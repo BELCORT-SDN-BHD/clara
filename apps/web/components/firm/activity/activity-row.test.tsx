@@ -107,3 +107,48 @@ test("ActivityRow actor cell: a null actor on an ORDINARY (non-sweep) row still 
   );
   assert.ok(!text.includes("Clara (system)"), "a non-sweep null-actor row must not be mislabelled a system act");
 });
+
+// ── #742 — the document pipeline's four machine-written event types ───────────────────────────
+//
+// 7 of the live feed's first 25 rows rendered "—" for these, which is a C77.3 miss on events that
+// DID have an author. Both arms are proven per type, because the fix's whole correctness rests on
+// them staying apart: the machine writers pass no actor, the human door (`set_document_kind`)
+// passes the acting member, and the null actor is what tells the two apart — no payload, no
+// invented uuid, no migration (lib/firm/activity.ts's `isPipelineSystemRow`).
+
+const PIPELINE_TYPES = [
+  "document.extraction_completed",
+  "document.classified",
+  "document.invoice_facts_completed",
+  "open_question.opened",
+] as const;
+
+for (const eventType of PIPELINE_TYPES) {
+  test(`ActivityRow actor cell: a MACHINE-produced ${eventType} row reads 'Clara (system)'`, async () => {
+    const text = await renderRow(
+      activityRow({
+        source: "event", event_type: eventType, kind: "documents",
+        actor: null, on_behalf_of: null,
+        description: "A document-pipeline step completed.",
+      }),
+      resolverFor(MEMBERS),
+    );
+    assert.match(text, /Clara \(system\)/, `expected the system marker for ${eventType}, got: ${JSON.stringify(text)}`);
+    assert.ok(!text.includes("—"), `the unattributed em dash must not render for ${eventType}`);
+  });
+
+  test(`ActivityRow actor cell: a HUMAN-produced ${eventType} row reads the person's name`, async () => {
+    // The human door for a classification passes the acting member; the row therefore carries a
+    // real actor and must never borrow the system label.
+    const text = await renderRow(
+      activityRow({
+        source: "event", event_type: eventType, kind: "documents",
+        actor: MEMBERS[0]!.user_id, on_behalf_of: null,
+        description: "A document-pipeline step completed.",
+      }),
+      resolverFor(MEMBERS),
+    );
+    assert.match(text, new RegExp(MEMBERS[0]!.display_name), `expected the person's name for a human ${eventType}`);
+    assert.ok(!text.includes("Clara (system)"), `a human-produced ${eventType} must not be labelled a system act`);
+  });
+}

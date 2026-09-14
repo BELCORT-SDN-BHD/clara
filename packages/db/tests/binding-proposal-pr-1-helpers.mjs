@@ -13,7 +13,7 @@ import { rootQuery, humanQuery, wakeQuery, roleQuery, namedCall, opk, ROLES, get
 // ---------------------------------------------------------------------------
 // TWO-SESSION MACHINERY — the lock-order cells (H6 / M-9 / C-1).
 // ---------------------------------------------------------------------------
-// db-tests.md: two dedicated clients, and PROVE the interleave with pg_blocking_pids, never a
+// Two dedicated clients, and PROVE the interleave with pg_blocking_pids, never a
 // sleep — a sleep proves nothing about whether the block actually happened. Copied locally
 // rather than cross-imported from p4t1/p4t2's own local copies, exactly as those two did.
 
@@ -35,7 +35,7 @@ export async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 8000) {
 
 /** Two dedicated pooled clients, released cleanly whatever happens. `rollback` -> `reset role`
  *  -> `reset all` on each, in that order: RESET ALL does NOT reset the role, and a SET ROLEd
- *  connection returned to the pool poisons the next rootQuery (db-tests.md). */
+ *  connection returned to the pool poisons the next rootQuery. */
 export async function twoSessions(fn) {
   const c1 = await getPool().connect();
   const c2 = await getPool().connect();
@@ -92,9 +92,7 @@ export async function bp1Live() {
 
 /** FAIL, never skip (the estate's fail0017 discipline): this battery is REQUIRED to go red
  *  against the pre-migration frontier. A drill that only ever skips is a false green.
- *  The message names packages/db/README.md, "Migration and deployment behavior"; the
- *  `.claude/rules/db-tests.md` it used to name is NOT in this repository, so an operator
- *  reading this failure was sent to a file they could not open. */
+ *  The message names packages/db/README.md, "Migration and deployment behavior". */
 export function failBp1(live) {
   if (!live) {
     throw new Error(

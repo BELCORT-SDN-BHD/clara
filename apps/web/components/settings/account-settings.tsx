@@ -16,7 +16,8 @@
 //     (components/app-shell/motion-preference-sync.tsx), which
 //     app/globals.css's `@custom-variant motion-reduce` reads ALONGSIDE the
 //     OS query, so it governs every existing `motion-reduce:`-tagged utility
-//     in the product, not merely new UI this ticket writes.
+//     in the product, not merely new UI this ticket writes. A successful save
+//     PUBLISHES the saved value to that component (#715) — see `handleSave`.
 //   - Sidebar default: the shell's `sidebar_state` cookie
 //     (components/ui/sidebar.tsx) already decides the sidebar's initial
 //     state on every load — `interface.sidebarDefault` writes THAT SAME
@@ -50,6 +51,7 @@ import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { StateBanner } from "@/components/common/state";
+import { publishMotionPreference } from "@/components/app-shell/motion-preference-sync";
 import { AccountSection } from "@/components/settings/account-section";
 import { InterfaceSection, type InterfaceFieldViewState } from "@/components/settings/interface-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
@@ -155,6 +157,7 @@ export function AccountSettings() {
     if (!preferences || !isDirty) return;
     const patch = { interface: buildInterfacePatch(draft, preferences.interface) };
     const sidebarChoice = patch.interface.sidebarDefault;
+    const motionChoice = patch.interface.motion;
 
     const ok = await act(async () => {
       await saveMyPreferences(preferences.version, patch, crypto.randomUUID(), { session: sessionTokenAccessor });
@@ -166,6 +169,15 @@ export function AccountSettings() {
       // acknowledgement, never the record of what happened.
       setDraft({});
       if (sidebarChoice) applySidebarCookie(sidebarChoice);
+      // #715 — THE MOTION PREFERENCE APPLIES NOW, for the same reason the sidebar
+      // cookie is written here: a preference the person has just saved must not wait
+      // for a navigation to take effect. The sibling above and this line are the two
+      // halves of one rule — and note that neither WRITES the mechanism itself. The
+      // cookie is the shell's own (components/ui/sidebar.tsx); `data-motion` is
+      // `MotionPreferenceSync`'s own, and it stays the only writer of it (see that
+      // component's header for why a second writer would have had to re-derive the
+      // OS-reduced-motion rule).
+      if (motionChoice) publishMotionPreference(motionChoice);
       toast.add({ title: t("save.savedToast"), type: "success" });
     }
   }

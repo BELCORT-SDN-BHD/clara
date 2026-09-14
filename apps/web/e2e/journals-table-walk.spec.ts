@@ -277,3 +277,96 @@ test("t634: a stale or refused list_entry_links envelope is said out loud, and t
   await expect(firstRow(page)).toContainText("RECENT April utilities");
   await expect(page.locator("table tbody tr").last()).toContainText("BACKDATED January rent");
 });
+
+// ---------------------------------------------------------------------------
+// #719 — AN ADDRESSED ENTRY OLDER THAN THE BROWSE PAGE.
+//
+// `?entry=` used to be an in-memory filter over `loadJournalsWorkbench`'s newest-1,000 read
+// (lib/journals/api.ts's FETCH_CAP, unchanged by this ticket), so a correction or conflict link to
+// an older entry landed on "that entry is not in this page" — an honest sentence about an entry the
+// database has and this caller may read. The panel now reads that one entry BY ID beside the browse
+// read and merges it. The fixture models the cap where it actually bites: `JOURNALS.archived` is
+// absent from the client-scoped answer and present from the by-id one (journals-table-mock.mjs).
+// ---------------------------------------------------------------------------
+
+const postedEntryUrl = (entryId: string) => `${JOURNALS_URL}?tab=posted&entry=${entryId}`;
+
+test("#719: an entry the browse read never returned is fetched by id, merged into the table and expanded", async ({ page }) => {
+  await signInTo(page, postedEntryUrl(JOURNALS.archived));
+
+  // IT IS ON SCREEN AT ALL — the discriminating post-condition: this memo exists in NO answer the
+  // client-scoped read gives, so nothing but the by-id read can have put it here.
+  await expect(page.getByRole("table", { name: "Journal entries" })).toBeVisible();
+  await expect(firstRow(page)).toContainText("ARCHIVED June rent");
+  // ITS OWN LINES CAME WITH IT. The browse line read sorts by entry_id, so an addressed entry's
+  // lines can be missing from it even when the entry is not — the by-id read fetches both.
+  await expect(page.getByText("RM 3,100.00").first()).toBeVisible();
+  // EXPANDED, not merely present: the address disclosed the detail, so the row's control reads
+  // "Hide" rather than "View".
+  await expect(firstRow(page).getByRole("button", { name: "Hide" })).toBeVisible();
+  // The address says so, and offers the way back to the whole tab.
+  await expect(page.getByText("Showing the entry you were sent to")).toBeVisible();
+  // AND THE BROWSE PAGE IS STILL THE BROWSE PAGE — the honest "outside this page" sentence must not
+  // fire for an entry that was found.
+  await expect(page.getByText(/could not be found for this client/)).toHaveCount(0);
+});
+
+test("#719: a bogus or foreign ?entry= keeps the honest state — never a silent 'no matches'", async ({ page }) => {
+  await signInTo(page, postedEntryUrl(JOURNALS.missing));
+
+  // The by-id read ANSWERED with nothing. An id that never existed, another firm's id (RLS simply
+  // does not return it) and another client's id are one answer here, and this is it.
+  await expect(page.getByText(/could not be found for this client/)).toBeVisible();
+  await expect(page.getByRole("table", { name: "Journal entries" })).toHaveCount(0);
+});
+
+test("#719: Back returns to the list with the parameter cleared, and the table agrees with the URL", async ({ page }) => {
+  // MEMOS, NOT A ROW COUNT: an expanded entry renders a SECOND <tr> for its disclosed detail, so
+  // `tbody tr` counts rows AND detail panels. What the assertion is actually about is which entries
+  // are on screen.
+  const memo = (text: string) => page.getByRole("cell", { name: text, exact: false });
+
+  await signInTo(page, `${JOURNALS_URL}?tab=posted`);
+  await expect(page.getByRole("table", { name: "Journal entries" })).toBeVisible();
+  await expect(memo("RECENT April utilities")).toBeVisible();
+  await expect(memo("BACKDATED January rent")).toBeVisible();
+  await expect(memo("ARCHIVED June rent")).toHaveCount(0);
+
+  await page.goto(postedEntryUrl(JOURNALS.archived));
+  await expect(firstRow(page)).toContainText("ARCHIVED June rent");
+  await expect(memo("RECENT April utilities")).toHaveCount(0, { timeout: 10_000 });
+  await expect(memo("BACKDATED January rent")).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page).not.toHaveURL(/entry=/);
+  // THE HALF THAT WAS BROKEN: the parameter cleared but the table stayed filtered and expanded on
+  // the entry it had named — a URL saying "the whole journal" over a surface showing one row.
+  await expect(page.getByText("Showing the entry you were sent to")).toHaveCount(0);
+  await expect(memo("RECENT April utilities")).toBeVisible();
+  await expect(memo("BACKDATED January rent")).toBeVisible();
+  await expect(memo("ARCHIVED June rent")).toHaveCount(0, { timeout: 10_000 });
+  await expect(firstRow(page)).toContainText("RECENT April utilities");
+});
+
+test("#719: the addressed entry at 320px — keyboard-reachable, no page-wide horizontal scroll, axe-clean", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await signInTo(page, postedEntryUrl(JOURNALS.archived));
+  await expect(firstRow(page)).toContainText("ARCHIVED June rent");
+
+  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  expect(scrollWidth, "no page-wide horizontal scroll at 320px on an addressed entry").toBeLessThanOrEqual(clientWidth + 1);
+
+  // FOCUS RETURN, keyboard only: collapsing the addressed row's detail leaves focus on the control
+  // that did it — the row stays the reader's place rather than dropping them onto <body>.
+  const disclose = firstRow(page).getByRole("button", { name: "Hide" });
+  await disclose.focus();
+  await page.keyboard.press("Enter");
+  const reopened = firstRow(page).getByRole("button", { name: "View" });
+  await expect(reopened).toBeVisible();
+  await expect(reopened).toBeFocused();
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "the addressed journals entry at 320px").toEqual([]);
+});
+

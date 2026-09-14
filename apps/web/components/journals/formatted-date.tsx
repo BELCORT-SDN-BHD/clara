@@ -37,27 +37,35 @@ export function FormattedDate({ value }: { value: string | null }) {
  * (packages/db/migrations/0006_runtime_core.sql:203, the 14-day clarify
  * deadline), so a deadline rendered as a bare "Sep 17, 2026".
  *
- * An instant is formatted in the VIEWER'S OWN zone with the time shown,
- * because that is the question a deadline answers ("have I still got today?").
- * `Date.parse` handles the ISO-8601 offset PostgREST returns; an
- * unparseable value renders verbatim rather than as a fabricated date, the
- * same fail-closed arm `FormattedDate` takes.
+ * An instant is formatted with the time shown, because that is the question a
+ * deadline answers ("have I still got today?"). `Date.parse` handles the
+ * ISO-8601 offset PostgREST returns; an unparseable value renders verbatim
+ * rather than as a fabricated date, the same fail-closed arm `FormattedDate`
+ * takes.
  *
- * IT PINS NO `timeZone` ON PURPOSE, and the asymmetry with its sibling above is
- * the point rather than an oversight. `FormattedDate` pins UTC because a `date`
- * column has no instant to place — the zone is the very thing that would
- * corrupt it. An instant DOES have one, and the correct zone for a deadline is
- * the reader's, which is what `useFormatter` resolves from the ambient
- * environment when no override is given.
+ * IT PINS NO `timeZone` OF ITS OWN, AND THE RULE THAT SENTENCE STATES HAS
+ * CHANGED (#741, owner ruling 2026-09-13). It used to mean "the reader's own
+ * zone, resolved from the ambient environment" — an argument this header made
+ * at length, and which the ruling overturned. `i18n/request.ts` now pins ONE
+ * product-wide display zone, `lib/business-date.ts`'s `CLARA_BUSINESS_TIMEZONE`
+ * (Asia/Kuala_Lumpur, the zone `clara._book_today()` itself books in), so this
+ * component now renders the FIRM'S wall clock and inherits it by asking for no
+ * override at all.
  *
- * There is no hydration hazard in leaving it ambient here. Every caller is a
- * client component whose data arrives from a browser-side read — the journals
- * workbench's own hydration cycle — so the server render that Next ships has no
- * row to format and this component is first reached AFTER hydration, in the
- * viewer's own environment. A `timeZone` pinned in `i18n/request.ts` would fix
- * one zone for the WHOLE product, including every `FormattedDate` and every
- * other surface's dates, which is a product-wide decision and a much larger
- * blast radius than this component's own question.
+ * WHY THE PRODUCT ZONE BEAT THE READER'S. A deadline read in a zone other than
+ * the one the ledger books in is the "two machines, two days" audit hazard
+ * `lib/business-date.ts`'s own header names, arriving on the READ side — two
+ * colleagues on either side of midnight MYT would disagree about which day a
+ * clarify expires. And an ambient zone differs between the server render and
+ * the browser's by construction, which is a standing hydration-mismatch source
+ * for any caller that ever renders server-side (this one does not today; the
+ * pin means it no longer has to be the reason).
+ *
+ * THE ASYMMETRY WITH ITS SIBLING ABOVE SURVIVES, for the original reason:
+ * `FormattedDate` pins UTC EXPLICITLY because a `date` column has no instant to
+ * place — a zone is the very thing that would shift the calendar day the
+ * database recorded, the product zone included. An instant DOES have one, so it
+ * takes the product zone like every other date next-intl formats.
  */
 export function FormattedDateTime({ value }: { value: string | null }) {
   const format = useFormatter();

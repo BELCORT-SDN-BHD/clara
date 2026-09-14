@@ -23,8 +23,7 @@
 // Serial discipline: --test-concurrency=1 (shared rig convention). The two race cells take two
 // DEDICATED pooled connections each and PROVE the interleave with pg_blocking_pids
 // (never a sleep, which proves nothing about whether the block actually happened -- the rig
-// helper contracts `packages/db/tests/README.md` tells a reader to read; the
-// `.claude/rules/db-tests.md` this line used to cite is not in this repository).
+// helper contracts `packages/db/tests/README.md` tells a reader to read).
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -83,7 +82,7 @@ const validModel = () => ({ provider: "openai", model: "gpt-5.6-terra", version:
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll (bounded) until backend `pid` is observably WAITING on a lock held by `blockerPid`.
- *  Local copy of the convention p4t1/p4t2 also keep locally (db-tests.md). */
+ *  Local copy of the convention p4t1/p4t2 also keep locally. */
 async function waitBlockedByOrThrow(pid, blockerPid, what, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

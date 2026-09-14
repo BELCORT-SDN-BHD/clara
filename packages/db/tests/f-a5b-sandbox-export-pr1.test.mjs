@@ -1123,7 +1123,7 @@ test("B6.5 -- sandbox_views refuses UPDATE/DELETE (append-only) and TRUNCATE (no
     rootQuery("delete from clara.sandbox_views where id=$1", [viewId]),
     (e) => { assert.equal(e.code, "CLR08"); return true; });
   // opus, final round: the title claimed TRUNCATE coverage the body never actually exercised
-  // (a title/body mismatch class). truncateGuardError() (rig-txn.mjs) per the db-tests.md rule --
+  // (a title/body mismatch class). truncateGuardError() (rig-txn.mjs) --
   // never a bare TRUNCATE, which can lose a lock race before the BEFORE TRUNCATE guard ever fires.
   // CASCADE is required here for a DIFFERENT reason than the usual lock race: sandbox_exports FKs
   // to sandbox_views, so a plain TRUNCATE sandbox_views hits Postgres' own native referential-

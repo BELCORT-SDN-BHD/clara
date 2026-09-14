@@ -31,8 +31,8 @@ export async function coreCall(fnName, argCasts, ctx, args) {
 }
 /** Runs fn against a single transacted client `c` -- `c.query(sql, params)` -- so a fixture
  *  (entry + lines) and the core call that depends on it, or a core call and the
- *  bank_agent_receipts row its own deferred wall demands, land in ONE transaction (db-tests.md's
- *  withTxn rule: a deferred constraint trigger fires on the first statement alone otherwise). */
+ *  bank_agent_receipts row its own deferred wall demands, land in ONE transaction (withTxn's
+ *  rule: a deferred constraint trigger fires on the first statement alone otherwise). */
 export async function inTxn(fn) {
   return withTxn(async (c) => {
     await c.query(GUARD);

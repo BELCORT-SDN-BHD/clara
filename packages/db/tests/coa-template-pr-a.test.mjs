@@ -468,8 +468,7 @@ test("C5 · the annotation HINTS: twelve add-back leaves verbatim, eleven statut
   // The boundary: PR-a mints no tax_* relation. Proved by ABSENCE only until F-T3 PR-1 lands --
   // that file mints the tax-law relations BY DESIGN (0152_f_t3_pr_1_tax_platform), so this floor
   // is trued IN THE SAME PR per the succession pattern in packages/db/README.md, "Migration and
-  // deployment behavior" (the `.claude/rules/db-tests.md` this cited is not in this repository):
-  // branch on the
+  // deployment behavior": branch on the
   // migration STEM witness, and on the post-arm assert the tax_* set is EXACTLY F-T3's own five
   // (any other tax_* relation is still a PR-a boundary breach). The FK assertion below is the half
   // of the boundary that survives either way: coa_template_accounts never grows a foreign key
@@ -1254,7 +1253,7 @@ test("I-M11 · ck_coa_tmpl_add_back_class: dropping it lets an unlisted add-back
 // =============================================================================================
 // J -- THE REVIEW FOLD (Codex law-28 pass + the native pass, 2026-08-29). Every cell here was
 // RED before its fix and is GREEN after; the ones that are two-session prove the interleave
-// with waitBlockedByOrThrow rather than a sleep (db-tests.md).
+// with waitBlockedByOrThrow rather than a sleep.
 // =============================================================================================
 
 test("J1 · HIGH-1 the publish/edit RACE, EDITOR FIRST: publish blocks, then hashes the editor's row", async (t) => {

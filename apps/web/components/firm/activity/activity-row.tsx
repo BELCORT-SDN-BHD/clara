@@ -90,7 +90,11 @@ export function ActivityRow({
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("columnActor")}</dt>
-        <dd className="truncate text-card-foreground">
+        {/* #742 — the address the activity walk's C77.3 sweep reads. The actor cell is the ONE
+            place attribution is asserted across a whole page of rows, and a walk cannot address it
+            through `<dl>` structure alone (the client cell is a sibling `<dd>`). Read, never used
+            for styling or focus. */}
+        <dd data-activity-actor className="truncate text-card-foreground">
           <ActivityActorLine row={row} memberNames={memberNames} />
           {row.via_wake_kind ? (
             // A raw technical token, deliberately not translated: via_wake_kind spans several

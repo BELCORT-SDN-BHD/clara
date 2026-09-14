@@ -181,6 +181,34 @@ test("a saved 'always reduce motion' sets data-motion=reduced regardless of the 
   expect(result.violations, "/settings/account with reduced motion applied").toEqual([]);
 });
 
+test("#715 — a saved motion preference applies to <html data-motion> with no reload, both directions", async ({ page }) => {
+  // The OS asks for nothing, so the SAVED value is the only thing that can move
+  // this attribute — which is the state the owner's walk was in.
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await installStatefulPreferences(page, envelope(0));
+  await signIn(page);
+  await page.goto("/settings/account");
+  await expect(page.locator("html")).toHaveAttribute("data-motion", "system");
+
+  // A SENTINEL THAT DIES ON ANY NAVIGATION. The bug was never "the value does not
+  // persist" — a reload always showed the right thing. It was "the live page keeps
+  // the old value", so this cell has to prove the assertions below are read off the
+  // SAME document that pressed Save.
+  await page.evaluate(() => { (window as unknown as { __noNav?: boolean }).__noNav = true; });
+
+  await motionRadio(page, /Always reduce motion/).click();
+  await saveButton(page).click();
+  await expect(page.getByText("Preferences saved")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
+
+  // …AND BACK, still on the same document.
+  await motionRadio(page, /Match my system setting/).click();
+  await saveButton(page).click();
+  await expect(page.locator("html")).toHaveAttribute("data-motion", "system");
+
+  expect(await page.evaluate(() => (window as unknown as { __noNav?: boolean }).__noNav)).toBe(true);
+});
+
 test("OS-level reduced motion alone still applies with no saved preference", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installStatefulPreferences(page, envelope(0));

@@ -175,22 +175,54 @@ async function deriveNewestChatTurnExport() {
   return { registrySrc, exportName: m[1], version: Number(m[2]), fileName: `chatTurn.v${m[2]}.ts` };
 }
 
+// ---------------------------------------------------------------------------
+// THE PREFLIGHT'S SCOPE (#708). Both helpers below used to census `workflow.workflow_runs`
+// GLOBALLY. That is the right shape for the real runbook — a live rollback genuinely asks about
+// every run on the estate — and the wrong shape for a test, because the verdict then depends on
+// whatever else happens to be parked on the database. Measured during #623: a shared local rig
+// carrying 20 parked `chatTurn_v18` runs left by an earlier suite answered `refused` at the
+// "with v8's run completed, rollback is now allowed" leg, for reasons that had nothing to do
+// with the cutover under test. CI gives each e2e its own database (.github/actions/db-live-gates),
+// so only a reused local rig bit — and a red that reads as a cutover defect but is actually a
+// neighbour's leftovers is worse than no coverage.
+//
+// So the SCOPE is the runs this file staged, collected as it stages them (`STAGED_RUN_IDS`), and
+// every query is filtered to that set. The preflight LOGIC — per-name zero-check, inventory
+// against a supported-name set — is untouched; only the universe it reads is. The verdicts the
+// cutover legs assert therefore depend solely on this e2e's own state, on a fresh database and a
+// populated one alike.
+// ---------------------------------------------------------------------------
+/** Every `workflow.workflow_runs.id` this e2e staged. Filled by `stageRun` as each leg parks.
+ *  The WDK's own column is `varchar` (world-postgres 0000_cultured_the_anarchist.sql:36), NOT a
+ *  uuid — so the queries below bind `text[]`, and a `uuid[]` bind would fail at parse time. */
+const STAGED_RUN_IDS = [];
+function stageRun(runId) {
+  if (!runId) throw new Error("stageRun: a staged run must carry a workflow_run_id — refusing to scope the preflight to nothing");
+  STAGED_RUN_IDS.push(runId);
+  return runId;
+}
+
 /** The runbook §0/§8 preflight, executable: a version is rollback-'allowed' iff it has ZERO
- *  non-terminal runs (packages/runtime/README.md, 'Deployment and rollback'). */
+ *  non-terminal runs (packages/runtime/README.md, 'Deployment and rollback') — scoped to the runs
+ *  this e2e staged, per the note above. */
 async function rollbackPreflight(rig, name) {
   const r = await rig.rootQuery(
-    "select count(*)::int n from workflow.workflow_runs where name=$1 and status not in ('completed','failed','cancelled')",
-    [name],
+    `select count(*)::int n from workflow.workflow_runs
+      where name=$1 and id = any($2::text[]) and status not in ('completed','failed','cancelled')`,
+    [name, STAGED_RUN_IDS],
   );
   return Number(r.rows[0].n) === 0 ? "allowed" : "refused";
 }
 
 /** The runbook's INVENTORY-shaped preflight: a real rollback doesn't ask "does THIS ONE name
  *  have zero runs" — it asks "is EVERYTHING currently in flight covered by the build I'm rolling
- *  back to". Refuse if ANY non-terminal run's name falls outside `supportedNames`. */
+ *  back to". Refuse if ANY non-terminal run's name falls outside `supportedNames`. Scoped to the
+ *  runs this e2e staged, per the note above. */
 async function rollbackPreflightInventory(rig, supportedNames) {
   const r = await rig.rootQuery(
-    "select name, count(*)::int n from workflow.workflow_runs where status not in ('completed','failed','cancelled') group by name",
+    `select name, count(*)::int n from workflow.workflow_runs
+      where id = any($1::text[]) and status not in ('completed','failed','cancelled') group by name`,
+    [STAGED_RUN_IDS],
   );
   const outside = r.rows.filter((row) => !supportedNames.includes(row.name));
   return { verdict: outside.length === 0 ? "allowed" : "refused", outside };
@@ -241,6 +273,7 @@ async function main() {
   const t7 = t7Receipt.task_id;
   await start({ workflowId: v7ManifestName }, [{ taskId: t7 }]);
   const t7Parked = await pollTask(rig, t7, (t) => t.status === "awaiting_input", "T7 parks on clarify (v7)");
+  stageRun(t7Parked.workflow_run_id); // #708: this run, and only this run, is in the preflight's universe
   const v7RowName = (await rig.readWorkflowRun(t7Parked.workflow_run_id)).name;
   // GUARD: prove v7 (not a reconciler-raced newest) actually bound — fail loud so the race never false-greens.
   assert.match(v7RowName, /chatTurn\.v7|chatTurn_v7/, `GUARD: the parked run bound chatTurn_v7, not the newest export (row name ${v7RowName})`);
@@ -263,6 +296,7 @@ async function main() {
   assert.equal(turnRes.status, 202, "newest-version turn admitted 202");
   const t8 = (await turnRes.json()).task_id;
   const t8Parked = await pollTask(rig, t8, (t) => t.status === "awaiting_input", "T8 parks on clarify");
+  stageRun(t8Parked.workflow_run_id); // #708
   const v8RowName = (await rig.readWorkflowRun(t8Parked.workflow_run_id)).name;
   assert.match(
     v8RowName,
@@ -280,7 +314,10 @@ async function main() {
   // -------------------------------------------------------------------------
   assert.equal(await rollbackPreflight(rig, v7RowName), "refused", "v7 has a non-terminal run → rollback refused");
   assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "the newest version has a non-terminal run → rollback refused");
-  // The zero-run control (asserted directly, not inferred): a registered-but-unused version passes.
+  // The zero-run control (asserted directly, not inferred): a registered-but-unused version
+  // passes. Under the #708 scope this is "a version with no run among the ones this e2e staged",
+  // which is what makes it a control at all — the two refusals immediately above come from the
+  // SAME scope and the SAME helper, so a helper that could only ever say `refused` is caught here.
   assert.equal(await rollbackPreflight(rig, closeExampleName), "allowed", "a workflow with ZERO runs → rollback allowed");
   console.log("[cutover-e2e] preflight: v7 refused, v8 refused, closeExample (zero-run) allowed");
 

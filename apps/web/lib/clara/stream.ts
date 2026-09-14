@@ -336,6 +336,12 @@ export interface RunClaraTaskStreamOptions extends OpenTaskStreamOptions {
    *  read. Idempotent on the caller's side: fires again on every reattach. */
   onOpen?: () => void;
   onEvent: (event: SseEvent) => void;
+  /** #734 — FIRES WHEN `onEvent` ITSELF THROWS, and the throw does NOT leave this
+   *  function. The subscriber's fault is reported here, the frame is dropped, and
+   *  the loop goes on reading the very same stream: nothing about the TRANSPORT
+   *  failed, so nothing about the transport may be reported. See this loop's own
+   *  header for the defect that shape exists to end. */
+  onSubscriberFault?: (info: { error: unknown; event: SseEvent }) => void;
   /** Fires right before each backoff sleep — `attempt` is 1-based (this is the Nth
    *  consecutive failed attempt), `delayMs` is what's about to be waited. */
   onReconnectAttempt?: (info: { attempt: number; delayMs: number }) => void;
@@ -352,6 +358,31 @@ export interface RunClaraTaskStreamOptions extends OpenTaskStreamOptions {
   reconnectPolicy?: Partial<ReconnectPolicy>;
 }
 
+/** #734 — the `onEvent` guard, as its own function so the rule is stated once.
+ *
+ *  A subscriber throw is never a stream fault: the frame arrived intact and
+ *  something downstream of it threw, so the caller's `onSubscriberFault` is told
+ *  and the loop reads on — the stream's own reading of the run (`detached` means
+ *  reattach, `done` means stop) never depends on a tab's ability to paint a frame.
+ *  `onSubscriberFault`'s own throw is swallowed deliberately, and not defensively: the fault this reports IS
+ *  a subscriber going wrong (React past its nested-update ceiling, whose
+ *  `useSyncExternalStore` listener throws on every emit), so the handler's first
+ *  act — telling a store, which emits — can reach exactly the same broken listener.
+ *  Letting THAT escape would reject the stream promise with the subscriber's error,
+ *  which is the whole defect arriving by the back door. */
+function deliverEvent(opts: RunClaraTaskStreamOptions, event: SseEvent): void {
+  try {
+    opts.onEvent(event);
+  } catch (error) {
+    try {
+      opts.onSubscriberFault?.({ error, event });
+    } catch {
+      // See above — a fault handler that faults cannot be allowed to become a
+      // transport failure; there is nowhere left to report it.
+    }
+  }
+}
+
 /** The detach -> reattach flow. Opens the stream; on a clean `done` it stops. On
  *  `detached` — or on an ungraceful close with no terminal event at all (FIX 2) — it
  *  reattaches after a backoff sleep (FIX 1; the server replays from index 0, so the
@@ -360,7 +391,19 @@ export interface RunClaraTaskStreamOptions extends OpenTaskStreamOptions {
  *  up. Stops immediately if `signal` is already aborted, and lets a live `fetch`
  *  abort or a non-ok response propagate as a rejection (callers race this against
  *  their own abort, same as `apps/dashboard/app/chat/api.ts` `streamTask` callers do)
- *  — attach failures are never retried by this loop, only detaches/ungraceful closes. */
+ *  — attach failures are never retried by this loop, only detaches/ungraceful closes.
+ *
+ *  #734 — WHAT A REJECTION FROM THIS FUNCTION MEANS, now that it means one thing.
+ *  This promise rejects for TRANSPORT faults only: the attach failed, the response
+ *  was not ok, the body tore. It does NOT reject because a subscriber threw while
+ *  rendering an event that arrived perfectly well. It used to: `onEvent(evt)` was
+ *  called bare, so anything `claraThreadStore.emit()`'s listeners threw — React's
+ *  own "Maximum update depth exceeded" among them — came back out of here as the
+ *  stream's rejection, and `useClaraThread` (whose only reading of a rejection is
+ *  "the send failed") painted "Could not send that message" over a message that had
+ *  been accepted and a run that was still live. The caller can only classify what
+ *  this function distinguishes, so the distinction is made here: a subscriber throw
+ *  goes to `onSubscriberFault` and the read continues. */
 export async function runClaraTaskStream(opts: RunClaraTaskStreamOptions): Promise<void> {
   const policy: ReconnectPolicy = { ...DEFAULT_RECONNECT_POLICY, ...opts.reconnectPolicy };
   const sleep = opts.sleepImpl ?? defaultSleep;
@@ -373,7 +416,7 @@ export async function runClaraTaskStream(opts: RunClaraTaskStreamOptions): Promi
     let sawProgress = false; // some event OTHER than the closing `detached` signal itself
     let detached = false;
     for await (const evt of events) {
-      opts.onEvent(evt);
+      deliverEvent(opts, evt); // #734 — guarded; a subscriber throw never reaches this loop.
       if (evt.event === "detached") {
         detached = true; // the failure/retry signal, not evidence of progress — don't reset on it
         break;

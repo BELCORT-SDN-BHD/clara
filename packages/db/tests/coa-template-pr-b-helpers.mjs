@@ -280,7 +280,7 @@ export async function rawAdoption(client) {
  *  ledgers SCHEMA-WIDE, on the stated premise that "the package runs serially, so before/after
  *  equality is a stable refusal proof" -- true for packages/db's OWN internal
  *  --test-concurrency=1 run, but CI's db-estate job runs packages/db and packages/runtime
- *  CONCURRENTLY against ONE shared database (db-tests.md's own documented shape). The assertion's
+ *  CONCURRENTLY against ONE shared database. The assertion's
  *  actual claim is "the REFUSED CALL wrote nothing" -- the schema-wide count additionally
  *  asserted "nobody else in the whole estate wrote anything during this window", which is a
  *  claim this cell never needed and which cross-package concurrency makes false. Confirmed by a

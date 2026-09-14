@@ -254,14 +254,17 @@ test("320 CSS px and 200% zoom: the cancel dialog fits, and the page does not sc
   await control(page, { op: "run", workId });
   await expect(page.getByText("Running", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
-  // THE DIALOG IS OPENED AT THE WIDE VIEWPORT AND THEN NARROWED, deliberately. At 320 px the Clara
-  // rail becomes an OVERLAY (`fixed inset-y-0 right-0 z-40`) and covers the page behind it, so a
-  // click on a page control is intercepted by the rail rather than reaching the button — a shell
-  // behaviour this ticket neither introduced nor owns. What #630 has to prove at 320 px is that the
-  // DIALOG fits and stays operable, and resizing with it open measures exactly that.
-  await page.getByRole("button", { name: "Cancel Work" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  // NARROWED FIRST, THEN OPENED — and that ordering is the point of #736 rather than an
+  // incidental tidy-up. This cell used to open the dialog at the WIDE viewport and resize with it
+  // open, because at 320 px the Clara rail was an OVERLAY (`fixed inset-y-0 right-0 z-40`) left
+  // open by a resize, and its scrim intercepted the click on "Cancel Work" before the button ever
+  // saw it. #736 made the rail close itself on every crossing into narrow, so the page's own
+  // controls are reachable at this width with nothing to dismiss first — which is what this
+  // sequence now proves, in passing, alongside the dialog measurement #630 owns.
   await page.setViewportSize({ width: 320, height: 720 });
+  await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel Work" }).click();
   await expect(page.getByRole("dialog").getByRole("button", { name: "Cancel this Work" })).toBeVisible();
   const narrow = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
@@ -273,13 +276,11 @@ test("320 CSS px and 200% zoom: the cancel dialog fits, and the page does not sc
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  // 200% zoom is the same measurement at half the CSS viewport, and the dialog is opened at the
-  // wide viewport for the same reason as above.
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await page.getByRole("button", { name: "Cancel Work" }).click();
-  await expect(page.getByRole("dialog").getByRole("heading", { name: "Cancel this Work?" })).toBeVisible();
+  // 200% zoom is the same measurement at half the CSS viewport, and the dialog is opened AFTER the
+  // zoom now, for the same #736 reason as above.
   await page.setViewportSize({ width: 640, height: 720 });
   await page.evaluate(() => { document.documentElement.style.zoom = "200%"; });
+  await page.getByRole("button", { name: "Cancel Work" }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Cancel this Work?" })).toBeVisible();
   const zoomed = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,

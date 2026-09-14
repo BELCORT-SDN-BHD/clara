@@ -78,6 +78,35 @@
 //     own bindings: ⌘K is the command palette (components/command/
 //     command-k-provider.tsx) and Escape is the Clara rail's dismiss
 //     (components/clara/rail-chrome.tsx). Nothing binds B.
+//  9. `SidebarMenuSkeleton` is DELETED (#743), and so is its `Skeleton` import
+//     and its line in the export block. Upstream seeds the placeholder bar's
+//     width with a pseudo-random draw inside a lazy `useState` initialiser, so
+//     the server and the client choose different widths and the first
+//     server-rendered use is a hydration mismatch by construction — the very
+//     fault class #732 was opened for. Nothing in this app consumed it (only the
+//     definition and the export line existed), so deleting is cheaper and
+//     honester than deriving a width from `useId` for a component with no
+//     caller. A vendor sync WILL reinstate it: drop it again, or key the width
+//     off an index prop / `useId` if something has grown a use for it by then.
+// 10. `SIDEBAR_COOKIE_NAME` / `SIDEBAR_COOKIE_MAX_AGE` are DECLARED ELSEWHERE
+//     (#733) — `lib/navigation/sidebar-cookie.ts`, a plain module with no
+//     `"use client"` — and imported back here, which is why the two `const`s
+//     below are gone and an import stands in their place. A Server Component may
+//     import a CLIENT COMPONENT from a `"use client"` module and render it, but
+//     a plain-value export from such a module carries no client-reference
+//     machinery, so `app/(firm)/layout.tsx`'s server-side import of the cookie
+//     name resolved to `undefined` and `cookies().get(undefined)` never found
+//     the real `sidebar_state` cookie. The re-export below keeps every existing
+//     client importer (`components/settings/account-settings.tsx`) unchanged.
+// 11. `Sidebar` RENDERS BOTH ARMS (#732). The vendored component early-returns
+//     the mobile `<Sheet>` instead of the docked column; it now renders the
+//     docked column at every width (it already carries `hidden md:block`) and
+//     ADDS the sheet when `isMobile`. The measurement and the whole chain are in
+//     the note on the component itself; the one-line reason is that the layout's
+//     `<Suspense>` boundaries hydrate after the root has run its effects, so a
+//     component that swaps its entire host output on a post-mount viewport read
+//     is a hydration mismatch waiting for a narrow viewport. Pair with
+//     `hooks/use-mobile.ts`, whose flip is now a `startTransition`.
 
 import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
@@ -87,6 +116,7 @@ import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_COOKIE_NAME } from "@/lib/navigation/sidebar-cookie"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -97,7 +127,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   Tooltip,
   TooltipContent,
@@ -105,19 +134,19 @@ import {
 } from "@/components/ui/tooltip"
 import { PanelLeftIcon } from "lucide-react"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 /** 224px — see hand edit 2 for the arithmetic this number comes from. */
 const SIDEBAR_WIDTH = "14rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
-// SIDEBAR_COOKIE_MAX_AGE exported for #626: the personal-settings "sidebar
-// starts" preference writes THIS SAME cookie (same name, same max-age) on
-// save, so a saved default is the ONE mechanism above (not a second one) —
-// components/settings/account-settings.tsx imports both rather than
-// re-declaring the literal.
+// RE-EXPORTED, NOT RE-DECLARED (#733, hand edit 10). Both cookie constants live
+// in `lib/navigation/sidebar-cookie.ts` — a plain module — because the Server
+// layout has to import the NAME and a plain value cannot cross a `"use client"`
+// boundary. They are re-exported here so #626's personal-settings "sidebar
+// starts" preference, which writes THIS SAME cookie (same name, same max-age) on
+// save, keeps importing both from the component module it already reads and
+// cannot drift onto a second spelling.
 export { SIDEBAR_COOKIE_NAME, SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_WIDTH }
 
 type SidebarContextProps = {
@@ -280,9 +309,48 @@ function Sidebar({
     )
   }
 
-  if (isMobile) {
-    return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+  // #732 — BOTH ARMS RENDER, AND CSS DECIDES WHICH ONE IS SEEN. The vendored
+  // shape was `if (isMobile) return <Sheet…>` — ONE arm or the OTHER — and that
+  // early return is the hydration fault #732 was opened for.
+  //
+  // MEASURED (2026-09-14, `next build` + `next start`, Chromium via the e2e
+  // harness): loading a firm route at 375 CSS px logged TWO
+  // `Minified React error #418` and none at 1280. A `MutationObserver` armed at
+  // `DOMContentLoaded` showed React removing the server's
+  // `<div data-slot="sidebar">` TOGETHER WITH the `<!--$-->` / `<!--/$-->`
+  // comments that fence a Suspense boundary. The chain: `app/(firm)/layout.tsx`
+  // wraps `<AppSidebar />` and `<ShellHeader />` in `<Suspense>` (a build-time
+  // contract for `useSearchParams()`, per its own note), React hydrates those
+  // boundaries as their own units AFTER the root around them has committed and
+  // run its effects, and `useIsMobile`'s post-mount flip to `true` reaches them
+  // in between. With the early return, the tree this component then produced was
+  // the SHEET — which renders nothing while closed — against server HTML that
+  // holds a whole docked sidebar. Nothing to match, so React regenerated it.
+  //
+  // WHY THIS SHAPE FIXES IT BY CONSTRUCTION rather than by timing. The docked
+  // markup below is now rendered at EVERY width; it already carries
+  // `hidden md:block`, so below `md` it is `display: none` — out of layout, out
+  // of the accessibility tree, not focusable, exactly as before. Whatever moment
+  // a boundary hydrates, and whatever `isMobile` says at that moment, the host
+  // elements this component produces are the same ones the server sent. The
+  // sheet is now an ADDITION for the narrow arm, not a replacement, and Base UI
+  // renders nothing for it while it is closed — so the DOM is unchanged until
+  // the human opens the drawer.
+  //
+  // `useIsMobile`'s own `startTransition` (hooks/use-mobile.ts) stays, and the
+  // two fixes are not redundant: the transition stops the flip from being an
+  // URGENT update mid-hydration (measured: two #418 down to one), and this shape
+  // removes the remaining one by making the two arms agree on their host output.
+  //
+  // `{...props}` STAYS ON THE DOCKED CONTAINER ONLY. The vendored mobile arm
+  // spread it onto `<Sheet>` (a Base UI Dialog root, not a DOM node); with both
+  // arms live that would spread the same DOM props twice. The app's single call
+  // site (`components/app-shell/app-sidebar.tsx:192`) passes only `collapsible`,
+  // so nothing is lost, and the docked container is where the vendored desktop
+  // arm already put them.
+  const mobileSheet =
+    isMobile ? (
+      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
         <SheetContent
           dir={dir}
           data-sidebar="sidebar"
@@ -317,10 +385,11 @@ function Sidebar({
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
       </Sheet>
-    )
-  }
+    ) : null
 
   return (
+    <>
+      {mobileSheet}
     <div
       className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
@@ -363,6 +432,7 @@ function Sidebar({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -725,43 +795,11 @@ function SidebarMenuBadge({
   )
 }
 
-function SidebarMenuSkeleton({
-  className,
-  showIcon = false,
-  ...props
-}: React.ComponentProps<"div"> & {
-  showIcon?: boolean
-}) {
-  // Random width between 50 to 90%.
-  const [width] = React.useState(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  })
-
-  return (
-    <div
-      data-slot="sidebar-menu-skeleton"
-      data-sidebar="menu-skeleton"
-      className={cn("flex h-8 items-center gap-2 rounded-md px-2", className)}
-      {...props}
-    >
-      {showIcon && (
-        <Skeleton
-          className="size-4 rounded-md"
-          data-sidebar="menu-skeleton-icon"
-        />
-      )}
-      <Skeleton
-        className="h-4 max-w-(--skeleton-width) flex-1"
-        data-sidebar="menu-skeleton-text"
-        style={
-          {
-            "--skeleton-width": width,
-          } as React.CSSProperties
-        }
-      />
-    </div>
-  )
-}
+// #743 — HAND EDIT 9, A DELETION: the vendored `SidebarMenuSkeleton` USED TO SIT
+// HERE and does not any more. See this file's header, item 9, for why; the short
+// version is that its bar width came from a pseudo-random number drawn in a lazy
+// `useState` initialiser, which is a hydration mismatch by construction, and
+// nothing in this app ever rendered it. Its `Skeleton` import went with it.
 
 function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
   return (
@@ -839,7 +877,6 @@ export {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSkeleton,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,

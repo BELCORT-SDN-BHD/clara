@@ -25,9 +25,14 @@ export const DEFAULT_MODEL = "gpt-5.6-terra";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // THE ONE documented prefix EVERY synthetic clara.wake_engine_sources row this package's tests
-// ever register MUST carry (the #485/#490 class — CI's db-estate job runs packages/db and
-// packages/runtime CONCURRENTLY against ONE shared postgres, `pnpm -r --if-present test`, no
-// ordering exists between them). packages/db/tests/g1-wake-engine.test.mjs's T1 cell excludes
+// ever register MUST carry (the #485/#490 class). CI's db-estate job runs packages/db and
+// packages/runtime CONCURRENTLY and no ordering exists between them, but since #714 they no
+// longer share a DATABASE: the job migrates its `clara_ci` estate, takes a `CREATE DATABASE ...
+// TEMPLATE` copy of it, and points this package's suite at that copy (`.github/actions/
+// db-estate-suite/action.yml`). The prefix convention is KEPT REGARDLESS, for two reasons: a
+// local rig is still routinely one database for both packages, and the cross-package contract
+// below is a property of the fixtures, not of whichever isolation CI happens to have this month.
+// packages/db/tests/g1-wake-engine.test.mjs's T1 cell excludes
 // rows by exactly this literal so its own closed-world roster proof survives a run landing
 // mid-registration on this side. Both producers — wake-engine.test.mjs's own registerSource()
 // and g1-wake-bodies.fixtures.mjs's registerSource() — validate every caller's sourceKey

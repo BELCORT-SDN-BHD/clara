@@ -72,6 +72,32 @@ a configured disposable database. Production pool assertions still apply when th
 only on test rigs. Database-dependent tests need the disposable estate and PostgreSQL 17
 `pg_dump`/`psql`; see [database tests](../db/tests/README.md).
 
+### Standalone e2es
+
+Several runtime e2es are **not** collected by `node --test` and are invoked by path. They need a
+built server (`pnpm --filter @clara/runtime build`), a migrated + seeded database whose name the
+files hard-gate to `clara_rt_test` or `clara_wave_b_ci`, a `WORKFLOW_POSTGRES_URL` pointing at
+that same database, and the WDK world bootstrap
+(`pnpm --filter @clara/runtime exec bootstrap`). CI runs them in the `db-live-gates` job; read
+[`db-live-gates/action.yml`](../../.github/actions/db-live-gates/action.yml) for the exact
+sequence.
+
+`tests/version-cutover-e2e.mjs` **does not require a fresh database.** Its rollback preflight — per-name
+and inventory-shaped alike — is scoped to the `workflow.workflow_runs` rows the e2e itself stages,
+so parked non-terminal runs left by another suite on a shared local rig no longer change its
+verdicts (#708). Only the runs it staged are in the preflight's universe; the runbook's own
+preflight stays global, and the README's "Deployment and rollback" section below is the contract
+that describes it.
+
+`tests/work-question-e2e.mjs` derives each leg's settle budget rather than pinning a constant
+(#745): **budget = (control lease + one control poll interval) × the number of leases the leg must
+wait out + a stated slack.** The battery gives every engine it spawns — faulted ones included — the
+short `CLARA_CTL_LEASE_SECONDS=2` lease, so the wait is two seconds rather than `control.mjs`'s
+60-second default, and the slack is headroom for the resume itself rather than for lease-waiting.
+The engines' `[control]` lines are kept in the captured output, so a failing leg names the arm that
+ran. **CI runs this battery alone**; do not share a host with another suite when running it
+locally, and expect the lease-timing legs (3 and 5) to be the first to overrun if you do.
+
 ## Connection and service configuration
 
 Credentials arrive through environment/secrets. Never put their values in source, logs or argv.

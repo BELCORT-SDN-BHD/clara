@@ -3,7 +3,10 @@ description: >-
   Per-PR deploy-onto-existing and full-estate checks. Requires origin/main,
   an installed workspace and a libpq environment
   (PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE=clara_ci) pointing at the job's
-  throwaway postgres:17 service.
+  throwaway postgres:17 service, plus the PG17 client (psql) on PATH.
+  It creates a SECOND database on that same service — clara_runtime_ci, a
+  `CREATE DATABASE ... TEMPLATE` copy of clara_ci — so @clara/db and
+  @clara/runtime no longer race each other's writes (#714).
 runs:
   using: composite
   steps:
@@ -35,26 +38,92 @@ runs:
           echo "origin/main has no packages/db/migrations yet — first introduction; nothing to layer onto."
         fi
 
-    # `pnpm -r --if-present test` runs EVERY package's test (not just @clara/db)
-    # so a test added to @clara/runtime or @clara/web can't silently skip
-    # CI. Runs after seed because the db smoke test asserts against the migrated
-    # + seeded schema. Folds in the former `--filter @clara/db test` step.
+    # EVERY package's test runs here (not just @clara/db) so a test added to
+    # @clara/runtime or @clara/web can't silently skip CI. Runs after seed because
+    # the db smoke test asserts against the migrated + seeded schema. Folds in the
+    # former `--filter @clara/db test` step.
+    #
+    # ONE DATABASE PER POSTGRES-TOUCHING PACKAGE (#714). This step used to be a single
+    # `pnpm -r --if-present test`, which runs the packages CONCURRENTLY against whatever
+    # PGDATABASE the job env names — so @clara/db and @clara/runtime shared ONE database
+    # with no ordering between them. A runtime writer that posts through the books between
+    # a db cell's `books_version` read and its `wake_draft_entry` call invalidates the
+    # token: CLR12 "stale context" on PR #712's second run (job db-estate, cell 715), and
+    # the same class on `ready.test.mjs` in PR #723. Reruns were used to proceed; a rerun
+    # is not a fix, and neither is teaching the F-A2 cells to retry — the race is real.
+    # `db-live-gates` already gives each e2e its own database; this is the same isolation.
+    #
+    # WHY A TEMPLATE COPY AND NOT A SECOND MIGRATE. Roles are Postgres CLUSTER-global and
+    # survive `drop database`, and migration 0154 (merged, immutable) pins an ABSOLUTE
+    # clara-role count at its position in the chain — so a SECOND from-scratch migrate
+    # sharing a cluster with a first one breaks, which is exactly why db-live-gates gives
+    # each full-fresh-migrate its own SERVICE CONTAINER rather than a second database.
+    # `CREATE DATABASE ... TEMPLATE` is not a migrate chain at all: it copies the already-
+    # migrated, already-seeded estate byte for byte, so one chain still runs per cluster.
+    # It also costs seconds rather than the minutes a second container + full chain would,
+    # which is what keeps this job's wall-clock where it was.
+    #
+    # WALL-CLOCK: unchanged in shape. Before — one `pnpm -r` running the two suites in
+    # parallel. After — the same two suites still in parallel, as two background shell
+    # jobs, plus the template copy (seconds). The db suite remains the long pole either way.
     #
     # NO BUILD STEP HERE: the only estate test that
     # touches `.output` is worker-path.test.mjs, which stages its OWN fixture bundle —
     # the e2es that import the real built server live in the db-live-gates job, which
     # builds the runtime itself.
-    - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
+    - name: Migrate + seed + tests — all packages (per-package databases, one postgres:17)
       shell: bash -e {0}
       env:
-        # Un-skips the rig-gated suites against the shared migrated DB — they are
+        # Un-skips the rig-gated suites against the migrated DB — they are
         # pollution-proof by construction (they stage their own fixtures). The
         # Runtime interview plan-db tests read this variable.
         CLARA_RIG_DB: "1"
+        # The runtime suite's own database, taken as a template copy of the estate below.
+        # Matches the guard's *_ci ephemeral pattern, like every other database in this job.
+        RUNTIME_DB: clara_runtime_ci
       run: |
         pnpm db:migrate
         pnpm db:seed
-        pnpm -r --if-present test
+
+        # Pinned here so the two roles stay legible below: ESTATE_DB is the job-env database
+        # the @clara/db suite keeps; RUNTIME_DB is the copy @clara/runtime gets.
+        ESTATE_DB="$PGDATABASE"
+
+        # The template source must have no other sessions attached. The migrate/seed pools
+        # above have closed by now; terminate anything left rather than failing the copy on
+        # a straggler. This is an ephemeral service container — nothing here outlives the job.
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c \
+          "select pg_terminate_backend(pid) from pg_stat_activity
+             where datname = '$ESTATE_DB' and pid <> pg_backend_pid()" >/dev/null
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c \
+          "create database $RUNTIME_DB template $ESTATE_DB"
+        echo "--- $RUNTIME_DB created as a TEMPLATE copy of $ESTATE_DB (no second migrate chain on this cluster) ---"
+
+        # Both suites still run CONCURRENTLY — each against its own database. Output is
+        # prefixed so the two streams stay readable; each exit code is captured separately
+        # so a failure in either fails the step with its own name attached.
+        set +e
+        # `set -o pipefail` INSIDE each subshell: without it the captured status would be
+        # sed's, and every failing suite would report success.
+        # BOTH exclusions, and the second one is load-bearing: a bare `pnpm -r` leaves the
+        # workspace ROOT out of scope, but `--filter` puts it back IN — and the root's own
+        # `test` script is `pnpm -r --if-present test`, so a single `--filter '!@clara/runtime'`
+        # would recurse and re-run every suite, the runtime one included, against the ESTATE
+        # database. Measured: `-r --filter '!@clara/runtime'` selects clara/@clara/db/@clara/web;
+        # adding `--filter '!clara'` selects @clara/db + @clara/web, which is exactly what the
+        # old `pnpm -r --if-present test` ran minus the runtime package.
+        ( set -o pipefail; pnpm --filter '!@clara/runtime' --filter '!clara' --if-present test 2>&1 | sed 's/^/[estate] /' ) &
+        estate_pid=$!
+        ( set -o pipefail; PGDATABASE="$RUNTIME_DB" pnpm --filter @clara/runtime --if-present test 2>&1 | sed 's/^/[runtime] /' ) &
+        runtime_pid=$!
+        wait "$estate_pid"; estate_rc=$?
+        wait "$runtime_pid"; runtime_rc=$?
+        set -e
+        echo "--- estate suites exit=$estate_rc (on $ESTATE_DB); runtime suite exit=$runtime_rc (on $RUNTIME_DB) ---"
+        if [ "$estate_rc" -ne 0 ] || [ "$runtime_rc" -ne 0 ]; then
+          echo "::error::db-estate tests failed (estate=$estate_rc runtime=$runtime_rc)"
+          exit 1
+        fi
 
     # FALSE-GREEN PROTECTION for the 裁-41 battery. The sweep above preloads
     # tests/client-identifiers-unique-preintegration-gate.mjs, which sets

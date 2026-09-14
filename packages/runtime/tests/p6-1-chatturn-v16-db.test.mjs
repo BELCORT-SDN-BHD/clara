@@ -340,10 +340,27 @@ test("p6-1.db.freeform.read-id-provenance: a REFUSED read mints no card at all",
 
 test("p6-1.db.freeform.read-id-high-sequence: DB->wrapper loss is measured and fails closed", { skip: skipFreeform }, async (t) => {
   const { ctx } = await turnFixture("p61highseq");
-  const highId = "9007199254740993"; // 2^53 + 1: the first odd bigint JS cannot represent.
 
-  // Root-only rig setup: make the NEXT identity value exactly 2^53+1. This changes only the
-  // throwaway sequence; the production body and every security mechanism remain untouched.
+  // Root-only rig setup: make the NEXT identity value the first id ABOVE 2^53 that this log
+  // does not already hold. This changes only the throwaway sequence; the production body and
+  // every security mechanism remain untouched.
+  //
+  // THE SEED IS DERIVED, NOT FIXED (#754). The first cut pinned the seed at 2^53 and the
+  // asserted receipt at 2^53+1 on EVERY run. `clara.freeform_read_log` is settle-once —
+  // 0131_f_a6_freeform_read.sql's `_tf_freeform_settle_once` refuses DELETE and TRUNCATE — so
+  // the receipt this cell commits is PERMANENT, while the restore below deliberately puts the
+  // sequence back BELOW the band. Second run against the same database: `nextval` hands back
+  // 2^53+1, which the log already holds, `clara._freeform_arm`'s INSERT dies on
+  // `freeform_read_log_pkey` (23505, surfaced by the wrapper as `read_unavailable`), the verb
+  // transaction aborts, and the cell reds on "the admitted read committed exactly one audit
+  // row — 0 !== 1". Seeding from `greatest(2^53, max(id) in the band)` makes every run ask for
+  // the next FREE id instead of the same one.
+  //
+  // THE BAND THEREFORE GROWS BY ONE ROW PER RUN on a reused database — 2^53+1, then +2, then
+  // +3 — which is inherent to an append-only log and is the price of re-runnability; the
+  // boundary property under test (an id above 2^53 is an unsafe JSON number and must mint no
+  // card) holds for every id in the band, so nothing about the measurement weakens as it
+  // grows. A fresh clone per run is the alternative, and is what CI does.
   //
   // AND IT IS PUT BACK, which the first cut did not do. `setval` is not transactional and a
   // sequence is ESTATE state, so this cell used to leave clara.freeform_read_log's identity
@@ -358,20 +375,32 @@ test("p6-1.db.freeform.read-id-high-sequence: DB->wrapper loss is measured and f
   // this cell), so a fresh rig goes back to where it was and a populated one still lands above
   // its own data.
   const POISON_FLOOR = "9000000000000000"; // 9e15 — above every real id, below 2^53+1
-  // ONE CONNECTION for the read-then-move pair, so the value put back is the value this cell
-  // displaced. `pg_sequence_last_value` is null for a sequence never yet drawn from.
-  const seqBefore = await rig.asRoot(async (c) => {
+  const TWO_53 = "9007199254740992"; // the seed FLOOR: nextval off it is 2^53+1 on a virgin log
+  // ONE CONNECTION for the read-seed-then-move triple, so the value put back is the value this
+  // cell displaced and the seed is derived from the same snapshot it is written against.
+  // `pg_sequence_last_value` is null for a sequence never yet drawn from.
+  const { seqBefore, highId } = await rig.asRoot(async (c) => {
     const prev = (await c.query(
       "select pg_sequence_last_value(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass)::text as last_value",
     )).rows[0].last_value;
+    // greatest(2^53, the band's own highest id) — so `nextval` lands one above whatever this
+    // log already holds up there, on a virgin database (2^53+1) and on one this cell has
+    // already run against (2^53+n+1) alike.
+    const seed = (await c.query(
+      `select greatest($1::bigint, coalesce((select max(id) from clara.freeform_read_log where id >= $2::bigint), 0))::text as seed`,
+      [TWO_53, POISON_FLOOR],
+    )).rows[0].seed;
     await c.query(
       "select setval(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass,$1::bigint,true)",
-      ["9007199254740992"],
+      [seed],
     );
     // A prior run of this cell UNDER THE OLD CODE leaves the sequence poisoned, and carrying that
     // reading forward as "the previous value" would restore the very defect. Such a reading is
     // discarded rather than trusted, so the restore below is self-healing on that database too.
-    return prev != null && BigInt(prev) < BigInt(POISON_FLOOR) ? prev : null;
+    return {
+      seqBefore: prev != null && BigInt(prev) < BigInt(POISON_FLOOR) ? prev : null,
+      highId: String(BigInt(seed) + 1n),
+    };
   });
   // RESTORE ON EVERY EXIT, INCLUDING A FAILING ONE — a cell that reds must not also poison the rig
   // for every file that runs after it, which is what made this a suite-wide defect rather than a
@@ -413,7 +442,15 @@ test("p6-1.db.freeform.read-id-high-sequence: DB->wrapper loss is measured and f
     [freeform15.freeformOpKey(ctx.taskId, 0, 1)],
   );
   assert.equal(receipt.rows.length, 1, "the admitted read committed exactly one audit row");
-  assert.equal(String(receipt.rows[0].id), highId, "the DB-owned receipt id is exactly 2^53+1");
+  assert.equal(
+    String(receipt.rows[0].id),
+    highId,
+    `the DB-owned receipt id is exactly the derived seed + 1 (${highId}) — the first id above 2^53 this log did not already hold`,
+  );
+  assert.ok(
+    BigInt(receipt.rows[0].id) > BigInt(TWO_53),
+    `and it is above 2^53 (${TWO_53}), which is the boundary property this cell measures`,
+  );
 
   const wrapperId = result.out.read.read_id;
   assert.equal(typeof wrapperId, "number", "the current DB body emits a JSON number, so pg-types JSON.parse reaches the wrapper as number");

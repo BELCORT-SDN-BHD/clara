@@ -21,6 +21,7 @@ import {
   printSkipCount,
 } from "./work-journal-fixtures.mjs";
 import { seedVerifiedDocument } from "./rig-docs-fixtures.mjs";
+import { withTxn } from "./rig-txn.mjs";
 
 const CLR04 = "CLR04";
 const CLR10 = "CLR10";
@@ -1287,4 +1288,68 @@ test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls 
     assert.ok(row.cfg.includes("search_path=clara, pg_temp"),
       `af.23 clara.${row.proname} lost its pinned search_path (proconfig ${JSON.stringify(row.cfg)})`);
   }
+});
+
+// #744(c) — the owner accepted the linear kept-sweep read rather than relating the two clocks
+// (a sweep run's finalized_at and its run-completed event's created_at) with a constraint or an
+// index. That ruling holds ONLY because today's finalize/created identity is true by
+// construction: clara.reconcile_sweep_runs is the SOLE function body that both sets
+// clara.sweep_runs.finalized_at and appends the sweep.run_completed event, in the same
+// transaction (packages/db/migrations/0011_daily_loop.sql). This cell reads that fact from the
+// LIVE CATALOG — not from this file's own memory of the migration — and proves it is not
+// vacuously true: a temporary second writer, installed inside a transaction this cell always
+// rolls back, must make both counts read 2, or this guard would pass on any world.
+test("af.24 the two clocks: exactly ONE function body sets clara.sweep_runs.finalized_at, and exactly ONE appends sweep.run_completed (#744 c) — proven to fail against a temporary second writer", async (t) => {
+  if (await gateSweep(t)) return;
+
+  const FINALIZED_AT_WRITER = /update\s+clara\.sweep_runs\b[^;]*?finalized_at\s*=/i;
+  const RUN_COMPLETED_APPENDER = /_append_event\([^,)]+,\s*'sweep\.run_completed'/i;
+
+  async function scan(queryFn) {
+    const rows = (await queryFn(
+      `select p.proname, pg_get_functiondef(p.oid) as def
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'clara' and p.prokind = 'f'`)).rows;
+    return {
+      finalizers: rows.filter((r) => FINALIZED_AT_WRITER.test(r.def)).map((r) => r.proname).sort(),
+      appenders: rows.filter((r) => RUN_COMPLETED_APPENDER.test(r.def)).map((r) => r.proname).sort(),
+    };
+  }
+
+  // THE LIVE CLAIM.
+  const live = await scan(rootQuery);
+  assert.deepEqual(live.finalizers, ["reconcile_sweep_runs"],
+    `af.24: exactly one function body may set clara.sweep_runs.finalized_at (#744 c); got ${live.finalizers.join(", ") || "(none)"} `
+    + "— the finalize/created identity the feed leans on holds only by construction of today's single writer");
+  assert.deepEqual(live.appenders, ["reconcile_sweep_runs"],
+    `af.24: exactly one function body may append sweep.run_completed (#744 c); got ${live.appenders.join(", ") || "(none)"} `
+    + "— the same single writer, same transaction, is what makes the identity true");
+
+  // THE NEGATIVE PROOF. A second writer of BOTH facts, installed for the life of one
+  // transaction that is ALWAYS rolled back (never committed, never visible to any other
+  // session) must flip both counts to 2 — otherwise this cell could not actually fail.
+  const tmpFn = `clara._test744_second_writer_${process.pid}_${Date.now()}`;
+  await withTxn(async (c) => {
+    await c.query(`
+      create function ${tmpFn}(p_run_id uuid) returns void language plpgsql as $body744$
+      begin
+        update clara.sweep_runs set finalized_at = now() where id = p_run_id;
+        perform clara._append_event(null,'sweep.run_completed',null,null,null,null,null,null,null,null);
+      end
+      $body744$;
+    `);
+    const withSecondWriter = await scan((sql) => c.query(sql));
+    assert.equal(withSecondWriter.finalizers.length, 2,
+      `af.24 mutant control: a temporary second finalized_at writer must make the count 2, got ${withSecondWriter.finalizers.length} (${withSecondWriter.finalizers.join(", ")})`);
+    assert.equal(withSecondWriter.appenders.length, 2,
+      `af.24 mutant control: a temporary second run_completed appender must make the count 2, got ${withSecondWriter.appenders.length} (${withSecondWriter.appenders.join(", ")})`);
+  }, { commit: false });
+
+  // THE ROLLBACK PROOF. The temporary second writer must not survive — the live world is
+  // exactly what it was before the mutant control ran.
+  const after = await scan(rootQuery);
+  assert.deepEqual(after.finalizers, ["reconcile_sweep_runs"],
+    "af.24: the temporary second writer must not survive the rollback");
+  assert.deepEqual(after.appenders, ["reconcile_sweep_runs"],
+    "af.24: the temporary second appender must not survive the rollback");
 });

@@ -2,7 +2,7 @@
 // docs/plan/active/g1-wake-engine-{survey,design,annexes}.md; migration 0133_g1_wake_engine
 // (number claimed at merge, hard constraint 10). Cells below mirror Annex D's own numbering (D1-D3, D9) plus the registry
 // writer/credential-gate/dead-letter-table cells the design names but does not itself enumerate as
-// D-cells. Both-polarity throughout (db-tests.md): every GREEN cell has a RED-first inverted twin.
+// D-cells. Both-polarity throughout: every GREEN cell has a RED-first inverted twin.
 //
 // GATED on clara.wake_engine_sources' existence (never a migration filename/number).
 //
@@ -822,7 +822,7 @@ test("M3: a repeated NO-OP flip (a DIFFERENT op_key re-asserting the SAME alread
 // they didn't drift apart (a typo'd prefix on either side would silently degrade #2 back to
 // the unlocked race it was meant to close, with no test ever failing). Two real sessions,
 // PROVEN blocked via pg_blocking_pids (never a sleep, which proves nothing about whether the
-// interleave actually happened — db-tests.md's own standing law).
+// interleave actually happened).
 // =====================================================================================
 async function pollBlockedByOrThrow(blockedPid, blockerPid, { timeoutMs = 5000, intervalMs = 25, what = "the lock" } = {}) {
   const deadline = Date.now() + timeoutMs;

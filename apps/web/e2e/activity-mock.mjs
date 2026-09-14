@@ -11,10 +11,12 @@
 // this union; `packages/db/tests/activity-feed.test.mjs` owns that half.
 //
 // TWO CLIENTS:
-//   ACTIVITY.clientId      — the main fixture: a 9-row first page (upload, posting, a
+//   ACTIVITY.clientId      — the main fixture: a 14-row first page (upload, posting, a
 //                            correction PAIR, a close event, an agent-receipt, a conversation-
 //                            maintenance event, a report-kind row, and a KEPT sweep-heartbeat row
-//                            — #728 finding 1) that is `truncated`, and a second page carrying one
+//                            — #728 finding 1, plus #742's four MACHINE-written document-pipeline
+//                            rows and the HUMAN-written counterpart of one of them) that is
+//                            `truncated`, and a second page carrying one
 //                            new row PLUS a DELIBERATE duplicate of the first page's document row
 //                            (the load-more dedupe cell).
 //   ACTIVITY.flipClientId  — a second, otherwise-empty client whose `list_activity` call COUNT
@@ -55,6 +57,16 @@ export const ACTIVITY = {
   // packages/db/tests/activity-feed.test.mjs's af.14 (it never reaches this mock's caller at
   // all), so there is nothing for this browser-level walk to add for that half.
   sweepEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a2010e",
+  // #742 — the four MACHINE-written document-pipeline rows (actor null at the writer, no payload
+  // on this wire at all). Their ids are exported so the spec can address them individually rather
+  // than by sentence.
+  extractionEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a2010f",
+  classifiedMachineEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20110",
+  invoiceFactsEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20111",
+  pipelineQuestionEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20112",
+  /** The HUMAN half of the same event type — `set_document_kind` passes the acting member, which
+   *  is exactly what must keep the person's name rather than the system label. */
+  classifiedHumanEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20113",
 };
 
 const PAGE_2_CURSOR = "activity-mock-page-2";
@@ -179,9 +191,61 @@ const SWEEP_ROW = eventRow({
   kind: "agent",
 });
 
+// #742 — THE DOCUMENT PIPELINE'S OWN ROWS. `_append_event`'s fourth argument is the actor and all
+// four of these writers pass null (persist_document_extraction, classify_document twice, and the
+// invoice-facts witness), so the fixture carries `actor: null` for them — the exact shape that
+// rendered an unattributed "—" on the live feed and fails C77.3. The fifth row is the HUMAN door's
+// version of the same event type, with a real actor, so the walk can prove the two arms stay apart
+// on one page rather than only in a unit cell.
+const PIPELINE_MACHINE_ROWS = [
+  eventRow({
+    id: ACTIVITY.extractionEventId, actor: null,
+    event_type: "document.extraction_completed",
+    // Deliberately NOT a prefix of page 2's own extraction sentence — the load-more cell
+    // matches that one by text, and Playwright's getByText is a substring match.
+    description: "A filed document's text was extracted.",
+    occurred_at: "2026-09-01T00:10:00.000Z",
+    object_kind: "document", object_id: ACTIVITY.documentId, document_id: ACTIVITY.documentId,
+    kind: "documents",
+  }),
+  eventRow({
+    id: ACTIVITY.classifiedMachineEventId, actor: null,
+    event_type: "document.classified",
+    description: "A document was classified.",
+    occurred_at: "2026-09-01T00:11:00.000Z",
+    object_kind: "document", object_id: ACTIVITY.documentId, document_id: ACTIVITY.documentId,
+    kind: "documents",
+  }),
+  eventRow({
+    id: ACTIVITY.invoiceFactsEventId, actor: null,
+    event_type: "document.invoice_facts_completed",
+    description: "Invoice facts were witnessed for a document.",
+    occurred_at: "2026-09-01T00:12:00.000Z",
+    object_kind: "document", object_id: ACTIVITY.documentId, document_id: ACTIVITY.documentId,
+    kind: "documents",
+  }),
+  eventRow({
+    id: ACTIVITY.pipelineQuestionEventId, actor: null,
+    event_type: "open_question.opened",
+    description: "An open question was raised about a document.",
+    occurred_at: "2026-09-01T00:13:00.000Z",
+    kind: "documents",
+  }),
+];
+
+const PIPELINE_HUMAN_ROW = eventRow({
+  id: ACTIVITY.classifiedHumanEventId,
+  event_type: "document.classified",
+  description: "A person set the document kind.",
+  occurred_at: "2026-09-01T00:14:00.000Z",
+  object_kind: "document", object_id: ACTIVITY.documentId, document_id: ACTIVITY.documentId,
+  kind: "documents",
+});
+
 const PAGE_1 = [
   REPORT_ROW, AGENT_RECEIPT_ROW, CONVERSATION_MAINTENANCE_ROW, CLOSE_ROW,
   CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SWEEP_ROW, DOCUMENT_ROW,
+  ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
 ].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
 const PAGE_2_NEW_ROW = eventRow({

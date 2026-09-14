@@ -51,14 +51,33 @@ import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
 const DBNAME = disposableDatabaseName("clara_leader_state");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * How long a leader-loop transition may take to be OBSERVED before this file gives up (#706).
+ *
+ * Every wait in this file is already a condition poll rather than a fixed timer, so the budget is
+ * not part of any assertion's meaning — it exists only to turn a hang into a message. It is sized
+ * for a LOADED host on purpose: the loop polls every CLARA_LEADER_POLL_MS (200ms, set below), a
+ * `pg_terminate_backend` plus a re-acquire is a handful of those, and the whole file was measured
+ * failing under three-lane host contention while passing alone. A budget that a correct leader can
+ * miss under load produces a red that reads as a leader defect, which is the failure mode this
+ * number is chosen to avoid — it is deliberately far larger than the work, and a timeout here is a
+ * statement about the host, not about `lib/leader.mjs`.
+ */
+const LEADER_TRANSITION_BUDGET_MS = 120_000;
+
 /** Poll `probe` until it returns truthy, or fail loudly with what was last seen. */
-async function until(probe, { timeoutMs = 30_000, stepMs = 50, what = "condition" } = {}) {
+async function until(probe, { timeoutMs = LEADER_TRANSITION_BUDGET_MS, stepMs = 50, what = "condition" } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last;
   for (;;) {
     last = await probe();
     if (last) return last;
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}; last reading: ${JSON.stringify(last)}`);
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `timed out waiting for ${what} after ${timeoutMs}ms — TIMING under host load unless the reading below is `
+          + `stably wrong rather than late (#706); last reading: ${JSON.stringify(last)}`,
+      );
+    }
     await sleep(stepMs);
   }
 }

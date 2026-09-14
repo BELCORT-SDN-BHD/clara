@@ -11,9 +11,15 @@ import { beginDocumentIntake, finalizeDocumentIntake, recoverPendingDocumentInta
 import { reconcileDocumentIntakes } from "../lib/reconciler.mjs";
 import { localObjectExists, StorageError } from "../lib/storage.mjs";
 import { intakePaths, readIntakeMeta, writeIntakeMeta } from "../lib/spool.mjs";
+import { EICAR, eicarSkipForThisHost } from "./eicar-fixture.mjs";
 
 const READY = await rig.documentPipelineReady();
 const skip = READY ? false : "Slice-5 (0007) document pipeline surface absent";
+// #693 — on win32 with Defender real-time protection on, the EICAR bytes are quarantined between
+// this cell's write and the scanner's read, and the cell reds on an I/O error that reads like a
+// scanner regression. Probed once, before any test is defined; `false` everywhere else. The
+// pipeline gate still wins when it applies — an absent surface is the more fundamental reason.
+const eicarSkip = skip || (await eicarSkipForThisHost());
 const withRuntime = (fn) => rig.asRuntime(fn);
 let root;
 let previousSpool;
@@ -110,9 +116,9 @@ test("finalize response-loss retry replays the original receipt after its sideca
   assert.deepEqual(replay, first.finalized);
 });
 
-test("malware and entity-expansion inputs fail before canonical Storage", { skip }, async () => {
+test("malware and entity-expansion inputs fail before canonical Storage", { skip: eicarSkip }, async () => {
   const { owner, firm } = await rig.buildFirm("intake-quarantine");
-  const eicar = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nX5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\nstartxref\n0\n%%EOF\n");
+  const eicar = Buffer.from(`%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n${EICAR}\nstartxref\n0\n%%EOF\n`);
   const begun = await rig.asRuntime((client) =>
     beginDocumentIntake(client, { sub: owner, firmId: firm }, {
       filename: "bad.pdf", mime: "application/pdf", declared_bytes: eicar.length, origin: "documents_tab",

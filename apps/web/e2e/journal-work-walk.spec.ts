@@ -915,29 +915,38 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
       .filter((c) => c.name === "sidebar_state")
       .map((c) => c.value);
     expect(jarred, "the collapsed-sidebar cookie must be on the request that produced this render").toEqual(["false"]);
-    // THE SHELL ITSELF STAYS EXPANDED, RE-MEASURED (a fix-round review's own claim here
-    // used to say the cookie "did not reach `defaultOpen`" — TRUE in its symptom, wrong
-    // about the mechanism, and worth re-measuring rather than trusting). `defaultOpen`
-    // never receives this cookie's value AT ALL: `app/(firm)/layout.tsx:10` imports
-    // `SIDEBAR_COOKIE_NAME` from `components/ui/sidebar.tsx`, which opens with `"use
-    // client"` (sidebar.tsx:1). A Server Component may import a CLIENT COMPONENT from a
-    // `"use client"` module and render it (that is the whole mechanism — `SidebarProvider`/
-    // `SidebarInset`, imported the same line, work exactly this way) — but a PLAIN VALUE
-    // export from that same module carries no such reference; the RSC bundler has no
-    // client-reference machinery for a bare string constant, so the server-side import
-    // resolves to `undefined`. `layout.tsx:73`'s `cookies().get(SIDEBAR_COOKIE_NAME)` is
-    // therefore always `cookies().get(undefined)` on THIS server, which finds nothing
-    // regardless of what the request's cookie jar holds — MEASURED by sending the raw SSR
-    // request (bypassing the browser and its own cookie jar entirely) with an EXPLICIT
-    // `sidebar_state=false` header and then again with `sidebar_state=true`: both render
-    // `data-state="expanded"`, byte-identical, which is what a name that never reaches the
-    // read looks like (a genuine parse of "false" would tell the two apart). This is a
-    // real product defect — the cookie the client sets on every toggle is silently inert
-    // on the very layout that reads it back — but it is not a HYDRATION fault (server and
-    // client agree, both wrongly, on "expanded") and repairing the `"use client"` boundary
-    // is its own ticket, not #727's. What this cell can assert honestly is today's actual,
-    // measured behaviour.
-    await expect(page.locator("[data-slot=sidebar]").first()).toHaveAttribute("data-state", "expanded");
+    // …AND THE SHELL HONOURS IT NOW (#733). This cell used to record the OPPOSITE,
+    // with a long note: `app/(firm)/layout.tsx` imported `SIDEBAR_COOKIE_NAME`
+    // from `components/ui/sidebar.tsx`, which opens with `"use client"`. A Server
+    // Component may import a CLIENT COMPONENT from such a module and render it
+    // (`SidebarProvider`/`SidebarInset`, on the same import line, work exactly
+    // that way), but a plain string constant carries no client reference, so the
+    // server-side import never produced the cookie's name and
+    // `cookies().get(...)` found nothing whatever the request carried — measured
+    // by sending the raw SSR request with `sidebar_state=false` and again with
+    // `=true` and getting byte-identical `data-state="expanded"` back. #733 moved
+    // both constants to `lib/navigation/sidebar-cookie.ts`, a plain module with no
+    // client boundary for the value to fail to cross, and the client module
+    // re-exports them so nothing else had to move.
+    //
+    // THE RAW SSR REQUEST IS THE DISCRIMINATING HALF, and it is why this cell no
+    // longer stops at the rendered DOM. `data-state` on the hydrated page would
+    // also read "collapsed" if the SERVER still rendered it open and the client
+    // corrected it one frame later — which is precisely the open-then-snap the
+    // server-side read exists to prevent. So the HTML is fetched through the
+    // context's own request API (same cookie jar, same session, no browser
+    // render) and asserted before any script has run.
+    const ssr = await page.context().request.get(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+    expect(ssr.status(), "the raw SSR request must be served, not redirected to a login").toBe(200);
+    const html = await ssr.text();
+    const sidebarTag = /<[^>]*data-slot="sidebar"[^>]*>/.exec(html);
+    expect(sidebarTag, "the server rendered no [data-slot=sidebar] at all").not.toBeNull();
+    expect(
+      sidebarTag![0],
+      "SSR with sidebar_state=false must render the sidebar collapsed — the cookie is the server's to read",
+    ).toContain('data-state="collapsed"');
+    // …and the hydrated page agrees, which is the half that proves no snap-shut.
+    await expect(page.locator("[data-slot=sidebar]").first()).toHaveAttribute("data-state", "collapsed");
     await settle(page);
 
     // The COMPLETED face too, under the same carried state: a different subtree of this
@@ -952,6 +961,60 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
     ).toEqual([]);
     await page.evaluate(() => console.error("e2e-727-seeded-collector-probe"));
     expect(collector.seen(), "the console collector must actually be receiving errors").toContain("e2e-727-seeded-collector-probe");
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+/**
+ * #732 — THE SHELL HYDRATES CLEAN AT A NARROW VIEWPORT, NOT ONLY AT THE DEFAULT ONE.
+ *
+ * WHY THE TWO CELLS ABOVE WERE NOT ENOUGH, and the reading that makes this one
+ * necessary. Both of them run at Playwright's `Desktop Chrome` default viewport
+ * (1280×720), which is ABOVE every breakpoint this shell has: the sidebar is
+ * docked (`md`, 768) and the Clara rail is docked (`lg`, 1024). They therefore
+ * proved the hydration of ONE arm of a shell that has two, and the owner's
+ * 2026-09-13 reproduction on `clara-web` 742b09e9 is what named the other: the
+ * same route logged `Minified React error #418` on every load at 800 px and at
+ * 375 px and none at all at 1280 px. The width decides it, and the width these
+ * cells never varied.
+ *
+ * BOTH WIDTHS, IN ONE CELL, AND THE WIDE ONE IS THE CONTROL. A narrow-only cell
+ * would go green just as happily if the whole shell stopped rendering; the wide
+ * pass is what keeps "no #418 at 375" from being a claim about a page that
+ * renders nothing.
+ *
+ * THE VIEWPORT IS SET BEFORE THE `goto`, which is the entire point: a hydration
+ * mismatch is a property of the FIRST client render, so a resize afterwards
+ * measures a tree React has already reconciled and can never reproduce it.
+ */
+const HYDRATION_WIDTHS = [
+  { label: "375 px — the width the owner reproduced #418 at", size: { width: 375, height: 812 } },
+  { label: "1280 px — the docked arm, the control", size: { width: 1280, height: 900 } },
+] as const;
+
+test("#732: the Work detail route hydrates clean at 375 px as well as at 1280 px", async ({ page }) => {
+  const collector = watchReactFaults(page);
+  try {
+    await control(page, { op: "park_card" });
+    for (const width of HYDRATION_WIDTHS) {
+      await page.setViewportSize(width.size);
+      await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+      await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+      await settle(page);
+      // The parked face too — the subtree that reads a `localStorage` draft in a
+      // lazy state initialiser, walked at BOTH widths for the same reason the
+      // completed face is.
+      await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+      await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
+      await settle(page);
+      expect(
+        collector.faults(),
+        `${width.label}: the shell and the Work detail route must hydrate with no React fault`,
+      ).toEqual([]);
+    }
+    await page.evaluate(() => console.error("e2e-732-collector-probe"));
+    expect(collector.seen(), "the console collector must actually be receiving errors").toContain("e2e-732-collector-probe");
   } finally {
     await control(page, { op: "reset" }).catch(() => {});
   }

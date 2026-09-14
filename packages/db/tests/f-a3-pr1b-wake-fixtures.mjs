@@ -58,7 +58,7 @@ export async function realDigest(secret, client, bankAccount, opKey) {
  *  approve order every real writer uses (`_tf_lines_immutable` refuses a lines write once the
  *  entry is anything but 'draft', INCLUDING the entry's very first insert if it is born
  *  'approved' directly -- rig-replay-caught by this file's own battery, f31w.h/i/j). ONE
- *  transaction (db-tests.md's withTxn rule): a deferred balance trigger fires on the entry alone
+ *  transaction (withTxn's rule): a deferred balance trigger fires on the entry alone
  *  otherwise. Returns the entry id. */
 export async function approvedEntry({ client, actor, postingDate, memo, bankCoa, otherCoa, cents }) {
   return withTxn(async (c) => {

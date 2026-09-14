@@ -389,7 +389,7 @@ test("filing allowlist: closed world holds exactly the six train-beta rows, plus
   // Rows 1-6 are train beta's (this file). Row 7, wake_begin_client_onboarding, is F-A7b PR-b's
   // still-unclaimed reservation. Row 8, wake_propose_client_onboarding, is F-A7b PR-a's own --
   // this cell is the closed-world floor PR-a's own migration widens, trued here in the same PR
-  // (db-tests.md's succession rule: a PR that widens a registered closed world trues the floor
+  // (the succession rule: a PR that widens a registered closed world trues the floor
   // that pins it, in the same PR, rather than leaving the next sweep to find it red). GATED, not
   // unconditional (independent review finding F2): an unconditional row-8 expectation reds any
   // chain that holds PR-a's migration out (46/1 on the beta-only frontier).

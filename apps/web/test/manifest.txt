@@ -42,6 +42,7 @@ components/admin/members-single-fire.test.tsx
 components/admin/members-walls.test.tsx
 components/app-shell/app-breadcrumb.test.tsx
 components/app-shell/app-sidebar.test.tsx
+components/app-shell/motion-preference-sync.test.tsx
 components/app-shell/scope-switcher.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/bank-money-doors.test.tsx
@@ -142,6 +143,7 @@ components/firm/work-question-affordance.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/journals/formatted-date.test.tsx
 components/journals/journal-entries-table.test.tsx
 components/journals/journals-a11y.test.tsx
 components/journals/journals-approve-legend.test.tsx
@@ -191,6 +193,7 @@ components/registers/register-refresh-siblings.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
 components/registers/staff-advances-a11y.test.tsx
 components/registers/staff-advances-keyboard.test.tsx
+components/reports/reports-addressed-report.test.tsx
 components/reports/reports-components.test.tsx
 components/reports/reports-offer-refusal.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
@@ -280,6 +283,7 @@ lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts
 lib/journals/entries-table.test.ts
 lib/journals/governance-doors.test.ts
+lib/journals/use-entry-rows.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/members/members-doors.test.ts
 lib/members/use-member-names.test.ts

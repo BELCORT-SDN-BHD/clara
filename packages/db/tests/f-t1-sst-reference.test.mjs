@@ -8,7 +8,7 @@
 // obligations: this file's own re-cut plus a21-watch.test.mjs's, and a measured cell for the
 // 0016:882-886 schedule-note residual). F6's conceptual note is doc-only, recorded in the design.
 //
-// STEM-GATED (db-tests.md, wave-f-lane-brief.md): keys on the file STEM, never a number —
+// STEM-GATED (wave-f-lane-brief.md): keys on the file STEM, never a number —
 // this file's migration ships UNNUMBERED and is renumbered by the conductor at merge.
 //
 // SCOPE: clara.sst_rate_schedule (greenfield, ten rows — six live + four verified predecessors)

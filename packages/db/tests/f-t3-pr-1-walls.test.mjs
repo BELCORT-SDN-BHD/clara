@@ -330,7 +330,7 @@ test("ft3-G4 · DELETE is refused CLR08 and TRUNCATE is refused CLR08 on every r
     // by five of these six, tax_treatment_codes by the map), and a cell accepting that 0A000
     // would be measuring Postgres's FK rule rather than this file's wall. truncateGuardError
     // bounds the lock wait and retries, so the assertion observes the GUARD's CLR08 rather than
-    // a deadlock against a concurrent writer (db-tests.md).
+    // a deadlock against a concurrent writer.
     for (const rel of RELATIONS) {
       const err = await truncateGuardError(
         `set role ${ROLES.fnOwner}; truncate clara.${rel} cascade`);

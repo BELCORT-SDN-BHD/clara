@@ -12,8 +12,14 @@ import { detectDocument, IntakeScanError, scanFile } from "../lib/scan.mjs";
 import { spoolRequest, tryEnterIngress, _resetIntakeGateForTest } from "../lib/spool.mjs";
 import { parseStructured } from "../lib/structured.mjs";
 import { putCanonical, verifyCanonical } from "../lib/storage.mjs";
+import { EICAR, DEFENDER_SKIP_REASON, eicarSkipReason, eicarSkipForThisHost } from "./eicar-fixture.mjs";
 
 register();
+
+// #693 — the ONE reason an EICAR-bearing cell may skip. Probed ONCE, before any test is
+// defined (the `{ skip }` option is read at registration, exactly like intake-db.test.mjs's
+// `READY`), and `false` on every platform but a Windows box whose Defender ate the probe.
+const eicarSkip = await eicarSkipForThisHost();
 
 const PRIVATE_DIAGNOSTIC_RE =
   /(?:SyntaxError|PayloadTooLargeError|node_modules|[A-Za-z]:[\\/]|\/(?:Users|home|workspace)\/|(?:^|\n)\s*at\s|\bstack\b)/i;
@@ -105,9 +111,9 @@ test("ingress admission is globally bounded at two", () => {
   b();
 });
 
-test("scanner rejects EICAR, encrypted PDF, and XML entity expansion", async () => {
+test("scanner rejects EICAR, encrypted PDF, and XML entity expansion", { skip: eicarSkip }, async () => {
   const eicar = join(root, "eicar.bin");
-  await writeFile(eicar, "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*");
+  await writeFile(eicar, EICAR);
   await assert.rejects(scanFile(eicar), (err) => err.code === "malware_detected");
 
   const pdf = join(root, "encrypted.pdf");
@@ -117,6 +123,33 @@ test("scanner rejects EICAR, encrypted PDF, and XML entity expansion", async () 
   const xml = join(root, "entity.xml");
   await writeFile(xml, `<?xml version="1.0"?><root>${"x".repeat(9000)}<!DOCTYPE x [<!ENTITY y "z">]></root>`);
   await assert.rejects(detectDocument(xml, { originalFilename: "entity.xml" }), (err) => err.code === "quarantined");
+});
+
+// #693 — the skip DECISION, pinned in both directions on every platform. The behaviour it guards
+// is only reachable on a Windows host with Defender real-time protection on, which no CI runner
+// and no reviewer here has; taking the platform and the probe RESULT as arguments is what makes
+// the quarantine arm testable at all, rather than trusted because nobody can contradict it.
+test("(#693) a quarantined EICAR fixture on win32 SKIPS with the explicit reason", () => {
+  assert.equal(
+    eicarSkipReason({ platform: "win32", probeSurvived: false }),
+    DEFENDER_SKIP_REASON,
+    "a Windows host whose probe write vanished must skip, and say why — not fail on the I/O error as if the scanner had regressed",
+  );
+});
+
+test("(#693) positive control: the cell RUNS when the fixture survives, and on every non-Windows platform", () => {
+  assert.equal(
+    eicarSkipReason({ platform: "win32", probeSurvived: true }),
+    false,
+    "a Windows host WITHOUT an active quarantine still runs the cell — the skip is conditional on the measurement, not on the platform",
+  );
+  for (const platform of ["linux", "darwin"]) {
+    assert.equal(
+      eicarSkipReason({ platform, probeSurvived: false }),
+      false,
+      `${platform} is unchanged even on a failed probe: a vanished fixture there is a real defect, not a scanner's real-time protection`,
+    );
+  }
 });
 
 test("canonical test storage is immutable and readback-hash verified", async () => {

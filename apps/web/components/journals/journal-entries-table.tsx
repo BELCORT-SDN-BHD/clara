@@ -54,7 +54,6 @@ import {
   DEFAULT_SORT,
   NO_FILTERS,
   PAGE_SIZES,
-  buildEntryRows,
   filterEntryRows,
   filtersActive,
   originOptions,
@@ -65,6 +64,7 @@ import {
   type EntriesSort,
   type EntrySortKey,
 } from "@/lib/journals/entries-table";
+import { useEntryRows } from "@/lib/journals/use-entry-rows";
 import type { CoaAccountRow, JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { EntryLinkRow } from "@/lib/work/evidence";
 import type { PartClr } from "@/lib/parts/hooks";
@@ -128,9 +128,11 @@ export function JournalEntriesTable({
   actingId,
   onReverse,
   defaultStatus,
-  links = [],
+  links,
   linksUnavailable = false,
   initialEntryId = "",
+  addressedLoading = false,
+  addressedUnreachable = false,
 }: {
   clientId: string;
   entries: JournalEntryRow[];
@@ -147,6 +149,17 @@ export function JournalEntriesTable({
    *  table filtered to that one entry, with its detail already disclosed, and
    *  the Clear control returns the reader to the whole tab. */
   initialEntryId?: string;
+  /** #719 — the addressed entry is being fetched independently of the browse page
+   *  (components/journals/posted-panel.tsx). Said out loud rather than showing the
+   *  not-found sentence for the instant a read is in flight: "we are looking" and
+   *  "it is not there" are different claims. */
+  addressedLoading?: boolean;
+  /** #719 — the addressed read ANSWERED and the entry is not reachable from here: no such id, an
+   *  id belonging to another firm (RLS simply does not return it), another client of this firm, or
+   *  a read that failed. This is what the honest "outside this page" state keys on now — it used to
+   *  key on `entriesTruncated`, which was a guess: the table could not fetch, so a full page was
+   *  the only evidence it had that an entry might exist elsewhere. */
+  addressedUnreachable?: boolean;
   linesTruncated: boolean;
   /** lib/journals/api.ts:248 — `true` means `entries` is an INCOMPLETE page of
    *  clara.journal_entries, not the whole client's history. */
@@ -196,18 +209,35 @@ export function JournalEntriesTable({
   // another. The address is the state, so it is tracked rather than sampled.
   // `""` (no `?entry=`) deliberately does NOT clear a filter the reader set by
   // hand: only an ADDRESS moves this.
+  //
+  // #719 — AND AN ADDRESS GOING AWAY IS ALSO THE ADDRESS MOVING. Pressing Back out of an
+  // `?entry=` deep link cleared the PARAMETER and left the table still filtered and expanded on the
+  // entry it had named — a URL saying "the whole journal" over a surface showing one row. The guard
+  // is narrow on purpose: the filter is cleared only when it is still the one the PREVIOUS address
+  // put there, so anything a reader set themselves survives. (No control writes `filters.entry`
+  // today; the guard is what keeps that true if one ever does.)
   const seenEntryId = useRef(initialEntryId);
   useEffect(() => {
-    if (seenEntryId.current === initialEntryId) return;
+    const previous = seenEntryId.current;
+    if (previous === initialEntryId) return;
     seenEntryId.current = initialEntryId;
-    if (initialEntryId === "") return;
+    if (initialEntryId === "") {
+      setFilters((f) => (f.entry === previous ? { ...f, entry: "" } : f));
+      setExpandedId((id) => (id === previous ? null : id));
+      setPage(1);
+      return;
+    }
     setFilters((f) => ({ ...f, entry: initialEntryId }));
     setExpandedId(initialEntryId);
     setPage(1);
   }, [initialEntryId]);
 
   const totalsSortable = !linesTruncated;
-  const all = useMemo(() => buildEntryRows(entries, lines, links), [entries, lines, links]);
+  // #746 — the row model's memo lives in `useEntryRows`, which also resolves the ABSENT `links`
+  // case to ONE frozen array. It used to be `links = []` as a default parameter feeding this
+  // dependency list directly, so a table with no links read recomputed every render for a
+  // dependency nothing had changed.
+  const all = useEntryRows(entries, lines, links);
   const filtered = useMemo(() => filterEntryRows(all, filters), [all, filters]);
   const sorted = useMemo(() => sortEntryRows(filtered, sort, totalsSortable), [filtered, sort, totalsSortable]);
   const current = pageOf(sorted, page, pageSize);
@@ -314,13 +344,21 @@ export function JournalEntriesTable({
         // "no matches". Cross-model review, confirmed: `?entry=` filters IN
         // MEMORY over `loadJournalsWorkbench`'s newest-1000 read
         // (lib/journals/api.ts's FETCH_CAP), so a correction or conflict link to
-        // an older entry lands on a table that can only say "nothing matched
+        // an older entry landed on a table that could only say "nothing matched
         // your filters" — which reads as "that entry does not exist" about an
-        // entry the database has. Fetching it independently of the browse page
-        // is the real fix and belongs with the read; saying which of the two
-        // things happened costs one line and is true today.
+        // entry the database has.
+        //
+        // #719 CLOSED THE GAP THE OLD COMMENT HERE NAMED AS FUTURE WORK: the addressed entry is now
+        // fetched independently of the browse page, so reaching this branch with an address means
+        // the read ANSWERED and the entry genuinely is not reachable from this tab — no longer a
+        // `entriesTruncated` guess. The loading arm is separate because "we are looking" must never
+        // render as "it is not there".
         <EmptyState>
-          {filters.entry !== "" && entriesTruncated ? tm("filters.addressedOutsidePage") : t("noMatches")}
+          {filters.entry !== "" && addressedLoading
+            ? tm("filters.addressedLoading")
+            : filters.entry !== "" && addressedUnreachable
+              ? tm("filters.addressedOutsidePage")
+              : t("noMatches")}
         </EmptyState>
       ) : (
         <>

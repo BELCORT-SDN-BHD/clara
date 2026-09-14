@@ -144,7 +144,10 @@ test("#728 finding 1: a kept sweep heartbeat reads 'Clara (system)' under kind A
   await expect(page.getByText("An autodraft sweep run completed.")).toBeVisible();
   // C77.3: attribution present on every row — the system marker, not the honest-but-useless
   // em dash MemberName would otherwise render for the door's own null actor on this row.
-  await expect(page.getByText("Clara (system)")).toBeVisible();
+  // `.first()` since #742: the sweep heartbeat is no longer the only system-attributed row on this
+  // page — the four document-pipeline rows carry the same marker. The sweep row's OWN marker is
+  // proven by the kind=agent filter below, which leaves only it on screen.
+  await expect(page.getByText("Clara (system)").first()).toBeVisible();
 
   // The sweep row sorts under kind=Agent (never Documents — the 0181 fall-through 0183 retires
   // for this event_type). The kind chips are TOGGLES (multi-select, activity-filters.tsx's own
@@ -153,6 +156,8 @@ test("#728 finding 1: a kept sweep heartbeat reads 'Clara (system)' under kind A
   await page.getByRole("button", { name: "Agent", exact: true }).click();
   await expect(page).toHaveURL(/[?&]kinds=agent(&|$)/);
   await expect(page.getByText("An autodraft sweep run completed.")).toBeVisible();
+  // Narrowed to kind=agent, the sweep row is the only event row left — so this marker is ITS own.
+  await expect(page.getByText("Clara (system)")).toBeVisible();
   await page.getByRole("button", { name: "Agent", exact: true }).click();
   await page.getByRole("button", { name: "Documents", exact: true }).click();
   await expect(page).toHaveURL(/[?&]kinds=documents(&|$)/);
@@ -216,3 +221,100 @@ test("reduced motion: the event Sheet still opens and closes correctly", async (
   await page.keyboard.press("Escape");
   await expect(page.locator('[data-slot="sheet-content"]')).toHaveCount(0);
 });
+
+/**
+ * #742 — C77.3 ON A WHOLE PAGE, not one row.
+ *
+ * The live feed's first 25 rows carried 7 unattributed cells, every one of them a document-pipeline
+ * event whose machine writer passes no actor (`_append_event`'s fourth argument). The web rendered
+ * those as "—". This sweeps EVERY row's actor cell on the first page and refuses the em dash
+ * anywhere — the assertion the per-type unit cells (components/firm/activity/activity-row.test.tsx)
+ * cannot make, because it is about the page, not the component.
+ */
+test("#742: every row on the first page carries an attribution — no actor cell is the unattributed em dash", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity");
+  await expect(documentRowButton(page)).toBeVisible();
+
+  const actors = page.locator("[data-activity-actor]");
+  const count = await actors.count();
+  expect(count, "the fixture's first page should carry rows to check").toBeGreaterThan(0);
+  // "the first 25 rows" is the first page; the fixture's page 1 is smaller than that cap, so this
+  // walks all of it rather than pretending to a slice it does not have.
+  expect(count, "the first page must not exceed the 25-row page this ticket measured").toBeLessThanOrEqual(25);
+
+  for (let i = 0; i < count; i++) {
+    const text = ((await actors.nth(i).textContent()) ?? "").trim();
+    expect(text, `row ${i}'s actor cell is empty`).not.toBe("");
+    expect(text, `row ${i} is unattributed (C77.3)`).not.toContain("\u2014");
+  }
+
+  // The four machine-written pipeline rows read as Clara, and the HUMAN-written row of the SAME
+  // event type still reads its person — the discriminator is the null actor, and it holds on a page
+  // that carries both.
+  await expect(page.getByText("A filed document's text was extracted.")).toBeVisible();
+  await expect(page.getByText("A document was classified.")).toBeVisible();
+  await expect(page.getByText("Invoice facts were witnessed for a document.")).toBeVisible();
+  await expect(page.getByText("An open question was raised about a document.")).toBeVisible();
+  await expect(page.getByText("A person set the document kind.")).toBeVisible();
+  expect(await page.getByText("Clara (system)").count(), "the four machine pipeline rows plus the sweep heartbeat").toBe(5);
+});
+
+// ---------------------------------------------------------------------------
+// #719 — THE OBJECT LINKS NAME THE ITEM, not just the tab.
+//
+// This walk's own assertions used to stop at the TAB, because that was the honest destination:
+// neither the Journals workbench nor the Documents page read a per-item parameter. Journals reads
+// `?entry=` (#634) and Documents reads `?document=` (#719's Documents half), so the tightening
+// below is the whole point of the ticket — a link that lands on a list of a hundred documents has
+// not taken the reader to the one the row is about.
+// ---------------------------------------------------------------------------
+
+test("#719: a document row's object link lands on the DOCUMENT, not merely the Documents tab", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity");
+
+  const row = page.locator("li").filter({ has: documentRowButton(page) }).first();
+  const link = row.getByRole("link", { name: "View in books" });
+  // THE HREF IS THE ASSERTION, read before the click: the destination page's own fixtures are
+  // another lane's business, and this walk owns the address, not what the Documents tab does with
+  // it (documents-viewer-walk.spec.ts owns that half, `?document=` and all).
+  await expect(link).toHaveAttribute(
+    "href",
+    `/clients/${ACTIVITY.clientId}/documents?document=${ACTIVITY.documentId}`,
+  );
+
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${ACTIVITY.clientId}/documents\\?document=${ACTIVITY.documentId}$`));
+});
+
+test("#719: an entry row's object link lands on the ENTRY, and a correction's two links name their own entries", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity");
+
+  const original = page.locator("li").filter({ hasText: "A posted entry was reversed." }).first();
+  await expect(original.getByRole("link", { name: "Links to the entry that replaced it." })).toHaveAttribute(
+    "href",
+    `/clients/${ACTIVITY.clientId}/journals?entry=${ACTIVITY.entryReplacementId}`,
+  );
+  await expect(original.getByRole("link", { name: "View in books" })).toHaveAttribute(
+    "href",
+    `/clients/${ACTIVITY.clientId}/journals?entry=${ACTIVITY.entryOriginalId}`,
+  );
+});
+
+test("#719: a report-kind row now offers a link at all — the Reports tab, which is all this feed can name", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity?kinds=report");
+
+  // Before this the `report` group was the one kind with NO object arm, so its rows carried no link
+  // whatsoever. The feed carries no artifact id for them (`object_kind` is never 'report'), so the
+  // builder names the tab and says so rather than fabricating one — the `?report=` item parameter
+  // exists and is proven by the Reports tab's own cells.
+  const row = page.locator("li").filter({ hasText: "Report agent" }).first();
+  await expect(row.getByRole("link", { name: "View in books" })).toHaveAttribute(
+    "href",
+    `/clients/${ACTIVITY.clientId}/reports`,
+  );
+});
+
