@@ -18,8 +18,8 @@
 // keyed on a post receipt, an op_key or a pack digest, so these four render EXACTLY
 // what the wire carries — identifiers plus the DB's own verdict tokens — and link to
 // the workbench that does hold the live read. No amount, no line count, no status
-// this module inferred: apps/web/AGENTS.md, "the UI never invents a number, verb,
-// receipt, or link".
+// this module inferred: "the UI never invents a number, verb, receipt, or
+// link".
 //
 // C6 — `result` AND `pack` ARE NOW READ, AND THE OLD RULE IS NARROWED RATHER THAN
 // DROPPED. This header used to say none of the three open records is walked "because a

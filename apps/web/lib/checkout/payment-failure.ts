@@ -22,7 +22,7 @@
 // (`components/common/technical-detail.tsx`'s own header). The prose says what
 // happened; the disclosure says what the provider called it.
 //
-// WHY NOT A DOOR REFUSAL RENDERED VERBATIM. `apps/web/AGENTS.md`'s verbatim law
+// WHY NOT A DOOR REFUSAL RENDERED VERBATIM. The house's verbatim law
 // is about a `DoorRefusal` — a sentence the DATABASE composed for a person,
 // under its own authority. This is not that: no door refused anything here, and
 // `status_reason` is a column the applier filled from a third party's error

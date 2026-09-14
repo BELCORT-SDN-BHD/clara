@@ -104,7 +104,7 @@ export async function buildBankAccount(w, lineCents, suffix = "a", coaCode = BAN
   const stmtSha = sha256hex(randomUUID());
   const stmtDoc = await seedVerifiedDoc(w.firm, w.client, stmtSha, w.owner);
 
-  // §5/§6 — the statement AND every line in ONE statement (db-tests.md: "a pooled query() outside
+  // §5/§6 — the statement AND every line in ONE statement ("a pooled query() outside
   // an explicit begin is its own transaction"). t_bank_statements_belt is `deferrable initially
   // deferred` and re-derives line_count from the ACTUAL rows at transaction end, so three separate
   // calls would fire the belt right after the statement insert alone and refuse.

@@ -188,7 +188,7 @@ export function HoldingCard({
         {/* THE CHECKOUT REFUSAL, ABOVE THE STATE. A person who just tried to
             pay and was refused needs to read WHY before they read where their
             application stands. A door's refusal renders its own CLR code and
-            its own sentence, verbatim (apps/web/AGENTS.md); every other arm
+            its own sentence, verbatim; every other arm
             has one typed card and no invented cause. */}
         {checkoutRefusal !== null && checkoutRefusal.kind === "legal_not_accepted" && (
           /* THE ONE REFUSAL WITH A NEXT STEP (#621). Every other arm tells the

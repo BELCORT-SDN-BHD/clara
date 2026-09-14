@@ -3,7 +3,7 @@
  * apps/web/scripts/check-test-manifest.mjs — the test-manifest count-control
  * GATE (T0 seam, port-wave plan §3.1 / §7.2's "T0 owes this gate a positive
  * control"). Rides apps/web's `lint` script (no pipeline edit —
- * apps/web/AGENTS.md constraint 3's uniform ladder still runs the lint job on
+ * the uniform lint ladder still runs the lint job on
  * every PR), matching check-token-contrast.mjs's own house pattern.
  *
  * WHAT IT CHECKS: every REAL test file on disk — `*.test.{ts,tsx,js,jsx,mjs,
@@ -11,8 +11,8 @@
  * scripts/run-tests.mjs (the `test` script's real body) reads that manifest
  * and feeds it straight to `node --test`; a file present on disk but absent
  * from the manifest is a file `pnpm test` silently never runs — the Node 20
- * runner does not directory-scan for `.test.ts`/`.test.tsx` at all
- * (apps/web/AGENTS.md), and its `.mjs`/`.cjs`/`.js` directory-scan (which DOES
+ * runner does not directory-scan for `.test.ts`/`.test.tsx` at all,
+ * and its `.mjs`/`.cjs`/`.js` directory-scan (which DOES
  * work) is exactly the implicit mechanism this seam retires — see
  * run-tests.mjs's header for the five `.test.mjs` files that rode it
  * invisibly before this gate existed. Deliberately WIDER than the port-wave

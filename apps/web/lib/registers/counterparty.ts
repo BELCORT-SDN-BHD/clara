@@ -210,9 +210,9 @@ export function loadOpenItemAllocationsForItems(
 
 // =====================================================================
 // Statement reads — governed RPC transport, but READ-flavoured: no
-// confirmation UI, no re-read-after semantics (apps/web/AGENTS.md's own
-// "a read-flavoured RPC still rides callDoor as transport but is NOT a
-// governed act" rule, aging.ts's precedent).
+// confirmation UI, no re-read-after semantics (the "a read-flavoured RPC
+// still rides callDoor as transport but is NOT a governed act" rule,
+// aging.ts's precedent).
 // =====================================================================
 
 export type CounterpartyStatementRow = {

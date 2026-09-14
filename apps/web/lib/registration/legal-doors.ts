@@ -20,8 +20,8 @@
 //    and held by the component. Minting one here would hand every retry of a
 //    lost response a new identity, which is the whole property the key exists
 //    for: a resubmit after a dropped answer must REPLAY, not double-accept.
-//  · NOTHING IS RETRIED HERE. A `DoorRefusal` is the DB's considered answer
-//    (apps/web/AGENTS.md); it is classified and handed up, never re-attempted.
+//  · NOTHING IS RETRIED HERE. A `DoorRefusal` is the DB's considered answer;
+//    it is classified and handed up, never re-attempted.
 //
 // THE REFUSALS ARE CLASSIFIED BY CODE **AND** REASON, not by sentence. `0185`
 // raises `CLR10` with `detail.reason` of `invalid_kind` or `hash_mismatch`,
@@ -100,7 +100,7 @@ export const acceptLegalDocument: AcceptLegalDocument = async (params) => {
     const documentKind = out?.kind;
     // POSITIVELY CHECKED. A 200 that carries no acceptance is not evidence that
     // one exists, and the one thing this UI must never do is show a receipt for
-    // a row nobody wrote (apps/web/AGENTS.md).
+    // a row nobody wrote.
     if (status !== "accepted" && status !== "already_accepted") return { kind: "unavailable" };
     if (documentKind !== params.documentKind) return { kind: "unavailable" };
     if (typeof acceptedAt !== "string" || acceptedAt.length === 0) return { kind: "unavailable" };

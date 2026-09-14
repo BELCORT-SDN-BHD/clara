@@ -1,5 +1,5 @@
 // GATE (c) — keyboard-walk tests for T11's onboarding checklist card. Proves
-// the two dialog-testing laws (apps/web/AGENTS.md): a real refusal through
+// the two dialog-testing laws: a real refusal through
 // Confirm (via `clickButton`, never `h.fireEvent` on portaled content) closes
 // the dialog and renders the CLR code + message VERBATIM in the card's own
 // persistent banner AFTER the dialog closes; a real Cancel (via `clickButton`
@@ -157,8 +157,8 @@ test("COMMIT refusal: a real click on Confirm (clickButton) closes the dialog, a
       // ("Commit onboarding") — exclude the trigger by identity, or `findIn`
       // (which walks from `body`, a PARENT of `h.container`) resolves the
       // ALWAYS-PRESENT trigger first and this test would silently click
-      // nothing real (the exact vacuous-click class apps/web/AGENTS.md's
-      // dialog-testing laws exist to prevent).
+      // nothing real (the exact vacuous-click class the dialog-testing laws
+      // exist to prevent).
       const confirmButton = findIn(
         body as never,
         (n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== (trigger as unknown),

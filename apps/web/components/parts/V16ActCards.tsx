@@ -17,7 +17,7 @@
 // re-reads after the write — success AND failure, because the DB may have
 // partially applied — and it keeps a governed refusal STICKY across that
 // follow-up read, so a refusal is never silently erased by a re-read that merely
-// happens to succeed. No optimistic UI, ever (apps/web/AGENTS.md): nothing below
+// happens to succeed. No optimistic UI, ever: nothing below
 // paints an outcome the write only claimed.
 //
 // EVERY GATE SHAPES, NEVER HIDES. A settled question and a settled proposal

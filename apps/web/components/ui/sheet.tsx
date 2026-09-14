@@ -14,7 +14,7 @@
 //
 // HAND EDITS, all of them, in the same commit as the add:
 //
-//  1. i18n (apps/web/AGENTS.md: every string routes through next-intl). The
+//  1. i18n (every string routes through next-intl). The
 //     vendored dismiss control shipped a hardcoded English `<span className=
 //     "sr-only">Close</span>` — the SAME defect dialog.tsx:51 already fixed by
 //     reading `Common.close`. Same fix, same key, so the two primitives cannot
@@ -29,7 +29,7 @@
 //     with `motion-panel`, the token utility (`--motion-duration-panel`, token
 //     contract §7's "Dialog, sheet, Clara dock reflow" tier — this primitive is
 //     literally the "sheet" in that sentence). No ad-hoc durations
-//     (apps/web/AGENTS.md motion law). The backdrop's `duration-150` became
+//     (motion law). The backdrop's `duration-150` became
 //     `motion-fast` for the same reason.
 //  5. REDUCED MOTION, and this one was MEASURED in the built stylesheet rather
 //     than assumed. The vendored popup slides in and out on all four sides via

@@ -1,5 +1,5 @@
 // The event detail Sheet's own focus contract (#632 review finding 16: "this lane skipped its
-// RTL seam entirely"). Proves what apps/web/AGENTS.md's Sheet/Dialog contract asks for and what
+// RTL seam entirely"). Proves what the house's Sheet/Dialog contract asks for and what
 // this environment can HONESTLY measure — same discipline
 // `components/admin/invite-dialog-keyboard.test.tsx` already established for the (structurally
 // identical, @base-ui/react-backed) invite Dialog:

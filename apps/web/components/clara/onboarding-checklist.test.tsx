@@ -104,7 +104,7 @@ function buttonsLabelled(root: unknown, label: string): unknown[] {
 }
 
 /** The OPEN dialog's own controls live on `document.body`, not in the mount container: Base UI
- *  portals open dialog content out of the render root (apps/web/AGENTS.md's first dialog law).
+ *  portals open dialog content out of the render root (the house's first dialog law).
  *  A search of `h.container` alone finds only the trigger, which is why every dialog cell here
  *  walks the body and excludes the trigger BY IDENTITY. */
 function dialogNode(predicate: (n: { tagName?: string }) => boolean): unknown {

@@ -82,7 +82,7 @@ export const INVITE_CLARA_TOKEN_PARAM = "ct";
 /** What `accept_invite` resolves to — `_finish_op`'s persisted receipt
  *  (`0145:757-758`): `{user_id, firm_id, membership_id}`. Every field is
  *  optional here on purpose: this is a REPORT of what the DB did, and
- *  hydrate-never-trust (apps/web/AGENTS.md) forbids painting it as state. The
+ *  hydrate-never-trust forbids painting it as state. The
  *  caller re-reads `callerContext()` below to learn whether a membership
  *  actually exists — it never trusts these ids for that. */
 export type AcceptInviteReceipt = {
@@ -301,7 +301,7 @@ export async function requestFirmRegistration(
 }
 
 // ---------------------------------------------------------------------------
-// A READ, NOT A DOOR — labelled as such at its definition, per apps/web/AGENTS.md.
+// A READ, NOT A DOOR — labelled as such at its definition.
 //
 // *** P4-2 OWNS THE CANONICAL HOME, AND THIS LAYER IS SHAPED FOR A 1:1 FOLD.
 // Its `apps/web/lib/firm/caller-context.ts` is "the typed read + its wire-shape

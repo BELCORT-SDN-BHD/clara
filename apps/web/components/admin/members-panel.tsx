@@ -39,8 +39,8 @@
 //     Revoke-then-invite is the real path, and it is what ships.
 //
 // EVERY ACT RE-READS, AND NOTHING IS PAINTED OPTIMISTICALLY. `useHydratedPart`'s
-// `act()` reloads unconditionally after every call, success or failure
-// (apps/web/AGENTS.md). A role change or a removal re-reads the roster; an invite
+// `act()` reloads unconditionally after every call, success or failure.
+// A role change or a removal re-reads the roster; an invite
 // or a revoke re-reads the invite list.
 //
 // AFFORDANCE SHAPING IS NOT A WALL, AND IT NOW FAILS CLOSED — reversed on

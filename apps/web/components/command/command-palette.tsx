@@ -55,7 +55,7 @@ export function matchesQuery(haystacks: string[], rawQuery: string): boolean {
 export interface CommandPaletteProps {
   /** Called once a Go navigation or an Ask hand-off completes — closes the palette. */
   onNavigate: () => void;
-  /** The blessed singleton by default (apps/web/AGENTS.md's session-accessor law); a caller
+  /** The blessed singleton by default (the session-accessor law); a caller
    *  — a cell — may inject its own. Never a per-render object literal. */
   session?: SessionTokenAccessor;
 }
@@ -317,7 +317,7 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
       focusRail({ query: "", source: "cmdk" });
       onNavigate();
     } catch (err) {
-      // A DoorRefusal renders VERBATIM and is never retried (apps/web/AGENTS.md). The
+      // A DoorRefusal renders VERBATIM and is never retried. The
       // palette stays OPEN on a refusal so the human reads what the database said.
       if (isDoorRefusal(err)) setDoError({ message: err.message, code: err.code });
       else setDoError({ message: err instanceof Error ? err.message : String(err), code: null });

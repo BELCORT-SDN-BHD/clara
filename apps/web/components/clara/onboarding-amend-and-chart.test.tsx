@@ -3,7 +3,7 @@
 //
 // Both dialogs are Base UI dialogs, so every control inside them is driven with `clickButton`
 // from the shared harness — `h.fireEvent` silently no-ops on a node inside an OPEN dialog
-// (apps/web/AGENTS.md's first dialog law), and a cell that clicked nothing would pass.
+// (the house's first dialog law), and a cell that clicked nothing would pass.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

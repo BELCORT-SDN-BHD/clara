@@ -58,7 +58,7 @@
 // (chatTurn.v10.impl.ts:328 — the body `chatTurn.v16.impl.ts:41-53` re-exports and
 // `chatTurn.v16.ts:39` imports; the v1-era `chatTurn.impl.ts` is NOT the live path).
 // Neither path can carry a suggested-answer list, so a chip row here would be a control
-// for data that never arrives — apps/web/AGENTS.md's "never a fake control". It becomes a
+// for data that never arrives — "never a fake control". It becomes a
 // real feature the day the declarer emits one.
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";

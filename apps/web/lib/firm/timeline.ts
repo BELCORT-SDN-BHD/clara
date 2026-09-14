@@ -62,7 +62,7 @@ export const FIRM_TIMELINE_MAX_LIMIT = 200;
  *
  * `afterSeq` is the last `seq` already read (NOT a row index): pass `null` for the newest page.
  * Rides `callDoor` as TRANSPORT ONLY — this is a read RPC, so there is no confirmation UI, no
- * sticky-refusal semantics and no post-call re-read attached to it (apps/web/AGENTS.md).
+ * sticky-refusal semantics and no post-call re-read attached to it.
  */
 export async function listFirmTimeline(
   session: SessionTokenAccessor,

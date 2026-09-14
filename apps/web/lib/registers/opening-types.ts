@@ -1,5 +1,5 @@
 // Opening balances & carry-down — T2 (port wave, verb census at the live 0142
-// catalog — apps/web/AGENTS.md's "chase the LIVE body" rule). Shared types
+// catalog — the "chase the LIVE body" rule). Shared types
 // only; see ./opening.ts (reads) and ./opening-doors.ts (governed writes) for
 // the module boundary this domain follows (the same reads/doors split
 // ./counterparty.ts + ./counterparty-doors.ts already established).

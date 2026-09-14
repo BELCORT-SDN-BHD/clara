@@ -21,7 +21,7 @@
 //  2. `motion-standard` added. The vendored popup declared no duration at all
 //     and inherited tw-animate-css's default; token contract §7 puts "Popover,
 //     dropdown" on `--motion-duration-standard`, and a tooltip is that tier. No
-//     component in this tree spells a duration itself (apps/web/AGENTS.md).
+//     component in this tree spells a duration itself.
 //  3. `dark:` census: ZERO occurrences (light-theme-only, owner ruling Q4).
 //  4. i18n census: ZERO strings — a tooltip's content is always the caller's.
 //

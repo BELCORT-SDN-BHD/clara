@@ -49,7 +49,7 @@ function DialogContent({
    *  together with a single `DialogBody` wrapping the body; see the class comment below. */
   scrollBody?: boolean;
 }) {
-  // P3 polish, i18n law (apps/web/AGENTS.md): the dismiss control's screen-
+  // P3 polish, i18n law: the dismiss control's screen-
   // reader name was a hardcoded English "Close" in the vendored primitive —
   // the one string in this app that never went through next-intl.
   const t = useTranslations("Common");

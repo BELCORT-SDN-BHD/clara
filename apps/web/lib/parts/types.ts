@@ -128,7 +128,7 @@ export type StaffAdvancePart = { type: "staff_advance"; client_id: string; advan
  *
  *  IDENTIFIERS AND THE DB'S OWN VERDICT TOKENS ONLY — no lines, no amount, no
  *  account. The wire carries none, and the card must not invent one
- *  (apps/web/AGENTS.md: "The UI never invents a number"): the entry's lines and
+ *  ("The UI never invents a number"): the entry's lines and
  *  total are read on the journals workbench, which is what the card links to. */
 export type EntryPostedPart = {
   type: "entry_posted";

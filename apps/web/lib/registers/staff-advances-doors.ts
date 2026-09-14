@@ -1,6 +1,6 @@
 // T5 rung-0 census (2026-08-28, instance-unique throwaway rig, migrated 0001..0140,
 // LIVE catalog read directly via pg_proc/pg_get_functiondef — never migration text
-// alone, per apps/web/AGENTS.md's "chase the LIVE body" rule). All seven doors below
+// alone, per the "chase the LIVE body" rule). All seven doors below
 // are `clara_authenticated`-EXECUTE (viewer+ for the three reads, bookkeeper+ for
 // book/complete, admin+ for enrol/retire — WDB-G6: "enrol/retire sit one floor above
 // the bookkeeper verbs; enrolment decides what an account MEANS for every future

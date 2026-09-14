@@ -19,8 +19,8 @@
 // "unrecognized" template rather than as a next-intl key path OR as the raw
 // token. Absence of a label is stated, never silently shown.
 //
-// THE TWO VOCABULARIES, at their LIVE bodies (apps/web/AGENTS.md: chase the
-// live body, never a migration's first CREATE — both of these were replaced,
+// THE TWO VOCABULARIES, at their LIVE bodies (chase the live body, never a
+// migration's first CREATE — both of these were replaced,
 // one of them three times):
 //   · `clara.open_questions.origin` — `open_questions_origin_check_0017` as
 //     REDEFINED at `0121_f_a3_pr1b_agent_limb.sql:288-290`: clarify_promotion,

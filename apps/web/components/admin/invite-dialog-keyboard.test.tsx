@@ -166,7 +166,7 @@ test("invite dialog: a closed dialog FORGETS the address, so re-opening cannot r
   //   · `h.fireEvent` dispatches through the MOUNT CONTAINER's delegated
   //     listener, and an open Base UI dialog's content is portalled to
   //     `document.body` — a separate delegation root it never reaches
-  //     (apps/web/AGENTS.md's first dialog law). The React `onChange` was never
+  //     (Base UI's own first dialog law). The React `onChange` was never
   //     invoked at all.
   //   · the assertion that followed read back the value THE TEST HAD JUST
   //     WRITTEN, so it held whether or not the component was controlled.

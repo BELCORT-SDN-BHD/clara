@@ -15,7 +15,7 @@
 //
 // HAND EDITS, all of them, in the same commit as the add:
 //
-//  1. i18n (apps/web/AGENTS.md: every string routes through next-intl). The
+//  1. i18n (every string routes through next-intl). The
 //     vendored file shipped four hardcoded English strings — "Toggle Sidebar"
 //     twice on `SidebarTrigger`/`SidebarRail`, plus the mobile sheet's screen-
 //     reader-only "Sidebar" / "Displays the mobile sidebar." Each now reads the
@@ -34,8 +34,8 @@
 //  3. MOTION. Three literal `duration-200`s replaced with `motion-panel`, the
 //     token utility (`--motion-duration-panel`, token contract §7's "Dialog,
 //     sheet, Clara dock reflow" tier — a sidebar that slides a panel in and out
-//     is exactly that tier). No ad-hoc durations, apps/web/AGENTS.md's motion
-//     law. The transitions that MOVE — the gap's width, the container's
+//     is exactly that tier). No ad-hoc durations (motion law). The
+//     transitions that MOVE — the gap's width, the container's
 //     left/right/width, the group label's margin — are now `motion-safe:`, so
 //     under `prefers-reduced-motion: reduce` the sidebar changes state instantly
 //     instead of travelling. CORRECTED after the browser leg measured the

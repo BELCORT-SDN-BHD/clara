@@ -93,9 +93,9 @@ test("Add Account door dialog: opens on click, reaches Confirm/Cancel, Confirm g
       assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
 
       // The trigger lives in the container (outside any portal), so
-      // fireEvent reaches it fine — see apps/web/AGENTS.md's "Testing a
-      // dialog" section for why everything INSIDE the now-open dialog needs
-      // clickButton instead.
+      // fireEvent reaches it fine — but everything INSIDE the now-open dialog
+      // needs clickButton instead: Base UI portals open dialog content to
+      // `document.body`, a delegation root `fireEvent` never reaches.
       await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
