@@ -193,6 +193,13 @@ The census reports its frontier from `clara.schema_migrations` and compares it a
 migration files on disk. It never reads a migration's own success text: a chain that ran green
 and a frontier that landed are different claims, and only the ledger states the second.
 
+The census audits the public operation boundary, so a trigger below it is invisible to every
+label above. Read [#692](https://github.com/BELCORT-SDN-BHD/clara/issues/692) before adding the
+first writer for `clara.firm_document_limits`. Its BEFORE-INSERT pseudo-upsert is column-preserving:
+a limit the caller leaves out — or sends as NULL — keeps the value the firm already had, and so does
+`updated_by`. That holds because the four limit columns carry no table default; the trigger is the
+only thing that supplies 100 / 1000 / 2 / 2, and it does so on a firm's first insert alone.
+
 ## Frozen evaluator deployment
 
 An evaluator registered as undeployed remains unavailable until deliberately activated.

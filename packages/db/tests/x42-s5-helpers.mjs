@@ -1132,6 +1132,17 @@ const WORK_EGRESS_0195_CLOCK_NAMES = ["record_work_execution_trace"];
 // DEFAULT; 0194's `_adj_*` bodies either sit on this roster already (`_adj_run_occurrence_core`)
 // or take their dates from the period arithmetic they are handed.
 
+// #720 [0198, chat-clarify expiry] — ADDS NO NAME AND MOVES NONE, and that is MEASURED rather than
+// assumed: 0198 creates no body at all. It RECUTS exactly one, `clara.expire_due_interruptions`,
+// which already sits on WORK_QUESTIONS_0180_CLOCK_NAMES above, and the recut deletes a predicate
+// (`and work_id is not null`) without touching the clock read — the cutoff is still the same bare
+// `expires_at < clock_timestamp()` the 0180 block's own note records, still parameterless, still
+// deriving no DATE from that instant. The name therefore stays on the 0180 roster under the
+// `work_questions$` gate and needs no gate of its own: a database carrying 0198 carries 0180 by
+// construction (0198's §0 prestate refuses to apply otherwise), so the two can never disagree.
+// Verified against the live arm-(D) census on a from-scratch 0001..0198 chain, 2026-09-14.
+// #720 END
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(

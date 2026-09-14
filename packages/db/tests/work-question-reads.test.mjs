@@ -20,6 +20,11 @@ import {
   twoFields, twoFieldAnswer, questionPayload, QREASON, CLR, ROLES, roleQuery, namedCall,
   assertPair, assertRaises, detailOf, rootQuery, opk, workRow, freshWorkClient,
 } from "./work-question-fixtures.mjs";
+// #720: the chat half of the expiry cell below. Imported from the successor battery's own fixture
+// module rather than restated here, so ONE planting helper serves both frontiers.
+import {
+  chatExpiryLaneReady, parkedChatTurn, plantPastDueChatClarify,
+} from "./chat-clarify-expiry-fixtures.mjs";
 
 let world = null;
 before(async () => {
@@ -254,19 +259,28 @@ test("w629.expire.due a past-due work question is expired, audited, and refused 
     "expire.due answer");
 });
 
-test("w629.expire.not-due a question inside its deadline is untouched, and so is a chat clarify", async (t) => {
+// #720 REPLACED THE SECOND HALF OF THIS CELL. It used to assert that the sweep left EVERY chat
+// clarify alone — "the arm is scoped to WORK questions" — which was true of 0180 and is false of
+// 0198. The owner's 2026-09-13 ruling on #720 extended the sweep to the chat lane, so what this
+// cell now asserts is FRONTIER-AWARE: before the `chat_clarify_expiry$` migration a past-due chat
+// clarify is left alone (0180's law), and from it onward the SAME sweep expires it (0198's law).
+// The full #720 battery — the positive/negative pair, the audit row, the answer door and the sweep
+// invariants — is `chat-clarify-expiry.test.mjs`.
+test("w629.expire.not-due a question inside its deadline is untouched; a past-due CHAT clarify follows the live frontier", async (t) => {
   if (await gateQuestion(t)) return;
   const p = await parkedWork({ client: A1(), author: BOB() });
-  const chatBefore = await rootQuery(
-    "select count(*)::int as n from clara.agent_interruptions where work_id is null and status='pending'");
+  const turn = await parkedChatTurn({ firm: world.firms.A, author: BOB(), client: A1() });
+  const pastChat = await plantPastDueChatClarify({ task: turn.taskId });
+
   await expireDueInterruptions({ limit: 50 });
+
   assert.equal((await interruptionRow(p.questionId)).status, "pending",
     "expire.not-due: a live question is not swept");
-  const chatAfter = await rootQuery(
-    "select count(*)::int as n from clara.agent_interruptions where work_id is null and status='pending'");
-  assert.equal(chatAfter.rows[0].n, chatBefore.rows[0].n,
-    "expire.not-due: the arm is scoped to WORK questions — the chat lane's identical gap is a "
-    + "separate finding, not a side effect of this one");
+  const chatEnforcer = await chatExpiryLaneReady();
+  assert.equal((await interruptionRow(pastChat)).status, chatEnforcer ? "expired" : "pending",
+    chatEnforcer
+      ? "expire.not-due: #720 — the past-due CHAT clarify IS swept by the same call, under the same rules"
+      : "expire.not-due: pre-#720 the arm is scoped to WORK questions and the chat lane has no enforcer");
 });
 
 // ===========================================================================================

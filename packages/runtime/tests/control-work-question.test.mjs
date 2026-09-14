@@ -17,6 +17,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { deliverInterruptions, expirePastDueInterruptions, resumePayloadFor } from "../lib/control.mjs";
 import { reconcileAccountingWorkTasks } from "../lib/reconciler-work.mjs";
 import * as rig from "./rig.mjs";
@@ -35,8 +36,42 @@ async function workQuestionReady() {
   }
 }
 
+/** #720 Half 1 (migration 0198): the SAME sweep now expires past-due CHAT clarifications too.
+ *  Gated on the migration's STABLE STEM, never its number — numbers are claimed at merge, and this
+ *  battery runs against databases pinned at earlier frontiers. */
+async function chatExpiryReady() {
+  try {
+    const r = await rig.rootQuery(
+      "select count(*)::int as n from clara.schema_migrations where version ~ 'chat_clarify_expiry$'");
+    return (r.rows[0]?.n ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
 const READY = (await rig.runtimeReady()) && (await workQuestionReady());
 const SKIP = READY ? false : "migration 0180 (work questions) is not on this database";
+const CHAT_READY = READY && (await chatExpiryReady());
+const SKIP_CHAT = CHAT_READY ? false : "migration 0198 (#720 chat-clarify expiry) is not on this database";
+
+/** chatTurn's clarify framing — the exact literal `chatTurn.v10.prompt.ts` declares and every later
+ *  version re-exports. Restated rather than imported because this file is plain ESM and the prompt
+ *  module is TypeScript; the cell `expire.chat.source` below pins the restatement. */
+const CLARIFY_FRAMING = "This question and its answer are visible to your firm.";
+
+/** The chatTurn body THE IMAGE ACTUALLY RUNS, resolved through the single source of truth that
+ *  names it: `workflows/registry.ts`'s `chatTurn:` entry (registry.ts:117 today, `chatTurn_v18`).
+ *  Read from the registry's SOURCE rather than imported, because this file is plain ESM and
+ *  importing the registry pulls every workflow body with it; `tests/built-bundle-gate.mjs` reads
+ *  the same file the same way. A hard-coded `chatTurn.v18.ts` would go on asserting about a
+ *  superseded body the day the pin moves, and say nothing about the one being deployed. */
+const REGISTRY_SRC = readFileSync(new URL("../workflows/registry.ts", import.meta.url), "utf8");
+const CHAT_TURN_PIN = REGISTRY_SRC.match(/^\s*chatTurn:\s*chatTurn_(v\d+),/m)?.[1];
+if (!CHAT_TURN_PIN) {
+  throw new Error("workflows/registry.ts no longer spells its chatTurn pin as `chatTurn: chatTurn_vN,`");
+}
+const PINNED_CHAT_TURN_SRC = readFileSync(
+  new URL(`../workflows/chatTurn.${CHAT_TURN_PIN}.ts`, import.meta.url), "utf8");
 
 after(async () => {
   await rig.endPool();
@@ -316,7 +351,11 @@ test("expire: a past-due work question is expired and then delivered as expired"
   assert.ok(expiredCall, "expire: the parked run is told its question expired, so it can settle recoverably");
 });
 
-test("expire: a live question and a CHAT clarify are both left alone", { skip: SKIP }, async () => {
+// #720 REPLACED THE SECOND HALF OF THIS CELL. It used to assert that the sweep left EVERY chat
+// clarify alone — "the arm is scoped to WORK questions" — which was true of 0180 and is false of
+// 0198. What it asserts now is FRONTIER-AWARE: before the `chat_clarify_expiry$` migration a
+// past-due chat clarify is left alone, and from it onward the SAME call expires it.
+test("expire: a live question is untouched; a past-due CHAT clarify follows the live frontier", { skip: SKIP }, async () => {
   const p = await parkedWorkQuestion("wq11");
   const session = await rig.createChatSession({ author: p.owner, client: p.client });
   const { task_id } = await rig.beginChatTurn({ session, author: p.owner, turnKey: `t-${randomUUID()}` });
@@ -326,8 +365,133 @@ test("expire: a live question and a CHAT clarify are both left alone", { skip: S
   await rig.asRuntime((c) => expirePastDueInterruptions(c, { onlyFirm: p.firm }));
   assert.equal((await rig.readInterruption(p.questionId)).status, "pending",
     "expire: a question inside its deadline is untouched");
-  assert.equal((await rig.readInterruption(chatId)).status, "pending",
-    "expire: the arm is scoped to WORK questions — the chat lane's identical gap is a separate finding");
+  assert.equal((await rig.readInterruption(chatId)).status, CHAT_READY ? "expired" : "pending",
+    CHAT_READY
+      ? "expire: #720 — a past-due CHAT clarify is swept by the same call, under the same rules"
+      : "expire: pre-#720 the arm is scoped to WORK questions and the chat lane has no enforcer");
+});
+
+// ===========================================================================================
+// 5b · #720 Half 1 — THE CHAT LANE'S END-TO-END STORY: sweep, listener cycle, settled turn, and a
+//      conversation that works again. The WORLD is mocked (resumeHook is injected), so the resume
+//      body here STANDS IN for chatTurn_v18's parked hook — and `expire.chat.source` below pins
+//      that the stand-in is what the deployed workflow actually does with `{kind:'expired'}`.
+// ===========================================================================================
+
+test("expire.chat: a parked turn's past-due clarification is swept, resumed `expired`, settled with a clarification-closed part — and the conversation is usable again", { skip: SKIP_CHAT }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("cc720a");
+  const session = await rig.createChatSession({ author: owner, client });
+  const first = await rig.beginChatTurn({ session, author: owner, turnKey: `t1-${randomUUID()}` });
+  await rig.driveTask(first.task_id, ["running", "awaiting_input"]);
+  const chatId = await rig.insertInterruption({ task: first.task_id, expiresInDays: -1 });
+
+  // THE COST THE TICKET EXISTS TO END: while the turn is parked the session's one live-turn slot
+  // (uq_agent_task_one_live_turn, 0006:165) is held, so EVERY new message is refused.
+  await assert.rejects(
+    () => rig.beginChatTurn({ session, author: owner, turnKey: `t2-${randomUUID()}` }),
+    (e) => e.code === "CLR13",
+    "expire.chat: the parked turn blocks the conversation — that is the harm, stated before the fix",
+  );
+
+  const swept = await rig.asRuntime((c) => expirePastDueInterruptions(c, { onlyFirm: firm }));
+  assert.equal(swept.expired, 1, "expire.chat: the sweep moved the past-due chat clarification");
+  assert.equal((await rig.readInterruption(chatId)).status, "expired");
+
+  const payloads = [];
+  await rig.asRuntime((c) =>
+    deliverInterruptions(c, {
+      resumeHook: async (_token, payload) => {
+        payloads.push(payload);
+        // EXACTLY chatTurn_v18's `expired` branch: one clarify_closed part, then settle with the
+        // resolution's own kind as the outcome (workflows/chatTurn.v18.ts:143-145 + settle()).
+        await rig.settleChatTurn({
+          task: first.task_id,
+          outcome: payload.kind,
+          parts: [{ type: "clarify_closed", reason: payload.kind, framing: CLARIFY_FRAMING }],
+        });
+      },
+      getRun: runStatus("running"),
+      onlyFirm: firm,
+    }));
+
+  assert.deepEqual(payloads, [{ kind: "expired" }],
+    "expire.chat: the parked hook is resumed with the resolution the chat turn is already typed for");
+  assert.equal((await rig.readTask(first.task_id)).status, "expired", "expire.chat: the turn settles expired");
+  const msg = await rig.readAssistantMessage(first.task_id);
+  assert.ok(
+    msg.parts.some((x) => x.type === "clarify_closed" && x.reason === "expired" && x.framing === CLARIFY_FRAMING),
+    "expire.chat: …and the conversation records WHY it stopped, rather than going silent",
+  );
+  assert.notEqual((await rig.readInterruption(chatId)).delivered_at, null);
+
+  const second = await rig.beginChatTurn({ session, author: owner, turnKey: `t3-${randomUUID()}` });
+  assert.ok(second.task_id && second.task_id !== first.task_id,
+    "expire.chat: the live-turn slot is released — a new message in the same conversation is accepted");
+});
+
+test("expire.chat: a swept chat row whose engine run is already gone is stamped DELIVERED, not resumed for ever", { skip: SKIP_CHAT }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("cc720b");
+  const session = await rig.createChatSession({ author: owner, client });
+  const { task_id } = await rig.beginChatTurn({ session, author: owner, turnKey: `t-${randomUUID()}` });
+  await rig.driveTask(task_id, ["running", "awaiting_input"]);
+  const chatId = await rig.insertInterruption({ task: task_id, expiresInDays: -1 });
+  await rig.asRuntime((c) => expirePastDueInterruptions(c, { onlyFirm: firm }));
+
+  // THE FIXTURE MATCHES THE TITLE: a TERMINAL run status is what "the engine run is already gone"
+  // looks like to `getRun`. Behaviour here is unchanged either way — `deliverInterruptions` returns
+  // at `if (!row.work_id) { stampDelivered; }` (lib/control.mjs:292-295) BEFORE it ever calls
+  // `resumeAlreadyLanded`, so a CHAT row never consults getRun at all — which is precisely why the
+  // fixture must not quietly say the opposite of the sentence above it.
+  const cycle1 = await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("completed"), onlyFirm: firm }));
+  assert.equal(cycle1.leased, 1);
+  assert.equal(cycle1.delivered, 1, "expire.chat: HookNotFound on a CHAT row is still delivery (the pre-0180 assumption)");
+  assert.equal(cycle1.hookMissing, 0,
+    "expire.chat: …and it is NOT rested at hook_missing — the chat lane has no reconciler to pick it up (#764)");
+  const row = await rig.readInterruption(chatId);
+  assert.notEqual(row.delivered_at, null);
+  assert.equal(row.delivery_state, "delivered");
+
+  const cycle2 = await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("completed"), onlyFirm: firm }));
+  assert.equal(cycle2.leased, 0,
+    "expire.chat: NO RESUME STORM — a delivered row is never leased again, so the backlog the first "
+    + "hosted sweep expires cannot become a per-poll retry loop");
+});
+
+test("expire.chat.source: the registry-pinned chatTurn's `expired` branch is exactly what the cell above replays", () => {
+  assert.ok(
+    PINNED_CHAT_TURN_SRC.includes('createHook<{ kind: "answer" | "expired" | "cancelled"; answer?: unknown }>'),
+    "expire.chat.source: the parked hook is typed for `expired` — #720 invented no new resolution",
+  );
+  assert.ok(
+    PINNED_CHAT_TURN_SRC.includes('pushPart(allParts, { type: "clarify_closed", reason: resolution.kind, framing: CLARIFY_FRAMING });'),
+    "expire.chat.source: the expired branch records a clarification-closed part",
+  );
+  assert.ok(PINNED_CHAT_TURN_SRC.includes("outcome = resolution.kind;") && PINNED_CHAT_TURN_SRC.includes("await settle(outcome, null);"),
+    "expire.chat.source: …and settles the turn with the resolution's own kind");
+  const promptSrc = readFileSync(new URL("../workflows/chatTurn.v10.prompt.ts", import.meta.url), "utf8");
+  assert.ok(promptSrc.includes(`export const CLARIFY_FRAMING = ${JSON.stringify(CLARIFY_FRAMING)};`),
+    "expire.chat.source: the framing literal this file restates is the one the prompt module declares");
+});
+
+test("expire.pre-0180: on a database without the work-question columns the sweep is a clean no-op, and no statement naming the verb is parsed", async () => {
+  // A FRESH module instance, because `hasWorkQuestionColumns` memoises a TRUE answer for the
+  // process and every other cell in this file has already made it true.
+  const fresh = await import(`../lib/control.mjs?w720=${randomUUID()}`);
+  const statements = [];
+  const stub = {
+    query: async (text) => {
+      statements.push(String(text));
+      if (/information_schema\.columns/.test(String(text))) return { rows: [{ n: 0 }] };
+      throw new Error("a pre-0180 database must never be asked anything else");
+    },
+  };
+  const out = await fresh.expirePastDueInterruptions(stub, {});
+  assert.deepEqual(out, { expired: 0 }, "expire.pre-0180: the wrapper answers, it does not raise");
+  assert.equal(statements.length, 1, "expire.pre-0180: exactly ONE statement — the capability probe");
+  assert.ok(!statements.some((t) => t.includes("expire_due_interruptions")),
+    "expire.pre-0180: …and the verb's name never reaches the parser");
 });
 
 // ===========================================================================================

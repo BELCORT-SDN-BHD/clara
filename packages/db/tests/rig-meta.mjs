@@ -1612,6 +1612,17 @@ export const WORK_QUESTIONS_0180_COHORT = [
   ...WORK_QUESTIONS_0180_UNGRANTED_FNS,
 ];
 
+// #720 [0198, chat-clarify expiry] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, and each of those is
+// MEASURED rather than assumed. 0198 creates no function: it RECUTS `clara.expire_due_interruptions`
+// to delete one predicate (`and work_id is not null`) so a past-due CHAT clarification is swept
+// beside a past-due Work question. The name is already on WORK_QUESTIONS_0180_RUNTIME_FNS above and
+// STAYS there — same signature `(integer,uuid)`, same owner, same SECURITY DEFINER, same pinned
+// search_path, same EXECUTE to clara_runtime and to nobody else (0198's §T re-reads the exact ACL
+// text, grantor included, and refuses anything wider). A cohort of its own would also be WRONG here
+// rather than merely redundant: cohortFailures() fails a HALF-present cohort, and 0198's one name is
+// present on every database from 0180 onward regardless of whether 0198 has been applied.
+// #720 END
+
 // #634 [0182, optional and LATE journal evidence] — the EVIDENCE lane, its own cohort for the
 // same "wholly present or wholly absent" reason 0178's carries: folding these names into 0178's
 // roster would red every database between the two frontiers, and `cohortFailures()` fails a
@@ -1900,6 +1911,28 @@ export const WORK_EGRESS_0195_COHORT = [
   ...WORK_EGRESS_0195_RUNTIME_FNS, ...WORK_EGRESS_0195_HUMAN_FNS,
   ...WORK_EGRESS_0195_UNGRANTED_FNS,
 ];
+// #718 [0197, the document-coding lane's evidence-link lookback] — its own cohort for the same
+// "wholly present or wholly absent" reason 0182's carries, and a cohort of THREE UNGRANTED names
+// only: this file adds no door and changes no grant, so it earns no row in ALLOWED below.
+//
+//   NO HUMAN, RUNTIME, AGENT OR WAKE FN AT ALL. All three bodies are reachable exclusively from
+//   this migration's own triggers — the wall that refuses a coded approval on a document that
+//   already holds a live clara.entry_evidence_links row, the mirror wall on the links table that
+//   makes the two lanes serialize, and the ONE row lock both of them take first. A grant on any
+//   of them would be a caller able to take the estate's document lock, or to raise a coding
+//   refusal, from outside the transition that owns it — so the grant matrix's expected-false
+//   sweep over these three names IS the assertion, and this roster is what keeps them swept.
+//
+//   LISTED FOR THE HALF-APPLIED SIGNAL, which is sharper here than for most cohorts: a 0197 with
+//   `_tf_source_binding_wall` but WITHOUT `_tf_evidence_link_binding_wall` is not a narrower
+//   boundary, it is a REOPENED RACE — the coding lane would look back, and the evidence lane
+//   would still commit over it in the other arrival order. cohortFailures() fails that partial
+//   cohort by design.
+const CODING_LANE_LINK_0197_UNGRANTED_FNS = [
+  "_lock_document_binding", "_tf_source_binding_wall", "_tf_evidence_link_binding_wall",
+];
+export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_FNS];
+// #718 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2478,6 +2511,10 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
+  // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
+  // race, not a narrower boundary (see the block where the roster is declared).
+  failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
+  // #718 END
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
