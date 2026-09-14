@@ -22,6 +22,16 @@ const REGISTRY = await readFile(join(RUNTIME_ROOT, "workflows/registry.ts"), "ut
 
 const RUNTIME_SOURCES = readRuntimeSources();
 
+// #643/#644 (wave-3 integration, v19 review NOTE-1) — the v19 parts module and #643's own purpose
+// vocabulary are TypeScript, so they load through tsx's ESM loader, the idiom
+// tests/registry-view.test.mjs and f-a1-pr3a-consumers.test.mjs already use in this package.
+const { register: registerTsx } = await import("tsx/esm/api");
+registerTsx();
+const V19_PARTS = await import("../workflows/chatTurn.v19.parts.ts");
+const V19_PARTS_SOURCE = await readFile(join(RUNTIME_ROOT, "workflows/chatTurn.v19.parts.ts"), "utf8");
+const { PERIODIC_ADJUSTMENT_PURPOSES } = await import("../lib/periodic-adjustment-basis.ts");
+const V18_PARTS_SOURCE = await readFile(join(RUNTIME_ROOT, "workflows/chatTurn.v18.parts.ts"), "utf8");
+
 const PRE_P6_READER_KINDS = [
   "text",
   "tool_call",
@@ -65,11 +75,16 @@ const POST_P6_READER_KINDS = [
   // #629 — claraWork_v2 declares ONE more kind beside the Work run that writes it: the shared
   // question a parked Work is waiting on. Same shorthand as the three above.
   "work_question",
+  // #644 (wave-3 integration) — chatTurn_v19 declares ONE more kind beside the chat tool that
+  // mints it: the receipt `remember_client_information` leaves in the transcript. Same shorthand
+  // again. This literal is a CONTROL over the live reader, so every new wire kind has to be
+  // admitted here deliberately rather than absorbed silently.
+  "knowledge_receipt",
 ];
 
 /** The kinds a reader fixture MUST carry for the gate to admit it — the emittable set, which is
  *  the declared set minus the produced-elsewhere allowlist. */
-const EMITTABLE_KINDS = ["freeform_result", "work_accepted", "work_status", "work_result", "work_question"];
+const EMITTABLE_KINDS = ["freeform_result", "work_accepted", "work_status", "work_result", "work_question", "knowledge_receipt"];
 
 function readerFixture(kinds) {
   return `export type ClaraPart =\n${kinds.map((kind) => `  | { type: "${kind}" }`).join("\n")};\n`;
@@ -123,15 +138,24 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
     {
       kind: "work_accepted",
       classification: "emittable",
+      // #643/#644 (wave-3) — chatTurn_v19 mints this kind too, from the SAME two files v18 does.
+      // A superseded body keeps shipping (policy (c)), so both versions' sites stay on the census.
       constructionSites: [
         "packages/runtime/workflows/chatTurn.v18.prompt.ts",
         "packages/runtime/workflows/chatTurn.v18.tools.ts",
+        "packages/runtime/workflows/chatTurn.v19.prompt.ts",
+        "packages/runtime/workflows/chatTurn.v19.tools.ts",
       ],
     },
     {
       kind: "work_status",
       classification: "emittable",
-      constructionSites: ["packages/runtime/workflows/claraWork.v1.impl.ts"],
+      // #631 (wave-3) — claraWork_v3 writes it too, now carrying #738's `client_id`. v2 never
+      // re-declared this kind, which is why only v1 and v3 appear.
+      constructionSites: [
+        "packages/runtime/workflows/claraWork.v1.impl.ts",
+        "packages/runtime/workflows/claraWork.v3.impl.ts",
+      ],
     },
     {
       kind: "work_result",
@@ -139,12 +163,25 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
       constructionSites: [
         "packages/runtime/workflows/claraWork.v1.impl.ts",
         "packages/runtime/workflows/claraWork.v2.impl.ts",
+        "packages/runtime/workflows/claraWork.v3.impl.ts",
       ],
     },
     {
       kind: "work_question",
       classification: "emittable",
-      constructionSites: ["packages/runtime/workflows/claraWork.v2.impl.ts"],
+      constructionSites: [
+        "packages/runtime/workflows/claraWork.v2.impl.ts",
+        "packages/runtime/workflows/claraWork.v3.impl.ts",
+      ],
+    },
+    {
+      // #644 (wave-3) — the knowledge receipt `remember_client_information` leaves in a transcript.
+      kind: "knowledge_receipt",
+      classification: "emittable",
+      constructionSites: [
+        "packages/runtime/workflows/chatTurn.v19.prompt.ts",
+        "packages/runtime/workflows/chatTurn.v19.tools.ts",
+      ],
     },
   ], "the literal allowlist census pins kind + file while leaving line numbers diagnostic-only");
 });
@@ -490,4 +527,48 @@ test("p6-1.parts-parity: CI invokes the gate unconditionally after the workflow-
   assert.ok(deployParagraph, "the v16 deploy paragraph is present");
   assert.match(deployParagraph, /CI `build` job/, "the comment names the CI job that actually runs parity");
   assert.doesNotMatch(deployParagraph, /Docker build/, "the comment never claims the Docker build runs parity");
+});
+
+// #643/#644 (wave-3 integration, v19 review NOTE-1) — THE CENSUS `WORK_ACCEPTED_PURPOSES_V19`'s
+// DOCBLOCK PROMISES.
+//
+// WHY THIS CELL HAD TO EXIST. `chatTurn.v19.parts.ts` exports that array with the words "so a
+// census can assert the set without retyping the union", and nothing read it. An export inside a
+// frozen file can never be deleted once the deploy ceremony stamps `deployed: true`, so the choice
+// was to make the promise true or to ship a permanent, unfulfilled claim — and deleting the export
+// was not a choice at all. `ClaraPartV18Additions` sets the precedent for the SHAPE (an exported
+// census handle); it does not set one for a claim nobody checks.
+//
+// WHAT IT PROVES. The array is not a hand-typed third copy of the vocabulary: it is exactly
+// v18's inherited literal plus #643's OWN enum, so widening the adjustment lane without widening
+// this export — or widening this export without widening the lane — reds here. The type union
+// `WorkAcceptedPurposeV19` is built from those same two sources (asserted over the source text,
+// because a type is erased before this cell can see it), which is what keeps the data and the
+// type from drifting apart.
+test("p6-1.parts-census: WORK_ACCEPTED_PURPOSES_V19 IS v18's literal plus #643's own purpose enum", () => {
+  const purposes = V19_PARTS.WORK_ACCEPTED_PURPOSES_V19;
+  assert.ok(Array.isArray(purposes), "the census handle is an array of values, not a type");
+  assert.equal(new Set(purposes).size, purposes.length, "no purpose is named twice");
+
+  // v18's literal, read from v18's own declaration rather than retyped here.
+  const v18Literal = /^\s*purpose: "([a-z_]+)";$/m.exec(V18_PARTS_SOURCE)?.[1];
+  assert.equal(v18Literal, "journal_entry", "control: v18 still declares exactly one work_accepted purpose");
+
+  assert.deepEqual(
+    [...purposes],
+    [v18Literal, ...PERIODIC_ADJUSTMENT_PURPOSES],
+    "the census set is v18's inherited purpose followed by lib/periodic-adjustment-basis.ts's own enum — " +
+      "a fourth purpose must be added to the LANE and to this export together, or one surface labels a Work " +
+      "the other cannot name",
+  );
+
+  // …AND THE TYPE IS BUILT FROM THE SAME TWO SOURCES. A type is erased before this test runs, so
+  // the guard against the union and the array drifting apart is a source-text pin on how the union
+  // is composed: by reference to v18's part and to #643's exported purpose type, never by
+  // re-spelling the literals.
+  assert.match(
+    V19_PARTS_SOURCE,
+    /export type WorkAcceptedPurposeV19 = WorkAcceptedPart\["purpose"\] \| PeriodicAdjustmentPurpose;/,
+    "WorkAcceptedPurposeV19 must stay composed of v18's purpose and #643's PeriodicAdjustmentPurpose",
+  );
 });

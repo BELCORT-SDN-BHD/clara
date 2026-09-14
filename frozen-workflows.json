@@ -38,11 +38,11 @@
     },
     "packages/runtime/lib/capability-registry.mjs": {
       "sha256": "db98138aa47832da8a31a8f9a51d31ab503d6bb61ab899da2706051b68218c0a",
-      "note": ""
+      "note": "#631 — frozen BY CLOSURE, not by marker: claraWork_v3 imports the server-owned capability -> purpose/data-class catalogue, so check-frozen-workflows.mjs's import closure hash-locks this file. A change here needs a new claraWork successor once the ceremony stamps `deployed: true` (ARCHITECTURE §10 records the ruling). DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — see #815. NOT deploy-locked yet."
     },
     "packages/runtime/lib/knowledge.mjs": {
-      "sha256": "746ac773aed84cc56d6103b3a1deff162598c896d11163fc1ebb361a98f35cef",
-      "note": ""
+      "sha256": "e8a6119687dfa8b09e3a3ac4c2a014584bce83e12d57d7537d4c53c65788c2d6",
+      "note": "#644 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports readKnowledgePack/captureKnowledgeFor, so check-frozen-workflows.mjs's import closure hash-locks this file. It is therefore subject to the SAME hash lock as a frozen body: after the ceremony stamps `deployed: true`, a change here ships only with a new chatTurn successor. No module-level `node:` import may live here — see the file header. DEPLOY ORDER: migration 0192 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet."
     },
     "packages/runtime/lib/malaysian-registration.mjs": {
       "sha256": "49f8a2672577b5d567ddeddadc1d7207a6519126a330100cc821cde919ba74e8",
@@ -51,11 +51,11 @@
     },
     "packages/runtime/lib/periodic-adjustment-basis.ts": {
       "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
-      "note": ""
+      "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file (the web form imports the same module and is NOT frozen — only this closure membership locks it). DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet."
     },
     "packages/runtime/lib/work-trace.mjs": {
       "sha256": "96c7e7b51a648c753de3d8d1ac745d39f6015d312f269a1408a8e04330d320d6",
-      "note": ""
+      "note": "#631 — frozen BY CLOSURE, not by marker: claraWork_v3 imports the trace writer, so check-frozen-workflows.mjs's import closure hash-locks this file; a redaction hardening therefore needs a new module or a v4 closure (ARCHITECTURE §10). DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — see #815. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
@@ -709,27 +709,27 @@
     },
     "packages/runtime/workflows/chatTurn.v19.impl.ts": {
       "sha256": "c540ae14217052db27758a5304fc26622e02c9ea0ade3b43bf13dcbec0205587",
-      "note": ""
+      "note": "#643 + #644 — part of the chatTurn_v19 closure (ONE shared successor for both tickets: the `start_periodic_adjustment_work` tool, the `remember_client_information` tool, the `knowledge_receipt` wire kind and the honest knowledge-pack context step); registry.ts points chatTurn: here. v1..v18 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0194 (periodic adjustments) must BOTH be live BEFORE this image serves a chat turn — the two new tools call clara.capture_knowledge_for / clara.get_knowledge_pack (0192) and clara.admit_periodic_adjustment_work (0194). NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v19.parts.ts": {
       "sha256": "decb982c985fe661f65a3e523f99897d15961273ee3b20cb4bcb339418bb49f0",
-      "note": ""
+      "note": "#643 + #644 — part of the chatTurn_v19 closure (ONE shared successor for both tickets: the `start_periodic_adjustment_work` tool, the `remember_client_information` tool, the `knowledge_receipt` wire kind and the honest knowledge-pack context step); registry.ts points chatTurn: here. v1..v18 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0194 (periodic adjustments) must BOTH be live BEFORE this image serves a chat turn — the two new tools call clara.capture_knowledge_for / clara.get_knowledge_pack (0192) and clara.admit_periodic_adjustment_work (0194). NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v19.prompt.ts": {
       "sha256": "fe0f786c0f079a0685de959e88e44cc91e9b9d05544ba9ec652fe1fdbacf3d50",
-      "note": ""
+      "note": "#643 + #644 — part of the chatTurn_v19 closure (ONE shared successor for both tickets: the `start_periodic_adjustment_work` tool, the `remember_client_information` tool, the `knowledge_receipt` wire kind and the honest knowledge-pack context step); registry.ts points chatTurn: here. v1..v18 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0194 (periodic adjustments) must BOTH be live BEFORE this image serves a chat turn — the two new tools call clara.capture_knowledge_for / clara.get_knowledge_pack (0192) and clara.admit_periodic_adjustment_work (0194). NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v19.tools.ts": {
       "sha256": "8a977d917680ab6b6918f93db9cbad16e56d4069d098ef8cfb98e4afea5846b6",
-      "note": ""
+      "note": "#643 + #644 — part of the chatTurn_v19 closure (ONE shared successor for both tickets: the `start_periodic_adjustment_work` tool, the `remember_client_information` tool, the `knowledge_receipt` wire kind and the honest knowledge-pack context step); registry.ts points chatTurn: here. v1..v18 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0194 (periodic adjustments) must BOTH be live BEFORE this image serves a chat turn — the two new tools call clara.capture_knowledge_for / clara.get_knowledge_pack (0192) and clara.admit_periodic_adjustment_work (0194). NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v19.ts": {
       "sha256": "6817db64db307647808c5e389428852ef7039d9bab159038994ea8d98c35ed05",
-      "note": ""
+      "note": "#643 + #644 — part of the chatTurn_v19 closure (ONE shared successor for both tickets: the `start_periodic_adjustment_work` tool, the `remember_client_information` tool, the `knowledge_receipt` wire kind and the honest knowledge-pack context step); registry.ts points chatTurn: here. v1..v18 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0194 (periodic adjustments) must BOTH be live BEFORE this image serves a chat turn — the two new tools call clara.capture_knowledge_for / clara.get_knowledge_pack (0192) and clara.admit_periodic_adjustment_work (0194). NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v19.usage.ts": {
       "sha256": "2690f68ed419838f3bf759b8853bd0f385f6e8127ac65d1a78e342d4abca65c8",
-      "note": ""
+      "note": "#643 + #644 — part of the chatTurn_v19 closure (ONE shared successor for both tickets: the `start_periodic_adjustment_work` tool, the `remember_client_information` tool, the `knowledge_receipt` wire kind and the honest knowledge-pack context step); registry.ts points chatTurn: here. v1..v18 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0194 (periodic adjustments) must BOTH be live BEFORE this image serves a chat turn — the two new tools call clara.capture_knowledge_for / clara.get_knowledge_pack (0192) and clara.admit_periodic_adjustment_work (0194). NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
@@ -1043,31 +1043,31 @@
     },
     "packages/runtime/workflows/claraWork.v3.bundle.ts": {
       "sha256": "23b3f010333efd7a679b2363b570b432c43159ebb0b2671dd04209fb08041c46",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v3.errors.ts": {
       "sha256": "34428a76af7979fa5e16b3c2897c0ef17a2926e31db0d0384355a948e346dc70",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v3.impl.ts": {
       "sha256": "f61e64f26df633cbdfde060f354e9e299e107d2309848c288bdda771f9e6c81b",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v3.parts.ts": {
       "sha256": "2892553a7d7926687c7f5fa612e5326fd5512eebdc4ed0bb6433bb331e1d5ad3",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v3.prompt.ts": {
       "sha256": "3976a70a1f119c93a4b6abdb4a5aa52b277e90cc42b7b33ec25609d7d31e52e3",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v3.tools.ts": {
       "sha256": "c2f4ec283ceeb030460ce5254ba0db869f12782b0af0168547d201820e48f4a9",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v3.ts": {
       "sha256": "01a130c3531ed662a7b2bcd78400413cffb57db1d68aaf59c51451880624a7bd",
-      "note": ""
+      "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",

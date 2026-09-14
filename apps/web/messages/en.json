@@ -852,6 +852,9 @@
       "workAccepted": {
         "title": "Accounting work accepted",
         "purposeLabel": "purpose",
+        "purposeJournalEntry": "Journal entry",
+        "purposePeriodicStockAdjustment": "Periodic stock adjustment",
+        "purposePayrollObligation": "Supplied payroll obligation",
         "workLabel": "work",
         "operationLabel": "operation identity",
         "note": "Clara accepted this as durable work. It runs in the background; its own page keeps the current state, the basis and the receipt.",

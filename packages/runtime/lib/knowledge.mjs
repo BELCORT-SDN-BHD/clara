@@ -1,11 +1,18 @@
 // The governed-Knowledge runtime helpers — #644, migration 0192_client_knowledge_records.sql.
 //
-// A NON-FROZEN lib module, and that is the point. The chat capture tool
+// AN ORDINARY lib module by intent, and that is the point. The chat capture tool
 // (`remember_client_information`) and the honest knowledge-pack context step both belong inside a
 // frozen chatTurn body, and a frozen body is never edited afterwards. So every decision those two
 // steps need — what an unavailable read looks like, how a governed refusal reaches the model, how
 // an op_key is minted — is made HERE, where it can be reviewed and tested, and the frozen closure
 // becomes two calls.
+//
+// IT IS NEVERTHELESS FROZEN BY CLOSURE, since chatTurn_v19 imports it: check-frozen-workflows.mjs
+// walks a frozen body's import graph, so this file carries a `frozen-workflows.json` entry and its
+// hash is locked exactly like a workflow file's. Once the deploy ceremony stamps that entry
+// `deployed: true`, a change here ships only with a NEW chatTurn successor. (ARCHITECTURE §10
+// records the same ruling for #631's `lib/capability-registry.mjs` and `lib/work-trace.mjs`.)
+// "Reviewable and testable" survives; "editable after deploy" does not.
 //
 // WHAT `sql` IS: anything with `query(text, params)` — a `pg` Client or PoolClient. Every caller
 // supplies its own scoped connection (the runtime lane's `withRuntime`, or the OBO-scoped client
@@ -34,15 +41,27 @@
 //                 advising as though the client had no knowledge at all.
 // =============================================================================================
 
-// NO `node:` IMPORT LIVES IN THIS FILE, AND THAT IS A HARD CONSTRAINT RATHER THAN A PREFERENCE.
-// chatTurn_v19 imports this module, which puts it inside a FROZEN WORKFLOW'S IMPORT CLOSURE — and
-// the Workflow DevKit compiles that closure into a VM script where `require` is undefined. The
-// failure is a RUN-TIME one, not a build-time one, and it was measured on the real World before
-// this note was written: with `import { randomUUID } from "node:crypto"` at the top of this file,
-// `nitro build` succeeded and the first chat turn died
-// `USER_ERROR / ReferenceError: require is not defined at lib/knowledge.mjs` — inside the workflow,
-// before the tool it was carrying ever ran. `claraWork.v1.bundle.ts` open-codes SHA-256 for
-// exactly the same reason and says so in its own header.
+// NO MODULE-LEVEL `node:` IMPORT LIVES IN THIS FILE, AND THAT IS A HARD CONSTRAINT RATHER THAN A
+// PREFERENCE. State it precisely, because the imprecise version ("no `node:` import, ever") is
+// false in a way that invites a later hand to "fix" a deployed body:
+//
+//   FATAL — a MODULE-LEVEL STATIC import (`import { randomUUID } from "node:crypto"` at the top of
+//   this file). chatTurn_v19 imports this module, which puts it inside a FROZEN WORKFLOW'S IMPORT
+//   CLOSURE, and the Workflow DevKit compiles that closure into a VM script where `require` is
+//   undefined. The failure is a RUN-TIME one, not a build-time one, and it was measured on the real
+//   World before this note was written: `nitro build` succeeded and the first chat turn died
+//   `USER_ERROR / ReferenceError: require is not defined at lib/knowledge.mjs` — inside the
+//   workflow, before the tool it was carrying ever ran.
+//
+//   DEPLOYED AND SAFE — a DYNAMIC `await import("node:…")` evaluated INSIDE a `"use step"` body.
+//   `workflows/chatTurn.v10.impl.ts:317` (`mintHookTokenStep`) does exactly that for `randomUUID`,
+//   it is carried unchanged by v11…v19, it is `deployed: true`, and the chatTurn_v19 World e2e ran
+//   through it. A step body executes on the Node side of the step boundary, not in the closure's
+//   VM script, so the import resolves there.
+//
+// This file has no `"use step"` of its own — it is called FROM steps — so the safe form is not
+// available here, and the constraint above is absolute FOR THIS FILE. `claraWork.v1.bundle.ts`
+// open-codes SHA-256 for the same reason and says so in its own header.
 
 /** The door's own name, in one place, so a rename is one edit rather than a grep. */
 export const KNOWLEDGE_PACK_FN = "clara.get_knowledge_pack";

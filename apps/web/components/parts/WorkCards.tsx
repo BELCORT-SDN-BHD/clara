@@ -75,6 +75,7 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
 import { getAccountingWork } from "@/lib/work/reads";
+import { purposeLabel } from "@/lib/work/purpose-label";
 import { accountsForQuestion, getWorkQuestion } from "@/lib/work/questions";
 import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart } from "@/lib/parts/types";
 
@@ -172,7 +173,15 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
       title={t("title")}
       titleId={headingId}
       rows={[
-        [t("purposeLabel"), part.purpose],
+        // #643/#644 (wave-3 integration, v19 review NOTE-3) — THE PURPOSE IS LABELLED THROUGH THE
+        // ONE MAPPING, not rendered raw. This card showed the column's own token, which was a
+        // defensible non-regression while the CHECK admitted `journal_entry` alone; migration 0194
+        // admits three, so chatTurn_v19's two new purposes would have surfaced here as
+        // `periodic_stock_adjustment` / `payroll_obligation` while the Work detail and the journals
+        // row said "Periodic stock adjustment" / "Supplied payroll obligation" — one row described
+        // two ways. `lib/work/purpose-label.ts` owns WHICH purposes exist; the words stay with the
+        // surface, so the keys are this card's own. An unknown purpose still renders VERBATIM.
+        [t("purposeLabel"), purposeLabel(part.purpose, t, "purpose")],
         [t("workLabel"), part.work_id],
         [t("operationLabel"), part.logical_op_id],
       ]}

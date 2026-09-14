@@ -1472,3 +1472,71 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
     }
   });
 });
+
+// #631 (wave-3 integration) — THE DIAGNOSTICS SECTION LIVES INSIDE THE ACTIVITY TAB.
+//
+// WHY THIS CELL EXISTS AT ALL. #631 mounted `WorkDiagnostics` with one line beneath the identity
+// block and said so in the mount comment, because #641 was turning this file into Tabs on another
+// branch at the same time and a section written into the tab strip would have conflicted on every
+// line. Integration is where that mount moves, and a move has two ways to go wrong that no unit
+// cell on `WorkDiagnostics` itself can see: the section can end up in the WRONG panel (or in none),
+// and opening a tab can turn into an act on the Work.
+//
+// THE TAB IS NOT `keepMounted`, which is the point rather than an accident: the trace read fires
+// when a reader opens Activity, not on every visit to a Work detail page. The first arm asserts
+// exactly that — the section is ABSENT on arrival — and the second asserts it arrives on the tab.
+//
+// AND A TAB PRESS IS A READ. The third arm counts every non-GET request the page made across the
+// whole interaction and asserts zero, the same instrument #624's Sources cell uses one screen up.
+test("631 + 641: Diagnostics renders INSIDE the Activity tab, and opening that tab is a read, never a write", async () => {
+  await withStateDoor(documentState(), async (calls) => {
+    let writes = 0;
+    const h = await renderComponent(App({
+      load: async () => data({ work: workRow({ status: "completed" }) }),
+      retry: (async () => { writes += 1; return { kind: "accepted" } as never; }) as never,
+      cancel: (async () => { writes += 1; return { kind: "answered" } as never; }) as never,
+      takeOver: (async () => { writes += 1; return { kind: "accepted" } as never; }) as never,
+    }));
+    try {
+      await settleUntil(h, () => /Journal entry/.test(h.text()), "the page rendered");
+
+      // ARM 1 — ABSENT ON ARRIVAL. Results is the default tab; the trace section is not on screen
+      // and its door has not been asked.
+      assert.doesNotMatch(h.text(), /Diagnostics/, "the trace section is not mounted on the default tab");
+      assert.equal(
+        calls.filter((c) => c.url.includes("get_work_execution_trace")).length,
+        0,
+        "and no trace read fires for a reader who never opens Activity",
+      );
+
+      // ARM 2 — IT ARRIVES WITH THE TAB, and renders its own EMPTY face rather than nothing: the
+      // stub answers `[]`, which is a Work that has recorded no steps, not a Work you may not see.
+      const activity = h.find((n) =>
+        n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Activity");
+      assert.ok(activity, "the Activity tab is a real control");
+      await clickButton(activity);
+      await settleUntil(h, () => /Diagnostics/.test(h.text()), "the trace section mounted inside the Activity panel");
+      await settleUntil(
+        h,
+        () => /No steps have been recorded for this Work yet\./.test(h.text()),
+        "the trace read resolved to the empty face",
+      );
+      assert.equal(
+        calls.filter((c) => c.url.includes("get_work_execution_trace")).length,
+        1,
+        "opening the tab asked the trace door exactly once",
+      );
+
+      // ARM 3 — A TAB PRESS IS NOT AN ACT ON THE WORK. No retry, no cancel, no take-over, and no
+      // mutating request of any kind left this page across the whole interaction.
+      assert.equal(writes, 0, "a tab press is not an act on the Work");
+      assert.equal(
+        calls.filter((c) => c.method !== "GET" && !c.url.includes("/rest/v1/rpc/")).length,
+        0,
+        "no mutating request of any kind left this page",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
