@@ -10,6 +10,8 @@
 
 ## Completed
 
+- **Riders batch 2026-09-14** (this Mac, PR #817 → `main` 6375cc68, merged over wave 2): #736 #733 #743 #715 #741 #734 #719 #746 #742 #744 #709 #690 #755 #707 #754 #756 #708 #745 #760 #691 closed with local evidence on their tickets (db 4450/0 fail on a fresh cluster, runtime 2447/0 fail, web unit 3693/0 fail, browser 337 passed with `main`'s own #641/#640 fixture reds filed as #816, root lint green on macOS). Blueprint sync: ARCHITECTURE §4 (#744 ruling), §9 (shell hydration / rail / cookie / time zone / stream faults / deep links / attribution rules), §11 (renderer on Node 22, EICAR skip); `packages/db/README.md` (`interactive_client`); one repo-wide dead-citation guard on the root lint ladder.
+
 - 2026-09-14 wave 1 of the refresh implementation landed on `main` via PR #769 (fast-forward after `ci` green, the first real run of #620's `storage-policy-battery` job): #619 (parallel e2e harness), #622 (sign-in / recovery / safe return), #615 (0188 operator support), #641 (0189 B-style Work list + detail Tabs), #620 (0190 source custody). Closed with local evidence: #619 #622 #615 #641 #620 and the defects #722 #740 (#619) and #698 (#622). Reviews and fix-round reports: `docs/plan/active/refresh-wave-2026-09-14/reports/`. The merged tree caught one census (`checkout-gate-c3` c3.53, #615's reader admitted with its reason) and one runner flake (work-question e2e leg 5, green on re-run).
 
 - 2026-09-13 triage of the 37 refresh follow-up reports (ledger on #683): 6 closed, 32 `ready-for-agent` (the 7 owner decisions became briefs: #691 Node 22 base, #736 rail closes on a narrow crossing, #741 Asia/Kuala_Lumpur, #720 Half 1 with successor #764, #744 accept + guard, #755/#690 strip the dead citations; #732 reproduced and briefed), 0 `needs-info`.
@@ -29,7 +31,7 @@
 ## Next Steps
 
 0. Resume the refresh wave from the HANDOFF.md above (read it first; inspect every worktree before trusting a fix landed; restart the WSL clusters if WSL restarted).
-1. After the wave: `/implement` on the remaining wayfinder tickets the owner picks (#612 children, frontier per #597). Ready-for-agent riders by lane: web #732 #698 #715 #733 #734 #736 #741 #743 #746 #719 #760 #706 #740 #722 #755; db #692 #718 #720 #742 #744 #750 #709 #690; runtime tests #754 #756 #708 #745 #693 #707 #714; infra #691.
+1. After the wave: `/implement` on the remaining wayfinder tickets the owner picks (#612 children, frontier per #597). Riders: the 2026-09-14 batch (PR #817 → `main` 6375cc68, no migration) closed 20 of the ready-for-agent riders and left #732 (`awaiting-release`: hosted repro), #714 (three green `db-estate` runs on a runtime-free PR), #706 (new family members on the issue) and #693 (Windows confirmation) open on named evidence; still ready-for-agent and migration-bearing: db #692 #718 #720 (unblocked now that 0191–0194 are on `main`), #750 #721 (after #631's 0195).
 2. When the lawyer-reviewed Terms/DPA wording arrives: publish it as v2 through `clara.publish_legal_document` (as the BELCORT owner) or a seed migration; the beta v1 rows become superseded.
 3. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
 4. **#637's hosted half — the two-release + deliberate-rollback ceremony (owner-scheduled; local and CI
