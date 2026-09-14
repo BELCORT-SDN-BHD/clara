@@ -208,7 +208,9 @@ run 在冻结 bundle 下执行，调用受控领域 operation，**在同一事�
 （v19 相对 v18 加了两个工具、一个 wire kind 与一个**并列的**新 step，而不是加宽一个已部署的旧 step），
 旧版本保留导出供在途 run。对话可以发起会计 Work（与直接表单走同一扇准入门，不是第二套会计引擎），
 也可以捕获客户知识——知识以服务器登记的 key 写入，trust 由来源种类派生，
-对话车道只开放"用户陈述"与"模型推断"两档，读不到知识与没有知识必须被区分开。[已实现]
+对话车道只开放"用户陈述"与"模型推断"两档，读不到知识与没有知识必须被区分开。知识包 `clara.get_knowledge_pack`
+只对 runtime 开门，人读原始登记簿（`list_client_knowledge`）；撤回知识是人类专属动作，runtime 没有撤回门——
+两条均为 owner 2026-09-15 裁定（#783、#785）。[已实现]
 
 共享问题有稳定身份与问题／依据版本：一个 Work 同时至多一个待答问题，数据库只接受当前获准的第一份答案，
 重复提交回放同一结果；期限到期后问题失效而不是 Work 静默完成。
@@ -250,14 +252,17 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 **Work 车道**的授权不是一个 per-client 开关，而是**推导**出来的：事务所当前接受的 Terms + DPA
 且该 client 在世活跃；撤销可逆，且对已消耗的 dispatch 是追溯的——账务核心在提交时会再读一次授权是否仍在世。
 其余五个 typed purpose 仍走人工 grant + activation（`clara.grant_client_egress_purpose`／
-`activate_client_egress_purpose`），两套并存尚未统一。[已实现]
+`activate_client_egress_purpose`），两套并存尚未统一。[已实现；激活基础由 owner 于 2026-09-15 确认（#825）]
 
 执行轨迹表没有 payload 列、每列有文法校验、写入方做脱敏，且任何应用角色对它连 SELECT 都没有
 （FORCE RLS + 无 policy）。承担轨迹与能力目录这两件事的模块随冻结版本一起锁定：
 `packages/runtime/lib/work-trace.mjs` 是冻结正文的动态 import 入口，
 `lib/capability-registry.mjs` 由它静态 import 带入闭包，两者都在闭包哈希内。
 （`lib/egress.mjs` **不**在冻结闭包里：它是 OCR 提供方的适配器，兼一张 purpose 查表——
-按它自己的注释是文档与查表、从不是授权；授权只由数据库动词判定。）[已实现]
+按它自己的注释是文档与查表、从不是授权；授权只由数据库动词判定。）
+轨迹**没有导出路由**（by absence）：view-only，保留期由 prune lane 决定（owner 2026-09-15 确认，#802）；
+对 `work-trace.mjs` 脱敏逻辑的任何加固只能随下一个冻结版本（`claraWork_v4`）交付，不做原地修改
+（owner 2026-09-15 裁定，#815）。[已实现]
 
 ### F. 发布与回退
 
@@ -276,9 +281,14 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 
 回退预检 `packages/runtime/lib/rollback-preflight.mjs` 回答三问：(1) 非终态 run 的 body 普查；
 (2) 绑不到 run 的在世任务普查（未知 kind fail-closed）；(3) 数据库自身对目标镜像的 body 要求
-（某些迁移之后，目标镜像必须携带指定 body，且这一条不能靠 drain 清除）。该 frontier 规则已实现并上线，
-但它本身仍是待裁定语义（§7）。World 启动前另有一道 stranded-body 普查闸门：发现缺口即拒绝启动 durable world
-（HTTP 仍服务，`/ready` 503），只能由显式操作者覆盖。[已实现]
+（某些迁移之后，目标镜像必须携带指定 body，且这一条不能靠 drain 清除）。该 frontier 规则与 0195 的
+pre-v3 grandfather arm 已实现并上线；owner 于 2026-09-15 裁定（#826）：beta 期间托管用户与数据均为测试数据，
+停泊在 pre-v3 body 上的 Work 无需保全、经 Work 取消门清理即可（#820），两条规则保持已上线形状不动，
+下一次 wall-raising 迁移采用 grandfather 还是 drain 届时再裁。World 启动前另有一道 stranded-body 普查闸门：
+发现缺口即拒绝启动 durable world（HTTP 仍服务，`/ready` 503），只能由显式操作者覆盖。该拒绝是
+**database-wide** 的——同一个库上任何 lane 停泊的未导出 body 都会拒绝之后每一个 runtime 进程——owner 于
+2026-09-15 确认为既定取舍（#793）；CI 因此给不能容忍他人停泊 run 的 leg 各自一份模板复制库，
+按 lane 收窄留待 #792 的 park-and-warn。[已实现]
 
 发布仪式的实际形状（写前备份 → probe 机器只读预检 → 按 digest 发布 runtime → 发布 web → 静默窗口内迁移 →
 校验启动日志顺序 → smoke → 只读演示回退预检 → 事后单独锁定冻结清单）记在
@@ -309,6 +319,8 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 - **文件字节读取只用代理，不用签名 URL。** 代价是每次请求重读在世 membership，换来即时可撤销性。
 - **刻意不做的事：**
   - 没有 per-client 的 AI 开关（Work 车道的外发授权由事务所级 Terms／DPA 接受与 client 活跃状态推导）；
+  - 会计计划的建立／修订／补提以 bookkeeper 为下限，不复制 0045 调整模板的两签仪式——两条 lane 是不同产品
+    （owner 2026-09-15 确认，#790）；
   - 没有"全局开启自动执行"开关；观察到重复扣款不自动创建计划，也不代表产品具有发起银行付款或管理 mandate 的权限；
   - 不承诺高可用；
   - 不发明税率、门槛或员工计算——税率、阈值与法律文字是**有生效日期的外部输入**，
@@ -322,15 +334,13 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 ## 7. 已接受但未实现的目标
 
 各项的交付范围、依赖与完成证据由 GitHub 上的 delivery spec 与票承接；本表只记"与当前实现的差别"。
-两项**待 owner 裁定**的语义单独标出：未裁定前，它们已上线的实现不应被当作已敲定的架构。
+曾待 owner 裁定的两项语义（#825、#826）已于 2026-09-15 裁定，记在 §5 E／F；本表不再单列。
 
 | 目标 | 与当前实现的差别 |
 |---|---|
 | 完整 Accounting Work 领域模型（Work／Conversation／run／Q&A／receipt／JE 与领域对象／Knowledge） | `clara.accounting_work` + `operation_receipts` 已是该形状的首个持久化实现，但 Conversation 与 Knowledge 侧仍部分依赖既有 task／chat／interruption 表 |
 | 统一能力目录覆盖全部 lane | `packages/runtime/lib/capability-registry.mjs` 已为 Work lane 落地并写入执行轨迹；documents／bank／close 三条 lane 尚未纳入 |
 | 按操作粒度的外发 token 与配额 | 当前只有一个粗粒度的 `accounting_work` 用途 token，没有配额；firm-narrow 外发家族还缺 consume 动词 |
-| 外发授权推导的**激活假设**由 owner 确认（#825 待裁定） | 推导规则已实现并上线，但"何时算激活"这一条仍是待确认假设 |
-| pre-v3 grandfather 与 rollback-preflight **frontier 规则**的最终裁定（#826 待裁定） | 规则已实现并上线（§5 F），语义待 owner 确认 |
 | 全量硬性 readiness 门（覆盖所有已配置连接通道与存储） | `/ready` 已分离依赖检查并支持三态读数，但尚未对每条已配置通道强制闸门 |
 | 报表 metric pack 与 chart／表格读同一定义 | 渲染服务与封存流程存在；"金额／AR-AP 归桶在受信数据层统一定义"尚未全面落地 |
 | typed part 的完整协议兼容（字段与版本，不只 kind） | web 与 runtime 是两个独立发布单元，当前 parity 校验主要比对 kind，部分 reader 只有 ID |
