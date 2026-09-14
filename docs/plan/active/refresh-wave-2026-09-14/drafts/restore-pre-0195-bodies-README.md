@@ -48,3 +48,5 @@ read-only off rig637/`clara_637` (0187 checksum `5fc28e38…`); no `clara_pre` c
    `(cd packages/db && <dsn pipeline> | node ../../scripts/ops/dsn-pipe.mjs -- node`
    `scripts/migrate.mjs)` → expect `1 new migration(s) applied · 191 total`.
 2. Then release the compatibility image (carrying `claraWork_v3`) and start the machine.
+
+**Renamed 2026-09-15.** This draft was written as `0196_restore_pre_0195_bodies.sql`; PR #822 (#692) took the number 0196 on `main` on 2026-09-14, and 0197/0198 followed. When this draft is ever used it takes the then-next free number, its pre-state pins are re-read from the hosted bodies of that day, and its tail assertions are re-run on a rig chain first.
