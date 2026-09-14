@@ -248,14 +248,27 @@ create policy p_document_capabilities_owner on clara.document_capabilities
 
 -- There is no firm to scope BY -- the whole table is one global vocabulary with no tenant column
 -- and nothing tenant-derived in it -- so the predicate is `true` and the honesty lives in the
--- SELECT-only verb and the absent write grant. BOTH application read lanes are admitted: the
--- workbench renders the registry, and the agent lane must be able to read what it cannot do.
+-- SELECT-only verb and the absent write grant.
+--
+-- ONE APPLICATION LANE HOLDS THE TABLE, AND IT IS THE HUMAN ONE. The first cut admitted
+-- clara_agent_ro here too, on the reasoning that "the agent lane must be able to read what it
+-- cannot do" -- which is true, and is not an argument for a TABLE grant. 0165, the file this
+-- registry is modelled on (clara.document_kind_codeability, its own header says so), settled the
+-- same question the other way and its tail pins the answer: `clara_agent_ro holds NO table
+-- privilege and reaches the vocabulary only through clara._is_codeable_kind`. The agent lane keeps
+-- exactly that shape here -- clara._document_capability(text,text), clara._document_format(text)
+-- and clara.get_document_state(uuid,uuid) are EXECUTE-granted to it below, all three SECURITY
+-- DEFINER, and they are what the lane reads the registry through. A `using (true)` policy for a
+-- role that already holds the definer doors measures nothing and scopes nothing; it is only a
+-- second way in, and `packages/db/tests/rig-runtime-visibility.test.mjs`'s §6 agent sweep (the
+-- agent lane has ZERO access to every new table) is the law that says so. This file's tail asserts
+-- both halves.
 create policy p_document_capabilities_read on clara.document_capabilities
-  for select to clara_authenticated, clara_agent_ro using (true);
+  for select to clara_authenticated using (true);
 
 reset role;
 
-grant select on clara.document_capabilities to clara_authenticated, clara_agent_ro;
+grant select on clara.document_capabilities to clara_authenticated;
 
 -- =====================================================================================
 -- S2 -- THE SEED. 12 formats x 20 kinds = 240 rows, DERIVED.
@@ -1340,7 +1353,7 @@ declare
   v_pol int; v_forced boolean; v_enabled boolean; v_role text; v_priv text; v_ix text;
   v_path text; v_bad text[]; v_survivors text[]; v_census int := 0; v_refused int := 0;
   v_cap jsonb;
-  v_probe record;
+  v_probe record; v_sig text;
 begin
   -- (1) TOTALITY, BOTH DIRECTIONS, against the vocabulary derived from the live CHECK.
   v_kinds := clara._document_kind_roster();
@@ -1466,10 +1479,12 @@ begin
   --
   -- THE EXPECTED POLICY COUNT DIFFERS BY TABLE, and the difference is the design rather than an
   -- inconsistency. clara.document_capabilities is a GLOBAL vocabulary with no tenant column: its
-  -- read predicate is `true`, so ONE policy serves both lanes honestly and a split would be
-  -- theatre. clara.document_fact_validations is firm-scoped, so it takes the estate's per-lane
-  -- shape (0007:788-791) -- jwt_firm() for the human lane, wake_firm() for the agent lane -- and
-  -- carries THREE.
+  -- read predicate is `true`, and the ONE application lane holding the table is the human one
+  -- (the agent lane reads the registry through the definer doors -- see S1 and sweep (5b) below),
+  -- so owner + human read is TWO. clara.document_fact_validations is firm-scoped, so it takes the
+  -- estate's per-lane shape (0007:788-791) -- jwt_firm() for the human lane, wake_firm() for the
+  -- agent lane, each measured ROW-WISE by document-fact-validation-belt.test.mjs rather than
+  -- counted -- and carries THREE.
   --
   -- THE WRITE SWEEP IS SYMMETRIC ACROSS ALL THREE APPLICATION ROLES. The first cut checked
   -- INSERT/UPDATE/DELETE for clara_authenticated but only INSERT for clara_agent_ro and nothing
@@ -1498,9 +1513,43 @@ begin
         end if;
       end loop;
     end loop;
-    if not pg_catalog.has_table_privilege('clara_authenticated', 'clara.' || v_probe.t, 'SELECT')
-       or not pg_catalog.has_table_privilege('clara_agent_ro', 'clara.' || v_probe.t, 'SELECT') then
-      raise exception 'dcr tail: an application read lane cannot SELECT clara.%', v_probe.t using errcode = 'CLR10';
+    -- THE READ LANES, PER TABLE. The human lane holds SELECT on both. The agent lane holds it on
+    -- the firm-scoped validations table (its own wake_firm() policy is what scopes it) and NOT on
+    -- the global registry, which it reads through the definer doors instead -- sweep (5b) below
+    -- asserts that side in both directions.
+    if not pg_catalog.has_table_privilege('clara_authenticated', 'clara.' || v_probe.t, 'SELECT') then
+      raise exception 'dcr tail: the human read lane cannot SELECT clara.%', v_probe.t using errcode = 'CLR10';
+    end if;
+    if v_probe.t = 'document_fact_validations'
+       and not pg_catalog.has_table_privilege('clara_agent_ro', 'clara.' || v_probe.t, 'SELECT') then
+      raise exception 'dcr tail: the agent read lane cannot SELECT clara.% -- its wake_firm() policy then scopes nothing', v_probe.t
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (5b) THE AGENT LANE REACHES THE REGISTRY THROUGH A DOOR, NEVER THROUGH THE TABLE -- 0165's
+  -- own ruling for clara.document_kind_codeability, asserted here in both directions so neither
+  -- half can rot. A table grant restored by a later file fails the FIRST clause; a door revoked
+  -- out from under the lane (which would leave the agent unable to read what it cannot do, the
+  -- very thing this registry exists to publish) fails the SECOND.
+  if pg_catalog.has_table_privilege('clara_agent_ro', 'clara.document_capabilities', 'SELECT') then
+    raise exception 'dcr tail: clara_agent_ro holds SELECT on clara.document_capabilities -- the agent lane reads this global vocabulary through clara._document_capability / clara.get_document_state, never off the table (0165''s ruling)'
+      using errcode = 'CLR10';
+  end if;
+  if exists (select 1 from pg_policies
+              where schemaname = 'clara' and tablename = 'document_capabilities'
+                and 'clara_agent_ro' = any (roles)) then
+    raise exception 'dcr tail: a clara.document_capabilities policy still names clara_agent_ro -- a policy for a role with no grant measures nothing'
+      using errcode = 'CLR10';
+  end if;
+  foreach v_sig in array array['clara._document_capability(text,text)','clara._document_format(text)','clara.get_document_state(uuid,uuid)'] loop
+    if not pg_catalog.has_function_privilege('clara_agent_ro', v_sig, 'EXECUTE') then
+      raise exception 'dcr tail: clara_agent_ro cannot EXECUTE % -- with no table grant this is the lane''s only path to the registry', v_sig
+        using errcode = 'CLR10';
+    end if;
+    if (select prosecdef from pg_proc where oid = v_sig::regprocedure) is not true then
+      raise exception 'dcr tail: % is not SECURITY DEFINER -- an invoker-rights door cannot read a table the caller holds no grant on', v_sig
+        using errcode = 'CLR10';
     end if;
   end loop;
 
@@ -1574,6 +1623,6 @@ begin
     raise exception 'dcr tail: a new reader is not executable by the lanes that must reach it' using errcode = 'CLR10';
   end if;
 
-  raise notice 'dcr tail: OK -- clara.document_capabilities holds % rows, TOTAL over % derived kinds x % canonical intake formats in BOTH directions, one mime/custody/byte-engine per format, one registry_version. ofx x bank_statement reads byte_extraction=stored_only and typed_facts<>supported (the measured OFX finding); csv x bank_statement reads supported; a skipped_kind pair never reads operation-supported; consent_evidence is unsupported everywhere. clara._assert_field_path accepts all % censused producer paths and NULL, refuses % malformed shapes, and is spliced into clara.persist_document_extraction ONCE with owner/ACL/DEFINER/search_path and every pre-existing gate carried verbatim. clara.document_fact_validations is append-only and REVISIONED behind THREE DEFERRABLE INITIALLY DEFERRED constraint triggers (two recorders on the header tables plus the region-side belt, which re-derives at commit and APPENDS the next revision when a later identity region moves the verdict -- it raises nothing, asserted on its own body -- while readers take the highest revision), so no live persist body was recut; 0038''s own belt on clara.bank_statement_lines is asserted present because the statement half of that law, which keeps the stricter refusal, rests on it. Both new tables are forced-RLS with exactly two policies and no application write grant. No table in workflow/graphile_worker/spike touched.',
+  raise notice 'dcr tail: OK -- clara.document_capabilities holds % rows, TOTAL over % derived kinds x % canonical intake formats in BOTH directions, one mime/custody/byte-engine per format, one registry_version. ofx x bank_statement reads byte_extraction=stored_only and typed_facts<>supported (the measured OFX finding); csv x bank_statement reads supported; a skipped_kind pair never reads operation-supported; consent_evidence is unsupported everywhere. clara._assert_field_path accepts all % censused producer paths and NULL, refuses % malformed shapes, and is spliced into clara.persist_document_extraction ONCE with owner/ACL/DEFINER/search_path and every pre-existing gate carried verbatim. clara.document_fact_validations is append-only and REVISIONED behind THREE DEFERRABLE INITIALLY DEFERRED constraint triggers (two recorders on the header tables plus the region-side belt, which re-derives at commit and APPENDS the next revision when a later identity region moves the verdict -- it raises nothing, asserted on its own body -- while readers take the highest revision), so no live persist body was recut; 0038''s own belt on clara.bank_statement_lines is asserted present because the statement half of that law, which keeps the stricter refusal, rests on it. Both new tables are forced-RLS with no application write grant: the registry carries owner + HUMAN read and clara_agent_ro holds no table privilege on it at all -- the agent lane reaches it only through the SECURITY DEFINER doors clara._document_capability / clara._document_format / clara.get_document_state, which is 0165''s own ruling for clara.document_kind_codeability; the validations table keeps the per-lane pair (jwt_firm / wake_firm). No table in workflow/graphile_worker/spike touched.',
     v_rows, coalesce(array_length(v_kinds, 1), 0), v_formats, v_census, v_refused;
 end $dcr_tail$;

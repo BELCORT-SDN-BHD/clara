@@ -244,6 +244,12 @@ typed_facts（某条 facts lane 能为这一对落下带来源区域的类型化
 尚未分类的文件如实公布 custody 与 byte_extraction 而对 facts／operation 一律 `unsupported` 并标 `kind_known:false`。
 `clara.get_document_state(document, client)` 把四个状态、能力判定与 original／duplicate／refile／supersede lineage
 一次读出（准入与 `clara.get_document_extract` 完全一致），客户端 Documents 详情据此分别命名四个状态。
+**目录本身只有人类车道持表授权**：`clara_agent_ro` 在 `clara.document_capabilities` 上不持任何表权限，
+只经三个 SECURITY DEFINER 门（`clara._document_capability`／`clara._document_format`／`clara.get_document_state`）
+读它——与 0165 对其孪生表 `clara.document_kind_codeability` 的裁定同形（0191 tail 双向断言：表授权被恢复、
+或门被撤走，都直接拒绝应用）。首切曾同时授予两条车道，但目录是全局词汇、agent 侧谓词只能是 `using (true)`，
+那条授权既不划范围也没有读者，只是同一份内容的第二条入口。`clara.document_fact_validations` 不同：它是
+firm-scoped，两条车道各有自己的谓词（`jwt_firm()`／`wake_firm()`），agent 侧授权按设计保留。
 
 **Work 的 Sources 页签呈现同一组四态（#624 AC4「Documents AND Work」，wave-2 集成，本地证据）。**
 一条 Work 的 `source_refs` 里 `kind='document'` 的来源，在 #641 的 Work 详情 Results｜Sources｜Activity

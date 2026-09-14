@@ -278,14 +278,26 @@ cell("the registry is forced-RLS, readable by the app roles and writable by none
       has_table_privilege('clara_authenticated','clara.document_capabilities','INSERT') as auth_insert,
       has_table_privilege('clara_authenticated','clara.document_capabilities','UPDATE') as auth_update,
       has_table_privilege('clara_authenticated','clara.document_capabilities','DELETE') as auth_delete,
-      has_table_privilege('clara_agent_ro','clara.document_capabilities','SELECT') as agent_read
+      has_table_privilege('clara_agent_ro','clara.document_capabilities','SELECT') as agent_read,
+      (select count(*)::int from pg_policies p where p.schemaname='clara'
+        and p.tablename='document_capabilities' and 'clara_agent_ro' = any (p.roles)) as agent_policies
     from pg_class c join pg_namespace n on n.oid=c.relnamespace
     where n.nspname='clara' and c.relname='document_capabilities'`)).rows[0];
   assert.equal(r.enabled, true, "RLS enabled");
   assert.equal(r.forced, true, "RLS forced");
-  assert.equal(r.policies, 2, "owner ALL + application SELECT, and nothing else");
+  assert.equal(r.policies, 2, "owner ALL + the HUMAN lane's SELECT, and nothing else");
   assert.equal(r.auth_read, true, "the workbench renders this registry");
-  assert.equal(r.agent_read, true, "the agent lane must be able to read what it cannot do");
+  // THE AGENT LANE HOLDS NO TABLE PRIVILEGE, and that is the design rather than an omission --
+  // 0165's ruling for its twin (clara.document_kind_codeability: "clara_agent_ro holds NO table
+  // privilege and reaches the vocabulary only through clara._is_codeable_kind"), and the law
+  // rig-runtime-visibility.test.mjs's §6 agent sweep states for every new table. What the lane
+  // holds instead is the next cell's three SECURITY DEFINER doors; a `using (true)` policy for a
+  // role that already holds those measures nothing, so the policy must not name it either.
+  assert.equal(r.agent_read, false,
+    "clara_agent_ro holds SELECT on the registry table — it reads the registry through " +
+    "clara._document_capability / clara.get_document_state, never off the table");
+  assert.equal(r.agent_policies, 0,
+    "a document_capabilities policy still names clara_agent_ro — a policy for a role with no grant measures nothing");
   assert.equal(r.auth_insert, false);
   assert.equal(r.auth_update, false);
   assert.equal(r.auth_delete, false);
