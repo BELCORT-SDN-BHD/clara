@@ -56,15 +56,16 @@ export async function seedFiledDocument({ firm, uploadedBy, client }) {
  *  packages/db/migrations the only `insert into clara.document_regions` sites in the repo are
  *  test fixtures).
  *
- *  This is load-bearing rather than tidy. 0191's region-side belt
- *  (`clara._tf_document_region_fact_validate`) REFUSES a region carrying one of the seven
- *  identity terms when it arrives after the extraction's own COMMIT, with CLR10
- *  `fact_validation_would_go_stale`: the invoice-identity verdict is recorded at the header's
- *  COMMIT and the validation row is append-only, so a later region would leave the record
- *  describing regions that are no longer the regions on file. Seeding through three separate
- *  `fx.rootQuery` autocommits made this rig a writer path the product does not have, and the
- *  belt was right to refuse it. Inside one transaction both triggers are queued together and
- *  see the identical region set, so the belt is inert either way round (0191:930-975).
+ *  IT IS ABOUT FIDELITY, NOT ABOUT PERMISSION. 0191's region-side belt used to REFUSE a later
+ *  identity region outright (CLR10 `fact_validation_would_go_stale`) and this rig's three
+ *  separate `fx.rootQuery` autocommits red every DB cell in the battery. That refusal is gone —
+ *  the belt now re-derives at commit and APPENDS a revision only when the verdict actually moved
+ *  — so the old seeding would no longer fail. It would still be WRONG: the header commits with
+ *  no regions yet, the recorder writes `unmeasured / no_total_persisted`, and the first region
+ *  then appends a second revision. The rig would carry a two-revision history no production
+ *  persist can produce, and any cell that reads "the verdict" would be reading a fixture
+ *  artefact. One transaction gives this rig exactly what a real persist gives: ONE row, at
+ *  revision 1, over the complete region set.
  *
  *  `withActor`'s finally rolls back when anything throws before COMMIT; its `rollback` after a
  *  successful COMMIT finds no open transaction and is a no-op. `clock_timestamp()` still
