@@ -33,6 +33,7 @@
 # wave each appending 2-5 lines lands them in different alphabetical
 # §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
 components/accounting/journal-composer.test.tsx
+components/accounting/periodic-adjustment-form.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -332,6 +333,8 @@ lib/work/api.test.ts
 lib/work/evidence.test.ts
 lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
+lib/work/periodic-adjustment-draft.test.ts
+lib/work/periodic-adjustment.test.ts
 lib/work/question-fields.test.ts
 lib/work/questions.test.ts
 lib/work/reads.test.ts

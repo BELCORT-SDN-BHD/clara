@@ -76,11 +76,13 @@
     },
     "clientLeaf": {
       "journalComposer": "Record journal entry",
+      "periodicAdjustment": "Record periodic adjustment",
       "workDetail": "Journal entry",
       "knowledgeRecord": "Knowledge record"
     },
     "accounting": {
       "journals": "Journals",
+      "periodicAdjustments": "Periodic adjustments",
       "bank": "Bank",
       "receivables": "Receivables & payables",
       "assets": "Assets",
@@ -894,6 +896,7 @@
         "knowledge": "Knowledge",
         "reports": "Reports",
         "journals": "Journals",
+        "periodicAdjustments": "Periodic adjustments",
         "bank": "Bank",
         "registersAging": "Receivables & payables",
         "registersAssets": "Assets register",
@@ -1004,6 +1007,116 @@
     "lost": {
       "title": "We could not confirm whether this was accepted",
       "body": "The connection dropped before an answer arrived, so this entry may or may not have been accepted. Trying again is safe: it carries the same identity, so it resolves the existing work rather than creating a second one."
+    }
+  },
+  "PeriodicAdjustment": {
+    "heading": "Record periodic adjustment",
+    "body": "Record a periodic stock adjustment or a supplied payroll or statutory obligation from the particulars your client gave you. Submitting admits durable work; the entry is posted by that work and appears on its own page. Nothing here computes a contribution rate or an employee calculation — every figure is the one you enter.",
+    "purpose": {
+      "label": "What are you recording?",
+      "help": "Switching keeps what you have already typed in the other one.",
+      "options": {
+        "periodic_stock_adjustment": "Periodic stock adjustment",
+        "payroll_obligation": "Supplied payroll or statutory obligation"
+      }
+    },
+    "periodStart": "Period from",
+    "periodEnd": "Period to",
+    "method": {
+      "label": "How was the movement established?",
+      "help": "Choose the counted figures when your client gave you an opening and a closing stock figure.",
+      "options": {
+        "opening_closing_count": "From an opening and closing count",
+        "explicit_adjustment": "From an instructed movement"
+      }
+    },
+    "openingCents": "Opening stock",
+    "closingCents": "Closing stock",
+    "adjustmentCents": "Movement",
+    "adjustmentCentsHelp": "Positive when stock rose, negative when it fell.",
+    "movementLabel": "Movement (closing less opening):",
+    "movementUnknown": "Movement: enter both figures to see it.",
+    "countedAt": "Counted on",
+    "countedAtHelp": "Optional. It must fall inside the period above.",
+    "countReference": "Count reference",
+    "inventoryAccountCode": "Inventory account",
+    "costAccountCode": "Cost of sales account",
+    "obligationKind": {
+      "label": "Obligation",
+      "help": "This names what the obligation is. It sets no rate and computes nothing.",
+      "options": {
+        "epf": "EPF (KWSP)",
+        "socso": "SOCSO (PERKESO)",
+        "eis": "EIS (SIP)",
+        "pcb_mtd": "PCB (MTD)",
+        "hrdf": "HRDF (HRD Corp) levy",
+        "salary": "Salaries and wages",
+        "other_supplied": "Other supplied obligation"
+      }
+    },
+    "amountCents": "Amount",
+    "amountCentsHelp": "Exactly as your client supplied it.",
+    "expenseAccountCode": "Expense account",
+    "liabilityAccountCode": "Liability account",
+    "paymentAccountCode": "Settled from",
+    "paymentAccountHelp": "Only when part of it was paid in the same entry.",
+    "settledCents": "Amount settled",
+    "settledCentsHelp": "Shapes the entry below; it is not stored as a particular of its own — the split is readable from the posted lines.",
+    "advanceAccountCode": "Staff advance account",
+    "advanceAccountHelp": "Optional, and recorded as a particular only. Recovering an advance from this payroll needs the staff-advance register, which asks which advance is being discharged — this form does not decide that for you.",
+    "particularsSource": "Where these figures came from",
+    "particularsSourceHelp": "The payroll summary, message or document your client supplied.",
+    "instruction": "What you were asked to do",
+    "instructionHelp": "In your client's terms. This is the basis on the record.",
+    "accountPlaceholder": "Choose an account",
+    "accountNone": "None",
+    "defaultedHint": "Filled in from this client's chart. Change it if that is not the account you use.",
+    "preview": {
+      "heading": "The entry these particulars produce",
+      "body": "Derived from what you entered above and shown here so you can check it before submitting. The accounts and amounts follow the particulars; change them by changing the particulars."
+    },
+    "submit": "Submit",
+    "issues": {
+      "required": "Fill this in.",
+      "invalidDate": "Enter a real calendar date, as YYYY-MM-DD.",
+      "periodOrder": "The period ends before it starts.",
+      "accountRequired": "Choose an account.",
+      "accountUnknown": "This client's chart has no active account with that code.",
+      "accountsMustDiffer": "This must be a different account from the one above.",
+      "amountRequired": "This adjustment moves no money. Check the figures with your client.",
+      "amountNotExact": "Enter an exact amount in ringgit and sen.",
+      "derivedAmountMismatch": "This does not match the counted figures above.",
+      "countedOutsidePeriod": "The count was taken outside the period above, so it is not evidence about it.",
+      "overSettled": "More was settled than the obligation is.",
+      "settlementNeedsAccount": "Choose the account it was settled from.",
+      "paymentLegUnused": "Enter the amount settled, or clear the account above.",
+      "tooLong": "This is too long. Shorten it before submitting."
+    },
+    "rejected": {
+      "title": "The server did not accept these particulars",
+      "body": "Correct the highlighted field and submit again. Nothing was recorded."
+    },
+    "history": {
+      "heading": "Periodic adjustments",
+      "body": "Every periodic stock count and supplied payroll obligation recorded for this client, with the particulars behind it and the entry it produced.",
+      "newAction": "Record periodic adjustment",
+      "tableLabel": "Periodic adjustments",
+      "empty": "No periodic adjustment has been recorded for this client yet.",
+      "period": "Period",
+      "kind": "What was recorded",
+      "amount": "Amount",
+      "state": "Entry",
+      "live": "Posted",
+      "reversed": "Reversed",
+      "disclose": "Particulars and links",
+      "postingDate": "Posting date",
+      "entry": "Journal entry",
+      "work": "Work",
+      "receipt": "Operation receipt",
+      "logicalOpId": "Operation identity",
+      "source": "Source document",
+      "corrects": "Corrects",
+      "correctedBy": "Corrected by"
     }
   },
   "WorkDetail": {
@@ -1240,6 +1353,7 @@
     "noSections": "No accounting surfaces are available at your rank.",
     "purposes": {
       "journals": "Draft, review and post journal entries.",
+      "periodicAdjustments": "Periodic stock counts and supplied payroll obligations, with the entries they produced.",
       "bank": "Load statements, match lines and reconcile each account.",
       "receivables": "Open receivable and payable balances by counterparty and age.",
       "assets": "The fixed asset register, its cost, depreciation and net book value.",
@@ -4378,7 +4492,9 @@
       "withdrawn": "Withdrawn"
     },
     "workPurposes": {
-      "journal_entry": "Recorded a journal entry"
+      "journal_entry": "Recorded a journal entry",
+      "periodic_stock_adjustment": "Recorded a periodic stock adjustment",
+      "payroll_obligation": "Recorded a supplied payroll obligation"
     },
     "columnActor": "Actor",
     "columnClient": "Client",
@@ -4468,6 +4584,8 @@
       "receiptCopied": "Copied",
       "purpose": "Purpose",
       "purposeJournalEntry": "Journal entry",
+      "purposePeriodicStockAdjustment": "Periodic stock adjustment",
+      "purposePayrollObligation": "Supplied payroll obligation",
       "basisOrigin": "Basis",
       "basisUserDirect": "Typed by a person",
       "basisClaraInterpreted": "Interpreted by Clara",

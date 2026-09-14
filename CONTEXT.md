@@ -248,3 +248,10 @@ _Avoid_: The audit trail as a whole; a client-visible notification; proof that m
 **Provider problem**:
 A recorded payment-provider event the estate's applier could not act on — an unsettled payment, absent metadata, an unknown or mismatched checkout intent, a duplicate payment, or a payment arriving after the checkout was already settled. It is a question for the operator, not a failure of the applicant.
 _Avoid_: A failed payment; a reason to re-charge; an error the applicant must resolve.
+**Periodic adjustment**:
+One completed accounting act that records a movement a period's own facts establish rather than a transaction: a periodic stock adjustment (from a supplied opening/closing count or an instructed movement) or a supplied payroll/statutory obligation. It carries typed particulars — the period, the method or obligation kind, the exact amount, the account each leg plays, where the figures came from and the instruction — and those particulars must agree with the posted entry's own lines.
+_Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its scheduled occurrences; a rate, threshold or employee calculation the product worked out.
+
+**Supplied obligation particulars**:
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
+_Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.

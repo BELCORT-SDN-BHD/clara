@@ -66,6 +66,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
+import { purposeLabel } from "@/lib/work/purpose-label";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -650,15 +651,15 @@ function PostedEntrySection({
             </dd>
             {/* #634 — WHAT KIND OF WORK THIS WAS. `accounting_work.purpose` is
                 read on every one of this journey's surfaces and was rendered on
-                none of them; the vocabulary is one value today (`journal_entry`)
-                and an unknown one renders VERBATIM rather than crashing on a
-                missing message key, exactly as `basis_origin` does above. */}
+                none of them. #643 widened the vocabulary to three, so the
+                mapping moved into `lib/work/purpose-label.ts` and is shared with
+                the journals row; an unknown one still renders VERBATIM rather
+                than crashing on a missing message key, exactly as `basis_origin`
+                does above. */}
             {links?.purpose == null ? null : (
               <>
                 <dt className="text-muted-foreground">{tm("links.purpose")}</dt>
-                <dd className="text-foreground">
-                  {links.purpose === "journal_entry" ? tm("links.purposeJournalEntry") : links.purpose}
-                </dd>
+                <dd className="text-foreground">{purposeLabel(links.purpose, tm, "links.purpose")}</dd>
               </>
             )}
             {committed === null ? null : (
@@ -714,6 +715,9 @@ function WorkFacts({
   const t = useTranslations("WorkDetail");
   /** #630 — the handover row's own word. */
   const tc = useTranslations("WorkCancel");
+  /** #643 — the purpose's own noun, read from the SAME namespace the result block reads it from
+   *  so one page cannot label one row two ways. */
+  const tm = useTranslations("ManualJournal");
   const documentless = Array.isArray(work.source_refs) && work.source_refs.length === 0;
   const chatRef = (work.source_refs ?? []).find((ref) => ref.kind === "chat_task") ?? null;
   const bundleId = work.bundle?.id ?? null;
@@ -737,7 +741,10 @@ function WorkFacts({
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("purpose")}</dt>
-        <dd className="text-foreground">{work.purpose}</dd>
+        {/* #643 — THE SAME LABEL THE RESULT BLOCK SHOWS. It rendered the raw column value, so one
+            page said "Periodic stock adjustment" in one place and `periodic_stock_adjustment` in
+            another about the same row. */}
+        <dd className="text-foreground">{purposeLabel(work.purpose, tm, "links.purpose")}</dd>
         <dt className="text-muted-foreground">{t("submittedAt")}</dt>
         <dd className="text-foreground">{work.created_at === null ? "—" : businessDateTime(work.created_at)}</dd>
         <dt className="text-muted-foreground">{t("initiatorRole")}</dt>

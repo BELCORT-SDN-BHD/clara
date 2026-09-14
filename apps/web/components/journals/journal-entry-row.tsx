@@ -10,6 +10,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { purposeLabel } from "@/lib/work/purpose-label";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -255,14 +257,11 @@ function EntryLinksReadout({ clientId, link }: { clientId: string; link: EntryLi
           : link.document_source === "document_coding"
             ? tm("links.sourceDocumentCoding")
             : null;
-  const purpose =
-    link.purpose === null
-      ? null
-      : link.purpose === "journal_entry"
-        ? tm("links.purposeJournalEntry")
-        // The vocabulary is one value today; an unknown one renders VERBATIM
-        // rather than crashing on a missing key, exactly as `basis_origin` does.
-        : link.purpose;
+  // #643 — THE VOCABULARY IS THREE VALUES NOW, and the mapping lives in ONE module
+  // (`lib/work/purpose-label.ts`) shared with the Work detail: three inline ternaries were three
+  // places for the fourth purpose to be forgotten. An unknown one still renders VERBATIM rather
+  // than crashing on a missing key, exactly as `basis_origin` does.
+  const purpose = link.purpose === null ? null : purposeLabel(link.purpose, tm, "links.purpose");
   const basis =
     link.basis_origin === "user_direct"
       ? tm("links.basisUserDirect")

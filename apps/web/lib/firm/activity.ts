@@ -47,6 +47,7 @@
 // (`report_agent` receipts), not an object kind this feed can address a specific row of.
 
 import { callDoor } from "@/lib/doors";
+import { isKnownWorkPurpose } from "@/lib/work/purpose-label";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { isClientIdShape } from "@/lib/client-id";
 import { isKnownAgentReceiptKind } from "@/lib/firm/receipt-kinds";
@@ -486,5 +487,10 @@ export function describeActivity(
   // than a guessed translation.
   const purpose = row.purpose ?? row.event_type;
   if (!purpose) return t("unlabeledEvent");
-  return purpose === "journal_entry" ? t("workPurposes.journal_entry") : purpose;
+  // #643 — three purposes now (`periodic_stock_adjustment`, `payroll_obligation`), and the KNOWN
+  // set lives in `lib/work/purpose-label.ts` beside the noun labels the Work detail and the
+  // journals row read. The sentences themselves stay here, because this feed's copy is a sentence
+  // ("Recorded a journal entry") rather than a noun. A purpose this build has not registered still
+  // renders itself rather than a guessed translation.
+  return isKnownWorkPurpose(purpose) ? t(`workPurposes.${purpose}`) : purpose;
 }

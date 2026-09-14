@@ -40,9 +40,9 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { JournalBasisFields, fieldElementId, type FieldNode } from "@/components/accounting/journal-basis-fields";
+import { EvidenceChooser, useEvidenceReads } from "@/components/accounting/evidence-chooser";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { StateBanner } from "@/components/common/state";
-import { NativeSelect } from "@/components/common/native-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,12 +53,8 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { canOpenClientLeaf, journalEntryHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { submitJournalWork, type SubmitJournalWorkResult } from "@/lib/work/api";
-import { SpokenForNotes } from "@/components/work/spoken-for-note";
 import {
-  listClientEvidenceDocuments,
   findEntryClient,
-  listSpokenForDocuments,
-  mergeSpokenFor,
   type EvidenceDocument,
   type SpokenForDocumentRow,
 } from "@/lib/work/evidence";
@@ -187,10 +183,10 @@ export function JournalComposerView({
    *  form, the Work detail's late attachment and the journals table, and one
    *  namespace for one journey keeps those three surfaces' words together. */
   const tm = useTranslations("ManualJournal");
-  /** #728's own copy (findings 1-5, this journey's evidence picker included) lives under ONE new
-   *  namespace appended at the end of en.json, deliberately separate from ManualJournal/Activity —
-   *  see WalkFindings728's own header in messages/en.json. */
-  const tWalk = useTranslations("WalkFindings728");
+  // #728's own copy (findings 1-5) lives under ONE new namespace, `WalkFindings728`; this View no
+  // longer reads it directly because the picker's own words moved with the picker into
+  // `evidence-chooser.tsx`. `ComposerPhaseBanner` below still does — the sourceConflict sentence
+  // is this form's, not the chooser's.
   const go = navigate;
 
   // THE DRAFT SCOPE, or null. A caller whose firm/user could not be read does
@@ -237,22 +233,11 @@ export function JournalComposerView({
     [accountsRead.data],
   );
 
-  // THE DOCUMENTS READ IS ITS OWN FAILURE, like the chart's: a preparer who
-  // wanted no document is not blocked by a documents surface that is down, and
-  // the admission door re-checks the document against the client's live filings
-  // regardless. So it degrades to "no document" rather than to a dead form.
-  const documentsRead = useAsyncRead<EvidenceDocument[]>(() =>
-    loadDocuments ? loadDocuments() : listClientEvidenceDocuments(clientId, { session }),
-  );
-  const documents = documentsRead.data ?? [];
-  // #728 finding 5 — the SAME "own failure degrades independently" posture as the documents read
-  // itself: `spokenForRead.error` and `documentsRead.error` are two different claims, and a failed
-  // spoken-for check must never block choosing a document — the admission door's own conflict
-  // refusal is what actually protects the entry either way.
-  const spokenForRead = useAsyncRead<SpokenForDocumentRow[]>(() =>
-    loadSpokenFor ? loadSpokenFor() : listSpokenForDocuments(clientId, { session }),
-  );
-  const evidenceOptions = mergeSpokenFor(documents, spokenForRead.error !== null ? null : spokenForRead.data);
+  // THE DOCUMENTS READ IS ITS OWN FAILURE, like the chart's, and so is the spoken-for read: see
+  // `useEvidenceReads`' own note for both postures. Held here rather than inside the chooser
+  // because the `source_conflict` arm below reads the RAW advisory rows to name the claimant
+  // without a second round trip.
+  const evidence = useEvidenceReads(clientId, { session, loadDocuments, loadSpokenFor });
 
   const draft = useMemo(() => ({ postingDate, memo, lines }), [postingDate, memo, lines]);
   const issues: JournalIssue[] = useMemo(
@@ -400,7 +385,7 @@ export function JournalComposerView({
       // `claimantUnresolved`, with its own doc block, ~100 lines up — resolves
       // the rest under an AbortSignal and a timeout: a refusal is never held
       // back by a read of advisory grade (delta review round 3, finding [3]).
-      const advisory = (spokenForRead.data ?? []).find(
+      const advisory = (evidence.spokenFor ?? []).find(
         (r) => r.document_id === result.documentId && r.entry_id === result.entryId,
       ) ?? null;
       setPhase({
@@ -545,92 +530,30 @@ export function JournalComposerView({
         registerField={registerField}
       />
 
-      {/* #634 — EVIDENCE, AND IT IS OPTIONAL.
-          The raw balanced JV stays an EXPERT PATH: an entry may be recorded with
-          no document at all, and this section says so in words rather than
-          leaving a preparer to infer it from an empty control. "No document" is
-          the DEFAULT OPTION and is selectable on purpose — a chooser whose empty
-          state is only the absence of a choice cannot be re-chosen with the
-          keyboard once something has been picked.
-
-          A NATIVE <select> RATHER THAN A COMBOBOX. Appendix D asks for the
-          simplest control that carries the job: this list is a client's filed
-          documents (tens, not thousands), a native select is typeable, works at
-          320 px and at 200 % zoom, needs no portal and no focus trap, and it is
-          the one control every assistive technology already knows. */}
-      <div className="flex flex-col gap-1.5">
-        {/* A REAL `<label for>`, not a `<legend>`. MEASURED, on this ticket's own
-            browser walk: a `<fieldset>`/`<legend>` around ONE control gives the
-            group a name and leaves the `<select>` itself nameless — axe-core's
-            `select-name` rule is critical about exactly that, and a screen
-            reader landing on the control would hear no name at all. The other
-            two controls on this form are labelled the same way; this one now
-            matches them. */}
-        <Label htmlFor={fieldElementId("evidence")}>{tm("evidence.legend")}</Label>
-        <p id={`${fieldElementId("evidence")}-help`} className="text-xs text-muted-foreground">
-          {tm("evidence.help")}
-        </p>
-        {/* `NativeSelect`, NOT a hand-rolled `<select>`: the account picker on
-            every line and the late-attachment dialog both use it, and it is what
-            carries the house focus ring, the disabled treatment and the
-            `aria-invalid` border. A bare element here looked almost right and
-            showed the browser's default focus outline instead of the product's —
-            one control on this form behaving unlike every other. */}
-        <NativeSelect
-          id={fieldElementId("evidence")}
-          ref={(node) => registerField("evidence", node)}
-          className="w-full"
-          value={documentId ?? ""}
-          disabled={busy}
-          aria-invalid={phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence") ? true : undefined}
-          aria-describedby={`${fieldElementId("evidence")}-help ${fieldElementId("evidence")}-error`}
-          onChange={(e) => {
-            setDocumentId(e.target.value === "" ? null : e.target.value);
-            // A REFUSAL ABOUT THE OLD CHOICE IS RETIRED BY MAKING A NEW ONE.
-            // Leaving the conflict Alert up beside a document that is no longer
-            // selected would be the form describing a state that has passed.
-            if (phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence")) {
-              setPhase({ kind: "editing" });
-            }
-          }}
-        >
-          <option value="">{tm("evidence.none")}</option>
-          {evidenceOptions.map((doc) => (
-            // #728 finding 5 — DISABLED, never hidden: see lib/work/evidence.ts's own note on
-            // `mergeSpokenFor` for why a document already backing a posted entry stays in the
-            // list rather than being filtered out. THE REASON RIDES THE LABEL (review round, N9):
-            // it is the one place a browsing person reads, it is announced with the option, and it
-            // costs no extra node per document — which the paragraph-per-document it replaced did.
-            // The link to the conflicting entry belongs to the SELECTED document alone, below.
-            <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
-              {evidenceOptionLabel(doc, tm)}
-              {doc.spokenFor !== null ? ` — ${tWalk("evidenceSpokenForOption")}` : ""}
-            </option>
-          ))}
-        </NativeSelect>
-        <p id={`${fieldElementId("evidence")}-error`} className="text-xs text-error" role="alert">
-          {phase.kind === "rejected" && phase.field === "evidence" ? tm("evidence.invalid") : ""}
-        </p>
-        {/* The documents read degrades ON ITS OWN, exactly as the chart read
-            does: no document is a valid answer, so a failed list must not stop a
-            submit. */}
-        {documentsRead.error !== null ? (
-          <StateBanner
-            tone="warning"
-            action={
-              <Button type="button" variant="outline" size="sm" onClick={() => void documentsRead.reload()}>
-                {t("retry")}
-              </Button>
-            }
-          >
-            {tm("evidence.unavailable")}
-          </StateBanner>
-        ) : null}
-        {spokenForRead.error !== null ? (
-          <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
-        ) : null}
-        <SpokenForNotes clientId={clientId} options={evidenceOptions} selectedDocumentId={documentId ?? ""} />
-      </div>
+      {/* #634 — EVIDENCE, AND IT IS OPTIONAL. The control, its two reads and their degradation
+          rules live in `components/accounting/evidence-chooser.tsx` since #643 mounted the same
+          chooser on the periodic-adjustment door: one control, one set of ids, one vocabulary.
+          What stays HERE is what the chooser deliberately does not decide — which refusal is on
+          screen and what the next action is (`ComposerPhaseBanner` below, and the
+          `sourceConflict` arm in `apply`). */}
+      <EvidenceChooser
+        clientId={clientId}
+        reads={evidence}
+        value={documentId}
+        disabled={busy}
+        invalid={phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence")}
+        errorText={phase.kind === "rejected" && phase.field === "evidence" ? tm("evidence.invalid") : ""}
+        registerField={(node) => registerField("evidence", node)}
+        onChange={(next) => {
+          setDocumentId(next);
+          // A REFUSAL ABOUT THE OLD CHOICE IS RETIRED BY MAKING A NEW ONE. Leaving the conflict
+          // Alert up beside a document that is no longer selected would be the form describing a
+          // state that has passed.
+          if (phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence")) {
+            setPhase({ kind: "editing" });
+          }
+        }}
+      />
 
       {/* THE CHART READ IS A SEPARATE FAILURE FROM THE FORM'S. A preparer who
           knows the code can still submit; the commit rechecks every account
@@ -841,23 +764,4 @@ function ComposerPhaseBanner({
       {phase.kind === "lost" ? t("lost.body") : t("unavailable.body")}
     </StateBanner>
   );
-}
-
-/** One document, as a single readable option: its filename, what KIND of
- *  document it is, and the date it belongs to. Built here rather than in the
- *  read so the words are translated and the shape stays a plain string — a
- *  native `<option>` renders text, not markup, and a screen reader reads exactly
- *  what is written here. */
-function evidenceOptionLabel(
-  doc: EvidenceDocument,
-  t: (key: string, values?: Record<string, string>) => string,
-): string {
-  const name = doc.filename ?? t("evidence.unnamed");
-  const kind = doc.kind ?? t("evidence.unknownKind");
-  // The document's own business date when it has one; otherwise the day it was
-  // filed to this client. Sliced to the calendar day rather than re-formatted:
-  // this journey is about EXACT dates, and a locale re-render here would be a
-  // second date format beside the posting-date control's ISO one.
-  const date = (doc.financialDate ?? doc.filedAt).slice(0, 10);
-  return t("evidence.option", { name, kind, date });
 }

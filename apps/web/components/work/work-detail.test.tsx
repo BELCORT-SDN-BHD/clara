@@ -277,7 +277,13 @@ test("the identity block names the purpose, the source ABSENCE and the role AS A
   try {
     await h.settle();
     const text = h.text();
-    assert.match(text, /journal_entry/);
+    // #643 — THE LABEL, not the raw column value. The identity block used to render
+    // `accounting_work.purpose` verbatim while the result block a screen below showed "Journal
+    // entry" for the same row, which is one page saying two things about one fact. Both now read
+    // the ONE mapping (`lib/work/purpose-label.ts`); an unknown purpose still renders itself.
+    assert.match(text, /PurposeJournal entry/);
+    assert.doesNotMatch(text, /journal_entry/,
+      "the raw token is gone from the rendered page — it is a database value, not a reader's word");
     // The whole point of this journey: an operation with no document behind it.
     assert.match(text, /No source document — user-supplied basis/);
     // The role is HISTORY, and must never read as a current permission.
