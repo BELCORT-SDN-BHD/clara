@@ -288,7 +288,7 @@ to. The same four facts appear in one boot line, so a log and an HTTP read can b
 trusting either alone:
 
 ```
-[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v18 claraWork=claraWork_v2 …
+[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v19 claraWork=claraWork_v3 …
 ```
 
 `git_sha=<unset>` and `frontier=<unavailable: reason>` are the honest readings when the build arg

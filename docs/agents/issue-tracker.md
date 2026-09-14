@@ -13,6 +13,10 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Release convention — `awaiting-release`
+
+A ticket that is merged to `main` but not yet on production carries `awaiting-release`. The release session that ships it posts a "Hosted release evidence — <migration> (<date>, release session)" comment with the hosted readings and the rollback points, removes the label (`gh issue edit <n> --remove-label awaiting-release`) and closes the ticket ("Closing per the awaiting-release rule: local and CI evidence in the lane comment above, hosted evidence here"). Precedent: #621, #628, #692, #718, #720, #732. The ceremony itself is documented per release under `docs/plan/active/<wave>/RELEASE-RUNBOOK*.md`.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

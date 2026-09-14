@@ -256,10 +256,6 @@ _Avoid_: The entire balance of an account as a substitute for identifying what r
 The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much.
 _Avoid_: A new cash movement merely because an existing movement is matched.
 
-**Accounting plan**:
-An authorised instruction for accounting actions across future periods, including its calculation basis, timing and effective scope. A plan is distinct from the entries resulting from its execution.
-_Avoid_: A posted journal entry; an inferred obligation created merely by observing repetition; a bank payment schedule or mandate.
-
 **Observed bank debit**:
 A debit that has already occurred in a bank account and is supplied as an accounting fact. Clara may book an unrecorded movement or allocate an already recorded payment without duplicating it.
 _Avoid_: An instruction to initiate a payment; authority for a future bank mandate or recurring accounting plan.
