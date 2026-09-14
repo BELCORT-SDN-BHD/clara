@@ -41,6 +41,18 @@
 // never re-enqueue A's parked Work onto the successor mid-drill (the version-cutover-e2e:92
 // precedent).
 //
+// AND THAT SEQUENCE IS PRECISELY WHY `/ready` IS NOT THIS DRILL'S BOOT SIGNAL — the finding of its
+// first execution on a Linux runner (GitHub run 34796679822). `/ready`'s world and control
+// conjuncts are HEARTBEAT ROWS, and `clara.runtime_heartbeats` carries one row per component for
+// the WHOLE ESTATE (0006 §2.8) inside a 30s staleness window (lib/health.mjs:50) — so a successor
+// spawned onto the database its predecessor was beating into answers 200 on the PREDECESSOR's
+// beats. lib/health.mjs names that window itself, where it refuses to infer a refused world start
+// from a missing heartbeat: "a fresh beat from the previous process would otherwise mask it for a
+// whole staleness window". This drill manufactures exactly that condition by construction — stop A,
+// spawn B, same database, one second apart — so it waits for each image's OWN boot lines
+// (`waitBooted`) on top of `/ready`, and never asserts a log line the process has not yet been
+// given the chance to print.
+//
 // WHAT IT DELIBERATELY DOES NOT ASSERT: a `(CLR13, work_cancelled)` classification. Nothing here
 // cancels, and the frozen v1/v2 error tables map that pair to `state_changed` — asserting a
 // "correct" classification in a drill that does not exercise it would be a claim about a table
@@ -150,21 +162,53 @@ function childEnv(port, serveTarget) {
 }
 
 /** Spawn an image and CAPTURE its provenance lines — the boot line is evidence in this drill, not
- *  decoration: it is the only place an operator can read which bodies a running image carries. */
+ *  decoration: it is the only place an operator can read which bodies a running image carries.
+ *
+ *  READ LINE BY LINE, NOT CHUNK BY CHUNK. A `data` event is a slice of a pipe, not a promise of a
+ *  whole line: several `console.log`s can arrive in one event, and one line can arrive split across
+ *  two. A per-chunk `matchAll` therefore reads a banner cut by a chunk boundary as a banner that was
+ *  never logged — on this file's assertions that is a FALSE FAILURE about a released image, and it
+ *  is invisible on any host whose boot lines happen to arrive whole.
+ *
+ *  It also captures `durable world started pid=` (plugins/startWorld.ts): the one line that is THIS
+ *  process's own evidence that ITS world is up, as opposed to the estate-wide heartbeat row /ready
+ *  reads. */
 function spawnImage(label, port, serveTarget) {
   const child = spawn(process.execPath, [childScript], { env: childEnv(port, serveTarget), stdio: ["ignore", "pipe", "pipe"] });
-  const state = { label, exited: false, exitInfo: null, banners: [], serving: null, stranded: null, stderr: "" };
+  const state = { label, exited: false, exitInfo: null, banners: [], serving: null, worldStarted: null, stranded: null, stdout: "", stderr: "" };
   child.on("exit", (code, signal) => {
     state.exited = true;
     state.exitInfo = { code, signal };
   });
+  const ingest = (raw) => {
+    const line = raw.replace(/\r$/, "");
+    const banner = /\[clara-runtime\] bundle (\S+) digest=([0-9a-f]{64})/.exec(line);
+    if (banner) state.banners.push({ id: banner[1], digest: banner[2] });
+    if (!state.serving) {
+      const serving = /\[clara-runtime\] serving .*/.exec(line);
+      if (serving) state.serving = serving[0];
+    }
+    if (state.worldStarted === null) {
+      const started = /\[clara-runtime\] durable world started pid=(\d+)/.exec(line);
+      if (started) state.worldStarted = Number(started[1]);
+    }
+    if (state.stranded === null) {
+      const stranded = /\[clara-runtime\] stranded bodies n=(\d+).*/.exec(line);
+      if (stranded) state.stranded = { n: Number(stranded[1]), line: stranded[0] };
+    }
+  };
+  let pending = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    for (const m of d.matchAll(/\[clara-runtime\] bundle (\S+) digest=([0-9a-f]{64})/g)) state.banners.push({ id: m[1], digest: m[2] });
-    const serving = /\[clara-runtime\] serving [^\n]*/.exec(d);
-    if (serving && !state.serving) state.serving = serving[0];
-    const stranded = /\[clara-runtime\] stranded bodies n=(\d+)[^\n]*/.exec(d);
-    if (stranded && state.stranded === null) state.stranded = { n: Number(stranded[1]), line: stranded[0] };
+    state.stdout = `${state.stdout}${d}`.slice(-16000);
+    pending += d;
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) ingest(line);
+  });
+  child.stdout.on("end", () => {
+    if (pending) ingest(pending);
+    pending = "";
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
@@ -200,7 +244,51 @@ async function waitReady(image, deadlineMs = 90000) {
   }
   throw new Error(
     `image ${image.label} on ${image.port} did not become ready (/health + /ready 200)`
+      + `\n--- child stdout (tail) ---\n${image.state.stdout || "(none)"}`
       + `\n--- child stderr ---\n${image.state.stderr || "(none)"}\n--- exit: ${JSON.stringify(image.state.exitInfo)} ---`,
+  );
+}
+
+/**
+ * WAIT FOR *THIS* IMAGE'S OWN BOOT — the thing `/ready` does not prove, for the reason this file's
+ * header now states: /ready's world and control conjuncts are ESTATE-WIDE heartbeat rows with a 30s
+ * staleness window, and this drill spawns B one second after killing A on the same database, so B's
+ * very first /ready is answered by A's residue.
+ *
+ * MEASURED, GitHub run 34796679822 — the drill's first execution on a Linux runner. Build A, booting
+ * against a pristine database with no predecessor to borrow a beat from, took 11.6s to answer
+ * /ready. Build B answered it 1.4s after A was killed, and the drill then asserted B's bundle
+ * banners — which plugins/startWorld.ts logs only AFTER `await getWorld().start?.()` — against an
+ * empty list. The provenance line survived the same race because it is emitted FIRST, before the
+ * census and before the world, which is exactly why only the banner assertion failed.
+ *
+ * WAITING IS NOT WEAKENING: every fact this drill asserted before, it still asserts. The wait only
+ * stops it asking before the process could answer. An image whose world never starts still fails —
+ * bounded, naming what never arrived, with the child's own log attached.
+ *
+ * @returns {Promise<number>} ms spent waiting AFTER /ready already answered 200 — the width of the
+ * window /ready cannot see. The caller prints it, so the next runner's number is in the log.
+ */
+async function waitBooted(image, { banners = [], deadlineMs = 120000 } = {}) {
+  const startedAt = Date.now();
+  const end = startedAt + deadlineMs;
+  const missing = () => banners.filter((id) => !image.state.banners.some((b) => b.id === id));
+  for (;;) {
+    if (image.state.serving && image.state.worldStarted !== null && missing().length === 0) return Date.now() - startedAt;
+    if (image.state.exited || Date.now() >= end) break;
+    await sleep(100);
+  }
+  throw new Error(
+    `image ${image.label} on ${image.port} answered /ready but never finished its OWN boot within ${deadlineMs}ms`
+      + ` (/ready's world check is an estate-wide heartbeat — a predecessor stopped seconds ago satisfies it)`
+      + `\n  provenance line: ${image.state.serving ?? "(never logged)"}`
+      + `\n  durable world:   ${image.state.worldStarted === null ? "(never started)" : `started pid=${image.state.worldStarted}`}`
+      + `\n  bundle banners:  ${image.state.banners.map((b) => b.id).join(", ") || "(none)"}`
+      + `\n  still missing:   ${missing().join(", ") || "(none)"}`
+      + (image.state.stranded ? `\n  boot census:     ${image.state.stranded.line}` : "")
+      + `\n  exit: ${JSON.stringify(image.state.exitInfo)}`
+      + `\n--- child stdout (tail) ---\n${image.state.stdout || "(none)"}`
+      + `\n--- child stderr (tail) ---\n${image.state.stderr || "(none)"}`,
   );
 }
 
@@ -403,6 +491,10 @@ async function main() {
 
   try {
     await waitReady(imageA);
+    // A's OWN boot, not the estate's heartbeat: the sibling e2es that share this rig were beating
+    // into a database moments ago, and a /ready answered by a process that is already gone proves
+    // nothing about this one. Costs nothing when A is genuinely up — it already is by then.
+    await waitBooted(imageA);
     assert.ok(imageA.state.serving, "build A emitted the provenance boot line");
     assert.match(
       imageA.state.serving,
@@ -465,6 +557,10 @@ async function main() {
     // --- BUILD B. The successor image, this tree's own build. ---------------
     imageB = spawnImage("B", await ephemeralPort(), runtimeServe);
     await waitReady(imageB);
+    // THE WINDOW THIS DRILL CREATES ITSELF: A was beating into this database one second ago, so the
+    // /ready above can be — and on run 34796679822 was — answered by A's residue. Wait for B's own
+    // boot lines, including the two banners asserted immediately below.
+    const bootWindowB = await waitBooted(imageB, { banners: ["clara-work/v1", "clara-work/v2"] });
     assert.ok(imageB.state.serving, "build B emitted the provenance boot line");
     assert.match(imageB.state.serving, new RegExp(`claraWork=${pair.pinned}\\b`), `build B pins claraWork to ${pair.pinned}`);
     assert.match(imageB.state.serving, new RegExp(`bodies=${bodiesB.length}\\b`), "…and carries one more body than A");
@@ -474,6 +570,10 @@ async function main() {
     v2Digest = imageB.state.banners.find((b) => b.id === "clara-work/v2")?.digest ?? null;
     assert.match(String(v2Digest), /^[0-9a-f]{64}$/, "the successor digest is readable from B's own log");
     console.log(`[tb-e2e] B ready: ${imageB.state.serving}`);
+    console.log(
+      `[tb-e2e] B's OWN durable world started pid=${imageB.state.worldStarted}, ${bootWindowB}ms after /ready answered 200`
+        + " — the window /ready cannot see, because its world check is an estate-wide heartbeat build A had just refreshed",
+    );
 
     // /api/build-info is the HTTP half of the same claim.
     ctxB = await seedClient("tb-b");
