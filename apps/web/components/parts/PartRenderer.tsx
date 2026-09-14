@@ -10,6 +10,7 @@ import { BankActCard, BankPackCard, EntryPostedCard, QuestionOpenedCard } from "
 import { AgentReceiptCard, FreeformResultCard } from "./V16Cards";
 import { CloseProposalCard, FirmQuestionCard } from "./V16ActCards";
 import { WorkAcceptedCard, WorkQuestionCard, WorkResultCard, WorkStatusLine } from "./WorkCards";
+import { KnowledgeReceiptCard } from "./KnowledgeCards";
 import { SweepReceiptCard } from "./SweepReceiptCard";
 import { ClarifyCard } from "./ClarifyCard";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -292,6 +293,11 @@ export function PartRenderer({
   // #629 — the shared question. Rendered as a card that HYDRATES its record and offers the same
   // form the Work detail and Needs-you offer, never a chat-shaped copy of one.
   if (part.type === "work_question") return <WorkQuestionCard part={part} />;
+  // #644 — the governed knowledge receipt (chatTurn_v19). Renders the wire and stops, for the
+  // reason ./KnowledgeCards.tsx states: a record's value is correctable and withdrawable, and a
+  // transcript that printed one would go on asserting it after somebody changed it. The link goes
+  // to the record's own page, which reads all of that live.
+  if (part.type === "knowledge_receipt") return <KnowledgeReceiptCard part={part} />;
 
   // RESERVED, AND DELIBERATELY NOT A BRANCH — the tax-draft card (裁-44). Its
   // part shape belongs to the `ft3-taxprep-design` lane, alongside the

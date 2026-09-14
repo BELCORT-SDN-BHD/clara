@@ -439,6 +439,31 @@ export function basisFromAdjustment(
 }
 
 // ---------------------------------------------------------------------------------------------
+// THIS MODULE IS NOW FROZEN BY IMPORT, and that is a consequence worth stating where a later
+// hand will meet it. `chatTurn.v19.tools.ts` imports it, and `scripts/check-frozen-workflows.mjs`
+// freezes the transitive relative-import closure of every frozen workflow — so every byte below
+// is hash-locked in `frozen-workflows.json` from the moment v19 entered the manifest. A change to
+// a rule here is a change to a deployed body: it ships as a NEW module beside this one, wired by
+// a NEW chatTurn version, exactly as a frozen workflow file does. (The same thing happened to
+// `lib/work-trace.mjs` and `lib/capability-registry.mjs` when #631's claraWork_v3 imported them.)
+//
+// ---------------------------------------------------------------------------------------------
+// WHAT `chatTurn.v19` WIRED — recorded as done rather than owed. The list below was the
+// specification; `packages/runtime/workflows/chatTurn.v19.tools.ts` is the implementation and
+// `packages/runtime/tests/chat-turn-v19-tools.test.mjs` is the proof, including a rig arm that
+// hands the built `p_adjustment` and `p_basis` to `clara._assert_adjustment_basis` and
+// `clara._assert_adjustment_relationships` themselves.
+//
+// #796 CLOSED HERE: `payrollObligationInputSchema` gained `advance_account_code` (a 0194
+// particular, emitted into `p_adjustment`) AND `advance_cents` (a derivation input only, never
+// emitted — `settled_cents`'s own rule). The pair is the honest shape: 0194 refuses a NAMED leg
+// the entry never touches (`advance_leg`), so a code with no amount beside it could only ever be
+// admitted into a refusal, and `localAdjustmentRefusal` now asks for the missing half by name.
+// NOTE for whoever owns the direct form next: `apps/web/lib/work/periodic-adjustment.ts`'s
+// `derivedLines` still derives NO advance leg while the form offers the control, so a preparer
+// who picks a staff-advance account there gets 0194's `advance_leg` refusal at admission. That is
+// #643's, not v19's, and it is filed rather than silently fixed from this branch.
+//
 // WHAT `chatTurn.v19` MUST WIRE, and nothing more.
 //
 //   1. `tool({ inputSchema: startPeriodicAdjustmentWorkInputSchema, execute })` under the name

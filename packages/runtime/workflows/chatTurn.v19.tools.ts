@@ -203,8 +203,25 @@ export function chatParticularsSource(ctx: ToolCtx): string {
  *  model-supplied session id would be a provenance claim nobody checked. v18's own rule. */
 async function sessionOfTask(c: PgExec, taskId: string): Promise<string | null> {
   const t = await c.query("select session_id from clara.agent_tasks where id = $1", [taskId]);
-  return t.rows[0]?.session_id ?? null;
+  const row = (t.rows[0] ?? null) as { session_id?: unknown } | null;
+  return typeof row?.session_id === "string" ? row.session_id : null;
 }
+
+/** `lib/knowledge.mjs` is JavaScript with JSDoc, so its return type is an inferred union of three
+ *  object literals rather than a declared discriminated one. Declaring the shape HERE — and
+ *  reading it positively, field by field, instead of narrowing by a cast — is the same posture
+ *  `chatTurn.v15.infra.ts`'s `poolsV15()` takes toward the injected pool API, and for the same
+ *  reason: a cast asserts a member's existence from a type's spelling, and only a read that
+ *  actually saw the field is evidence it is there. */
+type CaptureAnswer = {
+  ok?: unknown;
+  kind?: unknown;
+  code?: unknown;
+  reason?: unknown;
+  detail?: unknown;
+  message?: unknown;
+  receipt?: unknown;
+};
 
 export async function runStartPeriodicAdjustmentWork(
   ctx: ToolCtx,
@@ -289,7 +306,7 @@ export async function runRememberClientInformation(
   }
   const clientId = ctx.clientId;
   const opKey = stableOpKey(ctx.taskId, REMEMBER_CLIENT_INFORMATION_TOOL, input);
-  const answer = await pools().withRuntime(async (c: PgExec) =>
+  const answer: CaptureAnswer = await pools().withRuntime(async (c: PgExec) =>
     captureKnowledgeFor(c, {
       assertedBy: ctx.createdBy,
       clientId,

@@ -22,7 +22,7 @@ export type CatalogEntry = { renderBranch: true; fixtures: ClaraPart[] };
 
 /** The part types that render a VISIBLE persisted element. Every key here MUST
  *  have a branch in PartRenderer.tsx; the parity test (./catalog.test.tsx) enforces
- *  it. 27 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 29 total,
+ *  it. 29 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 31 total,
  *  matching the live ClaraPart union in ./types.ts exactly.
  *
  *  The count's own history, because every step of it was a measurement rather
@@ -30,7 +30,9 @@ export type CatalogEntry = { renderBranch: true; fixtures: ClaraPart[] };
  *  chatTurn_v14 receipt kinds the live emitter was already putting on the wire
  *  (20 + 2 = 22); then 24 + 2 = 26 on 2026-08-30, when P6-2 registered the four
  *  chatTurn_v16 kinds P6-1 declared (ruling Q8); then 27 + 2 = 29 on 2026-09-10,
- *  when the durable-Work three joined for the first persistent successor. */
+ *  when the durable-Work three joined for the first persistent successor; then
+ *  28 + 2 = 30 when #629's `work_question` joined it; and 29 + 2 = 31 on
+ *  2026-09-14, when chatTurn_v19 added the governed knowledge receipt. */
 export const PART_CATALOG = {
   text: {
     renderBranch: true,
@@ -359,6 +361,47 @@ export const PART_CATALOG = {
         question_id: "question-3232",
         question_version: 2,
         status: "pending",
+      },
+    ],
+  },
+
+  // #644 · the governed knowledge receipt, minted by chatTurn_v19 the moment
+  // `remember_client_information` lands a revision. DURABLE (a chat turn writes it
+  // into `clara.chat_messages.parts`), identifier-only, and linked to the record's
+  // own page — which is where the value, the trust and the state are read live.
+  knowledge_receipt: {
+    renderBranch: true,
+    fixtures: [
+      {
+        type: "knowledge_receipt",
+        record_id: "record-4141",
+        client_id: "client-1111",
+        knowledge_key: "trade_nature",
+        knowledge_version: "7",
+        revision_kind: "capture",
+      },
+      // A CORRECTION reads differently to a human than a first capture, and the
+      // difference is the database's own answer (0192's `revision_kind`), never
+      // something the card infers from whether a reason was supplied.
+      {
+        type: "knowledge_receipt",
+        record_id: "record-4242",
+        client_id: "client-1111",
+        knowledge_key: "default_currency",
+        knowledge_version: "8",
+        revision_kind: "correction",
+      },
+      // `client_id` EMPTY — the same shape `work_accepted` documents above. A card
+      // that built `/clients//knowledge/record-4343` from it would be a 404 dressed
+      // as an affordance, so the branch drops the link instead; this fixture is the
+      // reachability proof that it still renders.
+      {
+        type: "knowledge_receipt",
+        record_id: "record-4343",
+        client_id: "",
+        knowledge_key: "msic",
+        knowledge_version: "9",
+        revision_kind: "capture",
       },
     ],
   },
