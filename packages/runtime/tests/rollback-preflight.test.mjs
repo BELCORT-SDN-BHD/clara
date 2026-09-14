@@ -22,6 +22,11 @@
 //     global one.
 //   * SCOPE (#708). Unrelated parked runs of another workflow name must not decide the scoped
 //     verdict — that is the defect filed as #708, reproduced here as a pass/fail line.
+//   * THE FRONTIER RULE (wave-3, #815). A rule that lives in the APPLIED SCHEMA and needs a body
+//     in the image refuses on its own, with no rows in flight at all — which is exactly the case
+//     neither census can see. Its cells are PURE (an explicit `frontier`, a stub `query`): the
+//     rule is about a version string and a roster, and making them need a rig would make them
+//     measure the rig instead of the rule.
 //
 // GATED, positively, on the catalog. `node --test` has no file-level skip, so every cell carries
 // its own `{ skip }` — the shape the rest of this suite uses for a migration-gated file.
@@ -46,6 +51,7 @@ import {
   AGENT_TASK_KINDS_FROM_SOURCES,
   DOCUMENT_LANE_CLASSES,
   DOCUMENT_LANES_WITHOUT_WORKFLOW,
+  FRONTIER_BODY_RULES,
   LIVE_DOCUMENT_TASK_STATUSES,
   LIVE_TASK_STATUSES,
   TASK_STATUSES_WITHOUT_BODY,
@@ -54,7 +60,10 @@ import {
   censusNonTerminalRuns,
   censusUnboundTasks,
   classOfBody,
+  frontierBodyViolations,
+  migrationOrdinal,
   preflight,
+  readMigrationFrontier,
   refusalFooterLines,
   strandedBodyCensus,
   supportedBodiesFromBundle,
@@ -645,6 +654,123 @@ test("637.pf: the BOOT census names the bodies live runs are parked on that THIS
     assert.equal(with2.names.includes("claraWork_v2"), false, "an image that carries the body strands nothing of it");
   } finally {
     await dropRuns([staged.id]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE FRONTIER RULE (wave-3, #815) — the leg neither census can see.
+//
+// 0195 grandfathers a run claimed under a pre-v3 bundle past its egress wall (the orchestrator's
+// ruling, verbatim in the migration header and docs/ARCHITECTURE.md §10), so a FORWARD cutover
+// finishes parked v1/v2 runs honestly. The price is the other direction: an image without
+// `claraWork_v3` would run the ENTIRE Work lane through that grandfather arm on a database whose
+// schema says the wall is in force — with the lane fully drained, so both censuses are clean and
+// every other leg says ALLOWED. These cells are the refusal, and they are pure: the rule is a
+// function of a version string and a body roster.
+// ---------------------------------------------------------------------------
+
+/** A `query` that answers ONLY the two censuses, both empty. No rig: these cells are about the
+ *  frontier rule and nothing else, and a stub makes that visible rather than incidental. */
+const emptyCensusQuery = async () => ({ rows: [] });
+
+test("637.pf: the frontier rule is a TABLE, and 0195 -> claraWork_v3 is its first row", () => {
+  assert.equal(Object.isFrozen(FRONTIER_BODY_RULES), true);
+  const r = FRONTIER_BODY_RULES.find((x) => x.migration.startsWith("0195_"));
+  assert.ok(r, `0195 must be in the rule table; got ${JSON.stringify(FRONTIER_BODY_RULES.map((x) => x.migration))}`);
+  assert.deepEqual([...r.requires], ["claraWork_v3"]);
+  assert.ok(r.why && r.why.length > 0, "a rule states WHY, so a later reader can judge whether it still holds");
+  // Every row is ordinal-comparable, which is the whole mechanism: a rule whose migration name has
+  // no leading ordinal could never come into force.
+  for (const rule of FRONTIER_BODY_RULES) {
+    assert.equal(typeof migrationOrdinal(rule.migration), "number", `${rule.migration} has no 4-digit ordinal`);
+  }
+  assert.equal(migrationOrdinal("0194_periodic_adjustments"), 194);
+  assert.equal(migrationOrdinal("0195_work_egress_purpose_and_execution_trace"), 195);
+  assert.equal(migrationOrdinal("not-a-migration"), null);
+});
+
+test("637.pf: BELOW the frontier the rule is not in force — 0194 + a target without claraWork_v3 ALLOWS", async () => {
+  assert.deepEqual(frontierBodyViolations("0194_periodic_adjustments", ["claraWork_v2", "chatTurn_v18"]), []);
+  const out = await preflight({
+    query: emptyCensusQuery,
+    supported: ["claraWork_v1", "claraWork_v2", "chatTurn_v18"],
+    frontier: "0194_periodic_adjustments",
+  });
+  assert.equal(out.verdict, "allowed", "a database that has not applied 0195 does not carry 0195's rule");
+  assert.deepEqual(out.reasons, []);
+  assert.deepEqual(out.frontier.violations, []);
+  assert.equal(out.frontier.version, "0194_periodic_adjustments");
+  assert.equal(out.frontier.measured, true, "…and it SAYS it looked — a rule nobody measured is not a pass");
+  // A database with nothing applied at all is the same answer for the same reason.
+  assert.deepEqual(frontierBodyViolations(null, []), []);
+});
+
+test("637.pf: AT the frontier a target without claraWork_v3 is REFUSED, naming 0195 AND the body", async () => {
+  const out = await preflight({
+    query: emptyCensusQuery,
+    supported: ["claraWork_v1", "claraWork_v2", "chatTurn_v18"],
+    frontier: "0195_work_egress_purpose_and_execution_trace",
+  });
+  assert.equal(out.verdict, "refused", "with 0195 applied, an image that cannot satisfy its wall is not shippable");
+  assert.deepEqual(out.reasons, ["frontier_requires_body"],
+    "…and the reason is ITS OWN: nothing is in flight, so neither census contributed");
+  assert.deepEqual(out.runs, [], "the run census is clean — this refusal is not drainable");
+  assert.equal(out.unbound.strandedCount, 0);
+  assert.equal(out.frontier.violations.length, 1);
+  assert.equal(out.frontier.violations[0].migration, "0195_work_egress_purpose_and_execution_trace",
+    "the refusal NAMES the migration whose rule is in force");
+  assert.equal(out.frontier.violations[0].body, "claraWork_v3", "…and the body the target is missing");
+  // A LATER frontier keeps the rule in force: `>= 0195`, not `== 0195`.
+  assert.equal(frontierBodyViolations("0231_something_later", ["claraWork_v2"]).length, 1);
+});
+
+test("637.pf: AT the frontier a target WITH claraWork_v3 allows — the rule is about the roster, not the number", async () => {
+  const out = await preflight({
+    query: emptyCensusQuery,
+    supported: ["claraWork_v1", "claraWork_v2", "claraWork_v3", "chatTurn_v18"],
+    frontier: "0195_work_egress_purpose_and_execution_trace",
+  });
+  assert.equal(out.verdict, "allowed");
+  assert.deepEqual(out.frontier.violations, []);
+  assert.deepEqual(out.frontier.rules, FRONTIER_BODY_RULES.map((r) => r.migration),
+    "the result says WHICH rules were checked, so an empty violations list is a measured pass");
+  // EXACT identifier, not class: a predecessor of the required body does not satisfy the rule.
+  assert.equal(frontierBodyViolations("0195_work_egress_purpose_and_execution_trace", ["claraWork_v2"]).length, 1);
+});
+
+test("637.pf: NO SCOPE CLEARS THE FRONTIER RULE — it counts no rows, so it cannot be narrowed away", async () => {
+  const out = await preflight({
+    query: emptyCensusQuery,
+    supported: ["claraWork_v2"],
+    scope: { workIds: ["00000000-0000-4000-8000-000000000001"] },
+    frontier: "0195_work_egress_purpose_and_execution_trace",
+  });
+  assert.equal(out.verdict, "refused", "the GLOBAL verdict — the one the exit code follows — still refuses");
+  assert.ok(out.reasons.includes("frontier_requires_body"));
+  // …and the SCOPED verdict is deliberately untouched by it. A scope answers 'is my lane clear',
+  // and this rule is about no lane at all; folding it in would make a scoped answer refuse for a
+  // reason the scope can neither cause nor clear, which is the #637 review B2 lesson inverted.
+  assert.equal(out.scoped.verdict, "allowed", "the scoped question is still answered on its own terms");
+  assert.equal(out.scoped.reasons.includes("frontier_requires_body"), false);
+});
+
+test("637.pf: the frontier is READ from clara.schema_migrations when the caller does not supply one", { skip: SKIP }, async () => {
+  // The production path: one read, the same `max(version)` aggregate clara.build_frontier() (0174)
+  // reports to /api/build-info. Read here directly because this module connects as the BASE login
+  // and that door is granted to clara_runtime alone.
+  const version = await readMigrationFrontier(query);
+  assert.match(String(version), /^\d{4}_/, `this rig's frontier is unreadable: ${JSON.stringify(version)}`);
+  const out = await preflight({ query, supported: ["claraWork_v3"] });
+  assert.equal(out.frontier.version, version, "preflight read the SAME frontier, without being told");
+  assert.equal(out.frontier.measured, true);
+  // On a rig at or past 0195 the rule is in force and a claraWork_v3-carrying target satisfies it;
+  // below 0195 it is not in force. Either way the violations for THIS roster are empty — asserted
+  // rather than assumed, so the cell means something on both sides of the frontier.
+  assert.deepEqual(out.frontier.violations, []);
+  if (migrationOrdinal(version) >= 195) {
+    const missing = await preflight({ query, supported: ["claraWork_v2"] });
+    assert.ok(missing.reasons.includes("frontier_requires_body"),
+      `this rig is at ${version}; a target without claraWork_v3 must refuse (got ${JSON.stringify(missing.reasons)})`);
   }
 });
 

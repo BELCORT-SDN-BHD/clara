@@ -45,6 +45,16 @@
 //      trustworthy as the person typing it, it says so loudly in its own output line, and it is
 //      listed last on purpose.
 //
+// AND THE DATABASE GETS A VOTE — THE FRONTIER RULE (wave-3, #815). Beside the two censuses this
+// command reads the database's own migration frontier (`max(clara.schema_migrations.version)`) and
+// refuses a target that does not carry a body the applied schema REQUIRES, whatever the censuses
+// say. Today there is one such rule: from `0195_work_egress_purpose_and_execution_trace` on, the
+// target must carry `claraWork_v3` — 0195's recut posting core requires a consumed
+// `accounting_work` egress authorisation and no other body can obtain one, so a pre-v3 image would
+// run the whole Work lane through 0195's grandfather arm with the wall in force and nothing
+// subject to it. The refusal reason is `frontier_requires_body` and it is GLOBAL: no scope clears
+// it, because it counts no rows.
+//
 // SCOPE IS EXPLICIT, OFF BY DEFAULT, AND NEVER THE EXIT CODE. Both censuses always run in FULL; a
 // scope adds a second, narrowed verdict beside the global one. The exit code follows the GLOBAL
 // verdict, because a scope answers "is MY lane clear" and can never answer "is it safe to release
@@ -170,6 +180,19 @@ function printCensus(label, view, supported) {
   console.log(`    verdict: ${view.verdict.toUpperCase()}${view.reasons.length > 0 ? ` (${view.reasons.join(", ")})` : ""}`);
 }
 
+/** The frontier leg, printed like the other two: what the database says, and what the rule table
+ *  checked against it. A measured pass prints the frontier rather than nothing — the same reason
+ *  the unbound census refuses to print an unlooked-for zero. */
+function printFrontier(frontier) {
+  console.log("  THE DATABASE'S OWN RULE (frontier vs the target's bodies — global, no scope clears it)");
+  console.log(`    clara.schema_migrations frontier: ${frontier.version ?? "NONE APPLIED"}`);
+  console.log(`    rules checked: ${frontier.rules.join(", ") || "(none)"}`);
+  for (const v of frontier.violations) {
+    console.log(`      !! ${v.migration} requires ${v.body}, which the target does NOT carry`);
+  }
+  if (frontier.violations.length === 0) console.log("      ok  the target carries every body the applied schema requires");
+}
+
 async function main() {
   const { bodies, source, verified } = resolveSupported();
   const runIds = flags("--scope-run");
@@ -207,6 +230,7 @@ async function main() {
       );
     }
     printCensus("GLOBAL (the whole database — this is what the exit code follows)", result, bodies);
+    printFrontier(result.frontier);
     if (result.scoped) {
       printCensus(
         `SCOPED (narrowed by the flags given${result.scope.derivedRunIds.length > 0 ? `; run ids derived from the named tasks: ${result.scope.derivedRunIds.join(", ")}` : ""})`,
@@ -221,6 +245,15 @@ async function main() {
     process.exit(0);
   }
   console.error("\nrollback-preflight: REFUSED (global)");
+  for (const v of result.frontier.violations) {
+    // NAMED, not merely counted: the migration whose rule is in force and the body it needs, so an
+    // operator can tell this apart from a parked-run refusal without reading the source.
+    console.error(
+      `  - frontier_requires_body: this database is at ${result.frontier.version}, and ${v.migration} `
+        + `requires the image to carry ${v.body}, which the target does NOT.`
+        + (v.why ? `\n      ${v.why}` : ""),
+    );
+  }
   for (const row of result.outside) {
     console.error(`  - ${row.count} non-terminal run(s) on ${row.body}, which the target image does NOT carry (${row.name}).`);
   }
@@ -239,6 +272,13 @@ async function main() {
       "\n  NOTE: the SCOPED verdict is allowed and the global one is not. The scope answered 'is my lane clear';\n"
         + "  it cannot answer 'is it safe to release this image'. Releasing on the scoped answer is how a parked run\n"
         + "  of another class becomes a ReplayDivergenceError and a crash loop.",
+    );
+  }
+  if (result.frontier.violations.length > 0) {
+    console.error(
+      "\n  The frontier refusal is NOT drainable: it is a rule in the applied schema, not a row in a queue."
+        + " Ship a target that carries the named body (or roll the SCHEMA back first, which is its own ceremony"
+        + " — a migration is not a deploy).",
     );
   }
   for (const line of refusalFooterLines(bodies, result)) console.error(line);

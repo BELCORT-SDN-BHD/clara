@@ -58,6 +58,21 @@
 //   * `/api/build-info`'s `bodies` on a running target, which is the registry's own roster.
 //   Measured on the current build, the two agree exactly (49 bodies).
 //
+// AND THE DATABASE HAS A VOTE OF ITS OWN — THE FRONTIER RULE (wave-3, #815). Both censuses above
+// ask "is anything IN FLIGHT that the target cannot run". They cannot see a rule that lives in the
+// SCHEMA and needs a body in the image. Migration 0195 is the first: its recut
+// `clara._record_journal_entry_core` refuses an accounting write whose run holds no consumed
+// `accounting_work` egress authorisation, and the ONLY body that can obtain one is `claraWork_v3`
+// (`prepare_work_egress_dispatch`/`consume_egress_dispatch` are called from
+// `workflows/claraWork.v3.impl.ts` and nowhere else). 0195 GRANDFATHERS runs claimed under a
+// pre-v3 bundle so a forward cutover finishes honestly — which means a rollback to a pre-v3 image
+// would run the whole Work lane through the grandfather arm, i.e. WITHOUT the egress wall, on a
+// database whose frontier says the wall is in force. That is not something a parked run can tell
+// you about: with the lane fully drained the run census is clean and every other leg says
+// ALLOWED. So the rule is measured directly — the database's own frontier against the target's
+// body roster — and it is GLOBAL: it refuses regardless of scope, because a scope narrows which
+// ROWS are counted and this rule counts no rows at all.
+//
 // FAIL-CLOSED. A read that throws is not "allowed": `preflight()` lets the error out, and the CLI
 // exits 2 rather than 1. The one thing this module must never do is answer "go ahead" because it
 // could not look.
@@ -67,6 +82,77 @@ import { makeClient } from "./relay.mjs";
 /** Terminal WDK run statuses. Everything else (`pending`, `running`) is in flight. ONE declaration:
  *  every query below takes these as a parameter rather than repeating the literals (N9). */
 export const TERMINAL_RUN_STATUSES = Object.freeze(["completed", "failed", "cancelled"]);
+
+/**
+ * MIGRATIONS WHOSE RULE NEEDS A BODY IN THE IMAGE — the frontier rule's whole content, as DATA.
+ *
+ * Once the database frontier is at or past `migration`, a target image that does not carry every
+ * identifier in `requires` is REFUSED, whatever the run census says. A later cutover that puts a
+ * rule of this shape in the schema adds a ROW here; it does not touch the verdict code, and
+ * tests/rollback-preflight.test.mjs reads this table rather than restating it.
+ *
+ * `requires` names BODY IDENTIFIERS (`claraWork_v3`), the same vocabulary
+ * `supportedBodiesFromBundle` and `/api/build-info`'s `bodies` speak, so the comparison is exact
+ * rather than class-shaped: `claraWork_v2` does not satisfy a rule that names `claraWork_v3`.
+ */
+export const FRONTIER_BODY_RULES = Object.freeze([
+  Object.freeze({
+    migration: "0195_work_egress_purpose_and_execution_trace",
+    requires: Object.freeze(["claraWork_v3"]),
+    why:
+      "0195's recut clara._record_journal_entry_core requires a consumed accounting_work egress "
+      + "authorisation at the accounting write, and claraWork_v3 is the ONLY body that obtains one "
+      + "(prepare_work_egress_dispatch / consume_egress_dispatch are called from "
+      + "workflows/claraWork.v3.impl.ts and nowhere else). A target without it would run the Work "
+      + "lane entirely through 0195's pre-v3 grandfather arm — the wall in force, and nothing "
+      + "subject to it.",
+  }),
+]);
+
+/** The leading 4-digit ordinal of a `clara.schema_migrations.version` (`0195_work_egress…` -> 195).
+ *  `null` when the string does not carry one — which the caller treats as FAIL-CLOSED rather than
+ *  as "no migrations", because an unreadable frontier is not an early one. */
+export function migrationOrdinal(version) {
+  const m = /^(\d{4})/.exec(String(version ?? ""));
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * THE FRONTIER RULE, pure. Which required bodies is this target missing, given this frontier?
+ *
+ * @param {string|null} frontierVersion the database's max `clara.schema_migrations.version`
+ * @param {ReadonlyArray<string>} supported the TARGET image's body identifiers
+ * @param {ReadonlyArray<{migration:string, requires:ReadonlyArray<string>, why?:string}>} [rules]
+ * @returns {Array<{migration:string, body:string, why:string|null}>}
+ */
+export function frontierBodyViolations(frontierVersion, supported, rules = FRONTIER_BODY_RULES) {
+  // A database with NO migrations applied carries none of these rules, and saying so is honest
+  // rather than lax: the schema the rule is about does not exist yet. An UNREADABLE version is the
+  // other case entirely — every rule applies, because this module cannot prove one does not.
+  if (frontierVersion === null || frontierVersion === undefined) return [];
+  const at = migrationOrdinal(frontierVersion);
+  const carried = new Set(supported.map(String));
+  const out = [];
+  for (const rule of rules) {
+    const needsFrom = migrationOrdinal(rule.migration);
+    if (at !== null && needsFrom !== null && at < needsFrom) continue;
+    for (const body of rule.requires) {
+      if (!carried.has(body)) out.push({ migration: rule.migration, body, why: rule.why ?? null });
+    }
+  }
+  return out;
+}
+
+/** The database's migration frontier: `max(version)` over `clara.schema_migrations` — the same
+ *  ledger and the same aggregate `clara.build_frontier()` (0174) reports to `/api/build-info`,
+ *  read directly here because this module's connection is the BASE login and that door is granted
+ *  to `clara_runtime` alone. NEVER swallowed: a read that throws leaves `preflight()` through the
+ *  same path every other read does, and the CLI exits 2. */
+export async function readMigrationFrontier(query) {
+  const r = await query("select max(version) as version from clara.schema_migrations");
+  const v = r.rows[0]?.version;
+  return v === undefined || v === null ? null : String(v);
+}
 
 /**
  * `clara.agent_tasks` statuses that still expect a WORKFLOW BODY to run them.
@@ -402,14 +488,23 @@ export function refusalFooterLines(supported, result) {
   ];
 }
 
-/** The verdict over ONE already-measured census pair. Pure: no database. */
-function verdictOver(supported, runs, unbound) {
+/**
+ * The verdict over ONE already-measured census pair. Pure: no database.
+ *
+ * `frontierViolations` is passed ONLY for the global view, and that is the rule rather than an
+ * oversight. A scoped verdict answers "is MY lane clear" — it is defined over the rows the caller
+ * named — and the frontier rule is about no rows at all, so folding it in would make a scoped
+ * answer refuse for a reason the scope cannot affect and cannot clear. It lands where the exit
+ * code is taken instead: the GLOBAL verdict, which is the release decision (#637 review B2).
+ */
+function verdictOver(supported, runs, unbound, frontierViolations = []) {
   const outside = runs.filter((row) => !supported.includes(row.body));
   const stranding = unbound.tasks.filter((t) => taskIsStranded(supported, t));
   const strandedClasses = [...new Set(stranding.map((t) => t.workflowClass).filter((c) => c !== null))].sort();
   const reasons = [];
   if (outside.length > 0) reasons.push("unsupported_body");
   if (stranding.length > 0) reasons.push("unbound_task");
+  if (frontierViolations.length > 0) reasons.push("frontier_requires_body");
   return {
     verdict: reasons.length === 0 ? "allowed" : "refused",
     reasons,
@@ -434,9 +529,15 @@ function verdictOver(supported, runs, unbound) {
  *   supported: ReadonlyArray<string>,
  *   scope?: {runIds?:ReadonlyArray<string>|null, nameLike?:string|null, workIds?:ReadonlyArray<string>|null,
  *            taskIds?:ReadonlyArray<string>|null, documentTaskIds?:ReadonlyArray<string>|null},
+ *   frontier?: string|null,
  * }} args
+ *
+ * `frontier` is the database's `clara.schema_migrations` max version. Omit it and this function
+ * READS it — that is the production path, and it is one read. Pass it (a version string, or `null`
+ * for "nothing applied") only where the caller is asking the question about a frontier other than
+ * the connected database's: the pure unit cells do exactly that, and nothing else should.
  */
-export async function preflight({ query, supported, scope = {} }) {
+export async function preflight({ query, supported, scope = {}, frontier }) {
   if (typeof query !== "function") throw new TypeError("preflight needs a `query` function");
   if (!Array.isArray(supported)) throw new TypeError("preflight needs a `supported` array of body identifiers");
 
@@ -446,7 +547,12 @@ export async function preflight({ query, supported, scope = {} }) {
   // unmeasured because a flag narrowed something else.
   const allRuns = await censusNonTerminalRuns(query, {});
   const allUnbound = await censusUnboundTasks(query, {});
-  const global = verdictOver([...supported], allRuns, allUnbound);
+  // THE DATABASE'S OWN VOTE. Read here rather than at the call sites so every caller — the CLI,
+  // the drills, a pipeline — gets it without opting in; a rule you have to remember to ask for is
+  // a rule that is not enforced.
+  const frontierVersion = frontier === undefined ? await readMigrationFrontier(query) : frontier ?? null;
+  const frontierViolations = frontierBodyViolations(frontierVersion, [...supported]);
+  const global = verdictOver([...supported], allRuns, allUnbound, frontierViolations);
 
   let scoped = null;
   let derivedRunIds = [];
@@ -494,6 +600,16 @@ export async function preflight({ query, supported, scope = {} }) {
     runs: global.runs,
     outside: global.outside,
     unbound: global.unbound,
+    // THE FRONTIER RULE's own leg, reported beside the two censuses and never folded into them:
+    // `version` is what the database says, `violations` is what the TARGET is missing because of
+    // it. An empty `violations` with a non-null `version` is a measured pass, not an unlooked-for
+    // zero — `rules` names what was actually checked.
+    frontier: {
+      version: frontierVersion,
+      measured: true,
+      violations: frontierViolations,
+      rules: FRONTIER_BODY_RULES.map((r) => r.migration),
+    },
     supported: [...supported],
     scope: {
       given,
