@@ -410,7 +410,7 @@ test(
     // A DISCRIMINATING post-condition: exit 0 alone would also be produced by a gate that
     // checked nothing, so assert it reports having actually looked at the things it names.
     assert.match(r.stdout, /check-workflow-bundle: OK/, "the gate reports OK");
-    assert.match(r.stdout, /chatTurn pinned at v18/, "...and says which version it found pinned in the served artifact");
+    assert.match(r.stdout, /chatTurn pinned at v19/, "...and says which version it found pinned in the served artifact");
     assert.match(r.stdout, /freeform_result emitter/, "...and that the emitter survived the compile");
     assert.match(r.stdout, /superseded body\(ies\) still ship for parked runs/, "...and that policy (c) holds in the image");
   },
