@@ -820,7 +820,9 @@ test("#631 B3: at 320 CSS px the step table scrolls inside its OWN viewport, and
   await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
   await openDiagnostics(page);
   await page.getByRole("button", { name: /Show \d+ steps/ }).click();
-  await settle(page);
+  // #760 moved this walk's settle instrument to `./helpers` as `settleForScan`; #631's B3 cell was
+  // written against the local `settle` that lived here, and means the same wait.
+  await settleForScan(page);
 
   const region = page.getByRole("region", { name: "Execution trace steps" });
   await expect(region).toBeVisible();
