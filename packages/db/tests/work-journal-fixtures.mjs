@@ -263,10 +263,32 @@ export async function claimWorkRun({ task, runId, bundle = null }) {
   return r.rows[0].result;
 }
 
+/** The manifest a claim stamps on the Work row, shaped exactly as `claraWorkRunManifestV3`
+ *  (workflows/claraWork.v3.bundle.ts) shapes it — with a fixture digest, because no db cell
+ *  hashes a bundle.
+ *
+ *  #631 WAVE-3 · THE ID IS `clara-work/v3`, AND IT IS LOAD-BEARING RATHER THAN DECORATION.
+ *  0195's recut `_record_journal_entry_core` GRANDFATHERS a run whose Work row records a PRE-v3
+ *  bundle id (`clara-work/v1`, `clara-work/v2`) past the egress wall — those bodies are frozen
+ *  and can never call `prepare_work_egress_dispatch`. This default therefore has to name the
+ *  bundle the CURRENT body stamps, or every cell in the estate would silently post through the
+ *  grandfather arm and the wall would be tested by nothing. The cells that mean to exercise the
+ *  grandfather pass an explicit `bundle` instead (tests/work-egress-authority.test.mjs §4b). */
 export const defaultBundle = () => ({
-  id: "clara-work/v1", digest: BUNDLE_DIGEST,
-  instructions: "clara-work-instructions/v1", tools: "clara-work-tools/v1",
-  skills: ["journal-entry/v1"],
+  id: "clara-work/v3", digest: BUNDLE_DIGEST,
+  instructions: "clara-work-instructions/v3", tools: "clara-work-tools/v3",
+  skills: ["journal-entry/v3"],
+  budgets: { segments: 4, modelCalls: 8, toolCalls: 12, replans: 2, transientRetries: 3 },
+  model: MODEL,
+});
+
+/** A predecessor's manifest, for the cells that exercise 0195's grandfather arm. `version` is
+ *  the bundle VERSION (1, 2, 3, 4…): the id shape is `clara-work/vN` and the three registry ids
+ *  follow it, exactly as claraWork.vN.bundle.ts spells them. */
+export const bundleForVersion = (version) => ({
+  id: `clara-work/v${version}`, digest: BUNDLE_DIGEST,
+  instructions: `clara-work-instructions/v${version}`, tools: `clara-work-tools/v${version}`,
+  skills: [`journal-entry/v${version}`],
   budgets: { segments: 4, modelCalls: 8, toolCalls: 12, replans: 2, transientRetries: 3 },
   model: MODEL,
 });

@@ -13,7 +13,8 @@
 -- hand; a task-bound prepare wrapper the Work run calls immediately before the model; a
 -- payload-free `clara.work_execution_traces` relation with one writer, one human read and a
 -- bounded prune; and a FOURTH recut of `clara._record_journal_entry_core` that refuses the
--- accounting write when the run holds no CONSUMED authorization of its own.
+-- accounting write when the run holds no CONSUMED authorization of its own -- unless that run
+-- was claimed under a PRE-v3 bundle, which is GRANDFATHERED past the wall by the ruling below.
 --
 -- =====================================================================================
 -- THE ACTIVATION ASSUMPTION. **THE OWNER MUST CONFIRM THIS**, and it is stated here, in
@@ -127,6 +128,75 @@
 -- refused — its authority was withdrawn, and no later act re-grants it retroactively either.
 --
 -- =====================================================================================
+-- AND WHAT ABOUT A RUN THAT WAS CLAIMED BEFORE THE WALL EXISTED? THE GRANDFATHER RULE.
+--
+-- THE RULING (wave-3 orchestrator, 2026-09-14), RECORDED VERBATIM HERE, in docs/ARCHITECTURE.md
+-- §10 and in the worker's report, and flagged for the OWNER'S CONFIRMATION exactly as the
+-- activation assumption at the top of this file is:
+--
+--   A Work whose run was claimed under a PRE-v3 bundle (`accounting_work.bundle->>'id'` is
+--   `clara-work/v1` or `clara-work/v2` — the frozen manifest stamped at claim) is GRANDFATHERED:
+--   `_record_journal_entry_core` does not require a consumed `accounting_work` authorization for
+--   it, and the trace (if any) records `authorization_id = null`. The wall applies in full to
+--   every run claimed under `clara-work/v3` or later. A rollback to a pre-v3 image under 0195
+--   would therefore run the Work lane without the egress wall — so the rollback preflight
+--   REFUSES any target image that does not carry `claraWork_v3` once the database frontier is at
+--   or past 0195, regardless of parked runs. Forward cutover: parked v1/v2 runs finish honestly;
+--   backward: the preflight is the gate (#815 stays: ship 0195 with the v3 image).
+--
+-- WHAT THE RULING IS ANSWERING, AND IT WAS MEASURED RATHER THAN FEARED. The prepare/consume pair
+-- a run needs to satisfy the gate above is called from exactly ONE non-test site in the
+-- repository, `packages/runtime/workflows/claraWork.v3.impl.ts:280,291`, and v1 and v2 are FROZEN
+-- bodies that can never gain it. So the day 0195 applies, every Work already parked on
+-- `claraWork_v1` or `claraWork_v2` — a human's unanswered question, a run mid-segment — becomes
+-- unpostable FOREVER: it resumes into its own body inside the new image (policy (c) holds at the
+-- image layer, run name invariant), reaches this core, and is refused CLR13
+-- `egress_not_authorized` at the write. This is not the rollback cost #631 already recorded; it is
+-- a FORWARD cutover cost, and #637's two-build drill at v2->v3 measured it on a real pair of
+-- images: task `failed`/`error_code='internal'`, Work `error={code:no_effect,reason:no_receipt}`,
+-- ZERO `clara.operation_receipts`, ZERO trace rows for that run — while the same drill at v1->v2
+-- on a 0194 chain is ALL PASS, so the only variable is this file. The refusal did not even reach
+-- the human as itself: v1's and v2's DEPLOY-LOCKED error rosters carry no
+-- `(CLR13, egress_not_authorized)` pair, so it surfaced as `internal`.
+--
+-- THE THREE OPTIONS, AND WHY (2) IS TAKEN HERE RATHER THAN LATER.
+--   (1) DRAIN THE WORK LANE BEFORE APPLYING 0195 — release ceremony only, no code. Rejected as the
+--       primary answer because it makes the SCHEMA's safety depend on an operator having emptied a
+--       queue first: a single parked Work turns a routine migration into silent data loss, there
+--       is no gate that can prove the drain happened at APPLY time, and #815 as filed does not
+--       carry the requirement. It also cannot help an estate that has already applied 0195.
+--   (2) GRANDFATHER PRE-v3 BUNDLES IN THE CORE'S OWN GATE — taken. The cost is stated plainly: a
+--       run claimed under v1/v2 posts WITHOUT a current-purpose egress authorisation, because its
+--       body had no way to obtain one. That is honest rather than lax — those runs called the
+--       model under the pre-0195 contract, and refusing their WRITE punishes the human for a
+--       deploy they did not make while the egress it was meant to control has already happened.
+--   (3) ACCEPT THE LOSS AND GIVE THOSE RUNS AN HONEST REFUSAL FACE — a NEW post-v2 error roster
+--       carrying the `(CLR13, egress_not_authorized)` pair (v1's and v2's own rosters are frozen).
+--       Rejected: it buys a better-worded failure for work that would still be destroyed, and it
+--       needs a new frozen body to carry the roster — which is a cutover, i.e. the very thing that
+--       strands the next cohort.
+--
+-- WHY IT IS IN THIS FILE AND NOT IN 0196. 0195 is UNMERGED — it has never been applied to a
+-- database outside this wave's rigs — so the rule can be a CLAUSE of the wall rather than a patch
+-- over it. A later migration would have to recut this core a FIFTH time to add one conjunct, and
+-- would leave a window in which the shipped rule is the one nobody ruled. The prestate pin against
+-- 0194's body (SECTION 0) is untouched by this change: the base is the same, only the insertion is
+-- wider.
+--
+-- IT FAILS CLOSED, AND THE SET IS CLOSED. The grandfathered set is EXACTLY the two ids the two
+-- frozen manifests declare — `clara-work/v1` (`workflows/claraWork.v1.bundle.ts`) and
+-- `clara-work/v2` (`workflows/claraWork.v2.bundle.ts`). A Work with NO bundle stamp (never
+-- claimed, so the column is null), an id this file has never heard of, and every id from
+-- `clara-work/v3` on are WALLED. The tail census re-reads the committed body and refuses to leave
+-- a THIRD id in that array, because a set that grows by accident is a wall that opens by accident.
+--
+-- AND THE TRACE SIDE IS VACUOUS TODAY, SAID SO THAT IT STAYS TRUE. `authorization_id = null` on a
+-- grandfathered run's trace row costs nothing here: `clara.record_work_execution_trace` already
+-- admits a null authorization, and no pre-v3 body writes a trace row at all (the writer, like the
+-- dispatch pair, exists only inside `claraWork.v3.impl.ts`). The clause is in the ruling so that a
+-- future body which DOES trace a grandfathered run cannot invent an authorization for it.
+--
+-- =====================================================================================
 -- WHAT THE TRACE RELATION ACTUALLY GUARANTEES, SAID EXACTLY.
 --
 --   NO FREE PAYLOAD COLUMN; BOUNDED, FORMAT-CHECKED FIELDS; BEST-EFFORT REDACTION AT THE WRITER.
@@ -213,10 +283,11 @@
 -- =====================================================================================
 -- THE REFUSAL VOCABULARY THIS FILE OWNS.
 --   CLR13 egress_not_authorized   the run holds no consumed, non-invalidated accounting_work
---                                 authorization of its own. TERMINAL and NON-RETRYABLE inside the
---                                 run (`claraWork_v3`'s roster maps it to `refusal`); the human's
---                                 Retry mints a NEW run, which refuses again at the PREPARE and
---                                 never reaches a model.
+--                                 authorization of its own AND was not claimed under a
+--                                 GRANDFATHERED pre-v3 bundle. TERMINAL and NON-RETRYABLE inside
+--                                 the run (`claraWork_v3`'s roster maps it to `refusal`); the
+--                                 human's Retry mints a NEW run, which refuses again at the
+--                                 PREPARE and never reaches a model.
 --   CLR10 invalid_trace           a trace row whose phase, outcome, digest or observed-revision
 --                                 key is outside its closed vocabulary + field + constraint.
 --   CLR11 work_not_found          a trace written for a task this credential cannot resolve to a
@@ -1602,6 +1673,12 @@ reset role;
 -- WHERE THE EGRESS GATE SITS: after step 3 (the client's status) and before `clara._reserve_op`,
 -- guarded by the same `clara._work_committed_receipt(p_work) is null` condition 0184's cancel arms
 -- carry. All three placements are measured rather than chosen -- see the arm's own comment.
+--
+-- AND IT CARRIES A SECOND GUARD, THE GRANDFATHER ARM (the wave-3 ruling, stated verbatim in this
+-- file's header): a run whose Work row records a PRE-v3 bundle id skips the authorization
+-- requirement entirely and changes NOTHING else about the write. It is one conjunct inside the
+-- SAME `if`, deliberately, so there is exactly ONE place in this body that decides whether the
+-- egress wall applies to a run.
 -- =====================================================================================
 set role clara_fn_owner;
 
@@ -1788,7 +1865,37 @@ begin
   -- succeeded (measured by the review). Reading the consent and the activation HERE costs two
   -- index lookups in the posting path and makes "authority must be live when the books move"
   -- true without recutting a relation four other purposes share.
-  if clara._work_committed_receipt(p_work) is null and not exists (
+  --
+  -- AND A RUN CLAIMED UNDER A PRE-v3 BUNDLE IS GRANDFATHERED PAST ALL OF IT. THE RULING, and it
+  -- is stated verbatim in this file's header with the measurement and the two options it beat:
+  --
+  --   A Work whose run was claimed under a PRE-v3 bundle (`accounting_work.bundle->>'id'` is
+  --   `clara-work/v1` or `clara-work/v2` — the FROZEN manifest `clara.claim_work_run` stamped on
+  --   the Work row at claim) is GRANDFATHERED: this core does not require a consumed
+  --   `accounting_work` authorization for it. The wall applies in full from the v3 bundle id on.
+  --
+  -- WHY A RUN CAN NEED IT. `clara.prepare_work_egress_dispatch` / `clara.consume_egress_dispatch`
+  -- are called from ONE non-test site in the repository — `claraWork.v3.impl.ts:280,291` — and
+  -- v1 and v2 are FROZEN bodies that can never gain the call. Without this conjunct every Work
+  -- already parked on `claraWork_v1`/`claraWork_v2` when 0195 applies is unpostable forever: it
+  -- resumes into its own body inside the new image and dies HERE, at the write, after the model
+  -- call it was refused authority for has already happened. #637's two-build drill measured
+  -- exactly that at v2->v3 (task `failed`/`internal`, zero receipts, zero trace rows).
+  --
+  -- THE ID IS THE WORK ROW'S OWN, NEVER A PARAMETER. `w.bundle` was written by
+  -- `clara.claim_work_run` (0178) from the body's own frozen manifest at claim time and
+  -- `clara.accounting_work` is immutable by trigger thereafter, so a run cannot nominate itself
+  -- into the grandfathered set: the posting caller supplies `p_bundle_digest`, and this arm does
+  -- not read it.
+  --
+  -- FAIL-CLOSED, AND THE SET IS CLOSED AT TWO. `coalesce(...,'')` makes a Work with NO bundle
+  -- stamp (never claimed) WALLED rather than exempt, an unknown id is walled, and the v3 id and
+  -- every successor are walled. The tail census re-reads this body and refuses a THIRD
+  -- `clara-work/vN` literal ANYWHERE in it -- which is why this comment names v3 by version
+  -- rather than by id.
+  if clara._work_committed_receipt(p_work) is null
+     and coalesce(w.bundle->>'id','') <> all (array['clara-work/v1','clara-work/v2'])
+     and not exists (
     select 1 from clara.egress_dispatch_authorizations ea
       join clara.client_egress_purpose_consents cc
         on cc.id = ea.consent_id and cc.firm_id = ea.firm_id and cc.client_id = ea.client_id
@@ -2144,7 +2251,7 @@ join inserted_types i on i.name=x.name cross join clara.taxonomy_active a;
 -- SECTION 14 — TAIL CENSUS. Every claim this file made, re-READ from the committed catalog.
 -- =====================================================================================
 do $w631_tail$
-declare v_n int; v_src text; v_def text; v_role text;
+declare v_n int; v_src text; v_def text; v_role text; v_ids text[];
 begin
   -- (T.1) THE SIXTH PURPOSE is on all three CHECKs, and none of the five before it was lost.
   for v_def in select con.conname from pg_constraint con join pg_class c on c.oid=con.conrelid
@@ -2420,6 +2527,27 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- WAVE-3 RULING · THE GRANDFATHER ARM IS IN THE COMMITTED BODY, and it reads the WORK ROW's
+  -- own frozen bundle stamp rather than anything a caller supplies. Without this arm every Work
+  -- parked on claraWork_v1/v2 when this file applies is unpostable forever (measured by #637's
+  -- two-build drill at v2->v3); with it, those runs finish honestly and the wall applies in full
+  -- from clara-work/v3 on.
+  if position('w.bundle->>''id''' in v_src) = 0 then
+    raise exception '#631 tail: the recut core does not read the Work''s FROZEN bundle id -- a run claimed under a pre-v3 bundle would be walled out of its own books'
+      using errcode='CLR10';
+  end if;
+  -- …AND THE PRE-v3 SET IS EXACTLY THE TWO IDS THE TWO FROZEN MANIFESTS DECLARE:
+  -- `clara-work/v1` (packages/runtime/workflows/claraWork.v1.bundle.ts) and `clara-work/v2`
+  -- (claraWork.v2.bundle.ts). Read as the SET of every clara-work/vN literal in the body, not by
+  -- matching the array's text, so a third id smuggled in anywhere in this core reds here: a
+  -- grandfathered set that grows by accident is a wall that opens by accident.
+  select array_agg(distinct t.m[1] order by t.m[1]) into v_ids
+    from regexp_matches(v_src, '(clara-work/v[0-9]+)', 'g') as t(m);
+  if v_ids is distinct from array['clara-work/v1','clara-work/v2'] then
+    raise exception '#631 tail: the grandfathered bundle-id set in the recut core is % -- it must be EXACTLY {clara-work/v1, clara-work/v2}',
+      coalesce(v_ids::text, '<none>') using errcode='CLR10';
+  end if;
+
   -- N3 · the prune leaves a ledger row, on 0006's own ledger.
   select p.prosrc into v_src from pg_proc p
    where p.oid='clara.prune_work_execution_traces(timestamptz,int)'::regprocedure;
@@ -2452,6 +2580,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#631 tail: OK -- accounting_work is the sixth typed client egress purpose on all three CHECKs with its own NULL-hash conjunct; the derived consent''s evidence relaxation is purpose-discriminated and carries legal_acceptance_id; the four owner verbs admit it, the GRANT door refuses it by name, clara.restore_client_egress_purpose is the owner-only way back on and clara.consume_egress_dispatch is byte-unmoved; the derived mint writes an audit row and egress.purpose_consent_derived; clara._accounting_work_egress_live, clara._work_egress_event_seq and the five trace field grammars are ungranted; clara.prepare_work_egress_dispatch, clara.record_work_execution_trace and clara.prune_work_execution_traces are clara_runtime-only and clara.get_work_execution_trace is clara_authenticated-only; clara.work_execution_traces is RLS-forced, free-payload-free, grammar-checked field by field, PRIVILEGE-free to every application role, FK-free against clara.accounting_work, append-only, no-truncate and empty; the prune leaves a clara.trace_prune_log row; the recut posting core keeps every inherited arm, re-derives the run binding and re-reads the consent and activation at the write; and NO trace export function exists.';
+  raise notice '#631 tail: OK -- accounting_work is the sixth typed client egress purpose on all three CHECKs with its own NULL-hash conjunct; the derived consent''s evidence relaxation is purpose-discriminated and carries legal_acceptance_id; the four owner verbs admit it, the GRANT door refuses it by name, clara.restore_client_egress_purpose is the owner-only way back on and clara.consume_egress_dispatch is byte-unmoved; the derived mint writes an audit row and egress.purpose_consent_derived; clara._accounting_work_egress_live, clara._work_egress_event_seq and the five trace field grammars are ungranted; clara.prepare_work_egress_dispatch, clara.record_work_execution_trace and clara.prune_work_execution_traces are clara_runtime-only and clara.get_work_execution_trace is clara_authenticated-only; clara.work_execution_traces is RLS-forced, free-payload-free, grammar-checked field by field, PRIVILEGE-free to every application role, FK-free against clara.accounting_work, append-only, no-truncate and empty; the prune leaves a clara.trace_prune_log row; the recut posting core keeps every inherited arm, re-derives the run binding, re-reads the consent and activation at the write and GRANDFATHERS exactly the two pre-v3 bundle ids {clara-work/v1, clara-work/v2} past that wall; and NO trace export function exists.';
 end
 $w631_tail$;

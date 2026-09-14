@@ -350,7 +350,10 @@ test("w623.claim.cas the first claim binds; a second under a DIFFERENT run id do
   assert.equal((await taskRow(w.task_id)).workflow_run_id, runId, "claim.cas: …and binds the run id");
   const work = await workRow(w.work_id);
   assert.equal(work.status, "running", "claim.cas: the Work follows its run");
-  assert.equal(work.bundle.id, "clara-work/v1", "claim.cas: the run records its bundle identity (C88.8)");
+  assert.equal(work.bundle.id, defaultBundle().id,
+    "claim.cas: the run records its bundle identity (C88.8)");
+  assert.equal(defaultBundle().id, "clara-work/v3",
+    "claim.cas: …and the rig claims under the CURRENT bundle — 0195 grandfathers a pre-v3 id past the egress wall, so a stale default would silently disarm it");
   assert.equal(work.bundle.digest, defaultBundle().digest);
 
   const other = await claimWorkRun({ task: w.task_id, runId: `${runId}-other` });

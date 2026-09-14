@@ -24,6 +24,13 @@
 //   4. `_record_journal_entry_core` refuses CLR13 `egress_not_authorized` when this run holds no
 //      consumed, non-invalidated authorization — writing NO entry, NO receipt, and leaving the
 //      logical identity UNSPENT so a later Retry can still use it.
+//   5. …UNLESS the run was claimed under a PRE-v3 bundle, which is GRANDFATHERED (the wave-3
+//      ruling, stated verbatim in 0195's header and docs/ARCHITECTURE.md §10 — the OWNER MUST
+//      CONFIRM IT). `clara.prepare_work_egress_dispatch`/`consume_egress_dispatch` are called
+//      from ONE non-test site, `claraWork.v3.impl.ts:280,291`, and v1/v2 are FROZEN bodies that
+//      can never gain the call: without the grandfather arm every Work already parked on
+//      claraWork_v1/_v2 when 0195 applies is unpostable forever. §4b is that arm, and it is
+//      CLOSED at two ids — an absent stamp, an unknown id and every id from v3 on are walled.
 //
 // Frontier-gated on the `work_egress_purpose_and_execution_trace$` stem: a leg pinned below 0195
 // skips cleanly rather than reds.
@@ -33,6 +40,7 @@ import assert from "node:assert/strict";
 import {
   gateEgress, buildWorkWorld, endPool, printLaneNotes, printSkipCount, noteLane,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
+  defaultBundle, bundleForVersion, workRow,
   basis, CLR, assertPair, rootQuery, opk, entryCount, committedReceiptCount,
   acceptLegalNow, publishNewerLegal, publishedLegal,
   prepareEgressDispatch, consumeEgressDispatch, prepareWorkEgressDispatch, workEgressEventSeq,
@@ -68,13 +76,19 @@ const BOB = () => world.users.bob;
 const UNKNOWN = { verdict: "unknown", authorization_id: null };
 
 /** Admit a Work and claim its run WITHOUT authorising egress — the arming every refusal cell
- *  needs, and the thing the shared `wakeRecordJournalEntry` wrapper would otherwise do for it. */
-async function armedUnauthorised({ client = null, author = null } = {}) {
+ *  needs, and the thing the shared `wakeRecordJournalEntry` wrapper would otherwise do for it.
+ *
+ *  `bundle` is the manifest the claim stamps on the Work row, and from 0195 it DECIDES whether
+ *  the egress wall applies at all: the default is the CURRENT `clara-work/v3` (so every refusal
+ *  cell below measures the wall), and §4b passes a predecessor's to measure the grandfather arm.
+ *  `claim = false` admits the Work and never claims a run, which is the only way to reach the
+ *  core with NO bundle stamp at all — `clara.claim_work_run` refuses a bundle without an id. */
+async function armedUnauthorised({ client = null, author = null, bundle = null, claim = true } = {}) {
   const cli = client ?? A1();
   const who = author ?? BOB();
   const work = await admitJournalWork({ client: cli, author: who, basis: basis() });
   const runId = opk("w631-run");
-  await claimWorkRun({ task: work.task_id, runId });
+  if (claim) await claimWorkRun({ task: work.task_id, runId, bundle });
   const cred = await mintClientObo({ firm: FIRM_A(), obo: who, client: cli });
   return { ...work, cred, client: cli, author: who, runId, basis: basis() };
 }
@@ -366,6 +380,91 @@ test("w631.write.authorised the ordinary authorised run posts, and its authoriza
   assert.equal(rows[0].id, prepared.authorization_id);
   assert.ok(rows[0].consumed_at, "write.authorised: …consumed");
   assert.equal(rows[0].invalidated_at, null);
+});
+
+// ===========================================================================================
+// 4b · THE GRANDFATHER ARM — a run claimed under a PRE-v3 bundle is not walled.
+//
+// THE RULING UNDER TEST (wave-3 orchestrator, 2026-09-14; verbatim in 0195's header and
+// docs/ARCHITECTURE.md §10; the OWNER MUST CONFIRM IT):
+//
+//   A Work whose run was claimed under a PRE-v3 bundle (`accounting_work.bundle->>'id'` is
+//   `clara-work/v1` or `clara-work/v2` — the frozen manifest stamped at claim) is
+//   GRANDFATHERED: `_record_journal_entry_core` does not require a consumed `accounting_work`
+//   authorization for it. The wall applies in full from `clara-work/v3` on.
+//
+// The two grandfathered ids are copied from the two FROZEN manifests that declare them —
+// `packages/runtime/workflows/claraWork.v1.bundle.ts` (`id: "clara-work/v1"`) and
+// `claraWork.v2.bundle.ts` (`id: "clara-work/v2"`) — and 0195's tail census re-reads the
+// committed body to refuse a THIRD id in that set.
+// ===========================================================================================
+
+test("w631.write.grandfathered a run claimed under a PRE-v3 bundle POSTS with NO authorization at all", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  for (const version of [1, 2]) {
+    const client = await freshWorkClient(ALICE(), `grandf${version}`);
+    const a = await armedUnauthorised({ client, bundle: bundleForVersion(version) });
+    assert.equal((await workRow(a.work_id)).bundle.id, `clara-work/v${version}`,
+      `write.grandfathered: mandatory setup — the Work row records the v${version} manifest`);
+    assert.equal((await authorizationsFor(client)).length, 0,
+      "write.grandfathered: …and NOTHING was dispatched: a frozen pre-v3 body cannot call the prepare verb");
+
+    const entriesBefore = await entryCount(client);
+    const out = await postRaw(a);
+    assert.equal(out.posted, true,
+      `write.grandfathered: a run parked on claraWork_v${version} before 0195 finishes honestly rather than dying at the write`);
+    assert.equal(await entryCount(client), entriesBefore + 1, "write.grandfathered: the books moved");
+    assert.equal(await committedReceiptCount(client), 1, "write.grandfathered: …with its committed receipt");
+    assert.equal((await authorizationsFor(client)).length, 0,
+      "write.grandfathered: …and the grandfather MINTS nothing — it skips the requirement, it does not satisfy it");
+  }
+});
+
+test("w631.write.walled_from_v3 the SAME Work claimed under clara-work/v3 is refused CLR13 egress_not_authorized", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "walledv3");
+  const a = await armedUnauthorised({ client, bundle: bundleForVersion(3) });
+  assert.equal((await workRow(a.work_id)).bundle.id, "clara-work/v3",
+    "write.walled_from_v3: mandatory setup — the claim stamped the CURRENT manifest");
+  assert.equal(bundleForVersion(3).id, defaultBundle().id,
+    "write.walled_from_v3: …which is the rig's own default, so every other cell in this file measures the wall");
+
+  const entriesBefore = await entryCount(client);
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a),
+    "write.walled_from_v3: the grandfather is a clause of the wall, not a hole in it — v3 is the first id it does NOT cover");
+  assert.equal(await entryCount(client), entriesBefore, "write.walled_from_v3: no entry");
+
+  // …and the SAME run posts once it has dispatched, which is what proves the refusal was the
+  // egress gate and not the bundle id being rejected for some other reason.
+  assert.equal((await authoriseWorkRun({ task: a.task_id, runId: a.runId })).consumed.verdict, "granted");
+  assert.equal((await postRaw(a)).posted, true,
+    "write.walled_from_v3: …and the authorised v3 run posts on the SAME identity");
+});
+
+test("w631.write.unknown_bundle an id this file has never heard of, and NO stamp at all, are both WALLED", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+
+  // A FUTURE successor. The set is closed at two; it does not open forward by accident.
+  const future = await freshWorkClient(ALICE(), "grandf4");
+  const a4 = await armedUnauthorised({ client: future, bundle: bundleForVersion(4) });
+  assert.equal((await workRow(a4.work_id)).bundle.id, "clara-work/v4");
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a4),
+    "write.unknown_bundle: a LATER bundle id is walled — the grandfather names two ids, it does not mean 'not v3'");
+
+  // NO STAMP. `clara.claim_work_run` refuses a bundle with no id (CLR10 invalid_bundle), so the
+  // only way a Work row carries a null bundle is that no run ever claimed it — which is exactly
+  // the state an admitted-but-unclaimed Work is in, and it must FAIL CLOSED rather than read as
+  // "not a v3 id, therefore grandfathered".
+  const bare = await freshWorkClient(ALICE(), "grandfnone");
+  const a0 = await armedUnauthorised({ client: bare, claim: false });
+  assert.equal((await workRow(a0.work_id)).bundle, null,
+    "write.unknown_bundle: mandatory setup — an unclaimed Work carries NO bundle stamp");
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a0),
+    "write.unknown_bundle: an absent stamp is WALLED — coalesce(bundle->>'id','') is the fail-closed reading");
+  assert.equal(await entryCount(bare), 0, "write.unknown_bundle: nothing posted for either shape");
 });
 
 // ===========================================================================================
