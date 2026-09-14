@@ -51,6 +51,7 @@ const v15Module = await import("../workflows/chatTurn.v15.ts");
 const v16Module = await import("../workflows/chatTurn.v16.ts");
 const v17Module = await import("../workflows/chatTurn.v17.ts");
 const v18Module = await import("../workflows/chatTurn.v18.ts");
+const v19Module = await import("../workflows/chatTurn.v19.ts");
 
 const PARTS_PATH = fileURLToPath(new URL("../workflows/chatTurn.v16.parts.ts", import.meta.url));
 const ENTRY_PATH = fileURLToPath(new URL("../workflows/chatTurn.v16.ts", import.meta.url));
@@ -101,9 +102,10 @@ function admittedRead(readId, extra = {}) {
 // 1 · The registry repoint, and policy (c) for every body it moved past.
 // ==============================================================================================
 
-test("p6-1.registry: chatTurn_v16 remains exported after the successor repoint to chatTurn_v18", () => {
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v18", "#623 now pins chatTurn_v18");
-  assert.equal(registry.workflows.chatTurn, v18Module.chatTurn_v18, "the new pin IS its module's own function");
+test("p6-1.registry: chatTurn_v16 remains exported after the successor repoint to chatTurn_v19", () => {
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v19", "#643 + #644's shared successor now pins chatTurn_v19");
+  assert.equal(registry.workflows.chatTurn, v19Module.chatTurn_v19, "the new pin IS its module's own function");
+  assert.equal(registry.chatTurn_v18, v18Module.chatTurn_v18, "#623's body remains reachable by identity");
   assert.equal(registry.chatTurn_v17, v17Module.chatTurn_v17, "FS-7's body remains reachable by identity");
   assert.equal(registry.chatTurn_v16, v16Module.chatTurn_v16, "P6-1's body remains reachable by identity");
   assert.notEqual(registry.workflows.chatTurn, v15Module.chatTurn_v15, "the registry no longer points chatTurn: at v15");

@@ -54,6 +54,20 @@ export const WAIVERS = new Map([
   // REVIEWED 2026-09-09. A REAL, UNFIXABLE-HERE DEFECT, waived so it is stated rather than
   // silently green — see the report on #618 for the routing note.
   //
+  // RE-REVIEWED 2026-09-14 when chatTurn_v19 landed, because the wave asked whether a new chat
+  // successor could retire this. IT CANNOT, and the reason is structural rather than a matter of
+  // effort. The census resolves a CALL SITE IN SOURCE, not the pinned version: the bare reader's
+  // only caller is chatTurn_v1's own frozen tools body, which stays in the tree — and stays
+  // EXPORTED from registry.ts — under versioning policy (c), so a run parked on v1 has a body to
+  // resume into. v19 could only have retired it by deleting that file, which is the one thing the
+  // policy forbids. Measured both ways on rig rigv19 (55455/clara_v19, frontier 189): with this
+  // waiver present the census is 10/10; with it deleted, `opcen.1` reds naming
+  // `clara.get_journal_entry(p_entry uuid) ... call sites:
+  // packages/runtime/workflows/chatTurn.impl.ts:112 [alias:read]` — a LIVE finding, not a dead
+  // exemption. The current closure is clean: chatTurn.v10.tools.ts:477 (which v11..v19 all carry
+  // by import) reads `clara.get_journal_entry_for`, and so do claraWork v1/v2. Retiring this needs
+  // a ruling that v1 may stop being exported, not another successor.
+  //
   // packages/runtime/workflows/chatTurn.impl.ts:112 (chatTurn_v1's read tool) calls
   // `clara.get_journal_entry($1)` on the READ pool, which SET ROLEs to clara_agent_ro.
   // Migration 0009 (S6 §9/C-11) retired the bare same-firm entry oracle from the agent lane —
@@ -71,10 +85,11 @@ export const WAIVERS = new Map([
     reason:
       "chatTurn_v1 (workflows/chatTurn.impl.ts:112, FROZEN per frozen-workflows.json) is the "
       + "last caller of the bare reader 0009 retired from clara_agent_ro; every later version "
-      + "uses get_journal_entry_for, registry.ts binds chatTurn to v18, and #623's new "
-      + "claraWork_v1 closure uses get_journal_entry_for as well — no successor keeps the bare "
-      + "reader. Real defect, unfixable in a frozen artifact — reported for routing, not "
-      + "silently absorbed.",
+      + "uses get_journal_entry_for, registry.ts binds chatTurn to v19, and both #623's "
+      + "claraWork_v1 and #643/#644's chatTurn_v19 use get_journal_entry_for as well — three "
+      + "successors have come and gone without a reason to keep the bare reader. Real defect, "
+      + "unfixable in a frozen artifact that policy (c) requires to stay exported — reported for "
+      + "routing, not silently absorbed.",
   }],
 ]);
 
