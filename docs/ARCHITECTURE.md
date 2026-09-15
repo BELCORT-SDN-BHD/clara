@@ -212,6 +212,14 @@ OCR／结构化抽取对发票与月结单走文本 + 图像双 witness，保留
 先删后插到更低版本、以及"整批同号发布"的跨行一致性仍是约定（#779 明确不在范围内）。[已实现，本地验证]
 <!-- /#779 -->
 
+<!-- #780 -->
+`clara.document_fact_validations` 的 firm 边界由 0208 的 migration tail 直接**读行**证明，而不再只靠
+0191 的"策略条数为三"：tail 用 0191 自己的 deferred recorder 写出 firm A 的一行校验记录，先做正向对照
+（firm A 的 human 与 agent 会话各读到该行），再断言 firm B 的 human 与 agent 各读到零、且把 firm A 的
+wake secret 放进 firm B 的 human 会话仍读到零（两条 lane 不会退回彼此的 accessor）；探针无法运行时报
+CLR10 中止而不是静默跳过，所有 fixture 通过 sentinel 回滚。[已实现，本地验证]
+<!-- /#780 -->
+
 金额一律是**整数最小货币单位**（DB 侧 bigint `*_cents`），余额、舍入、期间与关联对象检查都在这个单位上执行；
 大整数穿过 JSON 与前端时必须保留精度——freeform 读路径已知的精度缺口仍未修（§7）。[已实现]
 
