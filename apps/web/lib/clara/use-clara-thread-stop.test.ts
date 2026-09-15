@@ -20,6 +20,7 @@ import { test } from "node:test";
 
 import { enableDomInspection } from "../../test/domInspect";
 import { renderHook } from "../../test/hookHarness";
+import { settleUntil } from "../../test/settleUntil";
 import { claraThreadStore } from "./threadStore";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { StopReplyState } from "./useClaraThread";
@@ -28,6 +29,20 @@ enableDomInspection();
 
 const THREAD = "11111111-1111-4111-8111-111111111111";
 const session: SessionTokenAccessor = { getAccessToken: async () => "tok" };
+
+// #798 — bounded on WORK: 200 settle passes comfortably outlasts this hook's mocked fetch chains
+// and its own poll/backoff timers under whole-suite load, the same budget already justified for
+// the onboarding-checklist trio (16cb8c85).
+const SETTLE_PASSES = 200;
+
+/** No condition to wait for here — proving something did NOT happen (a clock that must stay
+ *  retired, a phase that must not move) has nothing to poll for, so this spends a FIXED number of
+ *  real settle hops instead: unlike `settleUntil`, it never returns early just because the
+ *  (already-true) absence held on the first check, which would let the very chain under test run
+ *  short. */
+async function absenceSettle(h: { settle: () => Promise<void> }, passes: number): Promise<void> {
+  for (let i = 0; i < passes; i += 1) await h.settle();
+}
 
 // ===========================================================================================
 // THE DOOR'S OWN ANSWER SHAPES (`clara.cancel_agent_task`, 0184's recut). `status` alone cannot
@@ -86,7 +101,7 @@ test("630 stopReply with no live turn is IDLE — it invents no task to cancel",
   await withRecordedRpc(async (seen) => {
     const h = await renderHook(() => useClaraThread(session, THREAD));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       let answer: string | null = null;
       await h.act(async () => { answer = await h.current.stopReply(); });
       assert.equal(answer, "idle", "there is no turn in flight, so there is nothing to stop");
@@ -102,7 +117,7 @@ test("630 stopReply cancels the CHAT-TURN task, and calls no second door", async
   await withRecordedRpc(async (seen) => {
     const h = await renderHook(() => useClaraThread(session, THREAD));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       // A live turn, as the store records one.
       claraThreadStore.markAccepted(THREAD, "task-1");
       await h.act(async () => { await h.current.stopReply(); });
@@ -122,7 +137,7 @@ test("630 CLOSING THE RAIL does neither — unmounting calls no door at all", as
   const { useClaraThread } = await import("./useClaraThread");
   await withRecordedRpc(async (seen) => {
     const h = await renderHook(() => useClaraThread(session, THREAD));
-    await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await h.settle();
     claraThreadStore.markAccepted(THREAD, "task-2");
     const before = seen.length;
     await h.unmount();
@@ -212,7 +227,7 @@ test("630 a stop pressed DURING admission is remembered, then spent on the task 
   await withAdmittingFetch(async (seen, release) => {
     const h = await renderHook(() => useClaraThread(session, THREAD_ADMIT));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       let sent: boolean | null = null;
       let answer: string | null = null;
       await h.act(async () => {
@@ -273,22 +288,27 @@ test("630 a stop AFTER admission, before the stream opens, leaves the composer u
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_ABORT));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       let sent: boolean | null = null;
+      let sending: Promise<void> | null = null;
+      await h.act(() => {
+        sending = h.current.sendMessage("hello").then((v) => { sent = v; });
+      });
+      // Wait for the ACCEPTANCE, so the store holds a task id and `stopReply` takes the direct
+      // arm — the pending arm would return before any stream existed. Polled through the
+      // harness's own `settle()` rather than a real 1 ms sleep loop, so a slower host gets more
+      // real time automatically instead of exhausting the fixed 40-tick budget.
+      await settleUntil(h, () => claraThreadStore.getThread(THREAD_ABORT).activeTaskId !== null,
+        "the turn's admission into the store", SETTLE_PASSES);
+      assert.equal(claraThreadStore.getThread(THREAD_ABORT).activeTaskId, "task-abort",
+        "precondition: the turn is ADMITTED and the stream has not opened");
       await h.act(async () => {
-        const sending = h.current.sendMessage("hello").then((v) => { sent = v; });
-        // Wait for the ACCEPTANCE, so the store holds a task id and `stopReply` takes the direct
-        // arm — the pending arm would return before any stream existed.
-        for (let i = 0; i < 40 && claraThreadStore.getThread(THREAD_ABORT).activeTaskId === null; i += 1) {
-          await new Promise((r) => setTimeout(r, 1));
-        }
-        assert.equal(claraThreadStore.getThread(THREAD_ABORT).activeTaskId, "task-abort",
-          "precondition: the turn is ADMITTED and the stream has not opened");
         await h.current.stopReply();
         openStream();
         await sending;
-        await new Promise((r) => setTimeout(r, 0));
       });
+      await settleUntil(h, () => claraThreadStore.getThread(THREAD_ABORT).sendStatus !== "sending",
+        "the send status leaving 'sending' once the abort path resolves", SETTLE_PASSES);
       // MEASURED (review): the abort path resolved the caller without ever transitioning the store,
       // so `sendStatus` stayed "sending" and the textarea and its attachment controls stayed
       // disabled for the life of the mount.
@@ -326,7 +346,7 @@ test("630 a pending stop DIES with the turn the runtime refused — it never can
   await withAdmittingFetch(async (seen, release) => {
     const h = await renderHook(() => useClaraThread(session, THREAD_REFUSED));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       let answer: string | null = null;
       let sent: boolean | null = null;
       await h.act(async () => {
@@ -357,7 +377,7 @@ test("630 a REFUSED stop inside the admission window says so — it never prints
   await withAdmittingFetch(async (seen, release) => {
     const h = await renderHook(() => useClaraThread(session, THREAD_DENIED));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       let answer: string | null = null;
       await h.act(async () => {
         const sending = h.current.sendMessage("hello").then(() => {});
@@ -387,7 +407,7 @@ test("630 a stop that fails at the TRANSPORT is not reported as a role refusal",
   await withAdmittingFetch(async (_seen, release) => {
     const h = await renderHook(() => useClaraThread(session, THREAD_TRANSPORT));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       await h.act(async () => {
         const sending = h.current.sendMessage("hello").then(() => {});
         await new Promise((r) => setTimeout(r, 0));
@@ -413,7 +433,7 @@ test("630 the machine is reset by a NEW turn and by a thread change", async () =
     let threadId = A;
     const h = await renderHook(() => useClaraThread(session, threadId));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       claraThreadStore.markAccepted(A, "task-reset");
       await h.act(async () => { await h.current.stopReply(); });
       assert.equal(h.current.stop.phase, "stopped", "precondition: the machine holds a stop");
@@ -459,7 +479,7 @@ async function stopWith(threadId: string, answer: () => Response): Promise<StopR
   try {
     const h = await renderHook(() => useClaraThread(session, threadId));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       claraThreadStore.markAccepted(threadId, `task-${threadId.slice(0, 4)}`);
       await h.act(async () => { await h.current.stopReply(); });
       settled = h.current.stop;
@@ -560,7 +580,7 @@ test("630 the run poll: a read that finds NO ROW keeps the parked question — a
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_POLL));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       // A thread parked on a question, exactly as the mount's own rehydrate leaves one.
       claraThreadStore.hydrateRun(
         THREAD_POLL,
@@ -573,10 +593,11 @@ test("630 the run poll: a read that finds NO ROW keeps the parked question — a
       const before = runReads;
       // Fire ONE tick from a SNAPSHOT — every re-render re-registers the interval this cell is
       // capturing, so iterating the live array would keep firing bodies the loop is still creating.
-      await h.act(async () => {
+      await h.act(() => {
         for (const tick of [...ticks]) tick();
-        await new Promise((r) => setTimeout(r, 10));
       });
+      await settleUntil(h, () => runReads > before,
+        "the run poll actually reading agent_tasks_visible at least once", SETTLE_PASSES);
       assert.ok(runReads > before, "precondition: the poll actually ran (it read the run at least once)");
 
       const after = claraThreadStore.getThread(THREAD_POLL);
@@ -610,7 +631,7 @@ test("630 a settled stop RETIRES the turn clock, so nothing counts under the Sto
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_CLOCK));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       claraThreadStore.hydrateRun(
         THREAD_CLOCK,
         { taskId: "task-clock", status: "running", startedAt: "2026-09-12T00:00:00.000Z" },
@@ -644,15 +665,18 @@ test("630 a REFUSED stop inside the admission window does not ABANDON the live t
     const { useClaraThread } = await import("./useClaraThread");
     const h = await renderHook(() => useClaraThread(session, THREAD_ABANDON));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.settle();
       await h.act(async () => {
         const sending = h.current.sendMessage("hello").then(() => {});
         await new Promise((r) => setTimeout(r, 0));
         await h.current.stopReply();
         release();
         await sending;
-        await new Promise((r) => setTimeout(r, 30));
       });
+      // The re-attach the refusal triggers is a separate effect that fires after the commit that
+      // records `stop.phase === "failed"`, so poll for its own GET:stream arrival.
+      await settleUntil(h, () => seen.includes("GET:stream"),
+        "the re-attached read the refused stop must not leave unreadable", SETTLE_PASSES);
       assert.equal(h.current.stop.phase, "failed", "precondition: the door refused");
       assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "denied");
       assert.ok(seen.includes("GET:stream"),
@@ -696,11 +720,12 @@ test("630 Stop after the rail is CLOSED AND REOPENED still aborts the first moun
   try {
     // FIRST MOUNT: post a turn, so a read is open for it.
     const first = await renderHook(() => useClaraThread(session, THREAD_REOPEN));
-    await first.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    await first.act(async () => {
-      void first.current.sendMessage("hello");
-      for (let i = 0; i < 80 && capturedSignal() === null; i += 1) await new Promise((r) => setTimeout(r, 1));
-    });
+    await first.settle();
+    await first.act(() => { void first.current.sendMessage("hello"); });
+    // Polled through the harness's own `settle()` rather than a real 1 ms sleep loop, so a slower
+    // host gets more real time automatically instead of exhausting the fixed 80-tick budget.
+    await settleUntil(first, () => capturedSignal() !== null,
+      "the stream read opening for the admitted turn", SETTLE_PASSES);
     const opened = capturedSignal();
     assert.ok(opened, "precondition: a read is open for the admitted turn");
     assert.equal(opened.aborted, false, "…and it has not been aborted");
@@ -713,7 +738,7 @@ test("630 Stop after the rail is CLOSED AND REOPENED still aborts the first moun
     // THE RAIL REOPENS on a fresh instance, and Stop is pressed there.
     const second = await renderHook(() => useClaraThread(session, THREAD_REOPEN));
     try {
-      await second.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await second.settle();
       await second.act(async () => { await second.current.stopReply(); });
       assert.equal(opened.aborted, true,
         "the press reaches the read the FIRST mount opened — the handle lives with the turn, not the mount");
@@ -812,7 +837,8 @@ test("630 a REMOUNT does not re-start the clock on a turn the door already stopp
   });
   try {
     const first = await renderHook(() => useClaraThread(session, THREAD_REMOUNT));
-    await first.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await settleUntil(first, () => claraThreadStore.getThread(THREAD_REMOUNT).turnStartedAt !== null,
+      "the mount hydrate starting the clock from the DB's own created_at", SETTLE_PASSES);
     assert.equal(claraThreadStore.getThread(THREAD_REMOUNT).turnStartedAt, "2026-09-12T00:00:00.000Z",
       "precondition: the mount hydrate started the clock from the DB's own created_at");
 
@@ -825,7 +851,10 @@ test("630 a REMOUNT does not re-start the clock on a turn the door already stopp
     status = "cancel_requested";
     const second = await renderHook(() => useClaraThread(session, THREAD_REMOUNT));
     try {
-      await second.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      // Absence, not arrival: this proves the reopened rail's mount hydrate does NOT restart the
+      // clock, so it spends a fixed number of settle hops rather than polling a condition that
+      // already holds on the first check.
+      await absenceSettle(second, 20);
       const after = claraThreadStore.getThread(THREAD_REMOUNT);
       assert.equal(after.turnStartedAt, null,
         "the reopened rail must not time a reply this surface has already said was stopped");
@@ -856,7 +885,8 @@ test("630 the run poll runs for EVERY non-terminal status the hydrate can produc
     try {
       const h = await renderHook(() => useClaraThread(session, thread));
       try {
-        await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+        await settleUntil(h, () => claraThreadStore.getThread(thread).turnStatus === status,
+          `${status}: the mount hydrate reflecting the run's own status`, SETTLE_PASSES);
         assert.equal(claraThreadStore.getThread(thread).turnStatus, status,
           `precondition: a ${status} run is hydrated with a clock`);
         assert.ok(clock.scheduled.includes(CLARA_RUN_POLL_MS),
@@ -865,7 +895,9 @@ test("630 the run poll runs for EVERY non-terminal status the hydrate can produc
 
         // …and the poll is what ENDS it. The run settles server-side; only this can notice.
         answer = { id: `task-${status}`, status: "completed", created_at: "2026-09-12T00:00:00.000Z" };
-        await h.act(async () => { clock.fire(); await new Promise((r) => setTimeout(r, 10)); });
+        await h.act(() => { clock.fire(); });
+        await settleUntil(h, () => claraThreadStore.getThread(thread).turnStartedAt === null,
+          `${status}: the terminal read retiring the clock`, SETTLE_PASSES);
         assert.equal(claraThreadStore.getThread(thread).turnStartedAt, null,
           `${status}: a terminal read retires the clock`);
         assert.equal(claraThreadStore.getThread(thread).turnStatus, null,
@@ -895,7 +927,7 @@ test("630 after the miss limit the poll gives up OUT LOUD — the clock and the 
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_GIVEUP));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.settle();
       await h.act(() => { claraThreadStore.hydrateRun(THREAD_GIVEUP,
         { taskId: "task-lost", status: "running", startedAt: "2026-09-12T00:00:00.000Z" }, PARKED); });
       await h.act(async () => { await h.rerender(); });
@@ -904,7 +936,8 @@ test("630 after the miss limit the poll gives up OUT LOUD — the clock and the 
 
       visible = false;
       for (let i = 0; i < CLARA_RUN_POLL_MISS_LIMIT; i += 1) {
-        await h.act(async () => { clock.fire(); await new Promise((r) => setTimeout(r, 10)); });
+        await h.act(() => { clock.fire(); });
+        await h.settle();
       }
       const after = claraThreadStore.getThread(THREAD_GIVEUP);
       assert.equal(after.turnLostSight, true, "the give-up is a STATE, not merely a stopped timer");
@@ -938,10 +971,13 @@ test("630 a REFUSED ordinary stop re-attaches this tab's read, the way the admis
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_REATTACH));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.settle();
       claraThreadStore.markAccepted(THREAD_REATTACH, "task-reattach");
       const before = net.streams.length;
-      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 20)); });
+      await h.act(async () => { await h.current.stopReply(); });
+      // The re-attach is a separate effect that fires after the commit that records the refusal.
+      await settleUntil(h, () => net.streams.length > before,
+        "the re-attached read for the turn the refusal left running", SETTLE_PASSES);
       assert.equal(h.current.stop.phase, "failed", "precondition: the door refused");
       assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "denied");
       assert.ok(net.streams.length > before,
@@ -974,10 +1010,13 @@ test("630 a stop the door says had ALREADY FINISHED does not re-attach — there
   try {
     const h = await renderHook(() => useClaraThread(session, `${THREAD_REATTACH.slice(0, -1)}1`));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.settle();
       claraThreadStore.markAccepted(`${THREAD_REATTACH.slice(0, -1)}1`, "task-over");
       const before = net.streams.length;
-      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 20)); });
+      await h.act(async () => { await h.current.stopReply(); });
+      // Absence, not arrival: proving no re-attach happens spends a fixed bound rather than
+      // returning the instant the (already-true) "no new stream yet" check first passes.
+      await absenceSettle(h, 20);
       assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "finished");
       assert.equal(net.streams.length, before,
         "a turn that had already ended has no more bytes to hand this tab");
@@ -1013,9 +1052,12 @@ test("630 a re-attach that FAILS marks the stream, never the send — the live t
   try {
     const h = await renderHook(() => useClaraThread(session, thread));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.settle();
       claraThreadStore.markAccepted(thread, "task-dead");
-      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 40)); });
+      await h.act(async () => { await h.current.stopReply(); });
+      // Absence, not arrival: this proves the failed re-attach does NOT clear `activeTaskId` or
+      // mark the send as errored, so it spends a fixed bound rather than an early-exit poll.
+      await absenceSettle(h, 20);
       const after = claraThreadStore.getThread(thread);
       assert.equal(after.activeTaskId, "task-dead",
         "the turn is still addressable — a re-attach that could not connect proves nothing about the run");
@@ -1085,7 +1127,7 @@ test("630 a refused stop whose re-attach FAILS keeps the live buffer — the par
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_PARKED_REFUSAL));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.settle();
       claraThreadStore.markAccepted(THREAD_PARKED_REFUSAL, "task-parked");
       // Clara is mid-answer and parked: the SSE buffer holds what has arrived, and it is the only
       // place the live clarify card comes from.
@@ -1095,7 +1137,11 @@ test("630 a refused stop whose re-attach FAILS keeps the live buffer — the par
       assert.ok(claraThreadStore.getThread(THREAD_PARKED_REFUSAL).stream.provisionalChunks.length > 0,
         "precondition: the live buffer holds the parked turn's parts");
 
-      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 40)); });
+      await h.act(async () => { await h.current.stopReply(); });
+      // The re-attach that fails is a separate effect that fires after the commit that records the
+      // refusal, so poll for its own settled "lost" state.
+      await settleUntil(h, () => reattachOf(h.current.stop) === "lost",
+        "the re-attach recording that it did not open", SETTLE_PASSES);
 
       assert.equal(h.current.stop.phase, "failed", "precondition: the door refused");
       assert.equal(reattachOf(h.current.stop), "lost",
@@ -1141,13 +1187,17 @@ test("630 a refused stop whose re-attach OPENS says so, and clears the buffer th
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_REATTACH_OPEN));
     try {
-      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.settle();
       claraThreadStore.markAccepted(THREAD_REATTACH_OPEN, "task-open");
       await h.act(async () => {
         claraThreadStore.applyStreamEvent(THREAD_REATTACH_OPEN, { event: "chunk", data: "half an answer" });
       });
 
-      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 40)); });
+      await h.act(async () => { await h.current.stopReply(); });
+      // The re-attach that opens is a separate effect that fires after the commit that records the
+      // refusal, so poll for its own settled "reading" state.
+      await settleUntil(h, () => reattachOf(h.current.stop) === "reading",
+        "the re-attach recording that it opened", SETTLE_PASSES);
 
       assert.equal(reattachOf(h.current.stop), "reading",
         "the attach opened, so — and only now — the machine may say this tab is reading again");
