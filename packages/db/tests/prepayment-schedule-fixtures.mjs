@@ -33,7 +33,7 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 
 import {
-  ROLES, rootQuery, roleQuery, humanQuery, namedCall, opk,
+  rootQuery, humanQuery, namedCall, opk,
   instructionRef, TZ,
 } from "./accounting-plans-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";

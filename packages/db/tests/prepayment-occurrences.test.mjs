@@ -26,7 +26,7 @@ import {
   prepaymentScene, createPrepaymentSchedule, getPrepaymentSchedule, listPrepaymentAttention,
   reviseAccountingPlan, requestPlanCatchUp, wakeDuePlanOccurrences, occurrenceRows,
   occurrenceCount, recordPeriod, workRow, claimWorkRun, settleWorkRun, mintClientObo,
-  wakeRecordJournalEntry, receiptsForWork, deactivateMember, monthEndAfter, monthStartBack,
+  wakeRecordJournalEntry, receiptsForWork, deactivateMember, monthEndAfter,
   closeFiscalYearOf, unapprovedEntry, scheduleRow,
   PREPAY_REASON, PLAN_MODEL,
 } from "./prepayment-schedule-fixtures.mjs";

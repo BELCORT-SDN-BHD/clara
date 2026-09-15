@@ -25,15 +25,15 @@
 // CONTRACT-BLIND against #653's own contract, frontier-gated on the `prepayment_amortisation$`
 // stem.
 
-import { test, before, after } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gatePrepayment, assertPrepaymentCohortPresent, endPool, printLaneNotes, printSkipCount,
+  assertPrepaymentCohortPresent, endPool, printLaneNotes, printSkipCount,
   opk, rootQuery, CLR, assertPair, assertRaises,
   prepaymentScene, createPrepaymentSchedule, getPrepaymentSchedule, listPrepaymentSchedules,
-  createAccountingPlan, reviseAccountingPlan, previewAccountingPlan, instructionRef,
+  createAccountingPlan, reviseAccountingPlan, previewAccountingPlan,
   scheduleRow, scheduleRowsFor, relationPosture, functionGrants, evaluatorFreezeMatches,
-  unapprovedEntry, ambiguousAssetEntry, account, nowhere,
+  unapprovedEntry, ambiguousAssetEntry, nowhere,
   AMORTISATION_KIND, PREPAY_REASON, TZ,
 } from "./prepayment-schedule-fixtures.mjs";
 

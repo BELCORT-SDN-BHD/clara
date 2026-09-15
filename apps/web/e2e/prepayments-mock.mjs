@@ -25,6 +25,12 @@
 //      two canned schedules is what proves the surface re-reads after the write instead of
 //      painting its own optimistic answer.
 
+// THE SHARED READER AND THE NAMED GUARD (`mock-dispatch.mjs`). `matchVerb` runs BEFORE
+// `readCachedJson`, so a verb this lane does not own never touches the stream; and for the four
+// verbs it DOES share with `plans-mock.mjs`, the body is parsed once and re-served to whichever
+// lane asks second — which is the whole reason that module exists.
+import { readCachedJson as readJson, matchVerb } from "./mock-dispatch.mjs";
+
 export const PREPAY = {
   firmId: "65065065-6500-4650-8650-650650650650",
   clientId: "65c0c0c0-6500-4650-8650-650650650650",
@@ -66,16 +72,6 @@ export function prepaymentCatchUps() {
   return state.catchUps;
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
 
 const CLIENT = () => ({
   id: PREPAY.clientId,
@@ -333,7 +329,7 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
 
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
-  if (!PREPAY_RPC_VERBS.has(verb)) return false;
+  if (!matchVerb(PREPAY_RPC_VERBS, verb)) return false;
   const body = await readJson(request);
 
   if (verb === "list_prepayment_schedules") {
