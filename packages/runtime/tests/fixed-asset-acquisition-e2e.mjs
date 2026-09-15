@@ -271,8 +271,15 @@ async function main() {
   const countReceipts = (work) =>
     rig.rootQuery("select count(*)::int as n from clara.operation_receipts where work_id = $1 and outcome = 'committed'", [work])
       .then((r) => r.rows[0].n);
+  // `acquired_date` IS CAST TO TEXT IN SQL, and that is not a style choice: `pg` parses a DATE
+  // column into a JS `Date` at LOCAL midnight, so `toISOString()` on this host shifts it a day
+  // backwards — the exact "timezone-shifted date" this cell exists to refuse. The database's own
+  // rendering is the only one that cannot lie.
   const assets = (client) =>
-    rig.rootQuery("select * from clara.fixed_assets where client_id = $1 order by created_at, id", [client]).then((r) => r.rows);
+    rig.rootQuery(
+      `select f.*, f.acquired_date::text as acquired_date_text
+         from clara.fixed_assets f where f.client_id = $1 order by f.created_at, f.id`,
+      [client]).then((r) => r.rows);
   const readWork = (id) => rig.rootQuery("select * from clara.accounting_work where id = $1", [id]).then((r) => r.rows[0] ?? null);
   const tasksFor = (work) => rig.rootQuery("select id from clara.agent_tasks where work_id = $1", [work]).then((r) => r.rows);
 
@@ -346,7 +353,7 @@ async function main() {
     assert.ok(asset.acquisition_line_id, "…and the cost LINE it was born from");
     assert.equal(String(asset.cost_cents), String(COST_CENTS), "the EXACT minor units, never a float");
     assert.equal(asset.asset_account_code, FA_COST);
-    assert.equal(asset.acquired_date.toISOString().slice(0, 10), "2026-09-01",
+    assert.equal(asset.acquired_date_text, "2026-09-01",
       "the acquisition date is the supplied posting date, never a timezone-shifted one");
     assert.equal(asset.status, "active");
     assert.equal(asset.acquisition_document_id, null, "a Work-lane acquisition carries no document");
