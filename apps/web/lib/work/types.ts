@@ -220,9 +220,17 @@ export type WorkTaskRow = {
   error_code: string | null;
   created_at: string | null;
   updated_at: string | null;
+  // #750 — WHO PRESSED CANCEL, AND WHEN. `clara.cancel_accounting_work` (0184 §G) records the
+  // author on the RUN rather than on the Work (`agent_tasks.cancelled_by/cancelled_at`), and the
+  // masked view this page already reads republishes both columns, so the Cancelled banner names
+  // the person without a new door and without a second read. Optional, for the same reason
+  // `initiated_by` is: a database below the frontier that published them would otherwise take
+  // the WHOLE PostgREST select down.
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
 };
 
-export const WORK_TASK_SELECT = "id,status,error_code,created_at,updated_at";
+export const WORK_TASK_SELECT = "id,status,error_code,created_at,updated_at,cancelled_by,cancelled_at";
 
 export function isTerminalWorkStatus(status: string): boolean {
   return TERMINAL_WORK_STATUSES.has(status);

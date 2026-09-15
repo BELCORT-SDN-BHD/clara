@@ -87,6 +87,7 @@ import {
   isTakeOverable,
   wasTakenOver,
   type AccountingWorkRow,
+  type WorkTaskRow,
 } from "@/lib/work/types";
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -429,6 +430,9 @@ export function WorkDetailView({
 
       <WorkOutcome
         work={work}
+        // #750 — the run row and the roster, so the Cancelled banner can NAME who pressed Cancel.
+        task={task}
+        members={memberNames}
         clientId={clientId}
         canRetry={canRetry}
         canTakeOver={canTakeOver}
@@ -864,6 +868,8 @@ function WorkOutcome({
   interruption,
   accountNames,
   onEditAsNewDraft,
+  task,
+  members,
 }: {
   work: AccountingWorkRow;
   clientId: string;
@@ -887,6 +893,12 @@ function WorkOutcome({
   accountNames: ReadonlyMap<string, string>;
   /** Writes the composer's draft from this basis, before the link navigates. */
   onEditAsNewDraft: () => void;
+  // #750 — THE CANCELLING AUTHOR REACHES THIS COMPONENT THROUGH THE RUN, and no further. The
+  // database records the press on `clara.agent_tasks.cancelled_by/cancelled_at` (0184 §G), which
+  // the masked view this page already reads republishes; the Work row carries no such column. So
+  // the banner names the person from the row the page HAD, rather than through a new door.
+  task: WorkTaskRow | null;
+  members: MemberNameResolver;
 }) {
   const t = useTranslations("WorkDetail");
   const tc = useTranslations("WorkCancel");
@@ -1077,13 +1089,28 @@ function WorkOutcome({
     // what it asked for under `error.superseded`, so nothing the run believed is lost. Shown as a
     // CODE rather than prose: it is the run's own vocabulary, not a sentence for a human.
     const superseded = supersededOutcome(work.error);
+    // #750 — AND WHO PRESSED IT. Until this, the page was the only place that said a Work had been
+    // cancelled and it did not say by whom: `cancel_accounting_work` records the author on the RUN
+    // (`cancelled_by`/`cancelled_at`), and nothing rendered it. Both halves must be present — a
+    // "Cancelled by" line with no name, or a name with no time, is worse than the plain banner.
+    const cancelledBy = task?.cancelled_by ?? null;
+    const cancelledAt = task?.cancelled_at ?? null;
     return (
       <StateBanner
         tone="neutral"
         title={t("cancelled.title")}
         code={superseded === null ? undefined : tc("cancelledSuperseded", { outcome: superseded })}
       >
-        {t("cancelled.body")}
+        <span className="flex flex-col gap-1">
+          <span>{t("cancelled.body")}</span>
+          {cancelledBy !== null && cancelledAt !== null ? (
+            <span className="inline-flex flex-wrap items-baseline gap-1">
+              <span>{tc("cancelledByLabel")}</span>
+              <MemberName userId={cancelledBy} resolver={members} showRole={false} />
+              <span>{tc("cancelledAt", { at: businessDateTime(new Date(cancelledAt)) })}</span>
+            </span>
+          ) : null}
+        </span>
       </StateBanner>
     );
   }

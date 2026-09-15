@@ -4878,6 +4878,8 @@
     "cancelledTitle": "Cancelled",
     "cancelledBody": "Nothing was posted.",
     "cancelledSuperseded": "The run reported {outcome} as it stopped.",
+    "cancelledByLabel": "Cancelled by",
+    "cancelledAt": "on {at}",
     "completedAfterCancelTitle": "This Work completed before the cancellation reached it",
     "completedAfterCancelBody": "The entry below was recorded and stays recorded. A cancel never reverses a posted entry — a correction is a separate, linked operation.",
     "viewEntry": "View the entry",

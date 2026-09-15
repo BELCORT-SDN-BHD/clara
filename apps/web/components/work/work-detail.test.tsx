@@ -912,6 +912,51 @@ test("630 a CANCELLED work shows the run's superseded outcome when the settle tr
   }
 });
 
+// #750 -----------------------------------------------------------------------------------------
+test("750 a CANCELLED work NAMES who pressed Cancel and when; a run that carries neither says nothing extra", async () => {
+  const cancelled = (task: Record<string, unknown> | null) =>
+    data({
+      work: workRow({ status: "cancelled", current_task_id: TASK }),
+      task: task as never,
+    });
+
+  // THE RUN CARRIES THE PRESS. `clara.cancel_accounting_work` records the author on
+  // `clara.agent_tasks.cancelled_by/cancelled_at` (0184 §G) and the masked view republishes both.
+  const named = await renderComponent(
+    App({
+      load: async () =>
+        cancelled({
+          id: TASK, status: "cancelled", error_code: null,
+          created_at: "2026-09-01T01:00:00.000Z", updated_at: "2026-09-12T06:14:00.000Z",
+          cancelled_by: USER, cancelled_at: "2026-09-12T06:14:00.000Z",
+        }),
+    }),
+  );
+  try {
+    await named.settle();
+    assert.match(named.text(), /Cancelled by/, "750 the banner says a person did this");
+    // The roster read is not mocked here, so `MemberName` falls through to its honest raw-id
+    // rendering — which is the CONTRACT (lib/members/use-member-names.ts), not a shortcoming: a
+    // name it cannot resolve is never guessed. The cell asserts the id it actually printed.
+    assert.match(named.text(), new RegExp(USER.slice(0, 8)), "750 …and names them");
+    assert.match(named.text(), /12 Sept 2026/, "750 …and when, in the firm's business timezone");
+  } finally {
+    await named.unmount();
+  }
+
+  // NEITHER HALF, NO LINE. A "Cancelled by" with nothing after it is worse than the plain banner.
+  const bare = await renderComponent(App({ load: async () => cancelled(null) }));
+  try {
+    await bare.settle();
+    assert.match(bare.text(), /Cancelled/, "750 the banner itself is unchanged");
+    assert.equal(/Cancelled by/.test(bare.text()), false,
+      "750 …and claims no author when the run carries none");
+  } finally {
+    await bare.unmount();
+  }
+});
+// #750 -----------------------------------------------------------------------------------------
+
 test("630 an authority_lost refusal offers Take responsibility; a plain failure does not", async () => {
   const taken: Array<{ workId: string; basisDigest?: string | null }> = [];
   const orphaned = () =>
