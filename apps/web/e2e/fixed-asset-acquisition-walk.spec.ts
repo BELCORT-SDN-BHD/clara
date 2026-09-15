@@ -89,7 +89,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     await expect(completeRow.getByText("Waiting on depreciation particulars")).toHaveCount(0);
 
     // EXACT MONEY, from the DB's own projection.
-    await expect(pendingRow.getByText("8,500.00")).toBeVisible();
+    await expect(pendingRow.getByText("RM 8,500.00").first()).toBeVisible();
 
     // STABLE URL AND BACK. The list → detail → Back journey must return the reader to the register
     // they were on, with its tab query intact.
@@ -102,11 +102,11 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
 
   test("the detail page shows a COMPLETE acquisition beside SEPARATELY pending particulars", async ({ page }) => {
     await signInTo(page, DETAIL_URL);
-    await expect(page.getByRole("heading", { name: "Fixed asset" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
 
     // The acquisition is WHOLE: exact cents, its currency, its journal entry, its Work and its
     // receipt — all on one tab, none of them waiting on anything.
-    await expect(page.getByText("8,500.00").first()).toBeVisible();
+    await expect(page.getByText("RM 8,500.00").first()).toBeVisible();
     await expect(page.getByText("MYR", { exact: false }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: FA.entryId })).toBeVisible();
     await expect(page.getByRole("link", { name: FA.workId })).toBeVisible();
@@ -130,7 +130,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
 
   test("History names the correction chain and says how each relationship was derived", async ({ page }) => {
     await signInTo(page, REVERSED_URL);
-    await expect(page.getByRole("heading", { name: "Fixed asset" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
     await openTab(page, "History");
     await expect(page.getByRole("link", { name: FA.assetName })).toBeVisible();
     await expect(page.getByText("Successor", { exact: true }).first()).toBeVisible();
@@ -144,7 +144,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   test("an invalid answer names the dependent CONTROL, keeps the draft, and a valid one persists", async ({ page }) => {
     await ensureRealFocus(page);
     await signInTo(page, ANSWERABLE_URL);
-    await expect(page.getByRole("heading", { name: "Fixed asset" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
     await openTab(page, "Particulars & policy");
 
     const trigger = page.getByRole("button", { name: "Complete particulars" });
@@ -166,10 +166,10 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
 
     await trigger.click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    const method = page.getByRole("dialog").getByLabel("Method", { exact: false });
-    await method.selectOption("straight_line");
-    await page.getByRole("dialog").getByLabel("In-service date", { exact: false }).fill("2026-08-20");
-    await page.getByRole("dialog").getByLabel("Useful life", { exact: false }).fill("60");
+    const dialogBody = page.getByRole("dialog");
+    await dialogBody.getByLabel("Depreciation method").selectOption("straight_line");
+    await dialogBody.getByLabel("In-service (start) date").fill("2026-08-20");
+    await dialogBody.getByLabel("Useful life (months)").fill("60");
     const confirm = page.getByRole("dialog").getByRole("button", { name: "Complete particulars" });
     await expect(confirm).toBeEnabled();
     await confirm.click();
@@ -185,8 +185,8 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   test("320px and 200% zoom keep the identity, the amount and the primary action readable", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 720 });
     await signInTo(page, DETAIL_URL);
-    await expect(page.getByRole("heading", { name: "Fixed asset" })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("8,500.00").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("RM 8,500.00").first()).toBeVisible();
 
     // NO PAGE-WIDE HORIZONTAL SCROLL at 320 CSS px. A ledger table may own a labelled horizontal
     // viewport of its own; the PAGE may not.
@@ -205,7 +205,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await ensureRealFocus(page);
     await signInTo(page, DETAIL_URL);
-    await expect(page.getByRole("heading", { name: "Fixed asset" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
 
     // THE TAB STRIP IS A REAL TABLIST with a roving tabindex — Base UI owns the arrow-key map, and
     // this is the cell that proves the ARIA contract is kept rather than half-declared.
@@ -238,22 +238,22 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     } else {
       await trigger.click();
       const dialog = page.getByRole("dialog");
-      await dialog.getByLabel("Useful life", { exact: false }).fill("84");
+      await dialog.getByLabel("Useful life (months)").fill("84");
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
       await trigger.click();
-      await expect(page.getByRole("dialog").getByLabel("Useful life", { exact: false })).toHaveValue("84");
+      await expect(page.getByRole("dialog").getByLabel("Useful life (months)")).toHaveValue("84");
       await page.keyboard.press("Escape");
     }
 
     // AND NEVER ACROSS ASSETS. A draft is scoped to the object it was typed against; carrying it
     // onto a different asset would be an accounting claim nobody made.
     await page.goto(DETAIL_URL);
-    await expect(page.getByRole("heading", { name: "Fixed asset" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
     await openTab(page, "Particulars & policy");
     const otherTrigger = page.getByRole("button", { name: "Complete particulars" });
     await expect(otherTrigger).toBeVisible();
     await otherTrigger.click();
-    await expect(page.getByRole("dialog").getByLabel("Useful life", { exact: false })).toHaveValue("");
+    await expect(page.getByRole("dialog").getByLabel("Useful life (months)")).toHaveValue("");
   });
 });
