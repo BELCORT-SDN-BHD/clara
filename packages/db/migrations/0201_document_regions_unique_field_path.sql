@@ -71,8 +71,15 @@
 --     it would SILENTLY ABSORB every line after the first and leave an opening balance holding
 --     one row. The failure would be quiet and the money would be wrong.
 --
--- AND `prior_gl.line` IS EXCLUDED FOR THE SAME REASON, PINNED BY A READER RATHER THAN BY A CHECK
--- (owner ruling, #778 round 4). No producer emits it yet -- packages/runtime/lib/prior-gl-cells.mjs:4
+-- AND `prior_gl.line` IS EXCLUDED FOR THE SAME REASON, PINNED BY A READER RATHER THAN BY A CHECK.
+-- ATTRIBUTION, stated exactly: this exclusion is the ORCHESTRATOR'S IN-SESSION RULING of
+-- 2026-09-15, not an owner ruling -- issue #778 carries no such comment, and an earlier draft of
+-- this header wrongly said it did. What the ruling rests on is EVIDENCE, not authority: the
+-- shipping reader below, and the fact that the sibling literal `opening_tb.line` is pinned by a
+-- CHECK (0017's ck_document_regions_opening_fact_0017) for exactly the same plural shape. The
+-- ticket's own title ("one region per (extraction_id, field_path)") is therefore not true of these
+-- two paths, which is declared here, in the index comment, in the tail and in ARCHITECTURE §5.A.
+-- No producer emits it yet -- packages/runtime/lib/prior-gl-cells.mjs:4
 -- says so in as many words ("NO new field_path") -- but a SHIPPING production reader already
 -- consumes MANY of them per extraction, which pins the shape as firmly as a CHECK would:
 --

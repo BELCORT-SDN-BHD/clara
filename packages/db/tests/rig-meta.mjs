@@ -1893,6 +1893,18 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
 // whether or not 0212 has been applied.
 // #797 END
 
+// #779 [0207, document_capabilities.registry_version monotonicity] — NO COHORT, and here is why,
+// stated rather than left to inference (the same courtesy the #797 block above pays). 0207 mints
+// exactly ONE new name, the trigger body `clara._tf_document_capabilities_version_monotone()`. It
+// is granted to NOBODY — revoked from PUBLIC, no role grant at all — so there is no grant-matrix
+// row for `grantMatrixFailures()` to claim, and a cohort of one would only assert a name's
+// presence, which the trigger's own attachment already proves inside 0207's §C TAIL. It is NOT
+// unswept: `definerHygieneFailures()` (below) derives every clara SECURITY DEFINER body from the
+// LIVE CATALOG rather than from a roster, so it checks this one's owner, pinned search_path and
+// ungranted ACL on every run, at every frontier, without being told it exists. 0207 changes no
+// existing name, signature or grant.
+// #779 END
+
 // #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
 // same "wholly present or wholly absent" reason 0178's and 0184's carry.
 //

@@ -384,7 +384,8 @@ run id。两个谓词同时被关系的 CHECK 与写入动词调用，因此墙�
 `p_observed_revisions`／`p_run`）一起收紧。**写入方仍未收紧**：`work-trace.mjs` 的 `traceRevisionOf`
 仍接受任意有限数，`traceRunOf` 根本没有作用在 `recordTrace` 发送的值上；该模块在冻结闭包内，按 #815
 的裁定只能随 `claraWork_v4` 交付，相应要求记在 `packages/runtime/README.md`。因此准确的说法是：
-**门对这两个字段做形状约束，写入方没有，门就是那道墙**；已存储的行不回溯校验、不重写。[已实现]
+**门对这两个字段做形状约束，写入方没有，门就是那道墙**；已存储的行不回溯校验、不重写。
+[已实现，本地已验证；hosted evidence pending]（artifacts：迁移 `packages/db/migrations/0210_work_trace_shape_bounds.sql`；cells `w811.trace.revision_bounds`／`w811.trace.run_grammar`，见 `packages/db/tests/work-egress-authority.test.mjs:800,839`）
 
 **"撤销可逆"说准确：哪一种撤回，由哪一道门回来（#812）。** 上面"撤销可逆，且对已消耗的 dispatch
 是追溯的"这句，现在按撤回的种类展开：
@@ -411,7 +412,8 @@ run id。两个谓词同时被关系的 CHECK 与写入动词调用，因此墙�
 做法**，0020 那条 CHECK **有意保持原样、不重切**（#812 裁定；0211 的 §0／§T 各测量它一次，所以
 "有意保持"是可核查的说法而不是假设）。控制台侧：Work 详情的 `egress_not_authorized` 面孔对
 **owner** 多出一个动作"Re-activate AI processing for this client"，文案同时说明它恢复的是新工作、
-当前这条记录仍为 refused。[已实现]
+当前这条记录仍为 refused。
+[已实现，本地已验证；hosted evidence pending]（artifacts：迁移 `packages/db/migrations/0211_accounting_work_egress_recovery.sql`；cells `w812.reactivate.round_trip`／`w812.reactivate.retroactive`／`w812.reactivate.door`，见 `packages/db/tests/work-egress-authority.test.mjs`）
 <!-- #811 #812 -->
 
 ### F. 发布与回退

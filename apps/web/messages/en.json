@@ -4986,7 +4986,7 @@
     "columnCase": "Case",
     "columnFirm": "Firm",
     "columnApplicant": "Applicant",
-  "columnApplicantName": "Name",
+    "columnApplicantName": "Name",
     "columnState": "State",
     "columnOccurred": "Since",
     "columnActions": "Actions",

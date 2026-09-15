@@ -503,8 +503,14 @@ test("w629.answer.version-arg a missing or non-positive version is refused befor
 
 test("w629.answer.one-effect a single-field question answered once leaves the Work parked for DELIVERY", async (t) => {
   if (await gateQuestion(t)) return;
-  const p = await parkedWork({ client: A1(), author: BOB(), fields: oneField() });
-  await answerWorkQuestion(BOB(), { question: p.questionId, version: 1, answer: { memo: "September rent" } });
+  // #721: the single field is `narration`, not `memo`. This cell is about the EFFECT of one accepted
+  // answer (the Work stays parked, one question, one answer) and the key was always incidental —
+  // but from 0200 a `memo` answer that differs from the ADMITTED memo is a basis change and is
+  // refused, so asking for `memo` here would make this cell about the basis rule instead of about
+  // the effect. `note` is not a basis element and never was. // #721
+  const p = await parkedWork({ client: A1(), author: BOB(),
+    fields: oneField({ key: "narration", label: "Anything to add?" }) });
+  await answerWorkQuestion(BOB(), { question: p.questionId, version: 1, answer: { narration: "September rent" } });
   const w = await workRow(p.workId);
   assert.equal(w.status, "awaiting_input",
     "answer.one-effect: accepting an answer does NOT advance the Work — the run must consume it");
@@ -624,18 +630,76 @@ test("w721.answer.still-lands a confirm/choose/explain answer is UNTOUCHED, incl
   assert.equal(row.answer.posting_date, "2026-09-01");
   assert.equal(row.answer.amount_cents, 120000);
 
-  // …and a plain single-field explain, which names no basis element at all.
-  const q = await parkedWork({ client: A1(), author: BOB(), fields: oneField() });
-  const memo = await answerWorkQuestion(BOB(), {
-    question: q.questionId, version: 1, answer: { memo: "September rent, Jalan Ampang" },
+  // …and a plain single-field explain, which names no basis element at all. // #721: the field is
+  // `narration`, not `memo` — an admitted journal basis ALWAYS carries a non-empty memo (0178's
+  // `_assert_journal_basis` requires one), so a differing `memo` answer is now the declared-but-
+  // present-and-different case the cell below drives, not a lands-unchanged one.
+  const q = await parkedWork({ client: A1(), author: BOB(),
+    fields: oneField({ key: "narration", label: "Anything to add?" }) });
+  const narration = await answerWorkQuestion(BOB(), {
+    question: q.questionId, version: 1, answer: { narration: "September rent, Jalan Ampang" },
   });
-  assert.equal(memo.status, "answered", "w721.answer.still-lands a declared memo still lands");
+  assert.equal(narration.status, "answered", "w721.answer.still-lands a declared non-basis field still lands");
 
   // AND EVERY OTHER UNDECLARED KEY KEEPS ITS OLD DIAGNOSIS. The new arm is narrow by construction.
-  const r = await parkedWork({ client: A1(), author: BOB(), fields: oneField() });
+  const r = await parkedWork({ client: A1(), author: BOB(),
+    fields: oneField({ key: "narration", label: "Anything to add?" }) });
   const { err } = await assertPair(CLR.badRequest, QREASON.invalidAnswer,
-    () => answerWorkQuestion(BOB(), { question: r.questionId, version: 1, answer: { memo: "x", colour: "red" } }),
+    () => answerWorkQuestion(BOB(), { question: r.questionId, version: 1, answer: { narration: "x", colour: "red" } }),
     "w721.answer.still-lands an unrelated undeclared key is still unknown_key");
   assert.equal(detailOf(err).constraint, "unknown_key");
+});
+
+// #721 · THE CASE THE TICKET WAS FILED FOR, and the one the first cut of 0200 left silent: a
+// question that DECLARES a basis element on a Work whose admitted basis ALREADY carries it, and a
+// human who replies with a different value. Before this arm the answer landed, the run unblocked,
+// and 0178's digest law then posted the ADMITTED value anyway — "the answered value can only
+// UNBLOCK the model … it cannot change what is posted" (#721's opening sentence), with no refusal
+// and no affordance. Now it is refused BY ELEMENT, and `clara.restate_accounting_work` is where
+// the new instruction goes.
+test("w721.answer.declared-but-different a DECLARED element the admitted basis already carries with another value is refused BY ELEMENT", async (t) => {
+  if (await gateRestate(t)) return;
+  const admitted = basis();          // posting_date 2026-09-01, memo "Office rent paid from Maybank", MYR
+  const cases = [
+    ["the posting date #629 itself asks for", twoFields(),
+      { posting_date: "2026-09-09", amount_cents: 120000 }, "posting_date", admitted.posting_date],
+    ["the memo", oneField(), { memo: "rent, revised" }, "memo", admitted.memo],
+    ["the currency", [{ key: "currency", label: "Which currency?", kind: "text", required: true }],
+      { currency: "SGD" }, "currency", admitted.currency],
+  ];
+  for (const [label, fields, answer, element, was] of cases) {
+    const p = await parkedWork({ client: A1(), author: BOB(), fields, basis: admitted });
+    const { err } = await assertPair(CLR.badRequest, "basis_change_not_allowed",
+      () => answerWorkQuestion(BOB(), { question: p.questionId, version: 1, answer }),
+      `w721.answer.declared-but-different ${label}`);
+    const d = detailOf(err);
+    assert.equal(d.element, element,
+      `w721.answer.declared-but-different ${label}: the refusal NAMES the element`);
+    assert.equal(d.admitted, was,
+      `w721.answer.declared-but-different ${label}: …and quotes what was admitted, so the human can see the difference`);
+    assert.equal((await interruptionRow(p.questionId)).status, "pending",
+      `w721.answer.declared-but-different ${label}: a refused answer leaves the question open`);
+  }
+
+  // THE VACUITY CONTROL. The SAME declared key, answered with the SAME value the basis carries,
+  // is a CONFIRMATION and still lands — so the arm above is about the difference, not about the
+  // key being declared.
+  const ok = await parkedWork({ client: A1(), author: BOB(), fields: twoFields(), basis: admitted });
+  const out = await answerWorkQuestion(BOB(), {
+    question: ok.questionId, version: 1,
+    answer: { posting_date: admitted.posting_date, amount_cents: 120000 },
+  });
+  assert.equal(out.status, "answered",
+    "w721.answer.declared-but-different: confirming the admitted value is not changing it");
+
+  // …AND THE MALFORMED ANSWER KEEPS #629'S OWN DIAGNOSIS. The new arm is asserted AFTER the shape
+  // assertion precisely so that `01/09/2026` is still `iso_date`, not `basis_change_not_allowed`.
+  const bad = await parkedWork({ client: A1(), author: BOB(), fields: twoFields(), basis: admitted });
+  const { err: shapeErr } = await assertPair(CLR.badRequest, QREASON.invalidAnswer,
+    () => answerWorkQuestion(BOB(), {
+      question: bad.questionId, version: 1, answer: { posting_date: "01/09/2026", amount_cents: 120000 },
+    }),
+    "w721.answer.declared-but-different a malformed date keeps its shape diagnosis");
+  assert.equal(detailOf(shapeErr).constraint, "iso_date");
 });
 // #721 ========================================================================================

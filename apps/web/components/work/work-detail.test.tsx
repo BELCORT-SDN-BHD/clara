@@ -19,7 +19,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { clickButton, renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { ReadError } from "../../lib/read";
-import { WORK_HEADING_ID, WorkDetailView } from "./work-detail";
+import { UNKNOWN_ACCOUNT_LINE_SENTENCE, WORK_HEADING_ID, WorkDetailView } from "./work-detail";
 import { WORK_STALE_AFTER_MS } from "../../lib/work/use-work-detail";
 import { journalDraftKey, type DraftStorage } from "../../lib/work/journal-draft";
 import type { CancelWorkResult, RetryWorkResult, TakeOverWorkResult } from "../../lib/work/api";
@@ -420,6 +420,26 @@ test("a REFUSED work renders the DB's own typed reason, with a retry and an edit
 // line ordinal ("line 2 codes to an account…"); the page resolves that ordinal, together with the
 // Work's own purpose and basis lines, back to the adjustment field that produced it, and renders
 // that field's label BESIDE the database's own sentence — never instead of it.
+//
+// THE SENTENCE IS SPELLED ONCE, by the component's exported `UNKNOWN_ACCOUNT_LINE_SENTENCE`. The
+// fixtures below are BUILT from it rather than re-typed, so a reworded regex cannot leave these
+// cells green against prose the page can no longer parse. The other half of the pin is db-side:
+// `w799.post.unknown-account-sentence` (packages/db/tests/work-journal-post.test.mjs) reads the
+// installed `_record_journal_entry_core` body and asserts it still raises this exact prefix, so a
+// migration that rewords it reds a db cell instead of silently turning this affordance off.
+const dbUnknownAccountMessage = (line: number, code: string) =>
+  `line ${line} codes to an account this client does not have active: ${code}`;
+
+test("799: the fixture prose the cells below use is exactly what the page's own matcher accepts", () => {
+  const m = UNKNOWN_ACCOUNT_LINE_SENTENCE.exec(dbUnknownAccountMessage(2, "9999"));
+  assert.ok(m, "the component's exported sentence matcher must accept the database's own wording");
+  assert.equal(m?.[1], "2", "…and must capture the line ordinal");
+  assert.equal(
+    UNKNOWN_ACCOUNT_LINE_SENTENCE.exec("some other refusal entirely"),
+    null,
+    "…and must not claim an unrelated refusal",
+  );
+});
 
 test("799: a refused stock-adjustment Work names the resolved field beside the DB's unchanged message", async () => {
   const h = await renderComponent(
@@ -441,7 +461,7 @@ test("799: a refused stock-adjustment Work names the resolved field beside the D
             error: {
               code: "CLR10",
               reason: "unknown_account",
-              message: "line 2 codes to an account this client does not have active: 9999",
+              message: dbUnknownAccountMessage(2, "9999"),
               recoverable: true,
             },
           }),
@@ -474,7 +494,7 @@ test("799: the generic line reference is the fallback for a journal_entry Work, 
             error: {
               code: "CLR10",
               reason: "unknown_account",
-              message: "line 2 codes to an account this client does not have active: 9999",
+              message: dbUnknownAccountMessage(2, "9999"),
               recoverable: true,
             },
           }),
@@ -546,7 +566,7 @@ test("799: the generic line reference is the fallback for a journal_entry Work, 
             error: {
               code: "CLR10",
               reason: "unknown_account",
-              message: "line 3 codes to an account this client does not have active: 9999",
+              message: dbUnknownAccountMessage(3, "9999"),
               recoverable: true,
             },
           }),

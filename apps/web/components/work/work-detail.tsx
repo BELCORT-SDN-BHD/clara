@@ -897,16 +897,31 @@ function WorkFacts({
   );
 }
 
-/** #799 — THE COMMIT-TIME `unknown_account` REFUSAL'S OWN LINE ORDINAL, read straight off the
- *  database's own sentence ("line 2 codes to an account this client does not have active: …",
- *  migrations 0178/0182/0184/0194/0195's shared `_record_journal_entry_core` step 6). This is the
- *  ONLY place that sentence's shape is parsed — `fieldForAdjustmentLineOrdinal` takes the ordinal
- *  from here and the Work's own `purpose`/`basis.lines` and resolves the leg; the sentence itself
- *  is never rewritten, reordered or replaced by this parse. `null` for anything that does not open
- *  with "line N codes to an account" — a message shape from a different constraint, or none. */
+/** #799 — THE COMMIT-TIME `unknown_account` REFUSAL'S SENTENCE SHAPE, as one exported constant.
+ *
+ *  THE COUPLING THIS NAMES. The refusal's payload is frozen (`detail` carries the reason and the
+ *  account code, never the line ordinal), so the ordinal exists only inside the database's own
+ *  English prose. That is a design decision, not an oversight — but it makes this regex a SECOND
+ *  place a rule lives, and the first place is SQL: `_record_journal_entry_core` step 6,
+ *  `raise exception 'line % codes to an account this client does not have active: %'`
+ *  (`packages/db/migrations/0204_record_journal_entry_core_reversal_liveness.sql:545`, carried
+ *  verbatim from 0178/0182/0184/0194/0195).
+ *
+ *  SO THE TWO ARE PINNED TOGETHER RATHER THAN LEFT TO AGREE BY LUCK. The db cell
+ *  `w799.post.unknown-account-sentence` (`packages/db/tests/work-journal-post.test.mjs`) reads the
+ *  INSTALLED body out of `pg_proc` and asserts it still raises exactly this prefix. A future
+ *  migration that rewords the sentence therefore REDS THAT CELL instead of silently turning this
+ *  affordance off with every web test still green — which is the failure mode the review named.
+ *  Exported so the web tests spell it once, here, rather than re-typing the prose a third time. */
+export const UNKNOWN_ACCOUNT_LINE_SENTENCE = /^line\s+(\d+)\s+codes to an account/i;
+
+/** The ordinal itself. `fieldForAdjustmentLineOrdinal` takes it from here, together with the
+ *  Work's own `purpose`/`basis.lines`, and resolves the leg; the sentence is never rewritten,
+ *  reordered or replaced by this parse — the database's words are always rendered whole. `null`
+ *  for anything that does not open with "line N codes to an account". */
 function unknownAccountLineOrdinal(message: string | null | undefined): number | null {
   if (typeof message !== "string") return null;
-  const match = /^line\s+(\d+)\s+codes to an account/i.exec(message.trim());
+  const match = UNKNOWN_ACCOUNT_LINE_SENTENCE.exec(message.trim());
   if (!match) return null;
   const ordinal = Number(match[1]);
   return Number.isInteger(ordinal) && ordinal >= 1 ? ordinal : null;

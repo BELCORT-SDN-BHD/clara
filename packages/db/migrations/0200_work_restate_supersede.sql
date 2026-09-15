@@ -79,14 +79,29 @@
 --   * the answer carries a `basis` or `basis_patch` member — an explicit attempt to restate the
 --     basis through the answer door; or
 --   * the answer carries a basis-element key (`account`, `amount`, `amount_cents`, `posting_date`,
---     `currency`, `evidence`, `memo`) THAT THIS QUESTION DID NOT DECLARE.
+--     `currency`, `evidence`, `memo`) THAT THIS QUESTION DID NOT DECLARE; or
+--   * the answer carries a DECLARED basis-element key whose element is already PRESENT in the
+--     ADMITTED BASIS with a DIFFERENT, non-blank value. (This third arm is asserted AFTER the
+--     generic answer assertion, so a malformed or blank value keeps #629's `iso_date`/`required`
+--     diagnosis; the first two are asserted BEFORE it, so an undeclared basis element is not
+--     diagnosed `unknown_key`. §D states the precedence argument in full.)
 --
 -- The second arm previously answered `invalid_answer` / `unknown_key` out of
 -- `clara._assert_work_answer` — true, and useless: it named a key the caller "should not send"
 -- where the honest answer is "that is a basis change; restate the instruction instead", which is
 -- the affordance B3 now offers. Every OTHER undeclared key still answers `unknown_key`, unchanged.
--- ASSUMPTION, recorded for review: this is the conservative reading. A wider one (refusing every
--- basis-element key, declared or not) would red #629's shipped cells and remove a working path.
+--
+-- THE THIRD ARM IS THE RULING'S LITERAL WORDING, and the case #721 opens with. Declaring a key is
+-- licence to COMPLETE an element, not licence to overwrite one: #629 legitimately asks "which date
+-- should this be posted on?" on a Work whose admitted basis ALREADY names a posting date, and the
+-- human types a different one. Before this arm that answer landed, the run unblocked, and 0178's
+-- digest law then posted the ADMITTED date anyway — "the answered value can only UNBLOCK the
+-- model … it cannot change what is posted", silently. The discriminator is the admitted basis
+-- itself, read through the new third argument: PRESENT-and-different refuses (naming the element
+-- and quoting what was admitted), ABSENT completes and lands. `account`, `amount`, `amount_cents`
+-- and `evidence` are never top-level members of a journal basis (0178 canonicalises the money into
+-- `lines`), so for those the arm is structurally inert and #629's path is untouched; `posting_date`,
+-- `currency` and `memo` are mandatory at admission, so for those it is the whole rule.
 --
 -- =====================================================================================
 -- DEPLOY ORDER. NO CONSUMER-FIRST OBLIGATION for the two recuts (both keep their signature, grant
@@ -103,6 +118,8 @@
 -- clara.answer_work_question                                  (human lane, bookkeeper+)
 --   CLR10 basis_change_not_allowed  detail.element = account|amount|posting_date|currency|
 --                                   evidence|memo|basis          — NEW; every 0180 pair unchanged
+--                                   detail.admitted = <the admitted value>, on the declared-but-
+--                                   different arm ONLY (the caller may already read its own Work)
 --
 -- clara.restate_accounting_work                               (runtime lane)
 --   CLR10 invalid_op_key / op_key_conflict     — via clara._work_door_ctx
@@ -309,14 +326,15 @@ end $$;
 -- §C  THE BASIS-CHANGE DISCRIMINATOR. One assertion, one place — the same discipline
 -- `clara._assert_work_answer` is written under, so the vocabulary is not restated at the door.
 -- =====================================================================================
-create function clara._assert_answer_changes_no_basis(p_fields jsonb, p_answer jsonb) returns void
+create function clara._assert_answer_changes_no_basis(p_fields jsonb, p_answer jsonb,
+    p_basis jsonb) returns void
   language plpgsql immutable set search_path = clara, pg_temp as $$
 declare
   -- The ruling's own six, plus `amount_cents` (the estate's spelling of `amount` on the wire),
   -- reported under the name the ruling uses.
   v_elements text[] := array['account','amount','amount_cents','posting_date','currency','evidence','memo'];
   v_declared text[] := '{}';
-  f jsonb; k text; v_el text;
+  f jsonb; k text; v_el text; v_admitted text; v_claimed text;
 begin
   if p_answer is null or jsonb_typeof(p_answer) <> 'object' then return; end if;
   for f in select value from jsonb_array_elements(coalesce(p_fields,'[]'::jsonb)) loop
@@ -344,9 +362,36 @@ begin
             'element', case when k = 'amount_cents' then 'amount' else k end,
             'field', k)::text;
     end if;
+    -- #721 · THE DECLARED-BUT-DIFFERENT ARM — the case the ticket was actually filed for. A
+    -- question may legitimately DECLARE `posting_date` (#629 ships exactly that), so being
+    -- declared is not licence to overwrite: it is licence to COMPLETE. The discriminator is the
+    -- ADMITTED BASIS itself, which is the only thing that can answer "would this change what gets
+    -- posted": if the basis already carries this element with a DIFFERENT value, the reply is a
+    -- new instruction and `clara.restate_accounting_work` is where it goes. If the element is
+    -- ABSENT from the admitted basis — a `null`, an empty string, or simply no member, which is
+    -- what `account` / `amount` / `amount_cents` / `evidence` always are at the TOP LEVEL of a
+    -- journal basis (0178 canonicalises the money into `lines`) — the answer completes it and
+    -- lands, unchanged from 0180. Comparison is on the RENDERED scalar (`->>`, trimmed), because
+    -- an answer arrives as the wire value the question asked for, never as canonical basis jsonb.
+    if k = any (v_elements) and (k = any (v_declared))
+       and jsonb_typeof(coalesce(p_basis,'{}'::jsonb)) = 'object' then
+      v_admitted := nullif(btrim(coalesce(p_basis->>k, '')), '');
+      v_claimed  := nullif(btrim(coalesce(p_answer->>k, '')), '');
+      -- A BLANK or absent claim is not a claim. It is a malformed answer, and
+      -- `clara._assert_work_answer` owns that diagnosis (`required`); saying "you may not change
+      -- the posting date" about an empty string would be a worse answer, not a stricter one.
+      if v_admitted is not null and v_claimed is not null and v_admitted is distinct from v_claimed then
+        raise exception 'a question''s answer cannot change the admitted basis element % (admitted %)',
+          k, v_admitted
+          using errcode='CLR10',
+            detail=jsonb_build_object('reason','basis_change_not_allowed',
+              'element', case when k = 'amount_cents' then 'amount' else k end,
+              'field', k, 'admitted', v_admitted)::text;
+      end if;
+    end if;
   end loop;
 end $$;
-revoke all on function clara._assert_answer_changes_no_basis(jsonb,jsonb) from public;
+revoke all on function clara._assert_answer_changes_no_basis(jsonb,jsonb,jsonb) from public;
 
 -- =====================================================================================
 -- §D  clara.answer_work_question — RECUT. 0180 §E's body with ONE assertion added, immediately
@@ -397,7 +442,10 @@ begin
   if not found or i.firm_id <> c.firm or i.work_id is null then
     raise exception 'question not found' using errcode='CLR11', detail='{"reason":"question_not_found"}';
   end if;
-  select aw.id, aw.status, aw.basis_digest, aw.current_task_id, aw.client_id into w
+  -- #721: `aw.basis` joins the select because the basis-change discriminator below needs the
+  -- ADMITTED values, not only their digest — a digest can say "it changed", never "you are about
+  -- to change posting_date, which is already 2026-09-01".
+  select aw.id, aw.status, aw.basis_digest, aw.current_task_id, aw.client_id, aw.basis into w
     from clara.accounting_work aw where aw.id = i.work_id;
 
   select cl.status into v_client_status from clara.clients cl
@@ -440,11 +488,25 @@ begin
 
   -- #721 · AN ANSWER COMPLETES ONLY WHAT WAS ASKED. A reply that claims a basis element is not an
   -- answer to this question — it is a NEW instruction, and `clara.restate_accounting_work` is where
-  -- it goes. Refused BEFORE the generic answer assertion so the diagnosis names the basis rather
-  -- than "a key this question did not ask for".
-  perform clara._assert_answer_changes_no_basis(i.fields, p_answer);
+  -- it goes. The rule is asserted in TWO PHASES around the generic answer assertion, because the
+  -- two halves want opposite precedence and one call cannot have both:
+  --
+  --   PHASE 1, BEFORE it (`p_basis` deliberately NULL, so only the shape arms can fire): an
+  --   explicit `basis`/`basis_patch` member, and a basis-element key THIS QUESTION DID NOT
+  --   DECLARE. These must beat `clara._assert_work_answer`, which would otherwise reach an
+  --   undeclared basis element and answer `unknown_key` — true, and useless.
+  --
+  --   PHASE 2, AFTER it (`p_basis` = the ADMITTED basis): a DECLARED basis element that the
+  --   admitted basis already carries with a different value. This must LOSE to
+  --   `clara._assert_work_answer`, because "you may not change the posting date" is the wrong
+  --   thing to say about `01/09/2026` or a blank — those are malformed answers, and #629's typed
+  --   `iso_date` / `required` diagnosis is the better one. Only a well-formed claim reaches here.
+  perform clara._assert_answer_changes_no_basis(i.fields, p_answer, null);
 
   perform clara._assert_work_answer(i.fields, p_answer, i.client_id);
+
+  -- #721 · PHASE 2. See the two-phase note above.
+  perform clara._assert_answer_changes_no_basis(i.fields, p_answer, w.basis);
 
   select m.role into v_role from clara.firm_memberships m
    where m.firm_id = c.firm and m.user_id = c.actor and m.status = 'active';
@@ -592,7 +654,7 @@ reset role;
 -- §T TAIL CENSUS.
 -- =====================================================================================
 do $w721_tail$
-declare v_src text; v_n int; v_posture text; v_missing text;
+declare v_src text; v_n int; v_posture text; v_missing text; v_def text; v_expect text; v_role text;
 begin
   -- 1 · THE COLUMNS, their nullability and their self-reference.
   select count(*)::int into v_n from information_schema.columns
@@ -641,8 +703,26 @@ begin
   if position('clara._assert_answer_changes_no_basis(' in v_src) = 0 then
     raise exception '#721 tail: the committed clara.answer_work_question does not assert the basis-change rule' using errcode='CLR10';
   end if;
-  if position('clara._assert_answer_changes_no_basis(' in v_src) > position('clara._assert_work_answer(' in v_src) then
-    raise exception '#721 tail: the basis-change assertion runs AFTER the generic answer assertion -- an undeclared basis element would be diagnosed unknown_key' using errcode='CLR10';
+  -- BOTH PHASES, in the order the precedence argument needs. Phase 1 (p_basis NULL) must precede
+  -- the generic answer assertion or an undeclared basis element is diagnosed unknown_key; phase 2
+  -- (p_basis = the admitted basis) must FOLLOW it or a malformed date is diagnosed as a basis
+  -- change instead of as a malformed date. A single call can satisfy only one of the two.
+  if position('clara._assert_answer_changes_no_basis(i.fields, p_answer, null)' in v_src) = 0 then
+    raise exception '#721 tail: the answer door is missing the PHASE 1 basis-change assertion' using errcode='CLR10';
+  end if;
+  if position('clara._assert_answer_changes_no_basis(i.fields, p_answer, w.basis)' in v_src) = 0 then
+    raise exception '#721 tail: the answer door is missing the PHASE 2 assertion -- without the admitted basis the declared-but-different arm cannot fire at all, and #721''s opening case stays silent' using errcode='CLR10';
+  end if;
+  if position('clara._assert_answer_changes_no_basis(i.fields, p_answer, null)' in v_src)
+     > position('clara._assert_work_answer(' in v_src) then
+    raise exception '#721 tail: PHASE 1 runs AFTER the generic answer assertion -- an undeclared basis element would be diagnosed unknown_key' using errcode='CLR10';
+  end if;
+  if position('clara._assert_answer_changes_no_basis(i.fields, p_answer, w.basis)' in v_src)
+     < position('clara._assert_work_answer(' in v_src) then
+    raise exception '#721 tail: PHASE 2 runs BEFORE the generic answer assertion -- a malformed date would be diagnosed basis_change_not_allowed instead of iso_date' using errcode='CLR10';
+  end if;
+  if position('aw.client_id, aw.basis into w' in v_src) = 0 then
+    raise exception '#721 tail: the answer door no longer selects aw.basis -- the discriminator would read null and admit every change' using errcode='CLR10';
   end if;
   v_missing := '';
   if position('clara._human_ctx(clara.role_rank(''bookkeeper''))' in v_src) = 0 then v_missing := v_missing || ' bookkeeper-floor'; end if;
@@ -723,6 +803,46 @@ begin
     raise exception '#721 tail: expected exactly 2 work.%% event types; found %', v_n using errcode='CLR10';
   end if;
 
-  raise notice '#721 tail: OK -- clara.accounting_work carries `supersedes` and `superseded_by` (nullable uuid, self-referencing, partially indexed); t_accounting_work_immutable admits exactly one null->value transition on each, refuses a re-point or an erase as accounting_work_immutable, refuses a self-link, refuses superseded_by on any Work that is not queued/running/awaiting_input/stopping/cancelled, and keeps every arm it already had (the frozen column set incl. adjustment_basis, the initiator authority wall, the DELETE refusal and the updated_at stamp); clara.answer_work_question keeps its bookkeeper floor, reservation, row lock, first-answer gate, version gate, deadline, Work-state and basis-digest convergence and its clara_authenticated-only grant, and gains clara._assert_answer_changes_no_basis AHEAD of the generic answer assertion so a reply claiming a basis element answers basis_change_not_allowed naming the element; clara.restate_accounting_work is a new clara_runtime-only SECURITY DEFINER door that opens with the shared work-door preamble, admits the successor through the UNWIDENED clara.admit_journal_work, stamps supersedes on it, stamps superseded_by on the predecessor BEFORE cancelling it under a derived op key, and therefore rides the single work.cancelled event 0199 registered; no work.superseded sibling type exists.';
+  -- 7 · THE POSTURE CEREMONY FOR THE TWO BODIES THIS FILE SHIPS THAT ARE REACHED BY NO GRANT.
+  -- `create or replace` preserves owner and ACL and `create` sets them, but "preserves" and "sets"
+  -- are claims about the server, and the rule 0197 §F / 0198 / 0212 §T.5 all write under is that a
+  -- claim is RE-READ FROM THE CATALOG after the recut. Both of these are ungranted, so the second
+  -- half — EXECUTE-unreachable by every application role — is the half that matters: a trigger body
+  -- carrying SECURITY DEFINER and an assertion that decides what may change the basis are exactly
+  -- the two bodies an accidental grant would be worst on.
+  --   `_tf_accounting_work_immutable()`   VOLATILE, SECURITY DEFINER (it is a trigger body)
+  --   `_assert_answer_changes_no_basis(jsonb,jsonb,jsonb)` IMMUTABLE, SECURITY INVOKER (it is a
+  --     pure function of its three arguments and must stay one -- an INVOKER assertion cannot be
+  --     talked into reading a table the caller may not read)
+  for v_def, v_expect in
+    select * from (values
+      ('clara._tf_accounting_work_immutable()', 'true | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner | v'),
+      ('clara._assert_answer_changes_no_basis(jsonb,jsonb,jsonb)', 'false | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner | i')
+    ) as t(sig, posture)
+  loop
+    if to_regprocedure(v_def) is null then
+      raise exception '#721 tail: % does not exist at that exact signature', v_def using errcode='CLR10';
+    end if;
+    select pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | '
+           || coalesce(array_to_string(p.proconfig, ','), '<none>') || ' | '
+           || coalesce(array_to_string(p.proacl, ','), '<null>') || ' | ' || p.provolatile::text
+      into v_posture from pg_proc p where p.oid = to_regprocedure(v_def);
+    if v_posture is distinct from ('clara_fn_owner | ' || v_expect) then
+      raise exception '#721 tail: % has the wrong posture -- expected {clara_fn_owner | %}; got {%}',
+        v_def, v_expect, v_posture using errcode='CLR10';
+    end if;
+    for v_role in select unnest(array['clara_authenticated','clara_runtime','clara_agent_ro',
+                                      'clara_wake_interactive','clara_wake_proactive']) loop
+      if has_function_privilege(v_role, v_def, 'EXECUTE') then
+        raise exception '#721 tail: % is EXECUTE-reachable by % -- it must stay ungranted', v_def, v_role
+          using errcode='CLR10';
+      end if;
+    end loop;
+    if has_function_privilege('public', v_def, 'EXECUTE') then
+      raise exception '#721 tail: % is EXECUTE-reachable by PUBLIC', v_def using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice '#721 tail: OK -- clara.accounting_work carries `supersedes` and `superseded_by` (nullable uuid, self-referencing, partially indexed); t_accounting_work_immutable admits exactly one null->value transition on each, refuses a re-point or an erase as accounting_work_immutable, refuses a self-link, refuses superseded_by on any Work that is not queued/running/awaiting_input/stopping/cancelled, and keeps every arm it already had (the frozen column set incl. adjustment_basis, the initiator authority wall, the DELETE refusal and the updated_at stamp); clara.answer_work_question keeps its bookkeeper floor, reservation, row lock, first-answer gate, version gate, deadline, Work-state and basis-digest convergence and its clara_authenticated-only grant, and gains clara._assert_answer_changes_no_basis(fields, answer, ADMITTED BASIS) AHEAD of the generic answer assertion so a reply claiming an UNDECLARED basis element -- or a DECLARED one the admitted basis already carries with a different value -- answers basis_change_not_allowed naming the element; clara._tf_accounting_work_immutable() and clara._assert_answer_changes_no_basis(jsonb,jsonb,jsonb) were re-read from the catalog after the recut (owner clara_fn_owner, the volatility and prosecdef each is declared with, pinned search_path, the exact ungranted ACL) and neither is EXECUTE-reachable by PUBLIC or by any of the five application roles; clara.restate_accounting_work is a new clara_runtime-only SECURITY DEFINER door that opens with the shared work-door preamble, admits the successor through the UNWIDENED clara.admit_journal_work, stamps supersedes on it, stamps superseded_by on the predecessor BEFORE cancelling it under a derived op key, and therefore rides the single work.cancelled event 0199 registered; no work.superseded sibling type exists.';
 end
 $w721_tail$;
