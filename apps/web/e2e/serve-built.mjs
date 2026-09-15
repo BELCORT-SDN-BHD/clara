@@ -90,6 +90,13 @@ import { WORK_LIST_CLIENTS, answerWorkListPage, handleWorkListSupabase } from ".
 // guards `readJson` on an exact-verb allow-list, so it drains no other lane's request stream and
 // can run anywhere in the chain below.
 import { handlePlansSupabase } from "./plans-mock.mjs";
+// #625's membership-lifecycle lane. It is consulted BEFORE this file's own three member branches
+// below — a DECLARED CORE HANDOVER (`e2e-fixture-ownership.test.ts`'s `CORE_RELATION_HANDOVERS`):
+// `caller_context`, `firm_members_visible` and `firm_invites_visible` are answered HERE with
+// fixed fixtures, and a roster that cannot be revoked, re-roled or removed cannot walk a
+// lifecycle. Every handler in that module returns false unless the signed-in address is its own
+// persona, which is why the handover costs every other walk nothing.
+import { handleMembersLifecycleSupabase } from "./members-lifecycle-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -482,6 +489,10 @@ async function handleSupabase(request, response, url) {
     }] : [], cors);
     return;
   }
+
+  // #625 — the membership-lifecycle lane, consulted BEFORE the three member branches below (see
+  // its import note). `state.email` is its whole scope.
+  if (await handleMembersLifecycleSupabase(request, response, path, url, sendJson, cors, state.email)) return;
 
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
     const bookkeeper = state.email.startsWith("bookkeeper@");

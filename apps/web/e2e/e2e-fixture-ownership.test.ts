@@ -61,6 +61,7 @@ const LANE_MOCKS = [
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
   "knowledge-mock.mjs",
+  "members-lifecycle-mock.mjs",
   "operator-support-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
@@ -338,6 +339,12 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
+  // #625's membership-lifecycle lane, declaring neither list. Its scope is the signed-in PERSONA
+  // rather than a client id, because the three relations it answers carry no client at all — they
+  // are firm-altitude reads keyed on the caller. `serve-built.mjs` passes the address it already
+  // tracks and every handler returns false for anybody else's, including the control endpoint,
+  // which is scoped on a persona named in its own body.
+  "members-lifecycle-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -1048,4 +1055,75 @@ test("verb-ownership census POSITIVE CONTROL · two undeclared claimants of list
   assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
   assert.match(problems[0]!, /list_entry_links/);
   assert.match(problems[0]!, /fake-lane-a-mock\.mjs/);
+});
+
+// --- THE CORE HANDOVER CENSUS (#625) ------------------------------------------
+//
+// `SHARED_RPC_VERBS` above catches one lane answering an RPC verb ANOTHER LANE also answers. It
+// cannot see the other half of the same class: a lane answering a RELATION that `serve-built.mjs`
+// ITSELF answers, from a hook that runs first. That is a TAKEOVER, not a collision — the CORE's
+// branch is still there and still correct for every other walk, and simply never reached for the
+// lane's own scope — and it is how the three member reads changed hands for #625.
+//
+// A takeover is legitimate and sometimes necessary (fixed fixtures cannot walk a lifecycle), so
+// this is a DECLARATION gate rather than a ban.
+//
+// ITS WATCH SET IS DELIBERATELY NARROW, and the reason is measured rather than tidy. Three CORE
+// relations were ALREADY taken over before this gate existed — `/rest/v1/clients` by eleven lanes,
+// `/rest/v1/chat_sessions` by two, `/rest/v1/onboarding_plans` by one — each id-scoped and
+// falling through otherwise, each argued in its own module's header. Widening this gate to them
+// would demand a retroactive declaration listing all eleven claimants of `clients`, which any
+// sibling branch adding a client-scoped lane would then have to edit: a shared-file conflict for
+// every one of them, in exchange for re-stating decisions their own headers already carry. So the
+// watch set is the relations whose ownership THIS change moved, and the pre-existing three are
+// named here as known-and-excluded rather than silently missed. Widening it is a repo-wide sweep
+// of its own, not a side effect of one ticket.
+const CORE_RELATION_HANDOVERS: Record<string, string[]> = {
+  // #625 — the membership lifecycle. `serve-built.mjs` answers all three in its CORE with FIXED
+  // fixtures (one roster row, an empty invite array, a caller context derived from the signed-in
+  // address); a roster that cannot be revoked, re-roled or removed cannot walk AC1/AC3/AC5. The
+  // lane answers them ONLY for its own persona and returns false for every other address, so the
+  // CORE still answers every sibling walk exactly as it did.
+  caller_context: ["members-lifecycle-mock.mjs"],
+  firm_members_visible: ["members-lifecycle-mock.mjs"],
+  firm_invites_visible: ["members-lifecycle-mock.mjs"],
+};
+
+/** `path === "/rest/v1/<relation>"` openers, excluding `/rest/v1/rpc/…` (verbs are censused by
+ *  `rpcVerbCensus` above). */
+const RELATION_OPENER = /path === "\/rest\/v1\/(?!rpc\/)([a-z0-9_]+)"/g;
+
+function relationsIn(file: string): Set<string> {
+  const source = readFileSync(file, "utf8");
+  return new Set([...source.matchAll(RELATION_OPENER)].map((m) => m[1]!));
+}
+
+test("CORE-handover census · the member reads taken over from serve-built.mjs stay DECLARED, with exactly their declared claimants", () => {
+  const core = relationsIn(SERVE_BUILT);
+  const claimants = new Map<string, string[]>();
+  for (const mock of LANE_MOCKS) {
+    for (const relation of relationsIn(join(E2E_DIR, mock))) {
+      if (!core.has(relation)) continue;
+      claimants.set(relation, [...(claimants.get(relation) ?? []), mock].sort());
+    }
+  }
+  console.log(`  ${core.size} relation(s) answered in serve-built.mjs; ${claimants.size} also answered by a lane mock:`);
+  for (const [relation, mocks] of claimants) console.log(`    ${relation}: ${mocks.join(", ")}`);
+
+  for (const [relation, declared] of Object.entries(CORE_RELATION_HANDOVERS)) {
+    assert.ok(
+      core.has(relation),
+      `${relation} is declared a CORE handover but serve-built.mjs no longer answers it — drop the declaration`,
+    );
+    assert.deepEqual(
+      claimants.get(relation) ?? [],
+      [...declared].sort(),
+      `${relation}'s real claimants no longer match its declaration — a lane joined or left a read this gate watches`,
+    );
+  }
+
+  // POSITIVE CONTROL on the reader itself: a relation the CORE answers and NO lane touches must
+  // census as absent, or the regex is over-matching and every row above is noise.
+  assert.ok(core.has("client_facts"), "serve-built.mjs must still answer /rest/v1/client_facts, or this control proves nothing");
+  assert.equal(claimants.has("client_facts"), false, "no lane mock answers /rest/v1/client_facts today");
 });
