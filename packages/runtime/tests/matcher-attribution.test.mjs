@@ -97,7 +97,7 @@ test("lane 1: a hard identifier SHARED across siblings ABSTAINS with the conflic
   const tin = tinOf();
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
   const extraction = await seedExtraction({ firm, document });
-  await seedRegion({ firm, extraction, fieldPath: "tin", textContent: tin });
+  await seedRegion({ firm, extraction, fieldPath: "invoice.vendor_tin", textContent: tin });
   await addClientIdentifier(owner, { client: clients[0], kind: "tin", value: tin });
   await addClientIdentifier(owner, { client: clients[1], kind: "tin", value: tin }); // shared ⇒ non-unique
 
@@ -135,7 +135,7 @@ test("lane 1 (DC-1): a SPACED identifier normalizes on write and matches a space
   const spaced = `${tin.slice(0, 3)} ${tin.slice(3, 8)}  ${tin.slice(8)}`; // internal whitespace, the DC-1 shape
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
   const extraction = await seedExtraction({ firm, document });
-  await seedRegion({ firm, extraction, fieldPath: "tin", textContent: tin }); // OCR sees it space-free
+  await seedRegion({ firm, extraction, fieldPath: "invoice.vendor_tin", textContent: tin }); // OCR sees it space-free
   await addClientIdentifier(owner, { client: clients[0], kind: "tin", value: spaced });
 
   const stored = await rootQuery(
@@ -161,7 +161,7 @@ test("lane 2: applyMatcherEffects wires computed candidates into the attempt (in
   const { owner, firm, clients } = await buildFirmWithClients(1);
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
   const extraction = await seedExtraction({ firm, document });
-  const region = await seedRegion({ firm, extraction, fieldPath: "supplier_name", textContent: "Acme Sdn Bhd" });
+  const region = await seedRegion({ firm, extraction, fieldPath: "invoice.supplier_name", textContent: "Acme Sdn Bhd" });
 
   // An injected reader (bypasses the as-built read-grant gap) yielding a name hit.
   const readMatchInputs = async () => ({
@@ -185,7 +185,7 @@ test("lane 2 (DC-2b): the DEFAULT reader computes candidates LIVE from the 0008 
   const clientName = (await rootQuery("select name from clara.clients where id=$1", [clients[0]])).rows[0].name;
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
   const extraction = await seedExtraction({ firm, document });
-  await seedRegion({ firm, extraction, fieldPath: "supplier_name", textContent: clientName });
+  await seedRegion({ firm, extraction, fieldPath: "invoice.supplier_name", textContent: clientName });
 
   // NO injected reader — readMatchInputs runs its real SQL under the 0008 grants.
   const res = await asMatcherLogin((c) =>
@@ -202,7 +202,7 @@ test("lane 2 (DC-2b): the DEFAULT reader computes candidates LIVE from the 0008 
   const b = await buildFirmWithClients(1);
   const docB = await seedVerifiedDocument({ firm: b.firm, uploadedBy: b.owner });
   const extB = await seedExtraction({ firm: b.firm, document: docB });
-  await seedRegion({ firm: b.firm, extraction: extB, fieldPath: "supplier_name", textContent: clientName });
+  await seedRegion({ firm: b.firm, extraction: extB, fieldPath: "invoice.supplier_name", textContent: clientName });
   await asMatcherLogin((c) => effectsInTxn(c, { documentId: docB, extractionId: extB, firmId: b.firm }));
   assert.equal((await candidatesForDoc(docB)).length, 0, "no cross-firm candidate (the reader is firm-scoped in SQL)");
 });
@@ -211,7 +211,7 @@ test("lane 2: confirm creates a human resolution; dismiss marks the sibling cand
   const { owner, firm, clients } = await buildFirmWithClients(1);
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
   const extraction = await seedExtraction({ firm, document });
-  const region = await seedRegion({ firm, extraction, fieldPath: "supplier_name", textContent: "Beta" });
+  const region = await seedRegion({ firm, extraction, fieldPath: "invoice.supplier_name", textContent: "Beta" });
 
   // Two attempts each with one candidate (record_attribution_attempt as clara_runtime).
   const attemptA = await recordAttemptWithCandidates({

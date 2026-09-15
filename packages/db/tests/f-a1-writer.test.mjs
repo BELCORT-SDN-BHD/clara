@@ -76,9 +76,11 @@ async function ocrFixture(sub, client, extraTexts = {}) {
     ...extraTexts,
   };
   const ids = {};
-  for (const [label, textContent] of Object.entries(texts)) {
+  for (const [i, [label, textContent]] of Object.entries(texts).entries()) {
+    // #777: the label keys `ids`/`idxOf`; the STORED path is the producer's conforming
+    // `pages.1.lines.<i>`, distinct per region within this extraction.
     ids[label] = await seedRegion({
-      firm, extraction: ocrId, fieldPath: `ocr_${label}`, textContent, locator: box(0, 0, 5, 5),
+      firm, extraction: ocrId, fieldPath: `pages.1.lines.${i}`, textContent, locator: box(0, 0, 5, 5),
     });
   }
   const rows = (await rootQuery(

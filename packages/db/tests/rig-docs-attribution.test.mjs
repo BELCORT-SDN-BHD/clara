@@ -111,7 +111,7 @@ test("§3.4 record_rule_resolution: a UNIQUE HARD identifier hit records a metho
   // A document presenting the identifier: extraction + region carrying the TIN.
   const { documentId } = await seedVerifiedDocument({ firm });
   const extraction = await seedExtraction({ firm, document: documentId, versionN: 1 });
-  await seedRegion({ firm, extraction, locatorKind: "page_polygon", fieldPath: "tin", textContent: tin, engineConfidence: 0.99 });
+  await seedRegion({ firm, extraction, locatorKind: "page_polygon", fieldPath: "invoice.vendor_tin", textContent: tin, engineConfidence: 0.99 });
   // A UNIQUE identifier hit → client A1.
   await addClientIdentifier(users.alice, { client: clients.A1, kind: "tin", value: tin });
 
@@ -137,7 +137,7 @@ test("§3.4 record_rule_resolution ABSTAINS when the HARD identifier is shared a
   const tin = `S${randomUUID().slice(0, 8)}`;
   const { documentId } = await seedVerifiedDocument({ firm });
   const extraction = await seedExtraction({ firm, document: documentId, versionN: 1 });
-  await seedRegion({ firm, extraction, locatorKind: "page_polygon", fieldPath: "tin", textContent: tin, engineConfidence: 0.99 });
+  await seedRegion({ firm, extraction, locatorKind: "page_polygon", fieldPath: "invoice.vendor_tin", textContent: tin, engineConfidence: 0.99 });
   // Shared across two siblings → NON-unique → lane-1 abstains.
   await addClientIdentifier(users.alice, { client: clients.A1, kind: "tin", value: tin });
   await addClientIdentifier(users.alice, { client: clients.A2, kind: "tin", value: tin });

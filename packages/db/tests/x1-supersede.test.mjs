@@ -94,7 +94,7 @@ async function settleReextraction(document, cents) {
   // NEW region on the SAME pinned OCR extraction, never an UPDATE of the original quote.
   const newRegion = (await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'reextraction_total',$3,1.0)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'pages.1.lines.101',$3,1.0)
      returning id`,
     [firm, ocrExtraction, raw])).rows[0];
   const idx = (await rootQuery(
@@ -262,7 +262,7 @@ test("[F-A1 PR-3 B1, cross-model review] persist_witness_facts' facts_rotated bl
   const raw = rm(153000);
   const newRegion = (await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'reextraction_total',$3,1.0)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'pages.1.lines.102',$3,1.0)
      returning id`,
     [firmId, ocrExtraction, raw])).rows[0];
   const idx = (await rootQuery(

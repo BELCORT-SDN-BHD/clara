@@ -842,7 +842,7 @@ test("x38.h add_bank_account writes the two-row client_identifiers pair, and a r
   // A document whose OCR region carries the PRINTED spelling exactly.
   const { documentId } = await seedVerifiedDocument({ firm });
   const extraction = await seedExtraction({ firm, document: documentId, versionN: 1 });
-  await seedRegion({ firm, extraction, locatorKind: "page_polygon", fieldPath: "bank_account", textContent: printed, engineConfidence: 0.99 });
+  await seedRegion({ firm, extraction, locatorKind: "page_polygon", fieldPath: "invoice.bank_account", textContent: printed, engineConfidence: 0.99 });
   let recorded = null;
   try {
     recorded = await recordRuleResolution({ document: documentId });

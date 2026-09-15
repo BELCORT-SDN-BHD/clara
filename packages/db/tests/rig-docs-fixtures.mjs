@@ -452,10 +452,19 @@ export async function seedExtraction({
   return r.rows[0].id;
 }
 
+// #777 / #778: the DEFAULT field_path. It must (a) conform to 0191's grammar
+// (clara._assert_field_path) so a rig that ran the suites can still take 0191, and (b) be
+// DISTINCT per seeded region, because clara.document_regions is unique on
+// (extraction_id, field_path) from 0201 onwards — two default regions on one extraction would
+// otherwise collide. A monotone per-process counter gives both.
+let seedRegionLineN = 0;
+export const nextSeedRegionFieldPath = () => `pages.1.lines.${seedRegionLineN += 1}`;
+
 export async function seedRegion({
   firm, extraction, locatorKind = "page_polygon", locator = { page: 1, polygon: [0, 0, 1, 1] },
-  fieldPath = "total", textContent = "100.00", engineConfidence = 0.97, lane = "runtime", extra = {},
+  fieldPath = null, textContent = "100.00", engineConfidence = 0.97, lane = "runtime", extra = {},
 }) {
+  fieldPath = fieldPath ?? nextSeedRegionFieldPath();
   const desired = {
     firm_id: firm, extraction_id: extraction, locator_kind: locatorKind, locator,
     field_path: fieldPath, text_content: textContent, engine_confidence: engineConfidence, ...extra,
