@@ -54,6 +54,7 @@ import { ClientIdentityBand } from "./client-home/client-identity-band";
 import { ClientLastActivity } from "./client-home/client-last-activity";
 import { ClientNeedsYou } from "./client-home/client-needs-you";
 import { ClientOnboardingProgress } from "./client-home/client-onboarding-progress";
+import { ClientWorkAttention } from "./client-home/client-work-attention";
 import { DataState } from "./data-state";
 
 /**
@@ -176,6 +177,14 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
             <div className="@container">
               <div className="grid grid-cols-1 gap-6 @3xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
                 <div className="flex min-w-0 flex-col gap-6">
+                  {/* #650 — SECTION C0, ABOVE the inbox rather than inside it, and it is a
+                      SEPARATE READ on purpose. The band's two facets come from
+                      `clara.get_client_work_pack`; the "waiting on a person" tile RESTATES the
+                      number this same `queue` envelope already carries, passed down rather than
+                      read a second time. One pack for three tiles would have made a single
+                      failure blank all three, which is exactly the law this file's own header
+                      states — every section reads for itself. */}
+                  <ClientWorkAttention clientId={clientId} queue={queue} />
                   <ClientNeedsYou queue={queue} clientName={client.data.name} />
                   <ClientDocsBacklog clientId={clientId} />
                 </div>

@@ -68,6 +68,34 @@ const READINESS = {
     { check_key: "c", drawer: 2, state: "pass", measured: null, measured_digest: "z", attested: false },
   ],
 };
+// #650 — the Work attention band's own read. Deliberately NOT all zeros: `active` at 2 and
+// `recent_success` at 1 over a `counts.work_questions` this envelope does not carry at all is the
+// discriminating shape — a build that derived any of the three tiles from the wrong source would
+// print a different trio.
+const WORK_PACK = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 5,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  facets: {
+    active: {
+      status: "ok", count: 2, coverage: "ok", coverage_reason: null,
+      rows: [{
+        work_id: "99999999-9999-4999-8999-999999999999", purpose: "journal_entry",
+        status: "running", memo: "Office rent", attempts: 1, current_run_status: "running",
+        retrying: false, created_at: "2026-09-16T01:00:00.000Z", updated_at: null,
+      }],
+    },
+    recent_success: {
+      status: "ok", count: 1, coverage: "ok", coverage_reason: null, uncounted_completions: 0,
+      rows: [],
+    },
+  },
+  needs_you_ref: { source: "list_review_queue.counts.work_questions" },
+};
+
 const ACCOUNTS = [{
   id: "b1", bank_code: "MBB", bank_name: "Maybank", bank_name_display: "Maybank", account_number: "****4021",
   account_number_normalized: "4021", coa_account_code: "1010", coa_account_name: "Bank", active: true,
@@ -115,6 +143,7 @@ function wire(overrides: Record<string, () => Response> = {}): typeof fetch {
     if (url.includes("/rest/v1/lint_findings")) return jsonResponse([{ id: "l1" }, { id: "l2" }]);
     if (url.includes("/rest/v1/attribution_candidates")) return jsonResponse([{ id: "a1" }, { id: "a2" }, { id: "a3" }]);
     if (url.includes("/rest/v1/close_prep_holds")) return jsonResponse([]);
+    if (url.includes("/rpc/get_client_work_pack")) return jsonResponse(WORK_PACK);
     if (url.includes("/rpc/list_review_queue")) return jsonResponse(ENVELOPE);
     if (url.includes("/rpc/list_uncoded_filings")) return jsonResponse([{ filing_id: "u1" }]);
     if (url.includes("/rpc/list_bank_accounts")) return jsonResponse(ACCOUNTS);
@@ -332,6 +361,57 @@ test("the ONBOARDING arm is axe-clean too — the escalation card's h2 never pre
 
       const violations = checkAccessibility(h.container as never);
       assert.deepEqual(violations, [], JSON.stringify(violations));
+    } finally { await h.unmount(); }
+  });
+});
+
+// #650 — SECTION C0. Two cells: the band renders its three tiles from TWO reads, and a pack read
+// that fails leaves every other section's real numbers on screen. The second is this board's own
+// law (see the file header, "EVERY SECTION READS FOR ITSELF"), re-measured for the new section
+// rather than assumed to be inherited.
+test("C0 — work attention: three tiles from TWO reads, and the needs-you tile is the queue's own number", async () => {
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      assert.match(h.text(), /Work attention/);
+      // `counts.work_questions` is ABSENT from this envelope, so the shipped chip reads 0 — and
+      // the tile must read the same 0 rather than inventing one from the pack.
+      assert.match(h.text(), /No Work is waiting on a person for this client right now\./);
+      assert.match(h.text(), /2 Works are queued or running/);
+      assert.match(h.text(), /1 Work finished in the last 7 days/);
+      assert.match(h.text(), /do not add them together/, "the overlap is stated, never subtracted");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("C0 — a FAILED pack read leaves needs-you, the docs backlog and close standing", async () => {
+  await withMockedEnv(
+    wire({ "/rpc/get_client_work_pack": () => jsonResponse({ message: "boom" }, 500) }),
+    async () => {
+      const h = await mount();
+      try {
+        assert.match(h.text(), /could not be read/, "the band's own two tiles say so");
+        assert.doesNotMatch(h.text(), /Nothing is running for this client right now/,
+          "a FAILED read must never render the honest-empty claim");
+        // …and every other section still has its real numbers.
+        assert.match(h.text(), /Needs you: 2/);
+        assert.match(h.text(), /Which cost centre for INV-2291\?/);
+        assert.match(h.text(), /3 filings awaiting attribution/);
+        assert.match(h.text(), /2 of 3 measured gates passing/);
+      } finally { await h.unmount(); }
+    },
+  );
+});
+
+// #650 AC3 — the reserved readiness slot is a LABEL AND A NOTE inside the close section, and the
+// section's real measured tally is untouched beside it.
+test("F — close: the readiness slot names the ticket that will measure it, and the real tally stays", async () => {
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      assert.match(h.text(), /2 of 3 measured gates passing/);
+      assert.match(h.text(), /Measured by #677/);
+      assert.match(h.text(), /this board does not estimate them/);
     } finally { await h.unmount(); }
   });
 });
