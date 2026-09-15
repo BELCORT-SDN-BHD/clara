@@ -328,7 +328,9 @@ World 启动前另有一道 stranded-body 普查闸门：
   长时能力走同源 allowlisted-header 代理。取舍：边缘部署减小自维护面，但 OpenNext／Workers 的兼容边界仍需自验。
 - **文件字节读取只用代理，不用签名 URL。** 代价是每次请求重读在世 membership，换来即时可撤销性。
 - **刻意不做的事：**
-  - 没有 per-client 的 AI 开关（Work 车道的外发授权由事务所级 Terms／DPA 接受与 client 活跃状态推导）；
+  - 没有 per-client 的 AI 开关（Work 车道的外发授权由事务所级 Terms／DPA 接受与 client 活跃状态推导），
+    也没有按操作粒度的外发 token 或配额：事务所注册时一次接受 Terms／DPA 即为全部授权，UX 保持最简
+    （owner 2026-09-15，#800，见 `.out-of-scope/per-operation-egress-tokens.md`）；firm-narrow 外发家族保持只发不用；
   - 会计计划的建立／修订／补提以 bookkeeper 为下限，不复制 0045 调整模板的两签仪式——两条 lane 是不同产品
     （owner 2026-09-15 确认，#790）；
   - 没有"全局开启自动执行"开关；观察到重复扣款不自动创建计划，也不代表产品具有发起银行付款或管理 mandate 的权限；
@@ -350,7 +352,6 @@ World 启动前另有一道 stranded-body 普查闸门：
 |---|---|
 | 完整 Accounting Work 领域模型（Work／Conversation／run／Q&A／receipt／JE 与领域对象／Knowledge） | `clara.accounting_work` + `operation_receipts` 已是该形状的首个持久化实现，但 Conversation 与 Knowledge 侧仍部分依赖既有 task／chat／interruption 表 |
 | 统一能力目录覆盖全部 lane | `packages/runtime/lib/capability-registry.mjs` 已为 Work lane 落地并写入执行轨迹；documents／bank／close 三条 lane 尚未纳入 |
-| 按操作粒度的外发 token 与配额 | 当前只有一个粗粒度的 `accounting_work` 用途 token，没有配额；firm-narrow 外发家族还缺 consume 动词 |
 | 全量硬性 readiness 门（覆盖所有已配置连接通道与存储） | `/ready` 已分离依赖检查并支持三态读数，但尚未对每条已配置通道强制闸门 |
 | 报表 metric pack 与 chart／表格读同一定义 | 渲染服务与封存流程存在；"金额／AR-AP 归桶在受信数据层统一定义"尚未全面落地 |
 | typed part 的完整协议兼容（字段与版本，不只 kind） | web 与 runtime 是两个独立发布单元，当前 parity 校验主要比对 kind，部分 reader 只有 ID |
