@@ -205,6 +205,13 @@ OCR／结构化抽取对发票与月结单走文本 + 图像双 witness，保留
 而不是静默留下两行争同一个字段；`field_path` 为空的 region 不受该键约束。[已实现，hosted evidence pending]
 <!-- /#778 -->
 
+<!-- #779 -->
+能力目录的 `registry_version` 单调性由数据库强制，不再只是约定：0207 的 BEFORE UPDATE 触发器
+`clara._tf_document_capabilities_version_monotone` 拒绝任何把同一 (format, document_kind) 行版本号
+调低的更新（CLR08，`detail.reason = registry_version_monotone`），调高或保持不变仍照常通过；
+先删后插到更低版本、以及"整批同号发布"的跨行一致性仍是约定（#779 明确不在范围内）。[已实现，本地验证]
+<!-- /#779 -->
+
 金额一律是**整数最小货币单位**（DB 侧 bigint `*_cents`），余额、舍入、期间与关联对象检查都在这个单位上执行；
 大整数穿过 JSON 与前端时必须保留精度——freeform 读路径已知的精度缺口仍未修（§7）。[已实现]
 

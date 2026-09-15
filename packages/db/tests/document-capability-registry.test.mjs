@@ -23,9 +23,14 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, endPool } from "./rig-fixtures.mjs";
+import { rootQuery, asRoot, endPool } from "./rig-fixtures.mjs";
 
 const CLR10 = "CLR10";
+// #779 — the immutability/append-only family code, the one clara._tf_accounting_plans_immutable
+// already raises for "a plan revision number never goes backwards" (0193). The registry's
+// version wall is the same refusal about a different counter, so it keeps the same code rather
+// than minting a second spelling.
+const CLR08 = "CLR08";
 
 /** The twelve canonical formats the runtime's intake admits, and the ONE canonical mime each
  *  spelling canonicalizes to. Transcribed from `packages/runtime/lib/intake.mjs`'s
@@ -52,7 +57,15 @@ const LEVELS = Object.freeze(["supported", "stored_only", "unsupported", "planne
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 16;
+// #779 — the three monotonicity cells below ride 0207's BEFORE UPDATE trigger, which sits ABOVE
+// 0191 in the chain. They are gated on THAT object (by its stem's own catalog shape, never by a
+// migration number), so this file keeps passing on a database that has 0191 and not yet 0207 —
+// the frontier rule every battery here follows. EXPECTED_CELLS is the count WITH 0207 applied;
+// the `after` hook below asserts the executed count equals whichever constant the live
+// frontier makes true, so forgetting to bump either one still fails the whole battery.
+const EXPECTED_CELLS = 19;
+const EXPECTED_CELLS_PRE_0207 = 16;
+let monotoneLive = false;
 
 async function cohortApplied() {
   const r = await rootQuery(`select
@@ -73,9 +86,22 @@ async function cohortApplied() {
   return present === flags.length;
 }
 
-before(async () => { live = await cohortApplied(); });
+async function monotoneWallApplied() {
+  const r = await rootQuery(`select exists (
+      select 1 from pg_trigger t
+       where t.tgrelid = 'clara.document_capabilities'::regclass
+         and t.tgname = 't_document_capabilities_version_monotone'
+         and not t.tgisinternal) as ok`);
+  return r.rows[0].ok === true;
+}
+
+before(async () => {
+  live = await cohortApplied();
+  monotoneLive = live && await monotoneWallApplied();
+});
 after(async () => {
-  if (live) assert.equal(executed, EXPECTED_CELLS, `expected ${EXPECTED_CELLS} cells to run, ${executed} did`);
+  const want = monotoneLive ? EXPECTED_CELLS : EXPECTED_CELLS_PRE_0207;
+  if (live) assert.equal(executed, want, `expected ${want} cells to run, ${executed} did`);
   await endPool();
 });
 
@@ -93,6 +119,36 @@ function gate(t) {
 }
 
 const cell = (name, fn) => test(name, async (t) => { if (gate(t)) return; executed += 1; await fn(t); });
+
+/** A cell that additionally needs 0207's version wall. It SKIPS (never fails) below that
+ *  frontier and is counted only when it actually ran, so the `after` hook stays exact. */
+const monotoneCell = (name, fn) => test(name, async (t) => {
+  if (gate(t)) return;
+  if (!monotoneLive) {
+    t.skip("0207_document_capabilities_version_monotone is not applied on this database");
+    return;
+  }
+  executed += 1;
+  await fn(t);
+});
+
+/** Run `fn(client)` inside a transaction that is ALWAYS rolled back. Every probe in this file
+ *  writes through the owner/root connection (no application role may write the registry at
+ *  all), and the battery's other cells assert registry-wide invariants — exactly one distinct
+ *  registry_version, one custody/byte engine per format, the OFX and CSV verdicts — so a probe
+ *  write left behind would turn them red. */
+async function inRolledBackTxn(fn) {
+  return asRoot(async (c) => {
+    await c.query("begin");
+    try {
+      return await fn(c);
+    } finally {
+      await c.query("rollback");
+    }
+  });
+}
+
+const PDF_INVOICE = "where format = 'pdf' and document_kind = 'invoice'";
 
 async function caught(fn) {
   try { await fn(); return null; } catch (err) { return err; }
@@ -324,4 +380,87 @@ cell("CONTROL: an out-of-set level is refused by the table's own CHECK, not mere
      values ('zzz','invoice','application/zzz','supported','supported','maybe','supported',null,null,1,'probe')`));
   assert.ok(err, "an out-of-set level was accepted");
   assert.equal(err.code, "23514", `expected a CHECK violation, got ${err.code} (${CLR10} is the migration's own code)`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// #779 — THE VERSION WALL. `registry_version` monotonicity was CONVENTION (0191's header prose
+// and this file's own table-wide "exactly one distinct version" cell); 0207 makes it a DATABASE
+// refusal. A column CHECK cannot see the value it replaces, so the invariant is a BEFORE UPDATE
+// trigger comparing OLD to NEW on the same (format, document_kind) key.
+//
+// THE OWNER CONNECTION IS THE ONLY WRITER THERE IS, and that is why these probes run through it.
+// The table is forced-RLS with an owner `for all` policy, `clara_authenticated` holds SELECT
+// only and `clara_agent_ro` holds no table privilege at all — so a wall enforced by grants or by
+// RLS would not reach the one role that can actually lower a version. The trigger does.
+// ---------------------------------------------------------------------------------------------
+
+monotoneCell("an UPDATE that LOWERS registry_version for an existing (format, kind) row is refused BY THE DATABASE", async () => {
+  const stored = await inRolledBackTxn(async (c) => {
+    // Raise first, so the refusal below is unambiguously the TRANSITION wall and not the
+    // column's own `registry_version >= 1` positivity CHECK: the registry publishes version 1
+    // today, so "one lower than the current value" would be 0 and would trip that CHECK too.
+    await c.query(`update clara.document_capabilities set registry_version = 5 ${PDF_INVOICE}`);
+    // A savepoint, so the REFUSED statement aborts only its own sub-transaction and the row can
+    // still be re-read afterwards — the refusal is the subject, and an aborted outer transaction
+    // would hide whether the stored value moved.
+    await c.query("savepoint probe_779");
+    const err = await caught(() => c.query(
+      `update clara.document_capabilities set registry_version = 3 ${PDF_INVOICE}`));
+    await c.query("rollback to savepoint probe_779");
+    assert.ok(err, "a BACKWARDS registry_version was accepted — monotonicity is still only a convention");
+    assert.equal(err.code, CLR08,
+      `expected the immutability-family code ${CLR08} (0193's "a plan revision number never goes backwards"), got ${err.code}`);
+    const detail = JSON.parse(err.detail ?? "{}");
+    assert.equal(detail.reason, "registry_version_monotone",
+      "the refusal must carry a MACHINE-READABLE reason, so a caller classifies it by code and reason rather than by message text");
+    assert.equal(detail.column, "registry_version");
+    assert.equal(detail.format, "pdf");
+    assert.equal(detail.document_kind, "invoice");
+    // The refused UPDATE changed nothing: the row still carries what the successful raise left.
+    return (await c.query(`select registry_version from clara.document_capabilities ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+  });
+  assert.equal(stored, 5, "the refused UPDATE must leave the stored registry_version exactly as it was");
+});
+
+monotoneCell("an UPDATE that RAISES registry_version, and one that leaves it UNCHANGED while changing another column, both still succeed", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const raised = (await c.query(
+      `update clara.document_capabilities set registry_version = registry_version + 1 ${PDF_INVOICE}
+         returning registry_version`)).rows[0].registry_version;
+    // UNCHANGED version, a different column moving — the ordinary corrective republish.
+    const same = (await c.query(
+      `update clara.document_capabilities set limits = limits || '{"probe_779":"transient"}'::jsonb ${PDF_INVOICE}
+         returning registry_version, limits`)).rows[0];
+    return { raised, same: same.registry_version, limits: same.limits };
+  });
+  assert.equal(seen.raised, 2, "raising registry_version must still succeed");
+  assert.equal(seen.same, 2, "an UPDATE that does not touch registry_version leaves it where it was");
+  assert.equal(seen.limits.probe_779, "transient", "the non-version column change was accepted");
+  assert.equal(seen.limits.invoice_line_items, "planned", "the existing named limit survived the probe write");
+});
+
+monotoneCell("ROLLBACK HYGIENE — after the probes the registry is byte-identical: one distinct version, the seeded verdicts and limits intact", async () => {
+  const r = (await rootQuery(
+    `select count(distinct registry_version)::int as versions,
+            min(registry_version)::int as v,
+            count(*) filter (where limits ? 'probe_779')::int as probe_limits
+       from clara.document_capabilities`)).rows[0];
+  assert.equal(r.versions, 1, "a probe write survived: the registry no longer publishes exactly one version");
+  assert.equal(r.v, 1, "a probe write survived: the published registry_version moved");
+  assert.equal(r.probe_limits, 0, "a probe `limits` write survived on some row");
+  const pdf = (await rootQuery(`select registry_version, limits from clara.document_capabilities ${PDF_INVOICE}`)).rows[0];
+  assert.equal(pdf.registry_version, 1, "the probed row's own version is back where it started");
+  assert.deepEqual(pdf.limits, { invoice_line_items: "planned" }, "the probed row's limits are back where they started");
+  const ofx = (await rootQuery(
+    "select byte_extraction, typed_facts from clara.document_capabilities where format='ofx' and document_kind='bank_statement'")).rows[0];
+  assert.equal(ofx.byte_extraction, "stored_only");
+  assert.notEqual(ofx.typed_facts, "supported");
+  // The positivity CHECK stays EXACTLY as 0191 wrote it: the trigger constrains TRANSITIONS,
+  // the CHECK constrains VALUES, and #779 replaces neither with the other.
+  const positivity = (await rootQuery(
+    `select count(*)::int as n from pg_constraint
+      where conrelid = 'clara.document_capabilities'::regclass and contype = 'c'
+        and pg_get_constraintdef(oid) ilike '%registry_version >= 1%'`)).rows[0].n;
+  assert.equal(positivity, 1, "0191's registry_version >= 1 positivity CHECK must still be on the column");
 });
