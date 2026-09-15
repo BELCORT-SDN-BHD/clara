@@ -152,7 +152,10 @@ caller's own firm already share the name's leading token, plus an exact-name hit
 identifier is supplied, a `client_identifiers (kind, value_normalized)` match normalised exactly
 as `add_client_identifier` normalises it. Three arities, ruled by the owner: 0 proceeds, 1 is
 returned for the human face to show and acknowledge, and **2 or more RAISES** CLR10
-`name_family_collision` with the candidate ids in `detail`.
+`name_family_collision` carrying the same candidate rows in `detail` (each with its `id`, name,
+party kind, status and match reason) — so the refused face renders the database's message verbatim
+beside the same linkable list it would have shown at arity 1, rather than going looking for the
+names through a second read of the same fact.
 
 **This is the ungranted-core / granted-wrapper idiom, and the reason is executable law rather than
 style.** `clara.name_family_token`, `clara.name_family_candidates` and

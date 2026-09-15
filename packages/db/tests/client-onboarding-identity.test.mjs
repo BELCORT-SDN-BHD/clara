@@ -257,8 +257,20 @@ cell("p649.identity.wall_two — two same-family parties (a client and a LIVE co
     "the token is the agent lane's own (0142:451-453), never a second vocabulary for one fact");
   const d = detailOf(err);
   assert.equal(d.arity, 2);
-  assert.deepEqual([...d.candidates].sort(), [client, cp].sort(),
+  // THE REFUSAL CARRIES THE ROWS, not bare ids: the face renders the DB's message verbatim with
+  // its code AND the same linkable list it would have rendered at arity 1. A refusal naming only
+  // uuids would force a SECOND read of the same fact, which is how two surfaces come to disagree
+  // about it.
+  assert.deepEqual(d.candidates.map((x) => x.id).sort(), [client, cp].sort(),
     "the refusal hands back WHICH parties collided, so the face can link them");
+  const kinds = Object.fromEntries(d.candidates.map((x) => [x.id, x.party_kind]));
+  assert.deepEqual(kinds, { [client]: "client", [cp]: "counterparty" });
+  for (const row of d.candidates) {
+    assert.ok(typeof row.name === "string" && row.name.length > 0, "each candidate carries its name");
+    assert.ok(["exact_name", "name_family", "identifier"].includes(row.match_reason),
+      "each candidate says WHY it matched");
+  }
+  assert.equal(d.name, "Rome Ventures Berhad", "the refusal echoes the name that was asked about");
 
   // THE ASSERTION IS THE ROW COUNT, NOT THE MESSAGE: a read that refused must not have created
   // anything on its way to refusing.

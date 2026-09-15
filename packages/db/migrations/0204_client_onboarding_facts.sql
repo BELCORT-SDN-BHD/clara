@@ -40,7 +40,14 @@
 --         second, stricter arity in one door would make two doors disagree about one fact.
 --   >=2 -> the DATABASE refuses, CLR10, reusing the token the agent lane already refuses with
 --         (`name_family_collision`, 0142:451-453) rather than minting a second vocabulary for
---         the same fact, and carrying the candidate ids in `detail` so the face can link them.
+--         the same fact, and carrying the candidates in `detail` so the face can link them.
+--
+-- THE REFUSAL CARRIES THE SAME ROWS THE SUCCESSFUL ANSWER WOULD HAVE, not a bare list of ids.
+-- A refusal that named only uuids would leave the human face with two choices, both bad: render
+-- raw ids, or go looking for the names through a SECOND read — and a second read of the same
+-- fact is how two surfaces come to disagree about it. The rows are no wider a disclosure than
+-- the arity-0/1 answer already is to the same admin of the same firm, and each row carries the
+-- `id` the ruling asks for.
 --
 -- WHAT THE WALL IS NOT. This read creates nothing and blocks nothing by itself: a caller that
 -- never asks can still call `clara.begin_client_onboarding` at any arity and a client is born.
@@ -97,7 +104,7 @@
 --   CLR10 client_name_required        a blank or whitespace-only name
 --   CLR10 identifier_malformed        p_identifier present but not an object, or kind/value half-given
 --   CLR10 identifier_kind_unknown     a kind outside clara.client_identifiers' own CHECK vocabulary
---   CLR10 name_family_collision       TWO OR MORE candidates; detail carries their ids
+--   CLR10 name_family_collision       TWO OR MORE candidates; detail carries them (ids included)
 --
 -- clara.settle_client_onboarding_facts                      (human lane, bookkeeper floor)
 --   CLR04 (no reason)         via clara._human_ctx
@@ -314,7 +321,7 @@ revoke all on function clara._plan_fye_month(uuid) from public;
 create function clara.client_identity_candidates(p_name text, p_identifier jsonb default null)
   returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare
-  c record; v_name text; v_kind text; v_value text; v_rows jsonb; v_arity int; v_ids jsonb;
+  c record; v_name text; v_kind text; v_value text; v_rows jsonb; v_arity int;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   v_name := nullif(btrim(coalesce(p_name, '')), '');
@@ -385,10 +392,8 @@ begin
              'client_id', b.client_id,
              'match_reason', b.match_reason)
            order by b.reason_rank, b.party_name, b.party_id), '[]'::jsonb),
-         count(*)::int,
-         coalesce(jsonb_agg(to_jsonb(b.party_id) order by b.reason_rank, b.party_name, b.party_id),
-                  '[]'::jsonb)
-    into v_rows, v_arity, v_ids
+         count(*)::int
+    into v_rows, v_arity
     from best b
     left join clara.clients cl
            on cl.id = b.party_id and cl.firm_id = c.firm and b.party_kind = 'client';
@@ -400,7 +405,7 @@ begin
     raise exception 'this name matches % existing clients or counterparties in your firm; decide which business this is before another record is created', v_arity
       using errcode = 'CLR10',
         detail = jsonb_build_object('reason', 'name_family_collision', 'class', 'client_identity',
-                                    'arity', v_arity, 'candidates', v_ids)::text;
+                                    'name', v_name, 'arity', v_arity, 'candidates', v_rows)::text;
   end if;
 
   return jsonb_build_object('name', v_name, 'arity', v_arity, 'candidates', v_rows);
@@ -409,7 +414,8 @@ comment on function clara.client_identity_candidates(text, jsonb) is
   '#649 AC1: which existing clients or live counterparties in the CALLER''S OWN firm already '
   'answer to this name (leading-token family, exact name) or to this identifier. Arity 0 '
   'proceeds, arity 1 is shown to the human and acknowledged in the face, arity >=2 RAISES CLR10 '
-  'name_family_collision with the candidate ids in detail. Admin floor, firm from the session.';
+  'name_family_collision carrying the same candidate rows in detail. Admin floor, firm from the '
+  'session.';
 revoke all on function clara.client_identity_candidates(text, jsonb) from public;
 grant execute on function clara.client_identity_candidates(text, jsonb) to clara_authenticated;
 
