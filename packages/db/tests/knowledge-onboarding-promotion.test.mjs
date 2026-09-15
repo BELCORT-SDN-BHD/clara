@@ -248,11 +248,27 @@ cell("kp.08 an OPEN plan promotes nothing, and a firm plan needs the explicit fi
   const ok = await promoteAsHuman(w.admin, firmPlan, { firmScope: true });
   assert.equal(ok.scope_kind, "firm");
   assert.equal(ok.client_id, null);
-  assert.equal(ok.promoted.length, 2);
+  // #654 (0205): THE FIRM-SCOPE ELIGIBILITY WALL NOW REACHES THIS DOOR, and that is the intended
+  // consequence of owner ruling D8 rather than a regression. `currency` maps to
+  // `default_currency`, one of the three keys a firm may default; `fye` maps to
+  // `financial_year_end_month`, a CLIENT-IDENTITY fact ("this business closes in December") that a
+  // firm may not hold on every client's behalf. The promotion door catches a per-item CLR10 and
+  // WITHHOLDS the item by name rather than aborting the whole act (0192:1711-1717), so one answer
+  // is promoted and one is withheld, carrying the wall's own reason verbatim in its detail.
+  assert.equal(ok.promoted.length, 1, `expected one promoted item, got ${JSON.stringify(ok.promoted)}`);
+  assert.equal(ok.promoted[0].knowledge_key, "default_currency");
+  assert.equal(ok.withheld.length, 1, `expected one withheld item, got ${JSON.stringify(ok.withheld)}`);
+  assert.equal(ok.withheld[0].knowledge_key, "financial_year_end_month");
+  assert.equal(ok.withheld[0].reason, "refused");
+  assert.equal(ok.withheld[0].sqlstate, "CLR10");
+  assert.match(String(ok.withheld[0].detail), /knowledge_scope_not_firm_defaultable/,
+    "the withheld item must carry the eligibility wall's own reason, not a generic refusal");
   const rows = await rootQuery(
     "select scope_kind, client_id, knowledge_key from clara.knowledge_records where firm_id=$1 order by knowledge_key",
     [w.firm]);
   assert.equal(rows.rows.every((r) => r.scope_kind === "firm" && r.client_id === null), true);
+  assert.deepEqual(rows.rows.map((r) => r.knowledge_key), ["default_currency"],
+    "the refused key must not have landed at firm scope");
 });
 
 cell("kp.09 the RUNTIME lane promotes a committed client plan with no JWT, recorded as clara_runtime", async () => {

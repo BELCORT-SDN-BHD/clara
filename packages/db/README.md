@@ -200,6 +200,60 @@ a limit the caller leaves out — or sends as NULL — keeps the value the firm 
 `updated_by`. That holds because the four limit columns carry no table default; the trigger is the
 only thing that supplies 100 / 1000 / 2 / 2, and it does so on a firm's first insert alone.
 
+## Knowledge scope, firm defaults and exceptions
+
+A governed knowledge record (`0192_client_knowledge_records.sql`) carries one of two scopes.
+`client` is the default; `firm` is an explicit act that `clara._knowledge_floor` floors at admin+
+no matter what the key's own floor says (#603 Q22). Both reads — `clara.list_client_knowledge` for
+the register and `clara.get_knowledge_pack` for a run — shadow a firm row behind a client row only
+at the **same key AND the same `applies_when_digest`**. That is what makes a client exception a
+first-class fact rather than a race: `uq_knowledge_live` already treats two live rows of one key as
+independent whenever their applicability differs, so a client row scoped to one narrow condition
+overrides the firm row carrying that condition and leaves an unconditional firm default standing.
+
+`0205_firm_knowledge_defaults.sql` adds what that model was missing, and no write door:
+
+- **Which keys may be defaulted** — `clara.knowledge_key_firm_eligibility`, an append-only,
+  code-populated, FORCE-RLS catalog seeded with `default_currency`, `reporting_framework` and
+  `accounting_basis` (owner ruling D8). `clara._tf_knowledge_firm_eligibility`, a BEFORE INSERT
+  trigger on `clara.knowledge_records`, refuses any other key at firm scope with CLR10
+  `knowledge_scope_not_firm_defaultable` — unless the catalog types it a `preference` or a
+  `policy`, the two kinds a firm can hold on its own behalf. On the 13-key catalog that admits four
+  keys in all (the three seeds plus `coa_seed_decision`) and refuses nine, `entity_type`, `msic`,
+  `sst_regime` and `financial_year_end_month` among them: a client-identity fact is never a firm
+  default. `knowledge_keys.scope_default` is deliberately NOT the mechanism — that table is
+  append-only on UPDATE, so its already-seeded rows can never be re-defaulted.
+- **What a firm default may cite** — `clara._tf_knowledge_firm_evidence`, the second BEFORE INSERT
+  trigger, refuses a firm-scope record pinning a document that carries **any** live
+  `clara.document_filings` row (CLR10 `firm_scope_client_evidence`). `uq_document_filing_active` is
+  over `(document_id, client_id) where retired_at is null`, so one document may hold N live
+  filings and the wall counts rather than probes for one. An **unfiled firm document stays
+  admissible** — the case 0192 reserves in its own voice — and retiring the last filing makes a
+  document admissible again. This is not an RLS disclosure fix (`clara.documents` is already
+  firm-readable); it stops one client's evidence travelling as the stated basis of a rule applied
+  to every other client, first of all inside a model's knowledge pack.
+- **Two viewer-floored reads, `clara_authenticated` only** — `clara.list_firm_knowledge()` returns
+  this firm's rules with the authority each promotion recorded, the live client exceptions at the
+  same key and applicability, and the non-terminal Work citing the key;
+  `clara.get_knowledge_applicability(p_client, p_knowledge_key)` answers, per applicability, which
+  of the firm rule and the client exception is in force and why. Nothing is granted to
+  `clara_runtime`, `clara_agent_ro` or either wake role (0057's dark-grant rule). "Today" in both
+  reads is resolved server-side in `Asia/Kuala_Lumpur` and returned as `as_of`.
+
+Both guards fire only for `scope_kind = 'firm'`; the client lane is byte-unaffected. They are named
+so they sort AFTER 0192's own `t_knowledge_records_authority`, which stamps `applies_when_digest`
+and refuses an unknown key first — `0205`'s tail asserts that order off `pg_trigger` rather than
+trusting the alphabet. 0205 recuts no 0192 body and therefore pins none.
+
+A promotion is `clara.capture_knowledge(p_scope_kind => 'firm')` with an **authored** reason, never
+the client row's own basis, and no source pins; a correction or withdrawal of a firm rule rides the
+shipped `correct_knowledge` / `withdraw_knowledge` at the same floor. Automatic re-evaluation of
+affected work is NOT built here — `docs/PRD.md:123` defers it to #658/#663 — so the register ships
+the human-review affordance instead.
+
+Battery: [tests/knowledge-firm-defaults.test.mjs](tests/knowledge-firm-defaults.test.mjs), gated by
+`knowledge-firm-defaults-preintegration-gate.mjs`.
+
 ## Frozen evaluator deployment
 
 An evaluator registered as undeployed remains unavailable until deliberately activated.

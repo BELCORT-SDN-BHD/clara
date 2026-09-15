@@ -194,18 +194,34 @@ cell("p654.eligibility.admits_by_kind — a preference or a policy key is eligib
   // EVERY OTHER CATALOG KEY IS REFUSED, one by one, so "fail-closed" is measured rather than
   // asserted. The nine are the five carried legacy keys plus turnover_band,
   // financial_year_end_month, sst_regime and mpers_eligibility.
-  const all = (await rootQuery("select knowledge_key from clara.knowledge_keys order by 1"))
-    .rows.map((x) => x.knowledge_key);
-  const refused = all.filter((k) => !admitted.includes(k));
-  assert.equal(refused.length, 9, `expected 9 refused keys, got ${refused.length}: ${refused.join(", ")}`);
-  for (const key of refused) {
+  //
+  // EACH PROBE CARRIES A VALUE THE CATALOG WOULD ACCEPT, derived from `value_shape` /
+  // `allowed_values` / `validated_against` rather than a constant: `clara._knowledge_assert_value`
+  // runs BEFORE the insert (0192:1188 inside the capture core), so a probe with the wrong shape
+  // would be refused `knowledge_value_invalid` and prove nothing at all about the scope wall.
+  const catalog = (await rootQuery(
+    "select knowledge_key, value_shape, allowed_values, validated_against from clara.knowledge_keys order by 1")).rows;
+  const probeValue = (row) => {
+    if (Array.isArray(row.allowed_values) && row.allowed_values.length > 0) return row.allowed_values[0];
+    if (row.validated_against === "range:month_1_12") return 6;
+    if (row.validated_against === "format_only") return "46900"; // msic: five digits (0192:696-706)
+    if (row.value_shape === "object") return { determination: "eligible", test: "rig" };
+    if (row.value_shape === "number") return 1;
+    if (row.value_shape === "boolean") return true;
+    return "rig";
+  };
+  const refused = catalog.filter((row) => !admitted.includes(row.knowledge_key));
+  assert.equal(refused.length, 9,
+    `expected 9 refused keys, got ${refused.length}: ${refused.map((x) => x.knowledge_key).join(", ")}`);
+  for (const row of refused) {
     const err = await assertRaises("CLR10", () => capture(w.owner, {
-      key, scope: "firm", client: null, value: "x",
-      basis: `the firm's standing position on ${key}`,
-    }), `capture_knowledge(firm, ${key})`);
+      key: row.knowledge_key, scope: "firm", client: null, value: probeValue(row),
+      basis: `the firm's standing position on ${row.knowledge_key}`,
+    }), `capture_knowledge(firm, ${row.knowledge_key})`);
     assert.equal(reasonOf(err), "knowledge_scope_not_firm_defaultable",
-      `${key} was refused for the wrong reason (${reasonOf(err)})`);
+      `${row.knowledge_key} was refused for the wrong reason (${reasonOf(err)}): ${err.message}`);
   }
+  assert.equal(await firmRowCount(w.firm), 2, "only the two admitted captures above may have landed");
 });
 
 // =============================================================================================
@@ -377,8 +393,12 @@ cell("p654.authority.floor — a bookkeeper cannot promote; an admin can, and th
     appliesWhen: { segment: "smp" }, from: "2026-10-01", to: "2027-09-30",
   });
   assert.equal(r.status, "captured");
+  // The two dates are read back as TEXT, never as a JS Date: `effective_from` is a calendar day in
+  // Asia/Kuala_Lumpur, and a Date parsed at the runner's local midnight then printed as UTC is off
+  // by the offset — the timezone date shift appendix C forbids, reproduced in the assertion itself.
   const row = (await rootQuery(
-    `select asserted_by, recorded_via, basis, applies_when, effective_from, effective_to,
+    `select asserted_by, recorded_via, basis, applies_when,
+            effective_from::text as effective_from, effective_to::text as effective_to,
             revision_kind, revision_n, scope_kind
        from clara.knowledge_records where id = $1`, [r.revision_id])).rows[0];
   assert.equal(row.asserted_by, w.admin, "the promoter is not recorded");
@@ -386,8 +406,8 @@ cell("p654.authority.floor — a bookkeeper cannot promote; an admin can, and th
   assert.equal(row.basis, "Partner meeting 2026-09-16: ringgit presentation is the firm's default",
     "the AUTHORED reason is not what the record carries");
   assert.deepEqual(row.applies_when, { segment: "smp" });
-  assert.equal(row.effective_from.toISOString().slice(0, 10), "2026-10-01");
-  assert.equal(row.effective_to.toISOString().slice(0, 10), "2027-09-30");
+  assert.equal(row.effective_from, "2026-10-01");
+  assert.equal(row.effective_to, "2027-09-30");
   assert.equal(row.revision_kind, "capture");
   assert.equal(row.revision_n, 1);
 
@@ -578,8 +598,11 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
     "_knowledge_capture_core", "_knowledge_insert_revision", "_knowledge_live_revision",
     "_tf_knowledge_records_supersede_only", "correct_knowledge", "get_knowledge_history",
     "get_knowledge_pack", "get_knowledge_record", "list_client_knowledge", "withdraw_knowledge",
-    // …and 0205's two reads. Nothing else in this schema may read the table.
-    "list_firm_knowledge", "get_knowledge_applicability",
+    // …and 0205's two reads plus its eligibility guard, whose own comment names 0192's authority
+    // trigger (the probe is `prosrc like '%knowledge_records%'`, so a comment counts — which is
+    // the conservative direction for a census that must not MISS a reader).
+    "list_firm_knowledge", "get_knowledge_applicability", "_tf_knowledge_firm_eligibility",
+    "_tf_knowledge_firm_evidence",
   ]);
   const strays = readers.filter((r) => !COHORT.has(r.proname)).map((r) => r.sig);
   assert.deepEqual(strays, [],
@@ -593,15 +616,25 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
     basis: "the firm prepares on the accrual basis",
   });
   const record = (await rootQuery(
-    "select id from clara.knowledge_records where firm_id = $1 and scope_kind = 'firm'", [w.firm])).rows[0].id;
-  const err = await assertRaises("CLR10", () => humanQuery(w.admin,
-    `select clara.create_accounting_plan(
-       p_client => $1, p_kind => 'recurring_journal', p_title => 'rig plan',
-       p_authority_kind => 'authority_rule',
-       p_authority_ref => $2::jsonb, p_schedule => '{}'::jsonb, p_op_key => $3) as r`,
-    [w.clientA, JSON.stringify({ kind: "knowledge_record", id: record }), opk("p654")]),
+    "select record_id from clara.knowledge_records where firm_id = $1 and scope_kind = 'firm'",
+    [w.firm])).rows[0].record_id;
+  const PLAN = `select clara.create_accounting_plan(
+     p_client => $1, p_kind => 'recurring_journal', p_purpose => 'rig probe',
+     p_authority_kind => $2, p_authority_ref => $3::jsonb,
+     p_frequency => 'monthly', p_day_rule => 'day_of_month', p_day_of_month => 1,
+     p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => null, p_effective_to => null,
+     p_basis => '{}'::jsonb, p_reversal_day_rule => null, p_op_key => $4) as r`;
+  // (a) A KNOWLEDGE PREFERENCE IS THE "authority rule" SHAPE 0193 REFUSES OUTRIGHT.
+  const rule = await assertRaises("CLR10", () => humanQuery(w.bookkeeper, PLAN,
+    [w.clientA, "authority_rule", JSON.stringify({ kind: "knowledge_record", id: record }), opk("p654")]),
+  "create_accounting_plan authorised by an authority rule");
+  assert.equal(reasonOf(rule), "authority_rule_unsupported");
+  // (b) …and dressed as an explicit instruction it still is not one: the reference must name an
+  // accounting_work or a chat_task, and `knowledge_record` is neither.
+  const ref = await assertRaises("CLR10", () => humanQuery(w.bookkeeper, PLAN,
+    [w.clientA, "explicit_instruction", JSON.stringify({ kind: "knowledge_record", id: record }), opk("p654")]),
   "create_accounting_plan authorised by a knowledge record");
-  assert.equal(reasonOf(err), "authority_rule_unsupported");
+  assert.equal(reasonOf(ref), "authority_ref_invalid");
 });
 
 cell("p654.pack.second_client — the firm default reaches a client with no row of its own through the RUNTIME pack", async () => {
