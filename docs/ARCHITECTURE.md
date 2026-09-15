@@ -409,6 +409,19 @@ run id。两个谓词同时被关系的 CHECK 与写入动词调用，因此墙�
 那些文件是冻结的，**其引用永远不能被修改**，所以取代它的不是一次改名，而是本小节这个锚点
 `#workflow-versioning-and-rollback`：任何读到该引用的人应当读这里（freeze-lint 失败时打印给人看的也是这一行）。[已实现]
 
+<!-- #791 -->
+**下一个冻结版本的清单摘要覆盖面（binding on `claraWork_v4`）。** `claraWork.v2.bundle.ts` 与
+`claraWork.v3.bundle.ts` 的清单摘要哈希的形状是 `{id, instructions, skills, tools{id,names}, budgets}`——
+`tools` 成员只带一个版本 id 与三个工具名的裸名单，从不带每个工具自己的 JSON schema，也不带它声明的
+依赖。`ask_question` 的 schema 在 v1→v2 之间改过，靠的只是手工把 `tools.id` 递增来标记，摘要本身
+测不出这个变化（#791）。这条口子无法对 v2 或 v3 收口：两者都是 `@frozen` 且在冻结清单中标记
+`deployed: true`，本小节上面的法条 (a) 已经说得很清楚——已部署的 body 不可变，行为变更只能以新的
+`_vN` 导出发布，从不原地编辑；freeze-lint 对任何一次改动都会拒绝（`BODY CHANGED` 或
+`REHASHED-VS-BASE`），哪怕只是给 body 加一行注释。因此这条要求记在这里，binding 在下一个被铸造的
+`claraWork_v4` 上：**`claraWork_v4` 的清单摘要必须同时覆盖每个工具的 JSON schema 与其声明的依赖，
+不能只是工具集 id 加名单**——一次只改 schema、不改名单的工具变更必须被摘要测出来，而不是像
+`ask_question` 那次一样只能靠人工递增 id 才留下痕迹。[已记录，未实现——铸造 `claraWork_v4` 时执行]
+
 回退预检 `packages/runtime/lib/rollback-preflight.mjs` 回答三问：(1) 非终态 run 的 body 普查；
 (2) 绑不到 run 的在世任务普查（未知 kind fail-closed）；(3) 数据库自身对目标镜像的 body 要求
 （某些迁移之后，目标镜像必须携带指定 body，且这一条不能靠 drain 清除）。该 frontier 规则与 0195 的
