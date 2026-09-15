@@ -289,7 +289,14 @@ const ADJUSTMENT_CENTS: Record<string, ReadonlyArray<[string, string, boolean]>>
     ["closingCents", "closing_cents", false],
     ["adjustmentCents", "adjustment_cents", true],
   ],
-  payroll_obligation: [["amountCents", "amount_cents", true]],
+  // #797 · `settledCents` is OPTIONAL and unsigned: migration 0212 made the settlement split a
+  // real particular, so the key has to reach the database or the web control could never be
+  // server-refusable. Absent means absent — an explicit 0 is a different fact (0212 refuses it
+  // beside a named payment account by name), so it is carried rather than dropped as falsy.
+  payroll_obligation: [
+    ["amountCents", "amount_cents", true],
+    ["settledCents", "settled_cents", false],
+  ],
 };
 
 function adjustmentInvalid(key: string, reason: string): InvalidBasis {

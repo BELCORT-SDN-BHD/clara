@@ -216,8 +216,9 @@ test("t643 an advance account derives its leg — the SAME lines the chat lane w
   const sent = received.received[0]!;
   expect(sent.purpose).toBe("payroll_obligation");
   // THE PARTICULAR CROSSED THE WIRE; THE DERIVATION INPUT DID NOT — `advanceCents` is a
-  // client-side figure only, exactly `settledCents`'s own N3 rule, so no `p_adjustment` key can
-  // ever carry it.
+  // client-side figure only (the staff-advance register owns the allocation, #797 Out of scope),
+  // so no `p_adjustment` key can ever carry it. `settledCents` is the CONTRAST since #797: it IS
+  // a particular now, and the payroll walk above sends it.
   expect(sent.adjustment.advanceAccountCode).toBe(PA.bank);
   expect("advanceCents" in sent.adjustment).toBe(false);
   expect(sent.basis.lines).toHaveLength(3);

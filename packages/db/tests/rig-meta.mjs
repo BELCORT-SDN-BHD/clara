@@ -1882,6 +1882,17 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
   ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
 ];
 
+// #797 [0212, the payroll settlement split as a stored particular] — NO COHORT, NO NEW NAME, NO
+// GRANT CHANGE, measured rather than assumed. 0212 creates no function: it RECUTS three bodies
+// that are already on PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS above and STAY there —
+// `_assert_adjustment_basis`, `_assert_adjustment_relationships` and `_adjustment_basis_canonical`,
+// same signatures, same owner, same SECURITY DEFINER, same pinned search_path, same ungranted ACL
+// (0212's §T re-reads the exact ACL text, grantor included, plus each body's 0194 volatility). A
+// cohort of its own would be WRONG rather than redundant, for 0198's stated reason: cohortFailures()
+// fails a HALF-present cohort, and these three names are present on every database from 0194 onward
+// whether or not 0212 has been applied.
+// #797 END
+
 // #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
 // same "wholly present or wholly absent" reason 0178's and 0184's carry.
 //

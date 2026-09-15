@@ -90,10 +90,12 @@ export type AdjustmentDraft = {
   expenseAccountCode: string;
   liabilityAccountCode: string;
   advanceAccountCode: string;
-  // THE ADVANCE LEG'S OWN `settled_cents`. A DERIVATION INPUT ONLY, never a stored particular —
-  // this module's N3 rule, restated: it shapes the derived advance leg (`derivedLines`) and
-  // nothing else, and it is deliberately absent from `ADJUSTMENT_FIELDS` below for the identical
-  // reason `settledCents` is.
+  // THE ADVANCE LEG'S OWN ALLOCATION. A DERIVATION INPUT ONLY, never a stored particular: it
+  // shapes the derived advance leg (`derivedLines`) and nothing else, and it is deliberately
+  // absent from `ADJUSTMENT_FIELDS` below. #797 made `settledCents` a real particular and left
+  // this one alone ON PURPOSE — the staff-advance register (`clara.staff_advance_accounts`,
+  // `book_staff_advance_application`) stays the authority on what a movement on its accounts
+  // requires, so an allocation this form invented would be a settlement fact nobody stated.
   advanceCents: number;
   paymentAccountCode: string;
   amountCents: number;
@@ -481,6 +483,11 @@ export function toAdjustmentWire(
   };
   if (draft.advanceAccountCode.trim() !== "") out.advanceAccountCode = draft.advanceAccountCode.trim();
   if (draft.paymentAccountCode.trim() !== "") out.paymentAccountCode = draft.paymentAccountCode.trim();
+  // #797 · THE STATED SETTLEMENT SPLIT, omitted when nothing was settled — exactly as an unfilled
+  // payment account is. Migration 0212 refuses an explicit `0` beside a named payment account by
+  // name, and a draft with neither has nothing to state, so sending `0` would be asking the
+  // database to refuse something this module already caught.
+  if (draft.settledCents > 0) out.settledCents = draft.settledCents;
   return out;
 }
 
@@ -513,28 +520,30 @@ export function toAdjustmentWire(
  * `_assert_adjustment_relationships` field paths — measured, both halves, rather than mirrored from
  * this form's own control list.
  *
- * `settledCents` AND `advanceCents` ARE BOTH DELIBERATELY ABSENT (adversarial migration-safety
- * review, N3 — the second pair closes #643's own named gap: the chat lane's
- * `packages/runtime/lib/periodic-adjustment-basis.ts` keeps `advance_cents` out of the stored
- * `p_adjustment` for the identical reason). Each is a CLIENT-SIDE DERIVATION INPUT and nothing
- * else: `settledCents` shapes the third line, `advanceCents` the third or fourth
- * (`derivedLines`), and neither the route nor 0194 has a `settled_cents` or `advance_cents`
- * particular, so no server refusal can ever carry either path. Listing either would be a claim
- * with nothing behind it, and `fieldForAdjustmentPath` would be promising to focus a control for a
- * refusal that cannot arrive. Their LOCAL validation still names them — `validateAdjustmentDraft`
- * raises `settlementNeedsAccount` / `paymentLegUnused` / `overSettled` against `settledCents` and
- * `advanceLegUnused` / `overAdvanced` against `advanceCents`, and `firstInvalidAdjustmentField`
- * focuses whichever fires — because that is this form's own rule about its own control, which is a
- * different thing from a wire path. `advanceAccountCode` stays IN this Set: unlike the cents, it
- * IS a 0194 particular (`_assert_adjustment_basis` reads it, `_assert_adjustment_relationships`
- * checks the staff-advance enrolment), so a server refusal naming it must still land on this
- * control.
+ * `settledCents` IS IN THIS SET SINCE #797, and `advanceCents` is still out — an asymmetry that is
+ * deliberate rather than an oversight. Migration 0212 made `settled_cents` an OPTIONAL typed
+ * particular of `clara._assert_adjustment_basis` and the route's `ADJUSTMENT_CENTS` table carries
+ * the key, so refusals really do arrive on this path (`over_settled` and `payment_leg_unused` on
+ * the figure, `settlement_needs_account` on the account) and a mapper that dropped them would leave
+ * a server refusal landing on nothing. `advanceCents` has no such particular in either half: the
+ * staff-advance allocation stays a client-side derivation input, because
+ * `clara.staff_advance_accounts` and `book_staff_advance_application` are the authority on what a
+ * movement on those accounts requires and a split this form invented would be a settlement fact
+ * nobody stated (#797, Out of scope). Its LOCAL validation still names it — `validateAdjustmentDraft`
+ * raises `advanceLegUnused` / `overAdvanced` against `advanceCents` and `firstInvalidAdjustmentField`
+ * focuses it — because that is this form's own rule about its own control, which is a different
+ * thing from a wire path. `advanceAccountCode` stays IN this Set for the original reason: it IS a
+ * 0194 particular (`_assert_adjustment_basis` reads it, `_assert_adjustment_relationships` checks
+ * the staff-advance enrolment), so a server refusal naming it must still land on this control.
  */
 const ADJUSTMENT_FIELDS = new Set<string>([
   "periodStart", "periodEnd", "instruction", "method", "openingCents", "closingCents",
   "adjustmentCents", "countedAt", "countReference", "inventoryAccountCode", "costAccountCode",
   "obligationKind", "expenseAccountCode", "liabilityAccountCode", "advanceAccountCode",
   "paymentAccountCode", "amountCents", "particularsSource",
+  // #797
+  "settledCents",
+  // #797 ends
 ]);
 
 export function fieldForAdjustmentPath(path: string | null): AdjustmentFieldId | null {

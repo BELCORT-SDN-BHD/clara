@@ -1075,7 +1075,7 @@
     "paymentAccountCode": "Settled from",
     "paymentAccountHelp": "Only when part of it was paid in the same entry.",
     "settledCents": "Amount settled",
-    "settledCentsHelp": "Shapes the entry below; it is not stored as a particular of its own — the split is readable from the posted lines.",
+    "settledCentsHelp": "Shapes the entry below and is recorded with the adjustment, so the history states how much was settled.",
     "advanceAccountCode": "Staff advance account",
     "advanceAccountHelp": "Optional, and recorded as a particular only. Recovering an advance from this payroll needs the staff-advance register, which asks which advance is being discharged — this form does not decide that for you.",
     "advanceCents": "Amount advanced",

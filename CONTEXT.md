@@ -286,7 +286,7 @@ One completed accounting act that records a movement a period's own facts establ
 _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its scheduled occurrences; a rate, threshold or employee calculation the product worked out.
 
 **Supplied obligation particulars**:
-The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
 **Capability registry**:
