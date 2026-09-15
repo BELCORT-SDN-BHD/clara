@@ -1,0 +1,376 @@
+// #633's browser lane — the DOCUMENTS-TAB half of the intake journey, and the firm's
+// unassigned-sources leaf.
+//
+// EXTENDS rather than replaces. `chat-parity-mock.mjs` already serves a REAL browser
+// upload (begin -> PUT -> finalize -> the adoption read), and the brief is explicit that
+// this lane reuses that harness rather than standing up a second one. What this file adds
+// is everything that trip never had a surface for: a LIST-form receipts read, the
+// capability catalogue, the unassigned population, the document -> Work link, and a
+// second intake id whose status is still MOVING so the settle-poll has something to
+// settle.
+//
+// EVERY BRANCH IS ID-SCOPED to this lane's own client and its own document ids, so it
+// answers for nobody else and falls through otherwise — the property `serve-built.mjs`'s
+// hook ordering depends on.
+//
+// WHAT IS REAL AND WHAT IS NOT. Real: the browser, the built bundle, the same-origin
+// runtime proxy (firm-scope guard + header allow-list), the upload queue, the settle-poll,
+// the capability join, the Data Table, and every message key. Mocked: PostgREST and the
+// runtime's three intake legs. So this lane is evidence about the JOURNEY and the client's
+// own wire shapes — never about whether Postgres would accept them. `packages/db/tests`
+// owns that half, and `intake-admission-e2e.mjs` owns the real-World chain.
+
+import { createServer as createHttpServer } from "node:http";
+
+export const DOCS_INTAKE = {
+  clientId: "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e",
+  /** ADOPTED, filed to this client, kind already known — the settled receipt. */
+  settledIntakeId: "2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a",
+  settledDocumentId: "3b3b3b3b-3b3b-4b3b-8b3b-3b3b3b3b3b3b",
+  /** STILL VERIFYING on the first read, ADOPTED from the second — the settle transition. */
+  movingIntakeId: "4c4c4c4c-4c4c-4c4c-8c4c-4c4c4c4c4c4c",
+  movingDocumentId: "5d5d5d5d-5d5d-4d5d-8d5d-5d5d5d5d5d5d",
+  /** UNASSIGNED at firm altitude — the leaf's own subject. */
+  unassignedDocumentId: "6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e",
+  /** The Work an entry citing the settled document belongs to. */
+  entryId: "7f7f7f7f-7f7f-4f7f-8f7f-7f7f7f7f7f7f",
+  workId: "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a",
+  /** The intake id every UPLOAD in this lane is given by the mock runtime. */
+  uploadIntakeId: "9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b9b",
+  uploadDocumentId: "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c",
+  userId: "11111111-1111-1111-1111-111111111111",
+};
+
+/** Mutable per-process lane state. The settle transition and the ask-once attribution are
+ *  both STATE CHANGES a walk drives, so they live here rather than in a constant. */
+const state = {
+  /** Flips after the first read of the moving intake, so the SECOND read settles it —
+   *  which is exactly what "the status settles without a reload" has to observe. */
+  movingReads: 0,
+  /** Set by the firm leaf's attribution act; the unassigned population then drops it. */
+  attributed: false,
+  /** Every attribution attempt, so a SECOND one on the same document can be refused. */
+  attributionAttempts: 0,
+  /** Set once an upload has been filed, so the receipts list can grow by one. */
+  uploadFiled: false,
+};
+
+export function resetDocsIntakeLane() {
+  state.movingReads = 0;
+  state.attributed = false;
+  state.attributionAttempts = 0;
+  state.uploadFiled = false;
+}
+
+const iso = (s) => `2026-04-0${s}T02:00:00.000Z`;
+
+function intakeRow(over) {
+  return {
+    id: DOCS_INTAKE.settledIntakeId,
+    uploaded_by: DOCS_INTAKE.userId,
+    origin: "documents_tab",
+    original_filename: "april-invoice.pdf",
+    declared_mime: "application/pdf",
+    declared_bytes: 20480,
+    status: "adopted",
+    document_id: DOCS_INTAKE.settledDocumentId,
+    failure_code: null,
+    expires_at: null,
+    created_at: iso(1),
+    updated_at: iso(1),
+    ...over,
+  };
+}
+
+/** The registry rows this lane joins against — the SHAPE `clara.document_capabilities`
+ *  publishes, measured on the #633 rig: `custody` supported everywhere, `byte_extraction`
+ *  stored_only for ofx and supported elsewhere, and (pdf, payroll_summary) carrying no
+ *  typed facts at all. Three rows, not 240: a walk only ever joins the pairs it renders. */
+const CAPABILITIES = [
+  {
+    format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
+    custody: "supported", byte_extraction: "supported", typed_facts: "supported",
+    business_operation: "supported", engine_id: "azure-di:prebuilt-invoice:4.0",
+    engine_byte: "azure-di:prebuilt-layout:4.0", registry_version: 1,
+    basis: "An invoice is read end to end and its header facts are corroborated.", limits: {},
+  },
+  {
+    format: "pdf", document_kind: "payroll_summary", mime_type: "application/pdf",
+    custody: "supported", byte_extraction: "supported", typed_facts: "unsupported",
+    business_operation: "unsupported", engine_id: null,
+    engine_byte: "azure-di:prebuilt-layout:4.0", registry_version: 1,
+    basis: "The bytes are read, but Clara derives no typed facts for this kind.", limits: {},
+  },
+  {
+    format: "pdf", document_kind: "ssm_company_doc", mime_type: "application/pdf",
+    custody: "supported", byte_extraction: "supported", typed_facts: "unsupported",
+    business_operation: "unsupported", engine_id: null,
+    engine_byte: "azure-di:prebuilt-layout:4.0", registry_version: 1,
+    basis: "A registry document is governance evidence, not a transaction.", limits: {},
+  },
+];
+
+function documentRow(id, over = {}) {
+  return {
+    id,
+    sha256: "a".repeat(64),
+    original_filename: "april-invoice.pdf",
+    mime_type: "application/pdf",
+    byte_size: 20480,
+    storage_path: `docs/${id}`,
+    uploaded_by: DOCS_INTAKE.userId,
+    created_at: iso(1),
+    bytes_verified_at: iso(1),
+    page_count: 2,
+    extraction_status: "done",
+    document_kind: "invoice",
+    financial_date: "2026-04-01",
+    retention_state: "unanchored",
+    retain_until: null,
+    retention_basis: null,
+    legal_hold: false,
+    legal_hold_reason: null,
+    ...over,
+  };
+}
+
+async function readJson(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  return raw.length === 0 ? {} : JSON.parse(raw);
+}
+
+async function drain(request) {
+  // eslint-disable-next-line no-empty
+  for await (const _chunk of request) {}
+}
+
+/**
+ * The PostgREST half. Returns true when it answered.
+ *
+ * SCOPING RULE, and it is what keeps this lane from swallowing chat-parity's: the
+ * receipts read is the LIST form (no `id=eq.`), while the chat composer's queue polls a
+ * SINGLE row by id. So this handler answers `document_intakes_visible` only when the
+ * request carries no `id=eq.` filter, or when the id it names is one of THIS lane's.
+ */
+export async function handleDocumentsIntakeSupabase(request, response, path, url, sendJson, cors) {
+  const params = url.searchParams;
+
+  if (request.method === "GET" && path === "/rest/v1/document_intakes_visible") {
+    const idFilter = params.get("id");
+    const named = idFilter?.startsWith("eq.") ? idFilter.slice(3) : null;
+    const mine = new Set([DOCS_INTAKE.settledIntakeId, DOCS_INTAKE.movingIntakeId, DOCS_INTAKE.uploadIntakeId]);
+    if (named !== null && !mine.has(named)) return false; // chat-parity's own poll
+    if (named === DOCS_INTAKE.uploadIntakeId) {
+      // The queue's own DB-confirmed adoption read for a file just uploaded in this walk.
+      sendJson(response, 200, [intakeRow({
+        id: DOCS_INTAKE.uploadIntakeId, original_filename: "uploaded.pdf",
+        status: "adopted", document_id: DOCS_INTAKE.uploadDocumentId, created_at: iso(4),
+      })], cors);
+      return true;
+    }
+    if (named !== null) {
+      sendJson(response, 200, [intakeRow({ id: named })], cors);
+      return true;
+    }
+    // THE LIST FORM — the receipts cell. The moving row settles on its SECOND read, which
+    // is the transition "status settles without a reload" is about.
+    state.movingReads += 1;
+    const settledYet = state.movingReads > 1;
+    sendJson(response, 200, [
+      intakeRow({}),
+      intakeRow({
+        id: DOCS_INTAKE.movingIntakeId,
+        original_filename: "march-statement.pdf",
+        status: settledYet ? "adopted" : "verifying",
+        document_id: settledYet ? DOCS_INTAKE.movingDocumentId : null,
+        created_at: iso(2),
+      }),
+    ], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/document_capabilities") {
+    sendJson(response, 200, CAPABILITIES, cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/caller_context") {
+    sendJson(response, 200, [{
+      user_id: DOCS_INTAKE.userId, firm_id: "e2e-firm", firm_name: "E2E Accounting",
+      role: "owner", role_rank: 40, is_operator: false,
+    }], cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_unassigned_documents") {
+    await drain(request);
+    // ASK ONCE: once attributed, the document LEAVES the population — the DB's own
+    // predicate stops matching it, and the leaf must stop offering the question.
+    sendJson(response, 200, state.attributed ? [] : [{
+      id: DOCS_INTAKE.unassignedDocumentId,
+      sha256: "b".repeat(64),
+      byte_size: 40960,
+      mime_type: "application/pdf",
+      created_at: iso(3),
+      page_count: 1,
+      unassigned: true,
+      document_kind: "ssm_company_doc",
+      financial_date: null,
+      bytes_verified_at: iso(3),
+      extraction_status: "done",
+      original_filename: "ssm-form-24.pdf",
+    }], cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/record_client_resolution") {
+    const body = await readJson(request);
+    if (body?.p_subject !== DOCS_INTAKE.unassignedDocumentId) return false;
+    state.attributionAttempts += 1;
+    if (state.attributionAttempts > 1) {
+      // THE SECOND ATTEMPT IS REFUSED, VERBATIM, by the DB's own words — the surface
+      // renders them and mints no second filing.
+      sendJson(response, 400, {
+        code: "CLR01",
+        message: "document_already_filed",
+        details: "This document already has a live filing; retire it before filing again.",
+      }, cors);
+      return true;
+    }
+    sendJson(response, 200, { resolution_id: "cafe0000-0000-4000-8000-000000000001" }, cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/file_document") {
+    const body = await readJson(request);
+    if (body?.p_document === DOCS_INTAKE.unassignedDocumentId) {
+      state.attributed = true;
+      sendJson(response, 200, null, cors);
+      return true;
+    }
+    if (body?.p_document === DOCS_INTAKE.uploadDocumentId) {
+      state.uploadFiled = true;
+      sendJson(response, 200, null, cors);
+      return true;
+    }
+    return false;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/entry_evidence_links") {
+    const doc = params.get("document_id");
+    if (doc === `eq.${DOCS_INTAKE.settledDocumentId}`) {
+      sendJson(response, 200, [{
+        entry_id: DOCS_INTAKE.entryId,
+        client_id: DOCS_INTAKE.clientId,
+        work_id: DOCS_INTAKE.workId,
+        logical_op_id: "op-633-1",
+        attached_at: iso(2),
+      }], cors);
+      return true;
+    }
+    if (doc?.startsWith("eq.")) {
+      // THE HONEST EMPTY. Every other document of this lane has produced no Work, and
+      // the surface has to say so in words rather than render nothing.
+      sendJson(response, 200, [], cors);
+      return true;
+    }
+    return false;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_spoken_for_documents") {
+    const body = await readJson(request);
+    if (body?.p_client !== DOCS_INTAKE.clientId) return false;
+    sendJson(response, 200, [{
+      document_id: DOCS_INTAKE.settledDocumentId,
+      entry_id: DOCS_INTAKE.entryId,
+      client_id: DOCS_INTAKE.clientId,
+      client_name: "Rome Properties",
+      via: "evidence_link",
+    }], cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/set_document_kind") {
+    const body = await readJson(request);
+    if (body?.p_document !== DOCS_INTAKE.unassignedDocumentId && body?.p_document !== DOCS_INTAKE.uploadDocumentId) return false;
+    sendJson(response, 200, null, cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/documents") {
+    const ids = /id=in\.\(([^)]*)\)/.exec(url.search)?.[1];
+    if (!ids) return false;
+    const wanted = ids.split(",").map((v) => decodeURIComponent(v.trim()));
+    const mine = [DOCS_INTAKE.settledDocumentId, DOCS_INTAKE.movingDocumentId, DOCS_INTAKE.uploadDocumentId];
+    if (!wanted.some((id) => mine.includes(id))) return false;
+    sendJson(response, 200, wanted.filter((id) => mine.includes(id)).map((id) => documentRow(
+      id,
+      id === DOCS_INTAKE.movingDocumentId
+        ? { original_filename: "march-statement.pdf", document_kind: "payroll_summary" }
+        : id === DOCS_INTAKE.uploadDocumentId
+          ? { original_filename: "uploaded.pdf", document_kind: null }
+          : {},
+    )), cors);
+    return true;
+  }
+
+  return false;
+}
+
+/** The runtime's three intake legs for THIS lane's upload id. Delegated into the same
+ *  mock-runtime origin `chat-parity-mock.mjs` starts, because `CLARA_RUNTIME_URL` can
+ *  name exactly one. */
+export async function handleDocumentsIntakeRuntime(request, response, url) {
+  const json = (status, body) => {
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify(body));
+  };
+  const path = url.pathname;
+
+  if (request.method === "POST" && path === "/api/intake/documents") {
+    const body = await readJson(request);
+    // FORMAT AND SIZE REFUSALS, PER FILE. These are the runtime's own walls
+    // (`intake.mjs:28`, `:33-50`) and the queue has to settle each row on its own.
+    if (typeof body?.declared_bytes === "number" && body.declared_bytes > 20 * 1024 * 1024) {
+      json(413, { error: "too_large", message: "declared bytes exceed the 20 MB limit" });
+      return true;
+    }
+    const admitted = new Set(["application/pdf", "image/png", "image/jpeg", "application/xml", "text/csv"]);
+    if (!admitted.has(String(body?.mime))) {
+      json(415, { error: "bad_type", message: `unsupported mime ${body?.mime}` });
+      return true;
+    }
+    json(201, { intake_id: DOCS_INTAKE.uploadIntakeId, upload_token: "e2e-docs-intake-token", expires_at: null });
+    return true;
+  }
+  if (request.method === "PUT" && path === `/api/intake/documents/${DOCS_INTAKE.uploadIntakeId}/bytes`) {
+    await drain(request);
+    response.writeHead(204);
+    response.end();
+    return true;
+  }
+  if (request.method === "POST" && path === `/api/intake/documents/${DOCS_INTAKE.uploadIntakeId}/finalize`) {
+    await readJson(request);
+    json(202, { status: "adopted", document_id: DOCS_INTAKE.uploadDocumentId });
+    return true;
+  }
+  return false;
+}
+
+/** Stand-alone start, for a walk that wants this lane on its own runtime origin. Unused
+ *  by `serve-built.mjs` (which delegates into chat-parity's single origin) and kept for
+ *  the same reason `startMockRuntime` is exported there: one file, one complete lane. */
+export function startDocumentsIntakeRuntime(port) {
+  const server = createHttpServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    void handleDocumentsIntakeRuntime(request, response, url).then((handled) => {
+      if (handled) return;
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "not_found" }));
+    });
+  });
+  server.listen(port, "127.0.0.1");
+  return { server, origin: `http://127.0.0.1:${port}` };
+}

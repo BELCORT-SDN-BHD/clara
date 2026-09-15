@@ -527,3 +527,33 @@ The classify-before-OCR race itself is closed (#606): migration
 `awaiting_extraction` until a `done` OCR/structured-parse extraction exists, and the `facts_gate`
 consumer re-enters that enqueue on `document.extraction_completed` as well as
 `document.classified`.
+
+### `tests/intake-admission-e2e.mjs` (#633)
+
+The real-Postgres-World proof that a file becomes admitted WORK with no human pressing
+anything. It starts where `intake-e2e.mjs` stops: that one owns the transport (CORS, the
+streaming PUT, the token lock, the upload capability never crossing workflow step IO);
+this one owns the chain AFTER the bytes are read.
+
+Seven legs: (1) upload → ocr done → classify enqueued, with ZERO `clara.request_autodraft`
+anywhere in the automatic lane — asserted from the source of `intake.mjs`,
+`intake-lanes.mjs`, `intake-recovery.mjs`, `autodraft.mjs`, `facts-gate.mjs` and
+`intakeRoutes.ts`, with a control proving the door exists (it is #614's RECOVERY act, not
+a gate); (2) a failed extraction yields `awaiting_extraction` and never a kind (0177's
+router); (3) duplicate bytes adopt onto the EXISTING document while the same name with
+different bytes stays distinct (identity is the sha256, `0003:76`); (4) a mixed five-file
+batch at the client's own CONCURRENCY of 2 settles each file independently, plus a burst
+beyond the runtime's upload ceiling refused 429 PER ITEM; (5) a replayed finalize leaves
+exactly one document and one ingest task; (6) H-53 — a `consent_evidence` born on this
+route keeps custody and never enters the coding lane; (7) C-37 — a real OFX (lane `none`,
+store-only at intake for `intake-lanes.mjs:45-51`'s reason, not for the retired "no OFX
+reader" one) and an XLSX, with the levels `clara.document_capabilities` actually publishes.
+
+Standalone, like `intake-e2e.mjs` — not collected by `node --test`. Wired in
+`.github/actions/db-live-gates/action.yml` as its own step, reusing the same throwaway
+database and bootstrapped world the Slice-5 step just built.
+
+NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
+between finalize and checkpoint. This file boots the runtime in-process (as
+`intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
+spawned-engine shape `interview-kill-resume-e2e.mjs` uses.
