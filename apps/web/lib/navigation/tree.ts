@@ -69,6 +69,9 @@ export type SettingsSectionId =
   | "account"
   | "firm"
   | "members"
+  // #648 (journey A5): the firm's own setup checklist. Distinct from `firm`, which is the
+  // authority-controls surface 裁-187 emptied and 裁-188 will refill.
+  | "setup"
   | "compliance"
   | "vendorBindings";
 
@@ -265,6 +268,17 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     labelKey: "sections.members.title",
     purposeKey: "sections.members.purpose",
     icon: "users",
+    minimumRole: "admin",
+  },
+  {
+    // #648 (journey A5). admin, and the floor is written in two places on purpose: here, so the
+    // section is ABSENT from a bookkeeper's menu by rank, and inside `clara.get_firm_setup` /
+    // the four firm setup doors, so a deep link is refused by the database rather than by a menu.
+    id: "setup",
+    href: "/settings/setup",
+    labelKey: "sections.setup.title",
+    purposeKey: "sections.setup.purpose",
+    icon: "clipboard",
     minimumRole: "admin",
   },
   {
