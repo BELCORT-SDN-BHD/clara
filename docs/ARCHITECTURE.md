@@ -436,6 +436,7 @@ pre-v3 grandfather arm 已实现并上线；owner 于 2026-09-15 裁定（#826�
 下一次 wall-raising 迁移采用 grandfather 还是 drain 届时再裁。同一天的第二条裁定（#810）：beta 期间被取代的
 body 可以从代码树退役而**不要求 drain 证明**——停在其上的 run 先在托管清理（#820）中取消，否则下面的
 stranded-body 闸门会拒绝启动；冻结清单为此保留一条 retired 记录而不是删除条目，法条 (c) 不变。
+工具里这条记录就是 `frozen-workflows.json` 顶层的 `retired`（路径 → 该条目最后一次冻结的 `sha256` + 裁定出处），是 `MISSING`／`REMOVED-VS-BASE` 唯一接受的缺席；其余条目的 deploy-lock 语义不变，反向的 `RETIRED-PRESENT`（已退役却仍在树里）同样是 finding。[已实现，`scripts/check-frozen-workflows.mjs`；首批退役 `chatTurn_v1` 闭包三文件]
 World 启动前另有一道 stranded-body 普查闸门：
 发现缺口即拒绝启动 durable world（HTTP 仍服务，`/ready` 503），只能由显式操作者覆盖。该拒绝是
 **database-wide** 的——同一个库上任何 lane 停泊的未导出 body 都会拒绝之后每一个 runtime 进程——owner 于

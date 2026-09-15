@@ -412,6 +412,15 @@ frozen file. The same rule holds for every other module the closure report attri
 entry. The ruling is recorded here; no hardening is implemented by it.
 <!-- /#815 -->
 
+<!-- #810 -->
+A RETIRED body does not vanish from the ledger: its manifest entry moves to the top-level `retired`
+record in `frozen-workflows.json` (path → the entry's last frozen `sha256` + the ruling that
+authorised it), which is the only absence `MISSING` and `REMOVED-VS-BASE` accept — and a retired
+path still present in the tree is its own finding, `RETIRED-PRESENT`. The first such retirement is
+`chatTurn_v1`'s three-file closure (#810, owner ruling 2026-09-15; beta only, runs parked on the
+body cancelled in the hosted cleanup first).
+<!-- /#810 -->
+
 ### The rollback preflight is a command, and it is a required step
 
 Run it **before** `fly deploy --image <previous>`, never after:
