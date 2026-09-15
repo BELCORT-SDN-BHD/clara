@@ -27,9 +27,9 @@
 // there is no second translator between the form and the ledger.
 
 import { callDoor } from "../doors";
-import { getRows } from "../read";
 import { sessionTokenAccessor } from "../session-accessor";
 import { isUuidShape } from "../client-id";
+import { listAccountingWorkPage, WORK_LIST_MAX_LIMIT, type WorkListRow } from "../work/work-list";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { JournalDraftInput } from "../work/journal-basis";
 
@@ -405,59 +405,72 @@ export function toPlanBasis(draft: JournalDraftInput): PlanBasis {
   };
 }
 
-// ── the authority picker's own read (WAVE-2 INTEGRATION) ────────────────────
+// ── the plan authority picker's own read (#809) ─────────────────────────────
 //
-// WHY IT IS HERE AND NOT IN lib/work/reads.ts. #640 wrote this picker against that module's
-// `listAccountingWork` — a plain `limit=201` filtered GET whose 201st row was the truncation
-// proof. #641, in the same wave, DELETED that reader: both Work LISTS moved to the
-// `clara.list_accounting_work` door, and it recorded the reason in that file — a second, drifting
-// answer to "what Work does this client have" is exactly what a reader picks the wrong one of.
-// Restoring it there would contradict a committed decision; calling the door instead would change
-// what the picker can show, because the door's projection deliberately carries no `basis` and no
-// `intent_key` (0189: "a list of operations is not a ledger") and this control needs both.
+// ONE LIST READER OF clara.accounting_work, and this is it — through the door.
 //
-// So the read lives HERE, named for the one thing it answers, scoped to this form, and never
-// offered as a Work list. That is the smallest true statement of the situation. Converging the
-// two — either by widening the door's projection or by pointing this picker at it and accepting a
-// weaker label — is a product decision, not an integrator's, and is named in the wave-2 report.
+// WHAT IT REPLACED, AND WHY. #640 wrote the picker against `lib/work/reads.ts`'s
+// `listAccountingWork`, a plain `limit=201` filtered GET. #641 deleted that reader in the same
+// wave: both Work LISTS moved to the `clara.list_accounting_work` door. Wave-2 integration could
+// not simply repoint the picker, because the door's projection carried no `intent_key` and the
+// label falls back to it — so it moved the direct table read here instead, and recorded that "what
+// accounting Work does this client have" now had two answers again. Migration 0203 (#809) widened
+// the door's projection by that one field, and this function is the convergence: the direct table
+// read, its row type and its envelope type are GONE, and the picker consumes the door's own row.
 //
-// THE CAP IS THE ORIGINAL'S. 200 rows, with the 201st fetched solely to prove truncation, so the
-// form can say the list is incomplete rather than silently omitting an instruction a professional
-// is looking for.
+// THE CAP IS THE ORIGINAL'S, THE PAGING IS THE DOOR'S. 200 candidates, with truncation reported
+// when more exist. The door clamps its page to at most 100, so reaching 200 means walking its
+// cursor across more than one page — round-tripping the opaque `next_cursor` VERBATIM and never
+// decoding it (the door's own contract, `lib/work/work-list.ts`).
+//
+// A REFUSAL IS NOT AN EMPTY LIST. Routing through the door raises this read's floor from any
+// authenticated member to BOOKKEEPER — the floor `clara.create_accounting_plan` already enforces
+// for the write this form exists to prepare. Nothing is caught here: a CLR04 propagates to the
+// caller's error arm, because "you may not read this" rendered as "this client has no
+// instructions" is the one mistake a picker of authorities must never make.
 const AUTHORITY_FETCH_CAP = 200;
 
-export type AuthorityCandidates = { rows: AuthorityCandidateRow[]; truncated: boolean };
-
-/** The columns THIS picker renders, and no more: a label, and the id the plan will cite. */
-export type AuthorityCandidateRow = {
-  id: string;
-  intent_key: string;
-  created_at: string | null;
-  basis: { memo?: string | null } | null;
-};
+/** The candidates for a plan's `authority_ref: {kind: "accounting_work", id}`, newest first —
+ *  the door's OWN row type, never a second shape. `truncated` means "more exist beyond the cap";
+ *  it is produced and, as before #809, not rendered. */
+export type PlanAuthorityWork = { rows: WorkListRow[]; truncated: boolean };
 
 /**
- * The client's own accounting Work, newest first — the candidates for a plan's
- * `authority_ref: {kind: "accounting_work", id}`.
+ * This client's accounting Work, newest first, capped at 200.
  *
- * `clara.accounting_work` carries a `clara_authenticated` select policy (0178), so this is a
- * direct RLS-scoped GET rather than a door, exactly as `lib/work/reads.ts`'s remaining
- * single-row reads are. A malformed client id answers empty WITHOUT a request: an `eq.` filter on
- * a uuid column with a non-uuid is a 400/22P02, never a state.
+ * A malformed client id answers empty WITHOUT a request — the same short circuit the direct read
+ * carried, kept because it is still true of the door: `p_client` is a `uuid` parameter, so a
+ * non-uuid is a 400/22P02 at PostgREST, never a state a person should be shown.
  */
-export async function listAuthorityCandidates(
+export async function listPlanAuthorityWork(
   clientId: string,
   o: Opts = {},
-): Promise<AuthorityCandidates> {
+): Promise<PlanAuthorityWork> {
   if (!isUuidShape(clientId)) return { rows: [], truncated: false };
-  const rows = await getRows<AuthorityCandidateRow>("accounting_work", {
-    select: "id,intent_key,created_at,basis",
-    filters: { client_id: `eq.${clientId}` },
-    order: "created_at.desc",
-    limit: AUTHORITY_FETCH_CAP + 1,
-    ...o,
-  });
-  return rows.length > AUTHORITY_FETCH_CAP
-    ? { rows: rows.slice(0, AUTHORITY_FETCH_CAP), truncated: true }
-    : { rows, truncated: false };
+  const rows: WorkListRow[] = [];
+  let cursor: string | null = null;
+  // The door clamps to 100 a page, so the cap needs at most two full pages; the third iteration
+  // is a BOUND, not an expectation — a door that answered `truncated` for ever would otherwise
+  // spin here, and a read that cannot terminate is worse than one that stops short.
+  const maxPages = Math.ceil(AUTHORITY_FETCH_CAP / WORK_LIST_MAX_LIMIT) + 1;
+  for (let page = 0; page < maxPages; page += 1) {
+    const got = await listAccountingWorkPage(
+      { client: clientId },
+      { ...o, cursor, limit: WORK_LIST_MAX_LIMIT },
+    );
+    rows.push(...got.rows);
+    if (rows.length >= AUTHORITY_FETCH_CAP) {
+      return {
+        rows: rows.slice(0, AUTHORITY_FETCH_CAP),
+        truncated: rows.length > AUTHORITY_FETCH_CAP || got.truncated,
+      };
+    }
+    // An empty page, or one the door did not mark truncated, or one with no cursor to follow: the
+    // walk is over and the list is complete. All three are the same answer and none is an error.
+    if (got.rows.length === 0 || !got.truncated || got.next_cursor === null) {
+      return { rows, truncated: false };
+    }
+    cursor = got.next_cursor;
+  }
+  return { rows: rows.slice(0, AUTHORITY_FETCH_CAP), truncated: true };
 }

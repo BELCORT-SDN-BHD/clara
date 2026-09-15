@@ -55,6 +55,12 @@ export type WorkListRow = {
   initiated_by: string | null;
   initiator_role: string;
   basis_origin: WorkBasisOrigin;
+  /** #809 — `clara.accounting_work.intent_key`, projected by migration 0203 on BOTH doors. NOT
+   *  nullable: the column is NOT NULL (0178) and the widen is a straight projection of it. It is
+   *  here because the plan authority picker labels a candidate by its memo falling back to this
+   *  key, and its absence from this projection was the whole reason a second, direct-table list
+   *  reader of clara.accounting_work existed beside this one until #809 deleted it. */
+  intent_key: string;
   memo: string | null;
   posting_date: string | null;
   currency: string | null;

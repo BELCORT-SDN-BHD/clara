@@ -47,7 +47,7 @@ import { listCoaAccounts } from "@/lib/journals/api";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
-  createPlan, listAuthorityCandidates, revisePlan, toPlanBasis,
+  createPlan, listPlanAuthorityWork, revisePlan, toPlanBasis,
   type PlanCreated, type PlanDetail, type PlanKind, type PlanOverlapWarning,
 } from "@/lib/plans/api";
 import {
@@ -80,10 +80,12 @@ export function PlanForm({
   const live = plan?.live_revision ?? null;
 
   const accounts = useAsyncRead(() => listCoaAccounts(sessionTokenAccessor, clientId));
-  // WAVE-2 INTEGRATION: #641 deleted lib/work/reads.ts's listAccountingWork in the same wave (both
-  // Work lists moved to the clara.list_accounting_work door, whose projection carries no basis and
-  // no intent_key). The picker's own read now lives in lib/plans/api.ts, named for what it answers.
-  const instructions = useAsyncRead(() => listAuthorityCandidates(clientId));
+  // #809: ONE list reader. Migration 0203 widened the clara.list_accounting_work door's
+  // projection with intent_key, so this picker reads through that door (paged to its own 200-row
+  // cap) instead of through the direct table read wave-2 integration had to leave beside it.
+  // A read the bookkeeper floor refuses lands in DataState's ERROR arm below, never its empty
+  // one — "you may not read this" must never render as "this client has no instructions".
+  const instructions = useAsyncRead(() => listPlanAuthorityWork(clientId));
 
   const [schedule, setSchedule] = useState<PlanScheduleDraft>({
     purpose: plan?.purpose ?? "",
@@ -311,7 +313,7 @@ export function PlanForm({
                 <option value="">{t("authorityChoose")}</option>
                 {(instructions.data?.rows ?? []).map((w) => (
                   <option key={w.id} value={w.id}>
-                    {w.basis?.memo ?? w.intent_key} — {String(w.created_at).slice(0, 10)}
+                    {w.memo ?? w.intent_key} — {String(w.created_at).slice(0, 10)}
                   </option>
                 ))}
               </NativeSelect>

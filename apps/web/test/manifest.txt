@@ -312,6 +312,9 @@ lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
 lib/parts/thread-action-coordinator.test.ts
 lib/parts/toolStatus.test.ts
+# #809
+lib/plans/api.test.ts
+# #809
 lib/plans/schedule.test.ts
 lib/rate-wall-courier.test.ts
 lib/read.test.ts
