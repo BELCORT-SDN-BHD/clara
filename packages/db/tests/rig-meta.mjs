@@ -1729,6 +1729,36 @@ export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];
 
+// #721 -----------------------------------------------------------------------------------------
+// #721 [0200, a reply that changes the basis becomes a new Work] — the RESTATE lane, its OWN
+// frontier-tolerant cohort for the same "wholly present or wholly absent" reason 0178's and 0184's
+// carry: folding these names into an older roster would red every database between the two
+// frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the ONE door — clara_runtime ONLY, the exact lane clara.cancel_accounting_work sits in, and
+//   for the identical reason: a restatement IS an admission plus a cancel, both of which are
+//   reached by a human THROUGH the runtime's authenticated route (`POST /api/work/:id/restate`),
+//   never by PostgREST. The wake roles, clara_agent_ro and clara_authenticated gain ZERO — a lane
+//   that could retire the Work it is executing and admit its replacement would be an agent
+//   rewriting the instruction it was given.
+const WORK_RESTATE_0200_RUNTIME_FNS = ["restate_accounting_work"];
+//   …and the UNGRANTED closure: the basis-change discriminator the answer gate calls. Listed so
+//   `cohortFailures` reports a half-applied 0200 rather than a silently narrower boundary, and so
+//   an accidental grant on it FAILS instead of passing quietly.
+//
+//   NOT LISTED, deliberately: `clara.answer_work_question` and `clara._tf_accounting_work_immutable`.
+//   0200 recuts both BODIES and touches neither NAME, signature nor grant —
+//   `answer_work_question` is already on WORK_QUESTIONS_0180_HUMAN_FNS and the trigger body is
+//   already reached through its own cohort — and a second listing of a name that exists at an
+//   EARLIER frontier would make this cohort resolve on databases 0200 has not touched, which is
+//   exactly the partial-cohort condition the gate exists to catch (0198's block states the same
+//   rule for the same reason).
+const WORK_RESTATE_0200_UNGRANTED_FNS = ["_assert_answer_changes_no_basis"];
+export const WORK_RESTATE_0200_COHORT = [
+  ...WORK_RESTATE_0200_RUNTIME_FNS, ...WORK_RESTATE_0200_UNGRANTED_FNS,
+];
+// #721 -----------------------------------------------------------------------------------------
+
 // #624 [0191, the document capability registry] — the four READERS this slice publishes, one
 // cohort for the same "wholly present or wholly absent" reason 0178's roster carries: folding these
 // names into an older cohort would red every database between the two frontiers, and
@@ -2261,6 +2291,10 @@ export const ALLOWED = {
     // clara.retry_accounting_work sits in. Both are reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...WORK_CANCEL_0184_RUNTIME_FNS,
+    // #721
+    // [#721, 0200] the restate door — clara_runtime ONLY, the same lane the cancel door sits in.
+    ...WORK_RESTATE_0200_RUNTIME_FNS,
+    // #721
     // [#644, 0192] the runtime knowledge lane: a capture attributed to a named, verified human
     // and the context pack. Plus the shared promotion door (also clara_authenticated above).
     ...KNOWLEDGE_0192_RUNTIME_FNS,
@@ -2505,6 +2539,9 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
+  // #721
+  failures.push(...cohortFailures("#721 0200 work-restate/supersede lane", WORK_RESTATE_0200_COHORT, liveNames));
+  // #721
   failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));

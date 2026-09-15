@@ -14,7 +14,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gateQuestion, buildWorkWorld, endPool, printLaneNotes, printSkipCount,
+  gateQuestion, gateRestate, buildWorkWorld, endPool, printLaneNotes, printSkipCount,
   admitJournalWork, claimWorkRun, settleWorkRun, cancelAgentTask,
   openWorkQuestion, answerWorkQuestion, parkedWork, interruptionRow, interruptionsForWork,
   auditForQuestion, getWorkPendingQuestion,
@@ -571,3 +571,71 @@ test("w629.open.raced two CONCURRENT opens on one Work: one wins, the loser is T
   assert.equal(rows.length, 1, "open.raced: exactly one question row exists on the Work");
   assert.equal(rows.filter((r) => r.status === "pending").length, 1);
 });
+
+
+
+// #721 ========================================================================================
+// THE ANSWER COMPLETES ONLY WHAT WAS ASKED (0200).
+//
+// The owner's ruling of 2026-09-12, point 1: an answer that would change an admitted basis element
+// is refused with a typed reason naming the element, instead of being merged into the basis. The
+// admitted basis never changes in place — 0178 digests it at admission and
+// `clara._record_journal_entry_core` refuses any echo that does not hash to it, so a merge was
+// never possible; what was missing was an HONEST REFUSAL and somewhere for the reply to go.
+// ============================================================================================
+
+test("w721.answer.basis-change a reply that claims a basis element is refused BY ELEMENT, and the question stays open", async (t) => {
+  if (await gateRestate(t)) return;
+  const fields = [{ key: "leg", label: "Which leg?", kind: "choice", required: true,
+    options: [{ value: "expense", label: "Expense" }, { value: "asset", label: "Asset" }] }];
+  const cases = [
+    ["an explicit basis member", { leg: "expense", basis: { posting_date: "2026-09-09" } }, "posting_date"],
+    ["a basis_patch member", { leg: "expense", basis_patch: { memo: "rent, revised" } }, "memo"],
+    ["a bare basis member naming nothing", { leg: "expense", basis: { whatever: 1 } }, "basis"],
+    ["an undeclared posting_date", { leg: "expense", posting_date: "2026-09-09" }, "posting_date"],
+    ["an undeclared amount_cents", { leg: "expense", amount_cents: 999 }, "amount"],
+    ["an undeclared account", { leg: "expense", account: WCHART.expense }, "account"],
+    ["an undeclared currency", { leg: "expense", currency: "SGD" }, "currency"],
+  ];
+  for (const [label, answer, element] of cases) {
+    const p = await parkedWork({ client: A1(), author: BOB(), fields });
+    const { err } = await assertPair(CLR.badRequest, "basis_change_not_allowed",
+      () => answerWorkQuestion(BOB(), { question: p.questionId, version: 1, answer }),
+      `w721.answer.basis-change ${label}`);
+    assert.equal(detailOf(err).element, element,
+      `w721.answer.basis-change ${label}: the refusal NAMES the element`);
+    assert.equal((await interruptionRow(p.questionId)).status, "pending",
+      `w721.answer.basis-change ${label}: a refused answer leaves the question open`);
+  }
+});
+
+test("w721.answer.still-lands a confirm/choose/explain answer is UNTOUCHED, including the basis-named fields the question itself declared", async (t) => {
+  if (await gateRestate(t)) return;
+  // THE VACUITY CONTROL FOR THE CELL ABOVE. #629 ships questions that legitimately ASK for a
+  // posting date or an amount; the reply unblocks the run and changes no admitted fact (0178's
+  // digest law). A rule that refused those would have broken a working path rather than closed a
+  // gap — so the same key that is refused UNDECLARED is accepted DECLARED.
+  const p = await parkedWork({ client: A1(), author: BOB() });   // twoFields(): posting_date + amount_cents
+  const out = await answerWorkQuestion(BOB(), {
+    question: p.questionId, version: 1, answer: twoFieldAnswer({ note: "confirmed on the phone" }),
+  });
+  assert.equal(out.status, "answered", "w721.answer.still-lands the declared basis-named fields are accepted");
+  const row = await interruptionRow(p.questionId);
+  assert.equal(row.answer.posting_date, "2026-09-01");
+  assert.equal(row.answer.amount_cents, 120000);
+
+  // …and a plain single-field explain, which names no basis element at all.
+  const q = await parkedWork({ client: A1(), author: BOB(), fields: oneField() });
+  const memo = await answerWorkQuestion(BOB(), {
+    question: q.questionId, version: 1, answer: { memo: "September rent, Jalan Ampang" },
+  });
+  assert.equal(memo.status, "answered", "w721.answer.still-lands a declared memo still lands");
+
+  // AND EVERY OTHER UNDECLARED KEY KEEPS ITS OLD DIAGNOSIS. The new arm is narrow by construction.
+  const r = await parkedWork({ client: A1(), author: BOB(), fields: oneField() });
+  const { err } = await assertPair(CLR.badRequest, QREASON.invalidAnswer,
+    () => answerWorkQuestion(BOB(), { question: r.questionId, version: 1, answer: { memo: "x", colour: "red" } }),
+    "w721.answer.still-lands an unrelated undeclared key is still unknown_key");
+  assert.equal(detailOf(err).constraint, "unknown_key");
+});
+// #721 ========================================================================================

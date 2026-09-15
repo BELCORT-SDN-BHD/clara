@@ -28,6 +28,9 @@ import {
 import { markSkip } from "./wave-a-helpers.mjs";
 
 export * from "./work-journal-fixtures.mjs";
+// #721 — the two builders `restateAccountingWork` calls BY NAME. `export *` republishes them to
+// importers; it does not bind them in THIS module's scope, so they are imported explicitly.
+import { basis, MODEL } from "./work-journal-fixtures.mjs";
 // Two world builders #623's own fixtures did not need: #630's races want a SECOND active
 // bookkeeper (the takeover's taker) and a throwaway member to revoke.
 export { insertUser, addMember };
@@ -62,6 +65,87 @@ export async function gateCancel(t) {
   t.skip(`#630 work-cancel lane absent (no ${CANCEL_STEM} migration applied)`);
   return true;
 }
+
+// #750 ---------------------------------------------------------------------------------------
+/** The #750 migration's STABLE STEM. Its OWN cohort: the `work.cancelled` domain event lands one
+ *  frontier ABOVE #630's cancel door, so a database that carries the door but not the event must
+ *  SKIP these cells rather than red them. */
+export const CANCELLED_EVENT_STEM = "work_cancelled_event$";
+
+let _eventReady = null;
+export async function cancelledEventReady() {
+  if (_eventReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [CANCELLED_EVENT_STEM]);
+      _eventReady = r.rows[0].n > 0;
+    } catch {
+      _eventReady = false;
+    }
+  }
+  return _eventReady;
+}
+
+/** `if (await gateCancelledEvent(t)) return;` */
+export async function gateCancelledEvent(t) {
+  if (await cancelledEventReady()) return false;
+  markSkip();
+  t.skip(`#750 work.cancelled event absent (no ${CANCELLED_EVENT_STEM} migration applied)`);
+  return true;
+}
+// #750 ---------------------------------------------------------------------------------------
+
+// #721 ---------------------------------------------------------------------------------------
+/** The #721 migration's STABLE STEM. Its OWN cohort again: `clara.restate_accounting_work` and the
+ *  two supersession columns land one frontier above #750's event. */
+export const RESTATE_STEM = "work_restate_supersede$";
+
+let _restateReady = null;
+export async function restateLaneReady() {
+  if (_restateReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [RESTATE_STEM]);
+      _restateReady = r.rows[0].n > 0;
+    } catch {
+      _restateReady = false;
+    }
+  }
+  return _restateReady;
+}
+
+/** `if (await gateRestate(t)) return;` */
+export async function gateRestate(t) {
+  if (await restateLaneReady()) return false;
+  markSkip();
+  t.skip(`#721 restate lane absent (no ${RESTATE_STEM} migration applied)`);
+  return true;
+}
+
+/** `clara.restate_accounting_work` — named arguments only, like every wrapper in this module. */
+export async function restateAccountingWork({
+  work, author, intentKey = null, basis: b = null, basisOrigin = "user_direct",
+  sourceRefs = [], model = null, opKey = null,
+}) {
+  const r = await roleQuery(RUNTIME, namedCall("restate_accounting_work", [
+    { name: "p_work", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+    { name: "p_intent_key", cast: "text" }, { name: "p_basis", cast: "jsonb" },
+    { name: "p_basis_origin", cast: "text" }, { name: "p_source_refs", cast: "jsonb" },
+    { name: "p_model", cast: "text" }, { name: "p_op_key", cast: "text" },
+  ]), [
+    work, author, intentKey ?? opk("w721-intent"), JSON.stringify(b ?? basis()),
+    basisOrigin, JSON.stringify(sourceRefs), model ?? MODEL, opKey ?? opk("w721-restate"),
+  ]);
+  return r.rows[0].result;
+}
+
+/** The supersession pair on one Work row. */
+export async function supersessionOf(work) {
+  const r = await rootQuery(
+    "select supersedes, superseded_by from clara.accounting_work where id=$1", [work]);
+  return r.rows[0] ?? null;
+}
+// #721 ---------------------------------------------------------------------------------------
 
 // ===========================================================================================
 // 2 · The closed vocabulary this battery asserts on.
