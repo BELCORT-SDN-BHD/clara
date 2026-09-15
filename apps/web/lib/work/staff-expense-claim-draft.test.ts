@@ -69,7 +69,7 @@ test("life.roundTrip: written, read back whole, retired only on demand", () => {
   const back = readClaimDraft(SCOPE, store);
   assert.ok(back);
   assert.equal(back.intentKey, "k1");
-  assert.equal(back.draft.items[0].amountCents, 48000);
+  assert.equal(back.draft.items[0]?.amountCents, 48000);
   assert.equal(back.draft.instruction, "Farah's March travel claim.");
   assert.equal(readClaimDraft(OTHER, store), null, "…and nothing under another client's scope");
 
@@ -127,7 +127,7 @@ test("parse.document: an unusable stored document id is DROPPED, and the figures
     const back = readClaimDraft(SCOPE, store);
     assert.ok(back, "the attachment is OPTIONAL: an unusable id costs the citation, never the claim");
     assert.equal(back.documentId, null);
-    assert.equal(back.draft.items[0].amountCents, 48000);
+    assert.equal(back.draft.items[0]?.amountCents, 48000);
   }
   store.map.set(key, JSON.stringify({
     intentKey: "k1", draft: draft(), documentId: "d1111111-1111-4111-8111-111111111111",
@@ -146,6 +146,6 @@ test("parse.pending: a waiting item round-trips with the fact it names", () => {
   writeClaimDraft(SCOPE, { intentKey: "k1", draft: waiting, documentId: null }, store);
   const back = readClaimDraft(SCOPE, store);
   assert.equal(back?.draft.items.length, 2);
-  assert.equal(back?.draft.items[1].pendingFact, "incurred_date");
-  assert.equal(back?.draft.items[1].amountCents, 0);
+  assert.equal(back?.draft.items[1]?.pendingFact, "incurred_date");
+  assert.equal(back?.draft.items[1]?.amountCents, 0);
 });

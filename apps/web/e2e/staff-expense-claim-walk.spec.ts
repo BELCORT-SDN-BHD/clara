@@ -122,7 +122,7 @@ test("t638 the form derives the entry from the claim, shows it, and admits ONE W
     received: Array<{ intentKey: string; claim: Record<string, unknown>; sourceRefs: unknown }>;
   };
   expect(answer.received).toHaveLength(1);
-  const sent = answer.received[0];
+  const sent = answer.received[0]!;
   // THE WIRE SHAPE, PINNED. The claim crosses; the total and the lines deliberately do not.
   expect(sent.claim.settlement).toBe("reimbursement");
   expect(sent.claim.payableAccountCode).toBe(SEC.payable);
@@ -167,7 +167,7 @@ test("t638 a NEW claimant is asked for the register's three answers BEFORE anyth
     received: Array<{ claim: { claimant: Record<string, unknown> } }>;
   };
   expect(answer.received).toHaveLength(1);
-  expect(answer.received[0].claim.claimant).toEqual({
+  expect(answer.received[0]!.claim.claimant).toEqual({
     accountCode: SEC.advanceFresh,
     personLabel: "Nur Amirah binti Zainal",
     attestation: "Dedicated to Nur Amirah; not a related-party balance.",
@@ -199,7 +199,7 @@ test("t638 the SETTLEMENT switch preserves what was typed, and only the active l
   const answer = (await control(page, { op: "received" })) as {
     received: Array<{ claim: Record<string, unknown> }>;
   };
-  const claim = answer.received[0].claim;
+  const claim = answer.received[0]!.claim;
   expect(claim.settlement).toBe("advance_application");
   expect(claim.advanceAccountCode).toBe(SEC.advance);
   expect(claim.advanceId).toBe(SEC.advanceId);
@@ -222,7 +222,7 @@ test("t638 an ITEM WAITING on a named fact posts nothing and holds nothing else 
   const answer = (await control(page, { op: "received" })) as {
     received: Array<{ claim: { items: Array<Record<string, unknown>> } }>;
   };
-  expect(answer.received[0].claim.items).toEqual([
+  expect(answer.received[0]!.claim.items).toEqual([
     { description: "KL–Penang return flight", expenseAccountCode: SEC.travel, amountCents: 48000 },
     { description: "Taxi, receipt undated", pendingFact: "incurred_date" },
   ]);
@@ -289,8 +289,8 @@ test("t638 a LOST answer is resolved by the SAME intent key, and a STALE one off
     received: Array<{ intentKey: string }>;
   };
   expect(answer.received.length, "the fixture saw the first attempt AND the resolution").toBe(2);
-  expect(answer.received[0].intentKey, "the SAME identity: a replay must resolve, not admit a second Work")
-    .toBe(answer.received[1].intentKey);
+  expect(answer.received[0]!.intentKey, "the SAME identity: a replay must resolve, not admit a second Work")
+    .toBe(answer.received[1]!.intentKey);
 });
 
 test("t638 a STALE claim under one intent key is a conflict with a route to the Work it names", async ({ page }) => {

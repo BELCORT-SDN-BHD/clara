@@ -362,7 +362,7 @@ test("the derived entry is ON SCREEN and the browser sends NO lines at all", asy
       "the DOOR derives the journal: a browser-sent basis would be a second, drifting statement");
     assert.equal((body.claim as { amountCents?: unknown }).amountCents, undefined,
       "…and the total with it");
-    assert.deepEqual((body.claim.items as Array<Record<string, unknown>>)[0], {
+    assert.deepEqual((body.claim.items as Array<Record<string, unknown>>)[0]!, {
       description: "KL–Penang flight", expenseAccountCode: "6200", amountCents: 48000,
     });
   } finally {
@@ -406,7 +406,7 @@ test("the DRAFT survives a remount under the same scope, and carries its intent 
   const key = claimDraftKey({ userId: USER, firmId: FIRM, clientId: CLIENT });
   const stored = JSON.parse(store.map.get(key) ?? "null") as { intentKey: string; draft: { items: Array<{ description: string }> } };
   assert.ok(stored, "the draft is filed under the user+firm+client scope key");
-  assert.equal(stored.draft.items[0].description, "KL–Penang flight");
+  assert.equal(stored.draft.items[0]?.description, "KL–Penang flight");
 
   let sent: Submitted | null = null;
   const second = await renderComponent(App({

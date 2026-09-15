@@ -35,6 +35,7 @@ import {
   toClaimWire,
   validateClaimDraft,
   type ClaimDraft,
+  type ClaimFieldId,
 } from "./staff-expense-claim";
 import { isKnownWorkPurpose } from "./purpose-label";
 import messages from "../../messages/en.json";
@@ -113,7 +114,7 @@ test("validate.items: a pending item waits alone, carries no amount, and cannot 
   assert.deepEqual(validateClaimDraft(waiting, CHART, ENROLLED), [],
     "an item that names the fact it lacks is a valid claim line, not an error");
   assert.equal(claimTotalCents(waiting), 48000, "…and contributes nothing to the total");
-  assert.equal(isPendingItem(waiting.items[1]), true);
+  assert.equal(isPendingItem(waiting.items[1]!), true);
 
   const withAmount = good({
     items: [{ ...emptyClaimItem(), description: "Taxi", pendingFact: "incurred_date", amountCents: 900 }],
@@ -181,8 +182,9 @@ test("validate.order: the issue list is in DOM order, so `issues[0]` is the FIRS
   const empty = emptyClaimDraft();
   const fields = validateClaimDraft(empty, CHART, ENROLLED).map((i) => i.field);
   assert.equal(firstInvalidClaimField(validateClaimDraft(empty, CHART, ENROLLED)), "claimantAccountCode");
-  const order = ["claimantAccountCode", "incurredDate", "postingDate", "items.0.description",
-    "items.0.expenseAccountCode", "items.0.amountCents", "payableAccountCode", "instruction"];
+  const order: ClaimFieldId[] = ["claimantAccountCode", "incurredDate", "postingDate",
+    "items.0.description", "items.0.expenseAccountCode", "items.0.amountCents",
+    "payableAccountCode", "instruction"];
   const seen = order.filter((f) => fields.includes(f));
   assert.deepEqual(seen, order.filter((f) => fields.includes(f)));
   assert.deepEqual(fields.filter((f) => order.includes(f)), seen,
@@ -202,7 +204,7 @@ test("derive.lines: item debits plus ONE settlement credit, exact to the cent", 
   // `already_settled` IS NOT "no journal": the expense debits land against the payment account.
   const settled = good({ settlement: "already_settled", paymentAccountCode: "1150", payableAccountCode: "" });
   assert.equal(settlementAccountCode(settled), "1150");
-  assert.deepEqual(derivedLines(settled).at(-1), {
+  assert.deepEqual(derivedLines(settled).at(-1)!, {
     account_code: "1150", debit_cents: 0, credit_cents: 60500, description: "already_settled",
   });
   // A PENDING ITEM POSTS NO LINE AT ALL.
@@ -246,9 +248,9 @@ test("wire.tax: a supplied tax note is carried verbatim, and a pending item send
     ],
   }), CHART, ENROLLED);
   assert.ok(wire);
-  assert.deepEqual((wire.items as Array<Record<string, unknown>>)[0].suppliedTax,
+  assert.deepEqual((wire.items as Array<Record<string, unknown>>)[0]!.suppliedTax,
     { note: "SR 6% shown as RM28.80" });
-  assert.deepEqual((wire.items as Array<Record<string, unknown>>)[1],
+  assert.deepEqual((wire.items as Array<Record<string, unknown>>)[1]!,
     { description: "Taxi", pendingFact: "incurred_date" });
 });
 
@@ -330,6 +332,7 @@ test("purpose.claim: a claim Work is labelled from its ORIGIN, not from a purpos
   // with. A build that had the read but no words for it would show a claim as a plain journal entry.
   const sec = (messages as { StaffExpenseClaim: { origin: Record<string, string> } }).StaffExpenseClaim.origin;
   assert.equal(typeof sec.label, "string");
-  assert.match(sec.value, /\{claimant\}/);
-  assert.match(sec.value, /\{settlement\}/);
+  assert.ok(sec.value !== undefined, "the claim-origin sentence exists");
+  assert.match(String(sec.value), /\{claimant\}/);
+  assert.match(String(sec.value), /\{settlement\}/);
 });
