@@ -169,11 +169,12 @@ test("p653.schedule.term_missing — a source entry whose document has no live s
   assert.deepEqual(await scheduleRowsFor(scene.client), [], "and no schedule row");
 });
 
-test("p653.schedule.zero_basis — the one balanced all-zero amortisation basis this estate can construct is refused AT THE NEW DOOR by 0178's own predicate: the detail names constraint nonzero_total and its owner", async (t) => {
+test("p653.schedule.zero_basis — C08.2's owner: the one balanced all-zero amortisation basis this estate can construct is refused AT THE NEW DOOR by clara._assert_journal_basis, and the refusal carries that predicate's OWN constraint rather than a second zero check's", async (t) => {
   if (await assertPrepaymentCohortPresent(t)) return;
-  // 1 cent over 2 months: the base truncates to 0, so the first period's derived basis moves no
-  // money at all. That is `clara._assert_journal_basis`'s `nonzero_total` — the SAME predicate
-  // `clara.create_accounting_plan` and `clara.admit_journal_work` use, minted nowhere twice.
+  // 1 cent over 2 months: the base truncates to 0, so the FIRST period's derived basis moves no
+  // money at all. That is the only balanced all-zero amortisation basis this estate can construct
+  // — the evaluator's own prepaid-leg predicate is `debit_cents > 0`, so a zero-value source entry
+  // never reaches the allocation at all.
   const scene = await prepaymentScene("zero", { cents: 1, termMonthsBack: 4, termMonths: 2 });
   const { detail } = await assertPair(CLR.badRequest, PREPAY_REASON.belowGranularity,
     () => createPrepaymentSchedule(scene.bob, {
@@ -181,9 +182,15 @@ test("p653.schedule.zero_basis — the one balanced all-zero amortisation basis 
       authorityRef: scene.authorityRef,
     }),
     "one cent amortised over two months");
-  assert.equal(detail.constraint, "nonzero_total",
-    "the door routes the proposal through the SHARED zero check rather than minting a second one");
-  assert.equal(detail.owner, "clara._assert_journal_basis", "…and says whose predicate refused");
+  assert.equal(detail.owner, "clara._assert_journal_basis",
+    "the door routes the proposal through the SHARED predicate rather than minting a second zero check");
+  // MEASURED, AND IT IS A FINDING ABOUT 0178 RATHER THAN ABOUT THIS DOOR. `_assert_journal_basis`'s
+  // `nonzero_total` arm (0178:785-787) is UNREACHABLE for an all-zero balanced basis: its per-line
+  // `exactly_one_side` arm (0178:771-775) fires first, and every line that survives that arm
+  // carries exactly one POSITIVE side, so the debit total can never be zero. C08.2's owner is
+  // confirmed; the arm that answers is this one.
+  assert.equal(detail.constraint, "exactly_one_side",
+    "the constraint carried through is the arm 0178 actually raised, not a word this door chose");
 });
 
 test("p653.schedule.granularity — the same proposal's typed payload names the total, the period count and the zero base, so the human's remedy is a judgement they can make", async (t) => {

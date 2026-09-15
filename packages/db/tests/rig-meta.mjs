@@ -1876,6 +1876,30 @@ export const ACCOUNTING_PLANS_0193_COHORT = [
   ...ACCOUNTING_PLANS_0193_UNGRANTED_FNS,
 ];
 
+// #653 [0208, prepayment recognition and amortisation over an explicit service period] — the
+// AMORTISATION lane, its own cohort for the same "wholly present or wholly absent" reason 0193's
+// carries. It EXTENDS 0193 rather than standing beside it: the schedule it derives is configured
+// as an `amortisation_schedule` accounting plan and admitted by 0193's own scan, so a half-applied
+// 0208 would be a plan kind the doors can create and the resolver cannot serve.
+//
+//   the FOUR human doors — clara_authenticated ONLY. The write is bookkeeper-floored in its own
+//   body, the three reads are viewer-floored and firm-predicated, and the agent and both wake
+//   roles gain NOTHING: a lane that could author its own future authority would be the agent
+//   deciding what it is allowed to do (0193 §I's reason, unchanged).
+const PREPAYMENT_0208_HUMAN_FNS = [
+  "create_prepayment_schedule", "get_prepayment_schedule", "list_prepayment_schedules",
+  "list_prepayment_attention",
+];
+//   …and the UNGRANTED closure: the per-period line resolver the two basis callers ask, the read
+//   preamble, and the relation's append-only trigger. NO new runtime verb — 0208 mints no second
+//   scan, and `wake_due_plan_occurrences` (0193) stays the only one.
+const PREPAYMENT_0208_UNGRANTED_FNS = [
+  "_plan_amortisation_period_line", "_prepayment_ctx", "_tf_prepayment_schedules_append_only",
+];
+export const PREPAYMENT_0208_COHORT = [
+  ...PREPAYMENT_0208_HUMAN_FNS, ...PREPAYMENT_0208_UNGRANTED_FNS,
+];
+
 // #631 [0195, model egress obeys current purpose authorisation + the redacted execution trace] —
 // the WORK-EGRESS lane, its own cohort for the same "wholly present or wholly absent" reason
 // 0178's and 0194's carry.
@@ -2106,6 +2130,9 @@ export const ALLOWED = {
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
+    // #653 [0208] the four prepayment-amortisation doors — see the block above. clara_authenticated
+    // ONLY; the agent role and both wake roles gain ZERO, and there is no new runtime verb at all.
+    ...PREPAYMENT_0208_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
@@ -2510,6 +2537,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
+  failures.push(...cohortFailures("#653 0208 prepayment-amortisation lane", PREPAYMENT_0208_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).

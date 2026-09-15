@@ -34,10 +34,11 @@ import assert from "node:assert/strict";
 
 import {
   ROLES, rootQuery, roleQuery, humanQuery, namedCall, opk,
-  instructionRef,
+  instructionRef, TZ,
 } from "./accounting-plans-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 import { prepaidScene, recordPeriod, account } from "./f-a4-pr2a-fixtures.mjs";
+import { openDefaultFY } from "./x56-fixtures.mjs";
 
 export * from "./accounting-plans-fixtures.mjs";
 // …and the PREPAYMENT half. `account` is this module's only new spelling from that side; the plan
@@ -198,15 +199,20 @@ export async function monthEndAfter(from, k) {
  * PAST where the cells need admissible occurrences.
  *
  * `termMonthsBack` is how many months before the current one the term's first charged month is;
- * `termMonths` is how many whole months it charges. The FISCAL YEAR is opened at the term's own
- * first day and runs twelve months, so a term of twelve months or fewer always sits inside ONE
- * opened year — the evaluator refuses a term that runs past its fiscal year with no open
- * successor (`0140:1097-1106`), and a scene that tripped that arm by accident would measure the
- * wrong refusal.
+ * `termMonths` is how many whole months it charges.
  *
- * The RECOGNITION ENTRY posts fourteen days into that year, binds the document and debits the
- * prepaid asset for `cents` — `prepaidScene`'s own shape, through `draft_entry`/`approve_entry`
- * with maker ≠ checker.
+ * THE FISCAL YEARS ARE CALENDAR YEARS, and that is the estate's own shape rather than a choice
+ * here: `clara.propose_fiscal_year` derives `ends_on` from the CLIENT's fy-end (12/31 by default),
+ * so a year opened on any day but 1 January is a SHORT year and `clara.open_fiscal_year` refuses
+ * it without a stated `length_reason` (measured: "a fiscal year spanning ~4 months needs its
+ * length_reason stated"). So the scene opens the calendar year the term STARTS in, and — when the
+ * term runs into the next one — opens that successor too, because `clara.prepayment_schedule_v1`
+ * refuses a term that runs past its fiscal year with no OPEN successor (`0140:1097-1106`). A scene
+ * that tripped that arm by accident would measure the wrong refusal.
+ *
+ * The RECOGNITION ENTRY posts fourteen days into the term's own first month, binds the document
+ * and debits the prepaid asset for `cents` — `prepaidScene`'s own shape, through
+ * `draft_entry`/`approve_entry` with maker != checker.
  */
 export async function prepaymentScene(tag, {
   cents = 120000, termMonthsBack = 4, termMonths = 3, recordTerm = true,
@@ -215,7 +221,12 @@ export async function prepaymentScene(tag, {
   const termEnd = await monthEndAfter(termStart, termMonths - 1);
   const postingDate = await rootQuery("select (($1::date + 14))::text as d", [termStart])
     .then((r) => r.rows[0].d);
-  const scene = await prepaidScene(tag, { cents, startsOn: termStart, postingDate });
+  const fyStart = `${termStart.slice(0, 4)}-01-01`;
+  const scene = await prepaidScene(tag, { cents, startsOn: fyStart, postingDate });
+  if (termEnd.slice(0, 4) !== termStart.slice(0, 4)) {
+    await openDefaultFY(scene.alice, {
+      client: scene.client, startsOn: `${termEnd.slice(0, 4)}-01-01`, tag: `p653 ${tag}` });
+  }
   // THE TERM IS RECORDED BY THE BOOKKEEPER, not the owner: `record_document_service_period` is
   // bookkeeper-floored (`0140:944-959`) and a scene that only ever exercised it as an owner would
   // leave the floor itself unmeasured.
@@ -223,7 +234,7 @@ export async function prepaymentScene(tag, {
     await recordPeriod(scene.bob, { document: scene.document, start: termStart, end: termEnd });
   }
   const ref = await instructionRef({ client: scene.client, author: scene.bob });
-  return { ...scene, termStart, termEnd, postingDate, authorityRef: ref, termMonths };
+  return { ...scene, termStart, termEnd, postingDate, fyStart, authorityRef: ref, termMonths };
 }
 
 /** A SECOND expense account on this client's chart, for the target cells. */
@@ -262,12 +273,20 @@ export async function relationPosture(relname) {
   return r.rows[0] ?? null;
 }
 
-/** Every EXECUTE grant on one function signature, as `{grantee, privilege}` rows. */
+/** Every EXECUTE grant on one function signature that an APPLICATION role holds, as
+ *  `{grantee, privilege}` rows.
+ *
+ *  THE OWNER'S OWN ENTRY IS EXCLUDED, deliberately: `revoke all … from public` materialises
+ *  `clara_fn_owner=X/clara_fn_owner` on every governed body in the estate, so including it would
+ *  make "this function is ungranted" read as one grant on every row and the census would measure
+ *  nothing. The question this instrument answers is which APPLICATION role can reach the body;
+ *  the owner/definer/search_path posture is migration 0208's own tail census. */
 export async function functionGrants(signature) {
   const r = await rootQuery(
-    `select a.grantee, a.privilege_type
+    `select pg_get_userbyid(a.grantee) as grantee, a.privilege_type
        from pg_proc p, aclexplode(p.proacl) a
       where p.oid = to_regprocedure($1)
+        and pg_get_userbyid(a.grantee) <> 'clara_fn_owner'
       order by 1, 2`, [signature]);
   return r.rows.map((x) => ({ grantee: x.grantee, privilege: x.privilege_type }));
 }
