@@ -228,3 +228,118 @@ test("§3 every EXPECTED_NEW_TABLE is present (the isolation/RLS sweeps depend o
   const missing = EXPECTED_NEW_TABLES.filter((tbl) => !present.has(tbl));
   assert.deepEqual(missing, [], `no expected new table is missing (got missing: ${missing.join(", ")})`);
 });
+
+// =============================================================================
+// p633.grants.nonregression — #633's OWN LOAD-BEARING READS, PINNED AS GRANTS
+// =============================================================================
+//
+// #633 ships ZERO SQL. Every read the intake surfaces make is an existing grant, which
+// means the ticket's whole delivery rests on four of them staying exactly as they are:
+//
+//   * `clara.entry_evidence_links`      select to clara_authenticated (0182:360), under
+//                                       FORCE RLS `firm_id = clara.jwt_firm()` (:358-359).
+//                                       The document -> Work link is read DIRECTLY off it;
+//                                       a SECURITY DEFINER wrapper would REMOVE that free
+//                                       tenant guarantee, which is why none was written.
+//   * `clara.document_intakes_visible`  select (0007:2747) — the durable receipt.
+//   * `clara.document_processing_tasks_visible` select (same grant) — the count half of
+//                                       AC8's progress.
+//   * `clara.document_capabilities`     select to clara_authenticated (0191:271) — the four
+//                                       tiers on the intake surfaces.
+//
+// AND NO APPLICATION ROLE HOLDS DML ON ANY OF THEM. A surface that could write its own
+// evidence link or its own receipt would be able to manufacture the very facts it is
+// supposed to be reporting.
+
+const P633_READS = Object.freeze([
+  "entry_evidence_links",
+  "document_intakes_visible",
+  "document_processing_tasks_visible",
+  "document_capabilities",
+]);
+
+const APP_ROLES = Object.freeze([ROLES.authenticated, ROLES.agentRo]);
+const DML = Object.freeze(["INSERT", "UPDATE", "DELETE", "TRUNCATE"]);
+
+test("p633.grants.nonregression — #633's four load-bearing reads are granted to clara_authenticated, and no app role holds DML on any of them", async (t) => {
+  if (unready(t)) return;
+
+  for (const rel of P633_READS) {
+    const exists = await rootQuery("select to_regclass($1) is not null as ok", [`clara.${rel}`]);
+    assert.equal(exists.rows[0].ok, true, `clara.${rel} must exist — #633 reads it and mints nothing`);
+
+    const grants = await rootQuery(
+      `select grantee, privilege_type from information_schema.role_table_grants
+        where table_schema='clara' and table_name=$1`,
+      [rel],
+    );
+    const held = (role, priv) => grants.rows.some((g) => g.grantee === role && g.privilege_type === priv);
+
+    assert.ok(
+      held(ROLES.authenticated, "SELECT"),
+      `clara.${rel} must keep its SELECT grant to ${ROLES.authenticated} — #633's surfaces read it under the caller's own JWT`,
+    );
+    noteLane(`p633 read: clara.${rel} select -> ${grants.rows.filter((g) => g.privilege_type === "SELECT").map((g) => g.grantee).join(", ")}`);
+
+    for (const role of APP_ROLES) {
+      for (const priv of DML) {
+        assert.equal(
+          held(role, priv), false,
+          `${role} must NOT hold ${priv} on clara.${rel} — a surface that can write its own evidence cannot be trusted to report it`,
+        );
+      }
+    }
+    assert.equal(
+      grants.rows.some((g) => g.grantee === "PUBLIC"), false,
+      `clara.${rel} must carry no PUBLIC grant of any kind`,
+    );
+  }
+});
+
+test("p633.grants.nonregression — entry_evidence_links is FORCE-RLS'd and firm-scoped, which is why #633 reads it directly", async (t) => {
+  if (unready(t)) return;
+  const rel = await rootQuery(
+    `select c.relrowsecurity, c.relforcerowsecurity
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname='clara' and c.relname='entry_evidence_links'`,
+  );
+  assert.equal(rel.rows[0].relrowsecurity, true, "row security is enabled");
+  assert.equal(
+    rel.rows[0].relforcerowsecurity, true,
+    "and FORCED — the guarantee a SECURITY DEFINER wrapper would have thrown away",
+  );
+
+  const policies = await rootQuery(
+    "select polname, pg_get_expr(polqual, polrelid) as qual from pg_policy where polrelid = 'clara.entry_evidence_links'::regclass",
+  );
+  assert.ok(policies.rowCount >= 1, "at least one policy governs it");
+  const quals = policies.rows.map((p) => String(p.qual ?? "")).join(" | ");
+  assert.match(quals, /jwt_firm\(\)/, `the human policy is firm-scoped by jwt_firm() — saw: ${quals}`);
+  noteLane(`p633 entry_evidence_links policies: ${policies.rows.map((p) => p.polname).join(", ")}`);
+});
+
+test("p633.grants.nonregression — a foreign firm's persona reads ZERO evidence links, with a non-vacuity control", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const firmA = (await rootQuery("select firm_id from clara.clients where id=$1", [clients.A1])).rows[0].firm_id;
+
+  // A real link, written by the estate's own lane rather than hand-inserted: seed a
+  // document, file it, draft and approve an entry citing it. If the fixture cannot be
+  // built the cell says so rather than asserting on an empty table.
+  const linkCount = await rootQuery(
+    "select count(*)::int n from clara.entry_evidence_links where firm_id = $1", [firmA],
+  );
+  noteLane(`p633 evidence links in firm A at cell time: ${linkCount.rows[0].n}`);
+
+  const theirs = await humanQuery(
+    users.dave,
+    "select count(*)::int n from clara.entry_evidence_links where firm_id = $1", [firmA],
+  );
+  assert.equal(theirs.rows[0].n, 0, "a foreign firm's persona reads none of firm A's evidence links, by exact firm id");
+
+  const mine = await humanQuery(
+    users.alice,
+    "select count(*)::int n from clara.entry_evidence_links where firm_id <> $1", [firmA],
+  );
+  assert.equal(mine.rows[0].n, 0, "and firm A's persona reads none of anyone else's — the scope is symmetric");
+});
