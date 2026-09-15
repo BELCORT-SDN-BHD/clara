@@ -191,7 +191,23 @@ test("0052 two IDENTICAL contact persons COLLAPSE — a repeated print is one fa
     "the same contact stated twice is one fact, not a contradiction",
   );
   const contacts = (await regionsOf(ft.document)).filter((r) => r.field_path === "invoice.contact_person");
-  assert.equal(contacts.length, 2, "both regions persist (identical values collapse at the GUARD, not at the row)");
+  // #778 (0201_document_regions_unique_field_path.sql) MOVED WHERE THE COLLAPSE LANDS, deliberately.
+  // The GUARD is unchanged and is still what this cell is about: an identical repeat is one fact,
+  // not a CLR10 contradiction, so the persist is ACCEPTED (the doesNotReject above is the subject,
+  // and the DIFFERING twin in the cell above still forfeits). What moved is the row count behind it.
+  // Until 0201 the accepted payload wrote BOTH prints; from 0201 clara.document_regions is UNIQUE
+  // on (extraction_id, field_path) and persist_invoice_facts' spliced `on conflict … do nothing`
+  // absorbs the second, so ONE row lands — which is exactly #778's own acceptance criterion
+  // ("persist_invoice_facts still accepts the identical-duplicate payload, one row"). Both readings
+  // are asserted off the LIVE CATALOG, this file's CONTRACT-BLIND doctrine, so the cell stays true
+  // against a pre-0201 target instead of pinning whichever estate happened to run it.
+  const keyed = (await rootQuery(
+    `select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname='clara' and c.relname='uq_document_regions_extraction_field_path'`,
+  )).rows.length > 0;
+  assert.equal(contacts.length, keyed ? 1 : 2, keyed
+    ? "#778: the identical repeat collapses at the GUARD *and* at the row — 0201's key admits one"
+    : "both regions persist (identical values collapse at the GUARD, not at the row)");
   assert.deepEqual([...new Set(contacts.map((r) => r.text_content))], ["Lim Xiao Shan"]);
 });
 

@@ -275,15 +275,69 @@ test("C2: a value-answered belt field with NO region, or geometry-less geometry,
     "…and C2 binds EVERY witnessed amount, not only the gross");
 });
 
+// #778 (0201_document_regions_unique_field_path.sql) MOVED THE LAW THIS CELL PINS, deliberately.
+// Until 0201 a second `invoice.total` region on one extraction was a row the estate could hold,
+// and the ONLY thing standing between it and a silently min()-selected total was the cardinality
+// COUNT in clara.evaluate_witness_fact_state_v1 (0023 RESIDUAL-4). From 0201 the row itself is
+// refused: `uq_document_regions_extraction_field_path` is UNIQUE on (extraction_id, field_path)
+// for every path except the two line-series literals `opening_tb.line` / `prior_gl.line`, which
+// `invoice.total` is not. So the conflicting duplicate now refuses HARDER and EARLIER than this
+// cell asserted — 23505 at the row, before any reader is consulted.
+// The cell is rewritten to the new law rather than deleted, because both halves still matter and
+// neither implies the other: (1) the key refuses the row, and (2) the reader's cardinality guard
+// is still INSTALLED, so a future migration that drops or narrows the key does not find the
+// min()-selection hazard quietly re-opened underneath it. CONTRACT-BLIND on the migration file:
+// 0201's presence is probed off the live catalog, so this file still runs against a pre-0201
+// target, where it asserts the ORIGINAL law.
 test("cardinality: a conflicting DUPLICATE region refuses rather than being min()-selected away", async (t) => {
   if (gate(t)) return;
-  const shape = witnessShape({ fields: BASE });
-  shape.regions.push({ field_path: "invoice.total", text_content: money(9999),
-    monetary_raw: money(9999), monetary_cents: 9999, locator_kind: "page_polygon", locator: box(2, 2, 3, 3) });
+  const keyed = (await rootQuery(
+    `select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname='clara' and c.relname='uq_document_regions_extraction_field_path'`,
+  )).rows.length > 0;
+
   const firm = await firmOf(world.clients.A1);
+
+  if (!keyed) {
+    const shape = witnessShape({ fields: BASE });
+    shape.regions.push({ field_path: "invoice.total", text_content: money(9999),
+      monetary_raw: money(9999), monetary_cents: 9999, locator_kind: "page_polygon", locator: box(2, 2, 3, 3) });
+    const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A1, kind: "invoice" });
+    const pair = await landWitnessPair(cited.documentId, shape);
+    assert.equal((await evaluatePair(cited.documentId, pair.textId, pair.visionId)).corroborated, false);
+    return;
+  }
+
+  // (1) The base shape — ONE `invoice.total` region — still corroborates. Without this the
+  // refusal below would prove nothing about the duplicate: a fixture that cannot corroborate at
+  // all refuses for its own reasons.
   const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A1, kind: "invoice" });
-  const pair = await landWitnessPair(cited.documentId, shape);
-  assert.equal((await evaluatePair(cited.documentId, pair.textId, pair.visionId)).corroborated, false);
+  const pair = await landWitnessPair(cited.documentId, witnessShape({ fields: BASE }));
+  assert.equal((await evaluatePair(cited.documentId, pair.textId, pair.visionId)).corroborated, true,
+    "the single-region twin must corroborate, or the refusal below is not about the duplicate");
+
+  // (2) The conflicting duplicate is refused AT THE ROW by 0201's key — 23505, naming the
+  // constraint, from the most privileged writer there is.
+  await assert.rejects(
+    () => rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,
+         text_content,engine_confidence,monetary_raw,monetary_cents)
+       values($1,$2,'page_polygon',$3::jsonb,'invoice.total',$4,null,$4,9999)`,
+      [pair.firm, pair.textId, JSON.stringify(box(2, 2, 3, 3)), money(9999)]),
+    (e) => e.code === "23505" && /uq_document_regions_extraction_field_path/.test(e.message),
+    "a second invoice.total region on one extraction must be refused by 0201's key",
+  );
+
+  // (3) …and the reader's cardinality guard is still installed underneath it. The count is what
+  // refused before 0201 and is what would have to refuse again if the key ever narrowed.
+  const body = (await rootQuery(
+    `select p.prosrc from pg_proc p where p.pronamespace='clara'::regnamespace
+       and p.proname='evaluate_witness_fact_state_v1'`,
+  )).rows[0].prosrc;
+  assert.ok(/'n',\s*count\(\*\)::int/.test(body),
+    "clara.evaluate_witness_fact_state_v1 must still aggregate a per-field_path cardinality COUNT");
+  assert.ok(/v_total_count\s*:=\s*coalesce\(\(v_reg->'invoice\.total'->>'n'\)::int/.test(body),
+    "…and must still read invoice.total's cardinality into v_total_count");
 });
 
 test("the ineligibility envelope gate is decisive from EITHER row (0023:309)", async (t) => {
