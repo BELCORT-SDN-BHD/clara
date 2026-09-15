@@ -102,6 +102,17 @@
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out, and the file SKIPS CLEANLY (exit 0, printed reason) when
 // migration 0180 is absent.
+//
+// TWO LEGS SINCE #794, ONE LAW. The claraWork leg above is the original drill, unchanged. The
+// chatTurn leg that follows it builds a SECOND scratch image — `className: "chatTurn"`, its own
+// scratch-image `name` — and measures the same cutover on the lane that has no Work row to resume
+// through: a turn parked on a CHAT CLARIFICATION under the predecessor body, the predecessor image
+// stopped, the successor image served, and the clarification answered through
+// `clara.answer_interruption` so the SUCCESSOR's own class-agnostic delivery lane resumes a hook
+// the PREDECESSOR opened. Because chatTurn mints no bundle, its binding proof is the run's own
+// body identifier plus the successor's `/api/build-info` roster rather than a receipt digest. Its
+// pair is derived exactly as claraWork's is, and it carries NO version literal: a later v19 -> v20
+// repoint needs no edit in this file.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -333,6 +344,13 @@ async function api(port, method, path, body, jwt) {
 const POSTING_DATE = "2026-09-08";
 const CENTS = 76543;
 
+/** #794 — the marker the chatTurn leg's own turn carries, so the scripted model's chat half
+ *  clarifies THIS turn and narrates past every other lane's leftover `chat_turn` task. Spelled in
+ *  BOTH files and imported across neither: importing tests/two-build-serve.mjs boots a server (the
+ *  chat-turn-v19-e2e/serve pair's own constraint, and its own precedent for duplicating the
+ *  literal). A drift makes the leg's `pollQuestion` time out, loudly, rather than silently pass. */
+const CHAT_DRILL_MARKER = "TWO-BUILD CHAT CUTOVER DRILL";
+
 function basisFor(memo) {
   return {
     postingDate: POSTING_DATE,
@@ -548,6 +566,10 @@ async function main() {
 
   const imageA = spawnImage("A", await ephemeralPort(), built.serveScript);
   let imageB = null;
+  // #794 — the chatTurn leg's own predecessor image and its own parked turn, declared out here so
+  // the catch's log dump and the finally's kill + cleanup cover them on every exit path.
+  let imageA2 = null;
+  let chatTask = null;
   let w1 = null;
   let w2 = null;
   let ctxA = null;
@@ -873,13 +895,178 @@ async function main() {
       // clara.accounting_work is immutable by trigger.
       await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [orphan.task_id]);
     }
+
+    // =========================================================================
+    // #794 — THE chatTurn LEG. The same cutover law, measured on the lane that has no Work row.
+    // =========================================================================
+    // WHY IT IS A SECOND LEG AND NOT A SECOND FILE. Everything above the pair — the bundle gate,
+    // the inventory gate, the boot-line waits, the stop-A-before-B sequencing, the reconcile grace,
+    // the per-exit cleanup — is the drill, not the claraWork drill. A sibling script would have
+    // copied all of it to change the last two hundred lines.
+    //
+    // WHAT IS DIFFERENT, AND IT IS EXACTLY WHAT THE TICKET SAID WOULD BE. chatTurn mints no
+    // bundle, has no `clara.accounting_work` row and no typed Work question, so:
+    //   · the pair comes from `deriveVersionPair(registrySrc, "chatTurn")` and the image is built
+    //     with `className: "chatTurn"` and its OWN scratch-image `name` (the default `"previous"`
+    //     names the directory and would overwrite the claraWork image, CLARA_TWO_BUILD_REUSE
+    //     included);
+    //   · the park is a CHAT CLARIFICATION through `clara.open_interruption`, answered through
+    //     `clara.answer_interruption` — never `clara.admit_journal_work`;
+    //   · and the "stayed bound to the body it started under" proof is the run's OWN body
+    //     identifier (`bodyIdentifierOf` over `workflow.workflow_runs.name`) plus the successor
+    //     image's `/api/build-info` roster, rather than a receipt's bundle digest.
+    //
+    // NO VERSION LITERAL APPEARS BELOW. Every identifier asserted on is computed from the derived
+    // pair, so a later v19 -> v20 repoint needs no edit here — the wave-3 lesson this file's header
+    // records, applied the first time rather than after a red run.
+    {
+      const chatProbe = await rig.rootQuery(`
+        select to_regprocedure('clara.open_interruption(uuid,text,jsonb,uuid)') is not null as open_fn,
+               to_regprocedure('clara.answer_interruption(uuid,jsonb,text)') is not null as answer_fn
+      `);
+      const cp = chatProbe.rows[0] ?? {};
+      if (!cp.open_fn || !cp.answer_fn) {
+        // The leg's OWN door, not the file's: the Work probe at the top of main() answers about
+        // 0180, and a database carrying that but not the 0006 clarification pair would skip this
+        // leg while every claraWork assertion above still stands.
+        console.log("[tb-e2e] chatTurn leg SKIPPED — clara.open_interruption / clara.answer_interruption are not on this database");
+      } else {
+        const builtChat = await buildPreviousVersionImage({ name: "previous-chat", className: "chatTurn", log: (m) => console.log(m) });
+        const pairC = builtChat.pair;
+        console.log(
+          `[tb-e2e] chatTurn pair derived from registry.ts: ${pairC.previous} (build A2) -> ${pairC.pinned} (build B)`
+            + `${builtChat.reused ? " [REUSED scratch artifact]" : ` [built in ${(builtChat.buildMs / 1000).toFixed(1)}s]`}`,
+        );
+
+        // STATIC PROOF, off the ARTIFACTS, that A2 is a genuine rollback target for this class.
+        const bodiesA2 = supportedBodiesFromBundle(readFileSync(builtChat.serverEntry, "utf8"));
+        assert.ok(bodiesA2.includes(pairC.previous), `build A2's bundle registers ${pairC.previous}`);
+        assert.equal(bodiesA2.includes(pairC.pinned), false, `build A2's bundle does NOT register ${pairC.pinned}`);
+        assert.ok(bodiesB.includes(pairC.previous), `build B STILL registers ${pairC.previous} (policy (c))`);
+        assert.ok(bodiesB.includes(pairC.pinned), `build B registers ${pairC.pinned}`);
+        assert.equal(bodiesB.length, bodiesA2.length + 1, "A2 and B differ by EXACTLY one body");
+        console.log(`[tb-e2e] artifacts: A2 carries ${bodiesA2.length} bodies (no ${pairC.pinned}), B carries ${bodiesB.length}`);
+
+        imageA2 = spawnImage("A2", await ephemeralPort(), builtChat.serveScript);
+        await waitReady(imageA2);
+        await waitBooted(imageA2);
+        assert.ok(imageA2.state.serving, "build A2 emitted the provenance boot line");
+        assert.match(
+          imageA2.state.serving,
+          new RegExp(`chatTurn=${pairC.previous}\\b`),
+          `build A2's boot line pins chatTurn to ${pairC.previous} (got: ${imageA2.state.serving})`,
+        );
+        assert.equal(
+          new RegExp(`chatTurn=${pairC.pinned}\\b`).test(imageA2.state.serving),
+          false,
+          "build A2's boot line does NOT name the successor as its pin",
+        );
+        assert.match(imageA2.state.serving, new RegExp(`bodies=${bodiesA2.length}\\b`), "…and its body count matches its own bundle");
+        console.log(`[tb-e2e] A2 ready: ${imageA2.state.serving}`);
+
+        // --- C1: a chat turn STARTED on the predecessor image, parked on a clarification --------
+        const ctxC1 = await seedClient("tb-chat");
+        const session = await api(imageA2.port, "POST", "/api/chat/sessions", { clientId: ctxC1.client, title: "tb-chat" }, ctxC1.jwt);
+        assert.equal(session.status, 201, `chat session created on build A2 (got ${session.status} ${JSON.stringify(session.body)})`);
+        const sessionId = session.body.id ?? session.body.session_id;
+        assert.ok(sessionId, `the session id comes back (${JSON.stringify(session.body)})`);
+
+        const turn = await api(
+          imageA2.port,
+          "POST",
+          `/api/chat/${sessionId}/turns`,
+          { turnKey: `tk_${randomUUID().slice(0, 12)}`, parts: [{ type: "text", text: `${CHAT_DRILL_MARKER} — book the rent accrual for me` }] },
+          ctxC1.jwt,
+        );
+        assert.equal(turn.status, 202, `the turn is accepted by build A2 (got ${turn.status} ${JSON.stringify(turn.body)})`);
+        chatTask = { task_id: turn.body.task_id };
+        assert.ok(chatTask.task_id, "…and it names the chat task");
+
+        const qc = await pollQuestion(chatTask.task_id, "the chat turn parks on a clarification inside build A2");
+        const tcParked = await readTask(chatTask.task_id);
+        assert.equal(tcParked.kind, "chat_turn", "the parked task is the CHAT lane's, not a Work task");
+        assert.equal(tcParked.status, "awaiting_input", "the turn is honest about being blocked");
+        assert.equal(tcParked.work_id ?? null, null, "…and it has NO accounting_work row — this lane has none to resume through");
+        assert.equal(qc.work_id ?? null, null, "the clarification is a BARE chat clarify, bound to no Work");
+        assert.equal((qc.fields ?? []).length, 0, "…with zero typed fields: `clara.open_interruption` is not the Work-question door");
+        assert.ok(tcParked.workflow_run_id, "the chat task is BOUND to a workflow run");
+        const runC = await readRun(tcParked.workflow_run_id);
+        assert.equal(
+          bodyIdentifierOf(runC.name),
+          pairC.previous,
+          `the turn's run bound ${pairC.previous}, derived from the run ROW (got ${runC.name})`,
+        );
+        console.log(`[tb-e2e] C1 parked on ${pairC.previous} (chat clarification, run ${runC.name})`);
+
+        // --- PREFLIGHT while the turn is parked on the predecessor ------------
+        const chatFwd = await preflight({ query, supported: bodiesB });
+        assert.ok(
+          chatFwd.outside.every((row) => row.body !== pairC.previous),
+          `a target that carries ${pairC.previous} strands nothing of this leg's (got ${JSON.stringify(chatFwd.outside)})`,
+        );
+        const chatBack = await preflight({ query, supported: bodiesB.filter((b) => b !== pairC.previous) });
+        assert.ok(
+          chatBack.outside.some((row) => row.body === pairC.previous),
+          `a target WITHOUT ${pairC.previous} is refused BY THIS PARKED TURN and names the body (got ${JSON.stringify(chatBack.outside)})`,
+        );
+        console.log(`[tb-e2e] preflight: a target without ${pairC.previous} is refused by the parked turn, naming it`);
+
+        // --- STOP A2. The same sequencing law: one leader at a time. -----------
+        imageA2.child.kill("SIGTERM");
+        await waitExit(imageA2.child);
+        console.log(`[tb-e2e] build A2 stopped (exit ${JSON.stringify(imageA2.state.exitInfo)}) — the turn is parked on a body no running process now carries`);
+
+        // --- BUILD B AGAIN. The successor image, which RETAINS the predecessor body. ----
+        imageB = spawnImage("B-chat", await ephemeralPort(), runtimeServe);
+        await waitReady(imageB);
+        await waitBooted(imageB, { banners: [prevBundleId, pinnedBundleId] });
+        assert.match(imageB.state.serving, new RegExp(`chatTurn=${pairC.pinned}\\b`), `build B pins chatTurn to ${pairC.pinned}`);
+        const infoC = await api(imageB.port, "GET", "/api/build-info", undefined, ctxC1.jwt);
+        assert.equal(infoC.status, 200, "build-info answers a scoped session");
+        assert.equal(infoC.body.pins.chatTurn, pairC.pinned, `build B's /api/build-info pins chatTurn = ${pairC.pinned}`);
+        assert.ok(infoC.body.bodies.includes(pairC.previous), "…and its roster STILL carries the RETAINED predecessor body — which is why the parked turn is not stranded");
+        console.log(`[tb-e2e] B ready for the chat leg: pins.chatTurn=${infoC.body.pins.chatTurn}, roster carries ${pairC.previous}`);
+
+        // --- C1 RESUMES on its ORIGINAL body, inside build B -------------------
+        // The SUCCESSOR image's own class-agnostic delivery lane (`deliverInterruptions`) carries a
+        // clarification the PREDECESSOR image parked. That is the property under test.
+        await rig.humanQuery(ctxC1.owner, "select clara.answer_interruption(p_id=>$1, p_answer=>$2::jsonb, p_op_key=>$3)", [
+          qc.id,
+          JSON.stringify({ answer: "the financial year to 31 December 2026" }),
+          `tb-chat-${randomUUID()}`,
+        ]);
+        const tcDone = await pollTask(
+          chatTask.task_id,
+          (t) => ["completed", "failed", "cancelled", "expired"].includes(t.status),
+          "the chat turn settles inside build B",
+          120000,
+        );
+        assert.equal(tcDone.status, "completed", `the chat turn completed (got ${tcDone.status}/${tcDone.error_code})`);
+        const runCAfter = await pollRun(
+          tcParked.workflow_run_id,
+          (r) => ["completed", "failed", "cancelled"].includes(r.status),
+          "the chat turn's run reaches a terminal status",
+        );
+        assert.equal(runCAfter.name, runC.name, "PIN: the run NAME is invariant across the resume — it never migrated to the successor");
+        assert.equal(bodyIdentifierOf(runCAfter.name), pairC.previous, `…and it is still ${pairC.previous}`);
+        assert.equal(runCAfter.status, "completed", `the run itself completed (got ${runCAfter.status})`);
+        const answered = await rig.rootQuery("select status, delivered_at from clara.agent_interruptions where id = $1", [qc.id]);
+        assert.equal(answered.rows[0].status, "answered", "the clarification is answered");
+        assert.ok(answered.rows[0].delivered_at, "…and the SUCCESSOR image's delivery lane delivered it to the predecessor body's hook");
+        console.log(`[tb-e2e] RESUME C1: the turn completed on ${pairC.previous} inside build B (run name invariant), clarification delivered`);
+
+        imageB.child.kill("SIGTERM");
+        await waitExit(imageB.child);
+        imageB = null;
+      }
+    }
   } catch (err) {
     // THE FAILING IMAGE'S OWN LOG, printed once, before the cleanup below kills it (wave-3).
     // Every assertion in this file is about what a RUNTIME PROCESS did, and the first v2 -> v3
     // re-run failed on `W1 completed (got failed/internal)` with no way to see WHY from this
     // file's output — the child's stdout was captured into `state.stdout` and then discarded.
     // A drill whose failure cannot be read is a drill someone will re-run rather than diagnose.
-    for (const img of [imageA, imageB]) {
+    for (const img of [imageA, imageA2, imageB]) {
       if (!img) continue;
       const tail = (img.state.stdout ?? "").split("\n").slice(-40).join("\n");
       const errTail = (img.state.stderr ?? "").split("\n").slice(-20).join("\n");
@@ -890,7 +1077,7 @@ async function main() {
   } finally {
     // Kill any image still up FIRST: a running engine would re-create what the cleanup below
     // settles.
-    for (const img of [imageA, imageB]) {
+    for (const img of [imageA, imageA2, imageB]) {
       if (img && !img.state.exited) {
         img.child.kill("SIGKILL");
         await waitExit(img.child).catch(() => {});
@@ -901,7 +1088,10 @@ async function main() {
     // measurement), so an interrupted drill must not poison the next one. Tasks are CANCELLED
     // rather than deleted (clara.agent_tasks refuses a DELETE, CLR08); runs are marked cancelled
     // rather than deleted so the WDK's own event log stays intact for anyone reading it.
-    const mine = [w1, w2].filter(Boolean);
+    // #794 — the chatTurn leg's own parked turn is cleaned up on exactly the same terms: an
+    // interrupted chat leg leaves a non-terminal run of a RETAINED body behind, which is the state
+    // the inventory gate refuses the NEXT run on.
+    const mine = [w1, w2, chatTask].filter(Boolean);
     for (const w of mine) {
       await rig
         .rootQuery(
