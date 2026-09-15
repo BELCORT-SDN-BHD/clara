@@ -302,6 +302,20 @@ per-client jsonb 聚合（每条事实还各带一次 `clara.users` 与 `clara.k
 重复提交回放同一结果；期限到期后问题失效而不是 Work 静默完成。
 Work 详情、Needs you 与 chat rail 展示并回答**同一个**问题记录。[已实现]
 
+<!-- #764 -->
+**澄清送达在两条车道上语义一致**：控制监听器遇到 `HookNotFound` 时不再按车道分叉——它先向引擎求证
+（run 已终态／已被遗忘，或 task 已离开 `awaiting_input`，都证明这次 resume 其实已经落地），
+无法求证的行**停在** `delivery_state='hook_missing'` 并带上时刻，绝不被盖成 `delivered`。
+chat 车道随之有了自己的 reconciler（`packages/runtime/lib/reconciler-chat-clarify.mjs`）：过了宽限期后
+**以一次 resume 重新探测**——钩子重新可达就让该轮继续；钩子确认消失则把该 chat turn 结算为 `expired`，
+写入 `clarify_closed` part，并释放会话唯一的 live-turn 槽位（`uq_agent_task_one_live_turn`）。
+结算是**先看回执**的：turn 已经 checkpoint 的 parts 会被带进 assistant message，而不是被一条收尾 part 覆盖。
+该 belt 同时覆盖 0198 §R 记下的历史状态（`status='expired'` + `delivery_state='delivered'` 而 task 仍 `awaiting_input`；
+发布会话计数为 0，因为当时 chat 积压为 0，而非因为该缺口被验证过）。它在 leader 循环里**先于**
+`runReconcilerSweep` 运行，因为 `reconcileTasks` 的通用引擎镜像会把同一行结算成 `cancelled/engine_lost`，
+那不是这条 turn 应得的终态。[已实现，hosted evidence pending]
+<!-- /#764 -->
+
 **模型侧的修复与预算合同**由每个 successor 重新实现，不随冻结正文自动继承：错误按 (errcode, reason)
 名册分为 invalid_input／state_changed／conflict／transient／refusal／cancelled／invariant 七档；
 **refusal 与 conflict 对模型是终态，不得改参重试**；可安全重算的状态冲突重读，基础设施失败有限退避，
@@ -512,4 +526,4 @@ World 启动前另有一道 stranded-body 普查闸门：
 | 异地备份的首次真实部署与恢复演练 | 脚本、age 加密与清单已实现，镜像未部署，restore 从未被证明（`packages/backup/README.md` 自己写明这一点） |
 | 渲染器首次真实部署的验收门槛 | 镜像已统一 Node 22 并有确定性 drill，但"真实排队任务完成、内容哈希一致、manifest 记录实际镜像、替换前保留前一镜像"仍是待兑现义务 |
 | 多机部署、spool 转移与恢复演练 | 当前明确是单机 + 本地 spool；数据库持久化能支持恢复，但流程未被证明可用 |
-| 若干已知的单向缺口（期初余额车道的凭据绑定方向、chat 车道 `HookNotFound` 的投递语义） | 两处的主路径都已串行化或已覆盖，各剩一个方向／一个状态未收口，由 GitHub 票承接 |
+| 若干已知的单向缺口（期初余额车道的凭据绑定方向） | <!-- #764 -->主路径已串行化或已覆盖，仍剩一个方向未收口，由 GitHub 票承接。chat 车道 `HookNotFound` 的投递语义**已收口**（#764：`hook_missing` 停靠态 + chat reconciler 重探测，见 §5.B）——本地已验证，hosted evidence pending<!-- /#764 --> |

@@ -29,6 +29,23 @@ import { runReconcilerSweep } from "./reconciler.mjs";
 // belts run on different cadences anyway (dispatch every fast cycle, enqueue daily), and this is
 // where every other cadence decision is already made.
 import { reconcileRenderDispatch, reconcileRenderEnqueue } from "./reconciler-render.mjs";
+// #764 — the chat lane's clarification reconciler. Wired HERE rather than inside
+// runReconcilerSweep for TWO reasons, and the second is the binding one:
+//   (a) the same module-size budget the Wave-E note above cites; and
+//   (b) IMPORT DIRECTION. reconciler-chat-clarify.mjs imports the ONE HookNotFound predicate and
+//       the ONE resume-payload builder from lib/control.mjs (restating either is the drift this
+//       package refuses), and control.mjs already imports reconciler.mjs — so registering the belt
+//       inside runReconcilerSweep would close a module cycle that reconciler-work.mjs and
+//       reconciler-documents.mjs both went out of their way to avoid. From here the graph stays a
+//       DAG: leader -> chat-clarify -> control -> reconciler.
+// IT RUNS BEFORE runReconcilerSweep, AND THE ORDER IS LOAD-BEARING rather than alphabetical.
+// reconcileTasks' section C mirrors engine truth onto a parked chat turn with
+// `terminalFor('awaiting_input','lost') = cancelled/engine_lost` — a generic terminal that says
+// nothing about the question the turn was waiting on. A turn whose clarification is UNREACHABLE
+// deserves the terminal its own parked hook would have produced: `expired`, carrying a
+// `clarify_closed` part. So the specific arm decides first, and the generic mirror never sees the
+// row. Every other parked chat turn is untouched here and still belongs to reconcileTasks.
+import { reconcileChatClarifies } from "./reconciler-chat-clarify.mjs";
 // Wave F Track-A, F-A5b card 1. The sandbox-export queue is a SIBLING job family with its own
 // verbs, so it gets its own belt on the SAME fast cadence as the render dispatch half — and for
 // the same reason: latency is the feature, and its DB-side cooldown (not this loop) bounds how
@@ -215,6 +232,18 @@ export function startLeaderLoop(deps) {
             const lintDue = lintReconcileDue(lastLintRun, Date.now());
             const faDue = depreciationRunDue(lastFaRun, Date.now());
             const adjDue = adjustmentRunDue(lastAdjRun, Date.now());
+            // #764 — contained exactly like the render belts below: this belt isolates its own
+            // faults per row and returns counters rather than throwing, and it is ALSO wrapped,
+            // because "a sweeper that cannot fail" is a claim and this repo's own history is a
+            // list of times that claim was wrong.
+            try {
+              const chatClarify = await reconcileChatClarifies(client, deps);
+              if (chatClarify.chatClarifyExpired > 0 || chatClarify.chatClarifyResumed > 0) {
+                log(`[reconcile] chat clarify: resumed=${chatClarify.chatClarifyResumed} expired=${chatClarify.chatClarifyExpired}`);
+              }
+            } catch (err) {
+              log(`[reconcile] chat clarify belt error: ${err?.message ?? err}`); // transient — retry next cycle
+            }
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
