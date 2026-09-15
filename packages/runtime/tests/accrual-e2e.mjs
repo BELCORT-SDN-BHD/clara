@@ -365,6 +365,16 @@ ${(faulty.state.tail ?? []).join("")}`,
   assert.equal(await countEntries(client), entriesBefore + 1, "exactly one journal entry exists after the crash");
   assert.equal((await accrualRows(client)).length, 1, "…and STILL exactly one accrual record");
 
+  // PAUSE THE PLAN BEFORE THE RESPAWN, and the reason is a measurement rather than tidiness: the
+  // respawned engine runs the WHOLE reconciler, so the instant the accrual's entry lands its plan's
+  // reversal becomes admissible and that engine admits AND posts it — which is the lane working,
+  // and which would leave legs 3 and 4 with nothing left to cancel. `clara.pause_accounting_plan`
+  // blocks FUTURE admission only and never touches an already admitted Work (0193's own comment),
+  // so the accrual's own replay is entirely unaffected and the reversal simply waits for §3 to
+  // resume the plan and drive the belt by hand.
+  await rig.humanQuery(owner, "select clara.pause_accounting_plan($1::uuid,$2::text,$3::text) as r",
+    [plan, "held by accrual-e2e so the reversal leg is driven deliberately", rig.opk("accrual-pause")]);
+
   const respawn = spawnServe({ CLARA_WORK_TEST_SCRIPT: "post" });
   let accrualEntry = null;
   try {
@@ -381,10 +391,20 @@ ${(faulty.state.tail ?? []).join("")}`,
     respawn.child.kill("SIGKILL");
     await waitExit(respawn.child).catch(() => {});
   }
-  assert.equal(await countEntries(client), entriesBefore + 1,
-    "STILL exactly one journal entry after the replay — the tool call replayed onto the same logical identity");
+  // THE REPLAY CLAIM IS PER OPERATION IDENTITY, NOT PER CLIENT, and this is why: the respawned
+  // engine runs the WHOLE reconciler, so the moment the accrual's entry is on the books its plan's
+  // REVERSAL becomes admissible and that same engine may admit and post it before it is killed.
+  // That is the lane working, not a defect — so the crash-replay assertions are made about the
+  // ACCRUAL'S OWN identity, which is what "replayed onto the same logical identity" means.
   assert.equal(await countCommitted(accrualWork), 1, "STILL exactly one committed receipt");
-  assert.equal((await occurrencesOf(plan)).length, 1, "STILL exactly one occurrence");
+  const accrualEntries = await rig.rootQuery(
+    `select count(distinct rc.effects->>'entry_id')::int as n from clara.operation_receipts rc
+      where rc.work_id = $1 and rc.outcome = 'committed'`, [accrualWork]);
+  assert.equal(accrualEntries.rows[0].n, 1,
+    "STILL exactly ONE journal entry for the accrual's own logical identity after the replay");
+  const primaryOccs = (await occurrencesOf(plan)).filter((o) => o.leg === "primary");
+  assert.equal(primaryOccs.length, 1, "STILL exactly one accrual occurrence");
+  assert.equal(primaryOccs[0].work_id, accrualWork, "…and it still names the Work it named before the crash");
   assert.equal((await accrualRows(client)).length, 1, "STILL exactly one accrual record");
 
   const read2 = await readAccrual(owner, accrualId);
@@ -403,6 +423,14 @@ ${(faulty.state.tail ?? []).join("")}`,
     const beltOnce = () => rig.withActor({ role: "clara_runtime" }, (c) =>
       reconcilePlanOccurrences(c, { limit: 50, log: () => {} }));
 
+    // THE PLAN IS STILL PAUSED FROM LEG 2, so a belt pass admits NOTHING: pausing blocks future
+    // admission, and the reversal is a future due event even though its accrual is on the books.
+    await beltOnce();
+    assert.equal((await occurrencesOf(plan)).length, 1,
+      "a paused plan admits no reversal, however posted its accrual is");
+
+    await rig.humanQuery(owner, "select clara.resume_accounting_plan($1::uuid,$2::text) as r",
+      [plan, rig.opk("accrual-resume")]);
     await beltOnce();
     const r3 = await occurrencesOf(plan);
     assert.equal(r3.length, 2, `the reversal becomes due once its accrual has POSTED; got ${JSON.stringify(r3.map((x) => [x.due_date, x.leg]))}`);
@@ -429,9 +457,13 @@ ${(faulty.state.tail ?? []).join("")}`,
     //
     // CANCEL WITH NO ENGINE RUNNING, which is the deterministic half of 0184's ordering boundary:
     // nothing is settling, so the cancel wins outright and the Work posts nothing.
-    const cancelled = await rig.humanQuery(owner,
-      "select clara.cancel_accounting_work($1::uuid,$2::uuid,$3::text) as r",
-      [reversal.work_id, owner, rig.opk("accrual-cancel")]);
+    // ON THE RUNTIME ROLE, because that is the only lane granted the cancel door
+    // (0184:1365 — `clara_runtime` alone; a human reaches it through the runtime's own
+    // authenticated route, never through PostgREST). The AUTHOR is still the human, passed as an
+    // argument, exactly as that route passes it.
+    const cancelled = await rig.withActor({ role: "clara_runtime" }, (c) =>
+      c.query("select clara.cancel_accounting_work($1::uuid,$2::uuid,$3::text) as r",
+        [reversal.work_id, owner, rig.opk("accrual-cancel")]));
     assert.ok(cancelled.rows[0].r, "the cancel door answered");
     const cancelledRow = await readWork(reversal.work_id);
     assert.ok(["cancelled", "stopping"].includes(cancelledRow.status),
