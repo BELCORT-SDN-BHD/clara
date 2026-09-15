@@ -111,12 +111,21 @@ export function queueRecoveryLabelKey(reason: string | null): string | null {
 
 /** A document's metadata badges as STRUCTURED entries — document-metadata.tsx
  *  resolves each into a `t()` call (two-step for `extraction`, whose own status
- *  key is translated first, then interpolated — "extraction: {status}"). Only
- *  `documentKind` interpolates a raw value directly: `document_kind` is itself a
- *  DB-owned enum string (e.g. "invoice"), not chrome prose — same treatment as
- *  `filingBasisKey`/`candidateRuleBandKey` leaving THEIR enum inputs untranslated,
- *  just without even a wrapping key since there is no fixed enumeration of kinds
- *  worth a full key set (DOCUMENT_KINDS already has 20 members). */
+ *  key is translated first, then interpolated — "extraction: {status}").
+ *
+ *  #633 AC2 OVERTURNS THIS COMMENT'S OWN PRIOR RULING, BY NAME. It used to read:
+ *  "Only `documentKind` interpolates a raw value directly: `document_kind` is itself
+ *  a DB-owned enum string (e.g. 'invoice'), not chrome prose … there is no fixed
+ *  enumeration of kinds worth a full key set (DOCUMENT_KINDS already has 20
+ *  members)." Both halves are wrong. The enumeration IS fixed and closed
+ *  (`documents_document_kind_check`, packages/db/migrations/0123_f_a7_gamma_egress.sql:
+ *  2056-2061, mirrored verbatim by `types.ts`'s DOCUMENT_KINDS and re-derived by
+ *  `clara._document_kind_roster()` for 0165's own capability seed), and 20 members is
+ *  the REASON for a key set rather than an argument against one — the shipped
+ *  consequence was `document-admin.tsx:77` offering "ssm_company_doc" to an accountant
+ *  as a choice, and this badge printing the same token. `documentKind` now resolves
+ *  through `lib/documents/kind-label.ts` like every other badge;
+ *  `filingBasisKey`/`candidateRuleBandKey` were already keyed and are unchanged. */
 export type DocumentBadge =
   | { kind: "extraction"; statusKey: string }
   | { kind: "pageCount"; count: number }
