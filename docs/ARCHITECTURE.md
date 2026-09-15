@@ -266,6 +266,15 @@ Knowledge 偏好、计算政策与"观察到的重复扣款"都解析不到，�
 runtime 皮带不自行推导任何日期，也不读任何 operator 开关——**不存在"全局开启自动执行"开关**，
 迁移尾部的普查对在世函数体断言了这一点。[已实现]
 
+<!-- #787 -->
+转回的"该分录仍在世"在**入账时再查一次**（不只在接收时）：由计划 reversal leg 发起的 Work 到达
+`clara._record_journal_entry_core` 时，核心重新调用接收侧同一个在世判定（`clara._plan_primary_entry`：
+已批准且自身未被冲销）；该分录已不在世（例如人类在接收与入账之间调用 `clara.reverse_entry` 冲销了计提）
+即按 CLR10 `reversal_before_primary`（`primary_state = entry_not_live`）拒绝入账，账上只留人类那一笔冲销。
+该臂与本函数体其余拒绝臂一样，只在该 Work **尚无已提交 operation receipt** 时生效，重放仍返回原结果。
+[已实现（本地验证：migration 0204 + `p640.occ.reversal_post_liveness`）；hosted evidence pending]
+<!-- #787 -->
+
 ### E. 模型外发（按用途授权 + 执行轨迹）
 
 外发是类型化的 client 用途家族：prepare／consume 两阶段、单次使用、短 TTL、多项重绑定检查。
