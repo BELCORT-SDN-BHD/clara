@@ -307,11 +307,26 @@ function PlanBasisSection({ basis }: { basis: PlanBasis | null }) {
 function OccurrenceRow({ clientId, occurrence }: { clientId: string; occurrence: PlanOccurrenceRow }) {
   const t = useTranslations("Plans");
   const refused = occurrence.outcome?.state === "refused";
+  // #789 — THE LEDGER IS OLDEST-FIRST AND INCLUDES THE CURRENT ADMISSION (0193 appends one element
+  // on every admission), so the PRIOR attempts are the ledger elements whose `work_id` is NOT the
+  // row's current one. Rendering the ledger verbatim would show the current Work as its own
+  // predecessor. `attempts` is tolerated absent (a door below 0193's frontier, or an ordinary
+  // single-attempt occurrence carrying an empty ledger) — it renders no history block at all, not a
+  // throw.
+  const priorAttempts = (occurrence.attempts ?? []).filter((a) => a.work_id !== occurrence.work_id);
   return (
     <TableRow>
       <TableCell className="font-medium">{occurrence.due_date}</TableCell>
       <TableCell className="text-muted-foreground">{legLabel(t, occurrence.leg)}</TableCell>
-      <TableCell className="text-muted-foreground">{occurrence.revision}</TableCell>
+      <TableCell className="text-muted-foreground">
+        {occurrence.revision}
+        {/* THE CURRENT ATTEMPT NUMBER, FOLDED INTO THE REVISION CELL rather than a new column — a
+            new column would mean a new header kept in step with it for no reader benefit, since
+            attempt 1 (the overwhelming majority of occurrences) says nothing a reader does not
+            already assume. */}
+        {" · "}
+        {t("attemptLabel", { n: occurrence.attempt })}
+      </TableCell>
       <TableCell>
         {refused ? (
           // A REFUSED DUE EVENT PRINTS ITS TYPED REASON VERBATIM — the database's own words, never
@@ -326,19 +341,46 @@ function OccurrenceRow({ clientId, occurrence }: { clientId: string; occurrence:
           </span>
         )}
       </TableCell>
-      <TableCell className="flex flex-wrap gap-2">
-        {occurrence.work_id === null ? (
-          <span className="text-muted-foreground">{t("noWork")}</span>
-        ) : (
-          <Link className="underline underline-offset-2" href={workDetailHref(clientId, occurrence.work_id)}>
-            {t("openWork")}
-          </Link>
-        )}
-        {occurrence.entry_id === null ? null : (
-          <Link className="underline underline-offset-2" href={journalEntryHref(clientId, occurrence.entry_id)}>
-            {t("openEntry")}
-          </Link>
-        )}
+      <TableCell className="flex flex-col gap-1">
+        <div className="flex flex-wrap gap-2">
+          {occurrence.work_id === null ? (
+            <span className="text-muted-foreground">{t("noWork")}</span>
+          ) : (
+            <Link className="underline underline-offset-2" href={workDetailHref(clientId, occurrence.work_id)}>
+              {t("openWork")}
+            </Link>
+          )}
+          {occurrence.entry_id === null ? null : (
+            <Link className="underline underline-offset-2" href={journalEntryHref(clientId, occurrence.entry_id)}>
+              {t("openEntry")}
+            </Link>
+          )}
+          {/* THE ENTRY THIS LEG UNDOES, under a label distinct from `openEntry` so it cannot be read
+              as the entry this occurrence PRODUCED (CONTEXT's own distinction between the two). */}
+          {occurrence.reverses_entry_id === null || occurrence.reverses_entry_id === undefined ? null : (
+            <Link className="underline underline-offset-2" href={journalEntryHref(clientId, occurrence.reverses_entry_id)}>
+              {t("reversesEntry")}
+            </Link>
+          )}
+        </div>
+        {/* THE CANCELLED OR FAILED WORK STAYS REACHABLE FROM THE PLAN (CONTEXT's "Plan occurrence"):
+            every prior attempt this due event took, each linking its OWN Work through the same
+            helper the current `work_id` already uses. No block at all when there is none — an
+            ordinary, never-superseded occurrence renders exactly as it always has. */}
+        {priorAttempts.length > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs text-muted-foreground">{t("priorAttemptsHeading")}</span>
+            {priorAttempts.map((a) => (
+              <Link
+                key={a.work_id}
+                className="text-xs underline underline-offset-2"
+                href={workDetailHref(clientId, a.work_id)}
+              >
+                {t("priorAttemptLink", { n: a.attempt })}
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </TableCell>
     </TableRow>
   );
