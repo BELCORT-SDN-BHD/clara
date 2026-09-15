@@ -183,6 +183,7 @@ components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/counterparty-hygiene-kinds.test.tsx
 components/registers/fa-particulars-fields.test.tsx
 components/registers/fa-register-tie.test.tsx
+components/registers/fixed-asset-detail.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
 components/registers/knowledge-detail.test.tsx
@@ -199,6 +200,7 @@ components/registers/register-refresh-siblings.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
 components/registers/staff-advances-a11y.test.tsx
 components/registers/staff-advances-keyboard.test.tsx
+components/registers/work-asset-row.test.tsx
 components/reports/reports-addressed-report.test.tsx
 components/reports/reports-components.test.tsx
 components/reports/reports-offer-refusal.test.tsx

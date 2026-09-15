@@ -56,6 +56,7 @@ const LANE_MOCKS = [
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
   "documents-viewer-mock.mjs",
+  "fixed-asset-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
@@ -338,6 +339,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
+  // #639's C7 acquisition lane. Every handler names this lane's own client id or one of its four
+  // asset ids before it answers and falls through otherwise, including all six RPC verbs and the
+  // three table reads — the shape a new lane mock aims for, declaring neither list. It claims no
+  // unfiltered `/clients` register (the walk navigates by URL) and it has no runtime half at all.
+  "fixed-asset-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
