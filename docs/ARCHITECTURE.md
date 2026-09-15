@@ -267,6 +267,15 @@ per-client jsonb 聚合（每条事实还各带一次 `clara.users` 与 `clara.k
 它读的行与共享表达式读的行完全相同（同表、同 live 谓词），convergence 电池对这个 key 同样做了断言。
 <!-- #784 -->
 
+<!-- #821 -->
+**一份凭证只背书一笔在账分录**，且三条通道互相看得见：工作／证据通道（`clara.entry_evidence_links`）
+与文件编码通道（`clara.journal_entries.document_id` 上的审核过账）彼此互看；开账通道按设计允许
+"一份 tie 凭证、多条开账明细"，因此兄弟开账明细不构成冲突，只有该凭证上已有**活的**证据链接
+（`released_at is null`）时开账审核才被拒。三道墙的拒绝口径完全一致：`CLR13` +
+`source_already_posted`，并指名冲突分录与凭证，不新增错误码或线上词汇；提问之前先锁 `clara.documents`
+的同一行，读-改-写竞争因此串行化。[已实现，本地验证；hosted evidence pending]
+<!-- #821 -->
+
 <a id="close-reporting-and-tax"></a>关账按年度顺序串行，carry-forward 幂等，beginning-close 冻结期间内银行结算须先完成。
 报表走 open → evaluate → seal → render：确定性计算、封存快照、独立渲染服务出文件，模型不重打金额。
 指标携带 unit／currency、period／as-of、computed-at、定义版本、source watermark 与 coverage；
