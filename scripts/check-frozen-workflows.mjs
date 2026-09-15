@@ -55,6 +55,14 @@
 //   node scripts/check-frozen-workflows.mjs --update         # re-baseline (local only)
 //   node scripts/check-frozen-workflows.mjs --lock-deployed  # ceremony: lock every entry
 //   node scripts/check-frozen-workflows.mjs --compare-base <ref> # semantic additions-only proof
+//   node scripts/check-frozen-workflows.mjs --print-closure   # report, per @frozen entry file,
+//                                                             # the modules its own closure locks
+//
+// `--print-closure` (#815) is ADDITIVE REPORTING ONLY: it reads nothing but the tree, writes no
+// manifest, changes no hash, and exits 0. It answers the question the flat manifest cannot —
+// "which frozen version(s) lock this module?" — which is what an author needs BEFORE editing e.g.
+// lib/work-trace.mjs (reached from claraWork.v3.impl.ts only through a DYNAMIC import) or
+// lib/capability-registry.mjs (reached only TRANSITIVELY, through work-trace.mjs).
 //
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
@@ -71,13 +79,16 @@
 // No dependencies — Node built-ins only.
 
 import { createHash } from "node:crypto";
-import { readFileSync, existsSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, extname } from "node:path";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 // Pure sibling checkers let selftests inject simulated base/head source pairs.
 import { checkManifestPaths, checkRegistryMonotonicity, checkRegistryViewIntegrity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
 import { runFrozenManifestCompareCli } from "./frozen-manifest-compare.mjs";
 import { FROZEN_WORKFLOW_FAILURE_GUIDANCE } from "./frozen-workflow-guidance.mjs";
+// The import-closure walk itself (#815) — shared with the selftest, which asserts the per-entry
+// attribution against the real tree without executing this CLI.
+import { FROZEN_MARKER, allImportsOf, computeFrozenClosures, formatClosureReport, scannedSourceFiles } from "./freeze-lint-closure.mjs";
 const COMPARE_BASE_INDEX = process.argv.indexOf("--compare-base");
 if (COMPARE_BASE_INDEX !== -1) process.exit(runFrozenManifestCompareCli(process.argv.slice(2)));
 // All git calls go through execFileSync with an argv array — never a shell string —
@@ -89,7 +100,6 @@ function git(args, opts = {}) {
 const REPO_ROOT = git(["rev-parse", "--show-toplevel"]).trim();
 const MANIFEST_REL = "frozen-workflows.json";
 const MANIFEST_PATH = join(REPO_ROOT, MANIFEST_REL);
-const FROZEN_MARKER = "@frozen";
 // A WDK workflow directive is a PROLOGUE STATEMENT — a bare string literal
 // `"use workflow";` on its own — not a prose mention of the words in a comment.
 // We strip comments first so a doc line like  // ... the `"use workflow"` directive
@@ -110,13 +120,11 @@ function hasWorkflowDirective(src) {
 // Defence-in-depth: reject a base ref that isn't a plain git ref name.
 const RAW_BASE_REF = process.env.FREEZE_BASE_REF || "origin/main";
 const BASE_REF = /^[A-Za-z0-9._/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
-// Coverage scope: ALL tracked source under packages/. Not a narrow per-directory allowlist.
-const SCAN_PATHSPEC = "packages";
-const SOURCE_EXT = new Set([".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx"]);
-
 const IN_CI = !!(process.env.CI || process.env.GITHUB_ACTIONS);
 const UPDATE = process.argv.includes("--update");
 const LOCK_DEPLOYED = process.argv.includes("--lock-deployed");
+// #815 — parsed HERE, after the --compare-base early exit above, so that path is undisturbed.
+const PRINT_CLOSURE = process.argv.includes("--print-closure");
 
 /** sha256 of file content, line-endings normalised to \n. */
 function hashText(text) {
@@ -125,66 +133,6 @@ function hashText(text) {
 function hashFile(absPath) {
   return hashText(readFileSync(absPath, "utf8"));
 }
-function toRel(abs) {
-  return relative(REPO_ROOT, abs).split("\\").join("/");
-}
-
-/** Tracked + new-but-not-ignored source files under packages/ (mirrors check-leaks). */
-function scannedSourceFiles() {
-  const out = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", SCAN_PATHSPEC], {
-    cwd: REPO_ROOT,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return [...new Set(out)].filter((rel) => SOURCE_EXT.has(extname(rel).toLowerCase()));
-}
-
-/** Resolve a relative import specifier to an on-disk source file (.js -> .ts, etc.). */
-function resolveRelImport(fromAbs, spec) {
-  const raw = resolve(dirname(fromAbs), spec);
-  const candidates = [raw];
-  const jsExt = raw.match(/\.([cm]?)jsx?$/);
-  if (jsExt) {
-    // "./steps.js" written in TS source resolves to "./steps.ts".
-    candidates.push(raw.replace(/\.[cm]?jsx?$/, ".ts"));
-    candidates.push(raw.replace(/\.[cm]?jsx?$/, ".tsx"));
-    candidates.push(raw.replace(/\.[cm]?jsx?$/, ".mts"));
-    candidates.push(raw.replace(/\.[cm]?jsx?$/, ".cts"));
-  }
-  for (const ext of SOURCE_EXT) candidates.push(raw + ext);
-  for (const ext of [".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx"]) {
-    candidates.push(join(raw, "index" + ext));
-  }
-  for (const c of candidates) {
-    try {
-      if (statSync(c).isFile()) return c;
-    } catch {
-      /* not this candidate */
-    }
-  }
-  return null;
-}
-
-/** All import/export specifiers of a source file (static + dynamic). */
-function allImportsOf(abs) {
-  const src = readFileSync(abs, "utf8");
-  const specs = new Set();
-  const re = /\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
-  let m;
-  while ((m = re.exec(src))) {
-    const spec = m[1] || m[2] || m[3];
-    if (spec) specs.add(spec);
-  }
-  return [...specs];
-}
-
-/** Relative import/export specifiers of a source file (static + dynamic). */
-function relativeImportsOf(abs) {
-  return allImportsOf(abs).filter((spec) => spec.startsWith("."));
-}
-
 /** Names of the workspace packages (packages/* + apps/*) — first-party specifiers. */
 function workspacePackageNames() {
   const names = new Set();
@@ -219,22 +167,6 @@ function isFirstPartyEscape(spec, wsNames) {
     if (spec === name || spec.startsWith(name + "/")) return true; // workspace package (or its subpath)
   }
   return false;
-}
-
-/** Transitive relative-import closure (includes the start file itself). */
-function importClosure(startAbs) {
-  const seen = new Set();
-  const stack = [startAbs];
-  while (stack.length) {
-    const cur = stack.pop();
-    if (seen.has(cur)) continue;
-    seen.add(cur);
-    for (const spec of relativeImportsOf(cur)) {
-      const r = resolveRelImport(cur, spec);
-      if (r) stack.push(r); // unresolved relative imports are left to tsc/build
-    }
-  }
-  return seen;
 }
 
 function loadManifest() {
@@ -280,28 +212,14 @@ function loadBaseManifest() {
   }
 }
 
-/** Compute the set (rel paths) that MUST be frozen: every @frozen file + its import closure. */
-function computeFrozenSet(files) {
-  const frozenMarked = files.filter((rel) => {
-    try {
-      return readFileSync(join(REPO_ROOT, rel), "utf8").includes(FROZEN_MARKER);
-    } catch {
-      return false;
-    }
-  });
-  const frozenRelSet = new Set();
-  for (const rel of frozenMarked) {
-    for (const abs of importClosure(join(REPO_ROOT, rel))) {
-      const r = toRel(abs);
-      if (r.startsWith("packages/")) frozenRelSet.add(r); // closure should not escape packages/
-    }
-  }
-  return { frozenMarked, frozenRel: [...frozenRelSet].sort() };
-}
-
 function main() {
-  const files = scannedSourceFiles();
-  const { frozenRel } = computeFrozenSet(files);
+  const files = scannedSourceFiles(REPO_ROOT);
+  const closure = computeFrozenClosures(REPO_ROOT, files);
+  const { frozenRel } = closure;
+  if (PRINT_CLOSURE) {
+    console.log(formatClosureReport(closure));
+    return 0;
+  }
   const workflowFiles = files.filter((rel) => {
     try {
       return hasWorkflowDirective(readFileSync(join(REPO_ROOT, rel), "utf8"));

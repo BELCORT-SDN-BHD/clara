@@ -398,6 +398,20 @@ only positively identified stale runtime sessions after confirming the old proce
 Frozen workflows and their relative-import closures are hash-checked. Behavioral changes need a
 successor version and registry repoint. Retain old exports while non-terminal runs reference them.
 
+<!-- #815 -->
+Which modules a given frozen entry locks is no longer prose you have to trust: run `node
+scripts/check-frozen-workflows.mjs --print-closure` to see, per `@frozen` entry file, the modules
+its own transitive relative-import closure hash-locks (static **and** dynamic imports). Read it
+before editing anything under `packages/runtime/lib/` — `lib/work-trace.mjs` is reached from
+`claraWork.v3.impl.ts` only through `await import(...)`, and `lib/capability-registry.mjs` only
+transitively through `lib/work-trace.mjs`, so neither looks frozen from the file itself.
+
+**Owner ruling (2026-09-15).** A redaction hardening to `lib/work-trace.mjs` goes through a **v4
+closure** — a new `claraWork_v4` and its own new frozen files — never an in-place edit to the
+frozen file. The same rule holds for every other module the closure report attributes to a frozen
+entry. The ruling is recorded here; no hardening is implemented by it.
+<!-- /#815 -->
+
 ### The rollback preflight is a command, and it is a required step
 
 Run it **before** `fly deploy --image <previous>`, never after:

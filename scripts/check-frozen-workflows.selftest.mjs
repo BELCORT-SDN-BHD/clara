@@ -23,8 +23,10 @@ import {
   checkEnqueueSites,
   parseRegistrySource,
 } from "./freeze-lint-checks.mjs";
+import { computeFrozenClosures, scannedSourceFiles } from "./freeze-lint-closure.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(HERE, "..");
 const FIXTURES = join(HERE, "freeze-lint-fixtures");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
 
@@ -341,6 +343,61 @@ testCase("C77.2 POSITIVE CONTROL: a valid production registration is clean — t
 testCase("C77.2 POSITIVE CONTROL: the REAL frozen manifest's every key passes (canary)", () => {
   const manifest = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
   expectClean(checkManifestPaths(Object.keys(manifest.workflows ?? {})));
+});
+
+// --- (#815) PER-ENTRY CLOSURE ATTRIBUTION -----------------------------------
+// The manifest is a FLAT set: it says a module is frozen, never which frozen entry reaches it.
+// Four modules newly reached by chatTurn_v19 / claraWork_v3 carry hand-written `note` prose
+// naming their reaching version, which is maintained by hand for four entries and can drift from
+// the real import graph. `--print-closure` computes the attribution instead; these cells are its
+// canary, run against the REAL repository tree (no fixtures — the property under test is the
+// actual import graph, and a fixture of it would be the same prose by another name).
+console.log("per-entry closure attribution (#815):");
+
+const closureFiles = scannedSourceFiles(REPO_ROOT);
+const closure = computeFrozenClosures(REPO_ROOT, closureFiles);
+/** Entry files (sorted) whose own closure locks `rel`. */
+const reachedBy = (rel) =>
+  [...closure.byEntry.entries()].filter(([, mods]) => mods.includes(rel)).map(([entry]) => entry).sort();
+
+const W = "packages/runtime/workflows/";
+const ATTRIBUTION = [
+  // #815 acceptance: knowledge.mjs under the 4 reaching chatTurn_v19 entry files.
+  ["packages/runtime/lib/knowledge.mjs", [`${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`]],
+  // ... periodic-adjustment-basis.ts under the 5 reaching chatTurn_v19 entry files.
+  ["packages/runtime/lib/periodic-adjustment-basis.ts", [`${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.parts.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`]],
+  // ... capability-registry.mjs (reached ONLY transitively, through work-trace.mjs) and
+  // work-trace.mjs (reached ONLY through a DYNAMIC import) under the 2 claraWork_v3 entry files.
+  ["packages/runtime/lib/capability-registry.mjs", [`${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`]],
+  ["packages/runtime/lib/work-trace.mjs", [`${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`]],
+];
+
+for (const [rel, expected] of ATTRIBUTION) {
+  testCase(`#815 ${rel} is attributed to exactly its ${expected.length} reaching frozen entr(ies)`, () => {
+    const actual = reachedBy(rel);
+    if (actual.join("\n") !== expected.join("\n")) {
+      throw new Error(`expected:\n  ${expected.join("\n  ")}\ngot:\n  ${actual.join("\n  ") || "(none)"}`);
+    }
+  });
+}
+
+testCase("#815 the UNION of every per-entry closure equals the flat set the tool freezes (the report re-partitions, it never changes what is frozen)", () => {
+  const union = new Set();
+  for (const mods of closure.byEntry.values()) for (const m of mods) union.add(m);
+  const flat = [...union].sort();
+  if (flat.join("\n") !== closure.frozenRel.join("\n")) {
+    const missing = closure.frozenRel.filter((r) => !union.has(r));
+    const extra = flat.filter((r) => !closure.frozenRel.includes(r));
+    throw new Error(`union != flat set; missing from union: ${missing.join(", ") || "(none)"}; extra: ${extra.join(", ") || "(none)"}`);
+  }
+});
+
+testCase("#815 the flat set matches the manifest's registered entry count (the union is the manifest)", () => {
+  const manifest = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
+  const registered = Object.keys(manifest.workflows ?? {}).length;
+  if (closure.frozenRel.length !== registered) {
+    throw new Error(`closure locks ${closure.frozenRel.length} module(s) but the manifest registers ${registered}`);
+  }
 });
 
 // --- (e) enqueue-site provenance --------------------------------------------
