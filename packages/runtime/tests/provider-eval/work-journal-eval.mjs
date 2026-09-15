@@ -74,7 +74,7 @@ if (!keyName) {
 const { register } = await import("tsx/esm/api");
 register();
 const { CLARA_WORK_BUNDLE_V3 } = await import("../../workflows/claraWork.v3.bundle.ts");
-const { generateText, tool } = await import("ai");
+const { generateText, tool, stepCountIs, hasToolCall } = await import("ai");
 const { z } = await import("zod");
 
 const CHART = [
@@ -191,7 +191,7 @@ for (const leg of LEGS) {
         system: instructions,
         prompt: leg.envelope,
         tools: evalTools(calls),
-        maxSteps: 4,
+        stopWhen: [stepCountIs(4), hasToolCall("ask_question")],
       });
       text = String(out.text ?? "");
     } catch (err) {
@@ -200,7 +200,8 @@ for (const leg of LEGS) {
     }
     const verdict = leg.score(calls, text);
     if (verdict.pass) passes += 1;
-    notes.push(`sample ${i + 1}: ${verdict.pass ? "PASS" : "FAIL"} — ${verdict.note}`);
+    const callTrail = calls.length > 0 ? calls.map((c) => c.name).join(" → ") : "(no tool calls)";
+    notes.push(`sample ${i + 1}: ${verdict.pass ? "PASS" : "FAIL"} — ${verdict.note} — calls: ${callTrail}`);
   }
   results.push({ id: leg.id, passes, samples: SAMPLES, notes });
 }
