@@ -67,6 +67,18 @@
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
 //
+// RETIREMENT (#810, owner ruling 2026-09-15). During beta a SUPERSEDED body may leave the tree
+// without a drain proof — runs parked on it are cancelled in the hosted cleanup first, because the
+// boot-time stranded-body guard would otherwise refuse to start the world. The manifest stays
+// append-only IN SPIRIT rather than in letter: the entry MOVES to a top-level `retired` record
+// (path -> { sha256: the entry's LAST frozen hash, ruling: the citation }) instead of being
+// deleted, so the ledger still answers "what was this file's last frozen hash, and under whose
+// ruling did it go". `MISSING` and `REMOVED-VS-BASE` accept exactly such a record and nothing
+// else; deploy-lock semantics are unchanged for every other entry. Versioning law (c) — an export
+// WITH in-flight runs is never renamed or deleted — is unchanged: retirement presupposes none.
+// The inverse is a finding of its own: a retired path whose FILE IS STILL IN THE TREE
+// (RETIRED-PRESENT) would be @frozen, unregistered and unhashed — a silent un-freeze.
+//
 // DEPLOY-LOCK (the versioning law's actual boundary — docs/ARCHITECTURE.md §10 (#workflow-versioning-and-rollback)):
 // `deployed: true` = shipped in a
 // LIVE image — hash immutable vs base forever, flag MONOTONIC (an unlock is the
@@ -170,9 +182,10 @@ function isFirstPartyEscape(spec, wsNames) {
 }
 
 function loadManifest() {
-  if (!existsSync(MANIFEST_PATH)) return { version: 1, workflows: {} };
+  if (!existsSync(MANIFEST_PATH)) return { version: 1, workflows: {}, retired: {} };
   const parsed = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
   parsed.workflows ??= {};
+  parsed.retired ??= {}; // #810 — absent on a manifest that has retired nothing.
   return parsed;
 }
 
@@ -199,17 +212,23 @@ function loadBaseManifest() {
   } catch {
     refExists = false;
   }
-  if (!refExists) return { available: false, workflows: {} };
+  if (!refExists) return { available: false, workflows: {}, retired: {} };
   const raw = readBaseFile(MANIFEST_REL);
   if (raw === null) {
     // Ref exists but manifest not present on it -> first introduction.
-    return { available: true, workflows: {} };
+    return { available: true, workflows: {}, retired: {} };
   }
   try {
-    return { available: true, workflows: JSON.parse(raw).workflows ?? {} };
+    const parsed = JSON.parse(raw);
+    return { available: true, workflows: parsed.workflows ?? {}, retired: parsed.retired ?? {} };
   } catch {
-    return { available: true, workflows: {} };
+    return { available: true, workflows: {}, retired: {} };
   }
+}
+
+/** #810 — a rewrite of the manifest carries the `retired` record through, and omits it when empty. */
+function withRetired(doc, retired) {
+  return Object.keys(retired ?? {}).length > 0 ? { ...doc, retired } : doc;
 }
 
 function main() {
@@ -249,7 +268,7 @@ function main() {
     for (const [rel, prev] of Object.entries(manifest.workflows)) if (!workflows[rel]) workflows[rel] = prev;
     writeFileSync(
       MANIFEST_PATH,
-      JSON.stringify({ version: manifest.version ?? 1, workflows }, null, 2) + "\n",
+      JSON.stringify(withRetired({ version: manifest.version ?? 1, workflows }, manifest.retired), null, 2) + "\n",
       "utf8",
     );
     console.log(
@@ -263,7 +282,7 @@ function main() {
     if (IN_CI) { console.error("freeze-lint: --lock-deployed is REFUSED under CI — a deliberate local ceremony act."); return 1; }
     let locked = 0;
     for (const e of Object.values(manifest.workflows)) if (e.deployed !== true) { e.deployed = true; locked += 1; }
-    writeFileSync(MANIFEST_PATH, JSON.stringify({ version: manifest.version ?? 1, workflows: manifest.workflows }, null, 2) + "\n", "utf8");
+    writeFileSync(MANIFEST_PATH, JSON.stringify(withRetired({ version: manifest.version ?? 1, workflows: manifest.workflows }, manifest.retired), null, 2) + "\n", "utf8");
     console.log(`freeze-lint: locked ${locked} newly-deployed entr(ies); every manifest entry is now deploy-locked.`);
     return 0;
   }
@@ -273,6 +292,7 @@ function main() {
   // H2 — freezing is mandatory, not opt-in: every "use workflow" file must be
   // @frozen AND registered.
   for (const rel of workflowFiles) {
+    if (manifest.retired[rel]) continue; // #810 — reported once, as RETIRED-PRESENT below.
     let src = "";
     try {
       src = readFileSync(join(REPO_ROOT, rel), "utf8");
@@ -293,6 +313,7 @@ function main() {
 
   // 1. Every frozen file (marked + import-closure) must be registered with a matching hash.
   for (const rel of frozenRel) {
+    if (manifest.retired[rel]) continue; // #810 — reported once, as RETIRED-PRESENT below.
     const entry = manifest.workflows[rel];
     if (!entry) {
       violations.push(
@@ -324,12 +345,38 @@ function main() {
     }
   }
 
+  // 2c. RETIREMENT INTEGRITY (#810). The `retired` record is the ONLY thing that makes a removal
+  // legal, so it carries its own rules rather than being trusted by existing. A retired file that
+  // is still in the tree is the inverse of a MISSING and just as much a finding: it would be
+  // @frozen, unregistered and unhashed — a silent un-freeze. A path in BOTH ledgers is a
+  // contradiction the append-only comparison below would read either way, so it fails closed here.
+  for (const [rel, record] of Object.entries(manifest.retired)) {
+    if (manifest.workflows[rel]) {
+      violations.push(
+        `RETIRED-DUPLICATE  ${rel}  (present in BOTH \`workflows\` and \`retired\` — an entry MOVES to the retired record, it is never copied).`,
+      );
+    }
+    if (!/^[0-9a-f]{64}$/.test(String(record?.sha256 ?? ""))) {
+      violations.push(`RETIRED-NO-HASH   ${rel}  (a retired record must quote the entry's LAST frozen sha256).`);
+    }
+    if (!String(record?.ruling ?? "").trim()) {
+      violations.push(
+        `RETIRED-NO-RULING ${rel}  (a retired record must cite the ruling that authorised the removal, e.g. "#810 owner ruling 2026-09-15").`,
+      );
+    }
+    if (existsSync(join(REPO_ROOT, rel))) {
+      violations.push(
+        `RETIRED-PRESENT   ${rel}  (recorded as retired but STILL IN THE TREE — a retirement is a removal from the tree, never a silent un-freeze; delete the file or restore its \`workflows\` entry).`,
+      );
+    }
+  }
+
   // 2a. MANIFEST-KEY HYGIENE (C77.2, #637). Checks 1 and 2 both ask questions about the
   // FILES the manifest points at; this asks the one question about the KEYS themselves. It is
   // separate from `isTestPath`'s long-standing use in the enqueue-site scan below (an
   // exclusion there, a refusal here) and runs on the manifest as loaded, so a key whose file
   // does not even exist is still reported by its own rule rather than only as MISSING.
-  violations.push(...checkManifestPaths(Object.keys(manifest.workflows), MANIFEST_REL));
+  violations.push(...checkManifestPaths([...Object.keys(manifest.workflows), ...Object.keys(manifest.retired)], MANIFEST_REL));
 
   // 2b. IMPORT-ESCAPE (finding 11): every frozen file must reach its first-party
   // code through RELATIVE imports so the closure can follow + hash it. A
@@ -360,9 +407,19 @@ function main() {
   for (const [rel, entry] of Object.entries(base.workflows)) {
     const cur = manifest.workflows[rel];
     if (!cur) {
-      violations.push(
-        `REMOVED-VS-BASE   ${rel}  (frozen in ${BASE_REF} but dropped from the manifest — append-only: a frozen entry can never be removed or renamed, even if the file moved out of scope).`,
-      );
+      // #810 — the ONE permitted absence: a `retired` record quoting this entry's LAST frozen
+      // hash. Its own shape (hash present, ruling cited, file gone) is checked at 2c above; here
+      // only the CONTINUITY with the base entry is, which 2c cannot see.
+      const retired = manifest.retired[rel];
+      if (!retired) {
+        violations.push(
+          `REMOVED-VS-BASE   ${rel}  (frozen in ${BASE_REF} but dropped from the manifest — append-only: a frozen entry can never be removed or renamed, even if the file moved out of scope; a beta-era retirement moves it to the \`retired\` record instead, #810).`,
+        );
+      } else if (retired.sha256 !== entry.sha256) {
+        violations.push(
+          `RETIRED-HASH-MISMATCH  ${rel}\n    base    ${entry.sha256}\n    retired ${retired.sha256}\n    -> a retired record must quote the entry's LAST frozen hash; it records history, it never rewrites it.`,
+        );
+      }
       continue;
     }
     if (entry.deployed === true && cur.deployed !== true)
@@ -371,6 +428,17 @@ function main() {
     if (cur.sha256 !== entry.sha256 && hashLocked)
       violations.push(`REHASHED-VS-BASE  ${rel}\n    base   ${entry.sha256}\n    current ${cur.sha256}\n    -> a DEPLOYED frozen hash is immutable vs ${BASE_REF}; editing a frozen body + its manifest hash together is exactly the bypass this blocks. Ship a new _vN.`);
   }
+  for (const [rel, record] of Object.entries(base.retired ?? {})) {
+    const cur = manifest.retired[rel];
+    if (!cur) {
+      violations.push(
+        `UNRETIRED-VS-BASE ${rel}  (retired in ${BASE_REF} but absent from the current \`retired\` record — a retirement is append-only, exactly like the entry it replaced).`,
+      );
+    } else if (cur.sha256 !== record.sha256) {
+      violations.push(`RETIRED-REHASHED-VS-BASE ${rel}  (retired last hash moved vs ${BASE_REF}).`);
+    }
+  }
+
   if (!base.available) {
     // The append-only-vs-base comparison is THE durable protection. On an
     // established repo origin/main always resolves (ci.yml fetches it, failing
@@ -423,8 +491,9 @@ function main() {
     return 1;
   }
 
+  const retiredCount = Object.keys(manifest.retired).length;
   console.log(
-    `freeze-lint: OK — ${frozenRel.length} frozen file(s) verified against ${MANIFEST_REL} (append-only vs ${BASE_REF}${base.available ? "" : " [base unavailable]"}); ${workflowFiles.length} "use workflow" module(s) all frozen+registered.`,
+    `freeze-lint: OK — ${frozenRel.length} frozen file(s) verified against ${MANIFEST_REL} (append-only vs ${BASE_REF}${base.available ? "" : " [base unavailable]"}); ${workflowFiles.length} "use workflow" module(s) all frozen+registered${retiredCount > 0 ? `; ${retiredCount} retired entr(ies) recorded` : ""}.`,
   );
   return 0;
 }

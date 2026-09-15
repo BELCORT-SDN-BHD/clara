@@ -24,6 +24,7 @@ import {
   parseRegistrySource,
 } from "./freeze-lint-checks.mjs";
 import { computeFrozenClosures, scannedSourceFiles } from "./freeze-lint-closure.mjs";
+import { compareFrozenManifestText } from "./frozen-manifest-compare.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
@@ -343,6 +344,62 @@ testCase("C77.2 POSITIVE CONTROL: a valid production registration is clean — t
 testCase("C77.2 POSITIVE CONTROL: the REAL frozen manifest's every key passes (canary)", () => {
   const manifest = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
   expectClean(checkManifestPaths(Object.keys(manifest.workflows ?? {})));
+});
+
+// --- (#810) THE RETIREMENT PATH ---------------------------------------------
+// Owner ruling 2026-09-15 (#810): during beta a superseded body may leave the tree without a
+// drain proof. The manifest stays append-only IN SPIRIT rather than in letter — an entry is MOVED
+// to a `retired` record (path, last hash, ruling reference), never deleted — so the ledger still
+// answers "what was this file's last frozen hash, and under whose ruling did it go". The two
+// rules that gate a removal, MISSING (check-frozen-workflows.mjs) and REMOVED-VS-BASE /
+// REMOVED-ENTRY (here), accept a retired entry and nothing else.
+console.log("frozen-entry retirement (#810):");
+
+const RETIRED_PATH = "packages/runtime/workflows/chatTurn.v1.ts";
+const RETIRED_SHA = "a".repeat(64);
+const RULING = "#810 owner ruling 2026-09-15";
+const manifestText = (workflows, retired) =>
+  JSON.stringify({ version: 1, workflows, ...(retired ? { retired } : {}) }, null, 2) + "\n";
+const BASE_WITH_ENTRY = manifestText({ [RETIRED_PATH]: { sha256: RETIRED_SHA, note: "", deployed: true } });
+
+testCase("#810 an entry MOVED to a `retired` record (same last hash, ruling cited) -> OK, never REMOVED-ENTRY", () => {
+  const current = manifestText({}, { [RETIRED_PATH]: { sha256: RETIRED_SHA, ruling: RULING } });
+  expectClean(compareFrozenManifestText(BASE_WITH_ENTRY, current, "base", "current").violations);
+});
+
+testCase("#810 an entry simply DROPPED with no retired record -> still REMOVED-ENTRY (the rule is relaxed for a recorded retirement, not abolished)", () => {
+  expectCodes(compareFrozenManifestText(BASE_WITH_ENTRY, manifestText({}), "base", "current").violations, [
+    "REMOVED-ENTRY",
+  ]);
+});
+
+testCase("#810 a retired record whose sha256 is NOT the entry's last frozen hash -> REJECT (RETIRED-HASH-MISMATCH) — a retirement records history, it never rewrites it", () => {
+  const current = manifestText({}, { [RETIRED_PATH]: { sha256: "b".repeat(64), ruling: RULING } });
+  expectCodes(compareFrozenManifestText(BASE_WITH_ENTRY, current, "base", "current").violations, [
+    "RETIRED-HASH-MISMATCH",
+  ]);
+});
+
+testCase("#810 a retired record with no ruling reference -> REJECT (RETIRED-NO-RULING) — the citation is the whole authority for the removal", () => {
+  const current = manifestText({}, { [RETIRED_PATH]: { sha256: RETIRED_SHA } });
+  expectCodes(compareFrozenManifestText(BASE_WITH_ENTRY, current, "base", "current").violations, [
+    "RETIRED-NO-RULING",
+  ]);
+});
+
+testCase("#810 a retirement is MONOTONIC: an entry retired on the base cannot return to `workflows` -> REJECT (UNRETIRED-ENTRY)", () => {
+  const base = manifestText({}, { [RETIRED_PATH]: { sha256: RETIRED_SHA, ruling: RULING } });
+  const current = manifestText({ [RETIRED_PATH]: { sha256: RETIRED_SHA, note: "", deployed: true } });
+  expectCodes(compareFrozenManifestText(base, current, "base", "current").violations, ["UNRETIRED-ENTRY"]);
+});
+
+testCase("#810 POSITIVE CONTROL: the REAL manifest's retired records each cite a ruling and carry a 64-hex last hash (canary)", () => {
+  const real = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
+  for (const [path, record] of Object.entries(real.retired ?? {})) {
+    if (!/^[0-9a-f]{64}$/.test(String(record.sha256))) throw new Error(`${path}: retired record has no 64-hex last hash`);
+    if (!String(record.ruling ?? "").trim()) throw new Error(`${path}: retired record cites no ruling`);
+    if (Object.hasOwn(real.workflows ?? {}, path)) throw new Error(`${path}: present in BOTH workflows and retired`);
+  }
 });
 
 // --- (#815) PER-ENTRY CLOSURE ATTRIBUTION -----------------------------------

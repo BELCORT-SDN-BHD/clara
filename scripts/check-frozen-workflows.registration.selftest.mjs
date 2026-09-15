@@ -192,6 +192,64 @@ try {
     writeFileSync(manifestPath, JSON.stringify(changed, null, 2) + "\n", "utf8");
     try { expectCompareReject("CHANGED-FLAG"); } finally { writeFileSync(manifestPath, cleanHeadRaw, "utf8"); }
   });
+
+  // --- THE RETIREMENT PATH (#810) -------------------------------------------------------------
+  // Owner ruling 2026-09-15: during beta a superseded body may leave the tree without a drain
+  // proof. The manifest stays append-only IN SPIRIT — the entry MOVES to a `retired` record
+  // (path, last hash, ruling) instead of being deleted — so `MISSING` and `REMOVED-VS-BASE`
+  // accept exactly that and nothing else. These three cells drive the SHIPPING program in both
+  // directions: an unrecorded removal is still a hard finding, a recorded one is green, and a
+  // retired entry whose file is still on disk is a finding of its own.
+  const demoV1Rel = "packages/runtime/workflows/demo.v1.ts";
+  const demoV1Abs = join(root, "packages", "runtime", "workflows", "demo.v1.ts");
+  const demoV1Src = readFileSync(demoV1Abs, "utf8");
+  const registryAbs = join(root, "packages", "runtime", "workflows", "registry.ts");
+  const v1Sha = JSON.parse(cleanHeadRaw).workflows[demoV1Rel].sha256;
+  const RETIREMENT_RULING = "#810 owner ruling 2026-09-15";
+  const retiredManifestRaw = (record) => {
+    const m = JSON.parse(cleanHeadRaw);
+    delete m.workflows[demoV1Rel];
+    m.retired = record;
+    return JSON.stringify(m, null, 2) + "\n";
+  };
+
+  check("6a · UNRECORDED REMOVAL — deleting a registered frozen file with no retired record is still MISSING", () => {
+    rmSync(demoV1Abs);
+    // The registry drops the retired body's import/export in the same change; the class stays
+    // pinned to demo_v2, so version monotonicity is untouched.
+    writeFileSync(
+      registryAbs,
+      'import { demo_v2 } from "./demo.v2.js";\nexport const workflows = {\n  demo: demo_v2,\n} as const;\nexport { demo_v2 };\n',
+      "utf8",
+    );
+    const r = run();
+    if (r.status === 0) throw new Error("the gate PASSED on an unrecorded removal — the append-only rule is relaxed for a RECORDED retirement only.");
+    const out = r.stdout + r.stderr;
+    if (!out.includes("MISSING")) throw new Error(`expected a MISSING violation, got:\n${out}`);
+    if (!out.includes("demo.v1.ts")) throw new Error(`the violation should name the deleted path; got:\n${out}`);
+  });
+
+  check("6b · RECORDED RETIREMENT — the entry moved to `retired` (last hash + ruling): the gate goes green and compare-base accepts the removal", () => {
+    writeFileSync(manifestPath, retiredManifestRaw({ [demoV1Rel]: { sha256: v1Sha, ruling: RETIREMENT_RULING } }), "utf8");
+    const r = run();
+    if (r.status !== 0) throw new Error(`expected exit 0 after recording the retirement, got ${r.status}:\n${r.stdout}${r.stderr}`);
+    const c = compare();
+    if (c.status !== 0) throw new Error(`compare-base rejected a recorded retirement:\n${c.stdout}${c.stderr}`);
+  });
+
+  check("6c · RETIRED-PRESENT — a retired entry whose file is STILL IN THE TREE is a finding (a retirement is a removal, never a silent un-freeze)", () => {
+    writeFileSync(demoV1Abs, demoV1Src, "utf8");
+    try {
+      const r = run();
+      if (r.status === 0) throw new Error("the gate PASSED with a retired file still on disk — it would then be @frozen, unregistered, and unhashed.");
+      const out = r.stdout + r.stderr;
+      if (!out.includes("RETIRED-PRESENT")) throw new Error(`expected a RETIRED-PRESENT violation, got:\n${out}`);
+      if (out.includes("UNREGISTERED")) throw new Error(`a retired path must be reported by its OWN rule, not as UNREGISTERED noise:\n${out}`);
+    } finally {
+      rmSync(demoV1Abs);
+      writeFileSync(manifestPath, cleanHeadRaw, "utf8");
+    }
+  });
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
