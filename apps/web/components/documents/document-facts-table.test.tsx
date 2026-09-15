@@ -275,3 +275,63 @@ test("[N1] clearing the highlight passes NULL, and the overlay ends with no row 
     await h.unmount();
   }
 });
+
+// =============================================================================================
+// #646 — THE PER-ROW REVISION CONTROL, and the two reasons a row does not get one.
+//
+// The affordance is gated TWICE, and both gates are the database's own rather than this table's:
+//
+//   * BY ROLE. The caller passes `revise` only when `clara.list_source_revisions` answered — and
+//     that read holds the SAME bookkeeper floor as `clara.revise_document_fact`. A viewer's read
+//     refuses, the caller has no source version to hand over, and NO COLUMN IS RENDERED. An
+//     affordance whose door would refuse is worse than no affordance.
+//   * BY FIELD. `clara._revisable_invoice_field` is a closed set; a layout fragment or a path from
+//     another lane is not in it, so those rows say "Read-only" instead of offering a control that
+//     would refuse CLR10 on confirm.
+// =============================================================================================
+
+test("#646 no `revise` affordance means the table renders exactly as it did before this ticket", async () => {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [region({ id: "r1", field_path: "invoice.total", monetary_cents: 105000 })],
+  })));
+  try {
+    await h.settle();
+    const headers = [] as string[];
+    const collect = (n: { tagName?: string; childNodes?: unknown[] }) => {
+      if (n.tagName === "TH") headers.push(textOf(n as never));
+      for (const c of (n.childNodes ?? []) as { tagName?: string; childNodes?: unknown[] }[]) collect(c);
+    };
+    collect(h.container as never);
+    assert.deepEqual(headers, ["Field", "Value", "Engine confidence"],
+      "three columns, no fourth header — a viewer sees the table #624 shipped");
+    assert.doesNotMatch(h.text(), /Read-only/, "and no placeholder where a control would have been");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#646 with the affordance, a revisable path gets a control and an unrevisable one says so", async () => {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [
+      region({ id: "r1", field_path: "invoice.total", monetary_cents: 105000 }),
+      region({ id: "r2", field_path: "statement.closing_balance", text_content: "RM 12.00" }),
+    ],
+    revise: { documentId: "d1", factsVersion: 2, busy: false, onRevised: () => {} },
+  })));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    const text = h.text();
+    assert.match(text, /Revise/, "the revisable row carries the control");
+    assert.match(text, /Read-only/,
+      "and the statement-lane path says so rather than offering a control the door would refuse");
+    const triggers: unknown[] = [];
+    const collect = (n: { tagName?: string; childNodes?: unknown[] }) => {
+      if (n.tagName === "BUTTON" && /^Revise$/.test(textOf(n as never))) triggers.push(n);
+      for (const c of (n.childNodes ?? []) as { tagName?: string; childNodes?: unknown[] }[]) collect(c);
+    };
+    collect(h.container as never);
+    assert.equal(triggers.length, 1, "exactly one control, on exactly the row the DB admits");
+  } finally {
+    await h.unmount();
+  }
+});

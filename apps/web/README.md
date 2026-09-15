@@ -25,6 +25,35 @@ The interface uses `next-intl` with a static English locale, semantic tokens fro
 
 Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
+## The document detail's three routed views (#646)
+
+`/clients/:clientId/documents` keeps ONE route and TWO query parameters:
+`?document=<uuid>` selects the document (#719/#624's published contract, unchanged) and
+`?tab=original|facts|accounting` selects which of its three adjacent views is showing. The default
+view writes **no** `tab` parameter at all, so every `?document=` link already sent still opens the
+same address it always did; a tab switch is a `router.replace`, so Back returns to the list rather
+than walking backwards through every view a person glanced at. The parser and the fold live in
+[`lib/documents/url-state.ts`](lib/documents/url-state.ts), and an unrecognised view name reads as
+Original rather than as an error — there is nothing to "not find".
+
+| View | What it holds |
+|---|---|
+| `original` | The page image with its lazy region overlay (opening it fetches the full bytes and, for a PDF, a pdf.js chunk — so it stays behind its own toggle), the typed facts read-only, and the filing history |
+| `facts` | The typed facts with a per-row **Revise** control, and the current source version the next revision must quote |
+| `accounting` | The journal entries standing on this document, the live `entry_evidence_links` claim read directly, and what is standing on the document's reading — knowledge records, open questions and parked Work questions |
+
+A **source revision** (`clara.revise_document_fact`) appends a new version of the document's typed
+facts and leaves the reading it replaced readable; it never edits a region in place. Recording one
+changes **nothing** that is already posted — the correction band states "source revision accepted"
+and "accounting impact pending" as two separate, persistent rows, and links the ticket that owns the
+second (accounting-linked-correction, #676). Clara does not re-assess dependent knowledge
+automatically: the accounting view lists what stands on the old reading so a person can decide, and
+the automatic engine is accepted-but-deferred (#658/#663).
+
+The document-kind change is its own exported dialog
+([`components/documents/document-kind-dialog.tsx`](components/documents/document-kind-dialog.tsx)),
+so the firm intake surface mounts the same control rather than copying a second kind-change form.
+
 ## Close and bank operating order
 
 Prepare and reconcile the books before beginning a financial-year close. For an ongoing client with brought-forward balances, record an evidenced opening position in this order:

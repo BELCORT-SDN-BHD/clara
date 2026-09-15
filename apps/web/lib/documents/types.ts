@@ -282,3 +282,86 @@ export type RequestReextractionResult = {
 /** Per-turn admission budget mirrored from the runtime's own cap
  *  (apps/dashboard/app/shared/intake.ts:99-100). */
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+// --- #646 (migration 0202) — the source-revision lane ----------------------------
+
+/** `clara.revise_document_fact`'s receipt. `facts_version` is what the NEXT revision of this
+ *  document must quote; `observed_version` is what THIS one was written against. */
+export type SourceRevisionResult = {
+  document_id: string;
+  revision_id: string;
+  field_path: string;
+  prior_value: { text?: string | null; cents?: number | null } | null;
+  new_value: { text?: string | null; cents?: number | null } | null;
+  extraction_id: string;
+  observed_extraction_id: string | null;
+  observed_version: number;
+  facts_version: number;
+  carried_regions: number;
+};
+
+/** One entry in `clara.list_source_revisions`' chronological lineage. The `entry_kind` names which
+ *  identity relation it came from: `fact`/`kind` are `clara.document_fact_revisions` rows,
+ *  `wrong_client_correction` is a `clara.filing_corrections` row joined READ-side, and
+ *  `filing_retired` is a plain retirement that no correction owns. The union is deliberately loose
+ *  at the type level and CHECKED at the render site — a future entry kind must render as an
+ *  honest unknown, never as a mislabelled one. */
+export type SourceLineageEntry = {
+  entry_kind: string;
+  at: string | null;
+  revision_id?: string;
+  client_id?: string | null;
+  field_path?: string | null;
+  prior_value?: { text?: string | null; cents?: number | null } | null;
+  new_value?: { text?: string | null; cents?: number | null } | null | string;
+  observed_extraction_id?: string | null;
+  observed_version_n?: number;
+  resulting_extraction_id?: string;
+  reason?: string | null;
+  recorded_by?: string | null;
+  correction_id?: string;
+  status?: string;
+  from_client?: string;
+  to_client?: string;
+  maker?: string | null;
+  checker?: string | null;
+  proposed_at?: string | null;
+  approved_at?: string | null;
+  completed_at?: string | null;
+  retired_filings?: Array<{
+    filing_id: string; client_id: string; retired_at: string | null; retirement_reason: string | null;
+  }>;
+  filing_id?: string;
+  retirement_reason?: string | null;
+};
+
+export type SourceRevisionsResult = {
+  document_id: string;
+  document_kind: string | null;
+  facts_version: number;
+  authoritative_extraction_id: string | null;
+  current_facts_extraction_id: string | null;
+  lineage: SourceLineageEntry[];
+};
+
+export type SourceDependentsResult = {
+  document_id: string;
+  current_facts_extraction_id: string | null;
+  facts_version: number;
+  knowledge_records: Array<{
+    id: string; record_id: string; revision_n: number; knowledge_key: string;
+    scope_kind: string; client_id: string | null; kind: string; state: string; trust: string;
+    source_extraction_id: string | null; source_region_id: string | null;
+    source_field_path: string | null; recorded_at: string; superseded_by: string | null;
+    source_superseded: boolean;
+  }>;
+  open_questions: Array<{
+    id: string; client_id: string; origin: string; status: string; question_text: string;
+    opened_at: string; live_filings: number; orphaned: boolean;
+  }>;
+  work_questions: Array<{
+    id: string; work_id: string; client_id: string | null; question_version: number;
+    status: string; delivery_state: string; created_at: string; expires_at: string;
+    work_status: string;
+  }>;
+};

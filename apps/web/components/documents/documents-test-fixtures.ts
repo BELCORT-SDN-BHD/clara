@@ -154,6 +154,12 @@ export function documentsFetch(opts: {
         // actually measure the four states bring their own fixture
         // (components/documents/document-state-panel.test.tsx).
         case "get_document_state": return null;
+        // #646 — the same reasoning, for the two source-revision reads. Both are RPCs returning
+        // jsonb, and SQL NULL is their legitimate answer for a document this caller may not read;
+        // the default `[]` below would hand the band an array where it expects an object or null.
+        // The cells that actually measure the band bring their own fixture.
+        case "list_source_revisions": return null;
+        case "list_source_dependents": return null;
         default: return [];
       }
     })();

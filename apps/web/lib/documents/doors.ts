@@ -7,7 +7,7 @@
 
 import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
-import type { RequestAutodraftResult, RequestReextractionResult } from "./types";
+import type { RequestAutodraftResult, RequestReextractionResult, SourceRevisionResult } from "./types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
@@ -194,4 +194,46 @@ export async function classifyConsentEvidenceDocument(
     { p_document: documentId, p_reason: reason, p_op_key: opKey() },
     opts,
   )) as { document_id: string; document_kind: string; prior_kind: string | null };
+}
+
+// --- #646 (migration 0202) -------------------------------------------------------
+
+/** `clara.revise_document_fact(p_document uuid, p_field_path text, p_value jsonb,
+ *  p_observed_version int, p_reason text, p_op_key text) -> jsonb` — bookkeeper+.
+ *
+ *  A human revision of ONE typed fact. The DB appends a whole new `clara-fact-human:v1`
+ *  extraction carrying the fact set with this field changed; it never edits a region in place.
+ *  `observedVersion` is the facts version the human was READING (`list_source_revisions`'
+ *  `facts_version`): if it has moved the door refuses CLR19 `stale_source_version` and hands the
+ *  attempted value back in `detail` so this surface can re-show it. Every other refusal
+ *  (`field_path_syntax` / `field_path_namespace` from the canonical grammar,
+ *  `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`,
+ *  `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`)
+ *  renders VERBATIM — this module replicates none of that judgement. */
+export async function reviseDocumentFact(
+  documentId: string, fieldPath: string, value: string, observedVersion: number, reason: string,
+  opts: Opts = {},
+): Promise<SourceRevisionResult> {
+  return (await callDoor(
+    "revise_document_fact",
+    {
+      p_document: documentId, p_field_path: fieldPath, p_value: value,
+      p_observed_version: observedVersion, p_reason: reason, p_op_key: opKey(),
+    },
+    opts,
+  )) as SourceRevisionResult;
+}
+
+/** `clara.dismiss_orphaned_classification_question(p_question uuid, p_reason text, p_op_key text)`
+ *  — bookkeeper+. Closes a classification question whose (document, client) pair carries ZERO live
+ *  filings; a question that still has a live filing refuses CLR10 `filing_still_live` and belongs
+ *  to `resolve_open_question` instead. */
+export async function dismissOrphanedClassificationQuestion(
+  questionId: string, reason: string, opts: Opts = {},
+): Promise<{ question_id: string; status: string }> {
+  return (await callDoor(
+    "dismiss_orphaned_classification_question",
+    { p_question: questionId, p_reason: reason, p_op_key: opKey() },
+    opts,
+  )) as { question_id: string; status: string };
 }
