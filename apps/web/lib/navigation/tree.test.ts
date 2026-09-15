@@ -82,10 +82,13 @@ test("firm nav is rank-shaped: Activity floors at bookkeeper, Operator at owner+
 
 test("settings sections are rank-shaped: members at admin, vendor bindings at bookkeeper — and registrations is no longer one of them (#615)", () => {
   const ids = (s: NavigationScope) => visibleSettingsSections(s).map((i) => i.id);
-  assert.deepEqual(ids(VIEWER), ["account", "firm", "compliance"]);
-  assert.deepEqual(ids(BOOKKEEPER), ["account", "firm", "compliance", "vendorBindings"]);
-  assert.deepEqual(ids(ADMIN), ["account", "firm", "members", "compliance", "vendorBindings"]);
-  assert.deepEqual(ids(OWNER), ["account", "firm", "members", "compliance", "vendorBindings"]);
+  // #654 — `knowledge` is VIEWER-floored, so it appears at every rank: the firm register
+  // is a read of the firm's own standing rules, and the acts inside it recheck their own
+  // floor at the door (admin+ for anything firm-scoped, #603 Q22).
+  assert.deepEqual(ids(VIEWER), ["account", "firm", "knowledge", "compliance"]);
+  assert.deepEqual(ids(BOOKKEEPER), ["account", "firm", "knowledge", "compliance", "vendorBindings"]);
+  assert.deepEqual(ids(ADMIN), ["account", "firm", "members", "knowledge", "compliance", "vendorBindings"]);
+  assert.deepEqual(ids(OWNER), ["account", "firm", "members", "knowledge", "compliance", "vendorBindings"]);
   // #615 moved the registration queue OUT of a firm's own settings and into the operator
   // destination, so an operator owner now sees exactly what any other owner sees here.
   assert.deepEqual(ids(OPERATOR_OWNER), SETTINGS_SECTIONS.map((s) => s.id));

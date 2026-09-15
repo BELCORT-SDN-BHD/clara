@@ -235,7 +235,7 @@ cell("p654.eligibility.admits_by_kind — a preference or a policy key is eligib
 cell("p654.evidence.refuses_filed_document — a firm default may not pin a document with ANY live client filing, at N=1 and at N>1", async () => {
   const w = await knowledgeWorld("p654v1");
   const doc = await firmDocument(w.firm, w.admin, "p654v1");
-  const filingA = await fileDocument(w.firm, doc, w.clientA, w.admin);
+  await fileDocument(w.firm, doc, w.clientA, w.admin);
 
   const one = await assertRaises("CLR10", () => capture(w.admin, {
     key: "default_currency", scope: "firm", client: null, value: "SGD",

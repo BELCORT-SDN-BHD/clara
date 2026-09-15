@@ -89,7 +89,11 @@ test("the label is honest because the ADMINISTRATIVE section is the gated one �
   // …and a bookkeeper is offered something real under it, so hiding the whole
   // entry would have taken away destinations that genuinely are theirs — the
   // reason 裁-187 renamed rather than hid.
-  assert.deepEqual(sectionIds(1), ["account", "firm", "compliance", "vendorBindings"]);
+  // #654 — `knowledge` joins the viewer-floored list: a firm default is the firm's own
+  // standing rule, and hiding the register from a bookkeeper would remove a destination
+  // that genuinely is theirs while granting and revoking nothing (the PROMOTE act inside
+  // it is admin+ and the door rechecks it).
+  assert.deepEqual(sectionIds(1), ["account", "firm", "knowledge", "compliance", "vendorBindings"]);
 });
 
 test("VACUITY CONTROL: the floor predicate really can say no, and says it per entry", () => {
