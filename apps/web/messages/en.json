@@ -1193,7 +1193,10 @@
     "fromPlanLink": "Open the plan",
     "egressNotAuthorized": {
       "title": "Clara is not authorised to use a model on this client's books",
-      "body": "This Work was stopped before anything was sent, and nothing was posted. An owner can restore it by accepting the current Terms and Data Processing Agreement for the firm, and by making sure this client is active."
+      "body": "This Work was stopped before anything was sent, and nothing was posted. An owner can restore it by accepting the current Terms and Data Processing Agreement for the firm, by making sure this client is active, and — if AI processing was paused for this client — by turning it back on below. Restoring authority applies to new work: this record stays refused, so start it again with Try again.",
+      "reactivate": "Re-activate AI processing for this client",
+      "reactivated": "AI processing is on again for this client. This record stays refused — use Try again to start a new run.",
+      "reactivateUnavailable": "We could not reach the service to turn AI processing back on. Nothing was changed; please try again."
     },
     "heading": "Journal entry",
     "body": "One durable accounting work record: what was asked, what ran, and what it recorded.",

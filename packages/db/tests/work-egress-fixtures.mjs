@@ -385,6 +385,82 @@ export async function restoreWorkEgress(sub, { client, purpose = WORK_EGRESS_PUR
   return r.rows[0].result;
 }
 
+// #812
+/** Deactivate a client's typed egress ACTIVATION through the OWNER door. This is the withdrawal
+ *  #812 measures: it stamps the activation and invalidates the client's still-UNCONSUMED dispatch
+ *  authorizations, and it NEVER revokes the consent — which is what makes the way back possible. */
+export async function deactivateWorkEgressPurpose(sub, {
+  client, purpose = WORK_EGRESS_PURPOSE, reason = "#812 rig: paused", opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("deactivate_client_egress_purpose", [
+    { name: "p_client", cast: "uuid" }, { name: "p_purpose", cast: "text" },
+    { name: "p_reason", cast: "text" }, { name: "p_op_key", cast: "text" },
+  ]), [client, purpose, reason, opKey ?? opk("w812-deact")]);
+  return r.rows[0].result;
+}
+
+/** Activate a typed egress purpose through the OWNER door, naming the consent. 0195's own door,
+ *  unchanged — the cell that names the SURVIVING consent is the measurement. */
+export async function activateWorkEgressPurpose(sub, {
+  client, purpose = WORK_EGRESS_PURPOSE, consent, opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("activate_client_egress_purpose", [
+    { name: "p_client", cast: "uuid" }, { name: "p_purpose", cast: "text" },
+    { name: "p_consent", cast: "uuid" }, { name: "p_op_key", cast: "text" },
+  ]), [client, purpose, consent, opKey ?? opk("w812-act")]);
+  return r.rows[0].result;
+}
+
+/** The #812 recovery door: re-activate a DEACTIVATED accounting_work activation without the
+ *  caller having to name a consent id no lawful read exposes to `clara_authenticated`. */
+export async function reactivateWorkEgress(sub, {
+  client, purpose = WORK_EGRESS_PURPOSE, opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("reactivate_client_egress_purpose", [
+    { name: "p_client", cast: "uuid" }, { name: "p_purpose", cast: "text" },
+    { name: "p_op_key", cast: "text" },
+  ]), [client, purpose, opKey ?? opk("w812-react")]);
+  return r.rows[0].result;
+}
+
+/** Every activation row for a client and purpose, oldest first — a re-activation leaves TWO, the
+ *  first one still carrying its `deactivated_at` and `deactivation_reason` as history. */
+export async function activationRows(client, purpose = WORK_EGRESS_PURPOSE) {
+  const r = await rootQuery(
+    `select id, consent_id, activated_by, activated_at, deactivated_at, deactivation_reason
+       from clara.client_egress_purpose_activations
+      where client_id=$1 and purpose=$2 order by activated_at, id`, [client, purpose]);
+  return r.rows;
+}
+
+/** The #812 recovery migration's STABLE STEM, for the lane's per-cell frontier gate. */
+export const EGRESS_RECOVERY_STEM = "accounting_work_egress_recovery$";
+
+let _recoveryReady = null;
+export async function egressRecoveryReady() {
+  if (_recoveryReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [EGRESS_RECOVERY_STEM]);
+      _recoveryReady = r.rows[0].n > 0;
+    } catch {
+      _recoveryReady = false;
+    }
+  }
+  return _recoveryReady;
+}
+
+/** `if (await gateEgressRecovery(t)) return;` — #812's own per-cell frontier gate. */
+export async function gateEgressRecovery(t) {
+  if (await gateEgress(t)) return true;
+  if (await egressRecoveryReady()) return false;
+  markSkip();
+  t.skip(`#812 egress recovery door absent (no ${EGRESS_RECOVERY_STEM} migration applied)`);
+  return true;
+}
+// #812
+
 /** The MANUAL grant door, for the cells that prove it refuses the DERIVED purpose by name. */
 export async function grantEgressPurpose(sub, {
   client, purpose, evidenceDocument = null, scopeNote = "#631 rig", opKey = null,

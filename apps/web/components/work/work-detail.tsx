@@ -42,6 +42,9 @@ import {
 } from "@/components/work/work-cancel-dialog";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
+// #812
+import { EgressReactivateAction } from "@/components/work/egress-reactivate-action";
+// #812
 import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
@@ -330,6 +333,10 @@ export function WorkDetailView({
   // posture `canRetry` states above). `stopping` is deliberately NOT cancellable — an admitted
   // operation is settling and a second press could only answer `already_stopping`.
   const bookkeeperPlus = typeof scope?.roleRank === "number" && scope.roleRank >= roleRankOf("bookkeeper");
+  // #812 — the recovery action on the egress face is an OWNER act, and the rank is the
+  // DATABASE's own `role_rank` (never re-derived from the role's spelling). Absent rank fails
+  // closed, exactly as `bookkeeperPlus` does.
+  const ownerHere = typeof scope?.roleRank === "number" && scope.roleRank >= roleRankOf("owner");
   const canCancel = bookkeeperPlus && isCancellableWorkStatus(work.status);
   const canTakeOver = bookkeeperPlus && isTakeOverable(work);
 
@@ -441,6 +448,7 @@ export function WorkDetailView({
         clientId={clientId}
         canRetry={canRetry}
         canTakeOver={canTakeOver}
+        canReactivateEgress={ownerHere} /* #812 */
         retrying={retrying}
         retryState={retryState}
         onRetry={() => void runRetry()}
@@ -894,6 +902,9 @@ function WorkOutcome({
   clientId,
   canRetry,
   canTakeOver,
+  // #812
+  canReactivateEgress,
+  // #812
   retrying,
   retryState,
   onRetry,
@@ -912,6 +923,12 @@ function WorkOutcome({
   canRetry: boolean;
   /** #630 — whether "Take responsibility" is worth offering for this refusal. */
   canTakeOver: boolean;
+  // #812
+  /** #812 — whether the OWNER-only "Re-activate AI processing for this client" action is offered
+   *  on the `egress_not_authorized` face. The door floors at owner; anyone else would only ever
+   *  read its CLR04. */
+  canReactivateEgress: boolean;
+  // #812
   retrying: boolean;
   retryState: RetryWorkResult | null;
   onRetry: () => void;
@@ -1039,6 +1056,13 @@ function WorkOutcome({
             <span className="block">{t("egressNotAuthorized.body")}</span>
           ) : null}
           {error.message ?? t("refused.body")}
+          {/* #812 — …and for an OWNER, the one recovery the sentence above could not offer before:
+              a paused (DEACTIVATED) purpose activation, re-activated through
+              clara.reactivate_client_egress_purpose. It restores FUTURE dispatches; "Try again"
+              above is what starts the new run. */}
+          {egressRefused && canReactivateEgress ? (
+            <EgressReactivateAction clientId={clientId} onReactivated={onConverge} />
+          ) : null}
         </StateBanner>
         {retryNotice}
       </div>

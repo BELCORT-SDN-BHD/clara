@@ -1962,6 +1962,20 @@ export const WORK_EGRESS_0195_COHORT = [
   ...WORK_EGRESS_0195_RUNTIME_FNS, ...WORK_EGRESS_0195_HUMAN_FNS,
   ...WORK_EGRESS_0195_UNGRANTED_FNS,
 ];
+// #812
+// #812 [0211, the way back on after a DEACTIVATION] — its OWN cohort for the same "wholly present
+// or wholly absent" reason 0195's carries: folding this name into WORK_EGRESS_0195_COHORT would
+// make every database at 0195 but below 0211 report a PARTIAL cohort, a false failure one
+// migration early.
+//
+//   clara_authenticated ONLY, owner-floored in its own body. NO runtime, agent or wake variant:
+//   a human took the authority away, only a human gives it back. It resolves the consent that
+//   survived the deactivation (no lawful read exposes that id) and delegates to 0195's own
+//   clara.activate_client_egress_purpose, which keeps the audit row, the domain event and the
+//   op_key idempotency.
+const EGRESS_RECOVERY_0211_HUMAN_FNS = ["reactivate_client_egress_purpose"];
+export const EGRESS_RECOVERY_0211_COHORT = [...EGRESS_RECOVERY_0211_HUMAN_FNS];
+// #812
 // #718 [0197, the document-coding lane's evidence-link lookback] — its own cohort for the same
 // "wholly present or wholly absent" reason 0182's carries, and a cohort of THREE UNGRANTED names
 // only: this file adds no door and changes no grant, so it earns no row in ALLOWED below.
@@ -2163,6 +2177,11 @@ export const ALLOWED = {
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
+    // #812
+    // 0211 [#812] the accounting_work re-activation door — owner floor in its own body,
+    // clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain ZERO.
+    ...EGRESS_RECOVERY_0211_HUMAN_FNS,
+    // #812
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2574,6 +2593,9 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
+  // #812
+  failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
+  // #812
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));

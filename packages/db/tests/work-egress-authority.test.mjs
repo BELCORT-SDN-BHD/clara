@@ -55,6 +55,10 @@ import {
   // #811
   gateTraceShape,
   // #811
+  // #812
+  gateEgressRecovery, deactivateWorkEgressPurpose, activateWorkEgressPurpose,
+  reactivateWorkEgress, activationRows, humanQuery,
+  // #812
 } from "./work-egress-fixtures.mjs";
 
 let world = null;
@@ -867,3 +871,162 @@ test("w811.trace.run_grammar a long-digit run id is REFUSED, and the run-id shap
   assert.equal(await traceCount(a.work_id), 3, "run_grammar: exactly the three admitted rows landed");
 });
 
+
+// ===========================================================================================
+// 10 · #812 — THE WAY BACK ON AFTER A **DEACTIVATION**, measured rather than assumed.
+//
+//     0195 gave `revoke_client_egress_purpose` a restore door. `deactivate_client_egress_purpose`
+//     never got one, and nothing in this battery had ever deactivated an `accounting_work`
+//     ACTIVATION at all (its `deactivateClient` helper archives the CLIENT — a different
+//     withdrawal with a different recovery). These cells measure the round trip first, and pin
+//     the invariants that hold whichever way it falls.
+// ===========================================================================================
+
+test("w812.reactivate.round_trip deactivate → unknown → activate NAMING THE SURVIVING CONSENT → granted, and the consent is never re-minted", async (t) => {
+  if (await gateEgressRecovery(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "reactivate");
+  const a = await armedUnauthorised({ client });
+  const { consumed } = await authoriseWorkRun({ task: a.task_id, runId: a.runId });
+  assert.equal(consumed.verdict, "granted",
+    "reactivate.round_trip: mandatory setup — the dispatch was authorised and SPENT before the withdrawal");
+
+  const before = await consentRows(client);
+  assert.equal(before.length, 1, "reactivate.round_trip: ONE derived consent, self-minted by the dispatch");
+  const surviving = before[0].id;
+
+  const out = await deactivateWorkEgressPurpose(ALICE(), { client });
+  assert.equal(out.status, "deactivated");
+  assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8101n }), UNKNOWN,
+    "reactivate.round_trip: with the activation deactivated the next dispatch answers unknown");
+  assert.equal((await consentRows(client))[0].revoked_at, null,
+    "reactivate.round_trip: …and the CONSENT survived — deactivation never revokes it");
+
+  // THE MEASUREMENT: 0195's own activate door, naming the consent that survived.
+  const act = await activateWorkEgressPurpose(ALICE(), { client, consent: surviving });
+  assert.equal(act.status, "active", "reactivate.round_trip: the activate door admits the surviving consent");
+  assert.equal(act.consent_id, surviving, "reactivate.round_trip: …the SAME consent, not a fresh one");
+  assert.equal((await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8102n })).verdict,
+    "granted", "reactivate.round_trip: and the next dispatch grants again — deactivate → activate ROUND-TRIPS");
+
+  // THE INVARIANTS, which hold whichever way the measurement fell.
+  const after = await consentRows(client);
+  assert.equal(after.length, 1, "reactivate.round_trip: the consent count stays at 1 — nothing was re-minted");
+  assert.equal(after[0].id, surviving);
+  const acts = await activationRows(client);
+  assert.equal(acts.length, 2, "reactivate.round_trip: a FRESH activation row, beside the old one");
+  assert.ok(acts[0].deactivated_at, "reactivate.round_trip: …the deactivated row KEEPS its instant…");
+  assert.equal(acts[0].deactivation_reason, "#812 rig: paused", "reactivate.round_trip: …and its reason, as history");
+  assert.equal(acts[1].deactivated_at, null, "reactivate.round_trip: …while the new one is live");
+});
+
+test("w812.reactivate.retroactive an authorization consumed BEFORE the deactivation stays refused at the posting core after the way back on", async (t) => {
+  if (await gateEgressRecovery(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "reactretro");
+  const a = await armedUnauthorised({ client });
+  assert.equal((await authoriseWorkRun({ task: a.task_id, runId: a.runId })).consumed.verdict, "granted",
+    "reactivate.retroactive: mandatory setup — the dispatch was authorised and SPENT");
+
+  await deactivateWorkEgressPurpose(ALICE(), { client });
+
+  const entriesBefore = await entryCount(client);
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a),
+    "reactivate.retroactive: authority must be LIVE when the books move — the two joins behind the consumed authorization read the ACTIVATION too");
+  assert.equal(await entryCount(client), entriesBefore, "reactivate.retroactive: no entry");
+  const reserved = await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn='record_journal_entry' and op_key=$1",
+    [a.logical_op_id]);
+  assert.equal(reserved.rows[0].n, 0,
+    "reactivate.retroactive: the identity is UNSPENT — the refusal is before _reserve_op");
+
+  // The consumed authorization is untouched: 0020's ck_…_one_terminal admits ONE terminal
+  // transition, so the gate reads the ACTIVATION behind the row rather than re-terminating it.
+  const auth = (await authorizationsFor(client))[0];
+  assert.ok(auth.consumed_at, "reactivate.retroactive: …still consumed…");
+  assert.equal(auth.invalidated_at, null, "reactivate.retroactive: …and NOT invalidated");
+
+  await reactivateWorkEgress(ALICE(), { client });
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a),
+    "reactivate.retroactive: the withdrawn run STAYS refused — recovery restores future dispatches only");
+  const retry = await armedUnauthorised({ client });
+  assert.equal((await authoriseWorkRun({ task: retry.task_id, runId: retry.runId })).consumed.verdict,
+    "granted");
+  assert.equal((await postRaw(retry)).posted, true,
+    "reactivate.retroactive: …and a NEW run, dispatched under the re-activated pair, posts");
+});
+
+test("w812.reactivate.door the recovery door needs NO consent id, because no lawful read exposes one", async (t) => {
+  if (await gateEgressRecovery(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "reactdoor");
+  assert.equal((await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8201n })).verdict, "granted");
+
+  // WHY THE DOOR EXISTS. `activate_client_egress_purpose` requires the consent id, and
+  // `clara.client_egress_purpose_consents` is FORCE RLS with a clara_fn_owner-only policy and no
+  // table grant (0020) — a firm owner cannot read the id the door would need.
+  for (const [who, label] of [[ALICE(), "the owner"], [BOB(), "a bookkeeper"]]) {
+    await assertRaises(PG.insufficientPrivilege,
+      () => humanQuery(who, "select id from clara.client_egress_purpose_consents where client_id=$1", [client]),
+      `reactivate.door: ${label} cannot read the consent id off the relation`);
+  }
+
+  const surviving = (await consentRows(client))[0].id;
+  await deactivateWorkEgressPurpose(ALICE(), { client, reason: "#812 rig: door" });
+  assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8202n }), UNKNOWN);
+
+  const out = await reactivateWorkEgress(ALICE(), { client });
+  assert.equal(out.status, "active", "reactivate.door: the recovery door re-activates");
+  assert.equal(out.consent_id, surviving,
+    "reactivate.door: …resolving the SURVIVING consent internally, never minting one");
+  assert.equal((await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8203n })).verdict,
+    "granted", "reactivate.door: …and the next dispatch grants");
+  assert.equal((await consentRows(client)).length, 1, "reactivate.door: still exactly one consent");
+
+  // A SECOND press over a live activation refuses with the activate door's own typed pair, so the
+  // door adds a consent lookup and nothing else.
+  await assertPair("CLR28", "duplicate_live", () => reactivateWorkEgress(ALICE(), { client }),
+    "reactivate.door: re-activating what is already live is a refusal, not a second activation");
+});
+
+test("w812.reactivate.floor re-activating is an OWNER act, for the DERIVED purpose, and only over a DEACTIVATION", async (t) => {
+  if (await gateEgressRecovery(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "reactfloor");
+  assert.equal((await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8301n })).verdict, "granted");
+  await deactivateWorkEgressPurpose(ALICE(), { client, reason: "#812 rig: floor" });
+
+  await assertRaises(CLR.authz, () => reactivateWorkEgress(world.users.carol, { client }),
+    "reactivate.floor: a VIEWER cannot restore model egress");
+  await assertRaises(CLR.authz, () => reactivateWorkEgress(BOB(), { client }),
+    "reactivate.floor: …nor a bookkeeper — a human took the authority away, only an owner gives it back");
+  await assertPair(CLR.badRequest, "purpose_not_reactivatable",
+    () => reactivateWorkEgress(ALICE(), { client, purpose: "document_processing" }),
+    "reactivate.floor: the five document-evidenced purposes keep their own activate door");
+  await assertRaises(CLR.notFound, () => reactivateWorkEgress(ALICE(), { client: B1() }),
+    "reactivate.floor: another firm's client is NOT FOUND — never an existence oracle");
+  await assertRaises(CLR.notFound,
+    () => reactivateWorkEgress(ALICE(), { client: "00000000-0000-4000-8000-000000000000" }),
+    "reactivate.floor: …and an absent client answers the same code");
+  assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 8302n }), UNKNOWN,
+    "reactivate.floor: none of those refusals re-activated anything");
+
+  // …and the two states that are not a deactivation.
+  const never = await freshWorkClient(ALICE(), "reactnever");
+  await assertPair("CLR28", "no_consent", () => reactivateWorkEgress(ALICE(), { client: never }),
+    "reactivate.floor: a client that never dispatched has no consent to re-activate over");
+  const live = await freshWorkClient(ALICE(), "reactlive");
+  await prepareEgressDispatch({ firm: FIRM_A(), client: live, eventSeq: 8303n });
+  await assertPair("CLR28", "nothing_to_reactivate", () => reactivateWorkEgress(ALICE(), { client: live }),
+    "reactivate.floor: …and one that was never deactivated is a refusal, not a second activation");
+
+  // A REVOKED consent is restore's business, not this door's: revoke withdraws the CONSENT, and
+  // this door only ever re-activates over a surviving one.
+  const revoked = await freshWorkClient(ALICE(), "reactrevoked");
+  await prepareEgressDispatch({ firm: FIRM_A(), client: revoked, eventSeq: 8304n });
+  await revokeWorkEgress(ALICE(), { client: revoked });
+  await assertPair("CLR28", "no_consent", () => reactivateWorkEgress(ALICE(), { client: revoked }),
+    "reactivate.floor: a REVOKE is reversed by restore_client_egress_purpose, never by this door");
+  assert.equal((await restoreWorkEgress(ALICE(), { client: revoked })).status, "live",
+    "reactivate.floor: …and restore is still the door that reverses it");
+});

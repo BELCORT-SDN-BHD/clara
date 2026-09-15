@@ -356,6 +356,33 @@ run id。两个谓词同时被关系的 CHECK 与写入动词调用，因此墙�
 仍接受任意有限数，`traceRunOf` 根本没有作用在 `recordTrace` 发送的值上；该模块在冻结闭包内，按 #815
 的裁定只能随 `claraWork_v4` 交付，相应要求记在 `packages/runtime/README.md`。因此准确的说法是：
 **门对这两个字段做形状约束，写入方没有，门就是那道墙**；已存储的行不回溯校验、不重写。[已实现]
+
+**"撤销可逆"说准确：哪一种撤回，由哪一道门回来（#812）。** 上面"撤销可逆，且对已消耗的 dispatch
+是追溯的"这句，现在按撤回的种类展开：
+
+- `revoke_client_egress_purpose` 撤的是 **consent** → 由 `restore_client_egress_purpose` 回来
+  （重新推导基础，铸一对**全新**的 consent+activation，被撤的那行留作历史）；
+- `deactivate_client_egress_purpose` 撤的是 **activation**，consent 仍在世 → 由 #812 的
+  `reactivate_client_egress_purpose` 回来（迁移 `0211_accounting_work_egress_recovery.sql`；
+  owner floor，仅 `accounting_work`，仅 `clara_authenticated`）。它在库内解析**幸存的** consent
+  再委托给 0195 的 `activate_client_egress_purpose`，因为 `client_egress_purpose_consents`
+  是 FORCE RLS、对任何应用角色都没有表权限（0020），consent id 根本到不了浏览器。已测得该往返成立：
+  deactivate → prepare 得 `unknown` → 用幸存 consent 激活 → prepare 重新 `granted`，consent 计数
+  始终为 1（`w812.reactivate.round_trip`）；
+- 法条发布了新版本而事务所尚未接受、或 client 不在世 → 只能去接受新版本／恢复 client，没有任何
+  egress 门能恢复事务所当下并不持有的授权。
+
+三种恢复都**只恢复未来的 dispatch**：在撤回之前就已消耗的授权，之后仍被账务核心拒绝
+（`w631.write.withdrawn_after_consume`、`w812.reactivate.retroactive`）。
+
+**live-at-write 由重算后的账务核心里的两个 join 实现**——在该 run 已消耗的 dispatch authorization
+背后，再读一次 consent 的 `revoked_at is null` 与 activation 的 `deactivated_at is null`——而**不是**
+把已消耗的那行作废：0020 的 `ck_egress_dispatch_authorizations_one_terminal`
+（`consumed_at is null or invalidated_at is null`）使"已消耗又被作废"根本无法表示。这是**已接受的
+做法**，0020 那条 CHECK **有意保持原样、不重切**（#812 裁定；0211 的 §0／§T 各测量它一次，所以
+"有意保持"是可核查的说法而不是假设）。控制台侧：Work 详情的 `egress_not_authorized` 面孔对
+**owner** 多出一个动作"Re-activate AI processing for this client"，文案同时说明它恢复的是新工作、
+当前这条记录仍为 refused。[已实现]
 <!-- #811 #812 -->
 
 ### F. 发布与回退
