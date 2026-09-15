@@ -38,6 +38,8 @@ import {
   admitPeriodicAdjustmentWork, listPeriodicAdjustments, reverseEntry,
   adjustmentsForClient, adjustmentRow, adjustmentCount, entryFlags, entryLinksFor,
   seedFiscalYear,
+  // #797
+  gatePaSettled,
 } from "./periodic-adjustment-fixtures.mjs";
 
 let world = null;
@@ -351,6 +353,147 @@ test("pa.payroll.settled a partly settled obligation splits its credit across th
       basis: basisForPayroll(unused),
     }), "payroll.settled(named but unused)");
   assert.equal(g.detail.constraint, "payment_leg");
+});
+
+// ===========================================================================================
+// 2b · #797 — THE SETTLEMENT SPLIT AS A STORED PARTICULAR.
+//
+// Gated on #797's OWN stem (`PA_SETTLED_STEM`), never on its number, so a database pinned at 0194
+// runs every #643 cell above and skips only these.
+//
+// WHAT THESE CELLS ARE ABOUT. Before #797 the split was recoverable ONLY by opening the posted
+// entry's lines: `_assert_adjustment_relationships` asked the named payment leg to carry SOMETHING
+// and no particular said how much. Now a stated figure is validated, held to the lines, and
+// STORED in the canonical basis the history renders. The one thing that must NOT move is absence:
+// the frozen chatTurn v19 closure omits the key, so a payroll obligation without it has to keep
+// posting exactly as it did.
+// ===========================================================================================
+
+test("pa.payroll.settled-cents a STATED partial settlement posts, and the stored basis says the split", async (t) => {
+  if (await gatePaSettled(t)) return;
+  const client = await paClient("settledcents");
+  const adj = payrollObligation({
+    amountCents: 130000, paymentAccountCode: PACHART.bank, settledCents: 30000,
+    instruction: "August EPF: RM 300.00 paid from the bank on the day, the rest accrued.",
+  });
+  const a = await armedPa({
+    client, purpose: PA_PURPOSE.payroll, adjustment: adj,
+    basis: basisForPayroll(adj, { creditSplit: { payment: 30000 } }),
+  });
+  const out = await post(a);
+
+  const posted = await linesOf(out.entry_id);
+  assert.equal(String(posted.find((l) => l.account_code === PACHART.bank).credit_cents), "30000",
+    "settled-cents: the payment leg is a CREDIT of exactly the stated figure");
+  assert.equal(String(posted.find((l) => l.account_code === PACHART.liability).credit_cents), "100000",
+    "settled-cents: a PARTIAL settlement leaves the remainder on the liability leg");
+
+  // THE ROW THE POST PRODUCED, not the payload that was submitted — the basis is the canonical
+  // builder's output, so this is the assertion that makes #797 true.
+  const row = await adjustmentRow(out.adjustment_id);
+  assert.equal(Number(row.basis.settled_cents), 30000,
+    "settled-cents: the STORED basis carries the split");
+  assert.equal(row.basis.payment_account_code, PACHART.bank);
+
+  // …and the read door hands it to the history unchanged.
+  const listed = await listPeriodicAdjustments(ALICE(), { client });
+  const seen = listed.find((r) => r.id === out.adjustment_id);
+  assert.equal(Number(seen.basis.settled_cents), 30000,
+    "settled-cents: clara.list_periodic_adjustments returns it, so the history can state it");
+});
+
+test("pa.payroll.settled-cents.mismatch a split that disagrees with the payment leg is refused with expected and actual", async (t) => {
+  if (await gatePaSettled(t)) return;
+  const client = await paClient("settledmismatch");
+  const adj = payrollObligation({
+    amountCents: 130000, paymentAccountCode: PACHART.bank, settledCents: 30000,
+  });
+  // The LINES settle RM 200.00; the PARTICULARS state RM 300.00. The expense leg's own check has
+  // always been exact; this is that rule, minted for the settlement leg.
+  const basis = basisForPayroll(adj, { creditSplit: { payment: 20000 } });
+  const g = await refusesPa(client, CLR.badRequest, PA_REASON.linesMismatch,
+    () => admitPeriodicAdjustmentWork({
+      client, author: ALICE(), purpose: PA_PURPOSE.payroll, adjustment: adj, basis,
+    }), "settled-cents(mismatch)");
+  assert.equal(g.detail.constraint, "settled_amount");
+  assert.equal(g.detail.field, "adjustment.settled_cents");
+  assert.equal(g.detail.account_code, PACHART.bank);
+  assert.equal(Number(g.detail.expected_net_cents), -30000,
+    "the net reader is debit MINUS credit, so a credit of 30000 is a net of -30000");
+  assert.equal(Number(g.detail.actual_net_cents), -20000);
+});
+
+test("pa.payroll.settled-cents.refusals each basis fault fires on the field the web form names", async (t) => {
+  if (await gatePaSettled(t)) return;
+  const client = await paClient("settledrefusals");
+  const cases = [
+    {
+      label: "not an integer",
+      field: "adjustment.settled_cents",
+      constraint: "integer_cents",
+      adjustment: payrollObligation({ paymentAccountCode: PACHART.bank, settledCents: 300.5 }),
+    },
+    {
+      label: "negative",
+      field: "adjustment.settled_cents",
+      constraint: "nonnegative_integer_cents",
+      adjustment: payrollObligation({ paymentAccountCode: PACHART.bank, settledCents: -1 }),
+    },
+    {
+      label: "more than the obligation",
+      field: "adjustment.settled_cents",
+      constraint: "over_settled",
+      adjustment: payrollObligation({
+        amountCents: 130000, paymentAccountCode: PACHART.bank, settledCents: 200000,
+      }),
+    },
+    {
+      label: "settled with no payment account",
+      field: "adjustment.payment_account_code",
+      constraint: "settlement_needs_account",
+      adjustment: payrollObligation({ amountCents: 130000, settledCents: 30000 }),
+    },
+    {
+      label: "an explicit 0 beside a named payment account",
+      field: "adjustment.settled_cents",
+      constraint: "payment_leg_unused",
+      adjustment: payrollObligation({ paymentAccountCode: PACHART.bank, settledCents: 0 }),
+    },
+  ];
+  for (const c of cases) {
+    const g = await refusesPa(client, CLR.badRequest, PA_REASON.invalidAdjustment,
+      () => admitPeriodicAdjustmentWork({
+        client, author: ALICE(), purpose: PA_PURPOSE.payroll, adjustment: c.adjustment,
+        basis: basisForPayroll(c.adjustment, { creditSplit: { payment: 30000 } }),
+      }), `settled-cents(${c.label})`);
+    assert.equal(g.detail.field, c.field, `settled-cents(${c.label}): field`);
+    assert.equal(g.detail.constraint, c.constraint, `settled-cents(${c.label}): constraint`);
+  }
+});
+
+test("pa.payroll.settled-cents.absent the frozen chat closure's shape still posts, key and all", async (t) => {
+  if (await gatePaSettled(t)) return;
+  // THE HARD PRECONDITION. `start_periodic_adjustment_work` ships inside a frozen chatTurn v19
+  // closure, names `payment_account_code` and omits `settled_cents`
+  // (`packages/runtime/tests/chat-turn-v19-tools.test.mjs` asserts the omission and hands that
+  // exact object to `clara._assert_adjustment_basis`). A mandatory particular would refuse every
+  // chat-originated payroll obligation in the estate, and the closure cannot be edited to supply
+  // one. So: no key, no new rule — the existing nonzero `payment_leg` check is still the only
+  // thing asked of that leg.
+  const client = await paClient("settledabsent");
+  const adj = payrollObligation({ amountCents: 130000, paymentAccountCode: PACHART.bank });
+  assert.equal("settled_cents" in adj, false, "absent: the fixture really omits the key");
+  const a = await armedPa({
+    client, purpose: PA_PURPOSE.payroll, adjustment: adj,
+    basis: basisForPayroll(adj, { creditSplit: { payment: 30000 } }),
+  });
+  const out = await post(a);
+  const posted = await linesOf(out.entry_id);
+  assert.equal(String(posted.find((l) => l.account_code === PACHART.bank).credit_cents), "30000",
+    "absent: the payment leg is untouched by the new rule");
+  const row = await adjustmentRow(out.adjustment_id);
+  assert.equal(row.basis.settled_cents, null,
+    "absent: the canonical form carries the key as JSON null, exactly as the optional account codes do");
 });
 
 test("pa.payroll.enrolment-withdrawn the enrolment is re-read AT COMMIT, not snapshotted at admission", async (t) => {
