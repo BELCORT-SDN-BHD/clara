@@ -64,6 +64,7 @@ const LANE_MOCKS = [
   "operator-support-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
+  "prepayments-mock.mjs",
   "tax-boundary-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
@@ -338,6 +339,12 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
+  // #653's C8/C9 lane. Every handler names this lane's own client id, schedule id or plan id
+  // before it answers and falls through otherwise — the two PostgREST reads (`clients` by `id`,
+  // `coa_accounts` by `client_id`) and all eight RPC verbs. Four of those verbs are the PLAN
+  // lifecycle doors this lane REUSES rather than re-cuts, so they are a declared share with
+  // `plans-mock.mjs` below, each side gated on its own plan id.
+  "prepayments-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -991,6 +998,18 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
   get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
+  // #653 x #640 — the FOUR plan lifecycle doors. A prepayment schedule CONFIGURES an
+  // `amortisation_schedule` accounting plan, so pause / resume / end / catch-up on it are
+  // `clara.pause_accounting_plan` and its siblings called on that plan's id. The web surface
+  // reuses #640's own dialogs rather than cutting a prepayment-shaped twin of each — a twin would
+  // be two lanes disagreeing about what "paused" means — so of course both mocks answer them.
+  // Each side gates on its OWN plan id first (`plans-mock.mjs` on `PLANS.planId`,
+  // `prepayments-mock.mjs` on `PREPAY.planId`) and falls through otherwise, so neither can answer
+  // for the other's walk — which is the distinction between a declared share and a collision.
+  pause_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
+  resume_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
+  end_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
+  request_plan_catch_up: ["plans-mock.mjs", "prepayments-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of

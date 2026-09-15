@@ -24,6 +24,13 @@
 // `clara.pause_accounting_plan` and its siblings called on this schedule's `plan_id`. A
 // prepayment-shaped twin of each would be two lanes disagreeing about what "paused" means.
 //
+// SO THEY SPEAK THE PLAN LANE'S WORDS ("Pause the plan", not "Pause the schedule"), and that is
+// the honest consequence of the reuse rather than an oversight: the dialog NAMES this schedule by
+// its own purpose in the title, and the noun underneath genuinely is a plan (CONTEXT.md's
+// "Accounting plan" now lists `amortisation schedule` as one of its three kinds). The duplicate
+// strings this lane briefly carried in its own namespace were DELETED rather than left as a second
+// copy nothing reads — a later hand editing the wrong copy would change nothing on screen.
+//
 // HYDRATE-NEVER-TRUST ON EVERY CONTROL: each act runs through `useAsyncRead().act()`, which reloads
 // the schedule unconditionally after success AND after failure. Nothing here paints an outcome the
 // database did not just report.

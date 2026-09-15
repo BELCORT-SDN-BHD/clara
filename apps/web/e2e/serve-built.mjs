@@ -90,6 +90,10 @@ import { WORK_LIST_CLIENTS, answerWorkListPage, handleWorkListSupabase } from ".
 // guards `readJson` on an exact-verb allow-list, so it drains no other lane's request stream and
 // can run anywhere in the chain below.
 import { handlePlansSupabase } from "./plans-mock.mjs";
+// #653's C8/C9 lane — the prepayment-amortisation doors plus the plan lifecycle doors that lane
+// reuses. Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb
+// allow-list, so it drains no other lane's request stream and can run anywhere in the chain below.
+import { handlePrepaymentsSupabase } from "./prepayments-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -604,6 +608,11 @@ async function handleSupabase(request, response, url) {
   // lane above. Placed before the home board for the same reason the journal-work lane is — that
   // lane answers `/rest/v1/clients` with an honest id-scoped row and this one must reach its own.
   if (await handlePlansSupabase(request, response, path, url, sendJson, cors)) return;
+  // #653's C8/C9 lane. Position is not load-bearing for the same reason #640's is not: every
+  // branch is scoped to this lane's own client, schedule or plan id and falls through otherwise.
+  // It sits AFTER the plan lane because the two share the four plan lifecycle verbs, each gated on
+  // its own plan id — a declared share rather than a collision (see e2e-fixture-ownership.test.ts).
+  if (await handlePrepaymentsSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
