@@ -37,3 +37,28 @@ A skipped preintegration suite is not evidence that its feature passed.
 
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
+
+## `client-onboarding-identity.test.mjs` (0204, #649)
+
+Nine cells over the two 0204 doors, every assertion under test issued through `humanQuery` as a
+real per-role session under real RLS. `rootQuery` appears only where the subject IS the catalog
+(the `has_function_privilege` census) or where a fixture is being planted.
+
+Frontier-gated on the live catalog through
+`client-onboarding-identity-preintegration-gate.mjs`, which the package `test` script preloads: a
+package-wide run against a chain below 0204 SKIPS loudly, a focused run FAILS. A **partial** cohort
+throws rather than skipping — a settle door without its identity read is a narrower boundary nobody
+chose.
+
+Two cells are worth knowing about before editing them:
+
+- `p649.identity.direct_birth_residual` asserts that `begin_client_onboarding` **still succeeds**
+  at arity ≥ 2. It documents the residual deliberately; it is not a missing wall to "fix" by
+  strengthening the assertion.
+- `p649.identity.census_replay` re-runs `0103:1225-1239`'s five-role EXECUTE census over the three
+  `name_family_*` helpers and asserts it is still EMPTY. The whole wrapper design turns on that
+  negative, so a cell that ever needs relaxing is a design change, not a test change.
+
+Counterparty fixtures are planted as post-images: `clara.counterparties` carries an immutability
+trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
+retired counterparty is inserted with both `merged_into` and `retired_at` set.
