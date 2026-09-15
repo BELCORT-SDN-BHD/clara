@@ -69,6 +69,12 @@ async function scan(page: Page, what: string): Promise<void> {
 }
 
 test.describe.serial("#648 · A5 firm setup", () => {
+  // TWO FULL SIGN-INS AND TWO SERVER RENDERS live inside the concurrency cell, and the axe scans
+  // add their own passes. The 30s default is a budget for a single-page cell; measured, that cell
+  // alone takes ~32s on this host. A short budget reports "the app did not converge" for a run
+  // that had simply not finished, which is a false finding.
+  test.describe.configure({ timeout: 180_000 });
+
   test("firmSetup.walk.start: the firm home tile is the authorised next step, and it gates nothing", async ({ page, context }) => {
     await arm(context);
     await signInTo(page, "/");
@@ -134,20 +140,21 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await arm(context);
     await signInTo(page, SETUP_URL);
 
-    // The first context opens the optional currency fact and types an answer WITHOUT saving.
+    // The first context opens the currency fact — the one that reaches the Knowledge register —
+    // and chooses an answer WITHOUT saving.
     await page.getByTestId("firm-setup-answer-currency-action").click();
     await page.getByRole("radio", { name: "USD" }).check();
 
-    // A SECOND REAL CONTEXT answers a DIFFERENT fact, which rotates the plan's CAS token.
+    // A SECOND REAL CONTEXT answers THE SAME fact first, which rotates the plan's CAS token.
     const other = await browser.newContext({ ignoreHTTPSErrors: true });
     await arm(other);
     const otherPage = await other.newPage();
     try {
       await signInTo(otherPage, SETUP_URL);
-      await otherPage.getByTestId("firm-setup-answer-mia-action").click();
-      await otherPage.getByRole("textbox").first().fill("MIA-OTHER");
+      await otherPage.getByTestId("firm-setup-answer-currency-action").click();
+      await otherPage.getByRole("radio", { name: "MYR" }).check();
       await otherPage.getByTestId("firm-setup-submit").click();
-      await expect(otherPage.getByTestId("firm-setup-answer-mia")).toHaveText("MIA-OTHER");
+      await expect(otherPage.getByTestId("firm-setup-fact-default_currency")).toHaveText("MYR");
     } finally {
       await other.close();
     }
@@ -156,62 +163,22 @@ test.describe.serial("#648 · A5 firm setup", () => {
     // authoritative plan it re-reads already carries the other editor's answer.
     await page.getByTestId("firm-setup-submit").click();
     await expect(page.getByTestId("firm-setup-stale")).toBeVisible();
-    await expect(page.getByTestId("firm-setup-answer-mia")).toHaveText("MIA-OTHER");
+    await expect(page.getByTestId("firm-setup-answer-currency")).toHaveText("MYR");
     await expect(page).toHaveURL(new RegExp(`${SETUP_URL}$`));
 
     // THE DRAFT SURVIVED the convergence: the radio the person chose is still chosen.
     await expect(page.getByRole("radio", { name: "USD" })).toBeChecked();
     await scan(page, "the stale convergence with a preserved draft");
 
-    // Saving again — on the re-read token — is accepted, and the fact reaches the register.
-    await page.getByTestId("firm-setup-submit").click();
-    await expect(page.getByTestId("firm-setup-fact-default_currency")).toHaveText("USD");
+    // AC3 — the winner's fact is on the SAME canonical record Settings and Knowledge read, with
+    // its scope, its source and its actor. The loser is deliberately NOT offered a second capture
+    // of it: the real door refuses that with `knowledge_already_live`, and the honest next step is
+    // the correction path on the fact itself, which is what this surface offers.
+    await expect(page.getByTestId("firm-setup-fact-default_currency")).toHaveText("MYR");
     await expect(page.getByTestId("firm-setup-fact-actor-default_currency")).toContainText("Aisyah Rahman");
     await expect(page.getByTestId("firm-setup-confirmed-facts")).toContainText("Firm default");
     await expect(page.getByTestId("firm-setup-confirmed-facts")).toContainText("Stated by a user");
-  });
-
-  test("firmSetup.walk.finish: an optional fact is skipped with a reason, setup commits, and the tile clears", async ({ page, context }) => {
-    await arm(context);
-    await signInTo(page, SETUP_URL);
-
-    await scan(page, "the checklist with confirmed facts");
-
-    // The skip Dialog: a focused, bounded decision. Focus returns to the page afterwards.
-    const trigger = page.getByTestId("firm-setup-skip-mia");
-    if (await trigger.isVisible().catch(() => false)) {
-      await trigger.click();
-      const dialog = page.getByRole("dialog");
-      await expect(dialog).toBeVisible();
-      await scan(page, "the skip dialog");
-      await dialog.getByRole("textbox").fill("The firm is not MIA-registered.");
-      await page.getByTestId("firm-setup-skip-confirm").click();
-      await expect(dialog).toBeHidden();
-      await expect(page.getByTestId("firm-setup-answer-mia")).toContainText("The firm is not MIA-registered.");
-    }
-
-    // COMMIT — and the completion face is distinct from "not started".
-    await expect(page.getByTestId("firm-setup-counter")).toHaveText("3 of 3 required facts recorded");
-    await page.getByTestId("firm-setup-commit").click();
-    await expect(page.getByTestId("firm-setup-committed-notice")).toBeVisible();
-    await expect(page.getByTestId("firm-setup-completed")).toBeVisible();
-    await expect(page.getByTestId("firm-setup-not-started")).toHaveCount(0);
-    await expect(page.getByTestId("firm-setup-commit")).toHaveCount(0);
-    await scan(page, "the completed checklist");
-
-    // The confirmed fact stays correctable AFTER the commit — a committed checklist does not
-    // freeze a record on the canonical register.
     await expect(page.getByTestId("firm-setup-correct-default_currency")).toBeVisible();
-
-    // …and the firm home tile has cleared, because nothing required is outstanding.
-    await page.goto("/");
-    await expect(page.getByTestId("firm-home-setup-tile")).toHaveCount(0);
-
-    // BACK returns to the firm home, and the section's URL is stable — the steps were local state.
-    await page.goto(SETUP_URL);
-    await expect(page).toHaveURL(new RegExp(`${SETUP_URL}$`));
-    await page.goBack();
-    await expect(page).toHaveURL(/\/$/);
   });
 
   test("firmSetup.walk.responsive: 320 CSS px, 200% zoom, keyboard focus return and reduced motion", async ({ page, context }) => {
@@ -240,15 +207,17 @@ test.describe.serial("#648 · A5 firm setup", () => {
 
     // KEYBOARD: opening a fact and cancelling returns focus to the control that opened it.
     await ensureRealFocus(page);
-    const answer = page.getByTestId("firm-setup-answer-currency-action");
-    if (await answer.isVisible().catch(() => false)) {
-      await answer.focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByTestId("firm-setup-item-form")).toBeVisible();
-      await page.getByTestId("firm-setup-cancel").click();
-      await expect(page.getByTestId("firm-setup-item-form")).toHaveCount(0);
-      await expect(answer).toBeFocused();
-    }
+    // UNCONDITIONAL, deliberately: a leg wrapped in "if it happens to be visible" is vacuous the
+    // day the state it depends on moves, and this cell runs BEFORE the commit precisely so the
+    // optional TIN fact is still pending here.
+    const answer = page.getByTestId("firm-setup-answer-tin-action");
+    await expect(answer).toBeVisible();
+    await answer.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("firm-setup-item-form")).toBeVisible();
+    await page.getByTestId("firm-setup-cancel").click();
+    await expect(page.getByTestId("firm-setup-item-form")).toHaveCount(0);
+    await expect(answer).toBeFocused();
 
     // REDUCED MOTION: with the preference set, nothing on this surface runs a finite animation.
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -261,5 +230,51 @@ test.describe.serial("#648 · A5 firm setup", () => {
       }).length);
     expect(running, "a finite animation ran under prefers-reduced-motion: reduce").toBe(0);
     await page.emulateMedia({ reducedMotion: null });
+  });
+
+  test("firmSetup.walk.finish: an optional fact is skipped with a reason, setup commits, and the tile clears", async ({ page, context }) => {
+    await arm(context);
+    await signInTo(page, SETUP_URL);
+
+    await scan(page, "the checklist with confirmed facts");
+
+    // The skip Dialog: ONE focused, bounded decision (appendix D row 23), and the whole leg is
+    // UNCONDITIONAL — the optional TIN fact is still pending at this point in the journey, and a
+    // leg guarded by "if it happens to be visible" would pass in silence the day it is not.
+    const trigger = page.getByTestId("firm-setup-skip-tin");
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await scan(page, "the skip dialog");
+    await dialog.getByRole("textbox").fill("The firm is below the MyInvois threshold.");
+    await page.getByTestId("firm-setup-skip-confirm").click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId("firm-setup-answer-tin")).toContainText("The firm is below the MyInvois threshold.");
+    // …and the skipped fact is visibly SKIPPED, not silently blank.
+    await expect(page.getByTestId("firm-setup-state-tin")).toHaveText("Skipped");
+
+    // COMMIT — and the completion face is distinct from "not started".
+    await expect(page.getByTestId("firm-setup-counter")).toHaveText("3 of 3 required facts recorded");
+    await page.getByTestId("firm-setup-commit").click();
+    await expect(page.getByTestId("firm-setup-committed-notice")).toBeVisible();
+    await expect(page.getByTestId("firm-setup-completed")).toBeVisible();
+    await expect(page.getByTestId("firm-setup-not-started")).toHaveCount(0);
+    await expect(page.getByTestId("firm-setup-commit")).toHaveCount(0);
+    await scan(page, "the completed checklist");
+
+    // The confirmed fact stays correctable AFTER the commit — a committed checklist does not
+    // freeze a record on the canonical register.
+    await expect(page.getByTestId("firm-setup-correct-default_currency")).toBeVisible();
+
+    // …and the firm home tile has cleared, because nothing required is outstanding.
+    await page.goto("/");
+    await expect(page.getByTestId("firm-home-setup-tile")).toHaveCount(0);
+
+    // BACK returns to the firm home, and the section's URL is stable — the steps were local state.
+    await page.goto(SETUP_URL);
+    await expect(page).toHaveURL(new RegExp(`${SETUP_URL}$`));
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
   });
 });

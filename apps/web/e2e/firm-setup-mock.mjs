@@ -57,7 +57,7 @@ function armed(request) {
 }
 
 /**
- * THE CATALOGUE, as `clara.get_firm_setup` emits it — five rows over three groups, so the walk
+ * THE CATALOGUE, as `clara.get_firm_setup` emits it — six rows over three groups, so the walk
  * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, and a fact
  * that reaches the knowledge register. The shapes and option lists are the ones 0203 seeds from
  * `clara.knowledge_keys.allowed_values`; nothing here invents a vocabulary.
@@ -90,6 +90,13 @@ const CATALOGUE = [
     note: "FIRM_SEGMENTS_V2 fye — a whole month 1-12, the interview's own validateFye shape.",
     required: true, min_role: "admin", answer_shape: "month", answer_options: [], answer_field: null,
     sort_order: 40, knowledge_key: null,
+  },
+  {
+    item_key: "tin", kind: "capture", group_key: "tax",
+    question: "What is the firm's MyInvois TIN?",
+    note: "FIRM_SEGMENTS_V2 tin — not required for commit here, and skippable with a stated reason.",
+    required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
+    sort_order: 45, knowledge_key: null,
   },
   {
     item_key: "currency", kind: "capture", group_key: "accounting",
