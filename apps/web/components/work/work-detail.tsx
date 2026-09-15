@@ -50,6 +50,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { WorkPlanOriginRow } from "@/components/plans/work-plan-origin";
+import { fieldForAdjustmentLineOrdinal } from "@/lib/work/periodic-adjustment";
 import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -896,6 +897,21 @@ function WorkFacts({
   );
 }
 
+/** #799 — THE COMMIT-TIME `unknown_account` REFUSAL'S OWN LINE ORDINAL, read straight off the
+ *  database's own sentence ("line 2 codes to an account this client does not have active: …",
+ *  migrations 0178/0182/0184/0194/0195's shared `_record_journal_entry_core` step 6). This is the
+ *  ONLY place that sentence's shape is parsed — `fieldForAdjustmentLineOrdinal` takes the ordinal
+ *  from here and the Work's own `purpose`/`basis.lines` and resolves the leg; the sentence itself
+ *  is never rewritten, reordered or replaced by this parse. `null` for anything that does not open
+ *  with "line N codes to an account" — a message shape from a different constraint, or none. */
+function unknownAccountLineOrdinal(message: string | null | undefined): number | null {
+  if (typeof message !== "string") return null;
+  const match = /^line\s+(\d+)\s+codes to an account/i.exec(message.trim());
+  if (!match) return null;
+  const ordinal = Number(match[1]);
+  return Number.isInteger(ordinal) && ordinal >= 1 ? ordinal : null;
+}
+
 /** The state-specific band: what is happening, and what a human may do next. */
 function WorkOutcome({
   work,
@@ -955,6 +971,7 @@ function WorkOutcome({
 }) {
   const t = useTranslations("WorkDetail");
   const tc = useTranslations("WorkCancel");
+  const tAdj = useTranslations("PeriodicAdjustment");
 
   // #630 (review) — "Cancel Work" IS NOT RENDERED HERE, deliberately. It lives in the detail view's
   // own action bar, at one position that no status change moves, because a control mounted inside a
@@ -1018,6 +1035,21 @@ function WorkOutcome({
     // THE DATABASE'S MESSAGE IS STILL SHOWN, underneath, because a refusal is a receipt and this
     // lane never replaces one with a paraphrase. What the face adds is WHO can fix it.
     const egressRefused = error.reason === "egress_not_authorized";
+    // #799 — A COMMIT-TIME `unknown_account` REFUSAL NAMES ONLY A BARE LINE ORDINAL
+    // ("line 2 codes to an account…"), because the chart-of-accounts check that raises it runs
+    // against the Work's already-admitted `basis.lines`, not against the periodic-adjustment
+    // form. `fieldForAdjustmentLineOrdinal` resolves that ordinal, together with this Work's own
+    // `purpose` and `basis.lines`, back to the adjustment field that produced it — `null` for a
+    // `journal_entry` Work, a different refusal reason, an ordinal past the basis, or any other
+    // shape, in which case the generic line reference stays the whole, honest disclosure.
+    const unknownAccountField =
+      error.reason === "unknown_account"
+        ? fieldForAdjustmentLineOrdinal(
+            unknownAccountLineOrdinal(error.message) ?? -1,
+            work.purpose,
+            work.basis?.lines ?? null,
+          )
+        : null;
     return (
       <div className="flex flex-col gap-2">
         {/* #630 — THE ONE REFUSAL A COLLEAGUE CAN RESCUE. Above the refusal rather than inside it:
@@ -1056,6 +1088,12 @@ function WorkOutcome({
             <span className="block">{t("egressNotAuthorized.body")}</span>
           ) : null}
           {error.message ?? t("refused.body")}
+          {/* #799 — the resolved field's own form label, BESIDE the database's sentence, never
+              instead of it: the sentence above is unchanged, and this only adds who can act on
+              it. */}
+          {unknownAccountField ? (
+            <span className="block text-muted-foreground">{tAdj(unknownAccountField)}</span>
+          ) : null}
           {/* #812 — …and for an OWNER, the one recovery the sentence above could not offer before:
               a paused (DEACTIVATED) purpose activation, re-activated through
               clara.reactivate_client_egress_purpose. It restores FUTURE dispatches; "Try again"

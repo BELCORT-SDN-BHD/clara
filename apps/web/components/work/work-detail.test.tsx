@@ -416,6 +416,153 @@ test("a REFUSED work renders the DB's own typed reason, with a retry and an edit
   }
 });
 
+// #799 — a commit-time `unknown_account` refusal on a periodic-adjustment Work names only a bare
+// line ordinal ("line 2 codes to an account…"); the page resolves that ordinal, together with the
+// Work's own purpose and basis lines, back to the adjustment field that produced it, and renders
+// that field's label BESIDE the database's own sentence — never instead of it.
+
+test("799: a refused stock-adjustment Work names the resolved field beside the DB's unchanged message", async () => {
+  const h = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "periodic_stock_adjustment",
+            status: "refused",
+            basis: {
+              posting_date: "2026-09-01",
+              memo: "Periodic stock adjustment",
+              currency: "MYR",
+              lines: [
+                { account_code: "1200", debit_cents: 250_000, credit_cents: 0, description: "stock movement" },
+                { account_code: "9999", debit_cents: 0, credit_cents: 250_000, description: "cost of sales" },
+              ],
+            },
+            error: {
+              code: "CLR10",
+              reason: "unknown_account",
+              message: "line 2 codes to an account this client does not have active: 9999",
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(
+      text,
+      /line 2 codes to an account this client does not have active: 9999/,
+      "the database's own sentence, unchanged",
+    );
+    assert.match(text, /Cost of sales account/, "the resolved field's own form label");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("799: the generic line reference is the fallback for a journal_entry Work, another reason, and an ordinal past the basis", async () => {
+  // A journal_entry Work: no adjustment fields to translate into, so no label at all.
+  const journalWork = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "journal_entry",
+            status: "refused",
+            error: {
+              code: "CLR10",
+              reason: "unknown_account",
+              message: "line 2 codes to an account this client does not have active: 9999",
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await journalWork.settle();
+    const text = journalWork.text();
+    assert.match(text, /line 2 codes to an account this client does not have active: 9999/);
+    assert.doesNotMatch(text, /Cost of sales account|Inventory account/, "no adjustment-field label on a journal entry");
+  } finally {
+    await journalWork.unmount();
+  }
+
+  // The SAME purpose and basis, but a DIFFERENT refusal reason: no label.
+  const otherReason = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "periodic_stock_adjustment",
+            status: "refused",
+            basis: {
+              posting_date: "2026-09-01",
+              memo: "Periodic stock adjustment",
+              currency: "MYR",
+              lines: [
+                { account_code: "1200", debit_cents: 250_000, credit_cents: 0, description: "stock movement" },
+                { account_code: "5040", debit_cents: 0, credit_cents: 250_000, description: "cost of sales" },
+              ],
+            },
+            error: {
+              code: "CLR10",
+              reason: "write_into_closed_period",
+              message: "September 2026 is closed for this client.",
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await otherReason.settle();
+    const text = otherReason.text();
+    assert.match(text, /September 2026 is closed for this client\./);
+    assert.doesNotMatch(text, /Cost of sales account|Inventory account/, "no label for a non-unknown_account reason");
+  } finally {
+    await otherReason.unmount();
+  }
+
+  // An ordinal PAST the basis (only two legs on a stock adjustment): no label.
+  const pastBasis = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "periodic_stock_adjustment",
+            status: "refused",
+            basis: {
+              posting_date: "2026-09-01",
+              memo: "Periodic stock adjustment",
+              currency: "MYR",
+              lines: [
+                { account_code: "1200", debit_cents: 250_000, credit_cents: 0, description: "stock movement" },
+                { account_code: "5040", debit_cents: 0, credit_cents: 250_000, description: "cost of sales" },
+              ],
+            },
+            error: {
+              code: "CLR10",
+              reason: "unknown_account",
+              message: "line 3 codes to an account this client does not have active: 9999",
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await pastBasis.settle();
+    const text = pastBasis.text();
+    assert.match(text, /line 3 codes to an account this client does not have active: 9999/);
+    assert.doesNotMatch(text, /Cost of sales account|Inventory account/, "ordinal 3 does not exist on a two-leg stock basis");
+  } finally {
+    await pastBasis.unmount();
+  }
+});
+
 test("BUDGET EXHAUSTION is its own copy, and a REFUSED retry reports the current status", async () => {
   const h = await renderComponent(
     App({

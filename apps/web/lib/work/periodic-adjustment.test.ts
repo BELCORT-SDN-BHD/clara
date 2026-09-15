@@ -23,6 +23,7 @@ import {
   defaultMemo,
   derivedLines,
   emptyAdjustmentDraft,
+  fieldForAdjustmentLineOrdinal,
   fieldForAdjustmentPath,
   firstInvalidAdjustmentField,
   isCalendarDate,
@@ -309,4 +310,54 @@ test("643.web: a server field path lands on a control in BOTH spellings of one p
 test("643.web: the default memo names the period it is about", () => {
   assert.equal(defaultMemo(stockDraft()), "Periodic stock adjustment 2026-01-01 to 2026-12-31");
   assert.equal(defaultMemo(payrollDraft()), "epf obligation 2026-08-01 to 2026-08-31");
+});
+
+test("799: a stock-adjustment commit-time ordinal resolves 1 to inventory, 2 to cost, anything else to null", () => {
+  assert.equal(fieldForAdjustmentLineOrdinal(1, "periodic_stock_adjustment", null), "inventoryAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(2, "periodic_stock_adjustment", null), "costAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "periodic_stock_adjustment", null), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(0, "periodic_stock_adjustment", null), null, "lines[0] never occurs");
+  assert.equal(fieldForAdjustmentLineOrdinal(-1, "periodic_stock_adjustment", null), null);
+});
+
+test("799: the obligation legs resolve in order, and the third leg reads the basis to tell advance from settlement", () => {
+  assert.equal(fieldForAdjustmentLineOrdinal(1, "payroll_obligation", []), "expenseAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(2, "payroll_obligation", []), "liabilityAccountCode");
+
+  // A basis with ONLY the advance leg (no settlement): ordinal 3 is the advance leg, and there is
+  // no ordinal 4 at all.
+  const advanceOnly = [
+    { description: "epf" },
+    { description: "obligation" },
+    { description: "staff advance" },
+  ];
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", advanceOnly), "advanceAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(4, "payroll_obligation", advanceOnly), null);
+
+  // A basis with ONLY the settlement leg (no advance): ordinal 3 is the settlement leg.
+  const settlementOnly = [
+    { description: "epf" },
+    { description: "obligation" },
+    { description: "settled" },
+  ];
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", settlementOnly), "paymentAccountCode");
+
+  // A basis with BOTH conditional legs: advance before settlement, matching `derivedLines`'s own
+  // order — ordinal 3 is the advance leg, ordinal 4 is the settlement leg.
+  const both = [
+    { description: "epf" },
+    { description: "obligation" },
+    { description: "staff advance" },
+    { description: "settled" },
+  ];
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", both), "advanceAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(4, "payroll_obligation", both), "paymentAccountCode");
+});
+
+test("799: no mapping for a journal_entry Work, an absent basis, or an ordinal the basis does not reach", () => {
+  assert.equal(fieldForAdjustmentLineOrdinal(1, "journal_entry", null), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(2, "journal_entry", [{ description: "epf" }, { description: "obligation" }]), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", null), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", undefined), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", []), null);
 });

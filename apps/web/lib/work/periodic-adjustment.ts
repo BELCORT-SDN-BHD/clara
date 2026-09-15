@@ -552,3 +552,57 @@ export function fieldForAdjustmentPath(path: string | null): AdjustmentFieldId |
   const camel = key.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
   return ADJUSTMENT_FIELDS.has(camel) ? (camel as AdjustmentFieldId) : null;
 }
+
+/**
+ * #799 — A COMMIT-TIME REFUSAL'S OWN 1-BASED LINE ORDINAL, mapped onto the adjustment field that
+ * produced it. Sibling to `fieldForAdjustmentPath` above, not a replacement for it: that function
+ * resolves an ADMISSION-TIME wire path (`adjustment.<key>`) straight to a control; this one
+ * resolves a COMMIT-TIME refusal, which — because it is raised by the shared chart-of-accounts
+ * check at `clara._record_journal_entry_core` step 6, against the Work's already-admitted
+ * `basis.lines`, not against the form — names only the bare ordinal (`lines[N].account_code`).
+ *
+ * THE ORDINAL IS 1-BASED, migration 0178's own indexing (`with ordinality`, `lines[i + 1]` in the
+ * runtime, pinned by `journal-basis.test.ts`'s `lines[1]` as the FIRST row) — `lines[0]` never
+ * occurs, so ordinal `0` and anything below it resolve to `null` here exactly like an ordinal past
+ * the basis.
+ *
+ * THE LEG ORDER IS THE ONE `derivedLines` ABOVE AND THE CHAT LANE'S `basisFromAdjustment`
+ * (`packages/runtime/lib/periodic-adjustment-basis.ts`) BOTH PRODUCE: stock adjustment is
+ * inventory (1) then cost (2) — always exactly two legs, so any other ordinal is `null`. Obligation
+ * is expense (1), liability (2), then the advance leg, then the settlement leg — BOTH CONDITIONAL,
+ * appended only when their amount is positive and their account is named, so an ordinal alone
+ * cannot tell a third leg apart from a fourth. `basisLines` — the Work's OWN `basis.lines`, already
+ * admitted — is the discriminator instead of re-deriving anything: `derivedLines`'s own
+ * `description`s for those two legs ("staff advance", "settled") are read straight off the line at
+ * that ordinal, so a basis carrying only the advance leg, only the settlement leg, or both all
+ * resolve correctly with no guessing about which one is missing.
+ *
+ * `null` for a `journal_entry` Work (no adjustment fields to translate into), for an ordinal the
+ * basis does not reach, for an absent/empty `basisLines`, or for any shape this function does not
+ * recognise — the generic line reference is the correct, honest fallback in every one of those
+ * cases, exactly as `fieldForAdjustmentPath`'s own `null` case documents.
+ */
+export function fieldForAdjustmentLineOrdinal(
+  ordinal: number,
+  purpose: string,
+  basisLines: ReadonlyArray<{ description?: string | null }> | null | undefined,
+): AdjustmentFieldId | null {
+  if (!Number.isInteger(ordinal) || ordinal < 1) return null;
+
+  if (purpose === "periodic_stock_adjustment") {
+    if (ordinal === 1) return "inventoryAccountCode";
+    if (ordinal === 2) return "costAccountCode";
+    return null;
+  }
+
+  if (purpose === "payroll_obligation") {
+    if (ordinal === 1) return "expenseAccountCode";
+    if (ordinal === 2) return "liabilityAccountCode";
+    const line = basisLines?.[ordinal - 1];
+    if (line?.description === "staff advance") return "advanceAccountCode";
+    if (line?.description === "settled") return "paymentAccountCode";
+    return null;
+  }
+
+  return null;
+}
