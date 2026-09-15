@@ -92,6 +92,17 @@ refuses the cutover while any pre-cutover classify task is still claimable witho
 extraction, and its rollback is a new append-only recovery migration applied while that consumer
 stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
 
+[0199_client_work_pack.sql](migrations/0199_client_work_pack.sql) owes **no** consumer-first
+obligation either, for a narrower reason: it adds exactly one SECURITY INVOKER read door,
+`clara.get_client_work_pack(p_client, p_preview)`, grants EXECUTE to `clara_authenticated` alone,
+and creates no relation, column, policy, index or trigger and recuts nothing. Its only consumer is
+a new browser module ([../../apps/web/lib/work/client-work-pack.ts](../../apps/web/lib/work/client-work-pack.ts)),
+which cannot call a function that is not there yet. It keeps ONE prestate pin — a pre-image
+`sha256(prosrc)` of `clara._work_run_attempts` — not because it recuts that body but because it
+CALLS it and its own safety argument depends on that helper's 101-id ceiling and its in-body
+bookkeeper floor; the pin is what forces a later recut of the helper to re-derive this door's
+argument rather than discover it at 102 running Works.
+
 Rebuilding a target from the migration chain and restoring a dump are different operations.
 A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials
 afterward and probe every configured runtime lane. Existing platform roles can also collide
