@@ -213,11 +213,21 @@ export function SupportCaseSheet({
                 <dd className="text-card-foreground">{detail.firm_name ?? t("unavailable")}</dd>
 
                 <dt className="text-muted-foreground">{t("columnApplicant")}</dt>
-                {/* No display-name resolution exists for an applicant: `clara.users_visible`
-                    requires the target share the CALLER's firm and a pre-membership applicant has
-                    no membership anywhere (lib/registration/doors.ts's own measured note). The
-                    truncated id is an honest absence, never a fabricated name. */}
+                {/* #776 — the id STAYS. `clara.resolve_operator_support_applicants` resolves the
+                    applicant's `clara.users.display_name` through an operator-only read scoped to
+                    the applicants of support cases (NOT `clara.users_visible`, whose same-firm
+                    requirement a pre-membership applicant structurally cannot meet). When nothing
+                    resolves — a null applicant, or an id naming no user — the Name row is simply
+                    not rendered and the truncated id stands alone, exactly as it did before: an
+                    honest absence, never a fabricated name. */}
                 <dd className="font-mono text-xs text-muted-foreground">{shortId(detail.applicant)}</dd>
+
+                {detail.applicant_name ? (
+                  <>
+                    <dt className="text-muted-foreground">{t("columnApplicantName")}</dt>
+                    <dd className="text-card-foreground">{detail.applicant_name}</dd>
+                  </>
+                ) : null}
 
                 <dt className="text-muted-foreground">{t("columnState")}</dt>
                 <dd className="text-card-foreground">{t(`state.${supportCaseState(detail)}`)}</dd>

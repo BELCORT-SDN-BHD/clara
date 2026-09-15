@@ -139,11 +139,21 @@ const CALLER_CONTEXT = [{
   role: "owner", role_rank: 3, is_operator: true,
 }];
 
+/** #776 — the applicant on every case below, and the name the operator-only name door resolves it
+ *  to. The console asks for it on the queue AND on the detail, so every mock in this file answers
+ *  it; a mock that did not would trip this file's own "unexpected fetch" guard. */
+const APPLICANT = "a1234567-89ab-cdef-0123-456789abcdef";
+const APPLICANT_NAME = "Farid bin Ismail";
+
+function applicantNames(): Response {
+  return jsonResponse([{ applicant: APPLICANT, display_name: APPLICANT_NAME }]);
+}
+
 function registrationCase(over: Record<string, unknown> = {}) {
   return {
     case_kind: "registration", case_id: REGISTRATION_CASE,
     occurred_at: "2026-09-12T04:00:00+00:00", registration_id: REGISTRATION_CASE,
-    applicant: "a1234567-89ab-cdef-0123-456789abcdef", firm_name: "Rome Public Advisory",
+    applicant: APPLICANT, firm_name: "Rome Public Advisory",
     request_status: "open", firm_id: null, intent_status: null, intent_status_at: null,
     intent_status_reason: null, payment_recorded_at: null, payment_consumed_at: null,
     problem_kind: null, problem_noticed_at: null, problem_detail: null,
@@ -258,6 +268,7 @@ test("ticket 615 AC4 — a synchronous double-press of Approve results in EXACTL
       decided = true;
       return jsonResponse({ request_id: REGISTRATION_CASE, firm_id: "f-615", plan_id: "p-615" });
     }
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
     throw new Error(`unexpected fetch: ${url}`);
   });
 
@@ -293,6 +304,40 @@ test("ticket 615 AC4 — a synchronous double-press of Approve results in EXACTL
   });
 });
 
+// ── #776 · THE APPLICANT'S NAME IN THE DETAIL SHEET ──────────────────────────
+
+test("ticket 776 — the case detail shows the applicant's NAME beside the id, and the id stays", async () => {
+  const { impl, calls, search } = await mountCase("registration", REGISTRATION_CASE, (url) => {
+    if (url.includes("/rest/v1/caller_context")) return jsonResponse(CALLER_CONTEXT);
+    if (url.includes("/rpc/get_admission_capacity")) return jsonResponse({ max_firms: null, firms_count: 4, full: false });
+    if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse([registrationCase()]);
+    if (url.includes("/rpc/get_operator_support_case")) return jsonResponse(registrationCase());
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App(createElement(OperatorSupportConsole), search));
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 8; i++) await h.settle();
+      const text = textOf(body as never);
+      assert.match(text, new RegExp(APPLICANT_NAME), "the Sheet renders the resolved name");
+      assert.match(text, new RegExp(APPLICANT.slice(0, 8)),
+        "…and the truncated id it has always shown is still there beside it");
+      // THE NAME IS ASKED FOR WITH THE DECLARED PARAMETER NAME — the same spelling
+      // packages/db/tests/operation-census.test.mjs checks against the function's declaration, so a
+      // rename on either side is a finding rather than a silent 404 at runtime.
+      const asked = rpcCalls(calls, "resolve_operator_support_applicants");
+      assert.ok(asked.length > 0, "the name door was called");
+      assert.deepEqual((asked[0]!.body as { p_applicants: string[] }).p_applicants, [APPLICANT]);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 // ── THE REASON DIALOG: gate, focus return, verbatim refusal ──────────────────
 
 test("Reject dialog: Confirm gates on the required reason, Cancel closes it and returns focus to the trigger", async () => {
@@ -301,6 +346,7 @@ test("Reject dialog: Confirm gates on the required reason, Cancel closes it and 
     if (url.includes("/rpc/get_admission_capacity")) return jsonResponse({ max_firms: null, firms_count: 4, full: false });
     if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse([registrationCase()]);
     if (url.includes("/rpc/get_operator_support_case")) return jsonResponse(registrationCase());
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
     throw new Error(`unexpected fetch: ${url}`);
   });
 
@@ -365,6 +411,7 @@ test("ticket 615 AC3 — a governed refusal renders VERBATIM in its own labelled
       // The F7 self-decision wall — an operator may never decide their OWN request (0145:856-860).
       return clrResponse("CLR04", "cannot decide your own registration request");
     }
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
     throw new Error(`unexpected fetch: ${url}`);
   });
 
@@ -416,6 +463,7 @@ test("ticket 615 AC3 — a duplicate operation, a provider outage and a stale ca
       if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse([problemCase()]);
       if (url.includes("/rpc/get_operator_support_case")) return jsonResponse(problemCase());
       if (url.includes("/rpc/resolve_stripe_event_problem")) return answer();
+      if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
       throw new Error(`unexpected fetch: ${url}`);
     });
 
@@ -450,6 +498,7 @@ test("the reason counter and the Confirm gate agree on ONE Unicode code-point co
     if (url.includes("/rpc/get_admission_capacity")) return jsonResponse({ max_firms: null, firms_count: 4, full: false });
     if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse([registrationCase()]);
     if (url.includes("/rpc/get_operator_support_case")) return jsonResponse(registrationCase());
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
     throw new Error(`unexpected fetch: ${url}`);
   });
 
@@ -498,6 +547,7 @@ test("ticket 615 AC1/AC5 — a deep link to a case the door refuses shows one no
     if (url.includes("/rpc/get_operator_support_case")) {
       return clrResponse("CLR11", "support case not found", "support_case_not_found");
     }
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
     throw new Error(`unexpected fetch: ${url}`);
   });
 
@@ -533,6 +583,7 @@ test("ticket 615 AC3 — a SETTLED case offers no act and names the absence", as
         decided_reason: "Refunded by hand.",
       }));
     }
+    if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
     throw new Error(`unexpected fetch: ${url}`);
   });
 

@@ -136,6 +136,19 @@ function queueRow(over: Record<string, unknown> = {}) {
   };
 }
 
+/** #776 — the applicant ids the three arms carry, and the ONE the name door can resolve. B is a
+ *  real id on a real case that resolves to nothing (a provider-supplied applicant naming no user),
+ *  so this fixture carries BOTH halves of the field rather than only the happy one. */
+const APPLICANT_A = "a1234567-89ab-cdef-0123-456789abcdef";
+const APPLICANT_B = "b1234567-89ab-cdef-0123-456789abcdef";
+const APPLICANT_A_NAME = "Farid bin Ismail";
+
+/** The name door's answer: ONLY what it resolved. An unresolvable id is ABSENT, never a row with a
+ *  null name (0206 §1) — which is what makes `applicant_name: null` a real state here. */
+function applicantNames(): Response {
+  return jsonResponse([{ applicant: APPLICANT_A, display_name: APPLICANT_A_NAME }]);
+}
+
 const THREE_ARMS = [
   queueRow(),
   queueRow({
@@ -145,6 +158,7 @@ const THREE_ARMS = [
   }),
   queueRow({
     case_kind: "problem", case_id: PROBLEM_CASE, firm_name: "Penang Advisory",
+    applicant: APPLICANT_B,
     problem_kind: "duplicate_payment", problem_noticed_at: "2026-09-10T02:00:00+00:00",
     occurred_at: "2026-09-10T02:00:00+00:00",
   }),
@@ -219,6 +233,7 @@ test("ticket 615 AC1 — an operator-firm OWNER gets the queue AND the visible i
         return jsonResponse({ max_firms: null, firms_count: 4, full: false });
       }
       if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse(THREE_ARMS);
+      if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
       throw new Error(`unexpected fetch: ${url}`);
     },
     async () => {
@@ -233,6 +248,44 @@ test("ticket 615 AC1 — an operator-firm OWNER gets the queue AND the visible i
         assert.ok(regionsOf(h.container).includes("isolation"), "the isolation statement is its own region");
         assert.match(text, /does not open any firm's documents, ledger, Work or Knowledge/);
         assert.doesNotMatch(text, /does not carry that authority/);
+        assert.deepEqual(checkAccessibility(h.container as never), []);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// ── #776 · THE APPLICANT'S NAME, ON SCREEN ───────────────────────────────────
+
+test("ticket 776 — the queue renders the resolved applicant NAME beside the id, and keeps the "
+  + "honest absence where nothing resolved", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(callerContext(true, "owner", 3));
+      if (url.includes("/rpc/get_admission_capacity")) {
+        return jsonResponse({ max_firms: null, firms_count: 4, full: false });
+      }
+      if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse(THREE_ARMS);
+      if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(createElement(OperatorSupportConsole), "Operator support"));
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, new RegExp(messages.Operator.columnApplicantName),
+          "the Name column has its own header");
+        assert.match(text, new RegExp(APPLICANT_A_NAME), "the resolved applicant's name renders");
+        // THE ID IS STILL THERE. The name is BESIDE the truncated uuid, never instead of it —
+        // every other surface and every support conversation addresses the case by that id.
+        assert.match(text, new RegExp(APPLICANT_A.slice(0, 8)), "the truncated id still renders");
+        // …AND NOTHING IS INVENTED for the row the door could not resolve: it falls back to the
+        // console's own "unavailable" copy, and no uuid is ever painted as if it were a name.
+        assert.match(text, new RegExp(messages.Operator.unavailable));
+        assert.doesNotMatch(text, new RegExp(APPLICANT_B), "no full uuid is rendered as a name");
         assert.deepEqual(checkAccessibility(h.container as never), []);
       } finally {
         await h.unmount();
@@ -258,6 +311,7 @@ test("ticket 615 AC3 — an EMPTY queue and a DENIED read are different regions,
           return jsonResponse({ max_firms: null, firms_count: 4, full: false });
         }
         if (url.includes("/rpc/list_operator_support_queue")) return answer();
+        if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
         throw new Error(`unexpected fetch: ${url}`);
       },
       async () => {
@@ -288,6 +342,7 @@ test("ticket 615 AC3 — a case with no supported action says so, in its own lab
         return jsonResponse({ max_firms: null, firms_count: 4, full: false });
       }
       if (url.includes("/rpc/list_operator_support_queue")) return jsonResponse(THREE_ARMS);
+      if (url.includes("/rpc/resolve_operator_support_applicants")) return applicantNames();
       if (url.includes("/rpc/get_operator_support_case")) {
         // The unconsumed PAYMENT — the honest "no supported action" case: `clara.claim_paid_firm`
         // is the applicant's own door and the estate has no operator-side writer for it.

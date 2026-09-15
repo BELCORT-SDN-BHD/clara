@@ -28,12 +28,22 @@
 // navigation registry and this destination's own gate both read — is an AFFORDANCE that mirrors
 // it, never the wall: a caller who types `/operator` still meets CLR04.
 //
-// WHAT THIS MODULE DELIBERATELY DOES NOT DO. It computes no totals, resolves no display names
-// (`clara.users_visible` requires the target share the CALLER's firm, and an applicant has no
-// membership anywhere — `lib/registration/doors.ts`'s own header records that measured gap), and
-// invents no recovery act. `supportedActionFor` returns "none" for every state the estate has no
-// governed writer for, and the UI says so in those words rather than offering a control that would
-// refuse.
+// THE APPLICANT'S NAME, AND WHERE IT COMES FROM (#776). This module DOES resolve one display
+// name, and exactly one: the APPLICANT on a support case, through
+// `clara.resolve_operator_support_applicants(p_applicants uuid[]) -> (applicant, display_name)` —
+// a purpose-built operator-only read carrying the SAME owner+operator-firm predicate both doors
+// above carry. It is NOT `clara.users_visible`, which admits only a target who shares the CALLER's
+// firm and therefore structurally cannot serve an applicant with no membership anywhere
+// (`lib/registration/doors.ts`'s own header records that measured gap). The door is scoped to the
+// applicants OF SUPPORT CASES, so it is no existence oracle over `clara.users`; a null applicant,
+// an id naming no user, and a real user who is nobody's applicant all answer the same way — with
+// no row — and this module turns that into `applicant_name: null`, which the surfaces render as
+// the truncated id they have always shown. NO EMAIL is read or returned (0137's ruling).
+//
+// WHAT THIS MODULE DELIBERATELY DOES NOT DO. It computes no totals, resolves no display name other
+// than the applicant's (no decider, no firm member, no estate-wide user lookup), and invents no
+// recovery act. `supportedActionFor` returns "none" for every state the estate has no governed
+// writer for, and the UI says so in those words rather than offering a control that would refuse.
 
 import { callDoor, isDoorError, isDoorRefusal } from "@/lib/doors";
 import { isUuidShape } from "@/lib/client-id";
@@ -74,6 +84,12 @@ export type SupportQueueRow = {
   decided_at: string | null;
   decided_reason: string | null;
   settled: boolean;
+  /** #776 — the applicant's `clara.users.display_name`, resolved by THIS module through
+   *  `clara.resolve_operator_support_applicants` and merged onto the row. It is NOT a column of
+   *  `clara.list_operator_support_queue`; `null` means "nothing resolved" (a null applicant id, an
+   *  id naming no user, or a name read that did not answer) and the surfaces show the truncated id
+   *  in that case, exactly as they did before this field existed. */
+  applicant_name: string | null;
 };
 
 /** `clara.get_operator_support_case`'s answer: the queue row plus the arm's own detail. */
@@ -93,6 +109,72 @@ export type OperatorReadOptions = {
   signal?: AbortSignal;
 };
 
+/** One row of `clara.resolve_operator_support_applicants` — the applicant id and their name, and
+ *  no third field. An id the door could not resolve is ABSENT from the answer rather than present
+ *  with a null name (0206 §1), which is why this type has no nullable member. */
+export type ApplicantName = {
+  applicant: string;
+  display_name: string;
+};
+
+/** Resolve the applicant ids a page of cases carries to their display names.
+ *
+ *  DEDUPED AND NULL-FREE before the call: one applicant legitimately owns several cases, and a
+ *  `metadata_missing` problem carries no applicant at all. Sending the raw column would ask the
+ *  database the same question several times and send SQL NULLs it would only discard.
+ *
+ *  ZERO IDS IS NO CALL. An empty array is a question with no answer in it, and the door is not a
+ *  wall this module needs to re-test: `list_operator_support_queue` already refused a caller who
+ *  may not be here. */
+export async function resolveOperatorSupportApplicants(
+  applicants: readonly (string | null | undefined)[],
+  opts: OperatorReadOptions = {},
+): Promise<Map<string, string>> {
+  const ids = [...new Set(applicants.filter((a): a is string => typeof a === "string" && a !== ""))];
+  if (ids.length === 0) return new Map();
+  const rows = await callDoor<ApplicantName[] | null>(
+    "resolve_operator_support_applicants",
+    { p_applicants: ids },
+    { session: opts.session, signal: opts.signal },
+  );
+  const names = new Map<string, string>();
+  if (!Array.isArray(rows)) return names;
+  for (const row of rows) {
+    if (row && typeof row.applicant === "string" && typeof row.display_name === "string") {
+      names.set(row.applicant, row.display_name);
+    }
+  }
+  return names;
+}
+
+/** Merge a resolved-name map onto rows the queue/case door returned. A name that did not resolve
+ *  becomes `null` — never an empty string, never the uuid wearing a name's clothes. */
+function withApplicantName<T extends { applicant: string | null }>(
+  row: T,
+  names: Map<string, string>,
+): T & { applicant_name: string | null } {
+  return { ...row, applicant_name: (row.applicant && names.get(row.applicant)) ?? null };
+}
+
+/** The NAME read is DECORATION, and a failure of it is not a failure of the queue. The two doors
+ *  carry the same wall, so in practice one refuses only when the other does — but if the name read
+ *  fails on its own (transport, an abort, a permission that changed between the two calls) the
+ *  queue the operator asked for is still the answer, with every name absent. Turning a good queue
+ *  into a "denied" or "failed read" because a label did not arrive would be this seam inventing a
+ *  state the database never reported. The abort signal is re-thrown rather than swallowed: a
+ *  cancelled read must not resolve as a successful one. */
+async function namesFor(
+  rows: readonly { applicant: string | null }[],
+  opts: OperatorReadOptions,
+): Promise<Map<string, string>> {
+  try {
+    return await resolveOperatorSupportApplicants(rows.map((r) => r.applicant), opts);
+  } catch (e: unknown) {
+    if (opts.signal?.aborted) throw e;
+    return new Map();
+  }
+}
+
 /** The estate's open support cases, newest first — the door's own order, never re-sorted here. */
 export async function listOperatorSupportQueue(
   { includeSettled = false }: { includeSettled?: boolean } = {},
@@ -107,22 +189,28 @@ export async function listOperatorSupportQueue(
   // reported as an EMPTY LIST rather than a caller crashing on `.map`. A REFUSAL never reaches
   // here at all — `callDoor` throws it, and `operatorQueueOutcome` below is what keeps a thrown
   // refusal from being rendered as an empty queue.
-  return Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows)) return [];
+  const names = await namesFor(rows, opts);
+  return rows.map((row) => withApplicantName(row, names));
 }
 
 /** One case, addressed by the OPAQUE (kind, id) pair a queue row — or the `?case=` URL param —
  *  already carries. A kind outside the closed three, an absent id and a mismatched pair are
  *  indistinguishable CLR11 refusals at the door; this module does not attempt to tell them apart. */
-export function getOperatorSupportCase(
+export async function getOperatorSupportCase(
   kind: SupportCaseKind,
   id: string,
   opts: OperatorReadOptions = {},
 ): Promise<SupportCaseDetail> {
-  return callDoor<SupportCaseDetail>(
+  const detail = await callDoor<SupportCaseDetail>(
     "get_operator_support_case",
     { p_kind: kind, p_id: id },
     { session: opts.session, signal: opts.signal },
   );
+  // A malformed envelope is the caller's problem to see, not this seam's to paper over — but it
+  // must not become a crash INSIDE the name merge either, so the merge is skipped for a non-object.
+  if (!detail || typeof detail !== "object") return detail;
+  return withApplicantName(detail, await namesFor([detail], opts));
 }
 
 // ── the `?case=` param: <kind>:<id>, split on the FIRST colon ────────────────

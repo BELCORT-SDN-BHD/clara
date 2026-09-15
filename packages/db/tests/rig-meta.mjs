@@ -1376,6 +1376,27 @@ const OPERATOR_SUPPORT_0188_HUMAN_FNS = [
 ];
 export const OPERATOR_SUPPORT_0188_COHORT = [...OPERATOR_SUPPORT_0188_HUMAN_FNS];
 
+// #776
+// #776 [0206, the operator support console's applicant-name read] — ONE granted name, its own
+// frontier-tolerant cohort for the same "wholly present or wholly absent" reason every cohort here
+// carries: the db-slice-frontiers matrix runs this package against databases pinned BETWEEN 0188
+// and 0206, and folding this name into 0188's roster above would red every one of those legs.
+//
+//   resolve_operator_support_applicants — turns the applicant ids a support case already carries
+//     into clara.users.display_name, for the OPERATOR FIRM'S OWNER and nobody else. Authority is
+//     clara.approve_firm_registration's own predicate, byte-copied and body-enforced, so the grant
+//     is the same clara_authenticated every other operator door holds — and, like them, agent,
+//     both wake roles, clara_runtime and clara_stripe_webhook gain ZERO. It is not an agent act and
+//     is not reachable from any lane that executes model output.
+//
+// NO UNGRANTED SIBLING. 0206 adds no internal and no trigger function, so this cohort is the whole
+// of the file's capability surface.
+const OPERATOR_APPLICANT_NAME_0206_HUMAN_FNS = [
+  "resolve_operator_support_applicants",
+];
+export const OPERATOR_APPLICANT_NAME_0206_COHORT = [...OPERATOR_APPLICANT_NAME_0206_HUMAN_FNS];
+// #776 END
+
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
 // wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
@@ -2094,6 +2115,11 @@ export const ALLOWED = {
     // clara_authenticated ONLY; agent, both wake roles, clara_runtime and the Stripe webhook
     // role gain ZERO.
     ...OPERATOR_SUPPORT_0188_HUMAN_FNS,
+    // #776
+    // #776 (0206): the operator support console's applicant-name read — see the block above.
+    // clara_authenticated ONLY, on the same wall as the two reads above it.
+    ...OPERATOR_APPLICANT_NAME_0206_HUMAN_FNS,
+    // #776 END
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -2552,6 +2578,10 @@ export async function grantMatrixFailures() {
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
   // #718 END
+  // #776
+  failures.push(...cohortFailures("#776 0206 operator applicant-name read",
+    OPERATOR_APPLICANT_NAME_0206_COHORT, liveNames));
+  // #776 END
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

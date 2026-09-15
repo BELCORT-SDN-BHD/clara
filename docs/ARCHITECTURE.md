@@ -59,6 +59,18 @@ flowchart LR
 Web 的请求生命周期与会计工作的生命周期分开——关闭页面不会终止后台执行。
 尚未加入事务所的申请人处于独立准入域，不能假设其已具有 firm 身份。
 
+<!-- #775 #776 -->
+**准入域上的 operator 支持面（本地已验证，hosted evidence pending）。** operator 的三项受治理决定现在都留下审计行：
+`clara.resolve_stripe_event_problem` 与 `clara.reject_firm_registration`、`clara.set_admission_capacity` 一样写入一条
+`clara.audit_log`（operator 事务所、决定人、`{problem, event, resolution}`），且该写入位于操作回执之内，重放不会写第二行
+（migration `0205_resolve_stripe_event_problem_audit.sql`；`packages/db/tests/operator-support.test.mjs` os.13）。
+申请人的姓名由一扇专用的 operator-only 读门 `clara.resolve_operator_support_applicants(uuid[]) -> (applicant, display_name)`
+解析（migration `0206_operator_support_applicant_name.sql`）：权限是 `clara.approve_firm_registration` 逐字节复制的
+owner + operator-firm 判定，范围限定为支持案件的申请人（经 `firm_registration_requests.applicant` 与
+`stripe_events.applicant`），因此它不是 `clara.users` 的存在性探针；解析不到的 id 不出现在结果里，界面继续显示截断的 uuid；
+只返回 `display_name`，不返回邮箱（0137 的裁定不变），也不扩大 `clara.users_visible`。
+<!-- #775 #776 END -->
+
 **四个部署单元的形态。** 状态逐行标注，当前线上版本见 `docs/PROGRESS.md`：
 
 | 单元 | 形态 | 关键约束 | 状态 |
