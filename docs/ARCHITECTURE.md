@@ -243,6 +243,30 @@ null→值一次，且只落在仍可取消或已取消的 Work 上）。没有 
 一个生产者，一个类型。[已实现，本地验证；hosted evidence pending]
 <!-- #750 / #721 -->
 
+<!-- #784 -->
+**遗留 Client Knowledge 事实：一个表达式，一个答案。** 五个 legacy carried key
+（`entity_type`、`msic`、`trade_nature`、`banking_arrangement`、`customer_identity_policy`）仍然存放在
+`clara.client_facts`，写入的唯一门仍是 `clara.record_client_fact`（0055 签名不变）；0192 在它旁边建立了
+知识登记簿，但不双写，所以对这五个 key，**整个系统实际据以行动的值仍是遗留行**。读取侧现在只有一个表达式：
+`clara._knowledge_legacy_rows(firm, client)`——人读登记簿 `clara.list_client_knowledge`、runtime 知识包
+`clara.get_knowledge_pack`（两者把每条遗留行标记为 `authoritative: true`），以及 0209 重接的三个消费点
+`clara.get_context_pack`、`clara._close_gate_closing_stock`、`clara._bank_registry_ledger_state`，全部经由它。
+三个重接点传入的是**客户自己的 firm**（从 `clara.clients` 查得，绝不是会话 firm）；因为
+`clara.client_facts` 带有 `(client_id, firm_id) → clara.clients(id, firm_id)` 的外键，加上 firm 过滤不会
+少读任何一行。该表达式从不查询 `clara.knowledge_records`，因此"知识记录不遮蔽遗留事实"是结构性的，而不是靠自觉。
+[已实现，0209_knowledge_legacy_readers_converge.sql；本地证据 `packages/db/tests/knowledge-legacy-readers-converge.test.mjs` 8/8 通过；hosted evidence pending]
+
+**唯一刻意保留直读的站点，及其理由。** `clara._tf_counterparty_name_only_guard()`（0062）是 counterparty
+写路径上的**逐行触发器**，它读 `customer_identity_policy` 用的是 `uq_client_fact_live`
+`(client_id, fact_key) WHERE superseded_at is null` 上的一次 `exists` 索引探测。实测（EXPLAIN ANALYZE，
+PostgreSQL 17.6，2026-09-15，客户仅有五条 live 事实）：直读 0.011 ms；改走共享表达式则是对
+per-client jsonb 聚合（每条事实还各带一次 `clara.users` 与 `clara.knowledge_keys` join）的 Function Scan，
+2.027 ms——相差约 180 倍，且这已是可能最小的客户。为一次写路径探测支付整客户聚合的代价不划算，故该站点
+**刻意保留直读**；0209 的 prestate 用 `sha256(prosrc)` 钉住了它的函数体，tail 也断言它仍然读
+`clara.client_facts` 与 `uq_client_fact_live`，使"刻意未改"可审计、且这段理由不会比它所描述的代码活得更久。
+它读的行与共享表达式读的行完全相同（同表、同 live 谓词），convergence 电池对这个 key 同样做了断言。
+<!-- #784 -->
+
 <a id="close-reporting-and-tax"></a>关账按年度顺序串行，carry-forward 幂等，beginning-close 冻结期间内银行结算须先完成。
 报表走 open → evaluate → seal → render：确定性计算、封存快照、独立渲染服务出文件，模型不重打金额。
 指标携带 unit／currency、period／as-of、computed-at、定义版本、source watermark 与 coverage；
