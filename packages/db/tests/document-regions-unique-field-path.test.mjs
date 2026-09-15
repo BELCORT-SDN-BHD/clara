@@ -34,7 +34,10 @@
 // pins that literal for every opening-balance fact and packages/runtime/lib/opening-tb-cells.mjs
 // emits one region per trial-balance ROW at it, so a forty-line trial balance is forty lawful rows
 // at one key. A total key would not have reddened a battery, it would have absorbed thirty-nine
-// balances in silence.
+// balances in silence. 10 is the second exclusion, `prior_gl.line`: no producer emits it yet, but
+// the shipping reader packages/runtime/lib/seeding-parse.mjs:241-257 selects EVERY such row of one
+// extraction and :138-150 makes one GL entry per region, so a prior-GL ledger is plural per
+// extraction by the same law a trial balance is.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -63,7 +66,7 @@ const REGION_INSERT = `insert into clara.document_regions(firm_id, extraction_id
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 9;
+const EXPECTED_CELLS = 10;
 
 async function laneReady() {
   try {
@@ -155,8 +158,9 @@ cell("the pair (extraction_id, field_path) is UNIQUE, the plain extraction index
 
   // …and it is PARTIAL, by exactly the 0017-pinned literal. A key that quietly became TOTAL would
   // absorb every trial-balance line after the first (cell 9 is the other half of this claim).
-  assert.match(unique[0].def, /WHERE \(field_path IS DISTINCT FROM 'opening_tb\.line'::text\)/,
-    `the key must stay PARTIAL on the 0017-pinned opening literal (got ${unique[0].def})`);
+  assert.match(unique[0].def,
+    /WHERE \(\(field_path IS DISTINCT FROM 'opening_tb\.line'::text\) AND \(field_path IS DISTINCT FROM 'prior_gl\.line'::text\)\)/,
+    `the key must stay PARTIAL on exactly the two plural literals (got ${unique[0].def})`);
 
   const plain = idx.find((r) => r.name === "ix_document_regions_extraction");
   assert.ok(plain, "ix_document_regions_extraction (0007) must survive — the extraction scan reads through it");
@@ -375,7 +379,7 @@ cell("persist_witness_facts is duplicate-free AT SOURCE, so it carries no on-con
     // predicate, so an arm that lost the WHERE would raise 42P10 on the first duplicate cell
     // instead of absorbing it.
     assert.match(r.prosrc.replace(/\s+/g, " "),
-      /on conflict \(extraction_id,field_path\) where field_path is distinct from 'opening_tb\.line' do nothing/,
+      /on conflict \(extraction_id,field_path\) where field_path is distinct from 'opening_tb\.line' and field_path is distinct from 'prior_gl\.line' do nothing/,
       `${r.proname} does not resolve the region-key conflict deterministically at the PARTIAL key`);
   }
 });
@@ -426,5 +430,52 @@ cell("MANY `opening_tb.line` regions still insert on ONE extraction — the open
   const dupe = await caught(() => rootQuery(REGION_INSERT,
     [world.firm, extraction, "opening_tb.total", "TOTAL AGAIN", null, null]));
   assert.ok(dupe, "`opening_tb.total` is NOT the pinned literal and must still be one row per extraction");
+  assert.equal(dupe.code, "23505", `expected a unique violation, got ${dupe.code}: ${dupe.message}`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// 10. THE SECOND EXCLUSION — the prior-GL seeding lane.
+// ---------------------------------------------------------------------------------------------
+
+cell("MANY `prior_gl.line` regions still insert on ONE extraction — the seeding lane is outside the key too", async () => {
+  // #778 round 4. Unlike `opening_tb.line` this literal is pinned by a READER rather than by a
+  // CHECK, and the reader is shipping: packages/runtime/lib/seeding-parse.mjs:241-257
+  // (SELECT_PRIOR_GL_REGIONS_SQL) picks ONE extraction — "the newest done extraction that CARRIES
+  // `prior_gl.line` rows", `limit 1` — and then selects EVERY `prior_gl.line` row of it, ordered by
+  // id; :138-150 (regionsToEntries) turns that list into one GL entry per region, each with its own
+  // line cite. A prior-GL ledger is therefore many lines at one path on one extraction. No producer
+  // writes them yet (prior-gl-cells.mjs:4 — "NO new field_path"), which is exactly why the key had
+  // to be widened BEFORE one ships rather than after it silently lost every line but the first.
+  const world = await seedWorld("priorgl");
+  const extraction = (await rootQuery(
+    `insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind,
+        version_n, status, page_count, envelope)
+     values ($1,$2,$3,'ocr',1,'done',1,'{}'::jsonb) returning id`,
+    [world.firm, world.documentId, `clara-fixture:0201-pgl-${opk("e")}`])).rows[0].id;
+
+  // The grammar seeding-parse.mjs parses: `<date> <counterparty> <account> RM <amount> <DR|CR>`.
+  const LINES = [
+    "2026-01-31 ACME SUPPLIES SDN BHD 5000 RM 1,200.00 DR",
+    "2026-01-31 KOPITIAM ENTERPRISE 4000 RM 980.50 CR",
+    "2026-02-28 ACME SUPPLIES SDN BHD 5000 RM 340.25 DR",
+  ];
+  for (const text of LINES) {
+    const err = await caught(() => rootQuery(REGION_INSERT,
+      [world.firm, extraction, "prior_gl.line", text, null, null]));
+    assert.equal(err, null,
+      `a prior-GL ledger is MANY lines at one path — "${text}" was refused (${err?.code}: ${err?.message})`);
+  }
+  const n = (await rootQuery(
+    "select count(*)::int as n from clara.document_regions where extraction_id=$1 and field_path='prior_gl.line'",
+    [extraction])).rows[0].n;
+  assert.equal(n, LINES.length,
+    "every ledger line must stand — the reader selects them all and makes one entry per region");
+
+  // …and the exclusion is EXACTLY that literal: a neighbouring path on the same extraction is
+  // still one row per extraction, so the second exception cannot widen into a namespace either.
+  await rootQuery(REGION_INSERT, [world.firm, extraction, "prior_gl.total", "TOTAL", null, null]);
+  const dupe = await caught(() => rootQuery(REGION_INSERT,
+    [world.firm, extraction, "prior_gl.total", "TOTAL AGAIN", null, null]));
+  assert.ok(dupe, "`prior_gl.total` is NOT an excluded literal and must still be one row per extraction");
   assert.equal(dupe.code, "23505", `expected a unique violation, got ${dupe.code}: ${dupe.message}`);
 });

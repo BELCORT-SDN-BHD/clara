@@ -202,10 +202,12 @@ OCR／结构化抽取对发票与月结单走文本 + 图像双 witness，保留
 <!-- #778 -->
 同一次抽取内一个 `field_path` 只允许一条 region：`clara.document_regions` 在 `(extraction_id, field_path)` 上唯一，
 第二次写入被吸收（`on conflict … do nothing`，保留第一条证据——该表只追加，UPDATE 会被 append-only belt 拒绝），
-而不是静默留下两行争同一个字段。该键是**部分唯一索引**，两处例外：`field_path` 为空的 region 不受约束；
-`opening_tb.line` 被按字面排除在外——0017 的 `ck_document_regions_opening_fact_0017` 把每一条期初余额事实都钉在这一个
-字面量上，而真实 producer（`opening-tb-cells.mjs`）对试算表的**每一行**各产出一条该路径的 region，
-所以一张四十行的试算表本就是同一个键上的四十条合法记录，若用全表唯一键则会静默吞掉其中三十九条。
+而不是静默留下两行争同一个字段。该键是**部分唯一索引**：`field_path` 为空的 region 不受约束，另有两个按字面排除的路径。
+`opening_tb.line`——0017 的 `ck_document_regions_opening_fact_0017` 把每一条期初余额事实都钉在这一个字面量上，
+而真实 producer（`opening-tb-cells.mjs`）对试算表的**每一行**各产出一条该路径的 region；
+`prior_gl.line`——目前尚无 producer，但已上线的 reader（`seeding-parse.mjs` 的 `SELECT_PRIOR_GL_REGIONS_SQL`
+与 `regionsToEntries`）会读取同一次抽取下的**全部**该路径 region，每条各生成一条 GL 分录。
+所以一张四十行的试算表、一本多行的前期总账，本就是同一个键上的多条合法记录；若用全表唯一键则会静默吞掉其余各行。
 [已实现，hosted evidence pending]
 <!-- /#778 -->
 
