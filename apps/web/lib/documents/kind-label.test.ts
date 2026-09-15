@@ -68,7 +68,7 @@ test("every key this module can emit EXISTS in messages/en.json under ClientDocu
   for (const key of KIND_LABEL_KEYS) {
     const leaf = key.slice("kind.".length);
     assert.equal(typeof kindGroup[leaf], "string", `missing message ClientDocuments.${key}`);
-    assert.notEqual(kindGroup[leaf].trim(), "", `blank message ClientDocuments.${key}`);
+    assert.notEqual((kindGroup[leaf] ?? "").trim(), "", `blank message ClientDocuments.${key}`);
   }
 });
 
@@ -76,7 +76,7 @@ test("no rendered label is the raw enum spelling (AC2: 'render all document_kind
   const kindGroup = CD.kind as Record<string, string>;
   for (const kind of DOCUMENT_KINDS) {
     assert.notEqual(kindGroup[kind], kind, `ClientDocuments.kind.${kind} is the raw enum string`);
-    assert.equal(/^[a-z_]+$/.test(kindGroup[kind]), false, `ClientDocuments.kind.${kind} reads as a snake_case enum`);
+    assert.equal(/^[a-z_]+$/.test(kindGroup[kind] ?? ""), false, `ClientDocuments.kind.${kind} reads as a snake_case enum`);
   }
   // Distinct phrases, not one shared word.
   const phrases = DOCUMENT_KINDS.map((k) => kindGroup[k]);

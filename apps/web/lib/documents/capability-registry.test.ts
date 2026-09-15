@@ -93,7 +93,7 @@ test("readCapabilityRegistry issues ONE wire read and no per-row get_document_st
     const rows = await readCapabilityRegistry({ session: session() });
     assert.equal(rows.length, ROWS.length);
     assert.equal(seen.length, 1, "the registry is a SINGLE read");
-    assert.ok(seen[0].includes("document_capabilities"), seen[0]);
+    assert.ok((seen[0] ?? "").includes("document_capabilities"), seen[0]);
     assert.equal(seen.some((u) => u.includes("get_document_state")), false, "no per-row detail read");
   } finally {
     globalThis.fetch = original;
