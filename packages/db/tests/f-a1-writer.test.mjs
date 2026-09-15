@@ -88,13 +88,16 @@ async function ocrFixture(sub, client, extraTexts = {}) {
        from clara.document_regions where extraction_id=$1`, [ocrId])).rows;
   const idxOf = {};
   for (const [label, id] of Object.entries(ids)) idxOf[label] = rows.find((r) => r.id === id).idx;
-  return { firm, documentId: doc.documentId, sha256: doc.sha256, ocrId, idxOf };
+  return { firm, documentId: doc.documentId, sha256: doc.sha256, ocrId, idxOf, regionIds: ids };
 }
 
+// #777: the seeded field_path is `pages.1.lines.<i>` now, so the LABEL is no longer recoverable
+// from the stored path — the fixture's own label→uuid map is. Read it from there rather than
+// re-deriving a path, which is what the map was always for.
 async function ocrRegionId(o, label) {
-  const r = await rootQuery(
-    `select id from clara.document_regions where extraction_id=$1 and field_path=$2`, [o.ocrId, `ocr_${label}`]);
-  return r.rows[0].id;
+  const id = o.regionIds[label];
+  assert.ok(id, `ocrFixture seeded no region labelled ${label}`);
+  return id;
 }
 
 async function runningTask(firm, documentId, engineId = `llm-openai:gpt-witness:${randomUUID().slice(0, 8)}`, versionN = 1) {
