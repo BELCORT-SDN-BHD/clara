@@ -12,11 +12,26 @@
 // clara.set_counterparty_terms(p_counterparty, p_days, p_op_key) — 0040:3864.
 //   bookkeeper+. Refuses CLR10 terms_out_of_range (days must be 1-365), CLR08 on a
 //   merged/retired target.
-// clara.add_counterparty_alias(p_client, p_counterparty, p_alias, p_origin, p_op_key)
-//   — 0011_daily_loop.sql:1706. bookkeeper+. `p_origin` is one of 'former_name' |
-//   'trade_name' | 'human'. Refuses CLR23 target_retired / alias_collision.
+// clara.add_counterparty_alias(p_client, p_counterparty, p_alias, p_origin, p_op_key,
+//   p_basis, p_source_document, p_source_extraction, p_source_region, p_source_field_path)
+//   — 0011_daily_loop.sql:1706, RECUT 0200 §7.1 (#647): the five leading parameters and their
+//   NAMES are unchanged, five DEFAULTED provenance parameters are added, and there is still
+//   exactly ONE body of this name (0200's tail asserts it). bookkeeper+. `p_origin` is one of
+//   'former_name' | 'trade_name' | 'human' | 'extracted'; 'agent_proposed' is refused here
+//   (CLR10) because D11 gives Clara no identity write verb in this build. `recorded_via` is
+//   stamped 'human_ui' by the door from its OWN lane and is never sent from here. Refuses
+//   CLR23 target_retired / alias_collision / source_not_this_client, and CLR10
+//   source_incomplete (an 'extracted' alias owes both a document and an extraction) /
+//   source_not_extracted (only an extracted alias may carry an extraction, region or field pin).
 // clara.retire_counterparty_alias(p_client, p_alias, p_op_key) — 0011:1750.
-//   bookkeeper+.
+//   bookkeeper+. Wired since #647: clara.counterparty_aliases_visible and
+//   clara.get_counterparty_identity both project the alias id a retirement needs.
+// clara.set_counterparty_identifiers(p_client, p_counterparty, p_registration_no, p_tin,
+//   p_op_key) — 0174:785, RECUT 0200 §7.3 (#647) at the SAME signature and the same
+//   _finish_op envelope; each real change now also appends one identity revision. ADMIN floor,
+//   not bookkeeper. Refuses CLR11 not found · CLR23 target_retired / registration_collision /
+//   unregistered_name_collision · CLR10 registration_unusable (a registration that normalises
+//   to nothing).
 // clara.rename_counterparty(p_client, p_counterparty, p_new_name, p_op_key) —
 //   0011:1774. bookkeeper+. Refuses CLR23 target_retired / alias_collision (the new
 //   name collides with an existing identity or alias).
@@ -83,19 +98,72 @@ export function setCounterpartyTerms(
   );
 }
 
-export type CounterpartyAliasOrigin = "former_name" | "trade_name" | "human";
+/** The four origins the HUMAN door admits. `agent_proposed` exists in the database's CHECK and
+ *  is deliberately absent here: no human may label their own statement as the agent's. */
+export type CounterpartyAliasOrigin = "former_name" | "trade_name" | "human" | "extracted";
 export type AddCounterpartyAliasResult = { alias_id: string; counterparty_id: string };
+
+/** The provenance an alias may carry (#647 AC1). All optional: a human who simply knows the
+ *  trade name states it and pins nothing, and that absence is RECORDED (`recorded_via` is still
+ *  stamped 'human_ui' by the door) rather than invented. A source document must be FILED TO THIS
+ *  CLIENT — the door refuses CLR23 `source_not_this_client` otherwise, because the database's
+ *  own foreign keys are firm-congruent only and #646 moves filings between clients. */
+export type CounterpartyAliasProvenance = {
+  /** The human's own words. Sent as typed; the door trims and stores null for blank. */
+  basis?: string | null;
+  sourceDocumentId?: string | null;
+  sourceExtractionId?: string | null;
+  sourceRegionId?: string | null;
+  sourceFieldPath?: string | null;
+};
 
 export function addCounterpartyAlias(
   clientId: string,
   counterpartyId: string,
   alias: string,
   origin: CounterpartyAliasOrigin,
+  provenance: CounterpartyAliasProvenance = {},
   opts: Opts = {},
 ): Promise<AddCounterpartyAliasResult> {
   return callDoor<AddCounterpartyAliasResult>(
     "add_counterparty_alias",
-    { p_client: clientId, p_counterparty: counterpartyId, p_alias: alias, p_origin: origin, p_op_key: opKey() },
+    {
+      p_client: clientId, p_counterparty: counterpartyId, p_alias: alias, p_origin: origin,
+      p_op_key: opKey(),
+      p_basis: provenance.basis ?? null,
+      p_source_document: provenance.sourceDocumentId ?? null,
+      p_source_extraction: provenance.sourceExtractionId ?? null,
+      p_source_region: provenance.sourceRegionId ?? null,
+      p_source_field_path: provenance.sourceFieldPath ?? null,
+    },
+    opts,
+  );
+}
+
+export type SetCounterpartyIdentifiersResult = {
+  counterparty_id: string;
+  registration_no: string | null;
+  registration_normalized: string | null;
+  tin: string | null;
+};
+
+/** clara.set_counterparty_identifiers — H-09's missing face, ADMIN floor. Both values are
+ *  REPLACED, not merged: sending null for one CLEARS it, which is why the surface must show the
+ *  current pair and submit both. Every real change appends one identity revision, so a
+ *  correction is recoverable instead of being overwritten in place (#647 AC5). */
+export function setCounterpartyIdentifiers(
+  clientId: string,
+  counterpartyId: string,
+  registrationNo: string | null,
+  tin: string | null,
+  opts: Opts = {},
+): Promise<SetCounterpartyIdentifiersResult> {
+  return callDoor<SetCounterpartyIdentifiersResult>(
+    "set_counterparty_identifiers",
+    {
+      p_client: clientId, p_counterparty: counterpartyId,
+      p_registration_no: registrationNo, p_tin: tin, p_op_key: opKey(),
+    },
     opts,
   );
 }

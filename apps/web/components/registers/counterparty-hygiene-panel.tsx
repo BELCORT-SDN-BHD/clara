@@ -7,17 +7,17 @@
 // shape: one useHydratedPart, one persistent refusal banner, every dialog a
 // thin controlled form over a single governed call.
 //
-// RUNG-0 LIVE-CATALOG FINDING (throwaway rig, migrated to 0140, confirmed via
-// pg_policy — not migration text): `clara.counterparty_aliases` carries NO
-// `clara_authenticated` human-read policy — only the owner and freeform-agent
-// policies (`p_counterparty_aliases_owner`, `p_counterparty_aliases_freeform`).
-// `add_counterparty_alias` needs no prior read (a human types a new alias;
-// the DB's own alias_collision refusal, if any, renders verbatim) and stays
-// fully wired below. `retire_counterparty_alias` is EXECUTE-granted but has
-// no honest way to reach it: retiring needs the alias's own id, and no read
-// exists to discover one — this is NOT a missing verb, it is a missing READ,
-// so it is not offered as a control at all rather than as a dead one. Filed
-// as a new backend-read finding, separate from the plan's own OQ-4.
+// #647: THE ALIAS LIST, ITS PROVENANCE AND ITS RETIREMENT LIVE ON THE ROUTED IDENTITY DETAIL.
+// The stale rung-0 finding that used to sit here — "retire_counterparty_alias has no honest way
+// to reach it, because no read exists to discover an alias id" — was taken at frontier 0140 and
+// was already refuted by `clara.counterparty_aliases_visible` (0145:960-964). It is deleted
+// rather than amended, and the `NotBuiltNote` it justified is gone with it: 0200 §8.2 ships
+// `clara.get_counterparty_identity`, and each row below links to the detail that renders it.
+//
+// THIS PANEL KEEPS THE ACTS, THE DETAIL KEEPS THE READS. Create, set terms, add alias, rename and
+// merge are acts on a REGISTER and stay here (C-41: no control per database function, and no
+// duplicate of one either); the alias history, the identifier corrections, the merge lineage and
+// the conflicts are identity FACTS and live under the client's Knowledge area.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -30,9 +30,10 @@ import {
 } from "@/lib/registers/counterparty-doors";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { counterpartyIdentityHref } from "@/lib/navigation/tree";
 import { CreateCounterpartyDialog } from "./CreateCounterpartyDialog";
 import { SetCounterpartyTermsDialog } from "./SetCounterpartyTermsDialog";
 import { AddCounterpartyAliasDialog } from "./AddCounterpartyAliasDialog";
@@ -83,6 +84,7 @@ export function CounterpartyHygienePanel({
   onActed?: () => void;
 }) {
   const t = useTranslations("ArApCounterparty");
+  const tIdentity = useTranslations("ArApCounterparty.identity");
   const [kind, setKind] = useState<CounterpartyKind>("vendor");
   const { data, busy, err, clr, act: rawAct } = useHydratedPart(sessionTokenAccessor, (s) => loadHygieneData(s, clientId));
   const act = async (fn: () => Promise<void>): Promise<boolean> => {
@@ -163,7 +165,7 @@ export function CounterpartyHygienePanel({
                       <AddCounterpartyAliasDialog
                         counterpartyName={row.name}
                         busy={busy}
-                        onSubmit={(alias, origin) => act(() => addCounterpartyAlias(clientId, row.id, alias, origin, { session: sessionTokenAccessor }).then(() => undefined))}
+                        onSubmit={(alias, origin, basis) => act(() => addCounterpartyAlias(clientId, row.id, alias, origin, { basis }, { session: sessionTokenAccessor }).then(() => undefined))}
                       />
                       <MergeCounterpartiesDialog
                         clientId={clientId}
@@ -187,15 +189,21 @@ export function CounterpartyHygienePanel({
                     <dt>{t("terms")}</dt><dd>{row.payment_terms_days ?? "—"}</dd>
                   </div>
                 </dl>
+                {/* Item (33): the row is not a disguised link — this is a real, focusable anchor
+                    with its own accessible name, and it is the ONE way from the register to the
+                    identity's durable URL. It is offered for a merged or retired row too:
+                    reading where an identity went is exactly what a dead row is still for. */}
+                <Link
+                  className="w-fit text-xs underline underline-offset-4"
+                  href={counterpartyIdentityHref(clientId, row.id)}
+                >
+                  {tIdentity("openDetail")}
+                </Link>
               </li>
             );
           })}
         </ul>
       )}
-
-      <NotBuiltNote>
-        <p>{t("aliasListNotBuilt")}</p>
-      </NotBuiltNote>
     </div>
   );
 }

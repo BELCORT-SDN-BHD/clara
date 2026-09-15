@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createCounterparty, setCounterpartyTerms, addCounterpartyAlias, retireCounterpartyAlias,
   renameCounterparty, mergeCounterparties, applyOpenItems, unallocateGroup,
+  setCounterpartyIdentifiers,
 } from "./counterparty-doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -78,12 +79,73 @@ test("addCounterpartyAlias: POSTs /rpc/add_counterparty_alias with p_client/p_co
     fakeSession("tok"),
     /\/rpc\/add_counterparty_alias$/,
     { alias_id: "al1", counterparty_id: "cp1" },
-    () => addCounterpartyAlias("c1", "cp1", "Acme Trading", "trade_name", { session: fakeSession("tok") }),
+    () => addCounterpartyAlias("c1", "cp1", "Acme Trading", "trade_name", {}, { session: fakeSession("tok") }),
   );
   assert.equal(body.p_client, "c1");
   assert.equal(body.p_counterparty, "cp1");
   assert.equal(body.p_alias, "Acme Trading");
   assert.equal(body.p_origin, "trade_name");
+  // #647: the provenance trailer is always SENT, explicitly null where nothing was stated. An
+  // omitted key and a stated null are the same thing to PostgREST's named-argument resolution,
+  // but they are not the same thing to a reader of this payload: `recorded_via` is stamped by the
+  // door from its own lane and never appears here at all, which is the assertion that keeps a
+  // caller from ever trying to supply one.
+  assert.deepEqual(
+    {
+      basis: body.p_basis, doc: body.p_source_document, ext: body.p_source_extraction,
+      region: body.p_source_region, field: body.p_source_field_path,
+    },
+    { basis: null, doc: null, ext: null, region: null, field: null },
+  );
+  assert.equal("p_recorded_via" in body, false, "the caller never claims a lane");
+});
+
+test("addCounterpartyAlias: a stated basis and a source pin travel as p_basis / p_source_document", async () => {
+  const { body } = await captureCall(
+    fakeSession("tok"),
+    /\/rpc\/add_counterparty_alias$/,
+    { alias_id: "al2", counterparty_id: "cp1" },
+    () => addCounterpartyAlias("c1", "cp1", "Acme Bhd", "extracted", {
+      basis: "the letterhead on INV-9", sourceDocumentId: "doc1", sourceExtractionId: "ex1",
+      sourceRegionId: "rg1", sourceFieldPath: "invoice.vendor_name",
+    }, { session: fakeSession("tok") }),
+  );
+  assert.deepEqual(
+    {
+      origin: body.p_origin, basis: body.p_basis, doc: body.p_source_document,
+      ext: body.p_source_extraction, region: body.p_source_region, field: body.p_source_field_path,
+    },
+    {
+      origin: "extracted", basis: "the letterhead on INV-9", doc: "doc1", ext: "ex1",
+      region: "rg1", field: "invoice.vendor_name",
+    },
+  );
+});
+
+test("setCounterpartyIdentifiers: POSTs /rpc/set_counterparty_identifiers with both values and a fresh op_key", async () => {
+  const { body } = await captureCall(
+    fakeSession("tok"),
+    /\/rpc\/set_counterparty_identifiers$/,
+    { counterparty_id: "cp1", registration_no: "201801012345", registration_normalized: "201801012345", tin: "C123" },
+    () => setCounterpartyIdentifiers("c1", "cp1", "201801012345", "C123", { session: fakeSession("tok") }),
+  );
+  assert.deepEqual(
+    { client: body.p_client, cp: body.p_counterparty, reg: body.p_registration_no, tin: body.p_tin },
+    { client: "c1", cp: "cp1", reg: "201801012345", tin: "C123" },
+  );
+  assert.equal(typeof body.p_op_key, "string");
+});
+
+test("setCounterpartyIdentifiers: clearing a value sends an explicit null, never an omitted key — the door REPLACES the pair", async () => {
+  const { body } = await captureCall(
+    fakeSession("tok"),
+    /\/rpc\/set_counterparty_identifiers$/,
+    { counterparty_id: "cp1", registration_no: null, registration_normalized: null, tin: "C123" },
+    () => setCounterpartyIdentifiers("c1", "cp1", null, "C123", { session: fakeSession("tok") }),
+  );
+  assert.equal(body.p_registration_no, null);
+  assert.equal("p_registration_no" in body, true);
+  assert.equal(body.p_tin, "C123");
 });
 
 test("retireCounterpartyAlias: POSTs /rpc/retire_counterparty_alias with p_client/p_alias/p_op_key", async () => {

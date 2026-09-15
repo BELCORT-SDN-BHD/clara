@@ -36,7 +36,7 @@ import { rootQuery, humanQuery, roleQuery, endPool, ROLES } from "./rig-helpers.
 import {
   identityCohortApplied, identityWorld, createCounterparty, addAlias, addAliasFiveArgs,
   retireAlias, renameCounterparty, setIdentifiers, mergeCounterparties, identity, identityList,
-  mergeCorrections, revisionRows, aliasRow, sourceDocument, caught, reasonOf, opk,
+  mergeCorrections, revisionRows, aliasRow, sourceDocument, caught, reasonOf,
 } from "./counterparty-identity-fixtures.mjs";
 
 let applied = false;

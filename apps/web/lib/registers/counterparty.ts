@@ -23,11 +23,13 @@
 // registration_normalized, tin, payment_terms_days, merged_into, retired_at,
 // created_by, created_at, updated_at.
 //
-// clara.counterparty_aliases — NO clara_authenticated read policy exists
-// (confirmed via pg_policy: only p_counterparty_aliases_owner and
-// p_counterparty_aliases_freeform). There is deliberately no bulk-read
-// function for this table below — see the finding recorded just above
-// `OpenItemRow`.
+// clara.counterparty_aliases — still carries no clara_authenticated policy on the BASE table
+// (re-measured on the #647 rig at frontier 0200: only p_counterparty_aliases_owner and
+// p_counterparty_aliases_freeform), and it never will: it is the first member of
+// wave-a-shape.test.mjs's fn-fronted family. The human read is
+// `clara.counterparty_aliases_visible` (0145:960, WIDENED by 0200 to project client_id, kind,
+// origin, recorded_via, created_by and source_document_id) and
+// `clara.get_counterparty_identity` — see ./counterparty-identity.ts.
 //
 // clara.open_items / clara.open_item_allocations — direct RLS table reads (0037:851
 // grants plain SELECT to clara_authenticated, forced RLS, firm-scoped). Used here ONLY
@@ -91,18 +93,10 @@ export function loadCounterparties(
   });
 }
 
-// RUNG-0 LIVE-CATALOG FINDING (throwaway rig, migrated to 0140): unlike
-// `counterparties`/`open_items`/`open_item_allocations` above, the live
-// `clara.counterparty_aliases` table carries NO `clara_authenticated` human
-// read policy — only `p_counterparty_aliases_owner` (clara_fn_owner) and
-// `p_counterparty_aliases_freeform` (clara_freeform_ro). Confirmed by a
-// direct `pg_policy` read, not by migration text. There is deliberately no
-// `loadCounterpartyAliases` here: a bulk table read against this relation
-// would 403/return zero rows under RLS for every human session. Reported to
-// the conductor as a new backend-read finding — `add_counterparty_alias`
-// needs no such read (a human types a new alias) and stays wired;
-// `retire_counterparty_alias` is EXECUTE-granted but has no honest way to
-// discover an alias id to retire, so it is not offered as a control.
+// (The rung-0 finding that used to sit here — "retire_counterparty_alias has no honest way to
+// discover an alias id" — was taken at frontier 0140 and was already refuted by 0145:960-964.
+// It is deleted rather than amended: `clara.get_counterparty_identity` (#647, 0200 §8.2) is the
+// read, `./counterparty-identity.ts` is its module, and the retire control is wired.)
 
 export type OpenItemRow = {
   id: string;
@@ -223,6 +217,11 @@ export type CounterpartyStatementRow = {
   running_balance_cents: number;
   item_id: string | null;
   allocation_id: string | null;
+  /** #647 AC2: the party the row was RECORDED under, which `_statement_core` has emitted on
+   *  both legs since 裁-19 PR-1 spliced it (0149:649, :655, threaded at :661) and this type
+   *  dropped. It differs from the counterparty being viewed exactly when a merge folded another
+   *  identity in, and the panel renders "recorded as <name>" only then. */
+  recorded_counterparty_id?: string | null;
 };
 
 export type CounterpartyStatement = {
@@ -354,11 +353,15 @@ export type CounterpartyMergePreview = {
 };
 
 /** TWO PARALLEL fresh reads (counterparties, a full ar_aging/ap_aging pass),
- *  assembled into the two sides the preview card renders. No aliases —
- *  `counterparty_aliases` carries no human-read policy (this file's own
- *  header). Throws (never returns a partial/guessed shape) if either id is
+ *  assembled into the two sides the preview card renders. No aliases — the base table stays
+ *  fn-fronted (this file's own header). Throws (never returns a partial/guessed shape) if either id is
  *  missing from the fresh counterparties read — the caller's DataState
- *  renders that as a real read failure, not a silent empty preview. */
+ *  renders that as a real read failure, not a silent empty preview.
+ *
+ *  #647: the merge DIALOG still shows no aliases, deliberately — the alias list, its provenance
+ *  and the merge lineage live on the routed identity detail
+ *  (/clients/:clientId/knowledge/parties/:counterpartyId), which is a durable URL a reviewer can
+ *  link to rather than a modal that closes. */
 export async function loadCounterpartyMergePreview(
   session: SessionTokenAccessor,
   clientId: string,

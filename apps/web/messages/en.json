@@ -78,7 +78,8 @@
       "journalComposer": "Record journal entry",
       "periodicAdjustment": "Record periodic adjustment",
       "workDetail": "Journal entry",
-      "knowledgeRecord": "Knowledge record"
+      "knowledgeRecord": "Knowledge record",
+      "counterpartyIdentity": "Counterparty identity"
     },
     "accounting": {
       "journals": "Journals",
@@ -2450,7 +2451,9 @@
       "d91plus": "91+",
       "total": "Total",
       "totalsRow": "Client total",
-      "viewStatement": "View statement"
+      "viewStatement": "View statement",
+      "unresolved": "Identity unresolved",
+      "unresolvedTitle": "This group's counterparty does not resolve cleanly through its merge chain, so the figures are grouped under the party the items name."
     },
     "fixedAssets": {
       "empty": "No fixed assets recorded for this client.",
@@ -2606,7 +2609,8 @@
       "registry_lookup": "From a registry lookup",
       "imported_bundle": "From an imported bundle",
       "model_inference": "Inferred by Clara",
-      "legacy_client_fact": "Recorded as a client fact before the Knowledge register"
+      "legacy_client_fact": "Recorded as a client fact before the Knowledge register",
+      "counterparty_alias": "Recorded on a counterparty alias"
     },
     "recordedVia": {
       "human_ui": "entered in the app",
@@ -3815,7 +3819,6 @@
   "ArApCounterparty": {
     "heading": "Counterparty hygiene",
     "loading": "Loading counterparties…",
-    "aliasListNotBuilt": "A counterparty's existing aliases and the retire-alias action are not available yet — this build has no read for them. Adding a new alias still works.",
     "kindVendorPlural": "Vendors",
     "kindCustomerPlural": "Customers",
     "registration": "Registration",
@@ -3855,7 +3858,10 @@
       "originLabel": "Origin",
       "originTradeName": "Trade name",
       "originFormerName": "Former name",
-      "originHuman": "Recorded by a human"
+      "originHuman": "Recorded by a human",
+      "originExtracted": "Read off a document",
+      "basisLabel": "Why is this alias being recorded?",
+      "basisHint": "Optional. Kept on the alias so a later reader knows where the name came from."
     },
     "retireAlias": {
       "trigger": "Retire",
@@ -3943,7 +3949,107 @@
       "reasonLabel": "Reason"
     },
     "emptyVendor": "No vendor is recorded yet for this client.",
-    "emptyCustomer": "No customer is recorded yet for this client."
+    "emptyCustomer": "No customer is recorded yet for this client.",
+    "recordedVia": {
+      "human_ui": "entered in the app",
+      "agent": "written by Clara",
+      "seeding": "carried in by client setup",
+      "legacy_unknown": "lane not recorded"
+    },
+    "setIdentifiers": {
+      "trigger": "Correct identifiers",
+      "title": "Correct identifiers — {name}",
+      "description": "Both values are replaced together: clearing a field clears it on the counterparty. The previous values are kept in this counterparty's correction history.",
+      "confirm": "Correct",
+      "registrationLabel": "Registration number",
+      "registrationHint": "SSM or equivalent. Leave empty to clear it.",
+      "tinLabel": "TIN",
+      "tinHint": "Leave empty to clear it.",
+      "unchanged": "Nothing has been changed yet — edit a value before correcting."
+    },
+    "identity": {
+      "sectionHeading": "Identity",
+      "sectionIntro": "Who this client's suppliers and customers are, who said so, and every correction since. Identity facts never move money and never grant accounting permission.",
+      "detailHeading": "Counterparty identity",
+      "detailSubheading": "The current identity, every alias with the lane and source that recorded it, the full correction history and any merge lineage.",
+      "backToKnowledge": "Back to Knowledge",
+      "openDetail": "Open identity",
+      "loading": "Loading identity…",
+      "listLoading": "Loading counterparty identities…",
+      "emptyVendor": "No vendors are recorded for this client yet, so there is no vendor identity to show.",
+      "emptyCustomer": "No customers are recorded for this client yet, so there is no customer identity to show.",
+      "emptyBoth": "No counterparties are recorded for this client yet, so there is no identity to show.",
+      "filteredEmpty": "{total, plural, one {# counterparty is recorded} other {# counterparties are recorded}} for this client, but none is a {role}.",
+      "clearFilter": "Show both roles",
+      "filterLabel": "Role",
+      "filterBoth": "Both",
+      "filterVendor": "Vendors",
+      "filterCustomer": "Customers",
+      "asOf": "Read at {at}",
+      "countAliases": "{n, plural, =0 {No live aliases} one {# live alias} other {# live aliases}}",
+      "countRevisions": "{n, plural, =0 {No corrections} one {# correction} other {# corrections}}",
+      "countUnsourced": "{n, plural, =0 {Every live alias names a source} one {# live alias names no source} other {# live aliases name no source}}",
+      "countMerges": "{n, plural, =0 {No merge lineage} one {# merge} other {# merges}}",
+      "canonicalNow": "Merged into {name} — reads now resolve to that party.",
+      "recordedAs": "Recorded as {name}",
+      "currentHeading": "Current identity",
+      "aliasesHeading": "Aliases",
+      "aliasesEmpty": "No alias has ever been recorded for this counterparty.",
+      "aliasRetired": "Retired {at}",
+      "aliasLive": "Live",
+      "historyHeading": "Correction history",
+      "historyEmpty": "Nothing has been corrected since this counterparty was recorded.",
+      "revisionLabel": "Revision {n}",
+      "revisionBy": "{who} · {at}",
+      "mergesHeading": "Merge lineage",
+      "mergesEmpty": "This counterparty has never been merged, in either direction.",
+      "mergeSurvivor": "Absorbed {name} on {at}",
+      "mergeMerged": "Merged into {name} on {at}",
+      "mergeReason": "Reason: {reason}",
+      "correctionsHeading": "What a merge correction could describe",
+      "correctionsEmpty": "No counterparty of this client has been merged, so there is nothing to correct.",
+      "representableYes": "A correction could be described: the merge recorded what it did.",
+      "representableNo": "A correction cannot be described: this merge predates the lineage record, so nothing says which alias or rule it touched.",
+      "noUnmergeDoor": "There is no un-merge action anywhere in Clara. This list says what a correction could even describe, not what it can undo.",
+      "conflictsHeading": "Ambiguity this client's books keep open",
+      "conflictsEmpty": "No other party in this firm shares this one's identifiers or name.",
+      "conflictCrossClient": "{clientName} also records {identifier} {value} — on {partyName}. The two are deliberately NOT linked: a shared identifier across clients stays ambiguous.",
+      "conflictCrossKind": "{partyName} is a {role} of this client with the same name. Receivable and payable roles stay separate identities.",
+      "identifierRegistration": "registration number",
+      "identifierTin": "TIN",
+      "roleVendor": "vendor",
+      "roleCustomer": "customer",
+      "neverGrants": "Recording an identity never settles an invoice, nets an open item or grants accounting permission.",
+      "actRename": "Renamed",
+      "actAliasAdded": "Alias added",
+      "actAliasRetired": "Alias retired",
+      "actIdentifiersSet": "Identifiers corrected",
+      "actMerged": "Merged",
+      "originFormerName": "Former name",
+      "originTradeName": "Trade name",
+      "originHuman": "Stated by a person",
+      "originExtracted": "Read off a document",
+      "originAgentProposed": "Proposed by Clara"
+    }
+  },
+  "ClientIdentifiers": {
+    "heading": "This client's own identifiers",
+    "intro": "The registration numbers and tax identifiers recorded for this client itself. One row per kind and value; the same value may legitimately appear on another client of this firm.",
+    "loading": "Loading identifiers…",
+    "empty": "No identifier has been recorded for this client yet.",
+    "columnKind": "Kind",
+    "columnValue": "Value",
+    "columnAdded": "Recorded",
+    "addTrigger": "Add identifier",
+    "addTitle": "Add an identifier",
+    "addDescription": "Records one identifier for this client. The value is normalised by the database; the same kind and value cannot be recorded twice for one client.",
+    "addConfirm": "Add",
+    "kindLabel": "Kind",
+    "kindHint": "For example ssm, tin or sst.",
+    "valueLabel": "Value",
+    "valueHint": "Spaces are removed when it is stored.",
+    "kindRequired": "Name the kind of identifier before adding it.",
+    "valueRequired": "Enter the identifier value before adding it."
   },
   "ReportsSnapshotsSeeding": {
     "internalProcessing": {

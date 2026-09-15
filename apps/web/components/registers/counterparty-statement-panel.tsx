@@ -26,6 +26,7 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
   getCounterpartyStatement,
+  loadCounterparties,
   loadCounterpartyById,
   loadCounterpartyOpenItems,
   loadOpenItemAllocationsForItems,
@@ -78,7 +79,29 @@ async function loadPanelData(
       redirectedTo = null; // the lookup itself failed — `redirected` stays true regardless
     }
   }
-  return { statement, allocations, redirected, redirectedTo };
+  // #647 AC2: `_statement_core` has emitted `recorded_counterparty_id` on BOTH legs since 裁-19
+  // PR-1 spliced it (0149:649, :655) and the wire type dropped it. A row whose recorded party is
+  // not the party being read is an invoice raised under a name that has since been merged away,
+  // and a statement that shows only the survivor's name has quietly rewritten history.
+  //
+  // THE NAMES COME FROM A READ THAT RAN, and from a read that can genuinely see them:
+  // `loadCounterparties` returns live, retired AND merged rows for the kind (its own header), so
+  // the absorbed party is in it. Best-effort in the redirect sense — a failure degrades the NAME,
+  // never the fact, which is the id itself.
+  const recordedIds = new Set(
+    statement.rows.map((r) => r.recorded_counterparty_id).filter((id): id is string => Boolean(id)),
+  );
+  let recordedNames: Record<string, string> = {};
+  if ([...recordedIds].some((id) => id !== statement.counterparty_id)) {
+    try {
+      const kind = domain === "ar" ? "customer" : "vendor";
+      const parties = await loadCounterparties(session, clientId, kind);
+      recordedNames = Object.fromEntries(parties.map((p) => [p.id, p.name]));
+    } catch {
+      recordedNames = {};
+    }
+  }
+  return { statement, allocations, redirected, redirectedTo, recordedNames };
 }
 
 export function CounterpartyStatementPanel({
@@ -106,6 +129,7 @@ export function CounterpartyStatementPanel({
   onActed?: () => void;
 }) {
   const t = useTranslations("ArApCounterparty.statement");
+  const tIdentity = useTranslations("ArApCounterparty.identity");
   const tc = useTranslations("Common");
   const to = businessToday();
   const [from, setFrom] = useState(() => defaultStatementFrom(to));
@@ -174,7 +198,19 @@ export function CounterpartyStatementPanel({
               <TableRow key={`${r.row_type}-${r.item_id ?? r.allocation_id ?? i}-${i}`}>
                 <TableCell>{r.event_date}</TableCell>
                 <TableCell className="text-muted-foreground">{r.row_type}</TableCell>
-                <TableCell className="text-muted-foreground">{r.label ?? "—"}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {r.label ?? "—"}
+                  {/* "Recorded as X" ONLY when the recorded party differs from the party this
+                      statement is about — the ordinary case is silence. */}
+                  {r.recorded_counterparty_id && r.recorded_counterparty_id !== data.statement.counterparty_id ? (
+                    <span className="ml-2 text-xs">
+                      {tIdentity("recordedAs", {
+                        name: data.recordedNames[r.recorded_counterparty_id]
+                          ?? r.recorded_counterparty_id.slice(0, 8),
+                      })}
+                    </span>
+                  ) : null}
+                </TableCell>
                 <TableCell className="text-right">{fmtCents(r.delta_cents, tc("centsUnsafe"))}</TableCell>
                 <TableCell className="text-right">{fmtCents(r.running_balance_cents, tc("centsUnsafe"))}</TableCell>
               </TableRow>

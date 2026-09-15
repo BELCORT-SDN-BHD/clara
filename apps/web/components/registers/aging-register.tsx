@@ -13,6 +13,7 @@ import { businessToday } from "@/lib/business-date";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataTableCard } from "@/components/common/data-table-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
@@ -91,7 +92,20 @@ export function AgingRegister({ clientId }: { clientId: string }) {
           <TableBody>
             {rows.map((r) => (
               <TableRow key={r.counterparty_id} data-selected={r.counterparty_id === selectedCounterpartyId || undefined}>
-                <TableCell>{r.counterparty_name ?? r.counterparty_id.slice(0, 8)}</TableCell>
+                <TableCell>
+                  {r.counterparty_name ?? r.counterparty_id.slice(0, 8)}
+                  {/* #647 AC2: `_aging_core` has emitted `resolution` per group since 裁-19 PR-1
+                      spliced it (0149:590) and nothing rendered it. Only the UNRESOLVED value is
+                      shown — a canonical group is the ordinary case and a badge on every row
+                      would say nothing. The explanation is visible text on the badge's own
+                      element, never a hover-only tooltip (appendix D 63: status never hides
+                      behind hover). */}
+                  {r.resolution === "unresolved" ? (
+                    <Badge variant="secondary" className="ml-2" title={t("unresolvedTitle")}>
+                      {t("unresolved")}
+                    </Badge>
+                  ) : null}
+                </TableCell>
                 <TableCell>{fmtCents(r.current_cents, tc("centsUnsafe"))}</TableCell>
                 <TableCell>{fmtCents(r.d31_60_cents, tc("centsUnsafe"))}</TableCell>
                 <TableCell>{fmtCents(r.d61_90_cents, tc("centsUnsafe"))}</TableCell>
