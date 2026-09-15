@@ -87,6 +87,7 @@ export type AccountingItemId =
   | "receivables"
   | "assets"
   | "plans"
+  | "accruals"
   | "accounts"
   | "close"
   | "tax";
@@ -109,7 +110,17 @@ export type AccountingItemId =
  * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
  * a page that is only ever reached with an intent.
  */
-export type ClientLeafId = "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord";
+export type ClientLeafId =
+  | "journalComposer"
+  | "periodicAdjustment"
+  | "workDetail"
+  | "knowledgeRecord"
+  // #652 — /…/accruals/:accrualId names ONE accrual record, and /…/accruals/new is the ACT that
+  // creates one. Leaves for the two reasons this block states: a durable record cannot be a static
+  // menu row, and a multi-section accounting form is arrived at with an intent rather than browsed
+  // to.
+  | "accrualNew"
+  | "accrualDetail";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -337,6 +348,14 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   // workbench's own SectionTabs — this row simply stops being the sidebar's name for it, which
   // is why the two tabs the sidebar already does not name keep working the same way.
   { id: "plans", segment: "plans", labelKey: "accounting.plans", icon: "route", minimumRole: "viewer" },
+  // #652 — the client's evidenced accruals, with their service terms, their authority and their
+  // reversal bindings. Its OWN top-level client segment beside `plans`, deliberately NOT under
+  // `accounting/`: an accrual RIDES a `reversing_journal` plan (it accrues on a due date and
+  // reverses on the first of the following month), which is a schedule and not a period-fact
+  // adjustment. `accounting/adjustments` is #643's lane — a stock count or a supplied payroll
+  // obligation, no schedule and no future occurrence — and one prefix for two unrelated lanes makes
+  // every later reader guess which one a row belongs to.
+  { id: "accruals", segment: "accruals", labelKey: "accounting.accruals", icon: "route", minimumRole: "viewer" },
   { id: "accounts", segment: "registers", tab: "accounts", labelKey: "accounting.accounts", icon: "list", minimumRole: "viewer" },
   { id: "close", segment: "close", labelKey: "accounting.close", icon: "lock", minimumRole: "viewer" },
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
@@ -384,6 +403,13 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
   // name it rather than stopping at Knowledge and claiming the reader is on the register.
   { id: "knowledgeRecord", parent: "knowledge", labelKey: "clientLeaf.knowledgeRecord", minimumRole: "viewer" },
+  // #652 — BOOKKEEPER for the form, for `journalComposer`'s own reason: the write door behind it
+  // (`clara.create_accrual_adjustment`, bookkeeper+ inside its own body) can only ever refuse a
+  // viewer, and offering a control that can only refuse is 裁-187's rule. The route still renders
+  // for a viewer as the DENIED state rather than as a form. The DETAIL leaf is viewer, because
+  // reading the client's own accruals is the same class of act as reading their journals.
+  { id: "accrualNew", parent: "accounting", labelKey: "clientLeaf.accrualNew", minimumRole: "bookkeeper" },
+  { id: "accrualDetail", parent: "accounting", labelKey: "clientLeaf.accrualDetail", minimumRole: "viewer" },
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -459,6 +485,26 @@ export function planReviseHref(clientId: string, planId: string): string {
  *  percent-encoded for the reason `workDetailHref` states. */
 export function planDetailHref(clientId: string, planId: string): string {
   return `${clientBase(clientId)}/plans/${encodeURIComponent(planId)}`;
+}
+
+/** `/clients/:clientId/accruals` — the C08.1 accrual list (#652). */
+export function accrualsHref(clientId: string): string {
+  return `${clientBase(clientId)}/accruals`;
+}
+
+/** `/clients/:clientId/accruals/new` — the configuration form. A ROUTE rather than a Dialog because
+ *  an accrual carries a term, a method, an authority and two account legs, and appendix C §4 sends
+ *  a multi-section accounting form to a detail destination rather than an overlay. */
+export function accrualCreateHref(clientId: string): string {
+  return `${clientBase(clientId)}/accruals/new`;
+}
+
+/** `/clients/:clientId/accruals/:accrualId` — one accrual's own address (#652). Its particulars,
+ *  its authority, its plan and its occurrence lineage are durable detail, so it is a ROUTE rather
+ *  than a Sheet: Back works, and a reload lands on the same accrual. The id is percent-encoded for
+ *  the reason `workDetailHref` states. */
+export function accrualDetailHref(clientId: string, accrualId: string): string {
+  return `${clientBase(clientId)}/accruals/${encodeURIComponent(accrualId)}`;
 }
 
 export function accountingHref(clientId: string, item: AccountingItem): string {
@@ -574,6 +620,10 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
   if (parent === "accounting" && rest.length === 3 && rest[1] === "adjustments" && rest[2] === "new") {
     return "periodicAdjustment";
   }
+  if (parent === "accounting" && rest.length === 2 && rest[0] === "accruals" && rest[1] === "new") {
+    return "accrualNew";
+  }
+  if (parent === "accounting" && rest.length === 2 && rest[0] === "accruals") return "accrualDetail";
   if (parent === "work" && rest.length === 2) return "workDetail";
   if (parent === "knowledge" && rest.length === 2) return "knowledgeRecord";
   return null;

@@ -34,6 +34,7 @@
 # §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
 components/accounting/journal-composer.test.tsx
 components/accounting/periodic-adjustment-form.test.tsx
+components/accruals/accrual-form.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -339,6 +340,7 @@ lib/settings/motion-preference.test.ts
 lib/settings/preference-state.test.ts
 lib/settings/preferences.test.ts
 lib/wire.test.ts
+lib/work/accrual-draft.test.ts
 lib/work/api.test.ts
 lib/work/diagnostics.test.ts
 lib/work/evidence.test.ts
