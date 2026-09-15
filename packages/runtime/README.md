@@ -101,6 +101,22 @@ regardless — then deletes the rows it planted. Only the runs it staged are eve
 preflight's universe; the runbook's own preflight stays global, and the README's "Deployment and
 rollback" section below is the contract that describes it.
 
+`tests/accrual-e2e.mjs` (#652) extends the plan-occurrence leg to the accrual lane and runs
+immediately after it on the same rig. It proves the four things only a real world can show about an
+evidenced accrual: configuring one through `clara.create_accrual_adjustment` writes the plan, its
+revision, the accrual record, the current period's occurrence and the admitted Work in ONE commit
+with no engine running and NOTHING posted (a configuration receipt in `clara.op_receipts` is not an
+executed occurrence in `clara.operation_receipts`); a crash between the posting commit and its
+checkpoint replays onto the same logical identity and still leaves exactly ONE row in
+`clara.accrual_adjustments`; the reversal waits for the accrual's committed entry, names it and
+posts; and a cancel followed by the human's explicitly scoped `clara.request_plan_catch_up`
+produces a re-attempt under the SAME occurrence identity with one accrual record throughout. It
+SKIPS CLEANLY (exit 0, printed reason) when migration 0207 is absent, so it is safe to merge before
+the DB half lands, and `CLARA_SKIP_ACCRUAL_E2E=1` opts out. Its non-frozen basis module,
+[`lib/accrual-basis.ts`](lib/accrual-basis.ts), is unit-tested separately by
+`tests/accrual-basis-unit.test.mjs` and carries the `chatTurn` successor's wiring stanza in its own
+footer — **no frozen file may import it before that cut**.
+
 `tests/work-question-e2e.mjs` derives each leg's settle budget rather than pinning a constant
 (#745): **budget = (control lease + one control poll interval) × the number of leases the leg must
 wait out + a stated slack.** The battery gives every engine it spawns — faulted ones included — the
