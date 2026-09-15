@@ -31,7 +31,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   gateAccruals, assertAccrualCohortPresent, buildWorkWorld, endPool, printLaneNotes,
-  printSkipCount, opk, rootQuery, ROLES, roleQuery, humanQuery, namedCall, basis,
+  printSkipCount, opk, rootQuery, ROLES, roleQuery, basis,
   CLR, assertPair, assertRaises, deactivateMember, reactivateMember, setClientStatus,
   closeYearAround, claimWorkRun, settleWorkRun, mintClientObo, wakeRecordJournalEntry,
   workRow, receiptsForWork, instructionRef, occurrenceRows, occurrenceCount, occurrenceExtras,
