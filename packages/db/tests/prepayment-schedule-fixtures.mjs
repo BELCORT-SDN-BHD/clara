@@ -39,11 +39,14 @@ import {
 import { markSkip } from "./wave-a-helpers.mjs";
 import { prepaidScene, recordPeriod, account } from "./f-a4-pr2a-fixtures.mjs";
 import { openDefaultFY } from "./x56-fixtures.mjs";
+import { acceptPublishedLegal } from "./work-journal-fixtures.mjs";
+// The raw pool, for the ONE cell that needs two scans genuinely in flight behind a lock barrier.
+import { getPool } from "./rig-helpers.mjs";
 
 export * from "./accounting-plans-fixtures.mjs";
 // …and the PREPAYMENT half. `account` is this module's only new spelling from that side; the plan
 // chain exports neither it nor the scene builders, so no name is shadowed.
-export { prepaidScene, recordPeriod, account };
+export { prepaidScene, recordPeriod, account, getPool };
 
 // ===========================================================================================
 // 1 · The frontier gate.
@@ -223,6 +226,12 @@ export async function prepaymentScene(tag, {
     .then((r) => r.rows[0].d);
   const fyStart = `${termStart.slice(0, 4)}-01-01`;
   const scene = await prepaidScene(tag, { cents, startsOn: fyStart, postingDate });
+  // THE MODEL-EGRESS BASIS, without which NO occurrence of this schedule could ever post. It is
+  // DERIVED (0195:502) from the firm owner's acceptance of the current published Terms and DPA, and
+  // `clara._record_journal_entry_core` re-verifies it at the write — so a scene that skipped this
+  // would measure CLR13 `egress_not_authorized` where it meant to measure something else. Measured:
+  // the locked-period cell answered CLR13 instead of CLR19 before this line existed.
+  await acceptPublishedLegal(scene.alice);
   if (termEnd.slice(0, 4) !== termStart.slice(0, 4)) {
     await openDefaultFY(scene.alice, {
       client: scene.client, startsOn: `${termEnd.slice(0, 4)}-01-01`, tag: `p653 ${tag}` });
@@ -370,4 +379,26 @@ export async function ambiguousAssetEntry(scene, { cents = 60000, secondAsset = 
   await approveEntry(scene.bob, {
     entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p653-twoa") });
   return d.entry_id;
+}
+
+/** CLOSE the fiscal year that contains `day` for `client`, walking the estate's own lifecycle
+ *  edges (open -> closing -> closed), which is the only ladder its trigger admits.
+ *
+ *  A FIXTURE SHORTCUT AROUND AN ABSENT WRITER, stated as one rather than hidden — the estate's
+ *  close ladder is a multi-step ceremony (`begin_close` / attestations / `finalize_close`) whose
+ *  own batteries own it, and a cell about a LOCKED period needs the locked state rather than the
+ *  ceremony. The scene owns a DEDICATED client, so a year closed here closes nothing under another
+ *  cell's feet. `accounting-plans-fixtures.mjs`'s `closeYearAround` is the same shortcut for a
+ *  client that has no year at all; this one closes the year the scene already opened. */
+export async function closeFiscalYearOf(client, day) {
+  const fy = await rootQuery(
+    `select id from clara.fiscal_years
+      where client_id = $1 and $2::date between starts_on and ends_on
+      order by ordinal limit 1`, [client, day]);
+  const id = fy.rows[0]?.id;
+  if (!id) throw new Error(`closeFiscalYearOf: no fiscal year contains ${day} for client ${client}`);
+  for (const s of ["closing", "closed"]) {
+    await rootQuery("update clara.fiscal_years set status = $2 where id = $1", [id, s]);
+  }
+  return id;
 }
