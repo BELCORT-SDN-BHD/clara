@@ -146,6 +146,19 @@ export function FirmSetupChecklist() {
       if (err.reason === "knowledge_already_live") {
         return { ok: false, kind: "already_live", message: err.message, code: err.code };
       }
+      // #654's TWO WALLS, mapped AHEAD of the migration that raises them (0205). Both are
+      // `CLR10`s from a BEFORE INSERT trigger on `clara.knowledge_records`, and both are about
+      // the KEY or the SOURCE rather than about the value a person typed — so neither belongs in
+      // a field error beside a control. They get their own named faces, and they are mapped now
+      // because a refusal that arrives before its face does reaches a practitioner as a raw
+      // database sentence. Unexercised on this branch (0205 is not applied here) and named as
+      // such in the report rather than claimed as tested.
+      if (err.reason === "knowledge_scope_not_firm_defaultable") {
+        return { ok: false, kind: "not_firm_defaultable", message: err.message, code: err.code };
+      }
+      if (err.reason === "firm_scope_client_evidence") {
+        return { ok: false, kind: "client_evidence", message: err.message, code: err.code };
+      }
       return { ok: false, kind: "invalid", itemKey, message: err.message, code: err.code, reason: err.reason };
     }
     const message = err instanceof Error ? err.message : String(err);

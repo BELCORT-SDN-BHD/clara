@@ -515,6 +515,8 @@
       "stale": "Somebody else changed this checklist while you were answering. It has been re-read and your typing has been kept — check the current answers above, then save again.",
       "alreadyLive": "This fact is already on the Knowledge register. Correct it under \"Facts confirmed in setup\" below rather than answering it a second time.",
       "denied": "Your role changed while you were answering. Firm setup is limited to administrators and owners.",
+      "notFirmDefaultable": "This fact cannot be set as a firm-wide default. It belongs to a particular client rather than to the firm, so it is recorded on this checklist and nowhere else.",
+      "clientEvidence": "A firm-wide fact cannot cite a document that is filed under one client. State it from the firm's own records, or record it against that client instead.",
       "failed": "That did not reach the server. The checklist has been re-read — if your answer is already shown above it was recorded; otherwise pressing Save again sends the same request rather than answering twice.",
       "constraint": {
         "required": "This answer cannot be empty.",

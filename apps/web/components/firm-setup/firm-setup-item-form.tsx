@@ -65,8 +65,17 @@ export type FirmSetupSubmitOutcome =
   | { ok: false; kind: "stale" }
   /** The door refused this value. `itemKey` names the control to focus. */
   | { ok: false; kind: "invalid"; itemKey: string; message: string; code: string; reason: string | null }
-  /** Rank, or a knowledge-register refusal with its own designed face. */
-  | { ok: false; kind: "denied" | "already_live" | "failed"; message: string; code: string | null };
+  /** Rank, or a knowledge-register refusal with its own designed face.
+   *  `not_firm_defaultable` and `client_evidence` are #654's two walls (0205): a key that may not
+   *  be promoted to firm scope, and a firm-scope record that would pin a document with a live
+   *  client filing. Both are about the KEY or the SOURCE rather than the typed value, so neither
+   *  belongs in a field error. */
+  | {
+      ok: false;
+      kind: "denied" | "already_live" | "not_firm_defaultable" | "client_evidence" | "failed";
+      message: string;
+      code: string | null;
+    };
 
 export function FirmSetupItemForm({
   items,
@@ -209,6 +218,20 @@ export function FirmSetupItemForm({
       {outcome && !outcome.ok && outcome.kind === "already_live" ? (
         <div data-testid="firm-setup-already-live">
           <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined}>{t("form.alreadyLive")}</StateBanner>
+        </div>
+      ) : null}
+      {outcome && !outcome.ok && outcome.kind === "not_firm_defaultable" ? (
+        <div data-testid="firm-setup-not-firm-defaultable">
+          <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined}>
+            {t("form.notFirmDefaultable")}
+          </StateBanner>
+        </div>
+      ) : null}
+      {outcome && !outcome.ok && outcome.kind === "client_evidence" ? (
+        <div data-testid="firm-setup-client-evidence">
+          <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined}>
+            {t("form.clientEvidence")}
+          </StateBanner>
         </div>
       ) : null}
       {outcome && !outcome.ok && outcome.kind === "denied" ? (
