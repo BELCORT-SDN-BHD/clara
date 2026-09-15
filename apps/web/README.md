@@ -25,6 +25,50 @@ The interface uses `next-intl` with a static English locale, semantic tokens fro
 
 Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
+## Creating a client, and the two facts the commit does not write
+
+The client register's **Add client** control is the only surface in the product that opens a client
+file, and it reuses ⌘K's own dispatch rather than minting a second call site. Confirm now asks
+`clara.client_identity_candidates` before it reaches `clara.begin_client_onboarding`, and the
+answer decides what happens next — the three arities the owner ruled on 2026-09-15:
+
+- **0** — nothing in the firm answers to that name. The same click goes straight on to the door.
+- **1** — the candidate is **shown**, with a real link to the record and the reason it matched, and
+  Confirm re-enables only once a person ticks "this is a different business". The database does not
+  refuse at this arity and must not be made to: its own predicate is `count(*) > 1`, so one
+  same-family party has never been "ambiguous" anywhere in this estate. The acknowledgement is the
+  only wall here, and it lives in the face.
+- **2 or more** — the **database** refuses, CLR10 `name_family_collision`, and the refusal renders
+  verbatim with its code beside the same candidate list — which the refusal itself carries, so the
+  face never issues a second read of the fact it is reporting.
+
+Editing the name retires the check, the acknowledgement and the refusal; it never clears the typed
+text. **There is no client-side duplicate rule and there must not be one**: the family predicate may
+not be granted to any application role (a live census in migration 0103 raises on any such grant),
+which is why the browser is given a definer wrapper and never the predicate.
+
+**The wall is the READ, not the birth door.** A caller that never asks can still call
+`begin_client_onboarding` and a client is born — a named residual, kept honest by
+`packages/db/tests/client-onboarding-identity.test.mjs`'s `p649.identity.direct_birth_residual`.
+
+**Committing an onboarding plan writes neither Knowledge nor the client's own record.** Two
+separate, named acts follow it at the same call site, and they are treated differently on purpose:
+
+1. `promote_plan_answers_to_knowledge` is a **projection** and its failure is deliberately
+   swallowed — a failed Knowledge write must not present itself as a failed commit, and the act is
+   safe to repeat.
+2. `settle_client_onboarding_facts` writes the client's **own financial-year end** and its failure
+   is **shown**. Above all CLR38 `fy_end_locked_by_annual_cadence`: a live ANNUAL adjustment
+   template or depreciation authority means the year end did not move, and a refused financial-year
+   write presented as a settled onboarding is the worst outcome this journey can produce.
+
+The financial-year **day** is asked, never derived (owner ruling D7). The interview asks only a
+month; `clara.clients` admits a year end only as a month and a day together. The commit dialog's
+field offers month end as a **button that names the day it will fill** and never as a default —
+deriving it would invent an accounting fact on a professional's record. Leaving both boxes blank is
+a real choice: the settle door is then not called at all, and the dialog says so, rather than
+manufacturing a `fy_end_day_required` refusal for a value nobody gave.
+
 ## Close and bank operating order
 
 Prepare and reconcile the books before beginning a financial-year close. For an ongoing client with brought-forward balances, record an evidenced opening position in this order:

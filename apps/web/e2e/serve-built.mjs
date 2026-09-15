@@ -90,6 +90,11 @@ import { WORK_LIST_CLIENTS, answerWorkListPage, handleWorkListSupabase } from ".
 // guards `readJson` on an exact-verb allow-list, so it drains no other lane's request stream and
 // can run anywhere in the chain below.
 import { handlePlansSupabase } from "./plans-mock.mjs";
+// #649's client-creation lane — the identity-candidates read and the birth door. Both branches
+// gate on the request's own subject (for these two verbs the subject IS the free-text name: the
+// door takes no id) and fall through otherwise, so it can run anywhere in the chain below; it is
+// placed BEFORE the P6-5 lane because that lane answers `begin_client_onboarding` for ANY name.
+import { handleClientCreateSupabase } from "./client-create-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -569,6 +574,12 @@ async function handleSupabase(request, response, url) {
   // client/thread pairing check turns into a 404.
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
+  // #649 — BEFORE the P6-5 lane, and that position IS load-bearing: `agentic-finish-mock.mjs`
+  // answers `begin_client_onboarding` for every name (it declares the verb unscopeable, because
+  // its own walk does not care which name reached it), so a #649 name that arrived there first
+  // would be born into that lane's fixture. This lane gates on its own three names and falls
+  // through for every other, including that lane's.
+  if (await handleClientCreateSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;

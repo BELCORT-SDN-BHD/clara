@@ -111,6 +111,18 @@ _Avoid_: A combined client ledger.
 The context for one client business's books, evidence, accounting work and knowledge inside a firm.
 _Avoid_: Client login, firm workspace.
 
+**Client onboarding plan**:
+The record of what a firm must establish about one new client before its books open: the questions asked, the answers given, who gave each one and when, and a permanent revision trail in which an amended answer supersedes its predecessor rather than replacing it. Exactly one plan can be open per client; committing it activates the client, and cancelling it archives the client instead. A committed plan's answers are carried into Client knowledge and onto the client's own canonical record by separate, named acts — the commit itself writes neither.
+_Avoid_: An approval ritual standing between a client and ordinary bookkeeping; a checklist a person can edit in place; treating the interview conversation as the plan.
+
+**Client identity candidate**:
+An existing client or live counterparty of the same firm that a proposed client name (or a supplied registration identifier) already matches, shown with the reason it matched so a person can decide whether this is the same business. The estate's own ambiguity rule is arity: **two or more** candidates is a refusal, one is a candidate to look at and acknowledge, none proceeds silently.
+_Avoid_: Presenting an exact-name check as duplicate detection — a same-name clash is one match among several kinds, and a single same-family party has never been "ambiguous" in this estate; treating a candidate list as proof that a second record is wrong, or its absence as proof that it is right.
+
+**Opening position**:
+What a client's books start from: either a first year of trading, where there is nothing to carry down and no opening balances are owed, or a prior period's closing position that must be brought in and tied out before the books can be relied on. The second is owed work whether or not anyone has started it.
+_Avoid_: Treating a deferred carry-down as "no opening needed"; treating an empty opening register as evidence of a first year; a blanket onboarding sign-off standing in for either.
+
 **Confirmed client knowledge**:
 Durable information already accepted about a client, retained across conversations. A new chat does not withdraw or amend that information.
 _Avoid_: Chat history.

@@ -55,6 +55,7 @@ const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "client-create-mock.mjs",
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
@@ -338,6 +339,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
+  // #649's client-creation lane. Its `/rest/v1/clients` handler is id-scoped and its two RPC
+  // verbs gate on `body.p_name` before they answer, falling through for every other name — and
+  // for these two doors the NAME is the request's own subject rather than a label for one:
+  // `clara.client_identity_candidates(p_name, p_identifier)` and
+  // `clara.begin_client_onboarding(p_name, p_op_key)` carry no id at all. That is the distinction
+  // `agentic-finish-mock.mjs` draws the other way for the same verb — its walk does not care
+  // which name reached it, so it declares the verb unscopeable; this one's three names ARE its
+  // fixture. Neither column has anything to declare.
+  "client-create-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -991,6 +1001,15 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
   get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
+  // #649 x P6-5 — `clara.begin_client_onboarding` is the ONE door that creates a client, so any
+  // lane whose walk creates one answers it. The two answer for DIFFERENT names and the door
+  // carries no id, so the name is the request's own subject here rather than a label for one:
+  // `client-create-mock.mjs` gates on its own three names and falls through for every other,
+  // `agentic-finish-mock.mjs` answers whatever is left (it declares the verb unscopeable above,
+  // because its own walk does not care which name reached it). ORDER IS LOAD-BEARING and is
+  // stated at the hook in `serve-built.mjs`: the scoped lane runs FIRST, or a #649 name would be
+  // born into the other lane's fixture.
+  begin_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of
