@@ -1934,6 +1934,31 @@ const CODING_LANE_LINK_0197_UNGRANTED_FNS = [
 export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_FNS];
 // #718 END
 
+// #648 [0203, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
+// the same "wholly present or wholly absent" reason 0192's carries: folding these names into an
+// older roster would red every database between the two frontiers, and `cohortFailures()` fails a
+// PARTIAL cohort by design.
+//
+//   the FOUR human doors + the ONE read — clara_authenticated ONLY, every one floored at admin
+//   inside its own body through `clara._human_ctx` and then re-floored against the catalogue row's
+//   `min_role`. The agent, runtime and both wake roles gain ZERO here, and that is structural
+//   rather than an omission: a `_human_ctx`-gated verb granted to a role that carries no JWT
+//   claims is a DARK grant (0192 §H), and 0203's own §J tail asserts the same emptiness in-migration.
+const FIRM_SETUP_0203_HUMAN_FNS = [
+  "seed_firm_setup_plan", "answer_firm_setup_item", "defer_firm_setup_item",
+  "commit_firm_setup", "get_firm_setup",
+];
+//   …and the UNGRANTED closure the five share: the firm's-own-plan lookup, the catalogue answer
+//   grammar and the one revision bump. Listed so `cohortFailures` reports a half-applied 0203
+//   rather than a silently narrower boundary.
+const FIRM_SETUP_0203_UNGRANTED_FNS = [
+  "_firm_setup_plan", "_assert_firm_setup_answer", "_firm_setup_bump",
+];
+export const FIRM_SETUP_0203_COHORT = [
+  ...FIRM_SETUP_0203_HUMAN_FNS, ...FIRM_SETUP_0203_UNGRANTED_FNS,
+];
+// #648 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1978,6 +2003,8 @@ export const ALLOWED = {
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
     ...KNOWLEDGE_0192_HUMAN_FNS, // #644 [0192] the three knowledge writes + the three C13 reads
     ...KNOWLEDGE_0192_SHARED_FNS, // #644 [0192] the promotion door — the ONE two-lane name
+    ...FIRM_SETUP_0203_HUMAN_FNS, // #648 [0203] the four firm setup doors + the one A5 read
+    // (admin-floored; agent/wake/runtime gain ZERO — see the block above)
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
     // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
@@ -2508,6 +2535,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
+  failures.push(...cohortFailures("#648 0203 firm setup lane", FIRM_SETUP_0203_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));

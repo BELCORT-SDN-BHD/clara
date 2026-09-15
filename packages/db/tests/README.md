@@ -35,5 +35,14 @@ every test repeatable.
 suite's matching chain, rather than running those lists against the full frontier.
 A skipped preintegration suite is not evidence that its feature passed.
 
+`firm-setup.test.mjs` (#648, journey A5) needs the 0203 cohort — `clara.firm_setup_keys`, the four
+firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
+against a chain below that frontier FAILS by name; the package run preloads
+`firm-setup-preintegration-gate.mjs`, which turns the same absence into a loud skip. Its world is
+planted through the root connection because the subject is the setup doors rather than firm
+creation, but every assertion under test runs through a least-privileged persona (`humanQuery`) —
+the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
+`p648.defer.reason`, whose subject is the CHECK itself and which no door owns.
+
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
