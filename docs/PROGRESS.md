@@ -4,10 +4,9 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 
 ## Current State
 
-- `main`: docs-only commits ahead of the deployed runtime `git_sha 3486b6c2`; no runtime, web or database change since the 2026-09-14 releases. Tip = `git rev-parse --short origin/main`.
-- Hosted (two ceremonies on 2026-09-14): DB frontier **193 / 0198**; `clara-runtime` **v84** = `refresh-3486b6c2` (digest `sha256:b6dd2fa5…`, single Fly machine `48ee715b763048`); `clara-web` **`0290977b-74a4-4c4a-849f-ee60efd631bb`** (built at `70c731ef`). Rollback points, the runtime/database asymmetry (rollback below 0195 needs the unnumbered restore draft + a compatibility image carrying `claraWork_v3`) and the hosted configuration facts (legal v1 templates, Stripe test mode, admission capacity unlimited, the kept test firm "Walk Test 0913"): the two runbooks and #612's 2026-09-14 "Hosted configuration facts" comment.
-- Verification: `ci` green on every landed PR; the owner's signed-in walk on the released build is recorded on #682; every refresh ticket (#612's 11 children) and rider (#692 #718 #720 #732) is closed with hosted evidence; no issue carries `awaiting-release`.
-- Triage (2026-09-15): the 48 post-refresh tickets are settled — 13 closed (6 already implemented or duplicate, 7 owner rulings recorded in `docs/PRD.md` §3, `docs/ARCHITECTURE.md` §5 B/E/F and §6, `packages/runtime/README.md`, and three `.out-of-scope/` records), 30 carry an Agent Brief under `ready-for-agent`, 3 are `ready-for-human` (#800 #813 #820), 2 are parked as `idea` for the next wayfinder round (#782 #788). Owner rulings of the day: beta phase, hosted users and data are test data; parked pre-v3 Work may be cancelled and `chatTurn_v1` is retired from the tree without a drain proof; the 0045 adjustment-template lane is to be retired in favour of accounting plans.
+- `main`: docs-only commits ahead of the deployed runtime `git_sha 3486b6c2` (v84); no runtime, web or database change since the 2026-09-14 releases. Hosted: DB frontier **193 / 0198**; `clara-runtime` **v84** = `refresh-3486b6c2` (single Fly machine `48ee715b763048`); `clara-web` `0290977b-74a4-4c4a-849f-ee60efd631bb`. Hosted configuration facts and rollback points: the two runbooks and #612's 2026-09-14 "Hosted configuration facts" comment.
+- 2026-09-15 triage settled every post-refresh ticket: 16 closed (already implemented, duplicate, or an owner ruling recorded in `docs/PRD.md` §3, `docs/ARCHITECTURE.md` §5 B/E/F and §6, `packages/runtime/README.md`, `.out-of-scope/`), 30 `ready-for-agent` with Agent Briefs, 2 `idea` (#782 #788). Owner rulings of the day: beta phase — hosted users and data are test data; old bodies retire without a drain proof; the 0045 adjustment-template lane is to be retired; one Terms/DPA acceptance at registration is the whole model-egress authority (#800 rejected).
+- Hosted cleanup done (#820, 2026-09-15): no orphan `wake` tasks, zero non-terminal runs on any old body, rollback preflight **ALLOWED** against v84; only live run is `clientOnboarding_v4`.
 
 ## In Progress
 
@@ -15,14 +14,14 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 
 ## Known Issues
 
-- Ideas parked for the next wayfinder round (`idea` + `needs-triage`): #782 (model reading of every accounting document kind — payroll, contracts, opening balances, prior GL, xlsx/docx — wider than invoice line items; today only the invoice family and bank statements have typed-fact lanes) and #788 (owner ruling 2026-09-15: retire the 0045 adjustment-template lane and converge on accounting plans; the same-period double-post goes with it, `overlap_warning` stays until then).
-- #810 (`ready-for-agent`): owner ruled on 2026-09-15 that `chatTurn_v1` is retired from the tree with no drain proof (beta, test data); the freeze tooling gains a `retired` record so `MISSING` / `REMOVED-VS-BASE` accept it. Sequencing only: deploy the image without `chatTurn_v1` after #820's cleanup has cancelled any run parked on it, or the boot-time stranded-body guard refuses to start.
-- #820 (`ready-for-human`): ten orphan held `wake` tasks make every rollback preflight refuse (`unbound_task`); the brief also censuses non-terminal runs by body for #810. Do it at the start of #682's hosted session — its rollback verification needs a usable preflight. #813 (provider-eval real run) folds into the same session.
-- Deferred product promises are marked inline in `docs/PRD.md` with their tickets (#636 batch progress, #654 firm-scope promotion — its caller lands in #648's setup route, #658/#663 reassessment consumer, #764).
-- Machine: the local rig recipe (WSL Node 22 + corepack pnpm, PG17 clusters per chain, worktrees per ticket, web uploads from WSL) lives in the agent's memory, not in git; all rig clusters and ticket worktrees were dropped on 2026-09-14.
+- #836 (`ready-for-agent`): the provider-eval harness passes `maxSteps`, which AI SDK 7 ignores; the first real-provider run (`reports/631-provider-eval-2026-09-15.md`) scored 0/3 on three legs by construction — void until #836 lands and the owner re-runs it with a key.
+- #810 (`ready-for-agent`): `chatTurn_v1` leaves the tree; needs the freeze-tooling `retired` record; hosted census shows 0 runs on it, so it can deploy any time.
+- Ideas for the next wayfinder round: #782 (model reading of every document kind), #788 (retire the 0045 lane); unfiled: the owner expects invited members to also accept the Terms — today only the registering owner does.
+- Deferred product promises are marked inline in `docs/PRD.md` with their tickets (#636, #654, #658/#663, #764).
+- Machine: no local Postgres rig on this Windows box (Node 20; WSL has no node); `fly` is authenticated as tools@belcort.com and the probe-machine + `dsn-pipe` pattern works from Git Bash (recipe in the agent's memory).
 
 ## Next Steps
 
-1. The owner returns to the #597 map: **#682** (verify the real accounting journey and runtime recovery on the released combination; start with #820's hosted cleanup, record #810's run census, run #813's provider-eval) → **#683** (final acceptance + blueprint sync; by its own AC it reads every child ticket's result and every known issue's accepted disposition — today's triage comments are those dispositions — then closes #612 and #597).
+1. **#682** (verify the real accounting journey and runtime recovery on the released combination; the rollback preflight is already ALLOWED) → **#683** (final acceptance + blueprint sync; the 2026-09-15 triage comments are each known issue's accepted disposition; closes #612 and #597).
 2. When the lawyer-reviewed Terms/DPA wording arrives: publish it as v2 through `clara.publish_legal_document` (as the BELCORT owner) or a seed migration; the beta v1 rows become superseded.
 3. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
