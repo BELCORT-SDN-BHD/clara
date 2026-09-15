@@ -279,6 +279,42 @@ _Avoid_: A failed payment; a reason to re-charge; an error the applicant must re
 One completed accounting act that records a movement a period's own facts establish rather than a transaction: a periodic stock adjustment (from a supplied opening/closing count or an instructed movement) or a supplied payroll/statutory obligation. It carries typed particulars — the period, the method or obligation kind, the exact amount, the account each leg plays, where the figures came from and the instruction — and those particulars must agree with the posted entry's own lines.
 _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its scheduled occurrences; a rate, threshold or employee calculation the product worked out.
 
+**Accrual adjustment**:
+A cost a period has incurred but nobody has invoiced yet, recorded with the particulars that make it
+checkable: the amount, the expense account it charges and the non-control liability account it
+accrues into, the SERVICE PERIOD it belongs to, the rule that selects each period's amount, the
+window its authority covers, and the instruction that authorised it. It rides the accrual-and-
+reversal schedule rather than standing alone, so accepting one records the schedule, its first due
+event and the accounting work for it — and posts nothing.
+_Avoid_: A balanced journal entry wearing a marker; a periodic stock adjustment or a supplied
+payroll obligation (those record a movement the period's own facts establish, have no schedule and
+no future occurrence); a provision or an estimate the product worked out.
+
+**Accrual reversal**:
+The second leg of one accrual's schedule: the same entry with both sides exchanged, due on the first
+day of the period after the one it accrued for, and NAMING the journal entry it undoes. It is
+admissible only once its own period's accrual has POSTED an entry that is still live — never merely
+because that accrual was admitted — and a reversal the lane reached before then is recorded as
+refused, with which of the three ways the accrual failed to stand behind it.
+_Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
+as a posted one.
+
+**Service period**:
+The span of time an accrued or prepaid cost belongs to, stated by an identified person. Where it was
+anchored to a filed document it is bound to that document's own term record rather than restated, and
+a disagreement between the two is refused rather than resolved. A period a model read off a document
+is NOT an anchored fact and never enters the durable record.
+_Avoid_: The posting date; the authority window; an extracted or inferred period; a term the product
+derived from a filename, a date range it saw, or a conversation it summarised.
+
+**Calculation method**:
+The rule that says WHICH stated amount each of a schedule's periods uses — the figure stated on the
+record, the figure stated for the named service period, the figure stated on the cited source
+document, or the figure the previous period recorded. It selects among amounts a person supplied; it
+computes none, which is why it is a closed set of named rules rather than a versioned formula.
+_Avoid_: A rate, a proration or an allocation the product performs; a formula; anything a caller can
+extend without a new named rule.
+
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.

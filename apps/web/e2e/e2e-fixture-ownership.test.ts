@@ -52,6 +52,7 @@ const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
  */
 const LANE_MOCKS = [
   "activity-mock.mjs",
+  "accrual-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
@@ -338,6 +339,12 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
+  // #652's C8 accrual lane, built to that same shape: every branch names this lane's own client id
+  // or accrual id before it answers. `list_spoken_for_documents` is SHARED with
+  // `periodic-adjustment-mock.mjs` — both lanes mount the same `EvidenceChooser`, which makes the
+  // same advisory read — and both scope it by their own `p_client`, so neither can answer for the
+  // other. Declared here rather than left implicit, which is what this census is for.
+  "accrual-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -976,7 +983,13 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // Each lane gates on its OWN client before answering (journal-work-mock.mjs:1624,
   // periodic-adjustment-mock.mjs:320) and falls through otherwise, so neither can answer for the
   // other's walk — which is the distinction between a declared share and a collision.
-  list_spoken_for_documents: ["journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
+  // #652 joins the same share at WAVE-4 INTEGRATION and for the identical reason: the accrual form
+  // mounts the SAME `EvidenceChooser` component (an accrual may cite the invoice its term was read
+  // from), so it makes the same advisory read. `accrual-mock.mjs` gates on `ACC.clientId` before
+  // answering and falls through otherwise, so it can answer for neither of the other two.
+  list_spoken_for_documents: [
+    "accrual-mock.mjs", "journal-work-mock.mjs", "periodic-adjustment-mock.mjs",
+  ],
   // #640 x #631 — `clara.get_work_plan_origin` is read by `<WorkPlanOriginRow>`, which #640 mounts
   // on the SHARED Work detail page, so every lane whose walk opens a Work detail now issues it.
   // Declared at WAVE-3 INTEGRATION: #640's own walk had the only Work detail that reached this row
