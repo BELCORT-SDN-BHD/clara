@@ -69,6 +69,8 @@ export type SettingsSectionId =
   | "account"
   | "firm"
   | "members"
+  // #654 — the firm-wide Knowledge register.
+  | "knowledge"
   | "compliance"
   | "vendorBindings";
 
@@ -266,6 +268,19 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     purposeKey: "sections.members.purpose",
     icon: "users",
     minimumRole: "admin",
+  },
+  // #654 — VIEWER, the floor `clara.list_firm_knowledge` itself takes (the same
+  // floor `clara.list_client_knowledge` uses, 0192:1316). A firm default is the
+  // firm's own standing rule and hiding the register from a viewer would grant
+  // and revoke nothing; the PROMOTE act inside it is admin+ and the door
+  // (`clara.capture_knowledge` at firm scope) rechecks that floor for itself.
+  {
+    id: "knowledge",
+    href: "/settings/knowledge",
+    labelKey: "sections.knowledge.title",
+    purposeKey: "sections.knowledge.purpose",
+    icon: "book",
+    minimumRole: "viewer",
   },
   {
     id: "compliance",

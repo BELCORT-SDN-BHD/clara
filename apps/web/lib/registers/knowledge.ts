@@ -239,3 +239,180 @@ export function withdrawKnowledge(
     p_op_key: opKey(),
   }, opts);
 }
+
+// =============================================================================
+// #654 — FIRM-WIDE DEFAULTS AND THE CLIENT EXCEPTIONS THAT SURVIVE THEM
+// (0205_firm_knowledge_defaults.sql).
+//
+// THE PROMOTION IS NOT A NEW DOOR. `clara.capture_knowledge(p_scope_kind =>
+// 'firm')` has been the promotion path since 0192 and is already admin+ by
+// `clara._knowledge_floor` (#603 Q22); what 0192 recorded as its own deferral (3)
+// was that nothing in the product ever CALLED it. `promoteKnowledgeToFirm` below
+// is that caller, and it is a thin wrapper rather than a second contract.
+//
+// THE TWO READS ARE NEW, because neither shipped read could answer what C13 has
+// to show. `clara.list_client_knowledge` FILTERS a shadowed firm row out in SQL
+// (0192:1355-1363), so a client's register can say nothing about the firm rule it
+// overrides; `clara.get_knowledge_applicability` answers exactly that, per
+// applicability, and `clara.list_firm_knowledge` is the firm-altitude register at
+// `/settings/knowledge`.
+// =============================================================================
+
+/** One live client row overriding a firm rule at the same key AND applicability —
+ *  the same pair `list_client_knowledge`'s shadow matches on. */
+export type FirmKnowledgeException = {
+  client_id: string;
+  client_name: string | null;
+  record_id: string;
+  value: unknown;
+  recorded_at: string;
+};
+
+/** A non-terminal `clara.accounting_work` row citing this key. DERIVED from the
+ *  `source_work_id` pin a knowledge record carries — nothing in the estate stamps
+ *  a Work with the knowledge it reasoned under yet, which is what the claraWork
+ *  successor contract closes. */
+export type FirmKnowledgeWork = {
+  work_id: string;
+  client_id: string | null;
+  purpose: string;
+  status: string;
+};
+
+/** WHOSE ACT THE PROMOTION WAS. `required_role` is the authority the door
+ *  VERIFIED at the time (`clara._knowledge_floor(key,'firm')`), which is the
+ *  durable half; `promoter_role_now` / `promoter_active` are the promoter's
+ *  CURRENT membership and are labelled as current by the surface, because
+ *  `clara.firm_memberships` carries no history to reconstruct the role at the
+ *  instant from. */
+export type FirmKnowledgeAuthority = {
+  promoter: string;
+  promoter_name: string | null;
+  recorded_via: "human_ui" | "clara_runtime";
+  recorded_at: string;
+  reason: string;
+  required_role: string | null;
+  promoter_role_now: string | null;
+  promoter_active: boolean;
+};
+
+export type FirmKnowledgeRow = KnowledgeRecordRow & {
+  authority: FirmKnowledgeAuthority;
+  exception_count: number;
+  exceptions: FirmKnowledgeException[];
+  live_work: FirmKnowledgeWork[];
+  firm_defaultable_reason?: string | null;
+  in_effect_today?: boolean | null;
+};
+
+export type FirmKnowledgeEnvelope = {
+  firm_id: string;
+  /** Today in `Asia/Kuala_Lumpur`, resolved SERVER-SIDE. A calendar day is a
+   *  business fact here and the browser's clock is not evidence of it. */
+  as_of: string;
+  knowledge_version: string | number;
+  records: FirmKnowledgeRow[];
+};
+
+/** `none` means neither scope holds a live row at this applicability — a real
+ *  answer, not an empty one. */
+export type KnowledgeInForce = "client_exception" | "firm_default" | "none";
+
+export type KnowledgeInForceReason =
+  | "client_exception_shadows_firm_default"
+  | "client_record_only"
+  | "firm_default_applies"
+  | "no_live_record";
+
+export type KnowledgeApplicabilityEntry = {
+  applies_when: Record<string, unknown>;
+  applies_when_digest: string;
+  firm_rule: KnowledgeRecordRow | null;
+  client_exception: KnowledgeRecordRow | null;
+  in_force: KnowledgeInForce;
+  reason: KnowledgeInForceReason;
+  in_effect_today: boolean | null;
+};
+
+export type KnowledgeApplicabilityEnvelope = {
+  client_id: string;
+  knowledge_key: string;
+  as_of: string;
+  knowledge_version: string | number;
+  key: KnowledgeKeyDefinition & {
+    firm_defaultable: boolean;
+    firm_defaultable_reason: string | null;
+  };
+  applicabilities: KnowledgeApplicabilityEntry[];
+  /** How many clients in the firm hold a live exception to this key. */
+  exception_count: number;
+  live_work: FirmKnowledgeWork[];
+};
+
+/** clara.list_firm_knowledge() — viewer+, the `/settings/knowledge` register. */
+export function loadFirmKnowledge(
+  opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},
+): Promise<FirmKnowledgeEnvelope> {
+  return callDoor<FirmKnowledgeEnvelope>("list_firm_knowledge", {}, opts);
+}
+
+/** clara.get_knowledge_applicability(p_client, p_knowledge_key) — viewer+. The
+ *  firm rule, the client exception, which governs and why, per applicability. */
+export function loadKnowledgeApplicability(
+  clientId: string,
+  knowledgeKey: string,
+  opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},
+): Promise<KnowledgeApplicabilityEnvelope> {
+  return callDoor<KnowledgeApplicabilityEnvelope>(
+    "get_knowledge_applicability",
+    { p_client: clientId, p_knowledge_key: knowledgeKey },
+    opts,
+  );
+}
+
+/**
+ * clara.capture_knowledge at FIRM scope — the promotion.
+ *
+ * THE REASON IS AUTHORED, NEVER INHERITED. The caller passes the sentence a human
+ * typed in the dialog as `p_basis`; the client record's own basis is that client's
+ * narrative, and copying it would put one client's words behind a rule applied to
+ * every other. The dialog is what enforces "required"; the door refuses a blank
+ * one too (CLR10 `knowledge_basis_missing`).
+ *
+ * NO SOURCE PINS. A firm default cites no document at all here — the shipped
+ * promotion path passes an empty source for the same reason (0192:1706-1711), and
+ * 0205's evidence wall would refuse any document a client is filed against.
+ *
+ * TRUST TRAVELS FROM WHAT IS BEING GENERALISED: `sourceKind` is the client row's
+ * own, so an extracted or inferred row cannot be laundered into an asserted firm
+ * policy — the DB refuses that (CLR10 `knowledge_trust_insufficient`) and this
+ * wrapper does not paper over it.
+ *
+ * A FRESH op_key PER ATTEMPT (doors.ts's "never retry a refusal" law).
+ */
+export function promoteKnowledgeToFirm(
+  args: {
+    knowledgeKey: string;
+    value: unknown;
+    reason: string;
+    sourceKind: KnowledgeSourceKind;
+    appliesWhen?: Record<string, unknown>;
+    effectiveFrom?: string | null;
+    effectiveTo?: string | null;
+  },
+  opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},
+): Promise<{ status: string; record_id: string; revision_id: string; knowledge_key: string }> {
+  return callDoor("capture_knowledge", {
+    p_knowledge_key: args.knowledgeKey,
+    p_value: args.value,
+    p_basis: args.reason,
+    p_op_key: opKey(),
+    p_scope_kind: "firm",
+    p_client: null,
+    p_source_kind: args.sourceKind,
+    p_applies_when: args.appliesWhen ?? {},
+    p_effective_from: args.effectiveFrom ?? null,
+    p_effective_to: args.effectiveTo ?? null,
+    p_source: {},
+  }, opts);
+}

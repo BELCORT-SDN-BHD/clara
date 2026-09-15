@@ -51,6 +51,7 @@ import {
   KnowledgeSourceBlock,
   knowledgeValueText,
 } from "./knowledge-shared";
+import { KnowledgeExceptionPair } from "./knowledge-exception";
 
 const KINDS = ["assertion", "extracted_fact", "preference", "policy"] as const;
 const ALL = "all";
@@ -159,6 +160,17 @@ function KnowledgeGroup({ clientId, knowledgeKey, rows }: {
         <StateBanner tone="warning" title={t("conflictTitle")}>
           {t("conflictBody", { count: live.length, key: knowledgeKey })}
         </StateBanner>
+      ) : null}
+      {/* #654 — THE FIRM-RULE / CLIENT-EXCEPTION PAIR, and it is the OPPOSITE of the
+          conflict banner above it. A conflict means two live CLIENT rows and nothing
+          decides between them; a pair means the database HAS decided, per
+          applicability, and names the firm rule this client's own record overrides
+          (0192:1355-1363 filters that firm row out of this very read, which is why a
+          second read has to say so). Mounted only where a live GOVERNED client row
+          exists: a key this client has never recorded has nothing to override, and a
+          legacy client_fact is never shadowed at all (decision 1). */}
+      {live.some((r) => r.editable && r.scope_kind === "client") ? (
+        <KnowledgeExceptionPair clientId={clientId} knowledgeKey={knowledgeKey} />
       ) : null}
       <ul className="flex flex-col gap-3">
         {rows.map((row) => (
