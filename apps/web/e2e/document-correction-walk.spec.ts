@@ -27,12 +27,28 @@ import { ensureRealFocus } from "./helpers";
 const DOCUMENTS_URL = `/clients/${CORR.clientId}/documents`;
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
+/** ONE server serves the whole run, and this lane's state is the POINT of it — an accepted
+ *  revision MOVES the source version. So every cell starts from the same fixture, through the
+ *  lane's own client-scoped control verb. Without this, cell N's assertions would be about
+ *  whatever cells 1..N-1 happened to leave behind, which is the shape that turns one real failure
+ *  into six unattributable ones. */
+test.beforeEach(async ({ request }) => {
+  const response = await request.post("/e2e-supabase/rest/v1/rpc/reset_document_correction_fixture", {
+    data: { p_client: CORR.clientId },
+  });
+  expect(response.ok(), "the lane fixture must actually reset before each cell").toBe(true);
+});
+
 async function signIn(page: Page): Promise<void> {
   await page.goto("/login");
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  // 20s, not the 5s default: the FIRST cell of a freshly started `next start` pays for the
+  // server's own cold compile of `/login` and the firm shell, which is a property of the harness
+  // rather than of this journey (measured: the first cell of this file timed out at 5s while every
+  // later one signed in in well under a second).
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: 20_000 });
 }
 
 /** Open the walk's document straight at an address — the shape a shared link takes. */
@@ -148,35 +164,43 @@ test.describe("#646 — revising what the document says", () => {
     await expect(page.getByTestId("source-correction-band")).toContainText("Accounting impact pending");
   });
 
-  test("C2: a stale revision keeps the attempted value visible and recovers through a SECOND deliberate act", async ({ page }) => {
+  test("C2: a stale revision keeps the attempted value visible and recovers through a SECOND deliberate act", async ({ page, context }) => {
+    // THE ONLY TWO-PAGE CELL in this file: it signs in, opens a second page, and drives both. That
+    // is two full navigations plus two document opens, which does not fit the 30s default — and a
+    // cell that times out in its own sign-in says nothing about the journey it is meant to measure.
+    test.slow();
     await signIn(page);
     await openDocument(page, "facts");
-    // Move the document under the dialog: one accepted revision bumps the source version.
+    await expect(page.getByTestId("facts-version")).toContainText("source version 1");
+
+    // TWO PEOPLE, ONE DOCUMENT — the real shape of a stale revision, driven with two real pages
+    // rather than a rewritten request body. The second page opens its dialog against version 1 and
+    // then the first page moves the document under it.
+    const second = await context.newPage();
+    await second.goto(`${DOCUMENTS_URL}?document=${CORR.doc}&tab=facts`);
+    await expect(second.getByTestId("facts-version")).toContainText("source version 1", { timeout: 20_000 });
+    await second.getByRole("button", { name: "Revise" }).first().click();
+    await expect(second.getByTestId("revise-observed-version")).toHaveText("1");
+    await second.getByLabel("Corrected value").fill("1250.00");
+    await second.getByLabel("Revision reason").fill("a second person, working from the old reading");
+
     await revise(page, "1150.00", "the reader misread the printed total");
     await expect(page.getByTestId("facts-version")).toContainText("source version 2", { timeout: 20_000 });
 
-    // Now drive a revision written against version 1 — the shape a second person's open dialog has.
-    await page.goto(`${DOCUMENTS_URL}?document=${CORR.doc}&tab=facts`);
-    await expect(page.getByTestId("facts-version")).toContainText("source version 2", { timeout: 20_000 });
-    await page.route("**/rest/v1/rpc/revise_document_fact", async (route) => {
-      // The one thing the fixture cannot do by itself: make the dialog QUOTE a stale number. The
-      // browser is holding version 2; rewriting the body to 1 is how a second person's open dialog
-      // actually arrives, and the refusal it earns is the mock's own CLR19.
-      const body = JSON.parse(route.request().postData() ?? "{}");
-      await route.continue({ postData: JSON.stringify({ ...body, p_observed_version: 1 }) });
-    });
-    await revise(page, "1250.00", "a second person, working from the old reading");
-
-    const dialog = page.getByRole("dialog");
+    await second.getByRole("button", { name: "Record revision" }).click();
+    const dialog = second.getByRole("dialog");
     await expect(dialog).toContainText("CLR19");
     await expect(dialog).toContainText("stale_source_version");
     await expect(dialog).toContainText("1250.00");
     await expect(dialog).toContainText("source version 1");
     await expect(dialog).toContainText("version 2");
     // THE RECOVERY IS A CONTROL THE HUMAN PRESSES. Nothing re-submits on its own: that is how one
-    // person's correction silently overwrites another's.
-    await expect(page.getByTestId("revise-use-current-version")).toBeVisible();
-    await expect(page.getByLabel("Corrected value")).toHaveValue("1250.00");
+    // person's correction silently overwrites another's — and the value they typed is still there.
+    await expect(second.getByTestId("revise-use-current-version")).toBeVisible();
+    await expect(second.getByLabel("Corrected value")).toHaveValue("1250.00");
+    await second.getByTestId("revise-use-current-version").click();
+    await expect(second.getByTestId("revise-observed-version")).toHaveText("2");
+    await second.close();
   });
 
   test("C2: an unreadable amount is refused verbatim and the dialog stays open with the input standing", async ({ page }) => {
@@ -260,12 +284,12 @@ test.describe("#646 — the wrong-client correction, its Sheet and the client it
     await signIn(page);
     await openDocument(page);
 
-    await page.getByRole("button", { name: "Correct wrong client" }).click();
+    await page.getByRole("button", { name: "Correct wrong-client filing" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByRole("combobox").click();
     await page.getByRole("option").first().click();
-    await dialog.getByRole("button", { name: "Preview impact" }).click();
+    await dialog.getByRole("button", { name: "Preview blast radius" }).click();
     await expect(page.getByTestId("correction-blast-radius")).toContainText("1 cited entries");
 
     // THE SHEET TAKES THE EVIDENCE. While it is open the DECISION Dialog steps aside — two
@@ -276,27 +300,27 @@ test.describe("#646 — the wrong-client correction, its Sheet and the client it
     await expect(sheet).toContainText("Wrong-client impact");
     await expect(sheet).toContainText(CORR.entry);
     await expect(sheet).toContainText("separate accounting impact");
-    await expect(page.getByRole("button", { name: "Propose correction" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Record destination + propose" })).toHaveCount(0);
 
     // CLOSING IT RESTORES THE WIZARD AT THE SAME STEP, with the destination it already had — the
     // draft is not reset by looking at the evidence.
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0);
     await expect(page.getByTestId("correction-blast-radius")).toContainText("1 cited entries");
-    await expect(page.getByRole("button", { name: "Propose correction" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Record destination + propose" })).toBeVisible();
   });
 
   test("C2: the client the document moved AWAY from is told so, with the date and the correction id", async ({ page }) => {
     await signIn(page);
     await openDocument(page);
 
-    await page.getByRole("button", { name: "Correct wrong client" }).click();
+    await page.getByRole("button", { name: "Correct wrong-client filing" }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("combobox").click();
     await page.getByRole("option").first().click();
-    await dialog.getByRole("button", { name: "Preview impact" }).click();
-    await dialog.getByRole("button", { name: "Propose correction" }).click();
-    await dialog.getByRole("button", { name: "Approve correction" }).click();
+    await dialog.getByRole("button", { name: "Preview blast radius" }).click();
+    await dialog.getByRole("button", { name: "Record destination + propose" }).click();
+    await dialog.getByRole("button", { name: "Approve + apply" }).click();
 
     // The document does not silently vanish from this client: the band states where it went.
     await page.goto(`${DOCUMENTS_URL}?document=${CORR.doc}`);

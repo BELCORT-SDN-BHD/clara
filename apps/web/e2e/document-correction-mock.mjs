@@ -68,6 +68,13 @@ export const CORRECTION_RPC_VERBS = new Set([
   "propose_wrong_client_correction",
   "approve_wrong_client_correction",
   "get_document_extract",
+  // THE FIXTURE CONTROL. `serve-built.mjs` is ONE server for the whole run, so this lane's state
+  // survives from cell to cell — and this lane's state is the POINT (an accepted revision moves the
+  // source version, which is what a stale refusal is about). Each cell therefore resets it first,
+  // through a verb SCOPED to this lane's own client id: a control that answered for any body would
+  // be able to reset a sibling lane's fixture, which is exactly what `e2e-fixture-ownership.test.ts`
+  // exists to prevent.
+  "reset_document_correction_fixture",
 ]);
 
 const state = {
@@ -475,6 +482,12 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       if (body.p_correction !== CORR.correction) return false;
       state.transferred = true;
       return json(sendJson, response, { correction_id: CORR.correction, status: "completed" }, cors);
+    }
+
+    if (rpc === "reset_document_correction_fixture") {
+      if (body.p_client !== CORR.clientId) return false;
+      resetDocumentCorrection();
+      return json(sendJson, response, { ok: true }, cors);
     }
 
     if (rpc === "get_document_extract") {
