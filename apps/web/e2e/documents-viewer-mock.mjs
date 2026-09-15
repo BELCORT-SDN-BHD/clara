@@ -537,6 +537,34 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
       return json(sendJson, response, state624, cors);
     }
 
+    // #646 — the document detail panel reads its source lineage and its dependents on mount, so
+    // THIS lane has to answer them for ITS OWN documents or #624's walk would make two unmatched
+    // calls on every open. Both verbs are SHARED with `document-correction-mock.mjs` (declared as
+    // such in e2e-fixture-ownership.test.ts): each lane answers only for its own document ids and
+    // falls through otherwise.
+    //
+    // THE ANSWER IS AN EMPTY HISTORY, which is the honest fixture for this lane: #624's documents
+    // have never been revised, so the correction band renders NOTHING and this walk's faces are
+    // byte-identical to what they were before #646.
+    if (verb === "list_source_revisions") {
+      const body = await readJson(request);
+      if (typeof body.p_document !== "string" || !body.p_document.startsWith(LANE_DOCUMENT_PREFIX)) return false;
+      return json(sendJson, response, {
+        document_id: body.p_document, document_kind: DOC_ROWS[body.p_document]?.document_kind ?? null,
+        facts_version: 0, authoritative_extraction_id: null, current_facts_extraction_id: null,
+        lineage: [],
+      }, cors);
+    }
+
+    if (verb === "list_source_dependents") {
+      const body = await readJson(request);
+      if (typeof body.p_document !== "string" || !body.p_document.startsWith(LANE_DOCUMENT_PREFIX)) return false;
+      return json(sendJson, response, {
+        document_id: body.p_document, current_facts_extraction_id: null, facts_version: 0,
+        knowledge_records: [], open_questions: [], work_questions: [],
+      }, cors);
+    }
+
     if (verb === "confirm_attribution_candidate") {
       const body = await readJson(request);
       if (body.p_candidate !== DOCS.candidate) return false;

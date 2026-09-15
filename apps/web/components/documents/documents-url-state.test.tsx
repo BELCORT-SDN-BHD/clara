@@ -298,7 +298,7 @@ test("a DENIED filed read offers no Retry — a control that cannot work is wors
 // link #624 published still names the same address it always did.
 // =============================================================================================
 
-test("#646 the tab parameter admits exactly the three routed views, and anything else reads as Original", () => {
+test("646 · the tab parameter admits exactly the three routed views, and anything else reads as Original", () => {
   const parse = (search: string) => parseDocumentTabParam(new URLSearchParams(search));
   assert.equal(parse(""), "original", "no parameter is the default view, not an error");
   assert.equal(parse("tab=original"), "original");
@@ -315,7 +315,7 @@ test("#646 the tab parameter admits exactly the three routed views, and anything
   assert.equal(isDocumentTab(null), false);
 });
 
-test("#646 the DEFAULT view writes no tab parameter, and every other parameter survives the fold", () => {
+test("646 · the DEFAULT view writes no tab parameter, and every other parameter survives the fold", () => {
   const base = new URLSearchParams("document=11111111-1111-4111-8111-111111111111&page=2");
   const facts = applyDocumentTabParam(base, "facts");
   assert.equal(facts.get("tab"), "facts");
@@ -328,6 +328,6 @@ test("#646 the DEFAULT view writes no tab parameter, and every other parameter s
   // the one this surface has been handing out since #719.
   const back = applyDocumentTabParam(facts, "original");
   assert.equal(back.get("tab"), null, "switching back to Original leaves no dead parameter behind");
-  assert.equal(back.toString(), base.toString(), "and the URL is exactly the one #624 published");
+  assert.equal(back.toString(), base.toString(), "and the URL is exactly the one ticket 624 published");
   assert.equal(applyDocumentTabParam(facts, null).get("tab"), null);
 });

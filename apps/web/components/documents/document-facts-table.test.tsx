@@ -290,7 +290,7 @@ test("[N1] clearing the highlight passes NULL, and the overlay ends with no row 
 //     would refuse CLR10 on confirm.
 // =============================================================================================
 
-test("#646 no `revise` affordance means the table renders exactly as it did before this ticket", async () => {
+test("646 · no `revise` affordance means the table renders exactly as it did before this ticket", async () => {
   const h = await renderComponent(App(createElement(DocumentFactsTable, {
     facts: [region({ id: "r1", field_path: "invoice.total", monetary_cents: 105000 })],
   })));
@@ -303,14 +303,14 @@ test("#646 no `revise` affordance means the table renders exactly as it did befo
     };
     collect(h.container as never);
     assert.deepEqual(headers, ["Field", "Value", "Engine confidence"],
-      "three columns, no fourth header — a viewer sees the table #624 shipped");
+      "three columns, no fourth header — a viewer sees the table ticket 624 shipped");
     assert.doesNotMatch(h.text(), /Read-only/, "and no placeholder where a control would have been");
   } finally {
     await h.unmount();
   }
 });
 
-test("#646 with the affordance, a revisable path gets a control and an unrevisable one says so", async () => {
+test("646 · with the affordance, a revisable path gets a control and an unrevisable one says so", async () => {
   const h = await renderComponent(App(createElement(DocumentFactsTable, {
     facts: [
       region({ id: "r1", field_path: "invoice.total", monetary_cents: 105000 }),

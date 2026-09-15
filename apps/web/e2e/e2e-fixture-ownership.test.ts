@@ -55,6 +55,7 @@ const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "document-correction-mock.mjs",
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
@@ -280,6 +281,16 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `p_candidate` before it dispatches at all — so there is nothing to declare in either
   // column, which is the state a lane mock should be in.
   "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
+  // #646's source-correction lane. Every literal-path handler names its own client or its own
+  // `c0ee0c0c-` document prefix before it answers, and the RPC half guards on an exact-verb
+  // allow-list BEFORE `readJson` and then on its own document/question/correction id — so there is
+  // nothing to declare in either column.
+  //
+  // TWO OF ITS VERBS ARE SHARED with `documents-viewer-mock.mjs`: `list_source_revisions` and
+  // `list_source_dependents`, which the document detail panel reads on mount in BOTH lanes. Each
+  // lane answers only for its own document ids and falls through otherwise, which is what makes a
+  // shared verb safe here — the N5 scan below is what holds them to it.
+  "document-correction-mock.mjs": { unscopeable: [], debt: [] },
   "bank-close-registers-mock.mjs": {
     // The gate CATALOG is firm-wide and its read carries no filter AT ALL —
     // `lib/close/api.ts:320-322` sends only `select` and `order`. There is no discriminant in
