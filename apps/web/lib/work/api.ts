@@ -81,6 +81,13 @@ export type SubmitJournalWorkResult =
   /** No answer was observed. The request may have been admitted. */
   | { kind: "lost"; message: string };
 
+/** #638 — the claim door's answer. Every arm is `SubmitJournalWorkResult`'s, except that the
+ *  accepted one also names the CLAIM the admission already wrote (it is durable before the run
+ *  starts, so the form can link to it immediately). */
+export type SubmitClaimWorkResult =
+  | ({ kind: "accepted"; claimId: string | null } & WorkAdmission)
+  | Exclude<SubmitJournalWorkResult, { kind: "accepted" }>;
+
 export type RetryWorkResult =
   | ({ kind: "accepted" } & WorkAdmission)
   /** 409 — the Work is not in a state a new run may be admitted from. `status`
@@ -211,6 +218,69 @@ export async function submitPeriodicAdjustmentWork(
   if (res.status === 409) {
     // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and the
     // two doors share the response map that builds both bodies (`workErrorResponse`).
+    if (str(body.error) === "source_already_posted") {
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+    }
+    return { kind: "conflict", workId: str(body.work_id) };
+  }
+  return {
+    kind: "unavailable",
+    message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
+  };
+}
+
+/**
+ * #638 — ADMIT ONE STAFF EXPENSE CLAIM. A SIBLING of `submitPeriodicAdjustmentWork`, not a widened
+ * version of it, and for the reason migration 0206 gives for keeping a third database door: the
+ * three take different payloads and are reached by different surfaces.
+ *
+ * ONE ARGUMENT, NOT TWO. Unlike both siblings, this door takes NO `basis`: the claim IS the basis,
+ * and `clara.admit_staff_expense_claim_work` derives the balanced journal from the itemisation and
+ * the settlement itself. A browser that also posted lines would be a second, drifting statement of
+ * the same claim — cheaper to make impossible than to police.
+ *
+ * `claimId` COMES BACK WITH THE 202, because the claim row is durable at ADMISSION rather than at
+ * posting: the form links straight to the claim it just recorded, without waiting for the run.
+ */
+export async function submitStaffExpenseClaimWork(
+  auth: SessionTokenAccessor,
+  input: {
+    clientId: string;
+    intentKey: string;
+    claim: Record<string, unknown>;
+    /** Omitted entirely for a claim with no attachment — C1's "the attachment is genuinely
+     *  optional". The route reads an absent, null or empty list identically. */
+    sourceRefs?: ReadonlyArray<JournalSourceRefWire>;
+  },
+  signal?: AbortSignal,
+): Promise<SubmitClaimWorkResult> {
+  const token = await auth.getAccessToken();
+  if (!token) return { kind: "denied" };
+
+  let res: Response;
+  try {
+    res = await runtimePost(`${WORK_BASE}/staff-expense-claim`, token, input, signal);
+  } catch (err) {
+    // A network failure, a timeout, an aborted socket: NO answer was observed.
+    return { kind: "lost", message: (err as Error).message };
+  }
+  if (res.type === "opaqueredirect") return { kind: "denied" };
+
+  const body = (await readBody(res)) ?? {};
+  if (res.status === 202) {
+    const admission = admissionOf(body);
+    return admission === null
+      ? { kind: "lost", message: "the runtime accepted the work without naming it" }
+      : { kind: "accepted", ...admission, claimId: str(body.claim_id) };
+  }
+  if (res.status === 400) {
+    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: "denied" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409) {
+    // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and all
+    // three doors share the response map that builds both bodies (`workErrorResponse`).
     if (str(body.error) === "source_already_posted") {
       return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
     }

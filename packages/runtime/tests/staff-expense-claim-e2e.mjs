@@ -355,10 +355,13 @@ async function main() {
         "#638 e2e: dedicated to one named person; not a related-party balance", rig.opk("enrol")]);
     const checker = await rig.addMember(world.owner, world.firm, { role: "bookkeeper", prefix: "sec_chk" });
     const res = await rig.humanQuery(world.owner,
-      `select clara.record_resolution(p_client=>$1::uuid, p_subject_kind=>'manual', p_subject=>null::uuid,
-         p_confidence=>0.98::numeric, p_method=>'human', p_evidence=>'{}'::jsonb, p_op_key=>$2::text) as r`,
+      `select clara.record_client_resolution(p_client=>$1::uuid, p_subject_kind=>'manual',
+         p_subject=>null::uuid, p_confidence=>0.98::numeric, p_method=>'human',
+         p_evidence=>'{}'::jsonb, p_op_key=>$2::text) as r`,
       [world.client, rig.opk("res")]);
-    const resolution = res.rows[0].r.resolution_id ?? res.rows[0].r.id ?? res.rows[0].r;
+    const answer = res.rows[0].r;
+    const resolution = typeof answer === "string" ? answer : (answer.resolution_id ?? answer.id);
+    assert.ok(resolution, `record_client_resolution named its row (got ${JSON.stringify(answer)})`);
     const draft = await rig.humanQuery(world.owner,
       `select clara.draft_entry(p_client=>$1::uuid, p_resolution=>$2::uuid, p_posting_date=>$3::date,
          p_memo=>$4::text, p_lines=>$5::jsonb, p_op_key=>$6::text) as r`,
@@ -572,9 +575,14 @@ async function main() {
       clientId: gone.client, intentKey: goneIntent, claim: claim(),
     }, goneJwt);
     assert.equal(goneAdmit.status, 202, JSON.stringify(goneAdmit.body));
+    // `clara.remove_member` takes the MEMBERSHIP, not the (firm, user) pair — the members lane's
+    // own signature, read from the catalog rather than assumed.
+    const membership = (await rig.rootQuery(
+      "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
+      [gone.firm, goneMember])).rows[0].id;
     await rig.humanQuery(gone.owner,
-      "select clara.remove_member(p_firm=>$1::uuid, p_user=>$2::uuid, p_op_key=>$3::text) as r",
-      [gone.firm, goneMember, rig.opk("rm")]);
+      "select clara.remove_member(p_membership=>$1::uuid, p_op_key=>$2::text) as r",
+      [membership, rig.opk("rm")]);
     const afterRevoke = await api("POST", "/api/work/staff-expense-claim", {
       clientId: gone.client, intentKey: goneIntent, claim: claim(),
     }, goneJwt);

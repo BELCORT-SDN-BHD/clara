@@ -34,6 +34,7 @@
 # §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
 components/accounting/journal-composer.test.tsx
 components/accounting/periodic-adjustment-form.test.tsx
+components/accounting/staff-expense-claim-form.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -346,6 +347,8 @@ lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
 lib/work/periodic-adjustment-draft.test.ts
 lib/work/periodic-adjustment.test.ts
+lib/work/staff-expense-claim-draft.test.ts
+lib/work/staff-expense-claim.test.ts
 lib/work/question-fields.test.ts
 lib/work/questions.test.ts
 lib/work/reads.test.ts

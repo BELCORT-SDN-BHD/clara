@@ -310,6 +310,16 @@ export async function handlePlansSupabase(request, response, path, url, sendJson
     return true;
   }
 
+  // #638 — clara.get_work_claim_origin, on the SAME footing as the plan-origin row beside it and
+  // for the same reason: the Work detail asks both, and this lane's Work is a PLAN occurrence, not
+  // a staff expense claim. NULL is the door's own honest answer. Declared in
+  // e2e-fixture-ownership.test.ts's `SHARED_RPC_VERBS`.
+  if (verb === "get_work_claim_origin") {
+    if (body?.p_work !== PLANS.workId) return false;
+    sendJson(response, 200, null, cors);
+    return true;
+  }
+
   if (verb === "get_work_plan_origin") {
     if (body.p_work !== PLANS.workId) return false;
     sendJson(response, 200, {

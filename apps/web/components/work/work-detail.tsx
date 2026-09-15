@@ -69,6 +69,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { purposeLabel } from "@/lib/work/purpose-label";
+import { getWorkClaimOrigin, type WorkClaimOrigin } from "@/lib/work/staff-expense-claim-reads";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -157,6 +158,7 @@ export function WorkDetailView({
   scope,
   storage,
   loadLinks = listEntryLinks,
+  loadClaimOrigin = getWorkClaimOrigin,
 }: {
   clientId: string;
   workId: string;
@@ -173,6 +175,12 @@ export function WorkDetailView({
    *  again after every late attachment (hydrate-never-trust) while the Work
    *  itself has not moved. */
   loadLinks?: typeof listEntryLinks;
+  /** #638 — WHAT THIS WORK ACTUALLY IS, when its purpose cannot say. A staff expense claim is
+   *  admitted with purpose `journal_entry` (the vocabulary is deliberately unwidened — migration
+   *  0206's header states why a fourth purpose cannot post), so labelling by purpose alone would
+   *  call a claim "Journal entry" and stop. `clara.get_work_claim_origin` answers NULL for every
+   *  Work that is not a claim, so this read costs one round trip and never invents an origin. */
+  loadClaimOrigin?: typeof getWorkClaimOrigin;
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
@@ -229,6 +237,21 @@ export function WorkDetailView({
    *  that guess. The journals workbench already carries this distinction
    *  (`journals-workbench.tsx`'s own `linksUnavailable`); this page now does too. */
   const [linksUnavailable, setLinksUnavailable] = useState(false);
+  /** #638 — the claim this Work carries, or null. A FAILED read is indistinguishable from "not a
+   *  claim" on purpose: both leave the line absent, and the page never says a Work is NOT a claim,
+   *  only that it IS one. Nothing on this page is blocked by it. */
+  const [claimOrigin, setClaimOrigin] = useState<WorkClaimOrigin | null>(null);
+  useEffect(() => {
+    if (!addressable) return;
+    let live = true;
+    void (async () => {
+      const origin = await loadClaimOrigin(workId, { session }).catch(() => null);
+      if (live) setClaimOrigin(origin);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [addressable, workId, loadClaimOrigin, session]);
   const postedEntryId = state.data?.entry?.id ?? null;
   const reloadLinks = useCallback(async () => {
     if (postedEntryId === null) return;
@@ -384,6 +407,7 @@ export function WorkDetailView({
         linksUnavailable={linksUnavailable}
         committed={committed}
         reloadLinks={reloadLinks}
+        claimOrigin={claimOrigin}
         reloadWork={() => state.reload()}
         session={session}
       />
@@ -617,6 +641,7 @@ function PostedEntrySection({
   linksUnavailable,
   committed,
   reloadLinks,
+  claimOrigin,
   reloadWork,
   session,
 }: {
@@ -628,11 +653,14 @@ function PostedEntrySection({
   linksUnavailable: boolean;
   committed: OperationReceiptRow | null;
   reloadLinks: () => Promise<unknown>;
+  claimOrigin: WorkClaimOrigin | null;
   reloadWork: () => Promise<unknown>;
   session: SessionTokenAccessor;
 }) {
   const t = useTranslations("WorkDetail");
   const tm = useTranslations("ManualJournal");
+  /** #638's own copy, for the one line that names a claim. */
+  const tsec = useTranslations("StaffExpenseClaim");
   return (
         <section className="flex flex-col gap-2">
           <SectionHeader
@@ -675,6 +703,22 @@ function PostedEntrySection({
               <>
                 <dt className="text-muted-foreground">{tm("links.purpose")}</dt>
                 <dd className="text-foreground">{purposeLabel(links.purpose, tm, "links.purpose")}</dd>
+              </>
+            )}
+            {/* #638 — WHAT THIS WORK IS, when the purpose cannot say it. A staff expense claim is
+                a `journal_entry` Work by design, so the line above correctly reads "Journal entry"
+                and this one names the claim: whose it is, how it was settled, and how much. The
+                door answers NULL for every Work that is not a claim, so the line is simply absent
+                rather than empty. */}
+            {claimOrigin === null ? null : (
+              <>
+                <dt className="text-muted-foreground">{tsec("origin.label")}</dt>
+                <dd className="text-foreground" data-testid="work-claim-origin">
+                  {tsec("origin.value", {
+                    claimant: claimOrigin.claimant_label,
+                    settlement: tsec(`settlement.options.${claimOrigin.settlement}`),
+                  })}
+                </dd>
               </>
             )}
             {committed === null ? null : (

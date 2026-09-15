@@ -139,6 +139,16 @@ const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
       "payroll", "epf", "socso", "eis", "pcb", "hrdf", "statutory obligation",
     ],
   },
+  // #638 — the words a preparer reaches for when somebody hands them a receipt. Deliberately NOT
+  // "advances": that word belongs to the staff-advance register on the registers workbench, and two
+  // rows answering one word is a palette that guesses.
+  staffExpenseClaims: {
+    id: "staffExpenseClaims",
+    keywords: [
+      "staff claims", "expense claim", "reimbursement", "staff expenses", "receipts",
+      "employee payable", "claimant",
+    ],
+  },
   bank: { id: "bank", keywords: ["bank", "reconciliation", "statement", "matching"] },
   receivables: { id: "registersAging", keywords: ["receivables", "payables", "aging", "ar", "ap", "registers"] },
   assets: { id: "registersAssets", keywords: ["fixed assets", "depreciation", "nbv", "registers"] },

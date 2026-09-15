@@ -1781,6 +1781,21 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
     return true;
   }
 
+  // #638 — clara.get_work_claim_origin, the Work detail identity block's "Staff expense claim"
+  // row. Answered NULL for both of this lane's own Works: neither was admitted as a claim, and the
+  // detail renders nothing on a null row — the door's own honest answer for a Work that is not a
+  // claim, never a fabricated origin. The read exists at all because a claim is admitted with
+  // purpose `journal_entry` (migration 0206's header says why a fourth purpose cannot post), so the
+  // purpose alone cannot say what a Work IS. SHARED with staff-expense-claim-mock.mjs and
+  // plans-mock.mjs (declared in e2e-fixture-ownership.test.ts's `SHARED_RPC_VERBS`): each lane
+  // gates on its own Work ids first and falls through otherwise.
+  if (path === "/rest/v1/rpc/get_work_claim_origin") {
+    const body = await readJson(request);
+    if (body?.p_work !== JOURNAL_WORK.seededWorkId && body?.p_work !== JOURNAL_WORK.parkedCardWorkId) return false;
+    sendJson(response, 200, null, cors);
+    return true;
+  }
+
   // #728 finding 5 — clara.list_spoken_for_documents, the evidence pickers' advisory read.
   // Derived from the SAME `state.links`/`state.entries` this mock already keeps for
   // list_entry_links/attach_entry_evidence, rather than a separate fixture that could drift from
