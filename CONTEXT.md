@@ -20,6 +20,12 @@ _Avoid_: Chat session, chat message, journal entry as synonyms for the whole job
 Stopping the remaining work while retaining outcomes already completed. Reversing or correcting a posted outcome is a separate accounting action.
 _Avoid_: Rollback, reversal as synonyms for cancellation.
 
+<!-- #721 -->
+**Restated work / supersedes**:
+A reply that changes the admitted basis does not edit that work; it becomes a new work carrying the revised instruction, while the original is cancelled with the outcome *superseded*. The two are linked in both directions: the new work *supersedes* the old, the old is *superseded by* the new.
+_Avoid_: Edit, amend, correction as synonyms — a correction acts on a posted outcome, a restatement replaces an instruction that never posted.
+<!-- #721 -->
+
 **Accounting plan**:
 An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
 follows, the calendar days that schedule produces in a named timezone, the window its authority

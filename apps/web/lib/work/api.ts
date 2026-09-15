@@ -605,3 +605,85 @@ export async function takeOverWork(
     message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
   };
 }
+
+// #721 -----------------------------------------------------------------------
+/**
+ * #721 — RESTATE A WORK AS A NEW INSTRUCTION.
+ *
+ * The owner's ruling of 2026-09-12: an answer completes only what was asked, and a reply that
+ * changes an admitted basis element becomes a NEW Work. This is the client half of that — ONE
+ * request, because the two effects are one act: `clara.restate_accounting_work` admits the
+ * successor with `supersedes` and cancels the predecessor with `superseded_by` in one transaction.
+ *
+ * DELIBERATELY NOT `cancelWork()` FOLLOWED BY `submitJournalWork()`. Two calls have a state between
+ * them, and every failure in that gap leaves the firm with either two live Works for one
+ * instruction or none at all — with nothing on the row saying which was meant.
+ *
+ * `opKey` is this press's identity (a retry after a lost response REPLAYS); `intentKey` is the NEW
+ * Work's, exactly as it is for any admission.
+ */
+export type RestateWorkResult =
+  | ({ kind: "accepted" } & WorkAdmission & { supersedes: string | null })
+  /** 409 — the predecessor is not in a state a successor may replace: it posted, it settled, or
+   *  it already has one. `reason` is the database's own token, rendered rather than re-worded. */
+  | { kind: "not_restatable"; reason: string | null; status: string | null }
+  | { kind: "invalid_basis"; field: string | null; reason: string | null }
+  | { kind: "conflict"; workId: string | null }
+  | { kind: "denied" }
+  | { kind: "not_found" }
+  | { kind: "unavailable"; message: string }
+  | { kind: "lost"; message: string };
+
+export async function restateWork(
+  auth: SessionTokenAccessor,
+  input: {
+    workId: string;
+    opKey: string;
+    intentKey: string;
+    basis: JournalBasisWire;
+    sourceRefs?: ReadonlyArray<JournalSourceRefWire>;
+  },
+  signal?: AbortSignal,
+): Promise<RestateWorkResult> {
+  const token = await auth.getAccessToken();
+  if (!token) return { kind: "denied" };
+
+  let res: Response;
+  try {
+    res = await runtimePost(`${WORK_BASE}/${input.workId}/restate`, token, {
+      opKey: input.opKey,
+      intentKey: input.intentKey,
+      basis: input.basis,
+      ...(input.sourceRefs ? { sourceRefs: input.sourceRefs } : {}),
+    }, signal);
+  } catch (err) {
+    return { kind: "lost", message: (err as Error).message };
+  }
+  if (res.type === "opaqueredirect") return { kind: "denied" };
+
+  const body = (await readBody(res)) ?? {};
+  if (res.status === 202) {
+    const admission = admissionOf(body);
+    return admission === null
+      ? { kind: "lost", message: "the runtime accepted the restatement without naming it" }
+      : { kind: "accepted", ...admission, supersedes: str(body.supersedes) };
+  }
+  if (res.status === 400) return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+  if (res.status === 401 || res.status === 403) return { kind: "denied" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409) {
+    // THE DATABASE'S OWN TOKENS, kept apart. `intent_payload_conflict` says the NEW figures need a
+    // fresh intent key; `not_restatable` / `already_superseded` say the PREDECESSOR cannot be
+    // retired, which no key rotation fixes.
+    const reason = str(body.reason) ?? str(body.error);
+    if (reason === "not_restatable" || reason === "already_superseded" || reason === "not_restatable_purpose") {
+      return { kind: "not_restatable", reason, status: str(body.status) };
+    }
+    return { kind: "conflict", workId: str(body.work_id) };
+  }
+  return {
+    kind: "unavailable",
+    message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
+  };
+}
+// #721 -----------------------------------------------------------------------

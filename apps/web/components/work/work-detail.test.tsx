@@ -957,6 +957,64 @@ test("750 a CANCELLED work NAMES who pressed Cancel and when; a run that carries
 });
 // #750 -----------------------------------------------------------------------------------------
 
+// #721 -----------------------------------------------------------------------------------------
+test("721 B3 links a restated Work BOTH WAYS, and offers the restatement beside a pending question", async () => {
+  const OTHER = "99999999-9999-4999-8999-999999999999";
+
+  // THE SUCCESSOR, pointing back.
+  const forward = await renderComponent(
+    App({ load: async () => data({ work: workRow({ supersedes: OTHER }) }) }),
+  );
+  try {
+    await forward.settle();
+    assert.match(forward.text(), /Supersedes/, "721 the successor says what it replaced");
+    assert.ok(hrefs(forward.container).some((h) => h.includes(OTHER)),
+      "721 …and links to it, so a refusal can be read against the basis that was admitted");
+  } finally {
+    await forward.unmount();
+  }
+
+  // THE PREDECESSOR, pointing forward.
+  const back = await renderComponent(
+    App({ load: async () => data({ work: workRow({ status: "cancelled", superseded_by: OTHER }) }) }),
+  );
+  try {
+    await back.settle();
+    assert.match(back.text(), /Superseded by/, "721 the retired Work says what replaced it");
+    assert.ok(hrefs(back.container).some((h) => h.includes(OTHER)), "721 …and links to it");
+  } finally {
+    await back.unmount();
+  }
+
+  // NEITHER HALF, NEITHER ROW. Almost every Work was never restated.
+  const plain = await renderComponent(App({ load: async () => data() }));
+  try {
+    await plain.settle();
+    assert.equal(/Supersedes|Superseded by/.test(plain.text()), false,
+      "721 a Work that was never restated shows no supersession row at all");
+  } finally {
+    await plain.unmount();
+  }
+
+  // THE AFFORDANCE, beside the question a person may disagree with rather than merely answer.
+  const parked = await renderComponent(
+    App({
+      load: async () => data({
+        work: workRow({ status: "awaiting_input", current_task_id: TASK }),
+        interruption: parkedQuestion(),
+      }),
+    }),
+  );
+  try {
+    await parked.settle();
+    assert.match(parked.text(), /Restate as a new instruction/,
+      "721 a parked Work offers the other answer: a new instruction");
+  } finally {
+    await parked.unmount();
+  }
+});
+// #721 -----------------------------------------------------------------------------------------
+
 test("630 an authority_lost refusal offers Take responsibility; a plain failure does not", async () => {
   const taken: Array<{ workId: string; basisDigest?: string | null }> = [];
   const orphaned = () =>

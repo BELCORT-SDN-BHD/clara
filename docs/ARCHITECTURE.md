@@ -196,6 +196,20 @@ run 在冻结 bundle 下执行，调用受控领域 operation，**在同一事�
 收款分配必须维护余额，购置资产要同时保留资产记录。已入账历史不可原地改写——更正是有来源关联的
 冲销／替代操作。同 key 同 payload 重放取回原回执，同 key 不同 payload 是类型化 conflict。[已实现]
 
+<!-- #750 / #721 -->
+Work 的**取消**与**改述**：`clara.cancel_accounting_work` 取消尚未过账的 Work（已持有 committed
+回执的 Work 永远答 `already_completed`，不冲销已入账结果），并在真正取消的两条分支上追加**恰好一条**
+`work.cancelled` 领域事件（payload `{work, from_status, author, outcome, superseded_by}`），
+Activity feed 的 `work.%` 分支因此有了第二个生产者；B3 的 Cancelled 横幅从 run 行的
+`cancelled_by`／`cancelled_at` 读出"由谁、何时"。Work 问答的回答**只补齐被问到的事**：
+`clara.answer_work_question` 对声称改动已准入 basis 要素的回答答 `basis_change_not_allowed`
+（detail 指名要素）；真正要改指令的回复走新门 `clara.restate_accounting_work`——在同一事务里
+以同一扇准入门 `clara.admit_journal_work` 准入带 `supersedes` 的新 Work，并以
+`superseded_by` 取消旧 Work，两列都是**一次性写入**（`t_accounting_work_immutable` 只允许
+null→值一次，且只落在仍可取消或已取消的 Work 上）。没有 `work.superseded` 兄弟事件类型：
+一个生产者，一个类型。[已实现，本地验证；hosted evidence pending]
+<!-- #750 / #721 -->
+
 <a id="close-reporting-and-tax"></a>关账按年度顺序串行，carry-forward 幂等，beginning-close 冻结期间内银行结算须先完成。
 报表走 open → evaluate → seal → render：确定性计算、封存快照、独立渲染服务出文件，模型不重打金额。
 指标携带 unit／currency、period／as-of、computed-at、定义版本、source watermark 与 coverage；

@@ -55,7 +55,9 @@ import { businessDateTime } from "@/lib/business-date";
 import { isUuidShape } from "@/lib/client-id";
 import { readClarifyQuestion } from "@/lib/journals/governance-doors";
 import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
-import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navigation/tree";
+import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref, workDetailHref } from "@/lib/navigation/tree";
+// #721 — the shortened-id treatment the product already uses for ids.
+import { shortId } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
   cancelWork,
@@ -89,6 +91,9 @@ import {
   type AccountingWorkRow,
   type WorkTaskRow,
 } from "@/lib/work/types";
+// #721
+import { RestateWorkPanel } from "@/components/work/work-restate";
+// #721
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { WORK_HEADING_ID } from "@/lib/navigation/heading-ids";
@@ -392,7 +397,7 @@ export function WorkDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} />
+      <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} clientId={clientId} />
 
       {/* DELAYED IS ABOUT THE READ, not about the Work. It says the page has not
           managed a successful read since a named time, which is a fact about the
@@ -726,14 +731,19 @@ function WorkFacts({
   work,
   taskStatus,
   members,
+  clientId,
 }: {
   work: AccountingWorkRow;
   taskStatus: string | null;
   members: MemberNameResolver;
+  /** #721 — the scope both supersession links are built in. */
+  clientId: string;
 }) {
   const t = useTranslations("WorkDetail");
   /** #630 — the handover row's own word. */
   const tc = useTranslations("WorkCancel");
+  /** #721 — the restatement's own words, in the namespace the panel reads them from. */
+  const tr = useTranslations("WorkRestate");
   /** #643 — the purpose's own noun, read from the SAME namespace the result block reads it from
    *  so one page cannot label one row two ways. */
   const tm = useTranslations("ManualJournal");
@@ -784,6 +794,32 @@ function WorkFacts({
             <dt className="text-muted-foreground">{tc("responsibleNow")}</dt>
             <dd className="text-foreground">
               <MemberName userId={work.initiator} resolver={members} showRole={false} />
+            </dd>
+          </>
+        ) : null}
+        {/* #721 — BOTH WAYS, and only when there is something to point at. A restatement makes two
+            Works one story: the retired instruction and the one that replaced it. A reader who
+            lands on either half must be able to reach the other, because a refusal or a receipt is
+            only readable against the basis that was actually admitted. */}
+        {typeof work.supersedes === "string" && work.supersedes !== "" ? (
+          <>
+            <dt className="text-muted-foreground">{tr("supersedesLabel")}</dt>
+            <dd className="text-foreground">
+              <Link href={workDetailHref(clientId, work.supersedes)}
+                    className="font-medium text-primary underline underline-offset-2">
+                {tr("supersedesLink", { id: shortId(work.supersedes) })}
+              </Link>
+            </dd>
+          </>
+        ) : null}
+        {typeof work.superseded_by === "string" && work.superseded_by !== "" ? (
+          <>
+            <dt className="text-muted-foreground">{tr("supersededByLabel")}</dt>
+            <dd className="text-foreground">
+              <Link href={workDetailHref(clientId, work.superseded_by)}
+                    className="font-medium text-primary underline underline-offset-2">
+                {tr("supersededByLink", { id: shortId(work.superseded_by) })}
+              </Link>
             </dd>
           </>
         ) : null}
@@ -1079,6 +1115,11 @@ function WorkOutcome({
           workId={work.id}
           fallbackQuestion={clarify === null ? null : { question: clarify.question, context: clarify.context }}
         />
+        {/* #721 — AND THE OTHER ANSWER. A reply that CHANGES the instruction is not an answer to
+            this question (the door refuses it `basis_change_not_allowed`); it is a new Work. The
+            control sits beside the answer form because that is where a person discovers they
+            disagree with the basis rather than merely lacking a fact. */}
+        <RestateWorkPanel work={work} clientId={clientId} session={session} onRestated={onConverge} />
       </div>
     );
   }
