@@ -1934,6 +1934,40 @@ const CODING_LANE_LINK_0197_UNGRANTED_FNS = [
 export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_FNS];
 // #718 END
 
+// #647 [0200, counterparty identity provenance + the correction history] — its own cohort for the
+// same "wholly present or wholly absent" reason 0192's and 0193's carry: folding these names into
+// an older roster would red every database between the two frontiers, and cohortFailures() fails
+// a PARTIAL cohort by design.
+//
+//   the THREE human reads — clara_authenticated ONLY, every one viewer-floored inside its own
+//   body and firm-predicated. The agent and both wake lanes gain ZERO, and that is D11 rather
+//   than an omission: Clara has no identity WRITE verb in this slice, so she has nothing here to
+//   read either, and a _human_ctx-gated read granted to a role that carries no JWT is 0057 B6's
+//   DARK GRANT. The three RECUT writers (add_counterparty_alias, rename_counterparty,
+//   set_counterparty_identifiers) keep their existing rosters above — they are not new names.
+const COUNTERPARTY_IDENTITY_0200_HUMAN_FNS = [
+  "get_counterparty_identity", "list_counterparty_identity",
+  "list_counterparty_merge_corrections",
+];
+//   …and the UNGRANTED closure: the ONE revision writer (the only place a revision number is
+//   chosen, and the only body that takes the per-counterparty row lock that makes two concurrent
+//   corrections safe), the append-only trigger of the revision relation, the honesty trigger that
+//   refuses a machine lane claiming recorded_via='human_ui', and the two lane-agnostic revision
+//   triggers that cover the writers this slice may NOT recut (clara.merge_counterparties, whose
+//   live body is a 0149 splice, and clara.tick_seeding_proposal). Listed so cohortFailures
+//   reports a half-applied 0200 rather than a silently narrower boundary — and the signal is
+//   sharp here: a 0200 with the columns but without _tf_counterparty_alias_recorded_via is not a
+//   narrower boundary, it is a table on which any lane may claim a human wrote the row.
+const COUNTERPARTY_IDENTITY_0200_UNGRANTED_FNS = [
+  "_append_counterparty_identity_revision", "_tf_counterparty_identity_revision_immutable",
+  "_tf_counterparty_alias_recorded_via", "_tf_counterparty_alias_revision",
+  "_tf_counterparty_merge_revision",
+];
+export const COUNTERPARTY_IDENTITY_0200_COHORT = [
+  ...COUNTERPARTY_IDENTITY_0200_HUMAN_FNS, ...COUNTERPARTY_IDENTITY_0200_UNGRANTED_FNS,
+];
+// #647 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1978,6 +2012,8 @@ export const ALLOWED = {
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
     ...KNOWLEDGE_0192_HUMAN_FNS, // #644 [0192] the three knowledge writes + the three C13 reads
     ...KNOWLEDGE_0192_SHARED_FNS, // #644 [0192] the promotion door — the ONE two-lane name
+    ...COUNTERPARTY_IDENTITY_0200_HUMAN_FNS, // #647 [0200] the three counterparty-identity reads
+    // (viewer-floored, firm-predicated); agent/wake/runtime gain ZERO — D11, see the block above
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
     // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
@@ -2515,6 +2551,7 @@ export async function grantMatrixFailures() {
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
   // #718 END
+  failures.push(...cohortFailures("#647 0200 counterparty-identity provenance lane", COUNTERPARTY_IDENTITY_0200_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

@@ -131,13 +131,29 @@ test("p647.provenance.source_pins — a stray extraction pin is refused; a cross
   assert.equal(okRow.source_region_id, own.region);
   assert.equal(okRow.source_field_path, "invoice.vendor_name");
 
-  // W2 — a stray extraction pin on a non-'extracted' origin is provenance theatre.
+  // W2 — a stray extraction pin on a non-'extracted' origin is provenance theatre. TWO walls,
+  // asserted separately: the door refuses it as a TYPED refusal a human can read, and the table
+  // refuses it structurally for any writer that never goes through a door.
   const stray = await caught(() => addAlias(w.bookkeeper, {
     client: w.clientA, counterparty: cp, alias: name("STRAY"), origin: "human",
     document: own.document, extraction: own.extraction,
   }));
-  assert.ok(stray, "p647.provenance.source_pins: a stray extraction pin is refused");
-  assert.equal(stray.code, "23514", "p647.provenance.source_pins: refused by the two-way CHECK, not by the door's care");
+  assert.ok(stray, "p647.provenance.source_pins: a stray extraction pin is refused at the door");
+  assert.equal(stray.code, "CLR10", "p647.provenance.source_pins: the door names the mistake rather than leaking a 23514");
+  assert.equal(reasonOf(stray), "source_not_extracted");
+  const strayRaw = await caught(() => rootQuery(
+    `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
+        alias_display,origin,created_by,source_document_id,source_extraction_id)
+     values($1,$2,$3,'straydirect','straydirect','human',$4,$5,$6)`,
+    [w.firm, w.clientA, cp, w.bookkeeper, own.document, own.extraction]));
+  assert.equal(strayRaw?.code, "23514",
+    "p647.provenance.source_pins: …and the two-way CHECK refuses the same lie from a writer that never went through a door");
+  const missingHalf = await caught(() => addAlias(w.bookkeeper, {
+    client: w.clientA, counterparty: cp, alias: name("HALF"), origin: "extracted",
+    document: own.document,
+  }));
+  assert.equal(missingHalf?.code, "CLR10", "p647.provenance.source_pins: an extracted alias owes BOTH halves of its pin");
+  assert.equal(reasonOf(missingHalf), "source_incomplete");
 
   // W3 — a document of ANOTHER FIRM: the composite (id, firm_id) FK cannot even be satisfied.
   const cross = await caught(() => addAlias(w.bookkeeper, {
@@ -573,20 +589,20 @@ test("p647.alias.provenance_reaches_the_list — every one of the four recorded_
   if (need(t)) return;
   const cp = await createCounterparty(w.bookkeeper, { client: w.clientA, name: name("VIAS") });
   const human = await addAlias(w.bookkeeper, { client: w.clientA, counterparty: cp, alias: name("VIA-HUMAN"), origin: "human" });
-  const legacy = (await rootQuery(
-    `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
-        alias_display,origin,created_by) values($1,$2,$3,$4,$5,'human',$6) returning id`,
-    [w.firm, w.clientA, cp, `vialegacy${randomUUID().slice(0, 6).replace(/-/g, "")}`, "VIA LEGACY", w.bookkeeper])).rows[0].id;
-  const agent = (await rootQuery(
-    `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
-        alias_display,origin,created_by,recorded_via)
-     values($1,$2,$3,$4,$5,'agent_proposed',$6,'agent') returning id`,
-    [w.firm, w.clientA, cp, `viaagent${randomUUID().slice(0, 6).replace(/-/g, "")}`, "VIA AGENT", w.bookkeeper])).rows[0].id;
-  const seeding = (await rootQuery(
-    `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
-        alias_display,origin,created_by,recorded_via)
-     values($1,$2,$3,$4,$5,'human',$6,'seeding') returning id`,
-    [w.firm, w.clientA, cp, `viaseed${randomUUID().slice(0, 6).replace(/-/g, "")}`, "VIA SEED", w.bookkeeper])).rows[0].id;
+  // ck_counterparty_aliases_normalized ties the two spellings together, so a direct insert has to
+  // supply a congruent pair — the same discipline every door already follows.
+  const raw = async (display, origin, via) => {
+    const norm = display.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const r = await rootQuery(
+      `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
+          alias_display,origin,created_by,recorded_via)
+       values($1,$2,$3,$4,$5,$6,$7,coalesce($8,'legacy_unknown')) returning id`,
+      [w.firm, w.clientA, cp, norm, display, origin, w.bookkeeper, via]);
+    return r.rows[0].id;
+  };
+  const legacy = await raw(`VIALEGACY${randomUUID().slice(0, 6)}`, "human", null);
+  const agent = await raw(`VIAAGENT${randomUUID().slice(0, 6)}`, "agent_proposed", "agent");
+  const seeding = await raw(`VIASEED${randomUUID().slice(0, 6)}`, "human", "seeding");
 
   const detail = await identity(w.viewer, { client: w.clientA, counterparty: cp });
   const via = Object.fromEntries(detail.aliases.map((a) => [a.id, a.recorded_via]));
