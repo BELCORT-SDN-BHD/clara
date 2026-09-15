@@ -44,20 +44,44 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+/** The PREVIEW the fake door answers by default: a live invitation into this firm, at the role
+ *  the membership row will carry. #625 — `clara.preview_invite` (0209) is called between
+ *  verification and the password fields, so EVERY cell in this file now goes through it. */
+const PREVIEW_ROW = {
+  firm_name: "ROME PROPERTIES",
+  role: "bookkeeper",
+  status: "pending",
+  masked_email: "a***@example.test",
+};
+
 /** The fake estate: `accept_invite` MINTS the membership, `caller_context`
  *  REPORTS it. The read is never told about the acceptance except through this
  *  shared state — which is what makes the post-condition discriminating. */
-function fakeEstate(options: { acceptRefusal?: { code: string; message: string }; contextStatus?: number } = {}) {
+function fakeEstate(options: {
+  acceptRefusal?: { code: string; message: string };
+  contextStatus?: number;
+  /** #625 — what `clara.preview_invite` answers. A function so a cell can hold the read in
+   *  flight (the only way to prove the door was called BEFORE the password fields existed). */
+  preview?: () => Promise<Response>;
+} = {}) {
   const state = {
     membership: false,
     acceptCalls: [] as Record<string, unknown>[],
     contextReads: 0,
+    /** #625 — every `preview_invite` body this journey sent. WHEN it went out is proven by
+     *  holding the read in flight and looking at the DOM (see `p625.web.preview_called`), not by
+     *  counting from inside the transport. */
+    previewCalls: [] as Record<string, unknown>[],
     /** Headers of the LAST caller_context read — so a cell can prove the read
      *  went out credentialed and profile-scoped, not as an anonymous GET. */
     contextHeaders: {} as Record<string, string>,
   };
   const impl = (async (u: RequestInfo | URL, init?: RequestInit) => {
     const url = String(u);
+    if (url.includes("/rpc/preview_invite")) {
+      state.previewCalls.push(JSON.parse(String(init?.body ?? "{}")));
+      return options.preview ? options.preview() : jsonResponse(PREVIEW_ROW);
+    }
     if (url.includes("/rpc/accept_invite")) {
       state.acceptCalls.push(JSON.parse(String(init?.body ?? "{}")));
       if (options.acceptRefusal) return jsonResponse(options.acceptRefusal, 400);
@@ -152,16 +176,42 @@ function callAt(calls: Record<string, unknown>[], i: number): Record<string, unk
   return call;
 }
 
-/** Drives the shipped journey: click the gate, fill both fields, submit. */
-async function walkToSubmit(
-  h: Awaited<ReturnType<typeof renderComponent>>,
-  name = "Aisyah Rahman",
-): Promise<void> {
+/** Clicks the click gate and settles — verification, then #625's preview read, both run here. */
+async function walkToPassword(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
   const gate = findIn(h.container as never, byButtonText(/Accept invitation/));
   assert.ok(gate, "the click gate must render first — nothing is consumed on mount");
   await h.act(async () => { await clickButton(gate as never); });
-  for (let i = 0; i < 4; i++) await h.settle();
+  for (let i = 0; i < 6; i++) await h.settle();
+}
 
+/** #625 D1 — the settled JOINED stage's own control. The journey no longer navigates on its own:
+ *  it shows which firm was joined and at which role, and the person leaves when they say so. */
+async function enterWorkspace(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
+  const enter = findIn(h.container as never, byButtonText(/Enter workspace/));
+  assert.ok(enter, "the joined stage must offer an explicit Enter-workspace control");
+  await h.act(async () => { await clickButton(enter as never); });
+  for (let i = 0; i < 4; i++) await h.settle();
+}
+
+/** Drives the shipped journey: click the gate, fill both fields, submit — and, by default, take
+ *  the explicit Enter-workspace step #625 D1 puts between a settled acceptance and the redirect.
+ *  Pass `{ enter: false }` to stop ON the joined stage and look at it. */
+async function walkToSubmit(
+  h: Awaited<ReturnType<typeof renderComponent>>,
+  name = "Aisyah Rahman",
+  opts: { enter?: boolean } = {},
+): Promise<void> {
+  await walkToPassword(h);
+  await fillAndSubmit(h, name, opts);
+}
+
+/** The second half of `walkToSubmit`, for a cell that is ALREADY on the password step (e.g. one
+ *  that walked there to look at the preview block first). */
+async function fillAndSubmit(
+  h: Awaited<ReturnType<typeof renderComponent>>,
+  name = "Aisyah Rahman",
+  opts: { enter?: boolean } = {},
+): Promise<void> {
   const nameInput = findIn(h.container as never, byLabelledInput(/Your name/));
   const passwordInput = findIn(h.container as never, byLabelledInput(/Password/));
   assert.ok(nameInput, "the display-name field must render on the password step");
@@ -175,6 +225,9 @@ async function walkToSubmit(
   assert.ok(form, "the password form must render");
   await h.fireEvent(form as never, "submit");
   for (let i = 0; i < 8; i++) await h.settle();
+
+  if (opts.enter === false) return;
+  if (findIn(h.container as never, byButtonText(/Enter workspace/))) await enterWorkspace(h);
 }
 
 // ===========================================================================
@@ -649,7 +702,13 @@ test("the unconfirmed state's recovery RE-READS and never re-calls the door; a p
         for (let i = 0; i < 6; i++) await h.settle();
 
         assert.equal(state.acceptCalls.length, 1, "the recovery must NOT re-call a door that already succeeded");
-        assert.deepEqual(router.replaced, ["/"], "a positive read then leaves");
+        // #625 D1 — a positive read now SETTLES on the joined stage rather than navigating on its
+        // own, so the recovery's success is visible here too: the firm and role, then the
+        // person's own explicit step out.
+        assert.match(textOf(h.container as never), /ROME PROPERTIES/, "the recovered read names the firm");
+        assert.deepEqual(router.replaced, [], "…and still nothing navigates by itself");
+        await enterWorkspace(h);
+        assert.deepEqual(router.replaced, ["/"], "a positive read then leaves, when the person says so");
       } finally {
         await h.unmount();
       }
@@ -836,6 +895,296 @@ test("the membership read goes out CREDENTIALED and profile-scoped — never an 
       assert.equal(state.contextHeaders["authorization"], "Bearer tok", "the read carries the session bearer token");
       assert.equal(state.contextHeaders["accept-profile"], "clara", "and is scoped to the clara schema");
       assert.deepEqual(router.replaced, ["/"], "and the journey completed on it");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ===========================================================================
+// #625 — THE PREVIEW STEP (0209), THE TWO FACE SETS, AND THE JOINED STAGE.
+//
+// AC2's second half: "the accepted role and scope are visible BEFORE entering the workspace".
+// Two independent things make that true, and each has its own cells below:
+//   · `clara.preview_invite` is read AFTER verifyOtp has a session and BEFORE the password
+//     fields render, so the invitee knows which firm and which role they are joining before they
+//     commit anything; and
+//   · a settled JOINED stage replaces the bare `router.replace("/")`, so the membership that was
+//     just minted is stated rather than skipped past.
+// ===========================================================================
+
+/** A deferred response, so a cell can hold the preview read in flight and look at the DOM while
+ *  it is still out. Proving WHEN a call happened needs the call to still be happening. */
+function deferredResponse(): { promise: () => Promise<Response>; resolve: (body: unknown, status?: number) => void } {
+  let release: (r: Response) => void = () => {};
+  const p = new Promise<Response>((res) => { release = res; });
+  return { promise: () => p, resolve: (body, status = 200) => release(jsonResponse(body, status)) };
+}
+
+test("p625.web.preview_called: the door is called BEFORE the password fields exist, and its answer renders ABOVE them", async () => {
+  const gate = deferredResponse();
+  const { state, impl } = fakeEstate({ preview: gate.promise });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+
+      // (1) THE ORDERING CLAIM, proven while the read is still out: the door has been called and
+      //     there is no password field on the page yet.
+      assert.equal(state.previewCalls.length, 1, "the preview door must be called exactly once");
+      assert.equal(callAt(state.previewCalls, 0).p_token, CLARA_TOKEN, "…with CLARA's own invite token");
+      assert.equal(
+        findIn(h.container as never, byLabelledInput(/Password/)), null,
+        "no password field may exist while the preview read is still in flight",
+      );
+      assert.equal(state.acceptCalls.length, 0, "and nothing has been accepted");
+
+      // (2) The answer lands, and it lands ABOVE the fields: the form itself carries no firm name.
+      gate.resolve(PREVIEW_ROW);
+      for (let i = 0; i < 6; i++) await h.settle();
+      const text = textOf(h.container as never);
+      assert.match(text, /ROME PROPERTIES/, "the firm the invitation is into, by name");
+      assert.match(text, /Bookkeeper/, "…and the role it grants");
+      assert.match(text, /a\*\*\*@example\.test/, "…and the MASKED address, never the address");
+      const passwordInput = findIn(h.container as never, byLabelledInput(/Password/));
+      assert.ok(passwordInput, "the password step renders once the preview has settled");
+      const form = findIn(h.container as never, (n) => n.tagName === "FORM");
+      assert.ok(form);
+      assert.doesNotMatch(
+        textOf(form as never), /ROME PROPERTIES/,
+        "the preview block sits ABOVE the form, not inside it",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.preview_blocks: a revoked / expired / already-accepted preview renders THAT face and NO password form", async () => {
+  for (const [status, face] of [
+    ["revoked", /was revoked/],
+    ["expired", /invitation has expired/],
+    ["accepted", /already accepted/],
+  ] as const) {
+    let updateUserCalls = 0;
+    const { state, impl } = fakeEstate({
+      preview: async () => jsonResponse({ ...PREVIEW_ROW, status }),
+    });
+    await withMockedEnv(impl, async () => {
+      const { h, router } = await mount(
+        createElement(InviteAcceptForm, {
+          token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+          createSupabaseClient: authClient({
+            updateUser: async () => { updateUserCalls += 1; return { error: null }; },
+          }),
+        }),
+      );
+      try {
+        await walkToPassword(h);
+        const text = textOf(h.container as never);
+        assert.match(text, face, `the ${status} invitation must get its OWN face`);
+        assert.match(text, /ROME PROPERTIES/, "…and still name the firm it was for");
+        assert.equal(
+          findIn(h.container as never, byLabelledInput(/Password/)), null,
+          `a ${status} invitation must offer NO password form — there is nothing to accept`,
+        );
+        assert.equal(updateUserCalls, 0, "…and updateUser is unreachable from this face");
+        assert.equal(state.acceptCalls.length, 0, "…and the acceptance door is never called");
+        assert.deepEqual(router.replaced, [], "…and nothing navigates");
+      } finally {
+        await h.unmount();
+      }
+    });
+  }
+});
+
+test("p625.web.preview_blocks: a REFUSED preview renders the single no-oracle face and no password form", async () => {
+  const { state, impl } = fakeEstate({
+    preview: async () =>
+      jsonResponse(
+        {
+          code: "CLR10",
+          message: "this invite link is not valid for the signed-in address",
+          details: '{"reason":"invite_not_previewable"}',
+        },
+        400,
+      ),
+  });
+  await withMockedEnv(impl, async () => {
+    const { h, router } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const text = textOf(h.container as never);
+      assert.match(text, /not valid for the address you are signed in as/, "ONE face for the door's ONE refusal");
+      // THE NO-ORACLE READING, asserted as ABSENCE: the copy must name neither possibility,
+      // because the database deliberately cannot tell the caller which one it was.
+      assert.doesNotMatch(text, /does not exist/i, "the face must not say the token is unknown");
+      assert.doesNotMatch(text, /wrong email/i, "…nor that the token is real but the address is wrong");
+      assert.equal(findIn(h.container as never, byLabelledInput(/Password/)), null, "a refused preview blocks");
+      assert.equal(state.acceptCalls.length, 0);
+      assert.deepEqual(router.replaced, []);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.preview_blocks: an INDEFINITE preview DEGRADES — the password form still renders, with the block absent and one honest line", async () => {
+  const { state, impl } = fakeEstate({
+    preview: async () => { throw new TypeError("network down"); },
+  });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const text = textOf(h.container as never);
+      assert.ok(
+        findIn(h.container as never, byLabelledInput(/Password/)),
+        "a read that never came back is NOT a verdict — the door is still the authority, so the journey continues",
+      );
+      assert.doesNotMatch(text, /ROME PROPERTIES/, "…but nothing is claimed about which firm this is");
+      assert.match(text, /couldn't show which firm/, "…and the surface says so instead of leaving a silent gap");
+      // …and the journey really does complete over it.
+      await fillAndSubmit(h);
+      assert.equal(state.acceptCalls.length, 1, "the door is what decides, and it was reached");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.joined: the firm name and the accepted role are in the document BEFORE any navigation fires", async () => {
+  const { state, impl } = fakeEstate();
+  await withMockedEnv(impl, async () => {
+    const { h, router } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToSubmit(h, "Aisyah Rahman", { enter: false });
+
+      // THE ASSERTION IS ORDERING, not presence: the spy must not have been called YET.
+      assert.deepEqual(router.replaced, [], "the journey does not navigate on its own");
+      assert.equal(router.refreshed, 0);
+      assert.equal(state.membership, true, "…even though the membership is minted and read back");
+      const text = textOf(h.container as never);
+      assert.match(text, /ROME PROPERTIES/, "the firm that was joined, from the caller_context row already read");
+      assert.match(text, /Bookkeeper/, "…and the role it granted");
+
+      // …and the explicit control is what leaves.
+      await enterWorkspace(h);
+      assert.deepEqual(router.replaced, ["/"], "the explicit control navigates, once, to /");
+      assert.equal(router.refreshed, 1);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.faces: all FIVE typed verification reasons render a distinguishable face — four next actions, five diagnostic tokens", async () => {
+  const OTHER = "22222222-2222-2222-2222-222222222222";
+  const cases: { reason: string; verifyOtp: () => Promise<unknown>; face: RegExp }[] = [
+    {
+      reason: "rejected",
+      verifyOtp: async () => ({ data: null, error: { message: "Email link is invalid or has expired" } }),
+      face: /indistinguishable/,
+    },
+    {
+      reason: "no-session",
+      verifyOtp: async () => ({ data: { user: null, session: null }, error: null }),
+      face: /verified nobody/,
+    },
+    {
+      reason: "no-user",
+      verifyOtp: async () => ({ data: { user: null, session: { access_token: "jwt", user: { id: SUB } } }, error: null }),
+      face: /half confirmed/,
+    },
+    {
+      reason: "no-access-token",
+      verifyOtp: async () => ({ data: { user: { id: SUB }, session: { access_token: null, user: { id: SUB } } }, error: null }),
+      face: /half confirmed/,
+    },
+    {
+      reason: "subject-mismatch",
+      verifyOtp: async () => ({ data: { user: { id: SUB }, session: { access_token: "jwt", user: { id: OTHER } } }, error: null }),
+      face: /different sign-in/,
+    },
+  ];
+
+  const seen: string[] = [];
+  for (const c of cases) {
+    const { state, impl } = fakeEstate();
+    await withMockedEnv(impl, async () => {
+      const { h, router } = await mount(
+        createElement(InviteAcceptForm, {
+          token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+          createSupabaseClient: authClient({ verifyOtp: c.verifyOtp as never }),
+        }),
+      );
+      try {
+        await walkToPassword(h);
+        const text = textOf(h.container as never);
+        assert.match(text, c.face, `${c.reason}: its own next action`);
+        // THE COLLAPSED SENTENCE MUST BE GONE. `Invite.errorDescription` answered all five.
+        assert.doesNotMatch(
+          text, /It may have expired or already been used\./,
+          `${c.reason}: the one-size-fits-all description must no longer be the answer`,
+        );
+        // Each face still exposes its OWN reason, so two people who share a next action
+        // (no-user and no-access-token share P3) can still be told apart by a cell.
+        assert.match(text, new RegExp(c.reason), `${c.reason}: the typed reason is rendered as a diagnostic token`);
+        assert.equal(state.previewCalls.length, 0, `${c.reason}: a failed verification never reaches the preview door`);
+        assert.equal(state.acceptCalls.length, 0, `${c.reason}: …and never reaches the acceptance door`);
+        assert.deepEqual(router.replaced, [], `${c.reason}: …and never navigates`);
+        seen.push(text.replace(/\s+/g, " "));
+      } finally {
+        await h.unmount();
+      }
+    });
+  }
+
+  // FOUR next actions from FIVE reasons: `no-user` and `no-access-token` share P3 by design —
+  // the invitee's next step is identical — so the distinct-face count is four, not five.
+  const withoutTokens = seen.map((t) =>
+    t.replace(/no-user|no-access-token|subject-mismatch|no-session|rejected/g, ""),
+  );
+  assert.equal(new Set(withoutTokens).size, 4, "five reasons, four distinct next actions");
+});
+
+test("p625.web.faces: the PROVIDER's own sentence still rides P1 verbatim — it is the only place a vendor string is echoed", async () => {
+  const { impl } = fakeEstate();
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient({
+          verifyOtp: (async () => ({ data: null, error: { message: "Email link is invalid or has expired" } })) as never,
+        }),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      assert.match(
+        textOf(h.container as never), /Email link is invalid or has expired/,
+        "the provider's message is shown as the provider's, not re-worded into a Clara claim",
+      );
     } finally {
       await h.unmount();
     }

@@ -63,6 +63,15 @@ function authClient(over: Partial<InviteAuthClient["auth"]> = {}): () => InviteA
   });
 }
 
+/** #625 — what `clara.preview_invite` (0209) answers. The password step is now reached THROUGH
+ *  this read, so every keyboard walk below exercises it. */
+const PREVIEW_ROW = {
+  firm_name: "ROME PROPERTIES",
+  role: "bookkeeper",
+  status: "pending",
+  masked_email: "a***@example.test",
+};
+
 type Router = { replaced: string[] };
 function App(form: ReactElement, router: Router) {
   return createElement(NextIntlClientProvider, {
@@ -98,6 +107,7 @@ test("THE WHOLE JOURNEY IS KEYBOARD-OPERABLE, and a keyboard-driven acceptance m
   await withMockedEnv(
     (async (u: RequestInfo | URL) => {
       const url = String(u);
+      if (url.includes("/rpc/preview_invite")) return jsonResponse(PREVIEW_ROW);
       if (url.includes("/rpc/accept_invite")) { membership = true; return jsonResponse({ membership_id: "m1" }); }
       if (url.includes("/rest/v1/caller_context")) return jsonResponse(membership ? [CONTEXT_ROW] : []);
       throw new Error(`unexpected fetch: ${url}`);
@@ -150,6 +160,21 @@ test("THE WHOLE JOURNEY IS KEYBOARD-OPERABLE, and a keyboard-driven acceptance m
         // THE DISCRIMINATING POST-CONDITION: a keyboard-only run mints the
         // membership and leaves. True only AFTER the submit.
         assert.equal(membership, true, "the keyboard-driven journey must actually mint the membership");
+
+        // #625 D1 — STAGE 3: the settled joined stage. It states the firm and the role, and the
+        // ONE control on it must be keyboard-reachable too, or a keyboard-only invitee is left
+        // looking at a page they cannot leave.
+        assert.deepEqual(router.replaced, [], "the journey does not navigate on its own");
+        assert.match(textOf(h.container as never), /ROME PROPERTIES/, "the joined stage names the firm");
+        const enter = findIn(h.container as never, byButtonText(/Enter workspace/));
+        assert.ok(enter, "the joined stage must offer an explicit Enter-workspace control");
+        assert.ok(
+          focusableElements(h.container as never).includes(enter as never),
+          "…and it must be keyboard-reachable",
+        );
+        assert.deepEqual(checkKeyboardWalk(h.container as never), [], "no violations on the joined stage");
+        await h.act(async () => { await clickButton(enter as never); });
+        for (let i = 0; i < 4; i++) await h.settle();
         assert.deepEqual(router.replaced, ["/"], "and only then does it leave");
       } finally {
         await h.unmount();
@@ -163,6 +188,7 @@ test("the REFUSAL state stays keyboard-operable — the person can correct and r
   await withMockedEnv(
     (async (u: RequestInfo | URL) => {
       const url = String(u);
+      if (url.includes("/rpc/preview_invite")) return jsonResponse(PREVIEW_ROW);
       if (url.includes("/rpc/accept_invite")) {
         return jsonResponse({ code: "CLR10", message: "invalid invite token" }, 400);
       }
@@ -255,6 +281,7 @@ test("the unconfirmed state's recovery control is keyboard-reachable and genuine
   await withMockedEnv(
     (async (u: RequestInfo | URL) => {
       const url = String(u);
+      if (url.includes("/rpc/preview_invite")) return jsonResponse(PREVIEW_ROW);
       if (url.includes("/rpc/accept_invite")) { membership = true; return jsonResponse({ membership_id: "m1" }); }
       if (url.includes("/rest/v1/caller_context")) {
         return jsonResponse(membership && reportContext ? [CONTEXT_ROW] : []);
@@ -296,6 +323,15 @@ test("the unconfirmed state's recovery control is keyboard-reachable and genuine
         reportContext = true;
         await h.act(async () => { await clickButton(retry as never); });
         for (let i = 0; i < 6; i++) await h.settle();
+        // #625 D1 — the recovery settles on the joined stage, whose own control is what leaves.
+        const enter = findIn(h.container as never, byButtonText(/Enter workspace/));
+        assert.ok(enter, "the recovered read must settle on the joined stage");
+        assert.ok(
+          focusableElements(h.container as never).includes(enter as never),
+          "…whose control is keyboard-reachable",
+        );
+        await h.act(async () => { await clickButton(enter as never); });
+        for (let i = 0; i < 4; i++) await h.settle();
         assert.deepEqual(router.replaced, ["/"], "operating it from the keyboard genuinely completes the journey");
       } finally {
         await h.unmount();

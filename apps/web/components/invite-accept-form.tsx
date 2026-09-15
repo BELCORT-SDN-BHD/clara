@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 
 import {
   readInviteVerification,
+  type InviteVerificationFailure,
   type VerifyOtpLikeResponse,
 } from "@/lib/invite-verification";
 import { createClient } from "@/lib/supabase/client";
@@ -18,7 +19,15 @@ import {
   readCallerContextForSubject,
   INVITE_CLARA_TOKEN_PARAM,
   type CallerContextOutcome,
+  type CallerContextRow,
 } from "@/lib/identity/doors";
+import {
+  readInvitePreview,
+  INVITE_PREVIEW_ROLES,
+  type InvitePreviewOutcome,
+  type InvitePreviewRole,
+  type InvitePreviewRow,
+} from "@/lib/firm/invite-preview";
 import { isDoorRefusal } from "@/lib/doors";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -34,10 +43,72 @@ import { StateBanner } from "@/components/common/state";
 type Stage =
   | "confirm"
   | "verifying"
+  /** #625 — `clara.preview_invite` is in flight. Deliberately its own stage rather than a flag on
+   *  `set-password`: the password fields must NOT exist while the answer is still unknown, which
+   *  is the whole ordering claim AC2's second half rests on. */
+  | "previewing"
+  /** #625 — a DEFINITE negative from the preview: a revoked, expired or already-accepted
+   *  invitation, or the door's own single refusal. No password form is offered, because there is
+   *  nothing left to accept. */
+  | "blocked"
   | "set-password"
   | "saving"
+  /** #625 D1 — the membership is minted AND positively read back. The firm and the role are
+   *  stated, and the person leaves by their own explicit act rather than being thrown at `/`. */
+  | "joined"
   | "unconfirmed"
   | "error";
+
+/**
+ * #625 — THE FOUR NEXT ACTIONS, and the FIVE typed reasons that reach them.
+ *
+ * `lib/invite-verification.ts` has computed five `InviteVerificationFailure` members since the
+ * security review that created it; this surface read only `.ok` and wrote ONE sentence
+ * (`Invite.errorDescription`) for all five. The mapping below is the repair, and it is
+ * deliberately four faces rather than five:
+ *
+ *   rejected         → P1  the provider said no. A USED link and an EXPIRED link are
+ *                          indistinguishable at this point — GoTrue answers `otp_expired` for
+ *                          both — so P1 says so rather than guessing, and carries the provider's
+ *                          own sentence verbatim.
+ *   no-session       → P2  verified NOBODY: the `email_change` shape this module's header
+ *                          documents. Next action: sign out, reopen the link.
+ *   no-user          → P3  a partial success from the provider. Retry once, then ask for a new
+ *   no-access-token  → P3  invitation. These two share a face ONLY because the invitee's next
+ *                          action is identical; each still renders its OWN reason token, so a
+ *                          cell (and a support conversation) can still tell them apart.
+ *   subject-mismatch → P4  the link belongs to a different sign-in. Sign out fully first.
+ *
+ * `active-subject-mismatch` is the SAME next action discovered one step later — the ambient
+ * session's signature-verified subject is not the one this invite established — so it maps to P4
+ * too, and keeps its own distinguishing reason token.
+ */
+type FailureFace = "P1" | "P2" | "P3" | "P4";
+
+const FACE_FOR_REASON: Record<InviteVerificationFailure, FailureFace> = {
+  "rejected": "P1",
+  "no-session": "P2",
+  "no-user": "P3",
+  "no-access-token": "P3",
+  "subject-mismatch": "P4",
+};
+
+type Failure = {
+  face: FailureFace;
+  /** The typed discriminant, rendered as a diagnostic token. NOT a next action — two reasons
+   *  share P3 — and never parsed by anything. */
+  reason: InviteVerificationFailure | "active-subject-mismatch";
+  /** The provider's OWN sentence, on P1 only. Never re-worded, and never shown as Clara's. */
+  providerMessage: string | null;
+};
+
+/** Is this role one of the four `clara.firm_memberships.role` admits? A role outside the ladder
+ *  is rendered as its raw value rather than looked up — an unknown key would throw at runtime,
+ *  and inventing a label for a role this app cannot rank would be worse than showing the word
+ *  the database actually holds. */
+function knownRole(role: string): InvitePreviewRole | null {
+  return (INVITE_PREVIEW_ROLES as readonly string[]).includes(role) ? (role as InvitePreviewRole) : null;
+}
 
 /** A governed refusal as this surface renders it: the DB's own CLR code and
  *  its own message, both VERBATIM. `code` is null for an ordinary failure
@@ -119,6 +190,132 @@ export interface InviteAuthClient {
       password: string;
     }): Promise<{ error?: { message: string } | null }>;
   };
+}
+
+/**
+ * #625 — THE THREE DEAD-INVITATION FACES. A revoked, an expired and an already-accepted
+ * invitation each say what happened, name the firm it was for, and give the ONE next action that
+ * is actually available. None of them offers a password form: there is nothing left to accept,
+ * and a control that can only refuse is not an affordance (E-7 / 裁-187, one journey over).
+ *
+ * THERE IS NO RESEND, AND THE EXPIRED FACE SAYS SO IN WORDS. `clara.invite_member` refuses a
+ * second pending invite for the same address (CLR10, `0147:399`) and the plaintext token is never
+ * stored, so it cannot be re-sent — revoke, then invite again, is the real path and the copy
+ * names it rather than implying a button that does not exist.
+ */
+const BLOCKED_TITLE_KEY = {
+  expired: "expiredTitle",
+  revoked: "revokedTitle",
+  accepted: "acceptedTitle",
+} as const;
+const BLOCKED_BODY_KEY = {
+  expired: "expiredDescription",
+  revoked: "revokedDescription",
+  accepted: "acceptedDescription",
+} as const;
+
+function BlockedInvitationFace({
+  firm,
+  status,
+}: {
+  firm: string;
+  status: Exclude<InvitePreviewRow["status"], "pending">;
+}) {
+  const t = useTranslations("Invite.preview");
+  return (
+    <Card>
+      <CardHeader>
+        <h1 className="text-base font-semibold">{t(BLOCKED_TITLE_KEY[status])}</h1>
+        <CardDescription>{t(BLOCKED_BODY_KEY[status], { firm })}</CardDescription>
+      </CardHeader>
+      {/* ONLY the already-accepted face has an in-product next step: the person HAS an account,
+          so signing in is a real destination. An expired or revoked invitation has no account
+          behind it, and a sign-in link there would be a dead end wearing a button. */}
+      {status === "accepted" ? (
+        <CardContent>
+          <Link href="/login" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+            {t("signIn")}
+          </Link>
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * #625 — THE NO-ORACLE FACE. ONE face for the door's ONE refusal.
+ *
+ * `clara.preview_invite` answers an unknown token, a real token belonging to a different address
+ * and a session with no verified address with the SAME code, message and detail — deliberately,
+ * because telling them apart would let a token holder learn that a secret is live, or let a
+ * signed-in stranger enumerate which addresses have invitations outstanding (0141 §B). So this
+ * copy names NEITHER possibility. It is the one place on this journey where saying less is the
+ * accurate thing to say, and the copy says why rather than sounding evasive.
+ */
+function NoOracleFace() {
+  const t = useTranslations("Invite.preview");
+  return (
+    <Card>
+      <CardHeader>
+        <h1 className="text-base font-semibold">{t("mismatchTitle")}</h1>
+        <CardDescription>{t("mismatchDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Link href="/login" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+          {t("signIn")}
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * #625 — P1…P4. Five typed verification reasons, four next actions; see FACE_FOR_REASON above
+ * for which reason lands where and why `no-user` and `no-access-token` share one.
+ *
+ * EVERY FACE RENDERS ITS OWN REASON TOKEN. It is a diagnostic, not a next action: the two
+ * reasons that share P3 are indistinguishable to the invitee (their next step is identical) and
+ * must stay distinguishable to anyone reading over their shoulder.
+ */
+const FAILURE_TITLE_KEY = {
+  P1: "rejectedTitle",
+  P2: "noSessionTitle",
+  P3: "partialTitle",
+  P4: "subjectTitle",
+} as const;
+const FAILURE_BODY_KEY = {
+  P1: "rejectedDescription",
+  P2: "noSessionDescription",
+  P3: "partialDescription",
+  P4: "subjectDescription",
+} as const;
+
+function VerificationFailureFace({ failure }: { failure: Failure }) {
+  const t = useTranslations("Invite.failure");
+  return (
+    <Card>
+      <CardHeader>
+        <h1 className="text-base font-semibold">{t(FAILURE_TITLE_KEY[failure.face])}</h1>
+        <CardDescription>{t(FAILURE_BODY_KEY[failure.face])}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {/* THE PROVIDER'S OWN SENTENCE, on P1 only and labelled as theirs. It is the one branch
+            where an upstream string is the honest answer, because the provider is what refused —
+            everywhere else this app renders its own words or the database's, never a vendor's. */}
+        {failure.providerMessage ? (
+          <StateBanner tone="error" title={t("providerLabel")}>{failure.providerMessage}</StateBanner>
+        ) : null}
+        {/* The one in-product next step the two sign-out faces share. P1 and P3 have none: their
+            next action is to ask for a fresh invitation, which is not a route. */}
+        {failure.face === "P2" || failure.face === "P4" ? (
+          <Link href="/login" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+            {t("signIn")}
+          </Link>
+        ) : null}
+        <p className="text-xs text-muted-foreground">{t("reasonLabel", { reason: failure.reason })}</p>
+      </CardContent>
+    </Card>
+  );
 }
 
 /**
@@ -248,6 +445,11 @@ export function InviteAcceptForm({
   createSupabaseClient?: () => InviteAuthClient;
 }) {
   const t = useTranslations("Invite");
+  const tPreview = useTranslations("Invite.preview");
+  const tJoined = useTranslations("Invite.joined");
+  /** The role LABELS, borrowed from the roster's own namespace rather than duplicated here.
+   *  Two spellings of "Bookkeeper" in one messages file is a second vocabulary for one fact. */
+  const tRoles = useTranslations("Members.roles");
   /** The shared password-policy sentence — see `lib/auth/password-policy.ts`. */
   const tAuth = useTranslations("Auth");
   const router = useRouter();
@@ -259,6 +461,15 @@ export function InviteAcceptForm({
   // The subject verifyOtp positively proved. Everything after verification is
   // bound to THIS id, not to whatever session the browser happens to hold.
   const [verifiedSubject, setVerifiedSubject] = useState<string | null>(null);
+  /** #625 — what `clara.preview_invite` answered, kept in its TYPED form rather than flattened,
+   *  because the three shapes drive three different renderings and collapsing them here would
+   *  delete the distinction before the render that cares ever sees it. */
+  const [preview, setPreview] = useState<InvitePreviewOutcome | null>(null);
+  /** #625 — the typed verification failure, replacing one collapsed sentence for five reasons. */
+  const [failure, setFailure] = useState<Failure | null>(null);
+  /** #625 D1 — the `caller_context` row that PROVED the membership. Already read by
+   *  `confirmMembership` below; it used to be discarded on the way to `router.replace("/")`. */
+  const [joined, setJoined] = useState<CallerContextRow | null>(null);
 
   // One op_key per ATTEMPT, keyed by the display name it was minted for.
   // Re-submitting the SAME name after a transport failure replays the door's
@@ -289,23 +500,60 @@ export function InviteAcceptForm({
     const verification = readInviteVerification(response);
 
     if (!verification.ok) {
-      setErrorMessage(
-        response.error?.message ?? t("verificationIncomplete"),
-      );
+      // ONE OF FIVE, mapped to one of four next actions — see FACE_FOR_REASON's own comment.
+      // The provider's sentence rides P1 only: it is the one branch where an upstream string is
+      // the honest answer, because the provider is what refused.
+      setFailure({
+        face: FACE_FOR_REASON[verification.reason],
+        reason: verification.reason,
+        providerMessage: verification.reason === "rejected" ? (response.error?.message ?? null) : null,
+      });
       setStage("error");
       return;
     }
 
     setVerifiedSubject(verification.subject);
+
+    // #625 — THE PREVIEW STEP, AND WHY IT IS EXACTLY HERE. A session now exists for a PROVEN
+    // subject, which is the first moment `clara.preview_invite`'s JWT-email wall can pass; and
+    // the password fields have not rendered, which is the last moment the answer can still change
+    // what this person is asked to do. `set-password` is reached only from the `pending` branch.
+    setStage("previewing");
+    const outcome = await readInvitePreview(inviteToken ?? "");
+    setPreview(outcome);
+
+    // A DEFINITE NEGATIVE BLOCKS; AN INDEFINITE READ DEGRADES. The door stays the authority:
+    // `clara.accept_invite` re-checks every one of these facts inside its own transaction, so a
+    // read that never came back is not a verdict and must not become one here. This is the same
+    // reading `confirmMembership` already applies to the membership post-condition, in the other
+    // direction — absence is not evidence either way.
+    if (outcome.ok ? outcome.preview.status !== "pending" : outcome.kind === "refused") {
+      setStage("blocked");
+      return;
+    }
     setStage("set-password");
+  }
+
+  /** #625 D1 — the ONE navigation this surface performs, and a person performs it.
+   *
+   *  `replace()`, not `push()`: the current history entry is the invite URL, and even with the
+   *  `ct` parameter already scrubbed there is nothing there worth a Back button. */
+  function enterWorkspace(): void {
+    router.replace("/");
+    router.refresh();
   }
 
   /** The membership post-condition. Reads `clara.caller_context` — self-scoped
    *  by `jwt_sub()`, so it reports the freshly-minted membership on the SAME
-   *  access token the invitee arrived with. Redirects only on a positive read;
+   *  access token the invitee arrived with. Settles on the JOINED stage only on a positive read;
    *  every other outcome (zero rows, a failed read) takes the fail-closed
-   *  branch and stays on this page, because absence is not evidence. */
-  async function confirmMembershipThenLeave(): Promise<void> {
+   *  branch and stays on this page, because absence is not evidence.
+   *
+   *  #625 D1 CHANGED WHAT "POSITIVE" LEADS TO, NOT WHAT COUNTS AS POSITIVE. This function used
+   *  to end in `router.replace("/")`, throwing away the firm name and role it had just read; it
+   *  now KEEPS that row and renders it, and the person leaves by their own explicit act. Every
+   *  fail-closed branch below is byte-unchanged. */
+  async function confirmMembership(): Promise<void> {
     // No proven subject means there is nothing to bind a row TO, so no read can
     // be positive. Unreachable from the shipped flow (this stage is only
     // reached through the subject-binding check) — kept because a guard that
@@ -334,10 +582,12 @@ export function InviteAcceptForm({
       return;
     }
 
-    // replace(), not push(): the current history entry is the token-bearing
-    // invite URL, and the token must not survive in the back stack.
-    router.replace("/");
-    router.refresh();
+    // THE SETTLED POSITIVE. Not a redirect: the row that PROVED the membership is what the
+    // joined stage renders, so "the accepted role and scope are visible before entering the
+    // workspace" is a fact on the screen rather than a claim about a page the person has not
+    // reached yet.
+    setJoined(outcome.context);
+    setStage("joined");
   }
 
   async function handleSetPassword(event: React.FormEvent) {
@@ -361,7 +611,10 @@ export function InviteAcceptForm({
       !activeSubject ||
       activeSubject !== verifiedSubject
     ) {
-      setErrorMessage(t("subjectMismatch"));
+      // #625 — the SAME next action as P4 (sign out fully, then reopen the link), discovered one
+      // step later. It keeps its own reason token so the two are distinguishable in a support
+      // conversation without inventing a fifth face for one next action.
+      setFailure({ face: "P4", reason: "active-subject-mismatch", providerMessage: null });
       setStage("error");
       return;
     }
@@ -407,7 +660,7 @@ export function InviteAcceptForm({
     // (unconfirmed) is left holding a URL with no live secret in it.
     stripInviteTokenFromUrl();
 
-    await confirmMembershipThenLeave();
+    await confirmMembership();
   }
 
   // FAIL-CLOSED, BEFORE THE CLICK GATE. Without Clara's token this journey
@@ -476,15 +729,61 @@ export function InviteAcceptForm({
     );
   }
 
-  if (stage === "error") {
+  // #625 — the preview read is out. Its OWN stage, because the password fields must not exist
+  // while the answer is unknown: a person who is shown a password form has already been told,
+  // implicitly, that there is something here to accept.
+  if (stage === "previewing") {
     return (
       <Card>
         <CardHeader>
-          <h1 className="text-base font-semibold">{t("errorTitle")}</h1>
-          <CardDescription>{t("errorDescription")}</CardDescription>
+          <h1 className="text-base font-semibold">{tPreview("checkingTitle")}</h1>
+          <CardDescription>{tPreview("checkingDescription")}</CardDescription>
         </CardHeader>
-        <CardContent>
-          <StateBanner tone="error">{errorMessage}</StateBanner>
+      </Card>
+    );
+  }
+
+  // #625 — A DEFINITE NEGATIVE. Four faces, four next actions, and NO password form on any of
+  // them: there is nothing left to accept, so offering the fields would be offering a control
+  // that can only refuse (E-7 / 裁-187's reading, one journey over).
+  if (stage === "blocked") {
+    if (preview?.ok && preview.preview.status !== "pending") {
+      return <BlockedInvitationFace firm={preview.preview.firm_name} status={preview.preview.status} />;
+    }
+    return <NoOracleFace />;
+  }
+
+  if (stage === "error") {
+    // `failure` is set on every path that reaches this stage. The fallback is not a second
+    // vocabulary: it renders P1 — "the provider said no, and a used link and an expired one are
+    // indistinguishable here" — which is the honest reading of an unclassified failure, and it
+    // carries whatever sentence we do hold rather than inventing one.
+    return (
+      <VerificationFailureFace
+        failure={failure ?? { face: "P1", reason: "rejected", providerMessage: errorMessage }}
+      />
+    );
+  }
+
+  // #625 D1 — THE SETTLED POSITIVE. The membership is minted AND positively read back, and the
+  // row that proved it is rendered rather than discarded: which firm was joined, and at which
+  // role. Nothing navigates on its own.
+  if (stage === "joined" && joined) {
+    const role = knownRole(joined.role);
+    return (
+      <Card>
+        <CardHeader>
+          <h1 className="text-base font-semibold">{tJoined("title", { firm: joined.firm_name })}</h1>
+          <CardDescription>{tJoined("description")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-muted-foreground">{tJoined("roleLabel")}</dt>
+            <dd className="font-medium text-foreground">{role ? tRoles(role) : joined.role}</dd>
+          </dl>
+          <Button type="button" className="w-full" onClick={enterWorkspace}>
+            {tJoined("enter")}
+          </Button>
         </CardContent>
       </Card>
     );
@@ -495,7 +794,11 @@ export function InviteAcceptForm({
   // come back positive. Never a success redirect on a derived state: this says
   // exactly what is known, and offers the one honest recovery, which re-reads
   // and NEVER re-calls the door.
-  if (stage === "unconfirmed") {
+  // `stage === "joined" && !joined` is unreachable by construction (`confirmMembership` sets the
+  // row and the stage in one batch), but a settled acceptance must never fall through to a
+  // password form for something that already happened — so it takes the honest recovery this
+  // face already offers, which RE-READS and never re-calls the door.
+  if (stage === "unconfirmed" || (stage === "joined" && !joined)) {
     return (
       <Card>
         <CardHeader>
@@ -506,7 +809,7 @@ export function InviteAcceptForm({
           <Button
             type="button"
             className="w-full"
-            onClick={() => void confirmMembershipThenLeave()}
+            onClick={() => void confirmMembership()}
           >
             {t("unconfirmedRetry")}
           </Button>
@@ -523,7 +826,39 @@ export function InviteAcceptForm({
         <h1 className="text-base font-semibold">{t("setPasswordTitle")}</h1>
         <CardDescription>{t("setPasswordDescription")}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-6">
+        {/* #625 — THE PREVIEW BLOCK, ABOVE THE FIELDS AND OUTSIDE THE FORM. It answers the
+            question AC2 asks ("which firm, and at which role?") at the last moment before the
+            person commits anything. It is a statement of what the invitation SAYS, never an
+            authority: `clara.accept_invite` re-checks every one of these facts inside its own
+            transaction, which is why an INDEFINITE read degrades to one honest line rather than
+            blocking a journey the door is still perfectly able to complete. */}
+        {preview?.ok && preview.preview.status === "pending" ? (
+          <section
+            aria-labelledby="invite-preview-heading"
+            className="rounded-lg border border-border bg-muted/40 p-4"
+          >
+            <h2 id="invite-preview-heading" className="text-sm font-semibold">
+              {tPreview("heading")}
+            </h2>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              <dt className="text-muted-foreground">{tPreview("firmLabel")}</dt>
+              <dd className="font-medium text-foreground">{preview.preview.firm_name}</dd>
+              <dt className="text-muted-foreground">{tPreview("roleLabel")}</dt>
+              <dd className="font-medium text-foreground">
+                {knownRole(preview.preview.role) ? tRoles(preview.preview.role as InvitePreviewRole) : preview.preview.role}
+              </dd>
+              {/* A HINT, never an address: the door masks it (0209 §A) and this renders what it
+                  sent. Nothing here reconstructs an address, and the form still has no email
+                  field — the door reads that from the verified JWT claim. */}
+              <dt className="text-muted-foreground">{tPreview("emailLabel")}</dt>
+              <dd className="font-medium text-foreground">{preview.preview.masked_email}</dd>
+            </dl>
+            <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("roleNote")}</p>
+          </section>
+        ) : preview && !preview.ok && preview.kind === "indefinite" ? (
+          <p className="max-w-prose text-xs text-muted-foreground">{tPreview("indefiniteNote")}</p>
+        ) : null}
         <form onSubmit={handleSetPassword} className="flex flex-col gap-6">
           <div className="grid gap-1.5">
             <Label htmlFor="display-name">{t("nameLabel")}</Label>
