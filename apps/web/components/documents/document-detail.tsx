@@ -135,7 +135,7 @@ export function DocumentDetail({
           document nothing had been read from. Its own hydrated cell (one governed RPC that
           resolves its own scope and can honestly answer null), so a states refresh never drags
           five unrelated relation reads with it. */}
-      <DocumentStatePanel documentId={documentId} clientId={clientId} />
+      <DocumentStatePanel documentId={documentId} clientId={clientId} showWorkLinks />
 
       <section className="flex flex-col gap-1">
         <SectionHeader level={4}>{t("filingsHeading")}</SectionHeader>

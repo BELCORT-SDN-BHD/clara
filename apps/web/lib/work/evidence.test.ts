@@ -120,7 +120,8 @@ test("t634: the conflict lookup ignores a RELEASED binding", async () => {
       : url.includes("clients?") ? [{ name: "Acme Sdn Bhd" }] : []),
     async (urls) => {
       assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
-        { entryId: "e1", clientId: CLIENT, clientName: "Acme Sdn Bhd" });
+        // #633 widened DocumentClaim with the evidence link's own work_id/logical_op_id.
+        { entryId: "e1", clientId: CLIENT, clientName: "Acme Sdn Bhd", workId: null, logicalOpId: null });
       assert.ok(urls[0]!.includes("released_at=is.null"),
         `the links read must exclude released bindings (asked: ${urls[0]})`);
     },
@@ -138,7 +139,7 @@ test("t728d: the conflict lookup is FIRM-WIDE and names the claimant — a sibli
       : url.includes("clients?") ? [{ name: "Beta Sdn Bhd" }] : []),
     async (urls) => {
       assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
-        { entryId: "sib-1", clientId: SIBLING, clientName: "Beta Sdn Bhd" },
+        { entryId: "sib-1", clientId: SIBLING, clientName: "Beta Sdn Bhd", workId: null, logicalOpId: null },
         "the claimant travels with the entry, because the route is built from it — and now its NAME, because the copy has to say whose books the link leads to");
       assert.equal(urls[0]!.includes("client_id=eq."), false,
         `the read must not narrow to the asking client (asked: ${urls[0]})`);
@@ -162,7 +163,7 @@ test("t728f: a claim survives a failed NAME read — the link is the half that m
       }))) as typeof fetch;
   try {
     assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
-      { entryId: "sib-2", clientId: SIBLING, clientName: null },
+      { entryId: "sib-2", clientId: SIBLING, clientName: null, workId: null, logicalOpId: null },
       "the claim stands with a null name — never no claim at all");
   } finally {
     globalThis.fetch = original;
@@ -224,7 +225,8 @@ test("t634: the conflict lookup falls through to the DOCUMENT-CODING lane, appro
       : url.includes("clients?") ? [{ name: "Beta Sdn Bhd" }] : [{ id: "coded-1", client_id: SIBLING }]),
     async (urls) => {
       assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
-        { entryId: "coded-1", clientId: SIBLING, clientName: "Beta Sdn Bhd" });
+        // The coding-lane arm carries no evidence link, so it has no Work id to give.
+        { entryId: "coded-1", clientId: SIBLING, clientName: "Beta Sdn Bhd", workId: null, logicalOpId: null });
       const coded = urls[1] ?? "";
       assert.ok(coded.includes("status=eq.approved"), coded);
       assert.ok(coded.includes("reversed_by=is.null"), coded);
