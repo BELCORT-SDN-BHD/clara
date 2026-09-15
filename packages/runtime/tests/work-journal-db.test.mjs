@@ -542,8 +542,13 @@ async function reachableCodes() {
     // #643 adds the fifth: `POST /api/work/periodic-adjustment` reaches
     // `clara.admit_periodic_adjustment_work`, whose own call graph raises the closed-period
     // CLR19 at admission — a code no earlier door on this surface could reach before a run.
+    // #638 adds the sixth: `POST /api/work/staff-expense-claim` reaches
+    // `clara.admit_staff_expense_claim_work`, whose own call graph raises the claim lane's typed
+    // refusals (`claimant_missing`, `item_account_not_expense`, `payable_account_is_control`, …)
+    // — all CLR10/CLR11/CLR04, all already mapped, and the census is what proves that rather than
+    // the migration's prose.
     [["admit_journal_work", "retry_accounting_work", "cancel_accounting_work", "take_over_accounting_work",
-      "admit_periodic_adjustment_work"]],
+      "admit_periodic_adjustment_work", "admit_staff_expense_claim_work"]],
   );
   const triggers = await rig.rootQuery(
     `select distinct p.oid::regprocedure::text as fn, p.prosrc
@@ -561,10 +566,26 @@ async function reachableCodes() {
   return found;
 }
 
+/**
+ * ESTATE-INTERNAL INCONSISTENCY RAISES, EXEMPTED BY NAME rather than by a wildcard — the same
+ * discipline the sibling cell below applies to `23505` / `40P01` / `40001`.
+ *
+ * #638 widened this census's seed to `clara.admit_staff_expense_claim_work`, and its call graph
+ * reaches 0043's shared enrolment predicate `clara._adv_enrolment_admission`, which reaches 0041's
+ * `clara._fa_status_holds_account_role`. That body raises CLR37 when `clara.fa_account_profiles`
+ * carries a STATUS the classifier has never been taught — a contradiction inside the estate's own
+ * reference data, not a property of anything a caller can send. A 500 is the honest answer to it,
+ * and mapping it to a 4xx would tell a human to change an input that had nothing to do with the
+ * failure. It is listed here so the exemption is a stated judgement rather than a silent hole.
+ */
+const INTERNAL_INCONSISTENCY_CODES = new Set(["CLR37"]);
+
 test("623.db.census: every code the Work doors raise has an HTTP status — no bare 500", { skip: SKIP }, async () => {
   const found = await reachableCodes();
   assert.ok(found.size >= 4, `the census found only ${found.size} codes — the instrument is not reading prosrc`);
-  const unmapped = [...found.keys()].filter((code) => workErrorStatus(code, null) === null);
+  const unmapped = [...found.keys()]
+    .filter((code) => !INTERNAL_INCONSISTENCY_CODES.has(code))
+    .filter((code) => workErrorStatus(code, null) === null);
   assert.deepEqual(
     unmapped,
     [],

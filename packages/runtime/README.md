@@ -82,9 +82,23 @@ that same database, and the WDK world bootstrap
 [`db-live-gates/action.yml`](../../.github/actions/db-live-gates/action.yml) for the exact
 sequence.
 
-This is a general rule, not per-file guidance: none of the five standalone e2es
+`tests/staff-expense-claim-e2e.mjs` (#638) is one of them. It SKIPS CLEANLY — exit 0, with the
+reason printed — when migration 0206 is absent (`clara.staff_expense_claims`,
+`clara.staff_expense_claim_status` and `clara.admit_staff_expense_claim_work` are probed before
+anything is spawned), so the runtime half is safe to merge before the database half lands. It
+drives `POST /api/work/staff-expense-claim` end to end: a claim row durable at ADMISSION, a run
+served by the UNCHANGED frozen `clara-work/v3` bundle with the purpose vocabulary unwidened, a
+`posted` status-ledger row written by the operation receipt's own trigger, a lost acknowledgement
+that replays onto the same claim, a changed claim under one intent key that is a typed 409, a
+replay under REVOKED membership that is refused rather than replayed, per-item continuation, the
+optional attachment, and a SIGKILL between the database commit and the workflow checkpoint on the
+advance arm — where the allocation is minted by a deferred constraint trigger at commit, so only a
+real World can show the four writes are one transaction.
+
+This is a general rule, not per-file guidance: none of the standalone e2es
 (`tests/interview-e2e.mjs`, `tests/version-cutover-e2e.mjs`, `tests/work-journal-e2e.mjs`,
-`tests/work-question-e2e.mjs`, `tests/work-cancel-e2e.mjs`) may share a host with another suite
+`tests/work-question-e2e.mjs`, `tests/work-cancel-e2e.mjs`,
+`tests/periodic-adjustment-e2e.mjs`, `tests/staff-expense-claim-e2e.mjs`) may share a host with another suite
 WHILE it is actually running. `db-live-gates` runs each battery alone — one at a time on the same
 rig, never concurrently with anything else that could touch the same rows or steal the same lease
 clock. Running one locally while another suite hammers the same database at the same time is the

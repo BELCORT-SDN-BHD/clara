@@ -171,6 +171,23 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/periodic-adjustment-e2e.mjs
+        # #638 — the STAFF-EXPENSE-CLAIM e2e, immediately after its closest sibling and on the same
+        # rig, for the same reasons: it admits and settles its own Work and leaves none live. It
+        # drives the windows the unit and DB cells cannot. A claim Work runs through the UNCHANGED
+        # frozen clara-work/v3 bundle with the purpose vocabulary UNWIDENED (a staff expense claim
+        # is a `journal_entry` Work; the typed claim lives in a relation the run never reads), its
+        # claim row is durable at ADMISSION rather than at posting, and the crash leg kills the
+        # engine between the database commit and the workflow checkpoint on the ADVANCE arm — where
+        # the allocation is minted by a DEFERRED constraint trigger at commit, so only a real World
+        # can show that the entry, the receipt, the claim and the allocation are one transaction
+        # that survives the window. It also proves a replay under REVOKED authority is refused
+        # rather than answered `replayed:true`. It SKIPS CLEANLY (exit 0, printed reason) when
+        # migration 0206 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/staff-expense-claim-e2e.mjs
         # #631 — the WORK-EGRESS e2e, BEFORE the two builds below, because it is the only leg whose
         # subject is what happens BEFORE a model is called. It drives the three windows nothing
         # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->

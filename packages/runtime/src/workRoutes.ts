@@ -66,6 +66,17 @@
 //            maps for the first time here — see its own note for why that code could not reach
 //            this surface before.
 //
+//            #638 adds ONE MORE PREFIX on the same footing: `claim.<key>`, the typed particulars
+//            of a staff expense claim (migration 0206's own spelling), including the nested
+//            `claim.claimant.<key>` and the 1-BASED `claim.items[N].<key>`. The same total
+//            `_x` -> `X` re-speller serves it, so a field the schema gains cannot fall out of
+//            step. Its reasons are the database's own: `invalid_claim` folds to its `constraint`
+//            exactly as `invalid_basis` does, and `claimant_missing`, `claimant_not_enrolled`,
+//            `incurred_date_missing`, `incurred_after_posting`, `item_account_not_expense`,
+//            `items_do_not_sum`, `claim_all_zero`, `payable_account_is_control`,
+//            `advance_not_enrolled`, `advance_allocation_mismatch` and the three
+//            `correction_target_*` tokens ride back under their own names.
+//
 // WHY IT MATTERS ENOUGH TO STATE. `apps/web/lib/work/journal-basis.ts`'s `fieldForServerPath` is
 // the ONE mapper from a wire path onto a focusable control, and it was written against the
 // database's spelling. This route used to answer `basis.postingDate` / `basis.lines[0].accountCode`
@@ -355,6 +366,218 @@ export function toDbAdjustment(
   return { ok: true, adjustment: out };
 }
 
+/**
+ * #638 — THE TYPED PARTICULARS OF A STAFF EXPENSE CLAIM, translated into the database's own shape.
+ *
+ * SHAPE ONLY, AND DELIBERATELY THIN. `clara._assert_claim_basis` (migration 0206) is the authority
+ * and re-checks every rule — the claimant handle, the two dates, the itemisation and its exact sum,
+ * the settlement vocabulary, the expense class of every item account, the non-control payable, the
+ * advance's own capacity. This function exists to name the FIELD for the composer and to refuse the
+ * two things the database cannot diagnose helpfully: a payload that is not an object at all, and a
+ * number that is not an integer (jsonb `->>` coerces a string to text, so `"48000"` would be
+ * ADMITTED and then be a stored figure nobody typed).
+ *
+ * `amountCents` IS NOT A WIRE FIELD. The claim total is DERIVED here from the non-pending items,
+ * for the same reason `clara._claim_journal_basis` derives the lines: the database refuses a claim
+ * whose items do not sum to its total (`items_do_not_sum`), so there is exactly one honest value
+ * and a caller-supplied one could only ever disagree with it.
+ *
+ * SUPPLIED TAX FACTS ARE AN OPAQUE PASSTHROUGH. This beta has no tax vocabulary (0150:525 calls the
+ * statutory tag a hint; PRD:124 defers tax preparation), and AC1 asks only that they be carried.
+ */
+export type WireClaimItem = {
+  description?: unknown; expenseAccountCode?: unknown; amountCents?: unknown;
+  suppliedTax?: unknown; incurredDate?: unknown; pendingFact?: unknown;
+};
+export type WireClaimant = {
+  enrolmentId?: unknown; accountCode?: unknown; personLabel?: unknown; attestation?: unknown;
+  confirmDedicated?: unknown; identifier?: unknown;
+};
+export type WireClaim = {
+  claimant?: unknown; sourceKind?: unknown; instruction?: unknown; incurredDate?: unknown;
+  postingDate?: unknown; items?: unknown; settlement?: unknown; payableAccountCode?: unknown;
+  advanceAccountCode?: unknown; advanceId?: unknown; paymentAccountCode?: unknown;
+  correctsClaimId?: unknown;
+};
+
+export const CLAIM_SETTLEMENTS = Object.freeze(["reimbursement", "advance_application", "already_settled"]);
+const CLAIM_ITEM_DESCRIPTION_MAX_CHARS = 2000;
+
+function claimInvalid(key: string, reason: string): InvalidBasis {
+  return { error: "invalid_basis", field: `claim.${key}`, reason };
+}
+
+/** A required non-empty wire string, capped, with the DATABASE's own field path. */
+function claimText(
+  value: unknown, key: string, max: number, required: boolean,
+): { ok: true; value: string | undefined } | { ok: false; error: InvalidBasis } {
+  if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) {
+    if (required) return { ok: false, error: claimInvalid(key, "nonempty") };
+    return { ok: true, value: undefined };
+  }
+  if (typeof value !== "string") return { ok: false, error: claimInvalid(key, "text") };
+  if (value.trim().length > max) return { ok: false, error: claimInvalid(key, "max_length") };
+  return { ok: true, value: value.trim() };
+}
+
+export function toDbClaim(
+  raw: unknown,
+): { ok: true; claim: Record<string, unknown> } | { ok: false; error: InvalidBasis } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: { error: "invalid_basis", field: "claim", reason: "object" } };
+  }
+  const wire = raw as WireClaim;
+
+  // ---- the claimant handle ------------------------------------------------------------------
+  if (!wire.claimant || typeof wire.claimant !== "object" || Array.isArray(wire.claimant)) {
+    return { ok: false, error: claimInvalid("claimant", "object") };
+  }
+  const who = wire.claimant as WireClaimant;
+  const claimant: Record<string, unknown> = {};
+  if (who.enrolmentId !== undefined && who.enrolmentId !== null) {
+    if (typeof who.enrolmentId !== "string" || !UUID_RE.test(who.enrolmentId)) {
+      return { ok: false, error: claimInvalid("claimant.enrolment_id", "uuid") };
+    }
+    claimant.enrolment_id = who.enrolmentId;
+  }
+  for (const [wireKey, dbKey, max] of [
+    ["accountCode", "account_code", 64],
+    ["personLabel", "person_label", 200],
+    ["attestation", "attestation", 2000],
+    ["identifier", "identifier", 120],
+  ] as ReadonlyArray<[keyof WireClaimant, string, number]>) {
+    const got = claimText(who[wireKey], `claimant.${dbKey}`, max, false);
+    if (!got.ok) return { ok: false, error: got.error };
+    if (got.value !== undefined) claimant[dbKey] = got.value;
+  }
+  if (who.confirmDedicated !== undefined && who.confirmDedicated !== null) {
+    if (typeof who.confirmDedicated !== "boolean") {
+      return { ok: false, error: claimInvalid("claimant.confirm_dedicated", "boolean") };
+    }
+    claimant.confirm_dedicated = who.confirmDedicated;
+  }
+  if (claimant.enrolment_id === undefined && claimant.account_code === undefined) {
+    // The database's own token, at the door: a claim that does not say who claimed.
+    return { ok: false, error: { error: "invalid_basis", field: "claim.claimant", reason: "claimant_missing" } };
+  }
+
+  // ---- the two dates, which are DIFFERENT facts ----------------------------------------------
+  for (const [wireKey, dbKey] of [["incurredDate", "incurred_date"], ["postingDate", "posting_date"]] as const) {
+    const value = wire[wireKey];
+    if (typeof value !== "string" || value.trim() === "") {
+      return { ok: false, error: claimInvalid(dbKey, dbKey === "incurred_date" ? "incurred_date_missing" : "present") };
+    }
+    if (!DATE_RE.test(value)) return { ok: false, error: claimInvalid(dbKey, "iso_date") };
+  }
+  const incurredDate = wire.incurredDate as string;
+  const postingDate = wire.postingDate as string;
+  if (incurredDate > postingDate) {
+    return { ok: false, error: { error: "invalid_basis", field: "claim.incurred_date", reason: "incurred_after_posting" } };
+  }
+
+  if (wire.sourceKind !== "document" && wire.sourceKind !== "instruction") {
+    return { ok: false, error: claimInvalid("source_kind", "source_kind") };
+  }
+  const instruction = claimText(wire.instruction, "instruction", MEMO_MAX_CHARS, true);
+  if (!instruction.ok) return { ok: false, error: instruction.error };
+
+  if (typeof wire.settlement !== "string" || !CLAIM_SETTLEMENTS.includes(wire.settlement)) {
+    return { ok: false, error: claimInvalid("settlement", "settlement") };
+  }
+
+  // ---- the itemisation -----------------------------------------------------------------------
+  if (!Array.isArray(wire.items)) return { ok: false, error: claimInvalid("items", "array") };
+  if (wire.items.length < 1) return { ok: false, error: claimInvalid("items", "at_least_one") };
+  const items: Array<Record<string, unknown>> = [];
+  let total = 0;
+  let live = 0;
+  for (let i = 0; i < wire.items.length; i += 1) {
+    const path = `items[${i + 1}]`;
+    const item = wire.items[i] as WireClaimItem;
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return { ok: false, error: claimInvalid(path, "object") };
+    }
+    const description = claimText(item.description, `${path}.description`, CLAIM_ITEM_DESCRIPTION_MAX_CHARS, true);
+    if (!description.ok) return { ok: false, error: description.error };
+    const one: Record<string, unknown> = { description: description.value };
+    const pending = claimText(item.pendingFact, `${path}.pending_fact`, 120, false);
+    if (!pending.ok) return { ok: false, error: pending.error };
+    if (item.incurredDate !== undefined && item.incurredDate !== null) {
+      if (typeof item.incurredDate !== "string" || !DATE_RE.test(item.incurredDate)) {
+        return { ok: false, error: claimInvalid(`${path}.incurred_date`, "iso_date") };
+      }
+      one.incurred_date = item.incurredDate;
+    }
+    if (item.suppliedTax !== undefined && item.suppliedTax !== null) {
+      if (typeof item.suppliedTax !== "object" || Array.isArray(item.suppliedTax)) {
+        return { ok: false, error: claimInvalid(`${path}.supplied_tax`, "object") };
+      }
+      // CARRIED VERBATIM. No vocabulary exists to validate it against, and inventing one would be
+      // building the lane PRD:124 defers.
+      one.supplied_tax = item.suppliedTax;
+    }
+    if (pending.value !== undefined) {
+      one.pending_fact = pending.value;
+      if (item.amountCents !== undefined && item.amountCents !== null) {
+        return { ok: false, error: claimInvalid(`${path}.amount_cents`, "absent") };
+      }
+      items.push(one);
+      continue;
+    }
+    const code = claimText(item.expenseAccountCode, `${path}.expense_account_code`, 64, true);
+    if (!code.ok) return { ok: false, error: code.error };
+    one.expense_account_code = code.value;
+    if (!isInteger(item.amountCents)) return { ok: false, error: claimInvalid(`${path}.amount_cents`, "integer_cents") };
+    if (item.amountCents <= 0) {
+      return { ok: false, error: claimInvalid(`${path}.amount_cents`, "positive_integer_cents") };
+    }
+    one.amount_cents = item.amountCents;
+    total += item.amountCents;
+    live += 1;
+    items.push(one);
+  }
+  if (live === 0) {
+    return { ok: false, error: { error: "invalid_basis", field: "claim.items", reason: "claim_all_zero" } };
+  }
+
+  const out: Record<string, unknown> = {
+    claimant,
+    source_kind: wire.sourceKind,
+    instruction: instruction.value,
+    incurred_date: incurredDate,
+    posting_date: postingDate,
+    items,
+    amount_cents: total,
+    currency: "MYR",
+    settlement: wire.settlement,
+  };
+
+  // ---- the settlement's ONE credit leg --------------------------------------------------------
+  const legs: ReadonlyArray<[string, keyof WireClaim, string]> = [
+    ["reimbursement", "payableAccountCode", "payable_account_code"],
+    ["advance_application", "advanceAccountCode", "advance_account_code"],
+    ["already_settled", "paymentAccountCode", "payment_account_code"],
+  ];
+  const leg = legs.find(([settlement]) => settlement === wire.settlement)!;
+  const account = claimText(wire[leg[1]], leg[2], 64, true);
+  if (!account.ok) return { ok: false, error: account.error };
+  out[leg[2]] = account.value;
+  if (wire.settlement === "advance_application") {
+    if (typeof wire.advanceId !== "string" || !UUID_RE.test(wire.advanceId)) {
+      // No silent FIFO in this register (WD-R10): a claim says WHICH advance it discharges.
+      return { ok: false, error: { error: "invalid_basis", field: "claim.advance_id", reason: "advance_allocation_mismatch" } };
+    }
+    out.advance_id = wire.advanceId;
+  }
+  if (wire.correctsClaimId !== undefined && wire.correctsClaimId !== null) {
+    if (typeof wire.correctsClaimId !== "string" || !UUID_RE.test(wire.correctsClaimId)) {
+      return { ok: false, error: claimInvalid("corrects_claim_id", "uuid") };
+    }
+    out.corrects_claim_id = wire.correctsClaimId;
+  }
+  return { ok: true, claim: out };
+}
+
 /** The WIRE spelling of a field path the DATABASE raised. Every path is the database's already —
  *  EXCEPT its evidence array, which it spells `source_refs` and the browser posts as `sourceRefs`,
  *  and #643's typed particulars, which it spells `adjustment.<snake_case>` and the browser posts
@@ -369,6 +592,13 @@ function toWireField(field: string | null): string | null {
   if (field.startsWith("source_refs")) return `sourceRefs${field.slice("source_refs".length)}`;
   if (field.startsWith("adjustment.")) {
     return `adjustment.${field.slice("adjustment.".length).replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase())}`;
+  }
+  // #638 · the claim's own prefix, on the SAME footing and through the SAME total re-speller. It
+  // covers the nested `claim.claimant.<key>` and the 1-based `claim.items[N].<key>` without a
+  // table, because every key under it is a plain snake_case identifier and `items[3]` contains no
+  // `_` followed by a lower-case letter.
+  if (field.startsWith("claim.")) {
+    return `claim.${field.slice("claim.".length).replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase())}`;
   }
   return field;
 }
@@ -541,7 +771,12 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
     // all. `lib/wire.ts` surfaces `detail.reason` and discards every other detail key, so folding
     // here is the only place it can happen.
     const constraint = detailField(err, "constraint");
-    const folds = reason === "invalid_basis" || reason === "invalid_source_ref";
+    // #638 · `invalid_claim` folds on the same footing and for the same measured reason: the
+    // route's own earlier validation answers bare constraint tokens (`object` / `nonempty` /
+    // `integer_cents` / `iso_date` / …) while migration 0206 answers the SAME tokens buried in
+    // `detail.constraint` under `reason: "invalid_claim"`. Unfolded, the browser saw two
+    // vocabularies for one refusal depending on WHICH half caught it.
+    const folds = reason === "invalid_basis" || reason === "invalid_source_ref" || reason === "invalid_claim";
     return {
       status: 400,
       body: {
@@ -773,6 +1008,91 @@ export function workRoutes(): express.Router {
     } catch (err) {
       if (sendAuthError(res, err)) return;
       sendAdmissionError(res, err, "periodic adjustment admission");
+    }
+  });
+
+  // ---- C1/C3/C6 admission: a STAFF EXPENSE CLAIM -----------------------------
+  //
+  // A SIBLING of `/api/work/periodic-adjustment`, not a widened version of it, and for the reason
+  // migration 0206 gives for keeping a third database door: the three take different payloads and
+  // are reached by different surfaces.
+  //
+  // ONE ARGUMENT, NOT TWO. Unlike the periodic-adjustment door, this one takes NO `basis`: the
+  // claim IS the basis, and `clara.admit_staff_expense_claim_work` derives the balanced journal
+  // from the itemisation and the settlement itself (`clara._claim_journal_basis`). A route that
+  // also posted lines would be a second, drifting statement of the same claim — exactly what the
+  // `adjustment_lines_mismatch` rung exists to catch on the other lane, and cheaper to make
+  // impossible than to police.
+  //
+  // 202 FOR THE SAME REASON: the response acknowledges an ADMITTED intent, never a posted entry.
+  // The claim ROW, however, is already durable when this returns — it is written inside the
+  // admission transaction — which is why the 202 body carries `claim_id`.
+  router.post("/api/work/staff-expense-claim", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      clientId?: unknown; intentKey?: unknown; claim?: unknown; sourceRefs?: unknown;
+    };
+    if (typeof body.clientId !== "string" || !UUID_RE.test(body.clientId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    if (typeof body.intentKey !== "string" || body.intentKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_intent_key" });
+      return;
+    }
+    const translated = toDbClaim(body.claim);
+    if (!translated.ok) {
+      res.status(400).json(translated.error);
+      return;
+    }
+    // C1 · THE ATTACHMENT IS GENUINELY OPTIONAL. An omitted, null or empty `sourceRefs` is a
+    // documentless claim — a photographed receipt and a sentence in an email are both lawful
+    // sources, and #638's own acceptance line says so.
+    const refs = toDbSourceRefs(body.sourceRefs);
+    if (!refs.ok) {
+      res.status(400).json(refs.error);
+      return;
+    }
+
+    try {
+      const admitted = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query(
+          "select clara.admit_staff_expense_claim_work($1::uuid, $2::uuid, $3::text, $4::jsonb,"
+          + " $5::text, $6::jsonb, $7::text) as receipt",
+          [
+            body.clientId, p.sub, body.intentKey, JSON.stringify(translated.claim),
+            "user_direct", JSON.stringify(refs.sourceRefs), DEFAULT_MODEL,
+          ],
+        );
+        return (r.rows[0]?.receipt ?? null) as {
+          work_id: string;
+          task_id: string;
+          logical_op_id: string;
+          status: string;
+          replayed: boolean;
+          claim_id: string;
+        } | null;
+      });
+      if (!admitted) {
+        res.status(500).json({ error: "internal" });
+        return;
+      }
+      if (admitted.replayed !== true) await enqueueWork(admitted.task_id);
+      res.status(202).json({
+        work_id: admitted.work_id,
+        task_id: admitted.task_id,
+        logical_op_id: admitted.logical_op_id,
+        status: admitted.status,
+        replayed: admitted.replayed === true,
+        claim_id: admitted.claim_id,
+      });
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      sendAdmissionError(res, err, "staff expense claim admission");
     }
   });
 
