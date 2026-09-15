@@ -60,6 +60,16 @@ async function openDocuments(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Documents", exact: false }).first()).toBeVisible({ timeout: 30_000 });
 }
 
+/** THE THREE TABLES, BY NAME. Every one of these surfaces renders a `DataTableCard`,
+ *  which names its own scroll region after the table it scrolls (components/ui/table.tsx).
+ *  Scoping by region is what keeps these cells honest: the SAME filename legitimately
+ *  appears in the receipts table AND the filed-documents table, so an unscoped
+ *  `getByText(name)` resolves to two elements and fails strict mode rather than
+ *  asserting anything. */
+const receiptsTable = (page: Page) => page.getByRole("region", { name: "Upload receipts" });
+const queueTable = (page: Page) => page.getByRole("region", { name: "Uploads in progress" });
+const sourcesTable = (page: Page) => page.getByRole("region", { name: "Unassigned sources" });
+
 /** A file the runtime's allowlist admits. */
 const pdf = (name: string, size = 64) => ({
   name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 ".padEnd(size, "e")),
@@ -72,13 +82,13 @@ test("the durable receipts survive a RELOAD — the queue's own memory is not th
   // Nothing has been uploaded in THIS browser session, so anything on screen came from a
   // read of `document_intakes_visible` rather than from the queue's React ref.
   await expect(page.getByText("Recent uploads")).toBeVisible();
-  await expect(page.getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(receiptsTable(page).getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("No uploads yet", { exact: false })).toBeVisible();
 
   // And again after a real navigation — the defect this closes is that a reload lost
   // every receipt.
   await page.reload();
-  await expect(page.getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(receiptsTable(page).getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
   expect(faults.faults(), faults.seen().join("\n")).toEqual([]);
 });
 
@@ -87,18 +97,18 @@ test("a status SETTLES without a reload, and the watermark says what is still mo
 
   // `march-statement.pdf` is still verifying on the first read and adopts on the second.
   // The person does nothing; the bounded poll does the second read.
-  await expect(page.getByText("march-statement.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(receiptsTable(page).getByText("march-statement.pdf")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("receipts-watermark")).toContainText(/Watching 1 unfinished upload|Every upload here has settled/);
   await expect(page.getByTestId("receipts-watermark")).toContainText("Every upload here has settled", { timeout: 30_000 });
 });
 
 test("the four capability tiers are readable per row, and a payroll PDF never reads as facts support", async ({ page }) => {
   await openDocuments(page);
-  await expect(page.getByText("march-statement.pdf")).toBeVisible({ timeout: 20_000 });
+  const row = receiptsTable(page).getByRole("row").filter({ hasText: "march-statement.pdf" });
+  await expect(row).toBeVisible({ timeout: 20_000 });
 
   // `march-statement.pdf` is a payroll_summary: its bytes ARE read and its facts are not
   // supported. `extraction_status: done` must never stand in for the second.
-  const row = page.getByRole("row").filter({ hasText: "march-statement.pdf" });
   await expect(row.getByText("Custody")).toBeVisible();
   await expect(row.getByText("Supported").first()).toBeVisible();
   await expect(row.getByText("Not supported").first()).toBeVisible();
@@ -115,9 +125,9 @@ test("a five-file mixed batch settles each file on its own, with a NEXT STEP for
   ]);
 
   // The queue is a real table now: one row per file, each with its own status.
-  await expect(page.getByRole("table").filter({ hasText: "good-one.pdf" })).toBeVisible({ timeout: 20_000 });
+  await expect(queueTable(page)).toBeVisible({ timeout: 20_000 });
   for (const name of ["good-one.pdf", "good-two.pdf", "good-three.pdf", "notes.exe"]) {
-    await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(queueTable(page).getByRole("row").filter({ hasText: name })).toBeVisible({ timeout: 20_000 });
   }
 
   // The GOOD files reach the queue's terminal word IN THEIR OWN ROW. "Filed" is the
@@ -126,7 +136,7 @@ test("a five-file mixed batch settles each file on its own, with a NEXT STEP for
   // a section heading on the same page and a loose match would pass without the queue
   // ever settling.
   await expect(
-    page.getByRole("row").filter({ hasText: "good-one.pdf" }).getByText("Filed", { exact: true }),
+    queueTable(page).getByRole("row").filter({ hasText: "good-one.pdf" }).getByText("Filed", { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
 
   // And the bad one carries a REFUSAL naming the constraint, not a generic failure.
@@ -136,17 +146,17 @@ test("a five-file mixed batch settles each file on its own, with a NEXT STEP for
 test("Cancel, Retry and Remove are three DIFFERENT acts, and progress is measured or absent", async ({ page }) => {
   await openDocuments(page);
   await page.setInputFiles('input[type="file"]', [pdf("controls.pdf")]);
-  await expect(page.getByText("controls.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(queueTable(page).getByRole("row").filter({ hasText: "controls.pdf" })).toBeVisible({ timeout: 20_000 });
 
   // A real progressbar with real bounds. Chromium DOES measure an XHR upload, so this
   // may carry a value; what must never happen is a bar with a number nobody measured.
-  const bar = page.getByRole("progressbar").first();
+  const bar = queueTable(page).getByRole("progressbar").first();
   await expect(bar).toBeVisible();
   await expect(bar).toHaveAttribute("aria-valuemin", "0");
 
   // Remove is its own verb, and on a settled row the first press parks it rather than
   // vanishing a file that may already be stored.
-  const controlsRow = page.getByRole("row").filter({ hasText: "controls.pdf" });
+  const controlsRow = queueTable(page).getByRole("row").filter({ hasText: "controls.pdf" });
   await expect(controlsRow.getByText("Filed", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(controlsRow.getByRole("button", { name: "Cancel" })).toHaveCount(0);
   await controlsRow.getByRole("button", { name: "Remove" }).click();
@@ -178,7 +188,7 @@ test("the document says which WORK it produced — and says so honestly when it 
 test("320px and 200% zoom leave no page-wide horizontal scroll on the documents tab", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await openDocuments(page);
-  await expect(page.getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(receiptsTable(page).getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
 
   const overflow = await page.evaluate(() => {
     const doc = document.documentElement;
@@ -202,8 +212,8 @@ test("320px and 200% zoom leave no page-wide horizontal scroll on the documents 
 test("the documents tab is axe-clean with a populated queue and populated receipts", async ({ page }) => {
   await openDocuments(page);
   await page.setInputFiles('input[type="file"]', [pdf("a11y.pdf")]);
-  await expect(page.getByText("a11y.pdf")).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(queueTable(page).getByRole("row").filter({ hasText: "a11y.pdf" })).toBeVisible({ timeout: 20_000 });
+  await expect(receiptsTable(page).getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
   await scan(page, "documents tab, queue + receipts populated");
 });
 
@@ -216,7 +226,7 @@ test("the firm leaf lists an unassigned source with its kind phrase and its publ
   await page.goto(FIRM_DOCUMENTS_URL);
 
   await expect(page.getByRole("heading", { name: "Documents" }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(sourcesTable(page).getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });
   // The KIND as a phrase, never the enum.
   await expect(page.getByText("SSM company document")).toBeVisible();
   await expect(page.getByText("ssm_company_doc")).toHaveCount(0);
@@ -244,7 +254,7 @@ test("the firm leaf is axe-clean and leaves no horizontal scroll at 320px", asyn
 test("the firm leaf is reachable by KEYBOARD from the shell, and its own controls are too", async ({ page }) => {
   await signIn(page);
   await page.goto(FIRM_DOCUMENTS_URL);
-  await expect(page.getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(sourcesTable(page).getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });
 
   // Tab until the attribution control has focus; a control a keyboard cannot reach is
   // not a control.
@@ -267,7 +277,7 @@ test("the firm leaf is reachable by KEYBOARD from the shell, and its own control
 test("the ask-once attribution act files the source and the row LEAVES the set", async ({ page }) => {
   await signIn(page);
   await page.goto(FIRM_DOCUMENTS_URL);
-  await expect(page.getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });
+  await expect(sourcesTable(page).getByText("ssm-form-24.pdf")).toBeVisible({ timeout: 20_000 });
 
   // The picker is named for the FILE it is about, so a page of many rows says which one
   // each control belongs to. Reached by its accessible name rather than by a role guess:

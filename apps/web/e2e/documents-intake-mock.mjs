@@ -35,9 +35,9 @@ export const DOCS_INTAKE = {
   /** The Work an entry citing the settled document belongs to. */
   entryId: "7f7f7f7f-7f7f-4f7f-8f7f-7f7f7f7f7f7f",
   workId: "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a",
-  /** The intake id every UPLOAD in this lane is given by the mock runtime. */
-  uploadIntakeId: "9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b9b",
-  uploadDocumentId: "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c",
+  /** Uploads made DURING a walk get their ids from `nextUploadIds` below — one per
+   *  `begin`, because the queue runs at CONCURRENCY 2 and a batch sharing one intake id
+   *  is a mock artefact the real runtime never produces. They are not constants. */
   userId: "11111111-1111-1111-1111-111111111111",
 };
 
@@ -55,6 +55,24 @@ const state = {
   uploadFiled: false,
   /** See the arming note in handleDocumentsIntakeSupabase. */
   armed: false,
+  /** ONE INTAKE ID PER UPLOAD, because the queue runs at CONCURRENCY 2 and a batch of
+   *  four rows all polling one shared id would be a mock artefact the real runtime never
+   *  produces — every `begin` mints its own. Keyed by id so the PUT, the finalize and the
+   *  adoption read can all recognise a member of this lane's own set. */
+  uploads: new Map(),
+};
+
+let uploadSeq = 0;
+const nextUploadIds = (filename) => {
+  uploadSeq += 1;
+  const n = String(uploadSeq).padStart(2, "0");
+  const ids = {
+    intakeId: `9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b${n}`,
+    documentId: `0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c${n}`,
+    filename,
+  };
+  state.uploads.set(ids.intakeId, ids);
+  return ids;
 };
 
 export function resetDocsIntakeLane() {
@@ -63,6 +81,8 @@ export function resetDocsIntakeLane() {
   state.attributionAttempts = 0;
   state.uploadFiled = false;
   state.armed = false;
+  state.uploads.clear();
+  uploadSeq = 0;
 }
 
 const iso = (s) => `2026-04-0${s}T02:00:00.000Z`;
@@ -172,13 +192,14 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
   if (request.method === "GET" && path === "/rest/v1/document_intakes_visible") {
     const idFilter = params.get("id");
     const named = idFilter?.startsWith("eq.") ? idFilter.slice(3) : null;
-    const mine = new Set([DOCS_INTAKE.settledIntakeId, DOCS_INTAKE.movingIntakeId, DOCS_INTAKE.uploadIntakeId]);
-    if (named !== null && !mine.has(named)) return false; // chat-parity's own poll
-    if (named === DOCS_INTAKE.uploadIntakeId) {
+    const mine = new Set([DOCS_INTAKE.settledIntakeId, DOCS_INTAKE.movingIntakeId]);
+    if (named !== null && !mine.has(named) && !state.uploads.has(named)) return false; // chat-parity's own poll
+    if (named !== null && state.uploads.has(named)) {
+      const issued = state.uploads.get(named);
       // The queue's own DB-confirmed adoption read for a file just uploaded in this walk.
       sendJson(response, 200, [intakeRow({
-        id: DOCS_INTAKE.uploadIntakeId, original_filename: "uploaded.pdf",
-        status: "adopted", document_id: DOCS_INTAKE.uploadDocumentId, created_at: iso(4),
+        id: issued.intakeId, original_filename: issued.filename,
+        status: "adopted", document_id: issued.documentId, created_at: iso(4),
       })], cors);
       return true;
     }
@@ -230,13 +251,13 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
         filed_at: iso(2), filed_by: DOCS_INTAKE.userId, basis: "human",
         retired_at: null, retirement_reason: null, revision_token: "rev-633-2",
       },
-      ...(state.uploadFiled ? [{
-        id: "f0000000-0000-4000-8000-000000000003",
-        document_id: DOCS_INTAKE.uploadDocumentId,
+      ...(state.uploadFiled ? [...state.uploads.values()].map((u, i) => ({
+        id: `f0000000-0000-4000-8000-0000000001${String(i).padStart(2, "0")}`,
+        document_id: u.documentId,
         client_id: DOCS_INTAKE.clientId,
         filed_at: iso(4), filed_by: DOCS_INTAKE.userId, basis: "human",
-        retired_at: null, retirement_reason: null, revision_token: "rev-633-3",
-      }] : []),
+        retired_at: null, retirement_reason: null, revision_token: `rev-633-up-${i}`,
+      })) : []),
     ], cors);
     return true;
   }
@@ -300,7 +321,7 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
       sendJson(response, 200, null, cors);
       return true;
     }
-    if (body?.p_document === DOCS_INTAKE.uploadDocumentId) {
+    if ([...state.uploads.values()].some((u) => u.documentId === body?.p_document)) {
       state.uploadFiled = true;
       sendJson(response, 200, null, cors);
       return true;
@@ -324,7 +345,7 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
     // answering every `document_id=eq.` there is: `entry_evidence_links` is read by other
     // lanes' surfaces too, and a blanket empty here would quietly tell them their own
     // documents produced no Work.
-    const mine = [DOCS_INTAKE.movingDocumentId, DOCS_INTAKE.uploadDocumentId, DOCS_INTAKE.unassignedDocumentId];
+    const mine = [DOCS_INTAKE.movingDocumentId, DOCS_INTAKE.unassignedDocumentId, ...[...state.uploads.values()].map((u) => u.documentId)];
     if (mine.some((id) => doc === `eq.${id}`)) {
       sendJson(response, 200, [], cors);
       return true;
@@ -347,7 +368,8 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
 
   if (request.method === "POST" && path === "/rest/v1/rpc/set_document_kind") {
     const body = await readJson(request);
-    if (body?.p_document !== DOCS_INTAKE.unassignedDocumentId && body?.p_document !== DOCS_INTAKE.uploadDocumentId) return false;
+    const issuedDocs = [...state.uploads.values()].map((u) => u.documentId);
+    if (body?.p_document !== DOCS_INTAKE.unassignedDocumentId && !issuedDocs.includes(body?.p_document)) return false;
     sendJson(response, 200, null, cors);
     return true;
   }
@@ -356,16 +378,17 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
     const ids = /id=in\.\(([^)]*)\)/.exec(url.search)?.[1];
     if (!ids) return false;
     const wanted = ids.split(",").map((v) => decodeURIComponent(v.trim()));
-    const mine = [DOCS_INTAKE.settledDocumentId, DOCS_INTAKE.movingDocumentId, DOCS_INTAKE.uploadDocumentId];
+    const issued = [...state.uploads.values()];
+    const mine = [DOCS_INTAKE.settledDocumentId, DOCS_INTAKE.movingDocumentId, ...issued.map((u) => u.documentId)];
     if (!wanted.some((id) => mine.includes(id))) return false;
-    sendJson(response, 200, wanted.filter((id) => mine.includes(id)).map((id) => documentRow(
-      id,
-      id === DOCS_INTAKE.movingDocumentId
-        ? { original_filename: "march-statement.pdf", document_kind: "payroll_summary" }
-        : id === DOCS_INTAKE.uploadDocumentId
-          ? { original_filename: "uploaded.pdf", document_kind: null }
-          : {},
-    )), cors);
+    sendJson(response, 200, wanted.filter((id) => mine.includes(id)).map((id) => {
+      if (id === DOCS_INTAKE.movingDocumentId) {
+        return documentRow(id, { original_filename: "march-statement.pdf", document_kind: "payroll_summary" });
+      }
+      const up = issued.find((u) => u.documentId === id);
+      if (up) return documentRow(id, { original_filename: up.filename, document_kind: null });
+      return documentRow(id);
+    }), cors);
     return true;
   }
 
@@ -402,19 +425,24 @@ export async function handleDocumentsIntakeRuntime(request, response, url) {
       json(415, { error: "bad_type", message: `unsupported mime ${body?.mime}` });
       return true;
     }
-    json(201, { intake_id: DOCS_INTAKE.uploadIntakeId, upload_token: "e2e-docs-intake-token", expires_at: null });
+    const issued = nextUploadIds(String(body?.filename ?? "uploaded.pdf"));
+    json(201, { intake_id: issued.intakeId, upload_token: `e2e-docs-intake-token-${issued.intakeId}`, expires_at: null });
     return true;
   }
-  if (request.method === "PUT" && path === `/api/intake/documents/${DOCS_INTAKE.uploadIntakeId}/bytes`) {
-    await drain(request);
-    response.writeHead(204);
-    response.end();
-    return true;
-  }
-  if (request.method === "POST" && path === `/api/intake/documents/${DOCS_INTAKE.uploadIntakeId}/finalize`) {
-    await readJson(request);
-    json(202, { status: "adopted", document_id: DOCS_INTAKE.uploadDocumentId });
-    return true;
+  const leg = /^\/api\/intake\/documents\/([^/]+)\/(bytes|finalize)$/.exec(path);
+  if (leg && state.uploads.has(leg[1])) {
+    const issued = state.uploads.get(leg[1]);
+    if (request.method === "PUT" && leg[2] === "bytes") {
+      await drain(request);
+      response.writeHead(204);
+      response.end();
+      return true;
+    }
+    if (request.method === "POST" && leg[2] === "finalize") {
+      await readJson(request);
+      json(202, { status: "adopted", document_id: issued.documentId });
+      return true;
+    }
   }
   return false;
 }
