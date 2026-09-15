@@ -2316,7 +2316,7 @@ test("behavioural: direction === null (a pre-migration attempt row) skips the ea
 // wave's own registry cell). This file's premise was never "v6/v9 are the newest" — it was
 // "v6/v9 are REACHABLE, so every fidelity comparison above is comparing live bodies against
 // a body the engine can still resume". That is what it now asserts, in the direction that
-// still means something: v6/v9 must stay EXPORTED (Appendix A policy (c) — dropping the
+// still means something: v6/v9 must stay EXPORTED (ARCHITECTURE #workflow-versioning-and-rollback policy (c) — dropping the
 // export would strand any parked run), and the pins must be at or ahead of them.
 test("registry.ts keeps autoDraft_v6 / chatTurn_v9 EXPORTED after being superseded (policy (c)), and still exports their own predecessors", () => {
   assert.equal(typeof registryMod.autoDraft_v6, "function", "autoDraft_v6 must stay exported (policy c)");

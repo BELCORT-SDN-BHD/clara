@@ -6,7 +6,7 @@
 // Three things this file is trying to prove, in order of what would hurt most if wrong:
 //   1. v1 IS UNTOUCHED. Its inventories and validators still behave exactly as their own battery
 //      asserts, because "we shipped a v2" is only true if v1 kept its semantics for the parked
-//      runs finishing on it (ARCHITECTURE Appendix A policy (a)/(c)).
+//      runs finishing on it (ARCHITECTURE #workflow-versioning-and-rollback policy (a)/(c)).
 //   2. The two statutory impossibilities are refused LOUDLY and everything else unusual is
 //      recorded WITH an acknowledged warning — the house's refuse-nothing-silently posture.
 //   3. The new machinery cannot swallow anything: nothing persists before an echo-confirm (P19),
