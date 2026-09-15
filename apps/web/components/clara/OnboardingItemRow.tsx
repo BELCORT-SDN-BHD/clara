@@ -36,9 +36,29 @@
 // non-open plan (0017:2722), so an amend after commit is not a UI decision to make — it is
 // a door that would refuse, and the dialog says so instead of offering a doomed round trip.
 
-import { useState, type ReactNode } from "react";
+// AC6 / appendix D #28 — THE TWO WRITE CONTROLS ARE `Field`s NOW, not bare Textareas.
+//
+// Both inputs carried an `aria-label` and nothing else: no visible label, no description, no
+// error slot, and no `aria-invalid` when the Confirm they gate was disabled for the only reason
+// it is ever disabled (an empty answer). A person using a screen reader met a disabled button
+// with no statement of what was missing. `FieldGroup`/`Field`/`FieldLabel`/`FieldDescription`/
+// `FieldError` is the accepted composition for every new persistent input, and this is the same
+// shape `work-question-form.tsx:70` already ships.
+//
+// THE DOOR CALL IS UNTOUCHED. `resolve_onboarding_plan_item` still receives exactly its four
+// parameters, from exactly these two controls — `onboarding-amend-and-chart.test.tsx:214` pins
+// that call shape and must stay green through this re-composition.
+
+import { useId, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Badge } from "@/components/parts/PartBadge";
 import { businessDateTime } from "@/lib/business-date";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
@@ -115,8 +135,17 @@ export function OnboardingItemRow({
   // messages/en.json by `answer-format.test.ts`, which walks the real catalog rather than
   // trusting this line.
   const tAnswer = useTranslations("ClientOnboarding.answer") as unknown as AnswerTranslator;
+  const resolveId = useId();
+  const amendId = useId();
   const [resolution, setResolution] = useState("");
   const [amendment, setAmendment] = useState("");
+  // A control that has been touched and left empty is INVALID; an untouched one is not. Without
+  // this an empty field would render an error the moment the dialog opened, which is noise, and
+  // `aria-invalid` would be true before anybody did anything.
+  const [resolveTouched, setResolveTouched] = useState(false);
+  const [amendTouched, setAmendTouched] = useState(false);
+  const resolveInvalid = resolveTouched && resolution.trim().length === 0;
+  const amendInvalid = amendTouched && amendment.trim().length === 0;
   const isPending = item.state === "pending";
   const canResolve = isPending && planOpen;
   // 裁-27: the amend is offered for a SETTLED item on an OPEN plan — the exact complement of
@@ -149,13 +178,22 @@ export function OnboardingItemRow({
         confirmDisabled={!canResolve || resolution.trim().length === 0}
         onConfirm={() => onResolve(resolution.trim(), () => setResolution(""))}
       >
-        <Textarea
-          aria-label={t("resolveTrigger")}
-          placeholder={t("resolvePlaceholder")}
-          value={resolution}
-          onChange={(e) => setResolution(e.target.value)}
-          disabled={!canResolve}
-        />
+        <FieldGroup>
+          <Field data-invalid={resolveInvalid ? "true" : undefined}>
+            <FieldLabel htmlFor={resolveId}>{t("resolveLabel")}</FieldLabel>
+            <Textarea
+              id={resolveId}
+              aria-label={t("resolveTrigger")}
+              aria-invalid={resolveInvalid ? true : undefined}
+              placeholder={t("resolvePlaceholder")}
+              value={resolution}
+              onChange={(e) => { setResolveTouched(true); setResolution(e.target.value); }}
+              disabled={!canResolve}
+            />
+            <FieldDescription>{t("resolveFieldDescription")}</FieldDescription>
+            {resolveInvalid ? <FieldError>{t("resolveRequiredError")}</FieldError> : null}
+          </Field>
+        </FieldGroup>
         {/* "close this and use Amend resolution" is only true where that trigger EXISTS.
             `canAmend` is `!isPending && planOpen`, so on a settled receipt's rows (planOpen
             false) the old unconditional line told a professional to use a control that is not
@@ -209,12 +247,21 @@ export function OnboardingItemRow({
             </div>
           )}
           <p className="text-xs text-muted-foreground">{t("amendAppendOnlyNote")}</p>
-          <Textarea
-            aria-label={t("amendTrigger")}
-            placeholder={t("amendPlaceholder")}
-            value={amendment}
-            onChange={(e) => setAmendment(e.target.value)}
-          />
+          <FieldGroup>
+            <Field data-invalid={amendInvalid ? "true" : undefined}>
+              <FieldLabel htmlFor={amendId}>{t("amendLabel")}</FieldLabel>
+              <Textarea
+                id={amendId}
+                aria-label={t("amendTrigger")}
+                aria-invalid={amendInvalid ? true : undefined}
+                placeholder={t("amendPlaceholder")}
+                value={amendment}
+                onChange={(e) => { setAmendTouched(true); setAmendment(e.target.value); }}
+              />
+              <FieldDescription>{t("amendFieldDescription")}</FieldDescription>
+              {amendInvalid ? <FieldError>{t("amendRequiredError")}</FieldError> : null}
+            </Field>
+          </FieldGroup>
         </OnboardingDoorDialog>
       ) : null}
       {extraControls}

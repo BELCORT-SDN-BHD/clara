@@ -25,6 +25,7 @@
 // that failure is surfaced — a caught failure degraded to `false` would show a rung as unmet
 // that the DB may well consider met, which is review law 2 aimed at over-blocking.
 
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { SectionHeader } from "@/components/common/section-header";
@@ -42,6 +43,33 @@ import { DataState } from "../data-state";
  *  `pending` and `deferred` are not. Exported so the cell asserts the same closed set the
  *  component uses rather than a copy of it. */
 export const ONBOARDING_ANSWERED_STATES: readonly string[] = ["answered", "resolved"];
+
+/** #649 AC3 — WHICH OPENING STORY THIS CLIENT IS IN, read off the plan's own item keys rather
+ *  than inferred from the seed registry's emptiness.
+ *
+ *  `clara.commit_client_onboarding` accepts an opening position as an OR of three (0017:2812-2822),
+ *  and two of those three are item keys the interview writes by name (`interview.v2.questions.ts`'s
+ *  `openingItems`, which the DB reads BY NAME so they are a contract, not prose):
+ *    `first_year_zero_opening`  — a brand-new business. There is nothing to carry down, and no
+ *                                 opening Work will ever exist. This is `first_year`.
+ *    `carry_down_deferred`      — an ongoing business whose prior-period closing position has NOT
+ *                                 been captured yet. There IS opening work owed, and the registers'
+ *                                 opening tab is where it happens. This is `deferred`.
+ *  Anything else (including a finalized seed, which the caller reads separately) is `null`: the
+ *  section then says nothing about openings rather than guessing which story applies.
+ *
+ *  THE DISTINCTION IS THE ACCEPTANCE CRITERION ITSELF — "separate first-year/no-opening-needed
+ *  from missing imported opening evidence" — and CONTEXT.md's own Avoid for *Opening position*
+ *  names the failure: treating a deferred carry-down as "no opening needed". */
+export type OpeningStory = "first_year" | "deferred" | null;
+
+export function openingStory(items: readonly OnboardingPlanItemRow[]): OpeningStory {
+  const has = (key: string, states: readonly string[]) =>
+    items.some((i) => i.item_key === key && states.includes(i.state));
+  if (has("first_year_zero_opening", ["answered", "resolved"])) return "first_year";
+  if (has("carry_down_deferred", ["deferred", "resolved", "answered"])) return "deferred";
+  return null;
+}
 
 export function countRequiredAnswers(items: readonly OnboardingPlanItemRow[]): {
   answered: number;
@@ -62,6 +90,7 @@ type PlanSnapshot = {
   answered: number;
   required: number;
   openingSeeded: boolean;
+  opening: OpeningStory;
 };
 
 export function ClientOnboardingProgress({
@@ -91,6 +120,7 @@ export function ClientOnboardingProgress({
       answered,
       required,
       openingSeeded: seeded,
+      opening: openingStory(items),
     };
   });
 
@@ -115,6 +145,26 @@ export function ClientOnboardingProgress({
             <li>
               {plan.data.openingSeeded ? t("onboardingOpeningSeeded") : t("onboardingOpeningPending")}
             </li>
+            {/* #649 AC3 — THE LINK, and only on the branch that has somewhere to go.
+                A deferred carry-down is opening work that is OWED, and the registers' opening tab
+                (`opening-register.tsx` → `opening-position-gate.tsx`) is the only surface in the
+                product that does it — no onboarding surface has ever linked to it. A first-year
+                client has nothing to carry down, so it gets a SENTENCE and no link: offering one
+                would be the very confusion CONTEXT.md's *Opening position* Avoid names, pointed
+                the other way. A plan whose opening story cannot be read says neither. */}
+            {plan.data.opening === "deferred" && !plan.data.openingSeeded ? (
+              <li>
+                <Link
+                  href={`/clients/${clientId}/registers?tab=opening`}
+                  className="min-h-6 py-1 text-primary underline-offset-4 hover:underline"
+                >
+                  {t("onboardingOpeningLink")}
+                </Link>
+              </li>
+            ) : null}
+            {plan.data.opening === "first_year" ? (
+              <li className="text-xs text-muted-foreground">{t("onboardingFirstYearNoOpening")}</li>
+            ) : null}
             <li className="text-xs text-muted-foreground">
               {t("onboardingPlanState", { state: plan.data.state, revision: plan.data.revisionN })}
             </li>

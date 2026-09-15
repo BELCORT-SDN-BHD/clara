@@ -312,6 +312,26 @@
       "onboarding": "Onboarding"
     }
   },
+  "ClientIdentity": {
+    "candidatesLabel": "Already on your books under this name ({count})",
+    "noCandidates": "Nothing in this firm answers to that name.",
+    "noLink": "no client to open",
+    "nameFieldDescription": "Clara checks this name against your firm's clients and live counterparties before creating anything.",
+    "walledFieldError": "This name matches more than one business you already hold. Use a name that says which one this is, or open the right record instead.",
+    "acknowledgeLabel": "This is a different business",
+    "acknowledgeDescription": "Confirming records a second, separate client. If this is the same business, open the record above instead of creating another one.",
+    "reason": {
+      "exact_name": "same name",
+      "name_family": "same leading word",
+      "identifier": "same registration identifier",
+      "unknown": "matched on \"{reason}\""
+    },
+    "kind": {
+      "client": "Client",
+      "counterparty": "Counterparty",
+      "unknown": "{kind}"
+    }
+  },
   "FirmActivity": {
     "receiptKinds": {
       "entry_post": "Journal entry posted",
@@ -534,6 +554,11 @@
     "onboardingOpeningPending": "The opening position is not finalised yet.",
     "onboardingPlanState": "Plan state {state}, revision {revision}",
     "onboardingWhereToContinue": "Continue the interview with Clara in the panel beside this page.",
+    "onboardingOpeningLink": "Bring in the opening balances →",
+    "onboardingFirstYearNoOpening": "First year of trading — there is no prior closing position to carry down, so no opening balances are owed.",
+    "knowledgeFactsHeading": "Confirmed knowledge",
+    "knowledgeFactsUnavailable": "This client's confirmed knowledge could not be read. This is a failed read, not a client with nothing recorded.",
+    "knowledgeFactsStructured": "{count} confirmed record(s) hold a structured value — open Knowledge to read them.",
     "docsHeading": "Documents & coding",
     "docsEmpty": "Nothing is waiting in this client's document or coding pipeline.",
     "docsOverlapNote": "Some of these also appear under Needs you above — the two lists answer different questions, so do not add them together.",
@@ -4187,7 +4212,34 @@
       "amendHistoryNone": "This answer has not been amended before.",
       "amendHistoryLoading": "Reading this item's earlier answers…",
       "amendAppendOnlyNote": "Amending records a NEW resolution. The answer above is superseded, never erased — every version stays on the plan's permanent revision trail.",
-      "unverifiedBadge": "Format unverified"
+      "unverifiedBadge": "Format unverified",
+      "resolveLabel": "Your resolution",
+      "resolveFieldDescription": "Recorded on the plan as this item's answer, with your name and the time.",
+      "resolveRequiredError": "Say how this item was settled before recording it.",
+      "amendLabel": "The corrected answer",
+      "amendFieldDescription": "Recorded as a NEW resolution; the answer above stays on the plan's revision trail.",
+      "amendRequiredError": "Type the corrected answer before recording it."
+    },
+    "fyEnd": {
+      "monthLabel": "Financial year-end month",
+      "monthPlaceholder": "1–12",
+      "monthFromPlan": "The interview recorded month {month}. Leave this blank to use it.",
+      "monthNoPlanAnswer": "This plan recorded no financial year-end month, so it has to be stated here.",
+      "monthError": {
+        "required": "State the financial year-end month, 1 to 12.",
+        "not_a_month": "A financial year-end month is a whole number from 1 to 12."
+      },
+      "dayLabel": "Financial year-end day",
+      "dayPlaceholder": "1–31",
+      "dayDescription": "The interview never asked for the day, so Clara asks here rather than assuming month end.",
+      "dayError": {
+        "required": "State the financial year-end day. Clara does not assume month end.",
+        "not_a_day": "A financial year-end day is a whole number from 1 to 31.",
+        "not_in_month": "That day does not exist in the month you gave."
+      },
+      "monthEndSuggestion": "Use month end — day {day}",
+      "blankNote": "Leave both blank and no financial year end is recorded for this client now. It can be recorded later.",
+      "settleNote": "Recorded on the client itself when you confirm. If a yearly adjustment template or depreciation authority is live, the database refuses the change and says so."
     },
     "answer": {
       "ssm": {
@@ -4268,6 +4320,8 @@
         "partialUnnamed": "Clara could not read every fact her proposal depends on."
       },
       "receipt": "Applied: {accounts} accounts across {families} families. Adoption {adoption}.",
+      "seedDecidedOnOpenPlan": "The chart decision WAS made in the interview — it is recorded on this client's open onboarding plan. The chart applies once the onboarding is committed; the verdict above reads committed plans only.",
+      "seedDecisionPlanStateUnknown": "This client's chart decision is recorded against a plan state this build does not recognise (\"{state}\").",
       "recheck": "Re-check",
       "adoptionRecordNotBuilt": "The adopted template's full record — its rationale, the axes it was based on, and who proposed and adopted it — is not shown yet. Only the account count above is read.",
       "addFamilyNotBuilt": "Adding a further account family to a chart that has already adopted the standard template is not available yet."

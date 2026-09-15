@@ -14,7 +14,7 @@
 // with an honest caption distinguishing "could not be loaded" from "no fact
 // recorded" — law 2: a failed read is not evidence of absence.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,6 +24,14 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { Input } from "@/components/ui/input";
 import { StateBanner } from "@/components/common/state";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldSet,
+} from "@/components/ui/field";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { OnboardingDoorDialog } from "@/components/clara/OnboardingDoorDialog";
 import { findDoAction, isDoActionPermitted, type DoActionEnv } from "@/lib/command/do-actions";
@@ -31,6 +39,13 @@ import { loadDoEnv, runDoAction } from "@/lib/command/do-dispatch";
 import { meetsFloor } from "@/lib/identity/caller-context";
 import { onClientRecordChanged } from "@/lib/command/bus";
 import { isDoorRefusal } from "@/lib/doors";
+import {
+  candidatesFromRefusal,
+  isNameFamilyCollision,
+  readClientIdentityCandidates,
+  type ClientIdentityCandidate,
+} from "@/lib/onboarding/identity";
+import { ClientIdentityCandidateList } from "./client-identity-candidates";
 import { DataState } from "./data-state";
 
 type EnrichedRow = { client: ClientRow; entityType: string | null; msic: string | null };
@@ -88,12 +103,47 @@ async function loadEnrichedRegister(): Promise<EnrichedRegister> {
  * behind all three: `begin_client_onboarding` is `security definer` with its own admin
  * `_human_ctx` floor and raises CLR04 for a caller under it, rendered here VERBATIM.
  */
+/**
+ * ============================================================================
+ * #649 AC1 — THE IDENTITY CHECK, BEFORE THE RECORD.
+ * ============================================================================
+ *
+ * ONE MORE ASK, ON THE SAME CLICK. Confirm now asks `clara.client_identity_candidates` before it
+ * dispatches the birth door, and what comes back decides what happens next — the three arities the
+ * owner ruled on 2026-09-15:
+ *
+ *   0       nothing in this firm answers to that name. The SAME click goes straight on to the
+ *           door; a person who is not creating a duplicate is not interrupted.
+ *   1       the door RETURNS the candidate and does not refuse — the estate's own predicate is
+ *           `count(*) > 1` (0103:781-783), so one same-family party has never been "ambiguous"
+ *           anywhere in this estate. The face shows it, with a real link, and Confirm re-enables
+ *           only once the human ticks "this is a different business". That acknowledgement is the
+ *           ONLY wall at arity 1, and this comment is where that is written down.
+ *   >= 2    the DATABASE refuses, CLR10 `name_family_collision`, and the refusal is rendered
+ *           VERBATIM with its code beside the same list — which the refusal itself carried, so the
+ *           face never issues a second read of the fact it is reporting.
+ *
+ * THE TYPED NAME STAYS, always. Every arm above returns `false` from `onConfirm`, which is what
+ * keeps `OnboardingDoorDialog` open (CB-AE2E-004) with the human's input intact.
+ *
+ * EDITING THE NAME RETIRES THE CHECK, never the input: `checkedFor` remembers WHICH name the
+ * candidates answer for, so a changed name clears the candidates, the acknowledgement and the
+ * refusal — a tick that stood for a different name would be an acknowledgement of nothing.
+ */
 function AddClientControl({ onCreated }: { onCreated: () => void }) {
   const t = useTranslations("ClientsRegister");
+  const tid = useTranslations("ClientIdentity");
   const router = useRouter();
+  const nameFieldId = useId();
+  const ackFieldId = useId();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<{ message: string; code: string | null } | null>(null);
+  // The identity answer, and the NAME it answers for. `null` means "not asked yet for this name".
+  const [checkedFor, setCheckedFor] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<ClientIdentityCandidate[]>([]);
+  const [arity, setArity] = useState(0);
+  const [acknowledged, setAcknowledged] = useState(false);
   // ONE READ, on mount — the same shape the palette makes on every open. A FAILED read yields
   // no env at all, which renders the honest "we could not find out" line rather than an
   // absence that would read as "your role grants nothing".
@@ -109,6 +159,44 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
   if (!meetsFloor(env.data.ctx, spec.floor)) return null;
 
   const doEnv: DoActionEnv = { ...env.data, query: name };
+  const typed = name.trim();
+  // The candidates on screen answer for `checkedFor`. Anything else and they are stale by
+  // construction, so nothing about them may gate this Confirm.
+  const checkStands = checkedFor !== null && checkedFor === typed;
+  const acknowledgementOwed = checkStands && arity === 1 && !acknowledged;
+  const walled = checkStands && arity >= 2;
+
+  /** The identity read, and the three answers it can give. Returns `true` when the caller may go
+   *  on to the door on THIS click. Never throws: every failure is a face, not an exception. */
+  const runIdentityCheck = async (): Promise<boolean> => {
+    try {
+      const answer = await readClientIdentityCandidates(typed, { session: sessionTokenAccessor });
+      setCheckedFor(typed);
+      setCandidates(answer.candidates);
+      setArity(answer.arity);
+      setAcknowledged(false);
+      return answer.arity === 0;
+    } catch (err) {
+      setCheckedFor(typed);
+      setAcknowledged(false);
+      if (isNameFamilyCollision(err)) {
+        // THE WALL. The refusal carried the rows, so the list beside it is the DATABASE's own —
+        // never a second read of the fact being reported.
+        setCandidates(candidatesFromRefusal(err));
+        setArity(candidatesFromRefusal(err).length || 2);
+        setRefusal({ message: (err as Error).message, code: isDoorRefusal(err) ? err.code : null });
+        return false;
+      }
+      // Any other failure of the CHECK is reported as itself and blocks nothing beyond this
+      // click: a read that could not run is not evidence that the name is free, and it is not
+      // evidence that it is taken either.
+      setCandidates([]);
+      setArity(0);
+      if (isDoorRefusal(err)) setRefusal({ message: err.message, code: err.code });
+      else setRefusal({ message: err instanceof Error ? err.message : String(err), code: null });
+      return false;
+    }
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -122,7 +210,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
         description={t("addClientDescription")}
         confirmLabel={t("addClientConfirm")}
         busy={busy}
-        confirmDisabled={!isDoActionPermitted(spec, doEnv)}
+        confirmDisabled={!isDoActionPermitted(spec, doEnv) || acknowledgementOwed || walled}
         // CB-AE2E-004 (#549): resolves the OUTCOME. This dialog keeps its OWN `refusal`
         // state rather than a hydrated part's, so it reports success itself, and
         // OnboardingDoorDialog closes only on an explicit `true` — the not-permitted arm and
@@ -131,6 +219,16 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
           setBusy(true);
           setRefusal(null);
           try {
+            // #649 AC1 — ASK THE DATABASE FIRST, once per typed name. A name already checked and
+            // acknowledged does not pay for a second read; a changed name always does.
+            if (!checkStands) {
+              const clear = await runIdentityCheck();
+              if (!clear) return false;
+            } else if (arity >= 2) {
+              return false;              // unreachable while Confirm is disabled; a belt, labelled.
+            } else if (arity === 1 && !acknowledged) {
+              return false;              // same.
+            }
             const result = await runDoAction(spec, doEnv, sessionTokenAccessor);
             if (result.kind === "refused") {
               // `runDoAction` re-evaluates `isDoActionPermitted` against the same env before it
@@ -151,6 +249,10 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
               return false;
             }
             setName("");
+            setCheckedFor(null);
+            setCandidates([]);
+            setArity(0);
+            setAcknowledged(false);
             // Hydrate-never-trust: the register RE-READS rather than splicing in a row built
             // from the door's own reply. The navigation is to the id the DATABASE returned.
             onCreated();
@@ -166,12 +268,71 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
           }
         }}
       >
-        <Input
-          aria-label={t("addClientNameLabel")}
-          placeholder={t("addClientNamePlaceholder")}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+        {/* AC6 — the name is a FIELD now (appendix D #28: every new persistent input goes
+            through FieldGroup/Field with description and message slots), not a bare Input with
+            an aria-label. `aria-label` is KEPT on the control as well, because
+            `add-client-control.test.tsx` addresses it by that name and a visible label is not a
+            reason to drop the accessible one it already had. */}
+        <FieldGroup>
+          <Field data-invalid={walled ? "true" : undefined}>
+            <FieldLabel htmlFor={nameFieldId}>{t("addClientNameLabel")}</FieldLabel>
+            <Input
+              id={nameFieldId}
+              aria-label={t("addClientNameLabel")}
+              aria-invalid={walled ? true : undefined}
+              placeholder={t("addClientNamePlaceholder")}
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                // A CHECK BELONGS TO A NAME. Changing the name retires the candidates, the
+                // acknowledgement and the refusal — never the typed text.
+                setCheckedFor(null);
+                setCandidates([]);
+                setArity(0);
+                setAcknowledged(false);
+                setRefusal(null);
+              }}
+            />
+            <FieldDescription>{tid("nameFieldDescription")}</FieldDescription>
+            {walled ? <FieldError>{tid("walledFieldError")}</FieldError> : null}
+          </Field>
+        </FieldGroup>
+
+        {/* THE CANDIDATE FACE. Present at arity 1 (shown, acknowledged here) and at arity >= 2
+            (shown beside the database's own verbatim refusal, which travels into this dialog
+            through OnboardingDoorDialog's `refusal` slot and this page's banner). */}
+        {checkStands && candidates.length > 0 ? (
+          <ClientIdentityCandidateList arity={arity} candidates={candidates} />
+        ) : null}
+
+        {checkStands && arity >= 2 && refusal ? (
+          <StateBanner tone="error" code={refusal.code ?? undefined}>{refusal.message}</StateBanner>
+        ) : null}
+
+        {/* ARITY 1 — the only wall here, and it is the human's own act (appendix D #16:
+            Checkbox for an explicit acknowledgement, inside a FieldSet). No shadcn Checkbox is
+            installed in this project (appendix D lists it as "None"), so this is the native
+            control the rest of the estate already uses for acknowledgements
+            (components/bank/matching-section.tsx:201 is the same shape). */}
+        {checkStands && arity === 1 ? (
+          <FieldSet>
+            <Field orientation="horizontal" data-invalid={acknowledgementOwed ? "true" : undefined}>
+              <input
+                id={ackFieldId}
+                type="checkbox"
+                aria-label={tid("acknowledgeLabel")}
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+              />
+              <FieldLabel htmlFor={ackFieldId}>{tid("acknowledgeLabel")}</FieldLabel>
+            </Field>
+            <FieldDescription>{tid("acknowledgeDescription")}</FieldDescription>
+          </FieldSet>
+        ) : null}
+
+        {checkStands && arity === 0 ? (
+          <p className="text-xs text-muted-foreground">{tid("noCandidates")}</p>
+        ) : null}
       </OnboardingDoorDialog>
     </div>
   );

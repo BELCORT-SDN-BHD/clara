@@ -53,6 +53,16 @@ function mockEstate(persona: Persona, opts: { refuse?: boolean } = {}) {
   const beginCalls: unknown[] = [];
   const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
+    // #649 — Confirm now asks `clara.client_identity_candidates` before it dispatches the birth
+    // door. These seven cells are about the AFFORDANCE GATE and the dispatch, not about identity,
+    // so this fixture answers the arity-0 case ("nothing in this firm answers to that name") and
+    // the cells below keep proving exactly what they proved: an under-floor caller is never
+    // offered the control, an over-floor one is, the dispatch goes through ⌘K's own predicate,
+    // and a refusal renders verbatim. The identity face's own three arities are
+    // `add-client-candidates.test.tsx`'s subject.
+    if (u.includes("/rpc/client_identity_candidates")) {
+      return jsonResponse({ name: "x", arity: 0, candidates: [] });
+    }
     if (u.includes("/rest/v1/caller_context")) {
       if (persona === "unreadable") return jsonResponse({ message: "boom" }, 500);
       if (persona === "no_membership") return jsonResponse([]);
