@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS } from "./documents-viewer-mock.mjs";
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 
 /**
  * #614 — THE UNIFIED SHELL'S OWN WALK (裁-86).
@@ -50,14 +50,6 @@ const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const WIDE = { width: 1280, height: 720 };
 const NARROW = { width: 640, height: 720 };
 const NARROWEST = { width: 320, height: 720 };
-
-async function signInTo(page: Page, destination: string, email = "owner@example.test"): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /** A minimal, honest `list_review_queue` envelope, one row, distinguishable
  *  by its client id and question text — the same shape

@@ -18,7 +18,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, watchReactFaults } from "./helpers";
+import { settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
 
 const CLIENT_ID = "55555555-5555-4555-8555-555555555555";
 const THREAD_ID = "66666666-6666-4666-8666-666666666666";
@@ -56,18 +56,19 @@ async function scan(page: Page, what: string): Promise<void> {
 // running this file's own beforeEach followed by a test's own `openThread` unmodified, the
 // first test in the file failed with the page STUCK on "/login" after the click, 5s
 // timeout, no redirect. This repo's mock auth is not exercised for that shape (nothing
-// else in this suite signs in twice on one context), so this guards the ONE new caller
-// that now can — `page.context().cookies()` is a cheap, no-navigation check for the
-// session cookie `lib/supabase/cookie-options.ts`'s `AUTH_COOKIE_NAME` names, and every
-// OTHER call site keeps behaving exactly as before (a fresh context has no such cookie).
+// else in this suite signs in twice on one context AS THE SAME PERSONA), so this guards
+// the ONE caller that now can — `page.context().cookies()` is a cheap, no-navigation check
+// for the session cookie `lib/supabase/cookie-options.ts`'s `AUTH_COOKIE_NAME` names, and
+// every OTHER call site keeps behaving exactly as before (a fresh context has no such
+// cookie). #804 — this wraps the SHARED `signIn` helper (helpers.ts) rather than
+// reimplementing the form flow: the idempotency guard is this file's own (some other
+// walk's rank-sweep cell re-signs-in as a DIFFERENT persona on purpose, so the guard
+// cannot live in the shared helper without silently skipping that), but the sign-in
+// itself is not.
 async function signIn(page: Page): Promise<void> {
   const alreadySignedIn = (await page.context().cookies()).some((c) => c.name === "__Host-clara-auth");
   if (alreadySignedIn) return;
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await sharedSignIn(page);
 }
 
 /** The composer's accessible name. #507 and #508 both added `Clara.thread.composerLabel`

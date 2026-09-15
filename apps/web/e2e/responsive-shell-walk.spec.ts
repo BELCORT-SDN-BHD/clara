@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, watchReactFaults } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, signInTo, watchReactFaults } from "./helpers";
 
 /**
  * CB-AE2E-019 · H-31 · C-43 — THE BROWSER LEG (裁-86).
@@ -32,14 +32,6 @@ const NARROW = { width: 640, height: 720 };
 const WIDE = { width: 1280, height: 720 };
 const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-
-async function signInTo(page: Page, destination: string, email = "owner@example.test"): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /** The two halves of WCAG 1.4.10 Reflow this shell was failing, measured. */
 async function expectReflows(page: Page, face: string): Promise<void> {

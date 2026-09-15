@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { cellBudgetMs } from "./helpers";
+import { cellBudgetMs, signInTo } from "./helpers";
 
 // The Home boards' browser leg (裁-86): Firm Home -> a tile -> the surface that owns it -> back,
 // then the client board for an ACTIVE and an ONBOARDING client, each at 1440 and at 1024 with
@@ -17,7 +17,6 @@ import { cellBudgetMs } from "./helpers";
 // this proves the JOURNEY and the client's own wire shapes — never that Postgres would accept
 // them.
 
-const OWNER = "owner@example.test";
 const CLIENT_ACTIVE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CLIENT_ONBOARDING = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -89,15 +88,6 @@ async function seed(page: Page): Promise<void> {
     ] }));
 }
 
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await seed(page);
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill(OWNER);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
-
 /**
  * THE WORKBENCH, not the whole document — and this scoping is load-bearing, not tidiness.
  *
@@ -124,6 +114,7 @@ async function settled(page: Page): Promise<void> {
 }
 
 test("Firm Home names the firm, scores the queue from the envelope, and every tile links to the surface that owns it", async ({ page }) => {
+  await seed(page);
   await signInTo(page, "/");
   await settled(page);
 
@@ -153,6 +144,7 @@ test("Firm Home names the firm, scores the queue from the envelope, and every ti
 });
 
 test("the client board reads for an ACTIVE client: identity, the queue with its inline act, bank, close", async ({ page }) => {
+  await seed(page);
   await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
   await settled(page);
 
@@ -175,6 +167,7 @@ test("the client board reads for an ACTIVE client: identity, the queue with its 
 });
 
 test("the client board lifts ONBOARDING progress for a client mid-interview", async ({ page }) => {
+  await seed(page);
   await signInTo(page, `/clients/${CLIENT_ONBOARDING}`);
   await settled(page);
 
@@ -192,6 +185,7 @@ test("both boards reflow on the CONTAINER query at 1440 and at 1024 with the rai
   // each), which is well past a flat 30 s on a host running another suite.
   test.setTimeout(cellBudgetMs({ signIns: 2, polls: 4 }));
   for (const [face, url] of [["firm home", "/"], [`client home`, `/clients/${CLIENT_ACTIVE}`]] as const) {
+    await seed(page);
     await signInTo(page, url);
     for (const width of [1440, 1024]) {
       await page.setViewportSize({ width, height: 900 });
@@ -230,6 +224,7 @@ test("all three boards are clean under the full WCAG 2.1 AA scan", async ({ page
     ["client home (onboarding)", `/clients/${CLIENT_ONBOARDING}`],
   ] as const;
   for (const [face, url] of FACES) {
+    await seed(page);
     await signInTo(page, url);
     await settled(page);
     // POSITIVE CONTROL on the onboarding face specifically: the card whose heading caused the

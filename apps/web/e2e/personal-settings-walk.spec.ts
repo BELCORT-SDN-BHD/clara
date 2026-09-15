@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, signIn } from "./helpers";
 
 // #626 (refresh spec #612, journey D1) — `/settings/account`'s real content.
 // Mocks are installed with `page.route`, per firm-navigation-walk.spec.ts's own
@@ -13,14 +13,6 @@ import { cellBudgetMs, ensureRealFocus } from "./helpers";
 // override for its own scenario.
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-
-async function signIn(page: Page, email = "owner@example.test"): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
-}
 
 type Envelope = { version: number; interface: Record<string, string>; notifications: Record<string, never>; updated_at: string | null };
 

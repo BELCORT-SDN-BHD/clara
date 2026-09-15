@@ -47,6 +47,21 @@ The config sets no per-test timeout, so Playwright's flat 30 s applies to every 
 
 Use `test.setTimeout(cellBudgetMs({ polls, scans, signIns }))` at the top of a cell whose work is visible from the cell, and `grantCellBudget(CELL_BUDGET.x)` inside a shared helper (`signIn()`, `scan()`) whose cost depends on how many times the cell calls it — that form ADDS to whatever the cell already set, so a cell that signs in three times gets three times the headroom.
 
+### The sign-in cold-start flake (#804)
+
+`signIn()`/`signInTo()` (`helpers.ts`) are the ONE shared sign-in every spec in this suite calls — the 24 files (plus one inline copy) that used to each define their own were folded into it. Every call ends by waiting on the post-login `navigation[name=Main]` landmark, with an EXPLICIT timeout (`CELL_BUDGET.signIn`, 20 s) rather than falling through to Playwright's own default `expect` timeout (5 s) the way most of the retired copies did — that fallthrough is the measured cause of the intermittent timeout multiple browser-walk runs across the 2026-09-14 refresh wave observed on a freshly started server (e.g. `documents-viewer-walk`'s own fix-round report: "two `signIn` waits on `navigation[name=Main]`... flakes, not regressions").
+
+Two measurements, same conditions as `CELL_BUDGET.scan`'s own note (`node e2e/run.mjs <spec>`, `reuseExistingServer: false`, so every run is cold by construction; this Mac, 2026-09-16, machine otherwise idle):
+
+| What | Measured | Absorbed by |
+|---|---|---|
+| Cold server boot (this file's own readiness gate, `global-setup.ts`) | 160-970 ms for `${appOrigin}/login` to answer, first poll | `global-setup.ts`, before any test runs |
+| Cold sign-in round trip (first cell of a fresh run, after the gate above) | ~960 ms, vs. ~500 ms once warm | `CELL_BUDGET.signIn` / the shared helper's own wait timeout |
+
+Both measurements sit comfortably inside the existing 20 s figure — the measurement CONFIRMS `CELL_BUDGET.signIn`, it does not correct it. A slower or more loaded host (the original flake was observed under exactly that condition — several suites competing for one machine's CPU) is expected to cost more than this quiet-host measurement; the 20 s figure already carries over an order of magnitude of headroom above it.
+
+`global-setup.ts` (wired into `playwright.config.ts`'s `globalSetup`) is a SEPARATE gate from the sign-in wait above: it polls the HTTPS app origin's own `/login` — the origin the browser actually drives, not only this config's `webServer.url` probe of the internal Next port — once, before the suite's first test, and blocks (with a 100 s bound, failing loudly on timeout) until it genuinely answers. On a warm host it returns on its first poll and costs nothing; it exists so the walk suite's first sign-in never pays the server's own first-hit cost on top of its own wait.
+
 Three rules the budgets do not replace:
 
 - **A budget is a ceiling, never a wait.** Nothing here makes a passing cell slower; the per-assertion timeouts are what actually bound each step.

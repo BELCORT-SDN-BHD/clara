@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, settleForScan } from "./helpers";
+import { CELL_BUDGET, grantCellBudget, settleForScan, signIn } from "./helpers";
 
 /**
  * P6-6's 裁-86 browser leg — the identity finish, walked in a real browser
@@ -152,20 +152,6 @@ test("nothing on an entry face loops: the mark carries no animation at all", asy
 // ---------------------------------------------------------------------------
 // 裁-14 — the mascot, in the one place it is allowed to be
 // ---------------------------------------------------------------------------
-
-async function signIn(page: Page): Promise<void> {
-  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
-  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
-  // and one that never signs in gets none.
-  grantCellBudget(CELL_BUDGET.signIn);
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // #614: "Firm navigation" retired with the bespoke `<aside>` it named —
-  // the sidebar's one landmark is now "Main".
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
-}
 
 const E2E_THREAD = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
 /** The subject this walk signs in as, declared by the shared harness

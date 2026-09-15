@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signIn } from "./helpers";
 import { WORK_LIST } from "./work-list-mock.mjs";
 
 /**
@@ -19,14 +19,6 @@ import { WORK_LIST } from "./work-list-mock.mjs";
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
-}
 
 const workTable = (page: Page) => page.getByRole("table", { name: "Durable work" });
 const rowLink = (page: Page, memo: string) => workTable(page).getByRole("link", { name: memo });

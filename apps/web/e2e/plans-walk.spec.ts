@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 import { PLANS } from "./plans-mock.mjs";
 
 /**
@@ -35,17 +35,6 @@ const CLIENT = PLANS.clientId;
 const LIST_URL = `/clients/${CLIENT}/plans`;
 const DETAIL_URL = `/clients/${CLIENT}/plans/${PLANS.planId}`;
 const ENDED_URL = `/clients/${CLIENT}/plans/${PLANS.endedPlanId}`;
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // A GENEROUS TIMEOUT, not the 5s default: this host runs several rigs at once and the
-  // post-sign-in navigation is a full server render. A short wait here reports "the app did not
-  // sign in" for a page that had simply not finished, which is a false finding.
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
-}
 
 /**
  * THE FIXTURE'S PAUSE STATE IS PER-SERVER, NOT PER-TEST, and one server serves every walk in the

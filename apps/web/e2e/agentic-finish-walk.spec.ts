@@ -23,7 +23,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget } from "./helpers";
+import { signIn } from "./helpers";
 import { P6_5 } from "./agentic-finish-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -38,26 +38,10 @@ async function resetFixtures(page: Page): Promise<void> {
   expect(response.ok()).toBe(true);
 }
 
-/** THE REAL SIGN-IN, through the real login form — the same helper shape
- *  `chat-parity-walk.spec.ts` uses, and for the same reason: a hand-planted localStorage
- *  session would prove the walk, not the app.
- *
- *  THE PERSONA IS THE ALLOWLIST. `serve-built.mjs` answers `/rest/v1/caller_context` from the
- *  email that signed in — `bookkeeper@` is rank 1, `owner@` is rank 3 — so "what the database
- *  says this caller may do" is changed here by signing in as someone else, through the app's
- *  own session, with nothing mocked on the side. */
-async function signIn(page: Page, email = "owner@example.test"): Promise<void> {
-  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
-  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
-  // and one that never signs in gets none.
-  grantCellBudget(CELL_BUDGET.signIn);
-
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
-}
+// #804 — THE REAL SIGN-IN is now the shared `signIn` helper (helpers.ts). The persona is still
+// the allowlist: `serve-built.mjs` answers `/rest/v1/caller_context` from the email that signed
+// in — `bookkeeper@` is rank 1, `owner@` is rank 3 — so "what the database says this caller may
+// do" is changed by signing in as someone else, through the app's own session.
 
 /** The composer's accessible name, as `chat-parity-walk.spec.ts` pins it after the
  *  #507/#508 auto-merge took one of two values. Main's value is canonical. */

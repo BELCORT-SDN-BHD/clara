@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { cellBudgetMs, ensureRealFocus, settleForScan, watchReactFaults } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, signInTo, watchReactFaults } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 import { MOTION_LOCAL_STORAGE_KEY } from "../lib/settings/motion-preference";
 
@@ -38,14 +38,6 @@ const WORK_LIST_URL = `/clients/${CLIENT}/work`;
  *  here because this walk SEEDS a draft to reach the one validation rule the
  *  select cannot produce (see the unknown-account cell). */
 const DRAFT_KEY = `clara:journal-draft:11111111-1111-1111-1111-111111111111:33333333-3333-4333-8333-333333333333:${CLIENT}`;
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /**
  * Drive the fixture's Work state machine from inside the signed-in page.

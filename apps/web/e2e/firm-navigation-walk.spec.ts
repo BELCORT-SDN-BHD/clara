@@ -1,25 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget } from "./helpers";
+import { signIn } from "./helpers";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-
-async function signIn(page: Page, email: string): Promise<void> {
-  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
-  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
-  // and one that never signs in gets none.
-  grantCellBudget(CELL_BUDGET.signIn);
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
-  // #614: the sidebar's ONE navigation landmark, over the one registry
-  // (lib/navigation/tree.ts) — "Firm navigation" retired with the bespoke
-  // `<aside>` it named.
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
-}
 
 test("operator owner sees the full sidebar and reaches Members in two navigation clicks", async ({ page }) => {
   await signIn(page, "owner@example.test");

@@ -12,6 +12,12 @@ const nextPort = process.env.CLARA_E2E_NEXT_PORT ?? "3101";
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./e2e/.artifacts",
+  // #804 — polls the HTTPS app origin's own `/login` (the origin the browser actually drives,
+  // not only this file's own `webServer.url` probe of the internal Next port) until it genuinely
+  // answers, so the walk suite's first sign-in never pays a cold server's first-hit cost. See
+  // `e2e/global-setup.ts`'s own header for the measurement and why this seam runs after
+  // `webServer` and before every test file.
+  globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
