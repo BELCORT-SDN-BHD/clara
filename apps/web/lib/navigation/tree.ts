@@ -109,7 +109,8 @@ export type AccountingItemId =
  * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
  * a page that is only ever reached with an intent.
  */
-export type ClientLeafId = "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord";
+export type ClientLeafId =
+  | "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord" | "fixedAsset";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -384,6 +385,14 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
   // name it rather than stopping at Knowledge and claiming the reader is on the register.
   { id: "knowledgeRecord", parent: "knowledge", labelKey: "clientLeaf.knowledgeRecord", minimumRole: "viewer" },
+  // #639 — /…/registers/assets/:assetId names ONE fixed asset. A leaf for the same reason
+  // workDetail and knowledgeRecord are: a durable record cannot be a static menu row, and the
+  // breadcrumb has to name the asset rather than stopping at Fixed assets and claiming the reader
+  // is on the register. Parented on `accounting` — the CLIENT-NAV row, the only altitude a leaf's
+  // parent may name (the sidebar's "Fixed assets" entry is an ACCOUNTING ITEM under it, and
+  // `periodicAdjustment` is parented the same way for the same reason). The LIST stays exactly
+  // where it is: `registers?tab=fixedAssets`.
+  { id: "fixedAsset", parent: "accounting", labelKey: "clientLeaf.fixedAsset", minimumRole: "viewer" },
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -419,6 +428,15 @@ export function workDetailHref(clientId: string, workId: string): string {
  *  revision. Percent-encoded for the reason `workDetailHref` states. */
 export function knowledgeRecordHref(clientId: string, recordId: string): string {
   return `${clientBase(clientId)}/knowledge/${encodeURIComponent(recordId)}`;
+}
+
+/** `/clients/:clientId/registers/assets/:assetId` — ONE fixed asset's own address (#639).
+ *
+ *  A REAL ROUTE SEGMENT UNDER THE REGISTER, not a second register and not a `?tab=`: the list
+ *  stays at `registers?tab=fixedAssets` and this is the detail, on the `knowledge/:recordId`
+ *  precedent. Percent-encoded for the reason `workDetailHref` states. */
+export function fixedAssetHref(clientId: string, assetId: string): string {
+  return `${clientBase(clientId)}/registers/assets/${encodeURIComponent(assetId)}`;
 }
 
 /** `/clients/:clientId/journals` — the posted-and-drafts surface. With an entry

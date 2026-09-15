@@ -54,6 +54,15 @@ export type FixedAssetRow = {
    *  a client-side guess on its own — the door is still the wall. */
   disposal_draft_outstanding: boolean;
   disposal_draft_entry_id: string | null;
+  /** #639 (migration 0201) — the acquisition, projected on EVERY row shape so the register can
+   *  link a row to its journal entry and its source document without a second read per row.
+   *  `acquisition_document_id` is `coalesce(f.acquisition_document_id, e.document_id)` over the
+   *  acquisition ENTRY: a row birthed by `clara._fa_on_approve` arm 4 carries no birth-time copy
+   *  (0017's post-approval immutability wall makes it unwritable), and the entry is the authority.
+   *  All three are null on a supersede/revision successor, which has no acquisition of its own. */
+  acquisition_entry_id: string | null;
+  acquisition_line_id: string | null;
+  acquisition_document_id: string | null;
 };
 
 export type FixedAssetRegisterEnvelope = {
@@ -102,6 +111,98 @@ export type FaProjectedPeriod = {
   projected_cents: number;
 };
 
+/** #639 — THE ACQUISITION AS ITS OWN FACT (`clara._fa_acquisition_json`, migration 0201).
+ *
+ *  `work_id` and `receipt_id` are DERIVED BY JOIN from the acquisition entry, never stored: the
+ *  operation receipt is inserted AFTER the approve and the Work `result` is built inside the
+ *  posting core, so an approve-time write of either would have stamped NULL forever
+ *  (0195:2123-2127 records the estate's own ruling on exactly that). `currency` is always `MYR` —
+ *  admission refuses anything else (0178:734-736) and multi-currency is the accepted PRD:127
+ *  deferral, said out loud rather than left as a silent absence. */
+export type FaAcquisition = {
+  entry_id: string | null;
+  line_id: string | null;
+  document_id: string | null;
+  document_filename: string | null;
+  document_mime: string | null;
+  document_sha256: string | null;
+  document_kind: string | null;
+  posting_date: string | null;
+  approved_at: string | null;
+  entry_status: string | null;
+  entry_origin: string | null;
+  memo: string | null;
+  reversal_of: string | null;
+  reversed_by: string | null;
+  acquired_date: string | null;
+  cost_cents: number | null;
+  currency: "MYR";
+  asset_account: string | null;
+  work_id: string | null;
+  receipt_id: string | null;
+  receipt_logical_op_id: string | null;
+  receipt_created_at: string | null;
+  on_behalf_of: string | null;
+  work_status: string | null;
+  work_purpose: string | null;
+  /** `acquisition_entry` for a real acquisition; `supersede_successor` for a split/revision row,
+   *  which has no acquisition entry of its own by design (0041 SS1.1). */
+  derived_from: "acquisition_entry" | "supersede_successor" | (string & {});
+};
+
+/** #639 — the depreciation configuration, SEPARATE from the acquisition. "Policy and schedule
+ *  clearly separate" (AC8) is structural in the read, not a layout choice this surface could
+ *  quietly undo. `non_depreciable` is the enrolment fact the form needs BEFORE it offers a method
+ *  rather than after the door refuses one. */
+export type FaParticularsBlock = {
+  complete: boolean;
+  method: "straight_line" | "reducing_balance" | "none" | null;
+  useful_life_months: number | null;
+  rate_bps: number | null;
+  residual_cents: number | null;
+  start_date: string | null;
+  description: string | null;
+  ca_class: string | null;
+  is_commercial_vehicle: boolean | null;
+  is_new: boolean | null;
+  non_depreciable: boolean;
+};
+
+/** #639 — the correction chain, MADE VISIBLE rather than re-linked.
+ *
+ *  Reversing an acquisition unwinds its register row and re-booking births a NEW one keyed to the
+ *  new cost line; no column links the two and 0201 adds none, because a stored link would be a
+ *  claim about intent that only a human holds. Every related row therefore says HOW it was
+ *  derived, and the surface renders that word. `chain_open` is true when this row's acquisition
+ *  was reversed and nothing re-booked has been derived — an empty list would otherwise read as
+ *  "nothing happened". */
+export type FaRelatedAsset = {
+  asset_id: string;
+  description: string | null;
+  status: string;
+  cost_cents: number | null;
+  acquired_date: string | null;
+  acquisition_entry_id: string | null;
+  particulars_complete: boolean;
+  relation: "predecessor" | "successor" | (string & {});
+  link: "supersede" | "source_document" | "reversed_acquisition_on_same_enrolment" | (string & {});
+};
+
+export type FaHistory = {
+  status: string;
+  acquisition_entry_id: string | null;
+  acquisition_reversed_by: string | null;
+  acquisition_reversed_at: string | null;
+  acquisition_reverses: string | null;
+  supersedes_asset_id: string | null;
+  superseded_by_asset_id: string | null;
+  superseded_at: string | null;
+  disposed_at: string | null;
+  disposal_entry_id: string | null;
+  related: FaRelatedAsset[];
+  chain_open: boolean;
+};
+
 export type FixedAssetDetail = {
   asset: FixedAssetRow;
   /** Walked upward via `supersedes_asset_id` — every predecessor this asset's
@@ -113,6 +214,12 @@ export type FixedAssetDetail = {
    *  and depreciable. */
   schedule: FaProjectedPeriod[];
   uncharged_due: unknown[];
+  /** #639 (0201). Present on every database at or past that migration; a chain pinned below it
+   *  answers `undefined`, which is why the detail surface renders each block behind its own
+   *  presence check rather than assuming three keys that did not always exist. */
+  acquisition?: FaAcquisition | null;
+  particulars?: FaParticularsBlock | null;
+  history?: FaHistory | null;
 };
 
 /** clara.get_fixed_asset(p_asset) — viewer+. CLR11 if the asset is not in your

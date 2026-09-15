@@ -49,6 +49,9 @@ const ASSET: FixedAssetRow = {
   is_commercial_vehicle: null, is_new: null, superseded_by_asset_id: null, disposed_at: null,
   disposal_entry_id: null, uncharged_due_count: 0, split_month_advisory_count: 0,
   disposal_draft_outstanding: false, disposal_draft_entry_id: null,
+  // #639 (0201) — the acquisition every register row shape now projects. Present here so the
+  // fixture is a real FixedAssetRow rather than a partial one a cast would have hidden.
+  acquisition_entry_id: "e1", acquisition_line_id: "l1", acquisition_document_id: null,
 };
 const ACCOUNTS: AccountRow[] = [
   { account_code: "1500", name: "Office equipment", account_type: "asset", account_class: null, special_acc_type: null, is_active: true },

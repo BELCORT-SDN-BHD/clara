@@ -47,6 +47,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { WorkPlanOriginRow } from "@/components/plans/work-plan-origin";
+import { WorkAssetRow } from "@/components/registers/work-asset-row";
 import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -716,6 +717,15 @@ function PostedEntrySection({
   );
 }
 
+
+/** #639 — the Work's own posted entry, read from `result` without trusting its shape. The column
+ *  is jsonb and a Work that has not posted carries none, so this narrows rather than casts. */
+function workResultEntryId(work: AccountingWorkRow): string | null {
+  const result = work.result as { entry_id?: unknown } | null | undefined;
+  const id = result?.entry_id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
 /** The identity block: what this Work IS, who asked for it, on what basis, and
  *  which frozen bundle ran it. Every value is a column; nothing is derived. */
 function WorkFacts({
@@ -763,6 +773,10 @@ function WorkFacts({
         {/* #640 — "From plan <purpose>", and ONLY when this Work was initiated by an accounting
             plan's due event. The component renders nothing otherwise; see its own header. */}
         <WorkPlanOriginRow clientId={work.client_id} workId={work.id} />
+        {/* #639 — the fixed asset this Work registered, and ONLY when it registered one. Derived
+            from the posted entry through the register's own viewer-floored read; the component
+            renders nothing otherwise. See its own header. */}
+        <WorkAssetRow clientId={work.client_id} entryId={workResultEntryId(work)} />
         <dt className="text-muted-foreground">{t("submittedAt")}</dt>
         <dd className="text-foreground">{work.created_at === null ? "—" : businessDateTime(work.created_at)}</dd>
         <dt className="text-muted-foreground">{t("initiatorRole")}</dt>

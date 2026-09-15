@@ -334,7 +334,6 @@ test("p639.provenance.document_lane a hook-born row carries its source document 
 
 test("p639.refusal.locked_period an acquisition into a CLOSED fiscal year is refused by name and leaves no entry, no receipt and no register row", async (t) => {
   if (await gate(t)) return;
-  const w = await acqWorld();
   const client = await acqClient("refusal_locked");
   const fy = await rootQuery(
     `select id, starts_on, ends_on from clara.fiscal_years

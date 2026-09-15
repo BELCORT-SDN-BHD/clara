@@ -28,6 +28,7 @@
 // to select a row from the URL, this map is where that lands.
 
 import type { ReviewQueueRow } from "@/lib/journals/types";
+import { fixedAssetHref } from "@/lib/navigation/tree";
 
 /** The client-workspace tab each row kind belongs to, as a path SUFFIX under
  *  `/clients/<clientId>`. `""` is the workspace root — the honest destination for a row that
@@ -55,7 +56,12 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // client-scoped — so this kind deliberately has no client tab and keeps the root.
   // A lint finding is raised against the books; the journals workbench is where it is fixed.
   lint_finding: "/journals",
-  // Both "incomplete" kinds are register rows missing particulars.
+  // Both "incomplete" kinds are register rows missing particulars. `fixed_asset_incomplete` is
+  // REPOINTED by #639: the row carries the ASSET id in its shared `id` column
+  // (0041's S4.9 splice says so in its own words), and since 0201 there is a real route that
+  // selects that asset from the URL. This file's header named exactly that condition — "when a
+  // tab learns to select a row from the URL, this map is where that lands" — so the suffix here
+  // stays the register tab and `needsYouRowHref` narrows it to the detail below.
   fixed_asset_incomplete: "/registers",
   staff_advance_incomplete: "/registers",
 });
@@ -67,8 +73,18 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
  * `/clients/<clientId>`, so without one there is no page, and the caller renders no link
  * rather than a broken one.
  */
-export function needsYouRowHref(row: Pick<ReviewQueueRow, "row_kind" | "client_id">): string | null {
+export function needsYouRowHref(
+  row: Pick<ReviewQueueRow, "row_kind" | "client_id"> & { id?: string | null },
+): string | null {
   if (!row.client_id) return null;
+  // #639 — THE ONE DEEP DESTINATION THIS MAP OFFERS, and it is not a fragment: `id` on a
+  // `fixed_asset_incomplete` row IS the asset id (0041 S4.9), and `/registers/assets/:assetId` is
+  // a page this checkout really serves (routes.test.ts proves it against the real app/ tree). The
+  // guard is deliberate: a row whose id is missing or malformed falls back to the register tab
+  // rather than building a URL out of nothing.
+  if (row.row_kind === "fixed_asset_incomplete" && typeof row.id === "string" && row.id.length > 0) {
+    return fixedAssetHref(row.client_id, row.id);
+  }
   const suffix = OWNING_TAB[row.row_kind] ?? "";
   return `/clients/${row.client_id}${suffix}`;
 }
