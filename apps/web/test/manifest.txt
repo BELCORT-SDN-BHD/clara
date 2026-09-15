@@ -101,6 +101,7 @@ components/documents/documents-governance-keyboard.test.tsx
 components/documents/documents-url-state.test.tsx
 components/documents/documents-workbench-refresh.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/checkout-faces-a11y.test.tsx
 components/entry/email-confirmation-origin.test.tsx

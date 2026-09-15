@@ -83,6 +83,14 @@ export type QueueItem = {
   file: File;
   intakeId: string | null;
   documentId: string | null;
+  /** THE CAPABILITY JOIN KEY (#633 AC3(b)). Seeded from the browser's own
+   *  `file.type`, then OVERWRITTEN by the intake row's `declared_mime` as soon as the
+   *  first poll read lands — that value is the CANONICAL spelling
+   *  (`packages/runtime/lib/intake.mjs:88` canonicalises through MIME_ALIASES before
+   *  anything is stored), which is the only spelling `clara.document_capabilities`
+   *  indexes (0191:206). A browser-reported type this estate never admitted resolves
+   *  to no format and the surface publishes nothing — the honest answer. */
+  declaredMime: string | null;
   state: QueueState;
   /** MEASURED upload bytes from the XHR seam (`intake.ts`'s `putIntakeBytes`
    *  `onProgress`) — never a simulated ramp, never an indeterminate event dressed as
@@ -289,6 +297,9 @@ export function useUploadQueue(
             return null;
           });
           if (row) {
+            // The canonical mime lands here (see `declaredMime`'s own note) — the
+            // capability join key, from the DB rather than from the browser.
+            if (row.declared_mime) patch(localId, { declaredMime: row.declared_mime });
             // N6: filing is gated EXCLUSIVELY on this DB-confirmed row — `receipt`
             // (finalizeIntake's own advisory return, above) never drives it.
             if (row.status === "failed") return patch(localId, { state: "failed", failureCode: row.failure_code });
@@ -386,7 +397,7 @@ export function useUploadQueue(
         }
         ref.current = [
           ...ref.current,
-          { localId: crypto.randomUUID(), name: file.name, size: file.size, file, intakeId: null, documentId: null, state: "queued", ...BLANK },
+          { localId: crypto.randomUUID(), name: file.name, size: file.size, file, intakeId: null, documentId: null, declaredMime: file.type || null, state: "queued", ...BLANK },
         ];
       }
       sync();
