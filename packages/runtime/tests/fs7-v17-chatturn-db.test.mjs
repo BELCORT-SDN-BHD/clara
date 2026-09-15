@@ -43,6 +43,12 @@ import {
   dropDisposableDatabase,
   waitForBackendsClear,
 } from "../../db/tests/migrate-harness.mjs";
+import { pgToolsSkipForThisHost } from "./pg-tools-fixture.mjs";
+
+// #806 — probed ONCE, before before()/after() are ever invoked and before either test cell is
+// registered, so a host missing pg_dump/psql (cloneAmbientDatabase()'s dependency, called inside
+// before() below) reports SKIPPED rather than a hook failure, and creates no private database.
+const PG_TOOLS_SKIP = pgToolsSkipForThisHost();
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -191,6 +197,11 @@ async function dropPrivateDatabase(name) {
 }
 
 before(async () => {
+  // #806 — both cells below are registered with { skip: PG_TOOLS_SKIP }, so on a host missing
+  // pg_dump/psql node:test never runs them; this guard additionally keeps the hook itself from
+  // ever calling createPrivateDatabase()/cloneAmbientDatabase() on that host, so no disposable
+  // database is created (let alone orphaned) when the suite is going to report skipped anyway.
+  if (PG_TOOLS_SKIP) return;
   // Captured BEFORE createPrivateDatabase()/setDatabaseEnv() touch anything -- this
   // is the ambient (estate) target's pg_dump/psql env, the clone SOURCE.
   const sourceChildEnv = childEnvForExternalTools();
@@ -250,7 +261,7 @@ async function execute(tool, input, toolCallId) {
   });
 }
 
-test("fs7.v17.db.report-tools: open, assess and seal each reach their live interactive wrapper", async () => {
+test("fs7.v17.db.report-tools: open, assess and seal each reach their live interactive wrapper", { skip: PG_TOOLS_SKIP }, async () => {
   const { world, eps } = fixture;
   const ctx = {
     firmId: world.firms.A,
@@ -331,7 +342,7 @@ test("fs7.v17.db.report-tools: open, assess and seal each reach their live inter
   );
 });
 
-test("fs7.v17.db.close-stop: a chat-mintable client credential remains task-unbound after the allowlist wall is removed", async () => {
+test("fs7.v17.db.close-stop: a chat-mintable client credential remains task-unbound after the allowlist wall is removed", { skip: PG_TOOLS_SKIP }, async () => {
   const { world, eps } = fixture;
   const proposed = await rig.humanQuery(
     world.users.alice,
