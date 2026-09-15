@@ -51,11 +51,23 @@ import type { CapabilityIndex } from "@/lib/documents/capability-registry";
  * failure) and `item.recoveryRemedy` (the DB's own authoritative wording) render
  * VERBATIM, exactly like DoorFeedback's `err` elsewhere on this tab.
  */
-export function UploadPanel({ clientId, onFiled }: { clientId: string; onFiled: () => void }) {
+export function UploadPanel({ clientId, onFiled, capabilityIndex }: {
+  clientId: string;
+  onFiled: () => void;
+  /** ONE REGISTRY READ PER MOUNT, and the surface decides who owns it. When the page
+   *  already read the 240-row catalogue for another cell it passes the index down and
+   *  this panel reads NOTHING; mounted on its own (the a11y battery, a future host)
+   *  it reads for itself. Omitting the prop means "I own the read"; passing `null`
+   *  means "the owner has nothing yet", which renders the honest not-published tier. */
+  capabilityIndex?: CapabilityIndex | null;
+}) {
   const t = useTranslations("ClientDocuments");
   const [note, setNote] = useState<QueueRejection | null>(null);
   const queue = useUploadQueue(clientId, sessionTokenAccessor, onFiled, setNote);
-  const registry = useCapabilityRegistry(sessionTokenAccessor);
+  // A null session accessor disables the read entirely (lib/parts/hooks.ts only fires
+  // its mount effect when a session is present) — so the hoisted case costs zero reads.
+  const ownRegistry = useCapabilityRegistry(capabilityIndex === undefined ? sessionTokenAccessor : null);
+  const registryIndex = capabilityIndex === undefined ? ownRegistry.index : capabilityIndex;
 
   /** Every rendered row's own first control, keyed by localId, so focus can be
    *  RETURNED into the table after Cancel/Remove destroys whatever held it. The same
@@ -129,7 +141,7 @@ export function UploadPanel({ clientId, onFiled }: { clientId: string; onFiled: 
                 <QueueRow
                   key={item.localId}
                   item={item}
-                  capabilityIndex={registry.index}
+                  capabilityIndex={registryIndex}
                   onClassified={onFiled}
                   rowRef={(el) => {
                     if (el) rowRefs.current.set(item.localId, el);
