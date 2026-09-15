@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, watchReactFaults } from "./helpers";
+import { CELL_BUDGET, grantCellBudget, settleForScan, watchReactFaults } from "./helpers";
 import { MEMBERS_LIFECYCLE } from "./members-lifecycle-mock.mjs";
 
 /**
@@ -171,7 +171,14 @@ test("#625: a REFUSED act keeps its dialog open with the DB's own sentence insid
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("cannot demote/remove the last active owner");
   await expect(dialog).toContainText("CLR09");
-  // …and the row is untouched.
+
+  // …AND THE ROW IS UNTOUCHED — asserted after the dialog is dismissed, not through it. A Base UI
+  // dialog is modal: while it is open the rest of the document is `aria-hidden`, so a ROLE query
+  // for the row behind it finds nothing at all. Measured here (the first cut asserted through the
+  // open modal and failed "element(s) not found", which reads like a missing row and is not one).
+  // Dismissing first also proves the refusal is escapable rather than a trap.
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(ownerRow).toContainText("Active");
 });
 
@@ -179,6 +186,7 @@ test("#625: the roster and both confirmations scan clean, and the row menu drops
   grantCellBudget(CELL_BUDGET.scan * 2 + CELL_BUDGET.poll);
   await signInToMembers(page);
 
+  await settleForScan(page);
   const scanned = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(scanned.violations, "/settings/members with a populated roster and a pending invite").toEqual([]);
 
@@ -205,6 +213,14 @@ test("#625: the roster and both confirmations scan clean, and the row menu drops
   await roleTrigger.click();
   await page.getByRole("menuitem", { name: "Remove from firm" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  // WAIT FOR THE MENU TO FINISH LEAVING BEFORE SCANNING. Choosing a menu item closes the menu and
+  // opens the dialog in the same act, and the menu's EXIT keeps its popup mounted at a reduced
+  // opacity for the length of the transition. Measured here: a scan taken immediately reported
+  // three `color-contrast` violations against menu items carrying `data-closed`, which is the
+  // scan catching an animation rather than a defect. `settleForScan` waits for every finite
+  // animation; the detachment assertion is the second, independent statement of the same fact.
+  await expect(popup).toHaveCount(0);
+  await settleForScan(page);
   const withDialog = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(withDialog.violations, "the remove confirmation, open").toEqual([]);
 });
