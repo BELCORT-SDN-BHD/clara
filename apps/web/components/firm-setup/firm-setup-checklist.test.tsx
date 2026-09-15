@@ -1,0 +1,494 @@
+// #648 (journey A5) — the firm setup checklist's render-state and refusal cells.
+//
+// WHAT IS REAL HERE. The component tree, `lib/firm-setup/{api,types}.ts`, `lib/doors.ts`'s
+// transport and refusal classes, `useAsyncRead`'s reload-after-write, and the draft store. What is
+// faked is PostgREST — including the 403 the denied face needs and the CLR06 the stale face needs.
+// So these cells prove what the SURFACE does with each outcome; the doors' own floors, CAS and
+// idempotency are proven in `packages/db/tests/firm-setup.test.mjs` against a real Postgres under
+// real least-privileged roles.
+//
+// THE MUTANTS THESE CELLS KILL, named so a reviewer can check the instrument rather than the
+// result:
+//   · a counter frozen to a constant, or computed as a percentage, or summed from the items array
+//     instead of read from the envelope (cells 1 and 2 use a fixture where answered ≠ total and
+//     where the item states deliberately do NOT add up to the envelope's own numbers);
+//   · a CLR06 that renders a toast, navigates away, or clears the typed draft (cell 3);
+//   · a denied face that still renders a write control (cell 4);
+//   · an optional item that blocks completion (cell 5);
+//   · a lost response that offers a NEW request instead of replaying the same one (cell 6).
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createElement } from "react";
+import { NextIntlClientProvider } from "next-intl";
+
+import { clickButton, renderComponent, setFieldValue, textOf, type RenderHarness } from "../../test/hookHarness";
+import { enableDomInspection } from "../../test/domInspect";
+import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import messages from "../../messages/en.json";
+import { FirmSetupChecklist } from "./firm-setup-checklist";
+
+enableDomInspection();
+
+type Stub = { tagName?: string; childNodes?: Stub[]; getAttribute?: (n: string) => string | null; value?: string };
+
+const MAX_SETTLE_PASSES = 200;
+async function settleUntil(h: RenderHarness, condition: () => boolean, label: string): Promise<void> {
+  for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    if (condition()) return;
+    await h.settle();
+  }
+  if (condition()) return;
+  throw new Error(`${label} never arrived within ${MAX_SETTLE_PASSES} settle passes (a bound on WORK, not on the clock)`);
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+/** PostgREST's own refusal shape for a raised CLR: the code in `code`, the DETAIL in `details`. */
+function refusal(code: string, message: string, reason: string | null, status = 400): Response {
+  return new Response(
+    JSON.stringify({ code, message, details: reason === null ? null : JSON.stringify({ reason }), hint: null }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+}
+
+function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = impl;
+  configureSessionTokenSource(async () => "tok");
+  return run().finally(() => {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    resetSessionTokenSource();
+  });
+}
+
+const CALLER = [{
+  user_id: "11111111-1111-4111-8111-111111111111",
+  firm_id: "22222222-2222-4222-8222-222222222222",
+  firm_name: "Rig & Co PLT",
+  role: "admin",
+  role_rank: 2,
+  is_operator: false,
+}];
+const CALLER_BOOKKEEPER = [{ ...CALLER[0]!, role: "bookkeeper", role_rank: 1 }];
+
+function item(over: Record<string, unknown>) {
+  return {
+    item_key: "legal_name", kind: "must_ask", group_key: "identity",
+    question: "What is the firm's registered legal name?", note: "A catalogue note.",
+    required: true, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
+    sort_order: 10, state: "pending", answer: null, answered_by: null, answered_by_name: null,
+    answered_at: null, knowledge_key: null, knowledge_record_id: null,
+    ...over,
+  };
+}
+
+/**
+ * THE FIXTURE'S COUNTER AND ITS ITEM STATES DELIBERATELY DISAGREE.
+ *
+ * Two of the three required items below are `pending`, so anything that DERIVED the counter from
+ * the items array would print "1 of 3". The envelope says 2 of 3 — the database's own count over
+ * `clara.firm_setup_keys` — and the cell asserts the envelope's number. A component that computes
+ * its own progress cannot pass this, and neither can one that freezes it.
+ */
+const ENVELOPE = {
+  plan_id: "33333333-3333-4333-8333-333333333333",
+  revision_token: "44444444-4444-4444-8444-444444444444",
+  revision_n: 3,
+  state: "open",
+  committed_at: null,
+  seeded: true,
+  catalogue_total: 5,
+  counter: { required_answered: 2, required_total: 3 },
+  items: [
+    item({ item_key: "legal_name", state: "pending" }),
+    item({ item_key: "address", sort_order: 20, question: "What is the firm's registered address?", answer_shape: "long_text", state: "pending" }),
+    item({ item_key: "fye", sort_order: 30, group_key: "tax", question: "Which month is the firm's financial year-end?", answer_shape: "month", state: "pending" }),
+    item({
+      item_key: "mia", sort_order: 40, question: "What is the firm's MIA registration number?",
+      required: false, kind: "capture", state: "pending",
+    }),
+    item({
+      item_key: "currency", sort_order: 50, group_key: "accounting", kind: "capture",
+      question: "What is the firm's default currency?", required: false, answer_shape: "choice",
+      answer_options: ["MYR", "USD", "SGD"], knowledge_key: "default_currency", state: "pending",
+    }),
+  ],
+  required_outstanding: ["legal_name", "address"],
+  confirmed_facts: [],
+};
+
+type Call = { url: string; body: unknown };
+
+function mock(handlers: {
+  setup?: (call: number) => Response;
+  caller?: () => Response;
+  answer?: (call: number, body: unknown) => Response;
+  commit?: () => Response;
+  defer?: () => Response;
+}, calls: Call[] = []): typeof fetch {
+  let setupCalls = 0;
+  let answerCalls = 0;
+  return (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    calls.push({ url: u, body });
+    if (u.includes("/rest/v1/caller_context")) return (handlers.caller ?? (() => jsonResponse(CALLER)))();
+    if (u.includes("/rest/v1/rpc/get_firm_setup")) {
+      setupCalls += 1;
+      return (handlers.setup ?? (() => jsonResponse(ENVELOPE)))(setupCalls);
+    }
+    if (u.includes("/rest/v1/rpc/answer_firm_setup_item")) {
+      answerCalls += 1;
+      return (handlers.answer ?? (() => jsonResponse({ revision_token: "next-token" })))(answerCalls, body);
+    }
+    if (u.includes("/rest/v1/rpc/commit_firm_setup")) return (handlers.commit ?? (() => jsonResponse({ state: "committed" })))();
+    if (u.includes("/rest/v1/rpc/defer_firm_setup_item")) return (handlers.defer ?? (() => jsonResponse({ item_key: "mia" })))();
+    throw new Error(`unexpected fetch: ${u}`);
+  }) as typeof fetch;
+}
+
+function App() {
+  return createElement(NextIntlClientProvider, {
+    locale: "en", messages, children: createElement(FirmSetupChecklist),
+  });
+}
+
+/** Click, then settle once: `clickButton` calls the handler directly and is not act-wrapped, so
+ *  the state it sets is not on screen until React has flushed (hookHarness.ts:391). */
+async function press(h: RenderHarness, node: Stub | null, label: string): Promise<void> {
+  assert.ok(node, `no control to press: ${label}`);
+  await clickButton(node as never);
+  await h.settle();
+}
+
+function byTestId(h: RenderHarness, id: string): Stub | null {
+  return h.find((n) => (n as Stub).getAttribute?.("data-testid") === id) as Stub | null;
+}
+
+// =============================================================================================
+
+test("fs.web.01 the counter is the DATABASE's required-answered/required-total, never a percentage and never a sum of the item states", async () => {
+  await withMockedEnv(mock({}), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      const counter = byTestId(h, "firm-setup-counter");
+      assert.ok(counter, "no counter rendered");
+      assert.equal(textOf(counter as never), "2 of 3 required facts recorded");
+      // The items array says ONE required item is settled; the envelope says two. The envelope wins.
+      assert.doesNotMatch(h.text(), /1 of 3 required/, "the counter was derived from the items array");
+      assert.doesNotMatch(h.text(), /%/, "the counter rendered a percentage");
+      // …and the outstanding facts are NAMED, not merely counted.
+      const outstanding = byTestId(h, "firm-setup-outstanding");
+      assert.ok(outstanding, "the outstanding required facts are not named");
+      assert.match(textOf(outstanding as never), /registered legal name/);
+      assert.match(textOf(outstanding as never), /registered address/);
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.02 loading shows a named sentence and NO placeholder count", async () => {
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await withMockedEnv(mock({
+    setup: () => jsonResponse(ENVELOPE),
+    caller: () => jsonResponse(CALLER),
+  }), async () => {
+    // Hold the envelope read open by delaying the very first settle.
+    const impl = globalThis.fetch;
+    globalThis.fetch = (async (u: RequestInfo | URL, init?: RequestInit) => {
+      if (String(u).includes("get_firm_setup")) { await gate; }
+      return impl(u, init);
+    }) as typeof fetch;
+    const h = await renderComponent(App());
+    try {
+      assert.ok(byTestId(h, "firm-setup-loading"), "no loading face while the envelope is unread");
+      assert.match(h.text(), /Loading the firm setup checklist/);
+      assert.doesNotMatch(h.text(), /0 of 0/, "a placeholder zero was rendered during loading");
+      assert.doesNotMatch(h.text(), /required facts recorded/, "the counter rendered before it was read");
+      release?.();
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      assert.equal(byTestId(h, "firm-setup-loading"), null);
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.03 a CLR06 converges INLINE on the re-read plan and KEEPS the typed draft", async () => {
+  const calls: Call[] = [];
+  // The second read carries the OTHER editor's answer and a new token — the authoritative plan.
+  const AFTER = {
+    ...ENVELOPE,
+    revision_token: "55555555-5555-4555-8555-555555555555",
+    counter: { required_answered: 3, required_total: 3 },
+    items: ENVELOPE.items.map((i) =>
+      i.item_key === "address"
+        ? { ...i, state: "answered", answer: "9 Jalan Somebody Else", answered_by_name: "Tan Wei Ming" }
+        : i),
+  };
+  await withMockedEnv(mock({
+    setup: (n) => jsonResponse(n === 1 ? ENVELOPE : AFTER),
+    answer: () => refusal("CLR06", "stale onboarding plan revision", "stale_plan"),
+  }, calls), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      await press(h, byTestId(h, "firm-setup-answer-legal_name-action"), "Answer legal_name");
+      const input = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      assert.ok(input, "the single-Field form did not mount an input");
+      await h.act(() => { setFieldValue(input as never, "Rig & Co PLT"); });
+      await press(h, byTestId(h, "firm-setup-submit"), "Save");
+      await settleUntil(h, () => byTestId(h, "firm-setup-stale") !== null, "the stale face");
+
+      // INLINE, and never a toast: the banner is inside the mounted form.
+      const stale = byTestId(h, "firm-setup-stale");
+      assert.ok(stale, "the stale refusal did not converge inline");
+      assert.match(textOf(stale as never), /Somebody else changed this checklist/);
+      // THE AUTHORITATIVE PLAN WAS RE-READ, and the other editor's answer is on screen.
+      assert.match(h.text(), /9 Jalan Somebody Else/, "the plan was not re-read after the convergence");
+      // …and the DRAFT SURVIVED: the control still carries what was typed.
+      const after = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      assert.ok(after, "the form unmounted on a stale refusal — the draft had nowhere to survive");
+      assert.equal(after?.value, "Rig & Co PLT", "the typed draft was discarded by the convergence");
+      // Exactly one write was attempted, and a re-read followed it.
+      const writes = calls.filter((c) => c.url.includes("answer_firm_setup_item"));
+      assert.equal(writes.length, 1, "the surface retried a governed refusal");
+      assert.ok(calls.filter((c) => c.url.includes("get_firm_setup")).length >= 2, "no re-read after the refusal");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.04 a bookkeeper session renders the denied face with ZERO write controls", async () => {
+  await withMockedEnv(mock({
+    caller: () => jsonResponse(CALLER_BOOKKEEPER),
+    setup: () => refusal("CLR04", "insufficient role", null, 403),
+  }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-denied") !== null, "the denied face");
+      assert.match(h.text(), /Firm setup is for administrators/);
+      // …and it says the rest of the workspace is unaffected, which is AC4's second half in words.
+      assert.match(h.text(), /clients, Work and activity are open as usual/);
+      const buttons: Stub[] = [];
+      const walk = (n: Stub) => {
+        if (n.tagName === "BUTTON") buttons.push(n);
+        for (const c of n.childNodes ?? []) walk(c);
+      };
+      walk(h.container as never);
+      assert.deepEqual(buttons.map((b) => textOf(b as never)), [], "the denied face rendered a write control");
+      assert.equal(byTestId(h, "firm-setup-checklist"), null, "the checklist rendered under a denied read");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.05 an optional item is skippable with a stated reason, and the checklist still reaches completion", async () => {
+  const calls: Call[] = [];
+  const SKIPPED = {
+    ...ENVELOPE,
+    counter: { required_answered: 3, required_total: 3 },
+    required_outstanding: [],
+    items: ENVELOPE.items.map((i) =>
+      i.item_key === "mia"
+        ? { ...i, state: "deferred", answer: { deferred_reason: "The firm is not MIA-registered." } }
+        : { ...i, state: i.required ? "answered" : i.state }),
+  };
+  await withMockedEnv(mock({ setup: (n) => jsonResponse(n === 1 ? ENVELOPE : SKIPPED) }, calls), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      // A REQUIRED item offers no skip; an OPTIONAL one does.
+      assert.equal(byTestId(h, "firm-setup-skip-legal_name"), null, "a required fact offered a skip control");
+      await press(h, byTestId(h, "firm-setup-skip-mia"), "Not now (mia)");
+      await settleUntil(h, () => document.body !== undefined && /Skip this fact/.test(bodyText()), "the skip dialog");
+
+      // A REASON IS REQUIRED, and the dialog refuses an empty one before sending anything.
+      const confirm = bodyNode((n) => n.getAttribute?.("data-testid") === "firm-setup-skip-confirm");
+      assert.ok(confirm, "the skip dialog has no confirm control");
+      await press(h, confirm, "the skip confirm");
+      assert.equal(calls.filter((c) => c.url.includes("defer_firm_setup_item")).length, 0,
+        "an empty reason was sent to the door");
+      assert.match(bodyText(), /Say why this is being skipped/);
+
+      const reason = bodyNode((n) => n.getAttribute?.("id") === "firm-setup-skip-reason");
+      assert.ok(reason, "the skip dialog has no reason control");
+      await h.act(() => { setFieldValue(reason as never, "The firm is not MIA-registered."); });
+      await press(h, confirm, "the skip confirm");
+      await settleUntil(h, () => /Skipped/.test(h.text()), "the skipped state");
+
+      const sent = calls.find((c) => c.url.includes("defer_firm_setup_item"));
+      assert.ok(sent, "the skip never reached the door");
+      assert.equal((sent?.body as Record<string, unknown>).p_reason, "The firm is not MIA-registered.");
+      // …and the checklist is now complete: the counter is full and Finish is enabled.
+      assert.match(h.text(), /3 of 3 required facts recorded/);
+      const commit = byTestId(h, "firm-setup-commit");
+      assert.ok(commit, "the finish control is absent once everything is settled");
+      assert.notEqual((commit as Stub).getAttribute?.("disabled"), "", "the finish control stayed disabled");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.06 a lost response RE-READS first, then offers the SAME request again rather than a second answer", async () => {
+  const calls: Call[] = [];
+  await withMockedEnv(mock({
+    // A transport failure: not a governed refusal, so nothing is known about whether it landed.
+    answer: () => { throw new TypeError("network down"); },
+  }, calls), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      await press(h, byTestId(h, "firm-setup-answer-legal_name-action"), "Answer legal_name");
+      const input = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      await h.act(() => { setFieldValue(input as never, "Rig & Co PLT"); });
+      const readsBefore = calls.filter((c) => c.url.includes("get_firm_setup")).length;
+      await press(h, byTestId(h, "firm-setup-submit"), "Save");
+      await settleUntil(h, () => byTestId(h, "firm-setup-failed") !== null, "the failed face");
+
+      assert.match(textOf(byTestId(h, "firm-setup-failed") as never), /re-read/,
+        "the failed face does not say the checklist was re-read");
+      assert.ok(calls.filter((c) => c.url.includes("get_firm_setup")).length > readsBefore,
+        "the current state was not re-read before offering a resubmit");
+
+      // The SAME control, carrying the SAME derived op key: a second press REPLAYS.
+      await press(h, byTestId(h, "firm-setup-submit"), "Save");
+      await settleUntil(h, () => calls.filter((c) => c.url.includes("answer_firm_setup_item")).length === 2, "the retry");
+      const writes = calls.filter((c) => c.url.includes("answer_firm_setup_item"));
+      assert.equal(writes.length, 2);
+      assert.equal(
+        (writes[0]?.body as Record<string, unknown>).p_op_key,
+        (writes[1]?.body as Record<string, unknown>).p_op_key,
+        "the retry minted a NEW op key — the server would answer twice instead of replaying",
+      );
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.07 a group with more than one pending fact walks a bounded stepper, and one fact alone is a single Field", async () => {
+  await withMockedEnv(mock({}), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      // The identity group has three pending items (legal_name, address, mia): a bounded walk.
+      const walkTrigger = byTestId(h, "firm-setup-answer-group-identity");
+      assert.ok(walkTrigger, "a group of three pending facts offered no bounded walk");
+      await press(h, walkTrigger, "the bounded walk trigger");
+      assert.match(h.text(), /Question 1 of 3/, "the walk did not start at its first question");
+      assert.ok(byTestId(h, "firm-setup-next"), "the walk has no Next");
+      assert.equal(byTestId(h, "firm-setup-back"), null, "the first step offered Back");
+
+      // A step refuses to advance on an empty required value, with the error BESIDE the control.
+      await press(h, byTestId(h, "firm-setup-next"), "Next");
+      assert.ok(byTestId(h, "firm-setup-error-legal_name"), "an empty required step advanced");
+      assert.match(h.text(), /Question 1 of 3/, "the walk advanced past an invalid step");
+
+      const input = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      await h.act(() => { setFieldValue(input as never, "Rig & Co PLT"); });
+      await press(h, byTestId(h, "firm-setup-next"), "Next");
+      assert.match(h.text(), /Question 2 of 3/);
+      assert.ok(byTestId(h, "firm-setup-back"), "the second step has no Back");
+
+      // The accounting group has ONE pending fact, so it is a Field and never a walk.
+      assert.equal(byTestId(h, "firm-setup-answer-group-accounting"), null,
+        "a single pending fact was offered as a bounded walk");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.08 the not-started face is distinct from completion, and the seed action says accepted facts are kept", async () => {
+  const NOT_SEEDED = {
+    ...ENVELOPE,
+    seeded: false,
+    counter: { required_answered: 0, required_total: 3 },
+    items: ENVELOPE.items.map((i) => ({ ...i, state: "unseeded" })),
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(NOT_SEEDED) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-not-started") !== null, "the not-started face");
+      assert.match(h.text(), /Firm setup has not started/);
+      assert.equal(byTestId(h, "firm-setup-completed"), null,
+        "the not-started face and the completion face are the same box");
+      assert.ok(byTestId(h, "firm-setup-seed"), "the not-started face offers no way to start");
+      assert.match(h.text(), /kept exactly as it was and is never asked again/);
+      // Nothing is answerable before the list exists.
+      assert.equal(byTestId(h, "firm-setup-answer-legal_name-action"), null,
+        "an unseeded item offered an Answer control");
+    } finally { await h.unmount(); }
+  });
+
+  const COMMITTED = { ...ENVELOPE, state: "committed", committed_at: "2026-09-16T02:00:00Z",
+    counter: { required_answered: 3, required_total: 3 }, required_outstanding: [],
+    items: ENVELOPE.items.map((i) => ({ ...i, state: "answered", answer: "recorded" })) };
+  await withMockedEnv(mock({ setup: () => jsonResponse(COMMITTED) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-completed") !== null, "the completion face");
+      assert.match(h.text(), /Firm setup is complete/);
+      assert.equal(byTestId(h, "firm-setup-commit"), null, "a committed plan still offered Finish");
+      assert.equal(byTestId(h, "firm-setup-answer-legal_name-action"), null,
+        "a committed plan still offered an Answer control");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.09 a confirmed fact renders scope, source and actor, and says so when its author's rank no longer carries it", async () => {
+  const WITH_FACT = {
+    ...ENVELOPE,
+    items: ENVELOPE.items.map((i) =>
+      i.item_key === "currency"
+        ? { ...i, state: "answered", answer: "MYR", knowledge_record_id: "rec-1" }
+        : i),
+    confirmed_facts: [{
+      record_id: "rec-1", revision_id: "rev-1", revision_n: 1, scope_kind: "firm",
+      knowledge_key: "default_currency", item_key: "currency",
+      question: "What is the firm's default currency?", kind: "assertion", value: "MYR",
+      applies_when: {}, effective_from: null, effective_to: null,
+      source_kind: "user_statement", trust: "asserted",
+      basis: "Stated by a firm administrator in firm setup (item currency)",
+      asserted_by: "u1", asserted_by_name: "Aisyah Rahman", recorded_via: "human_ui",
+      recorded_at: "2026-09-16T02:00:00Z", state: "live", correctable: true,
+      key_description: null, authority_bearing: false,
+      asserted_by_active: true, asserted_by_role: "bookkeeper", authority_current: false,
+      legacy_client_fact_key: false,
+    }],
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(WITH_FACT) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => byTestId(h, "firm-setup-fact-default_currency") !== null, "the confirmed fact");
+      assert.match(h.text(), /Firm default/, "the fact does not render its SCOPE");
+      assert.match(h.text(), /Stated by a user/, "the fact does not render its SOURCE");
+      assert.match(textOf(byTestId(h, "firm-setup-fact-actor-default_currency") as never), /Aisyah Rahman/,
+        "the fact does not render its ACTOR");
+      const authority = byTestId(h, "firm-setup-fact-authority-default_currency");
+      assert.ok(authority, "a downgraded author is invisible on the fact");
+      assert.match(textOf(authority as never), /now a bookkeeper/);
+      // The correction path exists — without it, `knowledge_already_live` would dead-end.
+      assert.ok(byTestId(h, "firm-setup-correct-default_currency"), "no correction path for a live fact");
+    } finally { await h.unmount(); }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Base UI portals dialog content onto `document.body`, not into the mount container — the house's
+// first dialog law (`onboarding-checklist.test.tsx`'s own `dialogNode`).
+// ---------------------------------------------------------------------------------------------
+function bodyText(): string {
+  return textOf(document.body as never);
+}
+function bodyNode(predicate: (n: Stub) => boolean): Stub | null {
+  const walk = (n: Stub): Stub | null => {
+    if (predicate(n)) return n;
+    for (const c of n.childNodes ?? []) {
+      const hit = walk(c);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(document.body as never);
+}

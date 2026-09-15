@@ -202,24 +202,24 @@ export function FirmSetupItemForm({
       ) : null}
 
       {outcome && !outcome.ok && outcome.kind === "stale" ? (
-        <StateBanner tone="warning" silent={silent} data-testid="firm-setup-stale">
-          {t("form.stale")}
-        </StateBanner>
+        <div data-testid="firm-setup-stale">
+          <StateBanner tone="warning" silent={silent}>{t("form.stale")}</StateBanner>
+        </div>
       ) : null}
       {outcome && !outcome.ok && outcome.kind === "already_live" ? (
-        <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined} data-testid="firm-setup-already-live">
-          {t("form.alreadyLive")}
-        </StateBanner>
+        <div data-testid="firm-setup-already-live">
+          <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined}>{t("form.alreadyLive")}</StateBanner>
+        </div>
       ) : null}
       {outcome && !outcome.ok && outcome.kind === "denied" ? (
-        <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined} data-testid="firm-setup-denied-write">
-          {t("form.denied")}
-        </StateBanner>
+        <div data-testid="firm-setup-denied-write">
+          <StateBanner tone="warning" silent={silent} code={outcome.code ?? undefined}>{t("form.denied")}</StateBanner>
+        </div>
       ) : null}
       {outcome && !outcome.ok && outcome.kind === "failed" ? (
-        <StateBanner tone="error" silent={silent} code={outcome.code ?? undefined} data-testid="firm-setup-failed">
-          {t("form.failed")}
-        </StateBanner>
+        <div data-testid="firm-setup-failed">
+          <StateBanner tone="error" silent={silent} code={outcome.code ?? undefined}>{t("form.failed")}</StateBanner>
+        </div>
       ) : null}
 
       <FieldGroup>

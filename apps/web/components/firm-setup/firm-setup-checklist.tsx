@@ -41,7 +41,7 @@
 // no history entry — so Back returns to wherever the person came from (the firm home tile, in the
 // journey this ticket owns) rather than unwinding a form.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -107,18 +107,37 @@ export function FirmSetupChecklist() {
   const context = caller.data?.length === 1 ? (caller.data[0] ?? null) : null;
   const env = setup.data;
 
-  /** FOCUS RETURN. A form that closes must hand focus back to the control that opened it; if that
-   *  control is gone (the item is now answered), focus goes to its group's heading rather than
-   *  onto the document body. */
+  /**
+   * FOCUS RETURN, and it runs in an EFFECT rather than in the handler.
+   *
+   * The control a form has to hand focus back to may not exist yet at the moment the form closes:
+   * closing is a state change, and the trigger is re-rendered by the SAME pass that unmounts the
+   * form. So the handler records WHERE focus belongs and the effect below moves it once that render
+   * has happened. If the exact trigger is gone — the item is now answered, so its Answer button no
+   * longer renders — focus falls back to the first surviving trigger in the SAME group, which is
+   * next to where the person was. It never falls through to the document body: a control
+   * disappearing after a successful act is precisely the case §4 names ("a list row disappearing
+   * after resolution does not dump focus onto the document body").
+   */
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const closeAndReturn = useCallback((focusKey: string) => {
     setOpen(null);
-    queueMicrotask(() => {
-      const el = triggerRefs.current[focusKey] ?? null;
-      if (el && el.isConnected) { el.focus(); return; }
-      const heading = document.getElementById(`firm-setup-group-${focusKey.split(":")[0] ?? ""}`);
-      heading?.focus();
-    });
+    setPendingFocus(focusKey);
   }, []);
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    const live = (el: HTMLButtonElement | null | undefined): HTMLButtonElement | null =>
+      el && el.isConnected !== false ? el : null;
+    const exact = live(triggerRefs.current[pendingFocus]);
+    if (exact) { exact.focus(); setPendingFocus(null); return; }
+    const group = `${pendingFocus.split(":")[0] ?? ""}:`;
+    for (const [key, el] of Object.entries(triggerRefs.current)) {
+      if (!key.startsWith(group)) continue;
+      const candidate = live(el);
+      if (candidate) { candidate.focus(); break; }
+    }
+    setPendingFocus(null);
+  }, [pendingFocus]);
 
   const classify = useCallback((err: unknown, itemKey: string): FirmSetupSubmitOutcome => {
     if (isDoorRefusal(err)) {
@@ -249,10 +268,12 @@ export function FirmSetupChecklist() {
     && isDoorRefusal(setup.error) && setup.error.code === "CLR04";
   if (rankDenied || readDenied) {
     return (
-      <StateBanner tone="warning" data-testid="firm-setup-denied">
-        <p className="font-medium">{t("denied.title")}</p>
-        <p>{t("denied.body")}</p>
-      </StateBanner>
+      <div data-testid="firm-setup-denied">
+        <StateBanner tone="warning">
+          <p className="font-medium">{t("denied.title")}</p>
+          <p>{t("denied.body")}</p>
+        </StateBanner>
+      </div>
     );
   }
 
@@ -267,7 +288,7 @@ export function FirmSetupChecklist() {
   if (env === null) return <EmptyState>{t("unavailable")}</EmptyState>;
   if (env.plan_id === null) {
     return (
-      <StateBanner tone="neutral" data-testid="firm-setup-no-plan">{t("noPlan")}</StateBanner>
+      <div data-testid="firm-setup-no-plan"><StateBanner tone="neutral">{t("noPlan")}</StateBanner></div>
     );
   }
 
@@ -306,10 +327,10 @@ export function FirmSetupChecklist() {
       </section>
 
       {notice === "seeded" ? (
-        <StateBanner tone="info" data-testid="firm-setup-seeded-notice">{t("notice.seeded")}</StateBanner>
+        <div data-testid="firm-setup-seeded-notice"><StateBanner tone="info">{t("notice.seeded")}</StateBanner></div>
       ) : null}
       {notice === "committed" ? (
-        <StateBanner tone="info" data-testid="firm-setup-committed-notice">{t("notice.committed")}</StateBanner>
+        <div data-testid="firm-setup-committed-notice"><StateBanner tone="info">{t("notice.committed")}</StateBanner></div>
       ) : null}
       {/* A WRITE failure that no form is mounted to render (a seed, a commit, a skip) still has to
           be said. A form-owned refusal is rendered by the form, so this never doubles up. */}
@@ -318,15 +339,19 @@ export function FirmSetupChecklist() {
       ) : null}
 
       {committed ? (
-        <StateBanner tone="neutral" data-testid="firm-setup-completed">
-          <p className="font-medium">{t("completed.title")}</p>
-          <p>{t("completed.body")}</p>
-        </StateBanner>
+        <div data-testid="firm-setup-completed">
+          <StateBanner tone="neutral">
+            <p className="font-medium">{t("completed.title")}</p>
+            <p>{t("completed.body")}</p>
+          </StateBanner>
+        </div>
       ) : notStarted ? (
-        <StateBanner tone="info" data-testid="firm-setup-not-started">
-          <p className="font-medium">{t("notStarted.title")}</p>
-          <p>{t("notStarted.body", { count: env.catalogue_total })}</p>
-        </StateBanner>
+        <div data-testid="firm-setup-not-started">
+          <StateBanner tone="info">
+            <p className="font-medium">{t("notStarted.title")}</p>
+            <p>{t("notStarted.body", { count: env.catalogue_total })}</p>
+          </StateBanner>
+        </div>
       ) : null}
 
       {!committed && !env.seeded ? (

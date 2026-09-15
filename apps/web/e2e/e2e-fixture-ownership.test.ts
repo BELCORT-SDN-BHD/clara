@@ -56,6 +56,7 @@ const LANE_MOCKS = [
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
   "documents-viewer-mock.mjs",
+  "firm-setup-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
@@ -338,6 +339,14 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
+  // #648's A5 lane. Every one of its five verbs falls through unless the request carries this
+  // lane's own cookie marker, and the three that name a plan check it as well — so it answers for
+  // nobody else, and the firm-home tile's `get_firm_setup` on every OTHER walk is served by
+  // `serve-built.mjs`'s own honest "nothing outstanding" default instead. The marker IS the
+  // subject here rather than a convenience: `get_firm_setup` takes no argument at all (the firm
+  // comes from the caller's JWT), so there is nothing else in the request to key on. Nothing to
+  // declare.
+  "firm-setup-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
