@@ -55,6 +55,32 @@
 -- btree unique index, so a plain unique index leaves null-path regions free to repeat. The key
 -- narrows NAMED fields only, which is exactly the claim #778 makes.
 --
+-- AND `opening_tb.line` IS EXCLUDED, BY NAME, BECAUSE THE ESTATE ALREADY RULED IT PLURAL. This is
+-- the one exception, it is a PARTIAL index, and the exclusion is measured rather than defensive:
+--
+--   * 0017_wave_b.sql:759-765 pins the LITERAL. `ck_document_regions_opening_fact_0017` admits an
+--     opening fact only when `field_path='opening_tb.line'` — one literal, NOT a namespace — so
+--     every opening-balance fact a document carries must live under that one path.
+--   * The REAL producer emits ONE REGION PER TRIAL-BALANCE ROW, all at that path, in a single
+--     p_regions array for a single extraction: packages/runtime/lib/opening-tb-cells.mjs builds
+--     the region at :141-153 (`field_path: "opening_tb.line"`), one per kept row at :233, and
+--     hands the whole list over at :387 (`regions: kept.map((l) => l.region)`) to
+--     clara.persist_document_extraction. A trial balance with forty lines is forty regions at ONE
+--     (extraction_id, field_path). That is not a fixture artefact: it is what a trial balance IS.
+--   * So a TOTAL unique key here would not merely red a battery — with the `do nothing` arm below
+--     it would SILENTLY ABSORB every line after the first and leave an opening balance holding
+--     one row. The failure would be quiet and the money would be wrong.
+--
+-- The predicate is therefore exactly the literal 0017 pins, and no wider: every OTHER path stays
+-- inside the key, `opening_tb.line` stays outside it and keeps the plurality its own CHECK
+-- constraint presumes. Both ON CONFLICT arms below repeat the predicate verbatim, because an
+-- inference target must match the partial index's own predicate; an `opening_tb.line` element
+-- simply does not satisfy it, so it inserts unconditionally, which is the behaviour the lane had
+-- before this file. NOTE FOR A LATER FILE, not acted on here: `prior_gl.line` has the same plural
+-- shape in the seeding lane's readers and fixtures, but 0017's CHECK does not pin it and no
+-- in-repo producer emits it, so widening the predicate for it would be a guess — it is reported
+-- on #778 instead.
+--
 -- RISK, STATED. §S2 and §S3 replace the LIVE bodies of two functions on the ingest path. Both use
 -- the 0177/0191 ceremony on this same function family: a pre-image sha256 pin, a single-anchor
 -- splice of pg_get_functiondef's own rendering (so header, SECURITY DEFINER and search_path are
@@ -164,10 +190,14 @@ begin
   -- DELETING EVIDENCE, and doing that inside a migration would destroy an auditable row on an
   -- operator's behalf without the operator ever seeing it. REFUSE, name the count, and leave the
   -- fold to a release session running §R deliberately.
+  -- The census ranges over exactly what the index will cover: `opening_tb.line` is EXCLUDED here
+  -- for the same reason it is excluded from the index, and excluding it in only one of the two
+  -- places would either refuse a lawful estate or create a key over rows that violate it.
   select count(*), coalesce(sum(n), 0) into v_dupe_keys, v_dupe_rows
     from (select r.extraction_id, r.field_path, count(*) as n
             from clara.document_regions r
            where r.field_path is not null
+             and r.field_path is distinct from 'opening_tb.line'
            group by 1, 2
           having count(*) > 1) s;
 
@@ -176,6 +206,7 @@ begin
       from (select (r.extraction_id::text || ' ' || r.field_path) as t
               from clara.document_regions r
              where r.field_path is not null
+               and r.field_path is distinct from 'opening_tb.line'
              group by r.extraction_id, r.field_path
             having count(*) > 1
              limit 10) q;
@@ -198,10 +229,11 @@ end $dru_pre$;
 set role clara_fn_owner;
 
 create unique index uq_document_regions_extraction_field_path
-  on clara.document_regions (extraction_id, field_path);
+  on clara.document_regions (extraction_id, field_path)
+  where field_path is distinct from 'opening_tb.line';
 
 comment on index clara.uq_document_regions_extraction_field_path is
-  'ONE region per (extraction_id, field_path) (#778). Two source cells resolving to one field path -- two `<c r="A1">` in one XLSX sheet, or an invoice-facts payload naming one field twice -- must never leave two rows silently claiming it. NULL field_path is deliberately NOT constrained: nulls are distinct in a btree unique index, and a region without a named field is legitimate evidence (0191 S5). Every writer that can reach this key resolves the conflict with `on conflict ... do nothing`; the table is append-only, so absorbing the second write is the only merge it can express.';
+  'ONE region per (extraction_id, field_path) (#778), with ONE measured exception. Two source cells resolving to one field path -- two `<c r="A1">` in one XLSX sheet, or an invoice-facts payload naming one field twice -- must never leave two rows silently claiming it. NULL field_path is deliberately NOT constrained: nulls are distinct in a btree unique index, and a region without a named field is legitimate evidence (0191 S5). PARTIAL, excluding `opening_tb.line`: 0017''s ck_document_regions_opening_fact_0017 pins that literal for every opening-balance fact, and the real producer (opening-tb-cells.mjs:141-153, :233, :387) emits ONE region per trial-balance ROW at that one path in a single extraction -- a forty-line trial balance is forty legitimate rows at one key, so a total key would have absorbed thirty-nine of them silently. Every writer that can reach this key resolves the conflict with `on conflict ... where <the same predicate> ... do nothing`; the table is append-only, so absorbing the second write is the only merge it can express.';
 
 reset role;
 
@@ -236,7 +268,8 @@ begin
   v_anchor := $anchor$          v_opening_account,v_opening_amount,v_opening_side);
 $anchor$;
   v_replacement := $replacement$          v_opening_account,v_opening_amount,v_opening_side)
-        on conflict (extraction_id,field_path) do nothing;
+        on conflict (extraction_id,field_path)
+          where field_path is distinct from 'opening_tb.line' do nothing;
 $replacement$;
 
   if (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor) <> 1 then
@@ -274,15 +307,22 @@ begin
   -- below say the splice did the right things, and only a whole-body hash says it did NOTHING
   -- ELSE. Measured on a PG17 rig whose pre-image was 0191's pinned post-image body.
   if encode(sha256(convert_to(v_src, 'UTF8')), 'hex') <>
-      'e528497e04e30d0a98f8a19e31102b2782ba642fb61b2efcb05a80151032f834' then
+      '3506a4f57f9cb825f4fbe0c2d0bb72428cd2a857be44849d79aa6fc2ca10266f' then
     raise exception 'dru splice poststate: persist_document_extraction body sha256 is % -- the splice produced a body nobody measured; do not trust the substring probes below it',
       encode(sha256(convert_to(v_src, 'UTF8')), 'hex') using errcode = 'CLR10';
   end if;
-  if position('on conflict (extraction_id,field_path) do nothing' in v_src) = 0 then
+  if position('on conflict (extraction_id,field_path)' in v_src) = 0 then
     raise exception 'dru splice poststate: the region-key conflict arm is absent' using errcode = 'CLR10';
   end if;
-  if (length(v_src) - length(replace(v_src, 'on conflict (extraction_id,field_path) do nothing', '')))
-       / length('on conflict (extraction_id,field_path) do nothing') <> 1 then
+  -- THE PREDICATE IS PART OF THE ARM. An inference target must match the partial index's own
+  -- predicate; an arm that lost the WHERE would raise 42P10 on the first duplicate cell instead of
+  -- absorbing it, so it is asserted here rather than discovered on the ingest path.
+  if position('where field_path is distinct from ''opening_tb.line'' do nothing' in v_src) = 0 then
+    raise exception 'dru splice poststate: the conflict arm does not carry the partial index''s predicate'
+      using errcode = 'CLR10';
+  end if;
+  if (length(v_src) - length(replace(v_src, 'on conflict (extraction_id,field_path)', '')))
+       / length('on conflict (extraction_id,field_path)') <> 1 then
     raise exception 'dru splice poststate: the conflict arm was inserted more than once' using errcode = 'CLR10';
   end if;
   -- 0191's own limb census, re-run. A splice that quietly dropped one of these would be a
@@ -351,7 +391,8 @@ begin
       returning id into v_region;
 $anchor$;
   v_replacement := $replacement$             then v_raw end,v_cents)
-      on conflict (extraction_id,field_path) do nothing
+      on conflict (extraction_id,field_path)
+        where field_path is distinct from 'opening_tb.line' do nothing
       returning id into v_region;
     if v_region is null then
       -- #778: the (extraction_id,field_path) key ABSORBED this element. An identical repeat
@@ -410,13 +451,17 @@ begin
    where p.oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,integer,jsonb)'::regprocedure;
 
   if encode(sha256(convert_to(v_src, 'UTF8')), 'hex') <>
-      'f7c3e0303b53caa4a5e3c6b2071c57dd19323c0311cd481416e3e534caf8f05e' then
+      '42516831fe66846718c4c4d7769080753a0f3d7c9427a6efef341c1777c484bb' then
     raise exception 'dru splice poststate: persist_invoice_facts body sha256 is % -- the splice produced a body nobody measured',
       encode(sha256(convert_to(v_src, 'UTF8')), 'hex') using errcode = 'CLR10';
   end if;
-  if (length(v_src) - length(replace(v_src, 'on conflict (extraction_id,field_path) do nothing', '')))
-       / length('on conflict (extraction_id,field_path) do nothing') <> 1 then
+  if (length(v_src) - length(replace(v_src, 'on conflict (extraction_id,field_path)', '')))
+       / length('on conflict (extraction_id,field_path)') <> 1 then
     raise exception 'dru splice poststate: the region-key conflict arm is absent or duplicated in persist_invoice_facts'
+      using errcode = 'CLR10';
+  end if;
+  if position('where field_path is distinct from ''opening_tb.line'' do nothing' in v_src) = 0 then
+    raise exception 'dru splice poststate: persist_invoice_facts'' conflict arm does not carry the partial index''s predicate'
       using errcode = 'CLR10';
   end if;
   -- The refusal this file had to keep alive, counted: the post-loop guard's copy AND the
@@ -557,6 +602,7 @@ end $dru_witness$;
 do $dru_tail$
 declare
   v_uniq int;
+  v_idxdef text;
   v_plain int;
   v_trg int;
   v_writers int;
@@ -567,6 +613,17 @@ begin
      and pg_get_indexdef(ix.indexrelid) like '%(extraction_id, field_path)%';
   if v_uniq <> 1 then
     raise exception 'dru tail: expected exactly ONE unique index at (extraction_id, field_path), found %', v_uniq
+      using errcode = 'CLR10';
+  end if;
+
+  -- THE EXCLUSION, ASSERTED AS AN OBJECT rather than as a comment. A key that quietly became TOTAL
+  -- would absorb every trial-balance line after the first (see the header), so the predicate is
+  -- read back off the catalog in the same breath that creates it.
+  select pg_get_indexdef('clara.uq_document_regions_extraction_field_path'::regclass) into v_idxdef;
+  if (select ix.indpred from pg_index ix
+       where ix.indexrelid = 'clara.uq_document_regions_extraction_field_path'::regclass) is null
+     or position('WHERE (field_path IS DISTINCT FROM ''opening_tb.line''::text)' in v_idxdef) = 0 then
+    raise exception 'dru tail: the key is not the PARTIAL index this file creates -- `opening_tb.line` must stay outside it (0017''s ck_document_regions_opening_fact_0017 pins that literal and opening-tb-cells.mjs emits one region per trial-balance ROW at it). indexdef: %', v_idxdef
       using errcode = 'CLR10';
   end if;
 
@@ -593,11 +650,12 @@ begin
   select count(*)::int into v_writers from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
      and p.proname in ('persist_document_extraction','persist_invoice_facts')
-     and position('on conflict (extraction_id,field_path) do nothing' in p.prosrc) > 0;
+     and position('on conflict (extraction_id,field_path)' in p.prosrc) > 0
+     and position('where field_path is distinct from ''opening_tb.line'' do nothing' in p.prosrc) > 0;
   if v_writers <> 2 then
     raise exception 'dru tail: expected BOTH reachable region writers to carry the conflict arm, found %', v_writers
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'dru tail: OK -- clara.document_regions now carries uq_document_regions_extraction_field_path (UNIQUE, extraction_id + field_path, NULL paths deliberately unconstrained) beside 0007''s unchanged non-unique ix_document_regions_extraction; the append-only belt and 0191''s deferred fact belt are both still enabled; clara.persist_document_extraction and clara.persist_invoice_facts each absorb a same-key region with `on conflict ... do nothing` (never DO UPDATE, which the append-only belt would refuse) with owner/ACL/SECURITY DEFINER/search_path and every pre-existing gate carried verbatim and both post-image bodies pinned by sha; persist_invoice_facts additionally re-raises its conflicting-duplicate forfeiture from inside the loop, so an absorb can never silence it; clara.persist_witness_facts is untouched and confirmed duplicate-free at source. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'dru tail: OK -- clara.document_regions now carries uq_document_regions_extraction_field_path (UNIQUE, extraction_id + field_path, PARTIAL: NULL paths and the 0017-pinned `opening_tb.line` deliberately unconstrained -- a trial balance is many rows at that one path) beside 0007''s unchanged non-unique ix_document_regions_extraction; the append-only belt and 0191''s deferred fact belt are both still enabled; clara.persist_document_extraction and clara.persist_invoice_facts each absorb a same-key region with `on conflict ... do nothing` (never DO UPDATE, which the append-only belt would refuse) with owner/ACL/SECURITY DEFINER/search_path and every pre-existing gate carried verbatim and both post-image bodies pinned by sha; persist_invoice_facts additionally re-raises its conflicting-duplicate forfeiture from inside the loop, so an absorb can never silence it; clara.persist_witness_facts is untouched and confirmed duplicate-free at source. No table in workflow/graphile_worker/spike touched.';
 end $dru_tail$;

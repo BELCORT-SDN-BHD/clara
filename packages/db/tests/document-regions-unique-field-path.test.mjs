@@ -29,7 +29,12 @@
 // index, and a region without a named field must still be able to repeat. 8 confirms — by
 // reading the installed body, not by assertion — that clara.persist_witness_facts needed no
 // recut: its belt loop walks an array of distinct field names and its optional loop selects
-// `distinct on (c.field_path)`, so it is duplicate-free at source.
+// `distinct on (c.field_path)`, so it is duplicate-free at source. 9 is the ONE EXCLUSION: the key
+// is PARTIAL, and `opening_tb.line` sits outside it — 0017's ck_document_regions_opening_fact_0017
+// pins that literal for every opening-balance fact and packages/runtime/lib/opening-tb-cells.mjs
+// emits one region per trial-balance ROW at it, so a forty-line trial balance is forty lawful rows
+// at one key. A total key would not have reddened a battery, it would have absorbed thirty-nine
+// balances in silence.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -58,7 +63,7 @@ const REGION_INSERT = `insert into clara.document_regions(firm_id, extraction_id
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 8;
+const EXPECTED_CELLS = 9;
 
 async function laneReady() {
   try {
@@ -147,6 +152,11 @@ cell("the pair (extraction_id, field_path) is UNIQUE, the plain extraction index
     && /\(extraction_id, field_path\)/.test(r.def.replace(/\s+/g, " ")));
   assert.equal(unique.length, 1,
     `exactly one UNIQUE index at (extraction_id, field_path); got ${JSON.stringify(idx.map((r) => [r.name, r.uniq, r.def]))}`);
+
+  // …and it is PARTIAL, by exactly the 0017-pinned literal. A key that quietly became TOTAL would
+  // absorb every trial-balance line after the first (cell 9 is the other half of this claim).
+  assert.match(unique[0].def, /WHERE \(field_path IS DISTINCT FROM 'opening_tb\.line'::text\)/,
+    `the key must stay PARTIAL on the 0017-pinned opening literal (got ${unique[0].def})`);
 
   const plain = idx.find((r) => r.name === "ix_document_regions_extraction");
   assert.ok(plain, "ix_document_regions_extraction (0007) must survive — the extraction scan reads through it");
@@ -361,7 +371,60 @@ cell("persist_witness_facts is duplicate-free AT SOURCE, so it carries no on-con
         and proname in ('persist_document_extraction','persist_invoice_facts')`)).rows;
   assert.equal(recut.length, 2);
   for (const r of recut) {
-    assert.match(r.prosrc.replace(/\s+/g, " "), /on conflict \(extraction_id,field_path\) do nothing/,
-      `${r.proname} does not resolve the region-key conflict deterministically`);
+    // The PREDICATE is part of the arm: an inference target must match the partial index's own
+    // predicate, so an arm that lost the WHERE would raise 42P10 on the first duplicate cell
+    // instead of absorbing it.
+    assert.match(r.prosrc.replace(/\s+/g, " "),
+      /on conflict \(extraction_id,field_path\) where field_path is distinct from 'opening_tb\.line' do nothing/,
+      `${r.proname} does not resolve the region-key conflict deterministically at the PARTIAL key`);
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// 9. THE ONE EXCLUSION — the opening lane.
+// ---------------------------------------------------------------------------------------------
+
+cell("MANY `opening_tb.line` regions still insert on ONE extraction — the opening lane is outside the key", async () => {
+  // #778 / #213-lane: this is the exception the key was made PARTIAL for, and it is not a
+  // convenience. 0017_wave_b.sql:759-765's ck_document_regions_opening_fact_0017 admits an opening
+  // fact ONLY when `field_path='opening_tb.line'` — one literal, not a namespace — so every line of
+  // a trial balance must live at that one path. packages/runtime/lib/opening-tb-cells.mjs builds
+  // the region at :141-153, one per kept row at :233, and hands the whole list to
+  // clara.persist_document_extraction at :387. A forty-line trial balance is forty lawful rows at
+  // ONE (extraction_id, field_path); under a TOTAL key the `do nothing` arm would have absorbed
+  // thirty-nine of them and left an opening balance holding a single line, silently.
+  const world = await seedWorld("openingtb");
+  const extraction = (await rootQuery(
+    `insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind,
+        version_n, status, page_count, envelope)
+     values ($1,$2,$3,'ocr',1,'done',1,'{}'::jsonb) returning id`,
+    [world.firm, world.documentId, `clara-fixture:0201-tb-${opk("e")}`])).rows[0].id;
+
+  // Three trial-balance lines, the shape the producer emits: same path, distinct accounts, and the
+  // 0017 opening-fact triple on each (which is what pins the literal in the first place).
+  const LINES = [["1000", 250_000, "debit"], ["2000", 150_000, "credit"], ["3000", 100_000, "credit"]];
+  for (const [account, cents, side] of LINES) {
+    const err = await caught(() => rootQuery(
+      `insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path,
+          text_content, monetary_raw, monetary_cents, opening_account_code, opening_amount_cents, opening_side)
+       values ($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'opening_tb.line',
+               $3,$4,$5,$6,$5,$7)`,
+      [world.firm, extraction, `${account} OPENING RM ${(cents / 100).toFixed(2)} ${side === "debit" ? "DR" : "CR"}`,
+        (cents / 100).toFixed(2), cents, account, side]));
+    assert.equal(err, null,
+      `a trial balance is MANY lines at one path — ${account} was refused (${err?.code}: ${err?.message})`);
+  }
+
+  const n = (await rootQuery(
+    "select count(*)::int as n from clara.document_regions where extraction_id=$1 and field_path='opening_tb.line'",
+    [extraction])).rows[0].n;
+  assert.equal(n, LINES.length, "every trial-balance line must stand — none absorbed by the key");
+
+  // …and the exclusion is EXACTLY that literal: a neighbouring path on the same extraction is
+  // still inside the key, so the exception cannot quietly widen into a namespace.
+  await rootQuery(REGION_INSERT, [world.firm, extraction, "opening_tb.total", "TOTAL", null, null]);
+  const dupe = await caught(() => rootQuery(REGION_INSERT,
+    [world.firm, extraction, "opening_tb.total", "TOTAL AGAIN", null, null]));
+  assert.ok(dupe, "`opening_tb.total` is NOT the pinned literal and must still be one row per extraction");
+  assert.equal(dupe.code, "23505", `expected a unique violation, got ${dupe.code}: ${dupe.message}`);
 });
