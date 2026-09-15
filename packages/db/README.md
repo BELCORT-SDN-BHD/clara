@@ -98,6 +98,28 @@ afterward and probe every configured runtime lane. Existing platform roles can a
 with historical migration census assertions. A green local chain does not prove that a live
 cluster can be replayed without a target-specific preflight.
 
+## Member doors: the lock order other migrations depend on
+
+`clara.set_member_role`, `clara.remove_member` and `clara.revoke_invite` take `clara.firms` (or a
+firm-qualified row lock) **before** the member or invite row, and they must keep doing so. That
+order is not a local convenience: `clara._record_journal_entry_core` takes `clara.firms … for key
+share` *because* of it — the alternative was a measured `40P01` deadlock between a posting
+transaction and a role change
+([0194_periodic_adjustments.sql](migrations/0194_periodic_adjustments.sql) `:1461-1470`) — and that
+core is sha-pinned at `0194:192-195` and `0195:396-400`. A future recut that reverses
+firms-then-row is therefore a deadlock regression against a pinned body, not a style change.
+
+[0209_preview_invite.sql](migrations/0209_preview_invite.sql) adds `clara.preview_invite(p_token)`,
+the read an invited person makes after signing in and **before** setting a password, so the invite's
+firm, role and effective status are visible before the workspace. Deployment notes: it creates one
+SECURITY DEFINER function granted to `clara_authenticated` only, recuts **no** body (its §0 pins the
+five member doors and `clara._jwt_email()` by pre-image `sha256(prosrc)` and its §C re-reads the same
+six), adds **no** grant on `clara.firm_invites`, and takes **no** row lock of any kind — so it owes
+no writer-quiescence window and cannot join the lock order above. Its refusal is deliberately ONE
+shape for three different facts (unknown token, real token / wrong signed-in address, session with
+no verified address), because distinguishing them would rebuild the existence oracle
+[0141_p4_tranche1_invite_rbac.sql](migrations/0141_p4_tranche1_invite_rbac.sql) §B closed.
+
 ## The `interactive_client` wake kind
 
 `clara.wake_fn_allowlist` rows for the `interactive_client` wake kind are not "structurally

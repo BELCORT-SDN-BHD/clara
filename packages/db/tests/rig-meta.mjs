@@ -1934,6 +1934,24 @@ const CODING_LANE_LINK_0197_UNGRANTED_FNS = [
 export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_FNS];
 // #718 END
 
+// #625 [0209, the invited person's pre-password preview] — its own cohort for the same "wholly
+// present or wholly absent" reason 0193's and 0197's carry, and a cohort of ONE name.
+//
+//   ONE HUMAN DOOR, clara_authenticated ONLY. `clara.preview_invite(p_token)` answers
+//   {firm_name, role, effective status, masked address} for the ONE invite whose token the
+//   caller holds AND whose email is the caller's own verified JWT claim — the same two facts
+//   `clara.accept_invite` walls on. clara_runtime, both agent read roles and all four wake lanes
+//   gain ZERO: a lane that could preview an invitation could enumerate which addresses have one
+//   outstanding, which is the existence oracle 0141 §B closed by refusing the base table to every
+//   application role in the first place. There is no `anon` role in this estate, so "signed out"
+//   reaches nothing here either.
+//
+//   NO UNGRANTED CLOSURE. 0209 creates exactly one function and recuts none, so this cohort has
+//   one member and the grant-matrix sweep below is what pins the rest.
+const PREVIEW_INVITE_0209_HUMAN_FNS = ["preview_invite"];
+export const PREVIEW_INVITE_0209_COHORT = [...PREVIEW_INVITE_0209_HUMAN_FNS];
+// #625 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -2107,6 +2125,9 @@ export const ALLOWED = {
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
+    // #625 [0209] the invited person's pre-password preview — see the block above.
+    // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
+    ...PREVIEW_INVITE_0209_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2515,6 +2536,7 @@ export async function grantMatrixFailures() {
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
   // #718 END
+  failures.push(...cohortFailures("#625 0209 invite preview door", PREVIEW_INVITE_0209_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
