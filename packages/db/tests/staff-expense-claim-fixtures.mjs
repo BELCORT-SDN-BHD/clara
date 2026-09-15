@@ -21,6 +21,7 @@
 //                                           Work, so it commits through the SAME frozen wake verb
 //                                           with the posting core untouched.
 
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, humanQuery, roleQuery, namedCall, opk, ROLES, MODEL, noteLane,
@@ -51,11 +52,26 @@ export async function secLaneReady() {
   return _ready;
 }
 
-/** `if (await gateSec(t)) return;` — the house per-cell frontier gate, with a COUNTED skip. */
+/**
+ * `if (await gateSec(t)) return;` — the house per-cell frontier gate.
+ *
+ * IT SKIPS ONLY FOR THE PACKAGE-WIDE PRE-INTEGRATION SWEEP, which preloads
+ * `tests/staff-expense-claim-preintegration-gate.mjs` and thereby sets the env var below. A
+ * FOCUSED invocation does not preload it and therefore FAILS loudly when the lane is absent — the
+ * `firm-document-limits` idiom, and the reason a skipped battery is never evidence.
+ */
 export async function gateSec(t) {
   if (await secLaneReady()) return false;
-  markSkip();
-  t.skip(`#638 staff-expense-claim lane absent (no ${SEC_STEM} migration applied)`);
+  if (process.env.CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS === "1") {
+    markSkip();
+    t.skip(`#638 staff-expense-claim lane absent (no ${SEC_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#638: the staff-expense-claim lane is absent. Apply 0206_staff_expense_claims.sql (or its "
+    + "numbered suite copy), or set CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS=1 for the "
+    + "package-wide pre-integration sweep.",
+  );
   return true;
 }
 
@@ -366,4 +382,14 @@ export async function seedAdvance(maker, checker, {
     throw new Error(`seedAdvance: expected ONE new staff_advances row, had ${before}, now ${rows.length}`);
   }
   return { entry: d.entry_id, advance: rows[rows.length - 1] };
+}
+
+/** The entry's lines WITH their row ids — `linesOf` (work-journal-fixtures) projects neither `id`
+ *  nor the line the register keys an allocation to, and the belt reads coverage PER LINE, so a
+ *  cell that wants to prove the allocation sits on the very credit leg needs the id. */
+export async function linesWithIds(entry) {
+  const r = await rootQuery(
+    "select id, line_no, account_code, debit_cents, credit_cents, description"
+    + " from clara.journal_lines where entry_id=$1 order by line_no", [entry]);
+  return r.rows;
 }

@@ -1831,6 +1831,38 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
   ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
 ];
 
+// #638 [0206, staff expense claims / employee payables / advance settlement] — its own cohort for
+// the same "wholly present or wholly absent" reason 0178's and 0194's carry.
+//
+//   the ONE admission door — clara_runtime ONLY, mirroring clara.admit_journal_work's and
+//   clara.admit_periodic_adjustment_work's own grants. The wake roles and clara_authenticated gain
+//   ZERO: the browser reaches this door through the runtime's authenticated route
+//   (POST /api/work/staff-expense-claim), never through PostgREST.
+const STAFF_EXPENSE_CLAIMS_0206_RUNTIME_FNS = ["admit_staff_expense_claim_work"];
+//   the THREE reads — clara_authenticated ONLY, viewer-floored inside their own bodies (the same
+//   class as clara.list_periodic_adjustments). No agent, wake or runtime variant exists: the run is
+//   told its effect by the wake verb's answer and never reads a claim.
+const STAFF_EXPENSE_CLAIMS_0206_HUMAN_FNS = [
+  "list_staff_expense_claims", "get_staff_expense_claim", "get_work_claim_origin",
+];
+//   …and the UNGRANTED closure: the claim predicates the door and the reads share, the canonical
+//   form and the basis derivation, the definer-internal claimant resolver (which re-derives 0043's
+//   four enrol walls rather than calling the admin-floored door), and the four trigger bodies —
+//   the append-only belt, the posted/reversed status stamps and the lane-agnostic advance birth
+//   trigger. Listed so `cohortFailures` reports a half-applied 0206 rather than a silently
+//   narrower boundary.
+const STAFF_EXPENSE_CLAIMS_0206_UNGRANTED_FNS = [
+  "_assert_claim_basis", "_claim_basis_canonical", "_claim_journal_basis", "_claim_item_total",
+  "_claim_settlement_account", "_claim_text", "_claim_cents", "_claim_date", "_claim_uuid",
+  "_claim_resolve_claimant", "_tf_staff_expense_claim_append_only",
+  "_tf_staff_expense_claim_posted", "_tf_staff_expense_claim_reversed",
+  "_tf_adv_claim_application_birth",
+];
+export const STAFF_EXPENSE_CLAIMS_0206_COHORT = [
+  ...STAFF_EXPENSE_CLAIMS_0206_RUNTIME_FNS, ...STAFF_EXPENSE_CLAIMS_0206_HUMAN_FNS,
+  ...STAFF_EXPENSE_CLAIMS_0206_UNGRANTED_FNS,
+];
+
 // #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
 // same "wholly present or wholly absent" reason 0178's and 0184's carry.
 //
@@ -2103,6 +2135,10 @@ export const ALLOWED = {
     // ONLY, viewer-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
     ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
+    // #638 0206 the three staff-expense-claim reads — see the block above. clara_authenticated
+    // ONLY, viewer-floored in their own bodies; clara_runtime, the agent role and both wake roles
+    // gain ZERO.
+    ...STAFF_EXPENSE_CLAIMS_0206_HUMAN_FNS,
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
@@ -2269,6 +2305,9 @@ export const ALLOWED = {
     // clara.admit_journal_work sits in. Reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
+    // [#638, 0206] the staff-expense-claim admission door — clara_runtime ONLY, the same lane
+    // clara.admit_journal_work sits in, acting OBO a named human.
+    ...STAFF_EXPENSE_CLAIMS_0206_RUNTIME_FNS,
     ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
@@ -2509,6 +2548,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
+  failures.push(...cohortFailures("#638 0206 staff-expense-claim lane", STAFF_EXPENSE_CLAIMS_0206_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened

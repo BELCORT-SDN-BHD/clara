@@ -30,15 +30,15 @@ import assert from "node:assert/strict";
 import {
   buildWorkWorld, endPool, printLaneNotes, printSkipCount,
   claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
-  WCHART, CLR, BUNDLE_DIGEST, assertPair, assertRaises, detailOf,
+  WCHART, BUNDLE_DIGEST, assertPair, assertRaises,
   rootQuery, humanQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf,
   entryCount, committedReceiptCount, AGENT_USER_ID, admitJournalWork, basis,
-  reverseEntry, seedFiscalYear, entryLinksFor,
+  reverseEntry, seedFiscalYear,
   // #638
   gateSec, SEC_REASON, SECHART, SETTLEMENT, SEC_DATE, ensureSecChart, enrolAdvanceFor,
   liveEnrolment, claim, basisForClaim, admitStaffExpenseClaimWork, listStaffExpenseClaims,
-  getStaffExpenseClaim, getWorkClaimOrigin, claimsForClient, claimRow, claimCount, claimStatus,
-  applicationsForEntry, advancesForClient, advanceOutstanding, seedAdvance,
+  getStaffExpenseClaim, getWorkClaimOrigin, claimRow, claimCount, claimStatus,
+  applicationsForEntry, advanceOutstanding, seedAdvance, linesWithIds,
 } from "./staff-expense-claim-fixtures.mjs";
 
 let world = null;
@@ -330,7 +330,7 @@ test("p638.advance.happy settlement=advance_application mints a kind='claim' all
   const out = await post(a);
   assert.equal(out.posted, true, "advance.happy: the belt did NOT raise — the birth trigger covered the credit");
 
-  const lines = await linesOf(out.entry_id);
+  const lines = await linesWithIds(out.entry_id);
   const creditLine = lines.find((l) => l.account_code === SECHART.advance);
   assert.equal(String(creditLine.credit_cents), "60500");
 
@@ -579,19 +579,22 @@ test("p638.no_second_approval a claim above the firm's high-stakes floor posts i
   // (0043:2666) keeps the older DRAFTED branch. The Work lane deliberately does not inherit it
   // (PRD:114 — 不以金额强制增加第二人审批).
   const src = (await rootQuery(
-    "select prosrc from pg_proc where oid='clara.is_high_stakes(uuid,bigint,boolean,boolean,boolean)'::regprocedure"
-  ).catch(() => ({ rows: [] }))).rows[0]?.prosrc ?? "";
-  if (src !== "") {
-    assert.ok(src.includes("tax_affecting") || src.includes("is_year_end"),
-      "no_second_approval: is_high_stakes still fires on a NON-amount axis — recorded as a ticket finding");
-  }
+    "select prosrc from pg_proc where oid='clara.is_high_stakes(uuid)'::regprocedure")).rows[0].prosrc;
+  assert.ok(src.includes("tax_affecting") || src.includes("is_year_end"),
+    "no_second_approval: is_high_stakes still fires on a NON-amount axis (0004:72-78) — recorded as a ticket finding, never a blueprint edit");
+  // …and the posting core does not consult it at all, which is what makes PRD:114 true on this lane.
+  const core = (await rootQuery(
+    "select prosrc from pg_proc where oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure"
+  )).rows[0].prosrc;
+  assert.equal(core.includes("is_high_stakes"), false,
+    "no_second_approval: the Work lane's posting core never asks is_high_stakes");
 });
 
 // ===========================================================================================
 // 10 · p638.walls — the four live tail assertions this ticket must not move.
 // ===========================================================================================
 
-test("p638.walls 0042 tail 20(a)/(b) are live, a payable-class leg still refuses, and the hook census is still four", async (t) => {
+test("p638.walls 0042 tail 20(a)/(b) are live, a payable-class leg still refuses, and the hook census is unmoved", async (t) => {
   if (await gateSec(t)) return;
   // (a) open_items names no advance/claim concept.
   const defs = (await rootQuery(
@@ -618,18 +621,45 @@ test("p638.walls 0042 tail 20(a)/(b) are live, a payable-class leg still refuses
        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.prosrc ~ 'clara\\._subledger_on_approve *\\('
         and p.oid <> 'clara._subledger_on_approve(uuid)'::regprocedure`)).rows[0].s;
+  // MEASURED, NOT TRANSCRIBED. 0037:3840-3845 pinned this roster at FOUR; the live chain carries
+  // SIX, because clara.finalize_close (0056) and clara.reopen_fiscal_year (0085) both perform the
+  // hook and both landed after 0037's tail ran. The claim that matters here is that #638 adds
+  // NONE of them: section E inserts into clara.staff_advance_applications directly and never names
+  // the hook. (Recorded as a finding in the ticket's report — the stale pin is not #638's to move.)
   assert.equal(callers,
     "clara._approve_entry_core(jsonb,uuid,uuid,text,text), "
     + "clara._approve_opening_entry(uuid,uuid,uuid,text,integer), "
     + "clara.approve_wrong_client_correction(uuid,text,text,text), "
+    + "clara.finalize_close(uuid,text,text), "
+    + "clara.reopen_fiscal_year(uuid,text,jsonb,text,text), "
     + "clara.reverse_entry(uuid,text,text)",
-    "walls: the subledger hook's caller census moved — #638 must never become the fifth");
+    "walls: the subledger hook's caller census moved — #638 must never add one");
 
-  // (d) a payable-CLASS leg on the Work lane still refuses `generic_control_leg`.
+  // (d) A CONTROL-CLASS LEG IS REFUSED TWICE, and the two refusals are different facts.
+  //   * The CLAIM door refuses it at admission by its own name, so the preparer learns which
+  //     control it is that cannot carry money owed to a person.
+  //   * The POSTING CORE still refuses any payable/receivable-class leg with `generic_control_leg`
+  //     (0195:2021-2028) — unchanged by 0206, and proved here through the plain journal lane so
+  //     the claim door's earlier refusal can never be mistaken for the wall itself.
   const client = await secClient("controlleg");
   const c = claim({ payableAccountCode: SECHART.control });
   await refusesSec(client, "CLR10", SEC_REASON.payableIsControl,
     () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "walls.controlLeg");
+
+  const b = basis({
+    postingDate: "2026-05-31", memo: "#638: a control-class leg on the plain journal lane",
+    lines: [
+      { account_code: SECHART.travel, debit_cents: 1000, credit_cents: 0, description: "expense" },
+      { account_code: SECHART.control, debit_cents: 0, credit_cents: 1000, description: "control" },
+    ],
+  });
+  const w = await admitJournalWork({ client, author: ALICE(), basis: b });
+  await claimWorkRun({ task: w.task_id, runId: opk("sec-run") });
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: ALICE(), client });
+  await assertPair("CLR10", SEC_REASON.genericControlLeg,
+    () => wakeRecordJournalEntry(cred.secret, {
+      client, work: w.work_id, logicalOpId: w.logical_op_id, basis: b,
+    }), "walls.genericControlLeg");
 });
 
 // ===========================================================================================

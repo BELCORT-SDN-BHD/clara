@@ -37,3 +37,22 @@ A skipped preintegration suite is not evidence that its feature passed.
 
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
+
+## Batteries with their own frontier gate
+
+Each of these is keyed on a migration's stable STEM in `clara.schema_migrations` (never a number)
+and skips only when the package-wide sweep preloads its `*-preintegration-gate.mjs`; a focused run
+against a chain below the frontier FAILS, because a skip is not evidence.
+
+- `staff-expense-claim.test.mjs` (+ `staff-expense-claim-fixtures.mjs`) — #638, stem
+  `staff_expense_claims$` (migration 0206). Twenty-one cells over the claim lane: the Work-lane
+  posting of a claim (claim row born at admission, one approved entry, one committed receipt, one
+  `posted` status-ledger row and one `clara.op_receipts` row under the same `logical_op_id`), the
+  proof that #638 recuts nothing shared (both purpose CHECK texts and six pinned bodies
+  byte-identical), the CLR40 advance-DEBIT wall this ticket deliberately leaves standing, the birth
+  trigger's firing position before `t_je_adv_movement_belt`, the advance-application arm with its
+  over-application refusal and its two-session race, auto-enrolment of a new claimant against the
+  admin floor that still refuses the same bookkeeper directly, per-item continuation, the whole
+  typed refusal vocabulary, PRD:114's no-second-approval posture, 0042 tail 20(a)/(b), the
+  correction chain, `get_work_claim_origin`, the three reads, RLS posture and replay. Gate module:
+  `staff-expense-claim-preintegration-gate.mjs` (`CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS=1`).
