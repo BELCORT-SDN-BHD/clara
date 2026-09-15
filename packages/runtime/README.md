@@ -347,6 +347,77 @@ estate. This is the accepted ruling working as designed, not a bug; the owner co
 scope as the standing tradeoff on 2026-09-15 (#793). Narrowing it per lane is #792's park-and-warn
 shape, not a change to this guard.
 
+<!-- #792 -->
+### Why the boot census is the ONLY guard: the kernel has no per-run park (#792)
+
+**Pins this was measured against** (`packages/runtime/package.json` + `pnpm-lock.yaml`): `workflow`
+4.8.4 (bringing `@workflow/core` 4.8.4), `@workflow/world-postgres` 4.3.4, `@workflow/world` 4.4.0,
+`@workflow/errors` 4.2.1. No vendor file is patched and no pin is bumped.
+
+**There is no per-run park/hold primitive, and that is structural rather than an omission.**
+`WorkflowRunStatusSchema` (`@workflow/world/dist/runs.d.ts`) is exactly
+`pending | running | completed | failed | cancelled` — there is no held state to move a run into.
+The `Storage` interface (`@workflow/world/dist/interfaces.d.ts`) exposes `runs` as `get`/`list`
+only, so a caller cannot write a run row at all; `events.create` is the entire per-run mutation
+surface, and every event it accepts either advances the run or terminates it. The only run-scoped
+verbs the `workflow` package re-exports are `Run#cancel()` and `Run#wakeUp()`
+(`@workflow/core/dist/runtime/run.d.ts`). Cancelling is not parking, and there is nothing else.
+
+**What the pinned core does with a `ReplayDivergenceError` it can see.** `@workflow/core`
+`dist/runtime.js:580-607` catches it inside the invocation, queues up to
+`REPLAY_DIVERGENCE_MAX_RETRIES` (3, `dist/runtime/constants.js:62`) recovery replays for that one
+run, then converts it to a `CorruptedEventLogError` and fails **that run** through a `run_failed`
+event. The process is never at risk on that path — the vendor's own comment on the adjacent retry
+arm says redelivery avoids "killing the process via run_failed".
+
+**And a post-boot divergence CAN still end the process — by the OTHER fatal path.** Measured on a
+local rig on 2026-09-15, not inferred: a `chatTurn_v19` turn was parked under the full image, that
+image was stopped, and the chatTurn scratch image (which does not export `chatTurn_v19`) was booted
+with `CLARA_ALLOW_STRANDED_BODIES=1`. The sequence was:
+
+1. the boot census saw the stranded body and the override let the world start
+   (`stranded bodies n=1 names=chatTurn_v19 — OVERRIDDEN by CLARA_ALLOW_STRANDED_BODIES=1`);
+2. `durable world started pid=…` — so `getWorld().start()` RETURNED, as it always does.
+   world-postgres's `start()` migrates the graphile schema and calls `reenqueueActiveRuns`
+   (`@workflow/world-postgres/dist/index.js:45-47`); the replay itself happens later, inside a
+   graphile-worker task. **`plugins/startWorld.ts`'s world-start `catch` is therefore not reachable
+   by a replay error at all** — it can only see a failure of `start()` itself;
+3. the replay raised `WorkflowNotRegisteredError`, the core caught it, classified it `RUNTIME_ERROR`
+   and failed the run — the run row went to `failed` and the chat task settled `internal`;
+4. **and then, on a timer, an unhandled `ReplayDivergenceError`.** `EventsConsumer`'s deferred
+   unconsumed-event check (`@workflow/core/dist/events-consumer.js`: `handleUnconsumed` →
+   `setTimeout` → `onUnconsumedEvent`) fires AFTER the invocation has already rejected, and rejects
+   `workflowDiscontinuation` (`dist/workflow.js:100`) — a promise nothing is racing any more. It
+   surfaces as a process-level unhandled rejection from `Timeout._onTimeout`, and
+   `scripts/serve.mjs`'s crash-only `unhandledRejection` handler exits 1.
+
+So the attribution above was right and the ticket's implied mechanism was not: **the fatal path is
+`serve.mjs`'s crash-only handler, never the world-start catch.** Note what the measurement also
+shows about the blast radius: the run was already `failed` before the process died, so the restart
+after it inherits a clean census. A true loop needs a stranded run the engine cannot drive terminal
+first — which is why "MAY crash on replay" is the honest wording on the override, and why the
+census refuses by default rather than warning.
+
+**Why a park-and-warn could not be built here.** The throw has no Clara call frame to be caught in:
+it arrives at `process.on("unhandledRejection")`, outside every `try` in this repo and outside the
+vendor's own invocation. `ReplayDivergenceError.is()` is a name-based duck check
+(`@workflow/errors/dist/index.js:267`) and would be reachable without a new dependency pin — but
+there is nowhere to apply it that would park anything: the error carries only `eventId`, never a
+`runId`, and by the time it fires the core has already driven the run to `failed`. De-fataling it in
+`serve.mjs` would weaken the crash-only posture at the PROCESS level while parking no run. The
+missing primitive is upstream — a per-run hold state on the World contract, or a divergence hook
+carrying the `runId` — and filing that request is the owner's call, not this repo's.
+
+**Vocabulary.** A "parked" run in this repo's glossary is one waiting on its body or its hook —
+normal, expected, and what the two-build drill measures. #792's "park-and-warn" would have been a
+different thing: an operator-triage hold. Nothing in the pinned kernel can express it.
+
+**So the guard stays where it is.** The boot-time stranded-body census (`censusStrandedBodies()` in
+`plugins/startWorld.ts`, `strandedBodyCensusOnWorld` in `lib/rollback-preflight.mjs`) and the
+rollback preflight remain the whole defence, and `tests/body-census-guard-db.test.mjs` remains their
+proof.
+<!-- /#792 -->
+
 ## Deployment and rollback
 
 The image builds and runs on Node 22 (`node:22-bookworm-slim`, both stages), the same line as
@@ -495,11 +566,35 @@ does not export raised `ReplayDivergenceError` on the re-enqueue, and the crash-
 exited 1 — a crash loop under Fly, not a quiet park. That is why the preflight is a gate and not a
 note. Rollback POINTS are an input to this decision, not a substitute for it: knowing which image
 you would go back to tells you which bundle to scan, nothing more.
+<!-- #792 -->
+That exit was re-measured end to end on 2026-09-15 and the mechanism is now written down rather
+than inferred — including which of the two fatal paths carries it, and why the kernel at these pins
+cannot park the run instead. See *Why the boot census is the ONLY guard* above (#792).
+<!-- /#792 -->
 
 `tests/two-build-cutover-e2e.mjs` is the executable proof of the whole shape — it builds a
 predecessor image, admits Work to it, stops it, releases this tree's build, admits Work to the
 successor, and resumes the first Work on its ORIGINAL body inside the second image, with two
 distinct bundle digests and one receipt each. It is wired into the per-PR `db-live-gates` job.
+<!-- #794 -->
+**Since #794 it has a SECOND leg, on the lane that has no Work row.** The same file builds a second
+scratch image with `className: "chatTurn"` and its own scratch-image `name`, derives
+`chatTurn_v18 -> chatTurn_v19` from `registry.ts` exactly as it derives the claraWork pair (no
+version literal appears in the leg, so a later v19 -> v20 repoint needs no edit), starts a chat turn
+on the predecessor image and parks it on a CHAT CLARIFICATION through `clara.open_interruption` —
+not `clara.admit_journal_work`, and not a typed Work question, because chatTurn has no
+`clara.accounting_work` row to resume through. The predecessor image is then stopped, this tree's
+build serves, and the clarification is answered through `clara.answer_interruption`: the SUCCESSOR
+image's own class-agnostic delivery lane (`deliverInterruptions`, `lib/control.mjs`) resumes a hook
+the PREDECESSOR opened. Because chatTurn mints no bundle, the "stayed bound to the body it started
+under" proof is the run's own body identifier (`bodyIdentifierOf` over
+`workflow.workflow_runs.name`) plus the successor's `/api/build-info` roster showing the RETAINED
+predecessor, rather than a receipt's bundle digest. Both legs share one set of doors — bundle gate,
+inventory gate, stop-A-before-B, lengthened reconcile grace, per-image boot lines, cleanup on every
+exit path — and the leg has its own skip probe over `clara.open_interruption` /
+`clara.answer_interruption`. Local evidence 2026-09-15: both legs green in one run; hosted evidence
+pending.
+<!-- /#794 -->
 
 ### #623 — the accounting-Work lane (`claraWork_v1`, `chatTurn_v18`)
 
