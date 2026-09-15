@@ -200,6 +200,30 @@ a limit the caller leaves out — or sends as NULL — keeps the value the firm 
 `updated_by`. That holds because the four limit columns carry no table default; the trigger is the
 only thing that supplies 100 / 1000 / 2 / 2, and it does so on a firm's first insert alone.
 
+### Document source revision (#646, migration 0202)
+
+A document's own *reading* now has two governed human doors and two reads, all four
+`clara_authenticated` only and bookkeeper-floored inside their own bodies:
+
+| Door | What it does |
+|---|---|
+| `clara.revise_document_fact(uuid,text,jsonb,int,text,text)` | Appends ONE `clara-fact-human:v1` / `invoice_facts` extraction carrying the whole fact set with one field revised. It never UPDATEs `clara.document_regions`: the kind-scoped supersede chain (0089) is what keeps the previous reading readable, and the DEFERRABLE arithmetic belt (0191) re-derives the six-term identity over the new numbers. Refusals: `stale_source_version` (CLR19, echoing the attempted value), `field_path_syntax` / `field_path_namespace` (CLR10, from `clara._assert_field_path`), `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`, `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`, CLR11 for a foreign document, CLR03 for an agent identity. |
+| `clara.dismiss_orphaned_classification_question(uuid,text,text)` | Closes the dead end `clara.set_document_kind`'s own prose names (0169:236-255). It admits `origin='classification'` + `status='open'` + **zero live filings** for that (document, client) and nothing else; `clara._active_document_filing` is untouched, because `resolve_open_question` and `dismiss_open_question` ride it. |
+| `clara.list_source_revisions(uuid)` | One chronological lineage: `clara.document_fact_revisions` LEFT-JOINED read-side to `clara.filing_corrections` and to the filings a correction retired. No door ever denormalises a wrong-client refile into the new ledger. |
+| `clara.list_source_dependents(uuid)` | A READ-ONLY projection of the knowledge records, open questions and parked Work questions standing on this document. It writes nothing: automatic re-assessment is accepted-but-deferred (`docs/PRD.md:123`, owned by #658/#663). |
+
+`clara.document_fact_revisions` is the append-only identity + receipt relation behind them — FORCE
+RLS, SELECT-only for `clara_authenticated`, no DML for any application role, two `revision_kind`
+values (`fact`, `kind`) and **no** `correction_id` column. `observed_extraction_id` is the
+document's authoritative extraction as it stood inside the revising transaction;
+`observed_version_n` is its facts version (the count of done `invoice_facts` extractions), which a
+fact revision QUOTES and a kind revision derives.
+
+0202 also recuts `clara.set_document_kind` — signature unchanged — so a kind change records the
+same observation and its own `'kind'` revision row. **D1 write-quiesce is owed** for that recut
+(see the Deploy contract above). #646 mints no `clara.accounting_work` row and widens no purpose
+CHECK; the posted-effect integration is #676.
+
 ## Frozen evaluator deployment
 
 An evaluator registered as undeployed remains unavailable until deliberately activated.
