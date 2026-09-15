@@ -243,6 +243,12 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   { pattern: "/clients/[clientId]/plans/new", builder: "planCreateHref" },
   { pattern: "/clients/[clientId]/plans/[planId]", builder: "planDetailHref" },
   { pattern: "/clients/[clientId]/plans/[planId]/revise", builder: "planReviseHref" },
+  // #652's two accrual destinations, for the same reason the plan rows above are here. The LIST
+  // (`/clients/[clientId]/accruals`) IS a ⌘K row of its own; the form is the primary ACT reached
+  // from it, and one accrual's detail is reached from a surface that HOLDS the accrual (the list
+  // row), so both hrefs are built from an id at render time and there is no literal to find.
+  { pattern: "/clients/[clientId]/accruals/new", builder: "accrualCreateHref" },
+  { pattern: "/clients/[clientId]/accruals/[accrualId]", builder: "accrualDetailHref" },
 ];
 
 function orphanedFirmPages(
