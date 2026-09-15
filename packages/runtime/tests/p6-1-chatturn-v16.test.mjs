@@ -116,12 +116,17 @@ test("p6-1.registry.policy-c: chatTurn_v15 stays exported and IS its own functio
   assert.equal(registry.chatTurn_v15, v15Module.chatTurn_v15, "the registry's chatTurn_v15 export IS chatTurn.v15.ts's own function");
 });
 
-test("p6-1.registry.rollback-preflight: EVERY chatTurn body v1..v16 is still reachable by export", async () => {
+test("p6-1.registry.rollback-preflight: EVERY chatTurn body v2..v16 is still reachable by export (v1 retired, #810)", async () => {
+  // #810 — chatTurn_v1 was RETIRED (owner ruling 2026-09-15, hosted non-terminal count 0):
+  // its closure left the tree and the registry no longer exports it, so the ladder starts at v2.
+  // Versioning law (c) is unchanged for every body below — an export WITH in-flight runs still
+  // may never be renamed or deleted; this one had none.
+
   // The rollback preflight (packages/runtime/README.md) asks whether a target image still
   // exports every version holding non-terminal runs. That question is only answerable if the
   // registry keeps re-exporting all of them, so the repoint is the moment to re-assert it —
   // this is the cell that would catch a "tidy up the old exports" change riding a bump.
-  for (let n = 1; n <= 16; n++) {
+  for (let n = 2; n <= 16; n++) {
     const exportName = `chatTurn_v${n}`;
     assert.equal(typeof registry[exportName], "function", `registry re-exports ${exportName}`);
     const mod = await import(`../workflows/chatTurn.v${n}.ts`);

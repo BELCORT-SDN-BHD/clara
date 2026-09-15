@@ -66,8 +66,12 @@ test("fs7.v17.registry: chatTurn is pinned to v19 while v17 and v16 remain their
   assert.notEqual(registry.workflows.chatTurn, v16Module.chatTurn_v16);
 });
 
-test("fs7.v17.registry.policy-c: every chatTurn body v1..v19 remains reachable by export", async () => {
-  for (let n = 1; n <= 19; n += 1) {
+test("fs7.v17.registry.policy-c: every chatTurn body v2..v19 remains reachable by export (v1 retired, #810)", async () => {
+  // #810 — chatTurn_v1 was RETIRED (owner ruling 2026-09-15, hosted non-terminal count 0):
+  // its closure left the tree and the registry no longer exports it, so the ladder starts at v2.
+  // Versioning law (c) is unchanged for every body below — an export WITH in-flight runs still
+  // may never be renamed or deleted; this one had none.
+  for (let n = 2; n <= 19; n += 1) {
     const name = `chatTurn_v${n}`;
     const mod = await import(`../workflows/chatTurn.v${n}.ts`);
     assert.equal(typeof registry[name], "function", `registry exports ${name}`);
