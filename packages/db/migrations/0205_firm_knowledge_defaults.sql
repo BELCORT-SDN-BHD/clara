@@ -501,7 +501,8 @@ comment on function clara.list_firm_knowledge() is
 create function clara.get_knowledge_applicability(p_client uuid, p_knowledge_key text) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp
   set plan_cache_mode = force_custom_plan as $read$
-declare c record; k record; v_today date; v_rows jsonb; v_version bigint; v_exc int; v_work jsonb;
+declare c record; k record; v_today date; v_rows jsonb; v_version bigint; v_exc int; v_own int;
+        v_work jsonb;
 begin
   c := clara._human_ctx(clara.role_rank('viewer'));
   -- ONE refusal for absent and foreign alike (the 0021 rule -- no existence oracle), the shape
@@ -577,6 +578,18 @@ begin
                     and f.knowledge_key = o.knowledge_key
                     and f.applies_when_digest = o.applies_when_digest);
 
+  -- AND THE NUMBER A PROMOTE DIALOG ACTUALLY NEEDS, which is a DIFFERENT number and was
+  -- worth two fields rather than one overloaded name: how many clients already hold their
+  -- OWN live record of this key, whether or not a firm rule exists yet. At the moment a
+  -- human is deciding whether to promote, `exception_count` above is 0 by construction --
+  -- there is no firm rule for anything to be an exception TO -- so the honest answer to
+  -- "who keeps their own value if I do this?" is this count, and those are precisely the
+  -- clients that become exceptions the instant the rule lands.
+  select count(distinct o.client_id)::int into v_own
+    from clara.knowledge_records o
+   where o.firm_id = c.firm and o.scope_kind = 'client' and o.state = 'live'
+     and o.knowledge_key = p_knowledge_key;
+
   select coalesce(jsonb_agg(jsonb_build_object(
            'work_id', w.id, 'client_id', w.client_id, 'purpose', w.purpose,
            'status', w.status) order by w.created_at desc), '[]'::jsonb) into v_work
@@ -607,14 +620,16 @@ begin
                                    where e.knowledge_key = k.knowledge_key)),
     'applicabilities', v_rows,
     'exception_count', coalesce(v_exc, 0),
+    'client_record_count', coalesce(v_own, 0),
     'live_work', v_work);
 end $read$;
 revoke all on function clara.get_knowledge_applicability(uuid, text) from public;
 comment on function clara.get_knowledge_applicability(uuid, text) is
   '#654: for ONE client and ONE knowledge key, the firm rule and the client exception at every '
   'applicability, which of the two is in force and why, whether it is in effect today in '
-  'Asia/Kuala_Lumpur, how many clients hold an exception firm-wide, and the non-terminal Work '
-  'citing the key. Viewer+, clara_authenticated only. It picks no winner the reads do not already '
+  'Asia/Kuala_Lumpur, how many clients hold an exception firm-wide (exception_count) and how many '
+  'hold their own record of the key at all (client_record_count -- the number a promotion is '
+  'decided against), and the non-terminal Work citing the key. Viewer+, clara_authenticated only. It picks no winner the reads do not already '
   'perform: the pairing is the same key+applies_when_digest match clara.list_client_knowledge '
   'shadows on.';
 

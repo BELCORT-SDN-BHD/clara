@@ -2676,7 +2676,7 @@
       "effectiveOrder": "The effective window ends before it starts.",
       "preserveTitle": "Client exceptions survive this",
       "preserveBody": "Clients that already recorded their own value for this key and these conditions keep it. This rule reaches only the clients that have not.",
-      "exceptionsToday": "{count} client(s) already hold an exception to this key.",
+      "exceptionsToday": "{count} client(s) already hold their own value for this key and will keep it.",
       "valueLabel": "Value being promoted",
       "ineligibleTitle": "This key cannot be a firm default",
       "ineligibleBody": "This is a fact about one client, so it stays on that client. Currency, reporting framework, accounting basis and durable firm preferences can be promoted.",

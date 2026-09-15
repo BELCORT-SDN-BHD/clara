@@ -319,10 +319,19 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // through to whichever lane minted it. Neither column has anything to declare, which is the
   // state a lane mock should be in.
   "work-list-mock.mjs": { unscopeable: [], debt: [] },
-  // #644 — every handler checks a #644 id (a client id, a record id or the one missing document
-  // id) before it answers, and falls through otherwise; its five rpc verbs read the body only
-  // inside their own verb match. Nothing to declare.
-  "knowledge-mock.mjs": { unscopeable: [], debt: [] },
+  // #644 + #654 — every handler checks an id this lane minted (a client id, a record id or the
+  // one missing document id) before it answers, and falls through otherwise; its eight rpc verbs
+  // read the body only inside their own verb match. #654's two writes/reads scope the same way:
+  // `get_knowledge_applicability` on `p_client`, and `capture_knowledge` on BOTH `p_scope_kind`
+  // (firm only — the client lane belongs to no walk here) and the two knowledge keys this lane
+  // owns.
+  //
+  // THE ONE DECLARATION, and it is `list_coa_templates()`'s shape exactly: `clara.list_firm_
+  // knowledge()` takes NO arguments at all. A firm register is a read of the SESSION's own firm,
+  // so the request carries no subject to key on — keying on this lane's own literal instead would
+  // be scoping by a label, the "spelling is not identity" mistake applied to a fixture. Measured:
+  // no other lane mock in apps/web/e2e names this verb.
+  "knowledge-mock.mjs": { unscopeable: ["/rest/v1/rpc/list_firm_knowledge"], debt: [] },
   // #643 — every handler is scoped to this lane's own client id (`PA.clientId`) and falls through
   // otherwise: the PostgREST reads (clients, coa_accounts, document_filings, list_spoken_for_documents
   // by `p_client`; documents by ids this module minted), the RUNTIME admission route by `body.clientId`,

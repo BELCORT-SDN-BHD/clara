@@ -514,6 +514,13 @@ cell("p654.applicability.read_agrees — the new read's in-force answer is the o
   });
 
   const currency = await applicability(w.viewer, w.clientA, "default_currency");
+  // THE TWO COUNTS ARE DIFFERENT NUMBERS AND BOTH ARE LOAD-BEARING. `exception_count` is
+  // the register's strict one (a client row shadowing a live firm row at the same
+  // applicability); `client_record_count` is what the promote dialog decides against
+  // (clients holding their own record of the key at all). Here a firm rule exists, so both
+  // count client A; `coa_seed_decision` below is where they could differ.
+  assert.equal(currency.exception_count, 1);
+  assert.equal(currency.client_record_count, 1);
   assert.equal(currency.applicabilities.length, 1);
   assert.equal(currency.applicabilities[0].in_force, "client_exception");
   assert.equal(currency.applicabilities[0].reason, "client_exception_shadows_firm_default");
@@ -528,6 +535,14 @@ cell("p654.applicability.read_agrees — the new read's in-force answer is the o
   assert.equal(byDigest["{}"].reason, "firm_default_applies");
   assert.equal(byDigest['{"segment":"digital"}'].in_force, "client_exception");
   assert.equal(byDigest['{"segment":"digital"}'].reason, "client_record_only");
+
+  // A CLIENT ROW WITH NOTHING TO OVERRIDE IS NOT AN EXCEPTION, and the two counts say so
+  // apart: client A's narrow coa_seed_decision row shadows no firm row (the firm's is
+  // unconditional), so it counts as a RECORD but not as an EXCEPTION.
+  assert.equal(coa.exception_count, 0,
+    "a client row at a different applicability shadows nothing and is not an exception");
+  assert.equal(coa.client_record_count, 1,
+    "…but it IS a client holding its own value for the key, which is what a promotion is decided against");
 
   // AND THE ANSWER AGREES WITH THE REGISTER, row for row: the rows the read calls in force are
   // exactly the rows list_client_knowledge returns for this client.

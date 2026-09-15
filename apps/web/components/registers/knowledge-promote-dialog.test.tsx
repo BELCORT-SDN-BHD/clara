@@ -133,7 +133,11 @@ const APPLICABILITY = (over: Record<string, unknown> = {}) => ({
     firm_defaultable_reason: "The presentation currency the firm uses unless a client says otherwise.",
   },
   applicabilities: [],
-  exception_count: 2,
+  // At promote time these two are DIFFERENT numbers: no firm rule exists yet, so nothing can
+  // be an exception TO one, while two clients already hold their own value and will keep it.
+  // The dialog must show the second.
+  exception_count: 0,
+  client_record_count: 2,
   live_work: [],
   ...over,
 });
@@ -320,8 +324,8 @@ test("kp.05 the reason is required, is NEVER pre-filled from the client record, 
 
       assert.match(textOf(bodyOf() as never), /Client exceptions survive this/,
         "the dialog states persistently what promotion does to clients that already recorded their own value");
-      assert.match(textOf(bodyOf() as never), /2 client\(s\) already hold an exception/,
-        "…and how many hold one today, measured rather than reassuring");
+      assert.match(textOf(bodyOf() as never), /2 client\(s\) already hold their own value for this key/,
+        "and how many will keep it, measured rather than reassuring: the client_record_count a promotion is decided against, never the exception count that is 0 until a rule exists");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();

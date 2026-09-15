@@ -344,8 +344,15 @@ export type KnowledgeApplicabilityEnvelope = {
     firm_defaultable_reason: string | null;
   };
   applicabilities: KnowledgeApplicabilityEntry[];
-  /** How many clients in the firm hold a live exception to this key. */
+  /** How many clients in the firm hold a live exception to this key — a client row
+   *  SHADOWING a live firm row at the same applicability. The firm register's stricter
+   *  number, repeated here. */
   exception_count: number;
+  /** How many clients hold their OWN live record of this key at all, firm rule or no.
+   *  This is the number a promotion is decided against: at promote time `exception_count`
+   *  is 0 by construction (nothing exists to be an exception to), while these are exactly
+   *  the clients that keep their own value the instant the rule lands. */
+  client_record_count: number;
   live_work: FirmKnowledgeWork[];
 };
 

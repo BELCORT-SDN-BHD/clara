@@ -132,6 +132,14 @@ _Avoid_: An empty pack standing for a failed read; a pack presented as authority
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
 _Avoid_: Automatically sharing one client's private facts or practices with every other client.
 
+**Knowledge promotion**:
+The explicit, authorised act of making one client's recorded practice apply firm-wide: who promoted it, on the authority that act required, for what reason they wrote at the time, to what applicability and from when. Only a key the firm may hold on its own behalf can be promoted, and the rule cites no evidence belonging to a single client.
+_Avoid_: Copying the client record's own basis across as the firm's reason; promoting a fact about one business; a rule that reaches other clients without a named person having said it should.
+
+**Client knowledge exception**:
+An established client-scope record that keeps governing that client after a firm default is recorded for the same key and the same applicable conditions. It is a decided outcome, not an unresolved contradiction, and the client's own register says which of the two applies and why.
+_Avoid_: Presenting an exception as a conflict; treating a narrower client condition as overriding a firm rule that covers different conditions.
+
 **Accounting experience**:
 A source-linked lesson from completed work or a correction, including the outcome and conditions in which it is useful. Clara can consult it when deciding how to handle later work.
 _Avoid_: A confirmed policy merely because an action succeeded or was repeated; authority for a future posting plan.

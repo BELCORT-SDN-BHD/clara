@@ -120,7 +120,13 @@ export function KnowledgePromoteDialog({
   // A key the catalog does not admit at firm scope is not a permission problem and
   // must not read as one: the honest sentence is "this is a fact about one client".
   const eligible = applicability.data?.key.firm_defaultable ?? null;
-  const exceptionCount = applicability.data?.exception_count ?? 0;
+  // THE NUMBER A HUMAN NEEDS BEFORE COMMITTING is not "how many exceptions exist to a
+  // rule that does not exist yet" (that is 0 by construction at promote time) — it is
+  // how many clients ALREADY hold their own value for this key, because those are
+  // exactly the clients that will keep it. `client_record_count` is that number;
+  // `exception_count` is the firm register's stricter one (live client rows shadowing a
+  // live firm row at the same applicability).
+  const clientRecordCount = applicability.data?.client_record_count ?? 0;
   // A live firm rule at the SAME applicability would meet `uq_knowledge_live`
   // (CLR10 `knowledge_already_live`). Saying so before the click is kinder than
   // letting the door say it, and the door still says it if the state moved.
@@ -128,10 +134,20 @@ export function KnowledgePromoteDialog({
     (entry) => entry.firm_rule !== null,
   );
 
-  // Nothing is decided until BOTH reads have answered: a control offered against an
-  // unknown rank would be a guess, and a control withheld against one would be a
-  // denial the server never made.
-  if (scope.loading || applicability.loading) return null;
+  // LOADING ONLY WHILE NOTHING IS KNOWN YET, and this is MEASURED, not stylistic —
+  // the identical defect `knowledge-detail.tsx` records at its own DataState. `act()`
+  // re-reads after every write, so a plain `applicability.loading` blanked this whole
+  // subtree on a REFUSAL, unmounting the open dialog (whose `open` state lives inside
+  // the wrapper) and taking the sentence the human had just typed with it. The browser
+  // walk is what caught it: in the unit harness the follow-up read resolves inside one
+  // batched act, so the intermediate loading render never happens and the cell went
+  // green on a dialog that closes for real over a network round trip.
+  //
+  // Nothing is DECIDED until both reads have answered once: a control offered against
+  // an unknown rank would be a guess, and one withheld against an unknown rank would be
+  // a denial the server never made.
+  if (scope.loading && scope.data === null) return null;
+  if (applicability.loading && applicability.data === null) return null;
   if (rank !== null && !canPromoteToFirm(rank)) {
     return (
       <StateBanner tone="neutral" title={t("deniedTitle")} className="text-xs">
@@ -219,7 +235,9 @@ export function KnowledgePromoteDialog({
         <StateBanner tone="info" title={t("preserveTitle")} className="text-xs">
           <span className="flex flex-col gap-1">
             <span>{t("preserveBody")}</span>
-            {exceptionCount > 0 ? <span>{t("exceptionsToday", { count: exceptionCount })}</span> : null}
+            {clientRecordCount > 0
+              ? <span>{t("exceptionsToday", { count: clientRecordCount })}</span>
+              : null}
           </span>
         </StateBanner>
 
