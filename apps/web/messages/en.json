@@ -1311,10 +1311,10 @@
     "activityLoading": "Reading this work's activity…",
     "activityReadFailed": "This work's activity could not be read.",
     "activityEmptyTitle": "No activity recorded for this work yet",
-    "activityEmptyBody": "A work item enters the activity feed once it commits a receipt or changes a journal entry. Nothing matching it was found in the {scanned} most recent events for this client.",
-    "activityLookFurther": "Look further back",
-    "activityLookingFurther": "Looking…",
-    "activityScannedAll": "Searched every one of this client's {scanned} recorded events.",
+    "activityEmptyBody": "A work item enters the activity feed once it commits a receipt or changes a journal entry. Nothing has been recorded for this one yet.",
+    "activityLookFurther": "Load older activity",
+    "activityLookingFurther": "Loading…",
+    "activityScannedAll": "That is this work's complete recorded activity.",
     "activityOpenFeed": "Open the full activity feed"
   },
   "WorkList": {

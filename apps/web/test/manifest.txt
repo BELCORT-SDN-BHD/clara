@@ -209,6 +209,9 @@ components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
 components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
+# #770
+components/work/work-activity-view.test.tsx
+# #770
 components/work/work-cancel-dialog.test.tsx
 components/work/work-detail.test.tsx
 components/work/work-diagnostics.test.tsx

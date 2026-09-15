@@ -1563,10 +1563,29 @@ test("wc.35 the cancel door says WHICH arm answered: a stop that killed a queued
 // Called as a HUMAN: both are SECURITY INVOKER with a bookkeeper floor of their own.
 // -------------------------------------------------------------------------------------------
 
+// #770 [0202] gave the door a SEVENTH parameter (p_work) and DROPPED its six-argument signature
+// in the same migration, so this wrapper addresses whichever arity the database under test
+// carries — a slice-frontier leg pinned before 0202 must keep every cell below green.
+let _pWork770 = null;
+async function pWork770() {
+  if (_pWork770 === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        ["list_activity_p_work$"]);
+      _pWork770 = r.rows[0].n > 0;
+    } catch {
+      _pWork770 = false;
+    }
+  }
+  return _pWork770;
+}
+
 async function listActivity(sub, { cursor = null, limit = 50, client = null, kinds = null, since = null, until = null } = {}) {
-  const r = await humanQuery(sub,
-    "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result",
-    [cursor, limit, client, kinds, since, until]);
+  const sql = (await pWork770())
+    ? "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz,null::uuid) as result"
+    : "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result";
+  const r = await humanQuery(sub, sql, [cursor, limit, client, kinds, since, until]);
   return r.rows[0].result;
 }
 
