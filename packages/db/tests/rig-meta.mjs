@@ -1831,6 +1831,29 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
   ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
 ];
 
+// #639 [0201, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
+// "wholly present or wholly absent" reason every roster above carries: folding these names into
+// 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
+// fails a PARTIAL cohort by design.
+//
+//   the ONE new door — clara_runtime ONLY. A run applies the answer to its own dependent
+//   particulars question ON BEHALF OF the human who asked for the work; the browser keeps 0041's
+//   `complete_fixed_asset_particulars`, which is clara_authenticated-only and is NOT re-declared
+//   here (it belongs to FA_0041_HUMAN_FNS). A grant of this overload to clara_authenticated would
+//   be a second human door with no `_human_ctx` floor, which is why the matrix pins it.
+const FA_ACQUISITION_0201_RUNTIME_FNS = ["complete_fixed_asset_particulars_for"];
+//   …and the UNGRANTED closure: the lane-agnostic birth trigger body, the two acquisition
+//   projections the recut reads call, and the shared particulars core both doors' walls live in.
+//   Listed so `cohortFailures` reports a half-applied 0201 rather than a silently narrower
+//   boundary — and so a grant appearing on any of them FAILS the main sweep.
+const FA_ACQUISITION_0201_UNGRANTED_FNS = [
+  "_tf_fa_acquisition_birth", "_fa_acquisition_json", "_fa_acquisition_history",
+  "_fa_complete_particulars_core",
+];
+export const FA_ACQUISITION_0201_COHORT = [
+  ...FA_ACQUISITION_0201_RUNTIME_FNS, ...FA_ACQUISITION_0201_UNGRANTED_FNS,
+];
+
 // #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
 // same "wholly present or wholly absent" reason 0178's and 0184's carry.
 //
@@ -2269,6 +2292,10 @@ export const ALLOWED = {
     // clara.admit_journal_work sits in. Reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
+    // [#639, 0201] the particulars overload the run calls OBO the human who asked for the work --
+    // clara_runtime ONLY. Declared here so a grant to clara_authenticated (a second human door
+    // with no _human_ctx floor) or to either wake role FAILS the matrix.
+    ...FA_ACQUISITION_0201_RUNTIME_FNS,
     ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
@@ -2510,6 +2537,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
+  failures.push(...cohortFailures("#639 0201 fixed-asset acquisition lane", FA_ACQUISITION_0201_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
