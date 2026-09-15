@@ -527,3 +527,34 @@ The classify-before-OCR race itself is closed (#606): migration
 `awaiting_extraction` until a `done` OCR/structured-parse extraction exists, and the `facts_gate`
 consumer re-enters that enqueue on `document.extraction_completed` as well as
 `document.classified`.
+
+<!-- #811 -->
+## Requirements carried by the next frozen version (`claraWork_v4`)
+
+`packages/runtime/lib/work-trace.mjs` is inside `claraWork_v3`'s frozen closure and hash-locked in
+`frozen-workflows.json`; a comment edit breaks that lock exactly as a code edit does. The owner's
+standing ruling (docs/ARCHITECTURE.md §5.E, #815) is that any hardening of that module ships with
+the next frozen version rather than in place. This list is where such a requirement is recorded
+until that version is cut.
+
+- **#811 — bound an `observed_revisions` numeric value at the writer.** `traceRevisionOf` returns
+  any finite JS number, so `observedRevisions({books_version: 5141882293107742})` conforms an
+  account-run-shaped number rather than dropping it. Migration
+  `0210_work_trace_shape_bounds.sql` closes this AT THE DOOR
+  (`clara._work_trace_revisions_ok`: `abs(v) < 1e12 and scale(v) <= 6`, a CLR10 `invalid_trace`
+  naming `p_observed_revisions`). `claraWork_v4` should mirror that bound in `traceRevisionOf`, so
+  the ordinary path DROPS the value instead of meeting the wall — the same asymmetry every other
+  conformer already has.
+- **#811 — apply the `run` grammar at the writer.** `traceRunOf` exists and is exported, but
+  `recordTrace` sends `runId` UNCONFORMED (deliberately: a mangled run id would break the
+  `(work_id, run_id, seq)` replay identity), and a door refusal is swallowed by the frozen
+  closure's `traceSafely` / `traceSafelyInTransaction` wrappers. 0210 gives the `run` kind a
+  long-digit clause (13+ consecutive digits, unless the id is exactly `wrun_` plus a 26-character
+  Crockford base32 ULID — the shape `@workflow/core` 4.8.4 mints at
+  `dist/runtime/start.js:121`). `claraWork_v4` should either conform the run id it sends or
+  surface the refusal, because today a run bound that is too tight loses trace rows silently
+  rather than raising. Whichever it does, the writer's clause must stay NO TIGHTER than the door's.
+
+Until `claraWork_v4` ships, the honest sentence about both fields is: the DOOR bounds them in
+shape; the WRITER does not, and the door is the wall.
+<!-- #811 -->

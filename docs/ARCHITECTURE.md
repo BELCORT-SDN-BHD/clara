@@ -344,6 +344,20 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 对 `work-trace.mjs` 脱敏逻辑的任何加固只能随下一个冻结版本（`claraWork_v4`）交付，不做原地修改
 （owner 2026-09-15 裁定，#815）。[已实现]
 
+<!-- #811 #812 -->
+**文法校验的边界，说准确（#811）。** 上一段"每列有文法校验"这句，在 0195 之后对两个字段只在**长度**上
+成立、在**形状**上不成立：`observed_revisions` 的 number 值没有任何位数或量级测试，`run` 文法也没有
+`id`／`model`／`token`／`rev` 都带的长数字排除。迁移 `0210_work_trace_shape_bounds.sql` 在**门（door）**
+这一侧补齐：number 值受 `abs < 1e12` 且 `scale <= 6` 约束（指数写法 `1e30` 与 `1.5e-20` 同样被拒），
+`run` 文法拒绝 13 位以上连续数字——除非该 id 正是 WDK 铸造的形状（`wrun_` + 26 位 Crockford base32
+ULID，`@workflow/core` 4.8.4 `dist/runtime/start.js:121`），该豁免使这条子句**可证明**不会误伤真实
+run id。两个谓词同时被关系的 CHECK 与写入动词调用，因此墙与诊断（CLR10 `invalid_trace`，点名
+`p_observed_revisions`／`p_run`）一起收紧。**写入方仍未收紧**：`work-trace.mjs` 的 `traceRevisionOf`
+仍接受任意有限数，`traceRunOf` 根本没有作用在 `recordTrace` 发送的值上；该模块在冻结闭包内，按 #815
+的裁定只能随 `claraWork_v4` 交付，相应要求记在 `packages/runtime/README.md`。因此准确的说法是：
+**门对这两个字段做形状约束，写入方没有，门就是那道墙**；已存储的行不回溯校验、不重写。[已实现]
+<!-- #811 #812 -->
+
 ### F. 发布与回退
 
 迁移运行器用会话连接 + 会话级 advisory lock + 每迁移一事务；已应用字节不可变，只能追加后继迁移；

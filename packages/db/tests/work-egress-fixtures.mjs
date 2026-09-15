@@ -72,6 +72,35 @@ export async function gateEgress(t) {
   return true;
 }
 
+// #811
+/** The #811 shape-bounds migration's STABLE STEM — the numeric `observed_revisions` ceiling and
+ *  the `run` grammar's long-digit clause. A cell pinned below it skips rather than reds. */
+export const TRACE_SHAPE_STEM = "work_trace_shape_bounds$";
+
+let _shapeReady = null;
+export async function traceShapeBoundsReady() {
+  if (_shapeReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [TRACE_SHAPE_STEM]);
+      _shapeReady = r.rows[0].n > 0;
+    } catch {
+      _shapeReady = false;
+    }
+  }
+  return _shapeReady;
+}
+
+/** `if (await gateTraceShape(t)) return;` — #811's own per-cell frontier gate. */
+export async function gateTraceShape(t) {
+  if (await gateEgress(t)) return true;
+  if (await traceShapeBoundsReady()) return false;
+  markSkip();
+  t.skip(`#811 trace shape bounds absent (no ${TRACE_SHAPE_STEM} migration applied)`);
+  return true;
+}
+// #811
+
 // ===========================================================================================
 // 2 · The closed vocabulary.
 // ===========================================================================================

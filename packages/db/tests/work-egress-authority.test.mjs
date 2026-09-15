@@ -52,6 +52,9 @@ import {
   restoreWorkEgress, grantEgressPurpose, consentRows, auditCount, eventsOfType, tracePruneLog,
   readTraceTableAs, recordWorkExecutionTrace, recordWorkExecutionTraceBounded, withWorkRowLocked,
   pruneWorkExecutionTraces, getWorkExecutionTrace, traceCount, assertRaises, PG,
+  // #811
+  gateTraceShape,
+  // #811
 } from "./work-egress-fixtures.mjs";
 
 let world = null;
@@ -780,3 +783,87 @@ test("w631.trace.prune_logged the retention sweep leaves a row on 0006's own led
     "trace.prune_logged: named to the relation, beside 0006's own trace_spans rows");
   assert.ok(Number(log[0].spans_deleted) >= 1);
 });
+
+
+// ===========================================================================================
+// 9 · #811 — THE TWO SHAPE BOUNDS 0195 LEFT OPEN. Both fields were bounded in LENGTH and not in
+//     SHAPE: a numeric `observed_revisions` value had no digit/magnitude test at all, and the
+//     `run` grammar carried no long-digit clause. Both close AT THE DOOR (migration
+//     `work_trace_shape_bounds`), with the relation's own CHECKs tightening in step because they
+//     call the same two predicates.
+// ===========================================================================================
+
+test("w811.trace.revision_bounds a numeric observed revision is bounded in MAGNITUDE and in SCALE, and an ordinary small integer still lands", async (t) => {
+  if (await gateTraceShape(t)) return;
+  await acceptLegalNow(ALICE());
+  const a = await armedUnauthorised();
+  const base = { task: a.task_id, runId: a.runId, seq: 1, phase: "model_call", outcome: "ok" };
+  // Assembled from pieces, like the trace.grammar cell above, so `scripts/check-leaks.mjs` cannot
+  // read an account-run-shaped positive control as a committed secret. The VALUE is the number
+  // 5141882293107742 — the same 16-digit account run the review stored through this door.
+  const j = (...p) => p.join("");
+  const accountRun = Number(j("5141", "8822", "9310", "7742"));
+  assert.equal(String(accountRun), j("5141", "8822", "9310", "7742"),
+    "revision_bounds: mandatory setup — the literal is the 16-digit account run, exactly");
+
+  const magnitude = await assertPair(CLR.badRequest, "invalid_trace",
+    () => recordWorkExecutionTrace({ ...base, seq: 2, observedRevisions: { books_version: accountRun } }),
+    "revision_bounds: an account-run-shaped NUMBER is refused, not stored verbatim");
+  assert.equal(magnitude.detail.field, "p_observed_revisions",
+    "revision_bounds: …and the refusal NAMES the field, as every other grammar refusal does");
+
+  // The same magnitude written in EXPONENT notation. A digit-count-only test would miss this one,
+  // which is why the bound is on magnitude and scale rather than on the rendered digit run.
+  await assertPair(CLR.badRequest, "invalid_trace",
+    () => recordWorkExecutionTrace({ ...base, seq: 3, observedRevisions: { books_version: 1e30 } }),
+    "revision_bounds: exponent notation is the same magnitude and is refused the same way");
+  // …and a value too fine-grained to be a revision counter is refused on SCALE.
+  await assertPair(CLR.badRequest, "invalid_trace",
+    () => recordWorkExecutionTrace({ ...base, seq: 4, observedRevisions: { books_version: 1.5e-20 } }),
+    "revision_bounds: a 21-place fraction is not a revision either");
+
+  assert.equal(await traceCount(a.work_id), 0, "revision_bounds: NOTHING was written");
+
+  // The positive control: an ordinary small integer revision is what this field is FOR.
+  const id = await recordWorkExecutionTrace({
+    ...base, seq: 5, capabilityId: "accounting_work.model_segment",
+    observedRevisions: { books_version: 5, chart_revision: 41, knowledge_version: 0 } });
+  assert.ok(id, "revision_bounds: an ordinary small integer revision still lands");
+  assert.equal(await traceCount(a.work_id), 1);
+});
+
+test("w811.trace.run_grammar a long-digit run id is REFUSED, and the run-id shape the deployed WDK mints is ADMITTED", async (t) => {
+  if (await gateTraceShape(t)) return;
+  await acceptLegalNow(ALICE());
+  const a = await armedUnauthorised();
+  const base = { task: a.task_id, seq: 1, phase: "dispatch", outcome: "ok",
+    capabilityId: "accounting_work.model_segment" };
+  const j = (...p) => p.join("");
+
+  const refused = await assertPair(CLR.badRequest, "invalid_trace",
+    () => recordWorkExecutionTrace({ ...base, seq: 2, runId: j("run-", "5141", "8822", "9310", "7742") }),
+    "run_grammar: a run-<16 digits> id is a payload slot, and the door now refuses it");
+  assert.equal(refused.detail.field, "p_run",
+    "run_grammar: …naming p_run, exactly as every other field grammar names its field");
+
+  // The shape the DEPLOYED Workflow DevKit actually mints: `wrun_` + a 26-character Crockford
+  // base32 ULID (`workflow` 4.8.4 / @workflow/core 4.8.4,
+  // node_modules/.pnpm/@workflow+core@4.8.4_ws@8.21.0/node_modules/@workflow/core/dist/runtime/start.js:121,
+  // `const runId = \`wrun_${ulid()}\``). This literal is one of the estate's own captured run ids
+  // (docs/plan/active/prototypes/agent-harness/runtime-boundary-pass.json).
+  const wdk = "wrun_01M20WGD9ETKK6RWCBA8CWG1GE";
+  assert.ok(/^wrun_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/.test(wdk),
+    "run_grammar: mandatory setup — the literal IS the WDK's minted shape");
+  assert.ok(await recordWorkExecutionTrace({ ...base, seq: 3, runId: wdk }),
+    "run_grammar: a WDK-minted run id is admitted");
+
+  // …and so are the other two shapes this relation has ever seen: 0195's own documented
+  // `run_<uuid>` and the battery's `<tag>_<base36>_<base36>_<8 hex>` fixture id.
+  assert.ok(await recordWorkExecutionTrace({
+    ...base, seq: 4, runId: "run_9dcf64de-8ec6-47d7-85fb-e51f193fc557" }),
+    "run_grammar: 0195's documented run_<uuid> shape is still admitted");
+  assert.ok(await recordWorkExecutionTrace({ ...base, seq: 5, runId: a.runId }),
+    "run_grammar: …and so is the battery's own fixture run id");
+  assert.equal(await traceCount(a.work_id), 3, "run_grammar: exactly the three admitted rows landed");
+});
+
