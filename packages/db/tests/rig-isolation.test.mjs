@@ -646,8 +646,18 @@ test("T19 poison-role: reset + re-migrate normalizes a poisoned clara role", asy
   }
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  // #773
+  // THE BARE ENV FLAG IS NOT ENOUGH. `reset()` delegates to lib/guard.mjs's
+  // assertDestructiveAllowed(), whose targetIsEphemeral() authorises ANY loopback host
+  // REGARDLESS of database name (its own doc comment says so) — so `clara_631`-shaped shared
+  // rigs were wiped by workers who set the flags out of habit. guardedReset() applies the
+  // database-NAME allowlist dropDatabase() already applies one file over, reusing the guard
+  // module's exported EPHEMERAL_DB by import, and REFUSES before reset() is ever entered.
+  // The shared guard module itself is untouched. Proof: tests/rig-reset-guard.test.mjs.
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
+  // /#773
   await rootQuery("alter role clara_agent_ro bypassrls");
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ log: () => {} });
   const r = await rootQuery("select rolbypassrls, rolsuper, rolcanlogin from pg_roles where rolname = 'clara_agent_ro'");
   assert.equal(r.rows[0].rolbypassrls, false, "re-migrate normalized NOBYPASSRLS");
