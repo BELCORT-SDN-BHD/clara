@@ -211,9 +211,9 @@ components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/work-cancel-dialog.test.tsx
 components/work/work-detail.test.tsx
-components/work/work-restate.test.tsx
 components/work/work-diagnostics.test.tsx
 components/work/work-question-form.test.tsx
+components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/e2e-fixture-ownership.test.ts
 e2e/mock-dispatch.test.ts
