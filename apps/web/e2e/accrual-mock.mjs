@@ -26,6 +26,10 @@
 export const ACC = {
   firmId: "65065065-6500-4650-8650-650650650650",
   clientId: "65c0c0c0-6500-4650-8650-650650650650",
+  // A SECOND client of the same firm, with a chart of its own and no accruals at all. It exists for
+  // exactly one claim the draft cannot make otherwise: a scope change never TRANSFERS a draft — so
+  // the walk needs a real `/accruals/new` of another client to open, not a 404.
+  otherClientId: "65d0d0d0-6500-4650-8650-650650650650",
   accrualId: "65111111-6500-4650-8650-650650650650",
   unpostedAccrualId: "65222222-6500-4650-8650-650650650650",
   createdAccrualId: "65333333-6500-4650-8650-650650650650",
@@ -96,6 +100,12 @@ const ACCOUNTS = [
   { client_id: ACC.clientId, account_code: "6100", name: "Office Rent", account_type: "expense", is_active: true },
   { client_id: ACC.clientId, account_code: "6200", name: "Audit Fees", account_type: "expense", is_active: true },
   { client_id: ACC.clientId, account_code: "2020", name: "Accruals", account_type: "liability", is_active: true },
+  // A PAYABLE CONTROL ACCOUNT. The form OFFERS it — it is an active liability of this client, and
+  // the account CLASS is a database fact the browser does not hold — and the door REFUSES it
+  // (`non_control_liability`: a control account reconciles to identified open items and an accrual
+  // has none). That gap is the honest way to reach the server-refusal path: a real disagreement
+  // between what the form can know and what the database knows, rather than a contrived payload.
+  { client_id: ACC.clientId, account_code: "2050", name: "Trade Creditors", account_type: "liability", is_active: true },
   { client_id: ACC.clientId, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
 ];
 
@@ -303,10 +313,18 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
       sendJson(response, 200, [CLIENT()], cors);
       return true;
     }
+    if (idFilter === `eq.${ACC.otherClientId}`) {
+      sendJson(response, 200, [{ ...CLIENT(), id: ACC.otherClientId, name: "C8 ACCRUALS SIBLING" }], cors);
+      return true;
+    }
     return false;
   }
 
   if (request.method === "GET" && path === "/rest/v1/coa_accounts") {
+    if (clientFilter === `eq.${ACC.otherClientId}`) {
+      sendJson(response, 200, [], cors);
+      return true;
+    }
     if (clientFilter !== `eq.${ACC.clientId}`) return false;
     sendJson(response, 200, ACCOUNTS, cors);
     return true;
@@ -315,6 +333,10 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
   // The authority picker's own read — `clara.accounting_work` of this client. Scoped by
   // `client_id` and falls through otherwise, so the Work-list lane's own rows are untouched.
   if (request.method === "GET" && path === "/rest/v1/accounting_work") {
+    if (clientFilter === `eq.${ACC.otherClientId}`) {
+      sendJson(response, 200, [], cors);
+      return true;
+    }
     if (clientFilter !== `eq.${ACC.clientId}`) return false;
     sendJson(response, 200, AUTHORITY_WORK, cors);
     return true;
@@ -324,7 +346,7 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
   // of a client whose accrual rests on a standing instruction rather than an invoice — and it is
   // the state the walk's create cell runs in.
   if (request.method === "GET" && path === "/rest/v1/document_filings") {
-    if (clientFilter !== `eq.${ACC.clientId}`) return false;
+    if (clientFilter !== `eq.${ACC.clientId}` && clientFilter !== `eq.${ACC.otherClientId}`) return false;
     sendJson(response, 200, [], cors);
     return true;
   }
@@ -335,12 +357,16 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
   const body = await readJson(request);
 
   if (verb === "list_spoken_for_documents") {
-    if (body.p_client !== ACC.clientId) return false;
+    if (body.p_client !== ACC.clientId && body.p_client !== ACC.otherClientId) return false;
     sendJson(response, 200, [], cors);
     return true;
   }
 
   if (verb === "list_accrual_adjustments") {
+    if (body.p_client === ACC.otherClientId) {
+      sendJson(response, 200, { client_id: ACC.otherClientId, from: null, to: null, accruals: [] }, cors);
+      return true;
+    }
     if (body.p_client !== ACC.clientId) return false;
     // THE WINDOW IS THE DATABASE'S FILTER, and the mock applies it for the same reason it models
     // the refusal: the surface's behaviour is written against a filtered answer.
@@ -370,12 +396,12 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
     // verbatim, and the typed detail — reason AND field — inside `details`. The walk drives a
     // liability leg the FORM admits (it is a real, active liability account) and the DOOR refuses,
     // which is the only way to exercise the server-refusal path at all.
-    if (accrual.liability_account_code === "1150") {
+    if (accrual.liability_account_code === "2050") {
       state.refusals += 1;
       sendJson(response, 400, {
         code: "CLR10",
-        message: "accrual.liability_account_code must name a liability account; 1150 is a asset",
-        details: '{"reason":"accrual_account_relationship","field":"accrual.liability_account_code","constraint":"liability_account","account_code":"1150"}',
+        message: "accrual.liability_account_code names the payable control account; an accrual carries no identified open item",
+        details: '{"reason":"accrual_account_relationship","field":"accrual.liability_account_code","constraint":"non_control_liability","account_code":"2050","account_class":"payable"}',
       }, cors);
       return true;
     }

@@ -201,11 +201,12 @@ test("accrual.walk.evidenced: a stated ZERO is a TERM refusal at the amount, not
 test("accrual.walk.evidenced: a SERVER refusal renders as a persistent banner on the control it names — never a toast", async ({ page }) => {
   await signInTo(page, NEW_URL);
   await ensureRealFocus(page);
-  // A liability leg the FORM admits (an active account of this client) and the DOOR refuses.
-  await fillForm(page, { liability: "1150" });
+  // A liability leg the FORM ADMITS — 2050 is an active liability of this client, and the account
+  // CLASS is a database fact the browser does not hold — and the DOOR REFUSES as a control account.
+  await fillForm(page, { liability: "2050" });
   await page.getByRole("button", { name: "Record the accrual" }).click();
 
-  const refusal = page.getByText(/must name a liability account; 1150 is a asset/);
+  const refusal = page.getByText(/names the payable control account; an accrual carries no identified open item/);
   await expect(refusal).toBeVisible();
   await expect(page.getByLabel("Liability account")).toBeFocused();
   // PERSISTENT: it is still there after a settle, and after the pointer has moved away.
@@ -270,8 +271,7 @@ test("accrual.walk.evidenced: a half-typed accrual SURVIVES a reload, and never 
 
   // A SCOPE CHANGE NEVER TRANSFERS A DRAFT. The key carries user+firm+client, so another client's
   // form simply has no draft of this one's to find — and coming back still finds it.
-  const otherClient = "65f0f0f0-6500-4650-8650-650650650650";
-  await page.goto(`/clients/${otherClient}/accruals/new`);
+  await page.goto(`/clients/${ACC.otherClientId}/accruals/new`);
   await expect(page.getByLabel("What is being accrued")).toHaveValue("");
   await page.goto(NEW_URL);
   await expect(page.getByLabel("What is being accrued")).toHaveValue("Half-typed quarterly insurance accrual");
@@ -342,9 +342,9 @@ test("accrual.walk.evidenced: 320 CSS px on the detail — the whole lineage tab
 test("accrual.walk.evidenced: reduced motion — nothing on the form MOVES, and the opacity that remains is allowed to", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await signInTo(page, NEW_URL);
-  await fillForm(page, { liability: "1150" });
+  await fillForm(page, { liability: "2050" });
   await page.getByRole("button", { name: "Record the accrual" }).click();
-  await expect(page.getByText(/must name a liability account/)).toBeVisible();
+  await expect(page.getByText(/names the payable control account/)).toBeVisible();
 
   // MOVEMENT ONLY. Opacity and colour are allowed under reduced motion; transform and the
   // geometric properties are not — the token contract's own rule, measured as computed style.
