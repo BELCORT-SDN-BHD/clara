@@ -143,6 +143,13 @@ const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
   receivables: { id: "registersAging", keywords: ["receivables", "payables", "aging", "ar", "ap", "registers"] },
   assets: { id: "registersAssets", keywords: ["fixed assets", "depreciation", "nbv", "registers"] },
   plans: { id: "registersPlans", keywords: ["plans", "adjustments", "accruals", "registers"] },
+  // #653 — the words a preparer reaches for when a prepaid invoice needs spreading. Deliberately
+  // NOT "plans": that word belongs to the row above, and two rows answering one word is a palette
+  // that guesses.
+  prepayments: {
+    id: "prepayments",
+    keywords: ["prepayments", "prepaid", "amortisation", "amortization", "service period", "subscription", "insurance"],
+  },
   accounts: { id: "registersAccounts", keywords: ["accounts", "chart of accounts", "coa", "registers"] },
   close: { id: "close", keywords: ["close", "period", "fiscal year"] },
   tax: { id: "clientTax", keywords: ["tax", "sst", "cp204", "income tax", "computation"] },

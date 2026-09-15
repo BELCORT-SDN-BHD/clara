@@ -1,0 +1,400 @@
+"use client";
+
+// #653 — THE CONFIGURE FORM. It asks four things and derives everything else.
+//
+// WHAT IT ASKS, and why each one is a human judgement rather than a derivation:
+//   · WHICH posted prepayment — chosen from `clara.list_prepayment_attention`'s ARM B, which is
+//     the evaluator's OWN predicate (approved, document-bound, exactly one debited asset line). A
+//     free-text entry id would be a control whose only likely outcome is `prepayment_source_unfit`.
+//   · WHICH expense account — a Select over the client's OWN chart (appendix D row 49; a Combobox
+//     would be right for a large chart and the control degrades to one honestly by listing only
+//     ACTIVE expense accounts).
+//   · WHY that account — REQUIRED (appendix D row 18's pairing rule, and 0140's own
+//     `prepayment_target_underivable`/`basis_missing`): a classification with no recorded grounds
+//     is refused rather than saved unexplained.
+//   · WHAT the schedule is for.
+//
+// WHAT IT DOES NOT ASK, and each absence is a rule:
+//   · THE AMOUNT, THE PERIODS AND THE ALLOCATION — derived by the FROZEN
+//     `clara.prepayment_schedule_v1` from the recognition entry's own prepaid leg and the
+//     document's own service period. There is NO Calendar/Popover date picker on this form for the
+//     same reason: the term is not this form's to state.
+//   · THE CADENCE — monthly, each period's own month end. Migration 0208's `_assert_plan_schedule`
+//     refuses a typed one for this kind, so a control here could only ever produce a refusal.
+//
+// THE PREVIEW IS A DISABLED TABLE, AFTER THE FACT. The door answers with the derived allocation;
+// the form renders it read-only so a person can SEE what they configured before leaving the page.
+// It is a preview, never an editor — #643's `periodic-adjustment-form.tsx` established the idiom
+// and this lane needs it more, because these figures were not typed by anyone.
+//
+// A REFUSAL KEEPS THE DRAFT, NAMES ITSELF VERBATIM, AND SAYS THE PREPAYMENT IS STILL POSTED. That
+// last sentence is #653's own: a create-time refusal leaves a prepaid asset on the books with
+// nothing tracking it, and the person needs to know the money did not go away with their form.
+// Never a toast (appendix C §3) — a StateBanner that stays.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/common/native-select";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { StateBanner } from "@/components/common/state";
+import { DataState, ErrorMessage } from "@/components/firm/data-state";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Money } from "@/components/journals/money";
+import { PrepaymentBoundaryStatement, PrepaymentConfigurationStatement } from "./prepayment-statement";
+import { listCoaAccounts } from "@/lib/journals/api";
+import { useAsyncRead } from "@/lib/firm/use-async-read";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
+import {
+  createPrepaymentSchedule, loadPrepaymentAttention,
+  type AttentionUnscheduled, type PrepaymentCreated,
+} from "@/lib/prepayments/api";
+import {
+  EMPTY_PREPAYMENT_DRAFT, PREPAYMENT_TIMEZONE, firstInvalidPrepaymentField,
+  prepaymentFieldElementId, prepaymentRefusalKey, residualIndex, validatePrepaymentDraft,
+  type PrepaymentDraft, type PrepaymentFieldId, type PrepaymentIssue,
+} from "@/lib/prepayments/schedule";
+import { prepaymentDetailHref, prepaymentsHref } from "@/lib/navigation/tree";
+import { isDoorRefusal } from "@/lib/doors";
+
+type FieldNode = { focus: () => void };
+
+export function PrepaymentForm({
+  clientId,
+  /** The recognition prefilled from an attention row, so arm B's "configure the schedule" lands on
+   *  a form that already knows which prepayment it is about. */
+  entryId = null,
+  /** The instruction this schedule cites. The door RESOLVES it against this client's own Work, so
+   *  a saved preference cannot supply authority. */
+  authorityWorkId = null,
+}: {
+  clientId: string;
+  entryId?: string | null;
+  authorityWorkId?: string | null;
+}) {
+  const t = useTranslations("Prepayments");
+  const router = useRouter();
+
+  const accounts = useAsyncRead(() => listCoaAccounts(sessionTokenAccessor, clientId));
+  const attention = useAsyncRead(() => loadPrepaymentAttention(clientId));
+
+  const [draft, setDraft] = useState<PrepaymentDraft>({
+    ...EMPTY_PREPAYMENT_DRAFT,
+    sourceEntryId: entryId ?? "",
+  });
+  const [attempted, setAttempted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [created, setCreated] = useState<PrepaymentCreated | null>(null);
+
+  // ONE OP KEY PER SUBMITTED DECISION: minted on the first attempt and reused for every retry of
+  // the SAME figures, so a lost response replays through `clara._reserve_op` rather than asking a
+  // second question. Changing a field renews it — that is a different decision. Migration 0208
+  // asks its reservation BEFORE the duplicate check so this replay actually wins.
+  const opKeyRef = useRef<string | null>(null);
+  const renewKey = () => {
+    opKeyRef.current = null;
+  };
+  const opKey = () => {
+    if (opKeyRef.current === null) opKeyRef.current = crypto.randomUUID();
+    return opKeyRef.current;
+  };
+
+  const unscheduled: readonly AttentionUnscheduled[] = attention.data?.unscheduled ?? [];
+  const chosen = unscheduled.find((r) => r.entry_id === draft.sourceEntryId) ?? null;
+
+  const expenseAccounts = useMemo(
+    () => (accounts.data ?? []).filter((a) => a.is_active && a.account_type === "expense"),
+    [accounts.data],
+  );
+  const knownExpense = useMemo(
+    () => (accounts.data === null ? null : new Set(expenseAccounts.map((a) => a.account_code))),
+    [accounts.data, expenseAccounts],
+  );
+
+  const issues: PrepaymentIssue[] = validatePrepaymentDraft(draft, knownExpense);
+
+  const fields = useRef(new Map<PrepaymentFieldId, FieldNode>());
+  const register = (field: PrepaymentFieldId, node: FieldNode | null) => {
+    if (node === null) fields.current.delete(field);
+    else fields.current.set(field, node);
+  };
+
+  // The prefill arrives from the URL; when the attention read lands later it is already chosen.
+  useEffect(() => {
+    if (entryId !== null && draft.sourceEntryId === "") setDraft((d) => ({ ...d, sourceEntryId: entryId }));
+  }, [entryId, draft.sourceEntryId]);
+
+  const message = (field: PrepaymentFieldId): string | null => {
+    if (!attempted) return null;
+    const issue = issues.find((i) => i.field === field);
+    if (issue === undefined) return null;
+    const codes: Record<string, string> = {
+      sourceRequired: t("issueSourceRequired"),
+      accountRequired: t("issueAccountRequired"),
+      accountUnknown: t("issueAccountUnknown"),
+      basisRequired: t("issueBasisRequired"),
+      purposeRequired: t("issuePurposeRequired"),
+    };
+    return codes[issue.code] ?? issue.code;
+  };
+
+  const patch = (next: Partial<PrepaymentDraft>) => {
+    renewKey();
+    setDraft((prev) => ({ ...prev, ...next }));
+  };
+
+  const submit = async () => {
+    setAttempted(true);
+    const found = validatePrepaymentDraft(draft, knownExpense);
+    if (found.length > 0) {
+      fields.current.get(firstInvalidPrepaymentField(found))?.focus();
+      return;
+    }
+    setBusy(true);
+    setFailure(null);
+    try {
+      const answer = await createPrepaymentSchedule({
+        clientId,
+        sourceEntryId: draft.sourceEntryId,
+        expenseAccountCode: draft.expenseAccountCode.trim(),
+        expenseAccountBasis: draft.expenseAccountBasis.trim(),
+        purpose: draft.purpose.trim(),
+        // The instruction is a Work of THIS client. Where the page did not supply one, the door's
+        // own `authority_ref_unresolved` is the honest answer rather than a fabricated id.
+        authorityRef: { kind: "accounting_work", id: authorityWorkId ?? draft.sourceEntryId },
+        opKey: opKey(),
+      });
+      setCreated(answer);
+      setBusy(false);
+      if (answer.overlap_warning === null) {
+        router.push(prepaymentDetailHref(clientId, answer.schedule_id));
+      }
+    } catch (e) {
+      // THE DRAFT IS KEPT (appendix C §3). Every field a person typed is still on screen, and the
+      // banner below names the database's own refusal plus the sentence that matters most here:
+      // the prepayment itself is still posted and still needs a schedule.
+      setFailure(e);
+      setBusy(false);
+    }
+  };
+
+  // THE TYPED DISCRIMINANT, from the governed refusal itself. A transport failure is not a
+  // refusal and carries no `reason`, so it falls through to the database's own words below
+  // rather than being dressed as one of this lane's tokens.
+  const refusalKey = prepaymentRefusalKey(
+    failure !== null && isDoorRefusal(failure) ? failure.reason : null);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PrepaymentBoundaryStatement />
+      <PrepaymentConfigurationStatement />
+
+      {failure === null ? null : (
+        <StateBanner tone="error" title={t("refusalTitle")}>
+          <span className="flex flex-col gap-1">
+            <span>{refusalKey === "unknown" ? null : t(refusalKey)}</span>
+            {/* THE DATABASE'S OWN WORDS, always — a refusal this build has not enumerated is still
+                legible rather than reduced to a key path. */}
+            <ErrorMessage error={failure} />
+            <span className="text-xs">{t("refusalPostedAnyway")}</span>
+          </span>
+        </StateBanner>
+      )}
+
+      {created?.overlap_warning == null ? null : (
+        <StateBanner
+          tone="warning"
+          title={t("overlapTitle")}
+          action={
+            <Button variant="outline" size="sm" onClick={() => router.push(prepaymentsHref(clientId))}>
+              {t("overlapContinue")}
+            </Button>
+          }
+        >
+          {t("overlapBody", {
+            templates: created.overlap_warning.templates.map((x) => x.name).join(", "),
+          })}
+        </StateBanner>
+      )}
+
+      <p className="max-w-prose text-sm text-muted-foreground">
+        {t("derivedNote", { timezone: PREPAYMENT_TIMEZONE })}
+      </p>
+
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium" htmlFor={prepaymentFieldElementId("sourceEntry")}>
+            {t("fieldSource")}
+          </label>
+          <p className="max-w-prose text-xs text-muted-foreground">{t("sourceNote")}</p>
+          <DataState
+            loading={attention.loading}
+            error={attention.error}
+            isEmpty={unscheduled.length === 0}
+            emptyMessage={t("sourceEmpty")}
+          >
+            <NativeSelect
+              id={prepaymentFieldElementId("sourceEntry")}
+              ref={(node) => register("sourceEntry", node)}
+              value={draft.sourceEntryId}
+              disabled={busy}
+              aria-invalid={message("sourceEntry") === null ? undefined : true}
+              aria-describedby={`${prepaymentFieldElementId("sourceEntry")}-error`}
+              onChange={(e) => patch({ sourceEntryId: e.target.value })}
+            >
+              <option value="">{t("sourceChoose")}</option>
+              {unscheduled.map((row) => (
+                <option key={row.entry_id} value={row.entry_id}>
+                  {`${(row.amount_cents / 100).toFixed(2)} on ${row.posting_date} — ${row.prepaid_account_code}`}
+                </option>
+              ))}
+            </NativeSelect>
+          </DataState>
+          {/* THE TERM IS NOT THIS FORM'S TO STATE. When the chosen recognition's document carries
+              no service period, say so HERE rather than letting the door refuse after a submit. */}
+          {chosen !== null && !chosen.has_live_term ? (
+            <StateBanner tone="warning">{t("sourceNeedsTerm")}</StateBanner>
+          ) : null}
+          <FieldError id={`${prepaymentFieldElementId("sourceEntry")}-error`}>
+            {message("sourceEntry")}
+          </FieldError>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium" htmlFor={prepaymentFieldElementId("expenseAccount")}>
+            {t("fieldExpense")}
+          </label>
+          <p className="max-w-prose text-xs text-muted-foreground">{t("expenseNote")}</p>
+          {accounts.error !== null ? <StateBanner tone="warning">{t("accountsUnavailable")}</StateBanner> : null}
+          <NativeSelect
+            id={prepaymentFieldElementId("expenseAccount")}
+            ref={(node) => register("expenseAccount", node)}
+            value={draft.expenseAccountCode}
+            disabled={busy}
+            aria-invalid={message("expenseAccount") === null ? undefined : true}
+            aria-describedby={`${prepaymentFieldElementId("expenseAccount")}-error`}
+            onChange={(e) => patch({ expenseAccountCode: e.target.value })}
+          >
+            <option value="">{t("expenseChoose")}</option>
+            {expenseAccounts.map((a) => (
+              <option key={a.account_code} value={a.account_code}>
+                {a.account_code} — {a.name}
+              </option>
+            ))}
+          </NativeSelect>
+          <FieldError id={`${prepaymentFieldElementId("expenseAccount")}-error`}>
+            {message("expenseAccount")}
+          </FieldError>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium" htmlFor={prepaymentFieldElementId("expenseBasis")}>
+            {t("fieldExpenseBasis")}
+          </label>
+          <p className="max-w-prose text-xs text-muted-foreground">{t("expenseBasisNote")}</p>
+          <Textarea
+            id={prepaymentFieldElementId("expenseBasis")}
+            ref={(node) => register("expenseBasis", node)}
+            value={draft.expenseAccountBasis}
+            disabled={busy}
+            required
+            aria-invalid={message("expenseBasis") === null ? undefined : true}
+            aria-describedby={`${prepaymentFieldElementId("expenseBasis")}-error`}
+            onChange={(e) => patch({ expenseAccountBasis: e.target.value })}
+          />
+          <FieldError id={`${prepaymentFieldElementId("expenseBasis")}-error`}>
+            {message("expenseBasis")}
+          </FieldError>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium" htmlFor={prepaymentFieldElementId("purpose")}>
+            {t("fieldPurpose")}
+          </label>
+          <p className="max-w-prose text-xs text-muted-foreground">{t("purposeNote")}</p>
+          <Input
+            id={prepaymentFieldElementId("purpose")}
+            ref={(node) => register("purpose", node)}
+            value={draft.purpose}
+            disabled={busy}
+            aria-invalid={message("purpose") === null ? undefined : true}
+            aria-describedby={`${prepaymentFieldElementId("purpose")}-error`}
+            onChange={(e) => patch({ purpose: e.target.value })}
+          />
+          <FieldError id={`${prepaymentFieldElementId("purpose")}-error`}>{message("purpose")}</FieldError>
+        </div>
+      </section>
+
+      {created === null ? null : <DerivedAllocation created={created} />}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button disabled={busy} onClick={() => void submit()}>
+          {busy ? t("saving") : t("submitCreate")}
+        </Button>
+        <Button variant="outline" disabled={busy} onClick={() => router.push(prepaymentsHref(clientId))}>
+          {t("cancel")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** THE DERIVED ALLOCATION, DISABLED. A preview of what each period posts — never an editor, and
+ *  never a set of figures anybody typed. */
+function DerivedAllocation({ created }: { created: PrepaymentCreated }) {
+  const t = useTranslations("Prepayments");
+  const residual = residualIndex(created.period_lines);
+  return (
+    <section className="flex flex-col gap-2" aria-labelledby="prepayment-allocation-heading">
+      <h2 id="prepayment-allocation-heading" className="text-base font-semibold">
+        {t("allocationHeading")}
+      </h2>
+      <p className="max-w-prose text-sm text-muted-foreground">{t("allocationBody")}</p>
+      <fieldset disabled className="m-0 border-0 p-0">
+        <DataTableCard label={t("allocationTableLabel")}>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("colPeriod")}</TableHead>
+              <TableHead>{t("colPostsOn")}</TableHead>
+              <TableHead>{t("colAmount")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {created.period_lines.map((line, i) => (
+              <TableRow key={line.period_end}>
+                <TableCell className="text-muted-foreground">
+                  {line.period_start} – {line.period_end}
+                </TableCell>
+                {/* EACH PERIOD POSTS ON ITS OWN `period_end`, which is what makes the
+                    `period_end = due_date` join exact. Showing the period and the posting date in
+                    two columns is how a reader can see that for themselves. */}
+                <TableCell>{line.period_end}</TableCell>
+                <TableCell>
+                  <Money cents={Number(line.amount_cents)} />
+                  {i === residual ? (
+                    <span className="block text-xs text-muted-foreground">{t("residualNote")}</span>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </DataTableCard>
+      </fieldset>
+    </section>
+  );
+}
+
+/** One control's error, beside the control and wired by `aria-describedby` — the same shape
+ *  `plan-form.tsx` uses, so a prepayment field and a plan field read alike. */
+function FieldError({ id, children }: { id: string; children: string | null }) {
+  return (
+    <p id={id} className="text-xs text-error" role={children === null ? undefined : "alert"}>
+      {children ?? ""}
+    </p>
+  );
+}
