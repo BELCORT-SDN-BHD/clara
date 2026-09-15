@@ -120,15 +120,14 @@ test("pagination is a keyset: Next writes ?cursor=, Back returns to the first pa
 
   const pager = page.getByRole("navigation", { name: "Work list pages" });
   await expect(pager).toBeVisible();
-  // ROLE "button", NOT "link", and that is the vendored primitive being measured rather than a
-  // preference: shadcn base-nova's `PaginationLink` renders a real `<a href>` through Base UI's
-  // Button with `nativeButton={false}`, which stamps `role="button"` onto the anchor. So the
-  // control navigates like a link (the href is real, middle-click and open-in-new-tab work) while
-  // assistive tech announces it as a button. Asserted as it actually is; the mismatch is reported
-  // as a follow-up rather than patched into a primitive other lanes also install.
-  await pager.getByRole("button", { name: "Next page" }).click();
+  // ROLE "link", CORRECTED (#771): `PaginationLink` now branches on `href` and renders a plain
+  // `<a href>` with no added `role`, so the control's accessible role finally matches how it
+  // actually behaves — a real href, middle-click and open-in-new-tab both work, and `onClick`'s
+  // `preventDefault` upgrades an ordinary click to a client-side push.
+  await pager.getByRole("link", { name: "Next page" }).click();
 
   await expect(page).toHaveURL(/[?&]cursor=/);
+  const cursorUrl = page.url();
   await expect(rowLink(page, "Opening balances tie-out")).toBeVisible();
   await expect(rowLink(page, "Quarterly rent — which Maybank account?")).toHaveCount(0);
 
@@ -139,6 +138,16 @@ test("pagination is a keyset: Next writes ?cursor=, Back returns to the first pa
   await page.goBack();
   await expect(page).not.toHaveURL(/cursor=/);
   await expect(rowLink(page, "Quarterly rent — which Maybank account?")).toBeVisible();
+
+  // KEYBOARD PARITY (#771): a real `<a href>` activates on Enter the way a browser activates any
+  // link — focusing the Next control and pressing Enter must navigate identically to the pointer
+  // click above (same `?cursor=` URL, same rows), so the corrected native semantics do not
+  // regress keyboard reachability.
+  await pager.getByRole("link", { name: "Next page" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(cursorUrl);
+  await expect(rowLink(page, "Opening balances tie-out")).toBeVisible();
+  await expect(rowLink(page, "Quarterly rent — which Maybank account?")).toHaveCount(0);
 });
 
 test("a deep link to a FILTERED page renders that page, and Back from the detail restores the identical query", async ({ page }) => {

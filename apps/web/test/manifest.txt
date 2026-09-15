@@ -207,6 +207,7 @@ components/reports/reports-snapshots-seeding-keyboard.test.tsx
 components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
+components/ui/pagination.test.tsx
 components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/egress-reactivate-action.test.tsx
