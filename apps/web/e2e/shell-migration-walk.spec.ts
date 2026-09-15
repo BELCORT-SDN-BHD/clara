@@ -735,12 +735,15 @@ test("D5/D6: plain /work also renders the durable Work list and the agent-task p
   await expect(page.getByRole("heading", { name: "Work", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Running agent tasks", level: 2 })).toBeVisible();
   // #641 — the not-built note this cell used to pin is gone, because the thing it named is built:
-  // the durable Work list is now the page's own first section. This lane's fixtures answer
-  // `list_accounting_work` with serve-built's honest generic EMPTY (it owns no Work of its own),
-  // so what renders here is the FIRST-USE Empty — which is the right state for a firm with none,
-  // and is distinct from the filtered no-results copy (proved in work-list-walk.spec.ts).
+  // the durable Work list is now the page's own first section. The firm-wide (client-less)
+  // `list_accounting_work` read is answered by the Work-list lane's own nine seeded rows — the
+  // same rows that lane's client-scoped read returns — so plain /work shows the newest of them,
+  // not the first-use Empty (that Empty is proved for the lane's own empty client instead, in
+  // work-list-walk.spec.ts).
   await expect(page.getByRole("heading", { name: "Durable work", level: 2 })).toBeVisible();
-  await expect(page.getByText("No work yet")).toBeVisible();
+  await expect(
+    page.getByRole("table", { name: "Durable work" }).getByRole("link", { name: "Quarterly rent — which Maybank account?" }),
+  ).toBeVisible();
 
   await page.goto("/activity");
   await expect(page.getByRole("button", { name: "Details", exact: true })).toHaveCount(0);

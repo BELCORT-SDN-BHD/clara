@@ -365,13 +365,16 @@ test("the client register is a named table whose population is EXACTLY this firm
   await expect(table).toBeVisible();
 
   // POPULATION — exactly the shared mock's own unfiltered register (`serve-built.mjs`'s
-  // `clients` array): CLIENT_A, CLIENT_B, and #632's two ACTIVITY_CLIENTS, appended to that
-  // SAME array. Four rows, no more and no fewer.
-  await expect(table.locator("tbody tr")).toHaveCount(4);
+  // `clients` array): CLIENT_A, CLIENT_B, #632's two ACTIVITY_CLIENTS, and #641's three
+  // WORK_LIST_CLIENTS, all appended to that SAME array. Seven rows, no more and no fewer.
+  await expect(table.locator("tbody tr")).toHaveCount(7);
   await expect(table.getByRole("link", { name: "Rome Properties" })).toBeVisible();
   await expect(table.getByRole("link", { name: "Bee Creative Solution" })).toBeVisible();
   await expect(table.getByRole("link", { name: "Activity Feed Fixture" })).toBeVisible();
   await expect(table.getByRole("link", { name: "Activity Permission-Flip Fixture" })).toBeVisible();
+  await expect(table.getByRole("link", { name: "Work List Fixture" })).toBeVisible();
+  await expect(table.getByRole("link", { name: "Work List Empty Fixture" })).toBeVisible();
+  await expect(table.getByRole("link", { name: "Work List Denied Fixture" })).toBeVisible();
 
   // ISOLATION — every OTHER lane mock's own client exists only behind that lane's own
   // ID-SCOPED handler (`e2e-fixture-ownership.test.ts`'s N4/N5 rule: the UNFILTERED
