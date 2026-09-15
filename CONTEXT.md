@@ -294,3 +294,11 @@ _Avoid_: A standing grant; a per-client "AI on" switch; a quota; a check perform
 **Execution trace**:
 The durable record of what one Work run actually did: one row per step (dispatch, model call, tool call, settle) naming the versioned bundle, the capability, the purpose and the authorisation it spent, the input's digest, the revisions it observed, the timing and the outcome or typed refusal. It carries no prompt, no transcript and no client figures: the relation has no free payload column, every remaining field is bounded and format-checked so none of them can become one, and the writer redacts what it sends. It is read through one firm-scoped, bookkeeper-floored door — no application role can read the relation itself — and there is no export route.
 _Avoid_: A log; a span with an attribute bag; anything that stores what was sent; a free-text field on the row; evidence that an effect happened (a receipt is that).
+
+**Intake receipt**:
+The durable per-upload record a file's arrival leaves behind, in its own right and independent of the browser session that made it: who uploaded it, from which entrance (documents tab or chat), the declared name, type and size, the status it has reached and — once custody happens — the document it became. It is recoverable at mount, so closing the tab mid-batch loses the QUEUE and not the answer; and it carries no client, because attribution is a separate act on the document rather than a property of the upload.
+_Avoid_: Treating `finalizeIntake`'s own advisory return as the receipt (only a subsequent read is DB-confirmed); the upload queue's in-memory row; a record that implies the file was filed to anyone.
+
+**Unassigned source**:
+An adopted document with no live filing: the firm holds it and its bytes are sealed and readable, but no client's shelf has claimed it. It is firm-visible, awaits exactly ONE attribution act, and leaves the population the moment that act lands. A document that is unassigned is not a document that failed — it is a document nobody has answered a question about yet.
+_Avoid_: An unprocessed or failed upload; a document whose filing was retired (that one has a history); a per-person inbox — the population is the firm's, not the uploader's.

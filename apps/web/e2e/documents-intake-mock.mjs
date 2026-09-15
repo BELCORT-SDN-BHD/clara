@@ -53,6 +53,8 @@ const state = {
   attributionAttempts: 0,
   /** Set once an upload has been filed, so the receipts list can grow by one. */
   uploadFiled: false,
+  /** See the arming note in handleDocumentsIntakeSupabase. */
+  armed: false,
 };
 
 export function resetDocsIntakeLane() {
@@ -60,6 +62,7 @@ export function resetDocsIntakeLane() {
   state.attributed = false;
   state.attributionAttempts = 0;
   state.uploadFiled = false;
+  state.armed = false;
 }
 
 const iso = (s) => `2026-04-0${s}T02:00:00.000Z`;
@@ -142,8 +145,7 @@ async function readJson(request) {
 }
 
 async function drain(request) {
-  // eslint-disable-next-line no-empty
-  for await (const _chunk of request) {}
+  for await (const chunk of request) void chunk;
 }
 
 /**
@@ -156,6 +158,16 @@ async function drain(request) {
  */
 export async function handleDocumentsIntakeSupabase(request, response, path, url, sendJson, cors) {
   const params = url.searchParams;
+
+  // ARMING. The receipts read is the one request in this lane that carries no scope of
+  // its own — `clara.document_intakes` has no client column, which is the whole reason
+  // the predicate lives in the browser. So the lane arms itself on any request that DOES
+  // name this client (the filings read the workbench issues in the same breath, the
+  // spoken-for door, an evidence-link read), and until then it answers the list form
+  // with an honest EMPTY rather than another lane's rows. That matters in both
+  // directions: unarmed, this lane injects nothing into `documents-viewer-walk`'s tab;
+  // armed, it — not chat-parity's unconditional handler — is what answers here.
+  if (url.search.includes(DOCS_INTAKE.clientId)) state.armed = true;
 
   if (request.method === "GET" && path === "/rest/v1/document_intakes_visible") {
     const idFilter = params.get("id");
@@ -174,8 +186,13 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
       sendJson(response, 200, [intakeRow({ id: named })], cors);
       return true;
     }
-    // THE LIST FORM — the receipts cell. The moving row settles on its SECOND read, which
-    // is the transition "status settles without a reload" is about.
+    // THE LIST FORM — the receipts cell.
+    if (!state.armed) {
+      sendJson(response, 200, [], cors); // another lane's client: an honest empty, not our rows
+      return true;
+    }
+    // The moving row settles on its SECOND read, which is the transition
+    // "status settles without a reload" is about.
     state.movingReads += 1;
     const settledYet = state.movingReads > 1;
     sendJson(response, 200, [
@@ -187,6 +204,39 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
         document_id: settledYet ? DOCS_INTAKE.movingDocumentId : null,
         created_at: iso(2),
       }),
+    ], cors);
+    return true;
+  }
+
+  // THE FILINGS THIS CLIENT HOLDS. Load-bearing twice over: it is arm (a) of the receipts
+  // predicate ("filed to this client"), and it is what puts a CLICKABLE row in the filed
+  // list, which is the only way to open the detail panel where the file -> Work boundary
+  // is rendered. Scoped to this lane's client id, so every other walk's filings are
+  // untouched.
+  if (request.method === "GET" && path === "/rest/v1/document_filings") {
+    if (params.get("client_id") !== `eq.${DOCS_INTAKE.clientId}`) return false;
+    sendJson(response, 200, [
+      {
+        id: "f0000000-0000-4000-8000-000000000001",
+        document_id: DOCS_INTAKE.settledDocumentId,
+        client_id: DOCS_INTAKE.clientId,
+        filed_at: iso(1), filed_by: DOCS_INTAKE.userId, basis: "human",
+        retired_at: null, retirement_reason: null, revision_token: "rev-633-1",
+      },
+      {
+        id: "f0000000-0000-4000-8000-000000000002",
+        document_id: DOCS_INTAKE.movingDocumentId,
+        client_id: DOCS_INTAKE.clientId,
+        filed_at: iso(2), filed_by: DOCS_INTAKE.userId, basis: "human",
+        retired_at: null, retirement_reason: null, revision_token: "rev-633-2",
+      },
+      ...(state.uploadFiled ? [{
+        id: "f0000000-0000-4000-8000-000000000003",
+        document_id: DOCS_INTAKE.uploadDocumentId,
+        client_id: DOCS_INTAKE.clientId,
+        filed_at: iso(4), filed_by: DOCS_INTAKE.userId, basis: "human",
+        retired_at: null, retirement_reason: null, revision_token: "rev-633-3",
+      }] : []),
     ], cors);
     return true;
   }
@@ -270,9 +320,12 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
       }], cors);
       return true;
     }
-    if (doc?.startsWith("eq.")) {
-      // THE HONEST EMPTY. Every other document of this lane has produced no Work, and
-      // the surface has to say so in words rather than render nothing.
+    // THE HONEST EMPTY, for THIS LANE'S other documents only. Scoped rather than
+    // answering every `document_id=eq.` there is: `entry_evidence_links` is read by other
+    // lanes' surfaces too, and a blanket empty here would quietly tell them their own
+    // documents produced no Work.
+    const mine = [DOCS_INTAKE.movingDocumentId, DOCS_INTAKE.uploadDocumentId, DOCS_INTAKE.unassignedDocumentId];
+    if (mine.some((id) => doc === `eq.${id}`)) {
       sendJson(response, 200, [], cors);
       return true;
     }
@@ -331,6 +384,13 @@ export async function handleDocumentsIntakeRuntime(request, response, url) {
 
   if (request.method === "POST" && path === "/api/intake/documents") {
     const body = await readJson(request);
+    // THE DISCRIMINANT IS `origin`, and it is the runtime's OWN parameter, not a test
+    // convention: `intake.mjs:99-102` refuses unless a chat origin arrives with a
+    // session id, and `intake.ts`'s `beginIntake` defaults every Documents-workbench
+    // caller to "documents_tab". So this lane answers the documents tab and the firm
+    // leaf, and chat-parity's composer upload — which sends `origin: "chat"` — falls
+    // through to its own handler exactly as before.
+    if (body?.origin !== "documents_tab") return false;
     // FORMAT AND SIZE REFUSALS, PER FILE. These are the runtime's own walls
     // (`intake.mjs:28`, `:33-50`) and the queue has to settle each row on its own.
     if (typeof body?.declared_bytes === "number" && body.declared_bytes > 20 * 1024 * 1024) {
