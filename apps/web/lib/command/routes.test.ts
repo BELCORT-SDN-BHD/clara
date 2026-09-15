@@ -523,8 +523,9 @@ test("the join RAN — every row carries a floor, and none was dropped instead o
   // #614: five firm destinations + the Needs-you saved view + six settings
   // sections. The rows are BUILT from the registry now rather than joined to it,
   // so this count is what catches a construction that silently drops one.
+  // #648 added the `setup` settings section, so the literal is 13.
   assert.equal(FIRM_ROUTES.length, FIRM_NAV.length + 1 + SETTINGS_SECTIONS.length);
-  assert.equal(FIRM_ROUTES.length, 12);
+  assert.equal(FIRM_ROUTES.length, 13);
   for (const route of FIRM_ROUTES) {
     assert.equal(typeof route.minimumRole, "string", `${route.id} has no floor`);
   }
