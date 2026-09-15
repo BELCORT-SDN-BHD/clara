@@ -117,6 +117,28 @@ console.log("findDeadNameCitations — negative controls:");
     testCase("a citation of the repo-root AGENTS.md (which exists) is not flagged", () => {
       assertDeepEqual(hits, [], "must not flag a fixture that cites a file that actually exists");
     });
+    testCase("#795: a document with an Appendix A OF ITS OWN is not flagged — the dead name is \"ARCHITECTURE Appendix A\"", () => {
+      // THE FALSE POSITIVE THIS ENTRY USED TO CARRY. A bare /appendix a/i matched any tracked
+      // file naming any appendix, and reported it under a phrase that file never used. The
+      // entry is scoped per LINE to `Appendix A` BESIDE `ARCHITECTURE`; a document numbering
+      // its own appendices is none of this guard's business. Both shapes are fixtured: an
+      // appendix heading, and a cross-reference to it.
+      write(dir, "docs/plan/fixture-own-appendix.md",
+        "## Appendix A — the sampling method\n\nThe rates in Appendix A were re-derived in 2026.\n");
+      // …while a file naming BOTH on one line is still caught, so the narrowing did not
+      // disarm the entry.
+      write(dir, "docs/plan/fixture-cross-ref.md",
+        "See docs/ARCHITECTURE.md's Appendix A for the closure rule.\n");
+      const scoped = findDeadNameCitations(
+        ["docs/plan/fixture-own-appendix.md", "docs/plan/fixture-cross-ref.md"],
+        dir,
+      );
+      assertDeepEqual(
+        scoped,
+        [{ file: "docs/plan/fixture-cross-ref.md", name: "ARCHITECTURE Appendix A" }],
+        "only the file naming ARCHITECTURE beside Appendix A may be flagged",
+      );
+    });
     testCase("#795: an exempt allowlisted path citing ARCHITECTURE Appendix A is not flagged", () => {
       // Read the fixture's own content, but ask findDeadNameCitations to treat it as if it lived
       // at the real allowlisted path "docs/ARCHITECTURE.md" — the file this repo's real

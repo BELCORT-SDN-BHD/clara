@@ -16,7 +16,10 @@
 // --dry-run` against the pinned 4.19.0, recorded in the delivering report) —
 // a network call has no place in a gate every PR runs.
 
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -182,14 +185,42 @@ await testCase("a non-protected payload installs through the guard unchanged —
   assert(spawnCalls.length === 1 && spawnCalls[0].includes("alert"));
 });
 
-await testCase("`button.tsx` is byte-identical before and after a refused run — this selftest touches no real file", () => {
+await testCase("`button.tsx` is byte-identical ACROSS a refused run whose writer WOULD have written it", async () => {
+  // THE CASE THIS REPLACES read the same file twice in a row with nothing between the reads —
+  // it could not fail, and it wrapped no install attempt. A control that cannot go red is an
+  // assertion. This one hashes `button.tsx`, then drives `main()` on the protected payload with
+  // an injected writer that REALLY WRITES (to a throwaway file under the OS temp dir, never into
+  // the repo) the moment it is entered, then hashes again. If the guard ever let the payload
+  // through, the writer would run, the marker file would exist, and this case would fail — so
+  // the unchanged hash is evidence about the guard rather than about the absence of a writer.
   const buttonPath = join(WEB_ROOT, "components", "ui", "button.tsx");
-  const before = readFileSync(buttonPath, "utf8");
-  // The two protected-payload cases above already ran with no override and never called
-  // spawnAdd — this re-read simply confirms the file this whole gate exists to protect was
-  // never touched by any case in this process.
-  const after = readFileSync(buttonPath, "utf8");
-  assert(before === after, "button.tsx changed during this selftest run");
+  const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
+  const before = hash(buttonPath);
+
+  const marker = join(mkdtempSync(join(tmpdir(), "ui-add-guard-")), "the-writer-ran.txt");
+  const lines = [];
+  const code = await main(["pagination"], {}, {
+    resolveFiles: async () => BUTTON_CONTAINING_PAYLOAD,
+    // A writer with real side effects, standing exactly where the real `shadcn add` stands.
+    spawnAdd: (args) => {
+      writeFileSync(marker, `the guard let ${JSON.stringify(args)} through\n`, "utf8");
+      return 0;
+    },
+    log: (line) => lines.push(String(line)),
+  });
+
+  assert(code !== 0, "the run must be refused");
+  assert(!existsSync(marker), "the injected writer RAN — the guard let a protected payload through");
+  assert(hash(buttonPath) === before, "button.tsx changed during this selftest run");
+
+  // …and the refusal NAMES the file, which is the whole disclosure a human acts on. The
+  // earlier cases silenced `log` and so could not see this.
+  const said = lines.join("\n");
+  assert(/components\/ui\/button\.tsx/.test(said),
+    `the refusal must name components/ui/button.tsx; it said:\n${said}`);
+  assert(/REFUSING/.test(said), `the refusal must say so in as many words; it said:\n${said}`);
+  assert(new RegExp(OVERRIDE_ENV_VAR).test(said),
+    "…and must name the override, or a blocked human has no lawful way forward");
 });
 
 // ---------------------------------------------------------------------------
@@ -218,15 +249,27 @@ await testCase("adding a NEW file to the allowlist is a one-line data edit — n
 //     with an injected resolver so no network is reached.
 // ---------------------------------------------------------------------------
 console.log("main() against the real repo's own components.json and allowlist:");
-await testCase("scripts/ui-add.mjs, run as a real subprocess, refuses a fixture payload naming button.tsx", () => {
-  // A REAL SUBPROCESS RUN of the real CLI entry point is not possible here without a network
-  // call inside resolveRegistryItems — so this exercises the module's PUBLIC exports directly
-  // (the same functions `main` itself calls), which is what the fixture cases above already do.
-  // This case instead documents, in the selftest's own file, that the entry point exists and is
-  // reachable from `pnpm ui:add` (package.json's own script) — a structural check, not a
-  // duplicate network-reaching run.
+await testCase("the guard is reachable from the `ui:add` package script", () => {
+  // RENAMED (review 2026-09-15). The old title said "run as a real subprocess, refuses a fixture
+  // payload naming button.tsx" and then asserted a package.json string — a green name that lied
+  // about what had been proved. The refusal itself is proved by the `main()` cases above (with a
+  // writer that really writes); what THIS case checks is the one thing they cannot: that the
+  // entry point a human actually types is wired to the guarded module.
   const pkg = JSON.parse(readFileSync(join(WEB_ROOT, "package.json"), "utf8"));
   assert(pkg.scripts["ui:add"] === "node scripts/ui-add.mjs", "the guard must be reachable from a named package script");
+});
+
+await testCase("scripts/ui-add.mjs runs as a REAL subprocess and exits non-zero on its own refusal path", () => {
+  // The other half of the wiring: that the module is executable as a PROGRAM — its main-guard
+  // fires, its promise is awaited, and its return code becomes the process's exit code. A
+  // subprocess run of the GUARD's refusal is not reachable without a network call inside
+  // resolveRegistryItems (and a gate every PR runs may not make one), so this drives the one
+  // refusal path the entry point owns with no network at all: no component named. It proves the
+  // exit-code plumbing that every `pnpm ui:add` refusal, guard included, depends on.
+  const out = spawnSync(process.execPath, [join(WEB_ROOT, "scripts", "ui-add.mjs")],
+    { cwd: WEB_ROOT, encoding: "utf8" });
+  assert(out.status === 1, `the entry point must exit 1, got ${out.status} (signal ${out.signal})`);
+  assert(/\[ui-add\]/.test(out.stdout ?? ""), `the entry point must say what it did; stdout was:\n${out.stdout}`);
 });
 
 console.log("");

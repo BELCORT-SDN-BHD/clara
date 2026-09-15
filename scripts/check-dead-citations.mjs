@@ -76,15 +76,31 @@ const FROZEN_MANIFEST_PATHS = frozenManifestPaths(REPO_ROOT);
 /** The three dead names this guard refuses. Each `test` runs against a file's raw text and
  *  its repo-relative path — the path is needed so the third entry (#795) can exempt the
  *  frozen manifest and its explicit allowlist above; the first two entries ignore it. */
+/** #795 — the two halves of the dead name, matched per LINE (see the entry below). Neither
+ *  carries the `g` flag: a sticky `lastIndex` across calls would make this guard's answer
+ *  depend on how many files it had already read. */
+const APPENDIX_A = /appendix[^\S\n]+a\b/i;
+const NAMES_ARCHITECTURE = /architecture/i;
+
 const DEAD_NAMES = [
   { id: "apps/web/AGENTS.md", test: (text) => text.includes("apps/web/AGENTS.md") },
   { id: "db-tests.md", test: (text) => /db-tests\.md/.test(text) },
   {
+    // #795 — THE DEAD NAME IS "ARCHITECTURE Appendix A", not "Appendix A". A bare
+    // /appendix a/i anywhere in any tracked file would red a future document that
+    // legitimately has an Appendix A of ITS OWN — and would red it with a message naming a
+    // phrase that document never used, which is the worst kind of false positive: one whose
+    // diagnosis is also wrong. So this entry is scoped to the NAME, the way the two entries
+    // above are: a LINE that names `Appendix A` AND names ARCHITECTURE. That admits the
+    // anchored phrase ("ARCHITECTURE Appendix A"), every citation shape around it
+    // ("docs/ARCHITECTURE.md's Appendix A", "see ARCHITECTURE, Appendix A", "ARCHITECTURE.md
+    // 的 Appendix A"), and nothing else. Somebody else's appendix is none of this guard's
+    // business.
     id: "ARCHITECTURE Appendix A",
     test: (text, relPath) => {
-      if (!/appendix a/i.test(text)) return false;
+      if (!APPENDIX_A.test(text)) return false;   // cheap whole-file reject before the line walk
       if (FROZEN_MANIFEST_PATHS.has(relPath) || APPENDIX_A_ALLOWLIST.has(relPath)) return false;
-      return true;
+      return text.split("\n").some((line) => APPENDIX_A.test(line) && NAMES_ARCHITECTURE.test(line));
     },
   },
 ];
