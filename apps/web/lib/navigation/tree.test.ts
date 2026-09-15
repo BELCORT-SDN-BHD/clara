@@ -36,7 +36,9 @@ import {
   canOpenClientLeaf,
   clientIdOf,
   clientNavHref,
+  counterpartyIdentityHref,
   journalComposerHref,
+  knowledgeRecordHref,
   resolveActive,
   switchClientDestination,
   visibleAccountingItems,
@@ -257,6 +259,45 @@ test("a DEEPER path than a leaf resolves to the PARENT with no leaf — no crumb
 test("the leaf href builders encode their ids — a URL builder never trusts its input", () => {
   assert.equal(journalComposerHref(A), `/clients/${A}/accounting/journal/new`);
   assert.equal(workDetailHref(A, "w 1/x"), `/clients/${A}/work/w%201%2Fx`);
+  assert.equal(counterpartyIdentityHref(A, "cp 1/x"), `/clients/${A}/knowledge/parties/cp%201%2Fx`);
+});
+
+// #647 — the counterparty identity leaf. The whole reason it lives at
+// /knowledge/parties/:id rather than /knowledge/:id is that `leafFor` resolves by EXACT
+// LENGTH and already answers `knowledgeRecord` for ANY two-segment path under `knowledge`;
+// a second kind of detail at that depth would be indistinguishable from a record id.
+test("the counterparty identity leaf resolves, and it does NOT collide with the knowledge record leaf", () => {
+  const identity = resolveActive(counterpartyIdentityHref(A, "cp-1"), params());
+  assert.equal(identity.scope, "client");
+  assert.equal(identity.clientId, A);
+  assert.equal(identity.clientItem, "knowledge", "the sidebar still marks Knowledge — a reader on an identity IS under Knowledge");
+  assert.equal(identity.clientLeaf, "counterpartyIdentity");
+
+  // The two-segment sibling is untouched.
+  const record = resolveActive(knowledgeRecordHref(A, "rec-1"), params());
+  assert.equal(record.clientLeaf, "knowledgeRecord");
+
+  // A bare parent, a two-segment path with the literal `parties`, and anything deeper than
+  // the leaf all resolve to the PARENT with no leaf — no crumb for a route nobody serves.
+  assert.equal(resolveActive(`/clients/${A}/knowledge`).clientLeaf, null);
+  assert.equal(resolveActive(`/clients/${A}/knowledge/parties`).clientLeaf, "knowledgeRecord");
+  assert.equal(resolveActive(`/clients/${A}/knowledge/parties/cp-1/extra`).clientLeaf, null);
+  assert.equal(resolveActive(`/clients/${A}/knowledge/parties/cp-1/extra`).clientItem, "knowledge");
+});
+
+test("the counterparty identity breadcrumb NAMES the leaf and never shows the counterparty uuid", () => {
+  const crumbs = shape(counterpartyIdentityHref(A, "b1b1b1b1-1111-4111-8111-111111111111"));
+  assert.deepEqual(crumbs, [
+    { text: "E2E Accounting", href: "/" },
+    { text: "AppShell:firmNav.clients", href: "/clients" },
+    { text: "Rome Properties", href: `/clients/${A}` },
+    { text: "AppShell:clientNav.knowledge", href: `/clients/${A}/knowledge` },
+    { text: "AppShell:clientLeaf.counterpartyIdentity", href: null },
+  ]);
+  assert.ok(
+    crumbs.every((crumb) => !crumb.text.includes("b1b1b1b1")),
+    "the counterparty id must not appear as crumb text",
+  );
 });
 
 test("the composer is floored at BOOKKEEPER, the work detail at VIEWER — through the ONE predicate", () => {

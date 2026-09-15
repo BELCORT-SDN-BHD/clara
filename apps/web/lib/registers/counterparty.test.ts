@@ -216,3 +216,42 @@ test("loadCounterpartyMergePreview: throws if the fresh counterparties read is m
     },
   );
 });
+
+// #647 AC2 — `recorded_counterparty_id` on the statement row. `clara._statement_core` has emitted
+// it on BOTH legs since 裁-19 PR-1 spliced it (0149:649, :655, threaded at :661) and
+// `CounterpartyStatementRow` dropped it. The read is a pass-through, so what is asserted is that
+// the envelope ARRIVES intact: an omitted wire field is not a type error anywhere, it is a
+// silent loss of the one fact that says an invoice was raised under a name since merged away.
+test("ticket 647 — a statement row carries recorded_counterparty_id through, on both the item and the allocation leg", async () => {
+  const captured: Awaited<ReturnType<typeof getCustomerStatement>>[] = [];
+  await withMockedFetch(
+    async () =>
+      jsonResponse({
+        counterparty_id: "surv", domain: "ar", from: "2026-01-01", to: "2026-09-16",
+        opening_balance_cents: 0,
+        rows: [
+          { event_date: "2026-04-01", row_type: "item", label: "INV-1", delta_cents: 41983,
+            running_balance_cents: 41983, item_id: "i2", allocation_id: null,
+            recorded_counterparty_id: "merged-away" },
+          { event_date: "2026-09-10", row_type: "item", label: "INV-2", delta_cents: 73117,
+            running_balance_cents: 115100, item_id: "i1", allocation_id: null,
+            recorded_counterparty_id: "surv" },
+          { event_date: "2026-09-12", row_type: "allocation", label: "CN-1", delta_cents: -1000,
+            running_balance_cents: 114100, item_id: null, allocation_id: "al1",
+            recorded_counterparty_id: "merged-away" },
+        ],
+        closing_balance_cents: 114100,
+      }, 200),
+    async () => { captured.push(await getCustomerStatement("c1", "surv", "2026-01-01", "2026-09-16", { session: fakeSession("tok") })); },
+  );
+  const stmt = captured[0];
+  assert.ok(stmt, "the statement read resolved");
+  assert.deepEqual(
+    stmt.rows.map((r) => r.recorded_counterparty_id),
+    ["merged-away", "surv", "merged-away"],
+    "both legs keep the party the row was RECORDED under",
+  );
+  // The running balance is the DB's own on every row — this module never sums a delta.
+  assert.deepEqual(stmt.rows.map((r) => r.running_balance_cents), [41983, 115100, 114100]);
+  assert.equal(stmt.closing_balance_cents, 114100);
+});
