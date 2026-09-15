@@ -34,6 +34,7 @@ import {
   operatorFirmBookkeeper, operatorSupportLaneReady, opk, ordinaryFirm, paidUnclaimed, paymentRow,
   problemRow, registrationRow, rejectRegistration, releaseCapacity, resolveProblemWithKey,
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,
+  forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor, stampSession,
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
@@ -44,7 +45,7 @@ const SHARED_SIG = "clara._operator_support_cases(boolean,text,uuid)";
 
 let operator = null;
 let executed = 0;
-const EXPECTED_CELLS = 13;
+const EXPECTED_CELLS = 14;
 
 before(async () => {
   if (!(await operatorSupportLaneReady())) return;
@@ -685,6 +686,76 @@ cell("os.13 audit trace -- every support act the console offers is attributably 
     "the operator's own clara.audit_log read carries no other firm's row");
   assert.ok(visible.rows[0].n > 0, "…and it does carry this firm's own acts");
   await setCapacity(operator.owner, { maxFirms: null, reason: "#615 os.13 release" });
+});
+
+// ===========================================================================================
+// 6 · ARM 1's INTENT TIE-BREAK. #774.
+// ===========================================================================================
+
+cell("os.14 arm 1 tie-break -- a registration carrying a PAID intent and a LATER cancelled one "
+  + "reports the PAID intent's state: the money-carrying key beats `opened_at desc`", async () => {
+  // THE WORLD THIS CELL NEEDS, and the only world in which arm 1's status key is observable at
+  // all: ONE registration with TWO intents. Every other cell in this file gives a registration at
+  // most one, so a lateral ordered on `opened_at desc` alone would answer identically in all of
+  // them — which is exactly why this clause was shipped proven only by code inspection
+  // (docs/plan/active/refresh-wave-2026-09-14/reports/615-fixround.md).
+  const world = await openedCheckout(operator.owner, { tag: "os14" });
+
+  // THE EARLIER INTENT REACHES `paid` ALONG LAWFUL TRANSITIONS: born `open`, stamped once with a
+  // session (`open -> session_created`, the ONLY move the insert trigger admits for a first
+  // session stamp), then `session_created -> paid`.
+  await stampSession(world.intent);
+  await forceStatus(world.intent, "paid", "#774 os.14 this attempt carried the money");
+
+  // …AND THE LATER ONE IS CANCELLED. `clara.open_checkout_intent` reuses only an UNSTAMPED intent
+  // (0163's own money-surface rule), so the stamp above is what makes this call mint a SECOND row
+  // rather than hand back the first — the door's own behaviour, not a root insert behind it.
+  const second = await openIntent(world.sub, world.email, world.registration);
+  const later = second.intent_id;
+  assert.notEqual(later, world.intent, "the second call minted a NEW intent, it did not reuse");
+  await forceStatus(later, "cancelled", "#774 os.14 superseded attempt");
+
+  // THE TIE-BREAK IS ONLY MEASURED IF `opened_at desc` WOULD PICK THE WRONG ONE. `opened_at` is
+  // frozen at insert, so this is a fact about the fixture rather than a hope about timing.
+  const intents = await intentsOf(world.registration);
+  assert.equal(intents.length, 2, "the registration carries exactly two checkout intents");
+  const paidState = await intentState(world.intent);
+  const laterState = await intentState(later);
+  const openedAt = await rootQuery(
+    "select id, opened_at from clara.checkout_intents where id = any($1::uuid[])",
+    [[world.intent, later]]);
+  const openedOf = (id) => openedAt.rows.find((r) => r.id === id).opened_at;
+  assert.ok(openedOf(later).getTime() > openedOf(world.intent).getTime(),
+    "the CANCELLED intent was opened strictly later, so a bare `opened_at desc` would select it");
+  assert.equal(paidState.status, "paid");
+  assert.equal(laterState.status, "cancelled");
+
+  // THE TWO LOAD-BEARING PRECONDITIONS OF ARM 1, asserted rather than assumed: a registration that
+  // carried a payment row would be an ARM 2 case instead (os.04 pins that), and a decided one
+  // would leave the default queue.
+  assert.equal((await paymentsFor(world.registration)).length, 0,
+    "the registration carries NO clara.firm_registration_payments row");
+  assert.equal((await registrationRow(world.registration)).status, "open",
+    "the registration is still undecided");
+
+  // THE DOOR'S OWN ANSWER — never the migration body, never the shared body (granted to nobody).
+  const rows = await supportQueue(operator.owner);
+  const row = caseOf(rows, CASE_KIND.registration, world.registration);
+  assert.ok(row, "the undecided, unpaid registration is an arm-1 registration case");
+  assert.equal(row.payment_recorded_at, null, "…and it is arm 1, not arm 2");
+  assert.deepEqual({
+    intent_status: row.intent_status,
+    intent_status_at: row.intent_status_at?.getTime() ?? null,
+    intent_status_reason: row.intent_status_reason,
+  }, {
+    intent_status: "paid",
+    intent_status_at: paidState.status_at.getTime(),
+    intent_status_reason: "#774 os.14 this attempt carried the money",
+  }, "arm 1 reports the PAID intent's own state, corroborated against the intent row read as root");
+  // …and says so negatively too, because "it is the paid one" and "it is not the cancelled one"
+  // are the same fact only while exactly these two intents exist.
+  assert.notEqual(row.intent_status, laterState.status,
+    "the later cancelled attempt's status is NOT what the operator reads");
 });
 
 test("os.VACUITY CONTROL -- every declared #615 cell executed", async (t) => {
