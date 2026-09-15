@@ -132,9 +132,10 @@ test("721 the panel submits ONE restatement through the door and links to the Wo
     await clickButton(press!);
     await h.settle();
     assert.equal(calls.length, 1, "721 exactly one call — the two effects are ONE act at the door");
-    assert.equal(calls[0].workId, WORK, "721 …naming the Work being retired");
-    assert.equal(typeof calls[0].opKey, "string", "721 …under this press's own identity");
-    assert.equal(typeof calls[0].intentKey, "string", "721 …and the successor's own intent key");
+    const sent = calls[0]!;
+    assert.equal(sent.workId, WORK, "721 …naming the Work being retired");
+    assert.equal(typeof sent.opKey, "string", "721 …under this press's own identity");
+    assert.equal(typeof sent.intentKey, "string", "721 …and the successor's own intent key");
     assert.match(h.text(), /A new Work was recorded/, "721 the door's own answer is rendered");
     assert.ok(hrefs(h.container).some((href) => href.includes(NEW_WORK)),
       "721 …with a link to the Work it created");
