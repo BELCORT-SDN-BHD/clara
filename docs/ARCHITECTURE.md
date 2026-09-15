@@ -284,7 +284,10 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 （某些迁移之后，目标镜像必须携带指定 body，且这一条不能靠 drain 清除）。该 frontier 规则与 0195 的
 pre-v3 grandfather arm 已实现并上线；owner 于 2026-09-15 裁定（#826）：beta 期间托管用户与数据均为测试数据，
 停泊在 pre-v3 body 上的 Work 无需保全、经 Work 取消门清理即可（#820），两条规则保持已上线形状不动，
-下一次 wall-raising 迁移采用 grandfather 还是 drain 届时再裁。World 启动前另有一道 stranded-body 普查闸门：
+下一次 wall-raising 迁移采用 grandfather 还是 drain 届时再裁。同一天的第二条裁定（#810）：beta 期间被取代的
+body 可以从代码树退役而**不要求 drain 证明**——停在其上的 run 先在托管清理（#820）中取消，否则下面的
+stranded-body 闸门会拒绝启动；冻结清单为此保留一条 retired 记录而不是删除条目，法条 (c) 不变。
+World 启动前另有一道 stranded-body 普查闸门：
 发现缺口即拒绝启动 durable world（HTTP 仍服务，`/ready` 503），只能由显式操作者覆盖。该拒绝是
 **database-wide** 的——同一个库上任何 lane 停泊的未导出 body 都会拒绝之后每一个 runtime 进程——owner 于
 2026-09-15 确认为既定取舍（#793）；CI 因此给不能容忍他人停泊 run 的 leg 各自一份模板复制库，

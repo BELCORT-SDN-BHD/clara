@@ -29,7 +29,7 @@ For every delegation, always choose the available worker model best suited to th
 
 Heavy implementation may require detailed technical reasoning. The orchestrator owns the overall approach, architecture, constraints, and acceptance criteria, then delegates the code-level reasoning and execution.
 
-- **Methodlogy/Philosophy: Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** Delegate when parallelism or specialist-isolation materially benefits the task; do a bounded, well-specified step yourself rather than dispatch as ceremony.
+- **Methodlogy/Philosophy: Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** 
 
 ***在不牺牲品质的原则下用最effective, 适合, 经济and 经济的agent model.***
 
