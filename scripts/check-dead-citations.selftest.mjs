@@ -12,7 +12,7 @@
 //
 // No dependencies — Node built-ins only.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,14 @@ function write(root, relPath, content) {
 }
 function freshFixture() {
   return mkdtempSync(join(tmpdir(), "check-dead-citations-selftest-"));
+}
+/** The first path in frozen-workflows.json’s `workflows` map — a file that IS frozen right
+ *  now, which is exactly what the #795 frozen-manifest exemption covers. */
+function firstFrozenManifestPath() {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "frozen-workflows.json"), "utf8"));
+  const [first] = Object.keys(manifest.workflows ?? {});
+  if (!first) throw new Error("frozen-workflows.json has no `workflows` entries");
+  return first;
 }
 function rm(root) {
   rmSync(root, { recursive: true, force: true });
@@ -119,17 +127,15 @@ console.log("findDeadNameCitations — negative controls:");
       assertDeepEqual(allowlistHits, [], "docs/ARCHITECTURE.md is on the explicit APPENDIX_A_ALLOWLIST and must not be flagged");
     });
     testCase("#795: an exempt frozen-manifest path citing ARCHITECTURE Appendix A is not flagged", () => {
-      // packages/runtime/workflows/chatTurn.v1.ts is a real frozen-manifest entry (byte-immutable,
-      // hash-locked by check-frozen-workflows.mjs) that historically cites the dead phrase in its
-      // own header — the class of file the frozen-manifest exemption exists for.
-      mkdirSync(join(dir, "packages/runtime/workflows"), { recursive: true });
-      writeFileSync(
-        join(dir, "packages/runtime/workflows/chatTurn.v1.ts"),
-        "// ARCHITECTURE Appendix A policy (c)\n",
-        "utf8",
-      );
-      const frozenHits = findDeadNameCitations(["packages/runtime/workflows/chatTurn.v1.ts"], dir);
-      assertDeepEqual(frozenHits, [], "a real frozen-manifest path must not be flagged for citing ARCHITECTURE Appendix A");
+      // The exemption is read from frozen-workflows.json, so this case takes its path from the
+      // manifest too rather than naming one by hand: #810 retired chatTurn_v1 (the path this case
+      // used to hardcode), and a retirement deletes the file AND drops it from `workflows` — a
+      // hand-written path here goes stale the next time an entry is retired.
+      const livePath = firstFrozenManifestPath();
+      mkdirSync(join(dir, dirname(livePath)), { recursive: true });
+      writeFileSync(join(dir, livePath), "// ARCHITECTURE Appendix A policy (c)\n", "utf8");
+      const frozenHits = findDeadNameCitations([livePath], dir);
+      assertDeepEqual(frozenHits, [], `a real frozen-manifest path (${livePath}) must not be flagged for citing ARCHITECTURE Appendix A`);
     });
   } finally {
     rm(dir);
