@@ -200,6 +200,28 @@ a limit the caller leaves out — or sends as NULL — keeps the value the firm 
 `updated_by`. That holds because the four limit columns carry no table default; the trigger is the
 only thing that supplies 100 / 1000 / 2 / 2, and it does so on a firm's first insert alone.
 
+### The prepayment-amortisation lane (#653, 0208)
+
+`clara.create_prepayment_schedule` is the one write of that lane and it is unusual in two ways a
+census reader should know about. It CALLS A FROZEN EVALUATOR AS A DEFINER rather than through a
+grant: `clara.prepayment_schedule_v1` is a registered single-member `clara.evaluator_versions`
+closure AND a member of the rig's closed ungranted census
+([tests/rig-meta.mjs](tests/rig-meta.mjs)), so minting a grant to reach it would red the rig and
+editing it would red the apply. And it RE-DERIVES the expense half of the schedule — the judged
+account, its eligibility wall, its stated-grounds wall and the "this term charges nothing per
+period" refusal — because those live only inside `clara._agent_prepayment_schedule_core`, which is
+bound to the 0045 template lane behind a registered-and-disabled wake source. The re-derivation
+uses 0140's OWN three tokens and 0042's own eligibility helper; a second vocabulary for one rule is
+how two lanes start disagreeing about what is eligible.
+
+The three reads sit at the viewer floor. `clara.list_prepayment_attention` is the lane's
+refusal-visibility read and has TWO arms because one cannot reach both residues: arm A is a live
+amortisation plan whose most recent occurrence put no money on the books (at admission, or at the
+posting core — a locked period is the posting core's refusal, not the plan's), and arm B is an
+approved, document-bound, single-asset-debit entry that no schedule names, which is the only
+durable trace of a create-time refusal. A memo-only recognition binds no document and is reachable
+by neither arm; that residual is named rather than closed.
+
 ## Frozen evaluator deployment
 
 An evaluator registered as undeployed remains unavailable until deliberately activated.

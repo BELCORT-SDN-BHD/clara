@@ -37,3 +37,26 @@ A skipped preintegration suite is not evidence that its feature passed.
 
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
+
+### The prepayment-amortisation battery (#653)
+
+`prepayment-schedule.test.mjs` and `prepayment-occurrences.test.mjs` are frontier-gated on the
+`prepayment_amortisation$` stem, never on a migration number, and they share
+`prepayment-schedule-fixtures.mjs`. That module JOINS TWO EXISTING WORLDS rather than building a
+third: `f-a4-pr2a-fixtures.mjs`'s `prepaidScene` supplies the prepayment half (a fiscal year, a
+filed verified document, a prepaid-asset account, an expense target and an APPROVED entry binding
+the document and debiting exactly one asset line) and `accounting-plans-fixtures.mjs` supplies the
+plan half (a real authority row, the runtime scan, the catch-up door, the occurrence readers).
+
+Two things a later hand will trip over if they are not stated here. The scene opens CALENDAR-YEAR
+fiscal years — `clara.propose_fiscal_year` derives `ends_on` from the client's fy-end, so a year
+opened on any other day is a short year `clara.open_fiscal_year` refuses without a stated
+`length_reason` — and it opens the SUCCESSOR year too when the term crosses into it, because the
+frozen evaluator refuses a term running past its fiscal year with no open successor. And the scene
+ACCEPTS the published Terms and DPA as the firm owner: model egress is a standing precondition for
+every occurrence (0195), so a scene that skipped it measures `egress_not_authorized` where it meant
+to measure something else. Both were measured, not assumed — the locked-period cell answered CLR13
+instead of CLR19 before the acceptance was added.
+
+`prepayment-0208-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
+not preload it and fails loudly on a database without the lane, because a skip is not evidence.

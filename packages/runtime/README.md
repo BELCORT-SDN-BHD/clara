@@ -47,6 +47,40 @@ foreign-firm and out-of-client-scope, 403 `no_membership`, 409 `custody_pending`
 `ETag` (the content address), `Content-Length`, `Cache-Control: private, no-store` and
 `X-Content-Type-Options: nosniff`. No SQL text and no vendor response body reach the client.
 
+### The prepayment-amortisation lane (#653) — one non-frozen module and two owed successors
+
+`lib/prepayment-schedule-basis.ts` is NOT imported by any workflow body and must not be until the
+wave's successor ceremony: it is the `lib/periodic-adjustment-basis.ts` pattern BEFORE that file
+became frozen by import, and that file's own header records what import cost it. The checker's
+specifier scan matches `import("…")` too, so a dynamic import freezes it just as a static one does.
+
+It carries the `.strict()` tool schema, a refusal MIRROR (never a rule of its own), the door
+payload builder in the database's own parameter names, and the refusal→message map. The schema is
+deliberately narrow and each absence is a rule: no amount, no period count, no term, no cadence and
+no authority id — all of them are derived by the frozen `clara.prepayment_schedule_v1` or are
+human-only by law (`clara.record_document_service_period` has no wake wrapper and never will).
+
+TWO SUCCESSOR CONTRACTS ARE WRITTEN IN THAT FILE'S FOOTER AND NEITHER IS CUT:
+
+* **`chatTurn_v20` — `start_prepayment_schedule_work`.** Four lines: the tool, the local refusal,
+  a `stableOpKey`, one `clara.create_prepayment_schedule` call with `{kind:"chat_task", id:
+  ctx.taskId}` as the authority, and a `prepayment_schedule_configured` part. It mints no
+  `accounting_work.purpose` and no claraWork bundle — an amortisation occurrence is an ordinary
+  `journal_entry` Work the existing frozen body runs byte for byte.
+* **`claraWork_v4` — the TERM PARK.** #653's AC5 and historical row C55.13 are NOT CLAIMED by this
+  slice, and this is why: `clara.open_work_question` is `clara_runtime`-only, hook-token-gated and
+  requires a `running` task, so no human door can park a Work; and the frozen prompt forbids the run
+  from citing a source document at all. The contract names the roster change, the prompt change, the
+  `open_work_question` call with 0180's closed field kinds, and the rule that the ANSWER is applied
+  through the human door rather than by the run — a model-read service period may never become a
+  durable accounting fact.
+
+`tests/prepayment-occurrence-e2e.mjs` is a standalone e2e beside `plan-occurrence-e2e.mjs`. It adds
+one fact that lane cannot show: a per-period amount survives the frozen `.strict()` tool schema,
+the run's faithful echo and the digest comparison, so the final period's entry charges the residual
+rather than the revision's stored constant. Its model is SCRIPTED, so it is local, supplementary
+evidence per #653's AC8 — not a provider run and not hosted evidence.
+
 The bank-agent and close-prep wake engine/bodies exist. Their cadence sources ship disabled and
 their producer/activation work remains open. Reporting uses a separate
 [render service](../reporting-render/README.md). Tax computation and SST return issuance are

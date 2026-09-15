@@ -25,7 +25,10 @@ An explicitly authorised schedule for future accounting. It records what it post
 follows, the calendar days that schedule produces in a named timezone, the window its authority
 covers, and the instruction that authorised it — a row this database holds, not a remembered
 sentence. It can be revised (a new version, the predecessor kept), paused (future due events stop;
-work already admitted is untouched) and ended (terminal).
+work already admitted is untouched) and ended (terminal). Three KINDS exist: a *recurring journal*,
+a *reversing journal* (an accrual and its reversal, two legs per period), and an *amortisation
+schedule* (a Prepayment schedule's configured plan, whose every period posts its own amount).
+Depreciation and close schedules are not plan kinds and are refused by name.
 _Avoid_: A recurring adjustment template as a synonym; a preference, a calculation policy or a
 repeated bank debit as a source of authority; an instruction to move money — a plan creates journal
 Work and never initiates a bank payment or a mandate.
@@ -38,9 +41,37 @@ refused one records the refusal and creates nothing, and re-attempting it is an 
 rather than the next scan's business. A REVERSING occurrence also names the journal entry it undoes:
 it is admissible only once its own period's accrual has POSTED a still-live entry, never merely
 because that accrual was admitted.
+An AMORTISATION occurrence posts the amount ITS OWN period was allocated — not the plan's stored
+basis amount, which is only the first period's — and a due date the allocation does not cover is a
+typed refusal rather than a fall-back to that constant.
 _Avoid_: The journal entry as a synonym; a second scan's answer as a second occurrence; treating a
 missed period as something the schedule will pick up on its own; treating an admitted accrual as a
-posted one.
+posted one; treating an amortisation period's amount as the same as every other period's.
+
+**Prepayment schedule**:
+The derived amortisation of ONE posted prepayment: the recognition entry that put it on the books,
+the prepaid account read off that entry's own single debited asset leg, the Service period its
+document states, the expense account a person judged with the grounds they stated, and the exact
+allocation across whole calendar months with the remainder wholly in the final period. It is
+DERIVED, not typed: the amount, the period count, the per-period figures, the cadence and the
+authority window all come from the frozen evaluator's reading of rows this database already holds,
+and the only things a person supplies are which prepayment, which expense account, why, and what
+the schedule is for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
+admits each period.
+_Avoid_: A recurring adjustment template as a synonym; an editable table of period amounts; a
+schedule that pays anything — the money left the bank before the schedule existed; "configured" as
+a synonym for "posted", which is a different fact and a different count.
+
+**Service period**:
+The stretch of calendar a prepayment buys, as stated on the DOCUMENT that evidences it, recorded by
+a named person with the grounds they gave. It is supersede-never-mutate at document grain — one
+live period per document — and it is human-stated by law: no agent path to it exists, because a
+period read off a document by a model is a model-generated value. A schedule derived from it keeps
+naming the exact row it rode, so a later correction supersedes that row without silently moving an
+allocation that has already begun posting.
+_Avoid_: An effective date range on a plan; a fiscal period; a term the product inferred from an
+invoice's own dates; treating a corrected term as something a revision re-derives — a re-derived
+allocation is a new schedule.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
