@@ -133,6 +133,7 @@ components/firm/agent-tasks-keyboard.test.tsx
 components/firm/client-scope-invalidation.test.tsx
 components/firm/client-workspace-overview.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
+components/firm/documents/unassigned-sources.test.tsx
 components/firm/firm-home/firm-home-board.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts

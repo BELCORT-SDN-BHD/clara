@@ -61,6 +61,7 @@
       "home": "Home",
       "clients": "Clients",
       "work": "Work",
+      "documents": "Documents",
       "activity": "Activity",
       "settings": "Settings",
       "operator": "Operator"
@@ -311,6 +312,20 @@
       "archived": "Archived",
       "onboarding": "Onboarding"
     }
+  },
+  "FirmDocuments": {
+    "heading": "Documents",
+    "subheading": "Files this firm holds that no client's shelf has claimed yet. Each one is asked about once: choose whose books it belongs to, and it moves there.",
+    "listHeading": "Unassigned sources",
+    "tableLabel": "Unassigned sources",
+    "colAttribution": "Whose is it?",
+    "chooseClient": "Choose a client",
+    "chooseClientLabel": "Client for {filename}",
+    "fileToClient": "File to this client",
+    "alreadyAttributed": "Attributed. It leaves this list on the next read.",
+    "empty": "No unassigned sources. Every file this firm holds is already filed to a client.",
+    "unavailable": "Clara could not read this firm's unassigned sources.",
+    "loading": "Reading unassigned sources..."
   },
   "FirmActivity": {
     "receiptKinds": {
@@ -895,6 +910,7 @@
         "firmHome": "Firm home",
         "clientRegister": "Client register",
         "firmWork": "Work",
+        "firmDocuments": "Unassigned sources",
         "needsYou": "Needs you",
         "firmActivity": "Firm activity",
         "settings": "Settings",

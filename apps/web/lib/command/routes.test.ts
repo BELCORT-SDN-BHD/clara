@@ -521,10 +521,11 @@ test("the join RAN — every row carries a floor, and none was dropped instead o
   // an unjoinable row silently, and a Go row that quietly disappears is exactly
   // as wrong as one that quietly appears.
   // #614: five firm destinations + the Needs-you saved view + six settings
-  // sections. The rows are BUILT from the registry now rather than joined to it,
+  // sections. #633 adds a SIXTH firm destination (the unassigned-sources leaf), so the
+  // literal is 13. The rows are BUILT from the registry now rather than joined to it,
   // so this count is what catches a construction that silently drops one.
   assert.equal(FIRM_ROUTES.length, FIRM_NAV.length + 1 + SETTINGS_SECTIONS.length);
-  assert.equal(FIRM_ROUTES.length, 12);
+  assert.equal(FIRM_ROUTES.length, 13);
   for (const route of FIRM_ROUTES) {
     assert.equal(typeof route.minimumRole, "string", `${route.id} has no floor`);
   }
