@@ -22,6 +22,7 @@ import {
   acqWorld, acqClient, acqBasis, armedAcquisition, postAcquisition, workLaneAcquisition,
   completeParticularsFor, openWorkQuestion, answerWorkQuestion, pendingQuestion,
   assetForEntry, triggerOrderOnJournalEntries, approvePathBodies, faHookCallers,
+  documentLaneAcquisition,
   subledgerHookCallers, entryCountOf, committedReceiptCountOf, assetCountOf,
   buyAsset, completeParticulars, getFixedAsset, listFixedAssets, upsertFaProfile,
   reverseAndSettle, approvedEntry, faRow, entryRowOf, eventCount,
@@ -295,6 +296,82 @@ test("p639.provenance.document acquisition_document_id is the approving entry's 
   assert.ok(!("acquisition_receipt_id" in asset),
     "provenance: no acquisition_receipt_id column — an approve-time write would stamp NULL forever");
   assert.ok(!("acquisition_work_id" in asset), "provenance: …and no acquisition_work_id column");
+});
+
+test("p639.provenance.document_lane a hook-born row carries its source document through the READ, because 0017's immutability wall makes a back-fill unwritable", async (t) => {
+  if (await gate(t)) return;
+  const w = await acqWorld();
+  const client = await acqClient("provenance_doc_lane");
+  const filed = await documentLaneAcquisition(w.users.alice, {
+    firm: w.firms.A, client, cents: 640_000, postingDate: dayIn(mon(-1), 7),
+  });
+  const rows = await assetForEntry(filed.entry);
+  assert.equal(rows.length, 1, "document_lane: the document lane births exactly one register row");
+  const asset = rows[0];
+
+  // The COLUMN is null: `clara._fa_on_approve` arm 4 birthed this row at STATEMENT time, and
+  // clara._tf_fixed_assets_immutable_0017 refuses any later write to a column outside its
+  // post-approval allowlist. That trigger is not in #639's allowed recuts, so this is a
+  // MEASURED boundary rather than an omission.
+  assert.equal(asset.acquisition_document_id, null,
+    "document_lane: the hook birthed this row, so the birth-time copy is NULL");
+
+  // …and the READ resolves it anyway, from the acquisition entry, which is the authority.
+  const detail = await getFixedAsset(w.users.bob, asset.id);
+  assert.equal(detail.acquisition.document_id, filed.documentId,
+    "document_lane: the read resolves the source document from the acquisition ENTRY");
+  assert.equal(detail.acquisition.document_sha256, filed.sha256,
+    "document_lane: …and names the exact bytes it was read from");
+  assert.ok(detail.acquisition.document_filename,
+    "document_lane: …and the filename a human recognises");
+  assert.equal(detail.asset.acquisition_document_id, filed.documentId,
+    "document_lane: the register row shape carries it too, so the list can link without a second read");
+
+  // The entry and its register row agree, which is the invariant 0201's tail asserts estate-wide.
+  const entry = await entryRowOf(filed.entry);
+  assert.equal(entry.document_id, filed.documentId);
+});
+
+test("p639.refusal.locked_period an acquisition into a CLOSED fiscal year is refused by name and leaves no entry, no receipt and no register row", async (t) => {
+  if (await gate(t)) return;
+  const w = await acqWorld();
+  const client = await acqClient("refusal_locked");
+  const fy = await rootQuery(
+    `select id, starts_on, ends_on from clara.fiscal_years
+      where client_id = $1 order by starts_on desc limit 1`, [client]);
+  if (fy.rowCount === 0) {
+    noteLane("refusal.locked_period: this client has no fiscal year row — cell recorded, not asserted");
+    return;
+  }
+  // The period wall is the ESTATE's (clara._tf_period_wall, 0056) and the typed pre-check is
+  // 0194's; closing the year through a root UPDATE is a FIXTURE shortcut around the close lane,
+  // which needs a whole readiness run this cell is not about. Stated rather than hidden.
+  await rootQuery("update clara.fiscal_years set status='closed' where id=$1", [fy.rows[0].id]);
+  try {
+    const before = {
+      entries: await entryCountOf(client),
+      receipts: await committedReceiptCountOf(client),
+      assets: await assetCountOf(client),
+    };
+    const a = await armedAcquisition({
+      client,
+      basis: acqBasis({ cents: 120_000, postingDate: fy.rows[0].starts_on }),
+    });
+    const err = await caught(() => postAcquisition(a));
+    assert.ok(err, "locked_period: the acquisition is refused");
+    assert.equal(err.code, "CLR19",
+      `locked_period: …by the estate's period SQLSTATE (got ${err.code}: ${err.message})`);
+    assert.equal(reasonToken(err), ACQ.closedPeriod,
+      "locked_period: …and by the typed reason a surface can map to the period control");
+    assert.equal(await entryCountOf(client), before.entries,
+      "locked_period: no journal entry survives the refusal");
+    assert.equal(await committedReceiptCountOf(client), before.receipts,
+      "locked_period: …no committed receipt…");
+    assert.equal(await assetCountOf(client), before.assets,
+      "locked_period: …and no half-born register row (the acquisition/journal pair cannot mismatch)");
+  } finally {
+    await rootQuery("update clara.fiscal_years set status='open' where id=$1", [fy.rows[0].id]);
+  }
 });
 
 // ===========================================================================================

@@ -27,6 +27,9 @@ import {
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry,
   acceptPublishedLegal, workRow, receiptsForWork, settleWorkRun,
 } from "./work-journal-fixtures.mjs";
+import { draftEntryV3 as s6DraftEntry, filedDocument } from "./s6-helpers.mjs";
+import { approveEntry as rigApproveEntry, freshResolution as rigFreshResolution }
+  from "./rig-fixtures.mjs";
 
 export * from "./x41-fa-world.mjs";
 export {
@@ -185,6 +188,34 @@ export async function workLaneAcquisition({ client, author = null, basis = null 
   const a = await armedAcquisition({ client, author, basis });
   const out = await postAcquisition(a);
   return { ...a, out };
+}
+
+/** A DOCUMENT-BACKED acquisition, through the document lane's own cores.
+ *
+ *  This is the lane whose register rows `clara._fa_on_approve` arm 4 births at STATEMENT time —
+ *  before the deferred birth trigger runs and before it could write `acquisition_document_id`,
+ *  which 0017's post-approval immutability wall then makes unwritable forever. It is therefore the
+ *  lane that proves the READ resolves the acquisition entry's own document as the authority.
+ */
+export async function documentLaneAcquisition(sub, { firm, client, cents = 640_000, postingDate }) {
+  const doc = await filedDocument(sub, { firm, client });
+  const draft = await s6DraftEntry(sub, {
+    client,
+    resolution: rigFreshResolution(sub, client, { subjectKind: "document", subjectId: doc.documentId }),
+    document: doc.documentId, sha256: doc.sha256,
+    memo: `p639 document-lane acquisition ${opk("memo")}`,
+    postingDate,
+    lines: [
+      { account_code: COST, debit_cents: cents, credit_cents: 0, description: "asset cost" },
+      { account_code: BANK, debit_cents: 0, credit_cents: cents, description: "paid" },
+    ],
+    opKey: opk("p639-docdraft"),
+  });
+  const w = await acqWorld();
+  await rigApproveEntry(sub === w.users.alice ? w.users.bob : w.users.alice, {
+    entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("p639-docapr"),
+  });
+  return { ...doc, entry: draft.entry_id };
 }
 
 // ===========================================================================================

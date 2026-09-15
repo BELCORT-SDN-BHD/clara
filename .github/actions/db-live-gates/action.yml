@@ -171,6 +171,24 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/periodic-adjustment-e2e.mjs
+        # #639 — the FIXED-ASSET ACQUISITION e2e, immediately after #643's and on the same rig. It
+        # drives the one window nothing else can: migration 0201's acquisition birth is a DEFERRED
+        # constraint trigger, so the register row is written at COMMIT inside the posting
+        # transaction — and only a real engine that DIES between that commit and the workflow
+        # checkpoint can show the row was truly part of it. Four more halves ride with it: an
+        # acquisition posted through `/api/work/journal` against an ENROLLED fixed-asset cost
+        # account now commits at all (before 0201 the belt refused it at COMMIT with CLR40
+        # `fa_belt_unregistered_movement`); the acquisition is complete while the depreciation
+        # particulars are still absent; a re-POSTed intentKey births no second asset; and
+        # `clara.complete_fixed_asset_particulars_for` re-reads LIVE authority, refusing a demoted
+        # initiator by name and writing no journal when it succeeds. It settles its own Work and
+        # leaves no live run behind, so the two builds and the world guard still come last. It
+        # SKIPS CLEANLY (exit 0, printed reason) when migration 0201 is absent.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/fixed-asset-acquisition-e2e.mjs
         # #631 — the WORK-EGRESS e2e, BEFORE the two builds below, because it is the only leg whose
         # subject is what happens BEFORE a model is called. It drives the three windows nothing
         # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->
