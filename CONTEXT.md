@@ -111,6 +111,41 @@ _Avoid_: A combined client ledger.
 The context for one client business's books, evidence, accounting work and knowledge inside a firm.
 _Avoid_: Client login, firm workspace.
 
+**Invitation**:
+A single-use, time-limited admission into a firm that already exists, bound to one email address
+and to one role. Its secret is handed to the issuer exactly once and never stored, so an
+invitation cannot be re-sent: a fresh one is made by revoking the old one and inviting again, and
+the old link dies at that moment. Until it is accepted it is a DELIVERY state, not a membership —
+it grants nothing and appears in its own list.
+_Avoid_: Resending the same invitation; a pending invitation shown as a member; self-serve
+creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
+one (see **Admission capacity**).
+
+**Membership / Roster**:
+The firm's live list of who holds access and at what role, read at two different floors: the
+roster from bookkeeper upward, and the invitations from admin upward. It is the authority a
+surface re-reads after every act, never the view a completed act reported about itself.
+_Avoid_: A cached list a client painted optimistically; a removed membership treated as
+re-activatable — there is no re-activation, only a fresh invitation.
+
+**Role ladder and rank wall**:
+Four ordered roles — viewer, bookkeeper, admin, owner — and the five walls the member doors apply
+in order: an admin-or-above floor; a ceiling refusing a role above the actor's own; a target wall
+refusing an act on anyone ranked strictly above them; a refusal to act on themselves; and the
+last-owner trigger that refuses the demotion or removal leaving a firm with none. A caller's rank
+is re-read inside the door, after its lock, rather than trusted from the request.
+_Avoid_: A client-side rank check as the wall; treating a control the interface shapes away as a
+permission; assuming a rank observed at page load is still the caller's.
+
+**Access history**:
+Granting, changing and withdrawing access are receipted, append-only facts: each writes an audit
+row and a domain event in the same transaction as the change itself, and a withdrawal wins over
+any operation that commits after it. What is *not* yet true is that a person can READ that history
+as access history — the activity feed's kind ladder files these events under `documents` and its
+filter vocabulary offers no value that reaches them.
+_Avoid_: Reading the current roster as the history of how it got that way; treating the events'
+existence as evidence that a product surface can find them.
+
 **Confirmed client knowledge**:
 Durable information already accepted about a client, retained across conversations. A new chat does not withdraw or amend that information.
 _Avoid_: Chat history.
@@ -202,6 +237,10 @@ _Avoid_: A browser redirect as proof of payment; a Stripe event as a substitute 
 
 **Admission capacity**:
 The estate-wide limit on how many non-operator firms may exist, set by the operator firm's owner. The firm claim checks it last, under one lock, so two claims into the last slot yield one firm; the loser keeps its payment unconsumed and can claim once room is made.
+It is a limit on FIRMS, and the invitation path into a firm that already exists never reaches it:
+there is no per-firm seat count in this estate, and seats are explicitly deferred product scope
+(`docs/PRD.md:126` — accepted direction, delivery date undecided). An invitation is therefore
+refused for a role, an address or a rank, never for capacity.
 _Avoid_: A per-firm seat count; a check done only when the checkout opens.
 
 **Document custody**:
