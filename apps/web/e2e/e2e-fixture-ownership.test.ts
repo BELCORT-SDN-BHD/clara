@@ -304,7 +304,16 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // That is the property the N4/N5 pair exists to protect, and it is why "unscoped" is the
   // right shape here rather than a debt to repay. A green on this row means "the one shape the
   // reader can see is clean", not "this file is clean".
-  "home-board-mock.mjs": { unscopeable: [], debt: [] },
+  // #650 added the ONE handler in this file the reader can see: `/rest/v1/rpc/get_client_work_pack`,
+  // the client home's Work attention band. It is DEBT rather than "unscopeable" and the
+  // distinction is the point — the request carries `p_client`, so it COULD be scoped, and writing
+  // "cannot be scoped" into this gate would be a false reason. It is not scoped because its whole
+  // job is to give EVERY client route in this suite an honest-empty answer (the verb returns a
+  // scalar object, so an unanswered 404 would grow two "could not be read" tiles on every walk
+  // that merely lands on `/clients/:id`). It holds no fixture: both facets are `count: 0` with no
+  // rows, so there is nothing in it for a sibling walk to resolve as its own — the N4/N5 property.
+  // A walk that wants a POPULATED band overlays its own `page.route`.
+  "home-board-mock.mjs": { unscopeable: [], debt: ["/rest/v1/rpc/get_client_work_pack"] },
   // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
   // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
   // above, which is the state a lane mock should be in.

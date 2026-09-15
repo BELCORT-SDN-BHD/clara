@@ -39,7 +39,10 @@ const DRAFT_ROW = {
 
 const ENVELOPE = {
   watermark: "w",
-  counts: { ready: 5, needs_review: 12, needs_you: 3, open_drafts: 2, open_questions: 1, open_tasks: 0, compliance_watches: 0, lint_findings: 4 },
+  // `work_questions` is #629's Work-keyed count and the ONLY source the attention band's
+  // "waiting on a person" tile reads — deliberately a DIFFERENT number from `needs_you`, so a
+  // tile that took the wrong key off this envelope would print 3 where it should print 2.
+  counts: { ready: 5, needs_review: 12, needs_you: 3, open_drafts: 2, open_questions: 1, open_tasks: 0, compliance_watches: 0, lint_findings: 4, work_questions: 2 },
   sweep: { open_run: false, last_finalized_at: "2026-09-03T00:31:00Z", last_ack_at: null },
   compliance: { stale_evaluator: false, clients: [] },
   rows: [DRAFT_ROW], next_cursor: null,
@@ -60,6 +63,51 @@ const PLAN_ITEMS = [
   { id: "i1", plan_id: "plan-1", firm_id: "f1", item_kind: "must_ask", item_key: "a", question: null, answer: null, state: "answered", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
   { id: "i2", plan_id: "plan-1", firm_id: "f1", item_kind: "must_ask", item_key: "b", question: null, answer: null, state: "pending", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
 ];
+
+// #650 — the Work attention band's own read, POPULATED. `active` at 3 over a two-row preview and
+// `recent_success` at 1 over a one-row preview is the discriminating shape: a build that derived a
+// tile from `rows.length` would print 2 and 1, and a build that derived either from the review
+// queue's `counts.work_questions` (3 in ENVELOPE above? no — `needs_you` is 3 and
+// `work_questions` is absent) would print something else again.
+const WORK_PACK = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 5,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  facets: {
+    active: {
+      status: "ok", count: 3, coverage: "ok", coverage_reason: null,
+      rows: [
+        {
+          work_id: "99999999-9999-4999-8999-999999999991", purpose: "journal_entry",
+          status: "running", memo: "Office rent", attempts: 2, current_run_status: "running",
+          retrying: true, created_at: "2026-09-16T01:00:00.000Z", updated_at: null,
+        },
+        {
+          work_id: "99999999-9999-4999-8999-999999999992", purpose: "payroll_obligation",
+          status: "queued", memo: null, attempts: 1, current_run_status: null,
+          retrying: false, created_at: "2026-09-16T00:00:00.000Z", updated_at: null,
+        },
+      ],
+    },
+    recent_success: {
+      status: "ok", count: 1, coverage: "ok", coverage_reason: null, uncounted_completions: 0,
+      rows: [{
+        work_id: "99999999-9999-4999-8999-999999999993", purpose: "journal_entry",
+        status: "completed", memo: "Bank fee", receipt_id: "r1", entry_id: "e1",
+        committed_at: "2026-09-15T02:00:00.000Z",
+      }],
+    },
+  },
+  needs_you_ref: { source: "list_review_queue.counts.work_questions" },
+};
+
+/** An empty Work-list page, so a facet drilldown lands on a real list rather than on a 404 this
+ *  walk is not about. The LIST's own behaviour is `work-list-walk.spec.ts`'s subject; what is
+ *  under test here is the URL the home spells and the return journey. */
+const EMPTY_WORK_PAGE = { rows: [], next_cursor: null, truncated: false };
 
 function json(route: Route, body: unknown): Promise<void> {
   return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -82,6 +130,8 @@ async function seed(page: Page): Promise<void> {
   await page.route("**/e2e-supabase/rest/v1/onboarding_plan_items**", (route) => json(route, PLAN_ITEMS));
   await page.route("**/e2e-supabase/rest/v1/rpc/list_fiscal_years", (route) =>
     json(route, [{ fiscal_year_id: "fy1", label: "FY 2026", ordinal: 2, starts_on: "2026-01-01", ends_on: "2026-12-31", status: "open", fy_end_source: "asserted", has_active_reopen_receipt: false }]));
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => json(route, WORK_PACK));
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_accounting_work", (route) => json(route, EMPTY_WORK_PAGE));
   await page.route("**/e2e-supabase/rest/v1/rpc/get_close_readiness", (route) =>
     json(route, { fiscal_year_id: "fy1", close_run_id: null, run_state: null, fy_end_source: "asserted", gates: [
       { check_key: "a", drawer: 1, state: "pass", measured: null, measured_digest: "x", attested: false },
@@ -246,4 +296,146 @@ test("all three boards are clean under the full WCAG 2.1 AA scan", async ({ page
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `${face} axe violations`).toEqual([]);
   }
+});
+
+// ==============================================================================================
+// #650 — THE WORK ATTENTION BAND.
+// ==============================================================================================
+
+test("home.facets.drilldown — each count opens its OWN scoped list, and Back restores the home with focus on the control that left it", async ({ page }) => {
+  // #706 — one sign-in, one settle, then three navigations and three Backs.
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  const board = workbench(page);
+
+  // The three counts, each a full noun phrase rather than a bare number beside a label — the
+  // accessible NAME of each link IS the sentence.
+  const legs = [
+    ["2 Works are waiting on a person", /\/work\?view=needs-you$/],
+    ["3 Works are queued or running", /\/work\?status=queued%2Crunning$/],
+    ["1 Work finished in the last 7 days", /\/work\?status=completed&since=2026-09-10&until=2026-09-16$/],
+  ] as const;
+
+  for (const [name, expected] of legs) {
+    const link = board.getByRole("link", { name });
+    await expect(link, `${name} must be on the board as a link`).toBeVisible();
+    await link.focus();
+    await link.press("Enter");
+    await expect(page).toHaveURL(expected);
+
+    await page.goBack();
+    // THE HOME'S OWN URL, not merely "a client page": a Back that landed on the workspace root
+    // with a stale query would be the "preserved return state" criterion silently unmet.
+    await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}$`));
+    // AND THE FOCUS THAT LEFT IT. A keyboard user who opens a count and comes back must not be
+    // returned to the top of the document with their place lost.
+    await expect
+      .poll(async () => page.evaluate(() => document.activeElement?.textContent?.trim() ?? ""))
+      .toContain(name);
+  }
+});
+
+test("home.facets.responsive — 320px, 200% zoom and reduced motion keep every count reachable with no horizontal scroll, and the populated board is axe-clean", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3, scans: 1 }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+
+  for (const [label, width, height] of [
+    ["320px", 320, 720],
+    // 200% zoom, the repo's own idiom (`activity-feed-walk.spec.ts:215`): a HALVED viewport is
+    // what a 200% page zoom actually does to the CSS pixel box.
+    ["200% zoom (a halved 1280x720 viewport)", 640, 360],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await settled(page);
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `the client board must not scroll horizontally at ${label}`).toBeLessThanOrEqual(1);
+    // Every count is still on screen and still a link — a band that reflowed its numbers out of
+    // the document would satisfy the overflow check and fail the person.
+    for (const name of [
+      "2 Works are waiting on a person",
+      "3 Works are queued or running",
+      "1 Work finished in the last 7 days",
+    ]) {
+      await expect(workbench(page).getByRole("link", { name }), `${name} at ${label}`).toBeVisible();
+    }
+  }
+
+  // Back to a normal viewport for the scan, and scan the POPULATED band rather than an empty one.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await settled(page);
+  await expect(workbench(page).getByText("Work attention")).toBeVisible();
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "populated Work attention band axe violations").toEqual([]);
+});
+
+test("home.facets.states — empty, unknown and denied are three different sentences, and the band dates its own read", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3 }));
+
+  // EMPTY — the door answered zero.
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => json(route, {
+    ...WORK_PACK,
+    facets: {
+      active: { status: "ok", count: 0, coverage: "ok", coverage_reason: null, rows: [] },
+      recent_success: {
+        status: "ok", count: 0, coverage: "ok", coverage_reason: null,
+        uncounted_completions: 0, rows: [],
+      },
+    },
+  }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText("Nothing is running for this client right now.")).toBeVisible();
+  await expect(workbench(page).getByText(/^Read at /)).toBeVisible();
+  // The band NEVER claims to know the database's position — there is no Work lifecycle event in
+  // this estate to derive one from.
+  await expect(workbench(page).getByText(/up to date|watermark/i)).toHaveCount(0);
+
+  // UNKNOWN — the read landed but the body could not be read. Distinct from zero.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) =>
+    json(route, { computed_at: "2026-09-16T02:00:00.000Z", facets: { active: "nope", recent_success: null } }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText(/could not be read, so there is no number to show/)).toHaveCount(2);
+  await expect(workbench(page).getByText("Nothing is running for this client right now.")).toHaveCount(0);
+
+  // DENIED — a governed refusal. The viewer-floored tile beside it is UNTOUCHED, which is the
+  // whole reason the needs-you number is not part of this read.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => route.fulfill({
+    status: 403,
+    contentType: "application/json",
+    body: JSON.stringify({ code: "CLR04", message: "insufficient role" }),
+  }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText("Your role does not include this.")).toHaveCount(2);
+  await expect(workbench(page).getByRole("link", { name: "2 Works are waiting on a person" })).toBeVisible();
+});
+
+test("home.facets.delayed — a minute with no successful read says the UPDATE is delayed, and keeps the dated numbers", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  // THE CLOCK IS INSTALLED BEFORE ANY NAVIGATION — Playwright's own rule: `install` overrides the
+  // native Date/setInterval, so it must precede every clock-related call on the page.
+  await page.clock.install();
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+
+  // From here the door fails. The band must keep the numbers it already has, dated, and after the
+  // estate's own 60-second rule say that the UPDATE is delayed — a statement about the
+  // connection, never about the Work.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ message: "upstream" }),
+  }));
+
+  await page.clock.fastForward("01:05");
+  await expect(workbench(page).getByText(/Update delayed/)).toBeVisible();
+  await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
 });

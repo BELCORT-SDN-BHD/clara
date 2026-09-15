@@ -61,6 +61,43 @@ const EMPTY_RELATIONS = [
   "/rest/v1/opening_seed_registry",
 ];
 
+/**
+ * #650 — THE HONEST-EMPTY WORK PACK, and the one handler in this file the ownership census can
+ * see.
+ *
+ * `clara.get_client_work_pack` returns a scalar JSONB OBJECT, not a SETOF, so `[]` would be a
+ * malformed body rather than an empty answer — the browser would degrade both facets to
+ * `unknown` and every client route in the suite would grow two "could not be read" tiles. This is
+ * the empty ENVELOPE instead: two facets that were read and found empty, with a window and a read
+ * instant.
+ *
+ * DELIBERATELY UNSCOPED, and declared as such in `e2e-fixture-ownership.test.ts`. The request
+ * DOES carry a discriminant (`p_client`), so this could be scoped and is not — which is why it is
+ * recorded as debt rather than as "unscopeable", a reason that would be false. What makes it safe
+ * is the property this whole file rests on: there is no fixture in it. A walk that wants a
+ * POPULATED band overlays its own `page.route`, which is scoped to one page in one test and
+ * cannot reach another spec's server.
+ *
+ * The dates are fixed rather than derived from `Date.now()` so two runs of one spec see the same
+ * board; nothing asserts on them, because there is nothing in this envelope to count.
+ */
+const EMPTY_WORK_PACK = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 5,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  facets: {
+    active: { status: "ok", count: 0, coverage: "ok", coverage_reason: null, rows: [] },
+    recent_success: {
+      status: "ok", count: 0, coverage: "ok", coverage_reason: null,
+      uncounted_completions: 0, rows: [],
+    },
+  },
+  needs_you_ref: { source: "list_review_queue.counts.work_questions" },
+};
+
 /** Read RPCs the two boards (and the Tax tab) call. Every one returns a SETOF/TABLE, so an
  *  empty array is the shape the wire really carries — never `null`, which several of the typed
  *  wrappers would report as a malformed body rather than as an empty result. */
@@ -93,6 +130,10 @@ export async function handleHomeBoardSupabase(request, response, path, url, send
   }
   if (request.method === "GET" && EMPTY_RELATIONS.includes(path)) {
     sendJson(response, 200, [], cors);
+    return true;
+  }
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_client_work_pack") {
+    sendJson(response, 200, EMPTY_WORK_PACK, cors);
     return true;
   }
   if (request.method === "POST" && EMPTY_RPCS.includes(path)) {
