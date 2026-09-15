@@ -187,6 +187,12 @@ OCR／结构化抽取对发票与月结单走文本 + 图像双 witness，保留
 （custody / byte_extraction / typed_facts / business_operation 四个正交轴，全局而非按租户，
 未知方向取诚实默认而不是乐观默认）。[已实现，覆盖面见 §7]
 
+<!-- #778 -->
+同一次抽取内一个 `field_path` 只允许一条 region：`clara.document_regions` 在 `(extraction_id, field_path)` 上唯一，
+第二次写入被吸收（`on conflict … do nothing`，保留第一条证据——该表只追加，UPDATE 会被 append-only belt 拒绝），
+而不是静默留下两行争同一个字段；`field_path` 为空的 region 不受该键约束。[已实现，hosted evidence pending]
+<!-- /#778 -->
+
 金额一律是**整数最小货币单位**（DB 侧 bigint `*_cents`），余额、舍入、期间与关联对象检查都在这个单位上执行；
 大整数穿过 JSON 与前端时必须保留精度——freeform 读路径已知的精度缺口仍未修（§7）。[已实现]
 
