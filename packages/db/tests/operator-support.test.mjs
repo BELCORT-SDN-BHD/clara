@@ -612,23 +612,63 @@ cell("os.13 audit trace -- every support act the console offers is attributably 
   const before = await rootQuery(
     "select count(*)::int as n from clara.audit_log where firm_id = $1", [operator.firm]);
 
+  const resolveKey = opk("os13-r");
   await rejectRegistration(operator.owner, reg.registration, "#615 os.13 out of scope");
-  await resolveProblemWithKey(operator.owner, world.problem, "#615 os.13 refunded", opk("os13-r"));
+  await resolveProblemWithKey(operator.owner, world.problem, "#615 os.13 refunded", resolveKey);
   await setCapacity(operator.owner, { maxFirms: 99, reason: "#615 os.13", opKey: opk("os13-cap") });
 
   const rows = await rootQuery(
     `select fn, actor from clara.audit_log where firm_id = $1 order by at desc limit 30`,
     [operator.firm]);
   const stamped = rows.rows.map((r) => r.fn);
-  // `resolve_stripe_event_problem` writes NO clara._audit row today (0160 §5 stops at its
-  // op_receipts receipt) — stated here rather than asserted, so this cell does not claim an audit
-  // line that does not exist. The two that DO write one are asserted.
-  for (const fn of ["reject_firm_registration", "set_admission_capacity"]) {
+  // #775: `resolve_stripe_event_problem` now writes its own clara._audit row, so all THREE support
+  // acts the console offers are asserted here. 0160 §5 stopped at the op_receipts receipt; the
+  // recut (stem `resolve_stripe_event_problem_audit$`) added the one `clara._audit` call the two
+  // siblings already carried, which is why the audited-act roster below is closed at three.
+  const AUDITED_ACTS = ["reject_firm_registration", "resolve_stripe_event_problem",
+    "set_admission_capacity"];
+  for (const fn of AUDITED_ACTS) {
     assert.ok(stamped.includes(fn), `clara.audit_log carries ${fn} (saw ${stamped.join(", ")})`);
   }
-  for (const row of rows.rows.filter((r) => ["reject_firm_registration", "set_admission_capacity"].includes(r.fn))) {
+  for (const row of rows.rows.filter((r) => AUDITED_ACTS.includes(r.fn))) {
     assert.equal(row.actor, operator.owner, `${row.fn} is attributed to the deciding operator`);
   }
+
+  // #775 — THE RESOLUTION'S OWN ROW, read as root and asserted field by field. EXACTLY ONE row
+  // exists for this problem: a `count` rather than a `limit 1`, because the defect this cell now
+  // covers would also be invisible if the door wrote two.
+  const audited = await rootQuery(
+    `select firm_id, actor, on_behalf_of, via_wake_kind, entry_id, args, at
+       from clara.audit_log
+      where fn = 'resolve_stripe_event_problem' and args->>'problem' = $1`, [world.problem]);
+  assert.equal(audited.rowCount, 1,
+    "resolving a provider problem left exactly one clara.audit_log row");
+  const auditRow = audited.rows[0];
+  const problemTruth = await problemRow(world.problem);
+  assert.deepEqual({
+    firm_id: auditRow.firm_id, actor: auditRow.actor, on_behalf_of: auditRow.on_behalf_of,
+    via_wake_kind: auditRow.via_wake_kind, entry_id: auditRow.entry_id, args: auditRow.args,
+  }, {
+    firm_id: operator.firm, actor: operator.owner, on_behalf_of: null, via_wake_kind: null,
+    entry_id: null,
+    args: { problem: world.problem, event: problemTruth.event_id, resolution: "#615 os.13 refunded" },
+  }, "the audit row names the operator firm, the resolving operator and the case it decided");
+  // The timestamp is the TABLE's own default rather than anything this door computes, so it is
+  // asserted as "stamped at all, and at the instant the problem row was stamped or after it".
+  assert.ok(auditRow.at instanceof Date, "the audit row carries the table's own timestamp");
+  assert.ok(auditRow.at.getTime() >= problemTruth.resolved_at.getTime() - 1000,
+    "the audit row is stamped with the decision, not before it");
+
+  // …AND THE REPLAY WRITES NO SECOND ROW. The audit call sits INSIDE the operation receipt, so a
+  // lost-response retry under the same op_key returns the original receipt and touches nothing —
+  // the one arm an audit write placed before `_reserve_op` would break silently.
+  const replayed = await resolveProblemWithKey(operator.owner, world.problem,
+    "#615 os.13 refunded", resolveKey);
+  assert.equal(replayed.problem_id, world.problem, "the replay returned the original receipt");
+  const afterReplay = await rootQuery(
+    `select count(*)::int as n from clara.audit_log
+      where fn = 'resolve_stripe_event_problem' and args->>'problem' = $1`, [world.problem]);
+  assert.equal(afterReplay.rows[0].n, 1, "the replay wrote no second clara.audit_log row");
   const after = await rootQuery(
     "select count(*)::int as n from clara.audit_log where firm_id = $1", [operator.firm]);
   assert.ok(after.rows[0].n > before.rows[0].n, "the support acts left audit rows behind");
