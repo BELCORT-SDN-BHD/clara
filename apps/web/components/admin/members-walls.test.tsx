@@ -23,8 +23,10 @@ import { textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import {
   ADMIN_CONTEXT,
+  BOOKKEEPER_CONTEXT,
   INVITES,
   MEMBERS,
+  OWNER_CONTEXT,
   attrOf,
   findAll,
   findIn,
@@ -32,6 +34,7 @@ import {
   mockMembersFetch,
   mountMembers,
   withMockedEnv,
+  type StubNode,
 } from "./members-fixtures";
 
 enableDomInspection();
@@ -143,7 +146,10 @@ test("WALL: removing the last owner renders the same CLR09 through the confirm d
         // page behind a dialog that had just been thrown away. A modal that closes on a
         // refusal hides nothing today only because this panel happens to have no fields;
         // the law is one law for all fifteen wrappers.
-        assert.match(after, /Remove Tao Lim from this firm\?/, "the dialog must STAY OPEN, carrying the refusal the human has to read");
+        // #625 AC3: the confirmation now NAMES THE FIRM as well as the member, from the
+        // `caller_context` row the panel already reads — "this firm" was ambiguous on a screen
+        // someone may have open in two tabs.
+        assert.match(after, /Remove Tao Lim from ROME PROPERTIES\?/, "the dialog must STAY OPEN, carrying the refusal the human has to read");
       } finally {
         await h.unmount();
       }
@@ -528,4 +534,363 @@ test("a revoke re-reads the invite list and renders CLR09 verbatim when the invi
       }
     },
   );
+});
+
+// ===========================================================================
+// #625 — WHERE A REFUSAL LANDS, WHAT A CONFIRMATION NAMES, AND WHAT A DOWNGRADE
+// TAKES AWAY.
+//
+// AC3 and AC4. Three mechanisms, deliberately three separate cells, because they
+// fail independently:
+//   · a refusal raised BY a dialog must render INSIDE that dialog (the page-level
+//     StateBanner sits behind the modal backdrop and cannot be read);
+//   · a destructive confirmation must name the firm as well as the member;
+//   · a caller downgraded mid-session must lose the controls their old rank shaped,
+//     on the next AUTHORITATIVE response — which is a different mechanism from the
+//     admin-only email column, and so gets a different cell.
+// ===========================================================================
+
+/** The OPEN DIALOG's own subtree. `mountMembers()` appends to `document.body` precisely because
+ *  Base UI portals an open dialog there — which is why a `document.body` text scan cannot tell
+ *  "inside the dialog" from "behind the backdrop", and why every cell below queries THIS node.
+ *  (`members-fixtures.ts:179-183` records that reasoning at the fixture.) */
+function openDialog(body: Parameters<typeof findIn>[0]): StubNode | null {
+  return findIn(body, (n) => attrOf(n, "role") === "dialog");
+}
+
+async function openRemoveDialog(
+  h: Awaited<ReturnType<typeof mountMembers>>["h"],
+  body: Parameters<typeof findIn>[0],
+  name: string,
+): Promise<void> {
+  await openRoleMenu(h, body, name);
+  const remove = findIn(body, (n) => attrOf(n, "role") === "menuitem" && textOf(n as never).trim() === "Remove from firm");
+  assert.ok(remove, "the row menu must offer Remove");
+  await h.act(async () => { await clickButton(remove as never); });
+  for (let i = 0; i < 4; i++) await h.settle();
+}
+
+async function clickInDialog(
+  h: Awaited<ReturnType<typeof mountMembers>>["h"],
+  body: Parameters<typeof findIn>[0],
+  label: string,
+): Promise<void> {
+  const dialog = openDialog(body);
+  assert.ok(dialog, "a dialog must be open");
+  const button = findAll(dialog, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === label).at(-1);
+  assert.ok(button, `the dialog's own ${label} control must render`);
+  await h.act(async () => { await clickButton(button as never); });
+  for (let i = 0; i < 6; i++) await h.settle();
+}
+
+test("p625.web.dialog_refusal: the REMOVE dialog renders the refusal inside ITS OWN subtree, not behind the backdrop", async () => {
+  const calls: Call[] = [];
+  await withMockedEnv(
+    scripted({ remove_member: () => refusal("CLR09", "cannot demote/remove the last active owner") }, calls) as unknown as typeof fetch,
+    async () => {
+      const { h, body } = await mountMembers();
+      try {
+        await openRemoveDialog(h, body, "Tao Lim");
+        await clickInDialog(h, body, "Remove");
+
+        const dialog = openDialog(body);
+        assert.ok(dialog, "the dialog must STAY OPEN on a refusal — CB-AE2E-004");
+        const inside = textOf(dialog as never);
+        assert.match(inside, /cannot demote\/remove the last active owner/, "the DB's own sentence, INSIDE the modal");
+        assert.match(inside, /CLR09/, "…with its code as a chip");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("p625.web.dialog_refusal: the REVOKE dialog renders its refusal inside its own subtree too", async () => {
+  const calls: Call[] = [];
+  await withMockedEnv(
+    scripted({ revoke_invite: () => refusal("CLR09", "this invite is no longer open (status: accepted)") }, calls) as unknown as typeof fetch,
+    async () => {
+      const { h, body } = await mountMembers();
+      try {
+        const revokes = findAll(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Revoke");
+        assert.ok(revokes.length >= 1);
+        await h.act(async () => { await clickButton(revokes[0] as never); });
+        for (let i = 0; i < 4; i++) await h.settle();
+        await clickInDialog(h, body, "Revoke");
+
+        const dialog = openDialog(body);
+        assert.ok(dialog, "the dialog must stay open on a refusal");
+        assert.match(textOf(dialog as never), /this invite is no longer open \(status: accepted\)/);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("p625.web.dialog_refusal: the INVITE dialog carries its own refusal region, so a refused address is readable without closing the modal", async () => {
+  const impl = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/rest/v1/caller_context")) return jsonResponse(ADMIN_CONTEXT);
+    if (url === "/api/invite") {
+      return jsonResponse(
+        {
+          ok: false,
+          kind: "refusal",
+          refusal: {
+            code: "CLR04", message: "cannot invite to a role above your own rank",
+            reason: null, status: 400, pgCode: "CLR04", codeSource: "sqlstate",
+          },
+        },
+        400,
+      );
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      const trigger = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone");
+      assert.ok(trigger);
+      await h.act(async () => { await clickButton(trigger as never); });
+      for (let i = 0; i < 4; i++) await h.settle();
+      const email = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+      assert.ok(email);
+      await h.act(() => { setFieldValue(email as never, "newhire3@example.test"); });
+      await h.settle();
+      await clickInDialog(h, body, "Send invitation");
+
+      const dialog = openDialog(body);
+      assert.ok(dialog, "a governed refusal keeps the dialog open so the address survives");
+      const inside = textOf(dialog as never);
+      assert.match(inside, /cannot invite to a role above your own rank/, "the DB's sentence, INSIDE the modal");
+      assert.match(inside, /CLR04/);
+      // …and what was typed is still there to correct.
+      const stillTyped = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+      assert.ok(stillTyped, "the address field is still mounted");
+      assert.equal(
+        (stillTyped as unknown as { value?: string }).value, "newhire3@example.test",
+        "the typed address survives the refusal",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.invite_invalid: the courier's typed ADDRESS verdicts mark the FIELD invalid; a refusal about something else does not", async () => {
+  async function run(courierCode: string | null, expectInvalid: boolean): Promise<void> {
+    const impl = (async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(ADMIN_CONTEXT);
+      if (url === "/api/invite") {
+        if (courierCode) return jsonResponse({ ok: false, kind: "courier", code: courierCode }, 400);
+        return jsonResponse(
+          {
+            ok: false, kind: "refusal",
+            refusal: {
+              code: "CLR04", message: "cannot invite to a role above your own rank",
+              reason: null, status: 400, pgCode: "CLR04", codeSource: "sqlstate",
+            },
+          },
+          400,
+        );
+      }
+      return mockMembersFetch(url);
+    }) as unknown as typeof fetch;
+
+    await withMockedEnv(impl, async () => {
+      const { h, body } = await mountMembers();
+      try {
+        const trigger = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone");
+        assert.ok(trigger);
+        await h.act(async () => { await clickButton(trigger as never); });
+        for (let i = 0; i < 4; i++) await h.settle();
+        const email = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+        assert.ok(email);
+        assert.notEqual(attrOf(email as StubNode, "aria-invalid"), "true", "VACUITY GUARD: the field is valid before the act");
+        await h.act(() => { setFieldValue(email as never, "not-deliverable@example.test"); });
+        await h.settle();
+        await clickInDialog(h, body, "Send invitation");
+
+        const after = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+        assert.ok(after, "the dialog stays open so the address can be corrected");
+        assert.equal(
+          attrOf(after as StubNode, "aria-invalid") === "true", expectInvalid,
+          `${courierCode ?? "a governed refusal"}: aria-invalid on the address should be ${expectInvalid}`,
+        );
+      } finally {
+        await h.unmount();
+      }
+    });
+  }
+
+  // The courier's two ADDRESS verdicts — both typed codes, neither a message parsed by this app.
+  await run("unsupported_address", true);
+  await run("recipient_has_account", true);
+  // A refusal about the ROLE is not the address's fault, and marking the address would be this
+  // surface inventing a judgement the server did not make.
+  await run(null, false);
+});
+
+test("p625.web.firm_named: BOTH destructive confirmations name the FIRM, from the caller_context row the panel already reads", async () => {
+  await withMockedEnv(mockMembersFetch as unknown as typeof fetch, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      await openRemoveDialog(h, body, "Tao Lim");
+      const removeDialog = openDialog(body);
+      assert.ok(removeDialog, "the remove confirmation must open");
+      const removeText = textOf(removeDialog as never);
+      assert.match(removeText, /Tao Lim/, "the member, by name");
+      assert.match(removeText, /ROME PROPERTIES/, "…and the firm, by name");
+
+      // Close it and open the revoke confirmation.
+      await clickInDialog(h, body, "Cancel");
+      const revokes = findAll(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Revoke");
+      assert.ok(revokes.length >= 1);
+      await h.act(async () => { await clickButton(revokes[0] as never); });
+      for (let i = 0; i < 4; i++) await h.settle();
+      const revokeDialog = openDialog(body);
+      assert.ok(revokeDialog, "the revoke confirmation must open");
+      const revokeText = textOf(revokeDialog as never);
+      assert.match(revokeText, /newhire@example\.test/, "the invited address");
+      assert.match(revokeText, /ROME PROPERTIES/, "…and the firm");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.downgrade: a caller downgraded between two settled reads loses the role menu AND the Invite entry — at the ROLE-CHANGE act site", async () => {
+  let downgraded = false;
+  const impl = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    // THE AUTHORITATIVE RESPONSE. The caller is an owner until the act lands; from the next read
+    // on, the estate reports them as a bookkeeper — exactly what a concurrent demotion looks like.
+    if (url.includes("/rest/v1/caller_context")) {
+      return jsonResponse(downgraded ? BOOKKEEPER_CONTEXT : OWNER_CONTEXT);
+    }
+    if (url.includes("/rpc/set_member_role")) {
+      downgraded = true;
+      return jsonResponse({ membership_id: "m-book", role: "admin" });
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      // CONTROL — the owner really does hold both controls before the act.
+      assert.ok(
+        findIn(body, (n) => n.tagName === "BUTTON" && attrOf(n, "aria-label") === "Actions for Siti Rahman"),
+        "VACUITY GUARD: the role menu must be offered before the downgrade",
+      );
+      assert.ok(
+        findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone"),
+        "VACUITY GUARD: the Invite entry must be offered before the downgrade",
+      );
+
+      await openRoleMenu(h, body, "Siti Rahman");
+      await pickRole(h, body, "Admin");
+
+      assert.equal(
+        findIn(body, (n) => n.tagName === "BUTTON" && attrOf(n, "aria-label") === "Actions for Siti Rahman"), null,
+        "the role menu must be GONE on the next authoritative response",
+      );
+      assert.equal(
+        findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone"), null,
+        "…and so must the Invite entry",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.downgrade: the same is true at the INVITE act site, and on a REFUSED act — a refusal is an authoritative response too", async () => {
+  let downgraded = false;
+  const impl = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/rest/v1/caller_context")) {
+      return jsonResponse(downgraded ? BOOKKEEPER_CONTEXT : ADMIN_CONTEXT);
+    }
+    if (url === "/api/invite") {
+      // The estate refuses BECAUSE the caller was demoted; the panel must believe the read that
+      // follows, not the rank it was shaped with when the dialog opened.
+      downgraded = true;
+      return jsonResponse(
+        {
+          ok: false, kind: "refusal",
+          refusal: {
+            code: "CLR04", message: "insufficient role",
+            reason: null, status: 400, pgCode: "CLR04", codeSource: "sqlstate",
+          },
+        },
+        400,
+      );
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      const trigger = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone");
+      assert.ok(trigger, "VACUITY GUARD: the admin holds the Invite entry before the act");
+      await h.act(async () => { await clickButton(trigger as never); });
+      for (let i = 0; i < 4; i++) await h.settle();
+      const email = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+      assert.ok(email);
+      await h.act(() => { setFieldValue(email as never, "newhire4@example.test"); });
+      await h.settle();
+      await clickInDialog(h, body, "Send invitation");
+
+      assert.match(textOf(body as never), /insufficient role/, "the DB's own sentence is rendered");
+      assert.equal(
+        findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone"), null,
+        "a REFUSED act still re-reads the caller context, so the entry the old rank shaped is gone",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.web.email_mask: the admin-only email column masks on the next act-driven re-read — a DIFFERENT mechanism, proven separately", async () => {
+  // NOT the capability object: `members-tables.tsx` renders `row.email ?? emailWithheld`, so this
+  // column is DATA-DRIVEN and heals through `act()`'s unconditional re-read
+  // (`lib/parts/hooks.ts:246`/`:251`) without any capability re-derivation at all. Two mechanisms,
+  // two cells — folding them would let one of them rot behind the other's green.
+  let masked = false;
+  const impl = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/rest/v1/firm_members_visible")) {
+      return jsonResponse(masked ? MEMBERS.map((m) => ({ ...m, email: null })) : MEMBERS);
+    }
+    if (url.includes("/rpc/set_member_role")) {
+      // A REFUSED act, deliberately: `act()` re-reads on failure too, so the column must heal
+      // even when nothing was changed.
+      masked = true;
+      return refusal("CLR04", "cannot act on a member ranked above you");
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      assert.match(textOf(body as never), /tao@example\.test/, "VACUITY GUARD: the admin-only column is populated first");
+
+      await openRoleMenu(h, body, "Siti Rahman");
+      await pickRole(h, body, "Admin");
+
+      const after = textOf(body as never);
+      assert.match(after, /cannot act on a member ranked above you/, "the act was REFUSED");
+      assert.ok(!/tao@example\.test/.test(after), "…and the email column still masked on the re-read that followed");
+      assert.match(after, /Not shown/, "the cell states the absence rather than going blank");
+    } finally {
+      await h.unmount();
+    }
+  });
 });

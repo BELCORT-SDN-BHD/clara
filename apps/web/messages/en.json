@@ -479,7 +479,8 @@
       "statusRevoked": "Revoked",
       "revoke": "Revoke",
       "issue": "Invite someone",
-      "issued": "The invitation to {email} was sent."
+      "issued": "The invitation to {email} was sent.",
+      "noResendNote": "There is no resend and no seat limit. An invitation's link cannot be recovered once it is sent, so to give someone a fresh one, revoke the invitation below and invite them again — the old link stops working immediately."
     },
     "inviteDialog": {
       "title": "Invite someone to this firm",
@@ -488,15 +489,18 @@
       "emailPlaceholder": "name@example.com",
       "roleLabel": "Role",
       "confirm": "Send invitation",
-      "ceilingNote": "You can invite someone at your own rank or below. The firm refuses anything higher."
+      "ceilingNote": "You can invite someone at your own rank or below. The firm refuses anything higher.",
+      "addressInvalid": "This address was refused. Correct it and send again."
     },
     "removeDialog": {
       "title": "Remove {name} from this firm?",
+      "titleInFirm": "Remove {name} from {firm}?",
       "description": "They lose access immediately and any agent credentials they hold for this firm are revoked. There is no undo verb: inviting them again creates a fresh membership.",
       "confirm": "Remove"
     },
     "revokeDialog": {
       "title": "Revoke the invitation for {email}?",
+      "titleInFirm": "Revoke {firm}'s invitation for {email}?",
       "description": "The link stops working. Revoking is also how you free this address for a fresh invitation before the current one expires.",
       "confirm": "Revoke"
     },

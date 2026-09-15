@@ -285,6 +285,20 @@ export function firmCapabilities(scope: CapabilityScope | null): FirmCapabilitie
  * rather than picking the first row.
  */
 export function capabilityScopeFromRows(rows: readonly CallerContextRow[] | null): CapabilityScope | null {
+  return callerContextRowFromRows(rows);
+}
+
+/**
+ * THE SAME FOLD, returning the WHOLE row — for the surfaces that need a fact the capability
+ * object deliberately does not carry (#625: the firm's NAME, which a destructive confirmation
+ * has to say out loud).
+ *
+ * It exists so there is exactly ONE cardinality judgement, not two. `capabilityScopeFromRows`
+ * above now delegates to it: a panel that reads the view itself gets the firm name and the
+ * capability shaping from the same decision about zero, one and more-than-one rows, and a change
+ * to that decision cannot apply to one of them and not the other.
+ */
+export function callerContextRowFromRows(rows: readonly CallerContextRow[] | null): CallerContextRow | null {
   if (rows === null || rows.length !== 1) return null;
   return rows[0] ?? null;
 }

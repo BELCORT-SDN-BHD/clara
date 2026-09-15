@@ -76,10 +76,12 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadCallerContext } from "@/lib/firm/caller-context";
 import {
   assignableRoles,
+  callerContextRowFromRows,
   canActOnMemberOfRole,
   capabilityScopeFromRows,
   firmCapabilities,
 } from "@/lib/firm/capabilities";
+import type { DialogRefusal } from "@/components/common/dialog-refusal";
 import {
   loadFirmInvites,
   loadFirmMembers,
@@ -134,17 +136,77 @@ export function MembersPanel() {
   // touches cannot each get the cardinality judgement slightly differently.
   const scope = useMemo(() => capabilityScopeFromRows(context.data), [context.data]);
   const capabilities = useMemo(() => firmCapabilities(scope), [scope]);
+  // #625 AC3 — THE FIRM, BY NAME. `clara.caller_context` publishes `firm_name` (`0141:544`) and
+  // this panel has always read the view; it simply never rendered the column. Both destructive
+  // confirmations now say which firm they are about, because "remove them from this firm" is
+  // ambiguous on a screen someone may have opened in two tabs. `null` when the read is not a
+  // single well-formed row — the same fold `capabilityScopeFromRows` applies — and the copy then
+  // falls back to the wording that claims nothing.
+  const firmName = useMemo(() => callerContextRowFromRows(context.data)?.firm_name ?? null, [context.data]);
   // The two rank-only walls inside the members doors (0157:277-279 and
   // 0157:320-321) — derived once here, never inside the table, so the whole
   // ruling has exactly one implementation. See lib/firm/capabilities.ts.
   const roles = useMemo(() => assignableRoles(scope), [scope]);
   const canActOnMember = useCallback((memberRole: string) => canActOnMemberOfRole(scope, memberRole), [scope]);
 
+  /**
+   * #625 AC4 — THE SECOND READ, FOLDED INTO EVERY ACT'S OWN SETTLE.
+   *
+   * THE DEFECT. `scope`/`capabilities`/`roles` are derived from `context.data`, and `context` was
+   * read ONCE at mount and never again: this panel called `roster.act()` and `invites.act()`,
+   * each of which reloads only ITS OWN part. So an admin demoted to bookkeeper mid-session kept
+   * the role menu and the Invite entry until the whole page remounted — controls their live rank
+   * can no longer use, offered by a surface that had simply stopped asking.
+   *
+   * THE FIX IS ONE EXTRA READ, NOT A NEW MECHANISM. `lib/parts/hooks.ts` is deliberately NOT
+   * touched: `act()`'s reload discipline is shared by every hydrated surface in this app, and
+   * widening it here would change behaviour on screens nobody on this ticket looked at. There is
+   * no polling and no server push either — the acceptance is "on the next AUTHORITATIVE
+   * response", and this is exactly that: the caller context is re-read as part of settling
+   * whatever the person just did.
+   *
+   * ALL FOUR ACT SITES GO THROUGH IT — invite, role change, remove, revoke — because a caller
+   * whose next action is a role change ON SOMEBODY ELSE, or an invite attempt, must lose the
+   * control on THAT response too, not only on the one that happened to touch their own row.
+   *
+   * A REFUSED ACT COUNTS. `act()` re-reads on failure as well as success, and a refusal is
+   * frequently the FIRST evidence that the rank moved — refusing to believe it would be the
+   * defect wearing a different hat.
+   */
+  const settleAndRefreshContext = useCallback(
+    async (act: () => Promise<boolean>): Promise<boolean> => {
+      const ok = await act();
+      // Deliberately AFTER the act's own settle (its re-read has already finished): the panel then
+      // re-derives capabilities from a context read taken no earlier than the response that just
+      // landed. A failure here is not fatal — the part's own error banner already tells the truth
+      // about the act, and a context read that did not come back must not blank a page.
+      await context.reload().catch(() => {});
+      return ok;
+    },
+    [context],
+  );
+
   async function submitInvite(email: string, role: MemberRole): Promise<void> {
     setCourier(null);
     setIssued(null);
+    // WHY THE DIALOG STAYS OPEN, and for exactly which failures.
+    //
+    // A GOVERNED refusal always keeps it open (`refused`): the admin can correct the role or the
+    // address without retyping either. #625 adds the two COURIER verdicts that are about the
+    // ADDRESS ITSELF — `unsupported_address` (the transport cannot send there) and
+    // `recipient_has_account` (that address is already somebody's sign-in). Both create nothing
+    // and both are corrected in this dialog, so closing it over them threw away the field the
+    // verdict was asking the person to change, and a field-level invalid that appears only after
+    // the field is gone is not an affordance.
+    //
+    // EVERY OTHER COURIER CODE STILL CLOSES IT, and one of them must: `mail_failed` DID create an
+    // invitation whose link is unrecoverable, and the admin has to reach the list below to revoke
+    // it. `no_session`, `not_permitted`, `mail_not_configured`, `mail_unavailable`, `transport`,
+    // `cross_origin` and `invalid_request` are not about the address either, and their receipt is
+    // the panel's own courier banner.
     let refused = false;
-    await invites.act(async () => {
+    let addressRefused = false;
+    await settleAndRefreshContext(() => invites.act(async () => {
       try {
         await inviteMember(email, role);
         setIssued(email);
@@ -157,16 +219,41 @@ export function MembersPanel() {
         // own words.
         if (isInviteCourierError(e)) {
           setCourier(e);
+          addressRefused = e.code === "unsupported_address" || e.code === "recipient_has_account";
           return;
         }
         refused = true;
         throw e; // a DoorRefusal — act() records code + message, rendered verbatim
       }
-    });
-    // Stay open on a governed refusal so the address or the role can be corrected
-    // without retyping; close on anything else.
-    if (!refused) setInviteOpen(false);
+    }));
+    // Stay open on a governed refusal, and on a courier verdict about the address itself, so the
+    // field being corrected survives; close on anything else (see the note above).
+    if (!refused && !addressRefused) setInviteOpen(false);
   }
+
+  /** The two hydrated parts' own standing failures, in the shape `DoorDialogRefusal` renders.
+   *  `MembersConfirmDialog` shows one only AFTER that dialog has settled a confirm of its own
+   *  (`refusalForThisDialog`), so a refusal raised by a different door is never painted here. */
+  const rosterRefusal: DialogRefusal = { err: roster.err, clr: roster.clr };
+  const invitesRefusal: DialogRefusal = { err: invites.err, clr: invites.clr };
+  /** The INVITE dialog's refusal is either the DB's (through `invites`) or the COURIER's — two
+   *  different authorities, and the courier's is deliberately NOT folded into `invites.err`
+   *  (submitInvite swallows it so the unconditional re-read still runs and the admin can see the
+   *  invite `mail_failed` really did create). The dialog has to be able to show both. */
+  const inviteRefusal: DialogRefusal = courier
+    ? { err: tCourier(courier.code), clr: { code: courier.code, reason: null } }
+    : invitesRefusal;
+  /** #625 AC6 — FIELD-LEVEL INVALID, and only from a typed SERVER verdict.
+   *
+   *  This surface deliberately carries no client-side email judgement (`invite-dialog.tsx`'s own
+   *  header: a second, drifting gate is worse than none). These two courier codes are the
+   *  server's own verdict ABOUT THE ADDRESS — `unsupported_address` (the transport cannot send
+   *  there) and `recipient_has_account` (that address is already somebody's sign-in) — so the
+   *  field they are about says so, beside the control the person has to change. Matched on the
+   *  typed CODE, never on the message: spelling is not identity. Every other refusal, governed or
+   *  courier, stays form-level, because it is not the address that is wrong. */
+  const addressInvalid =
+    courier !== null && (courier.code === "unsupported_address" || courier.code === "recipient_has_account");
 
   return (
     <div className="flex flex-col gap-6">
@@ -191,9 +278,11 @@ export function MembersPanel() {
             // after the call AND its unconditional re-read have finished, so this
             // promise is exactly "the act has settled" — which is what
             // `MemberRowMenu`'s guard and its disabled items hang on.
-            roster.act(async () => {
-              await setMemberRole(sessionTokenAccessor, row.membership_id, role);
-            })
+            settleAndRefreshContext(() =>
+              roster.act(async () => {
+                await setMemberRole(sessionTokenAccessor, row.membership_id, role);
+              }),
+            )
           }
           onRemove={(row) => setRemoving(row)}
         />
@@ -216,6 +305,17 @@ export function MembersPanel() {
           {tInvites("heading")}
         </SectionHeader>
         <p className="max-w-prose text-sm text-muted-foreground">{tInvites("description")}</p>
+        {/* #625 D2 — TWO ABSENCES, WRITTEN DOWN RATHER THAN LEFT AS A SILENCE.
+            There is no RESEND door and there never will be: `clara.invite_member` refuses a
+            second pending invitation for the same address (CLR10, `0147:399`) and the plaintext
+            token is never stored (裁-16a), so nothing can re-send a link that already went out.
+            Revoke-then-invite is the real path and the copy names it.
+            There is no per-firm SEAT LIMIT either: the estate's only capacity is the estate-wide
+            Admission capacity on new FIRMS (`CONTEXT.md` "Admission capacity"), which this path
+            never touches, and per-firm seats are explicitly deferred product scope
+            (`docs/PRD.md:126`). A capacity control here would be inventing the thing a blueprint
+            deferred. Both are stated ONCE, where an admin would otherwise go looking. */}
+        <p className="max-w-prose text-xs text-muted-foreground">{tInvites("noResendNote")}</p>
         {courier ? (
           <StateBanner tone="error" title={tCourier("title")} code={courier.code}>
             {tCourier(courier.code)}
@@ -251,25 +351,45 @@ export function MembersPanel() {
         />
       </section>
 
-      <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} busy={invites.busy} onSubmit={submitInvite} />
+      <InviteDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        busy={invites.busy}
+        refusal={inviteRefusal}
+        addressInvalid={addressInvalid}
+        onSubmit={submitInvite}
+      />
 
       <MembersConfirmDialog
         open={removing !== null}
         onOpenChange={(open) => {
           if (!open) setRemoving(null);
         }}
-        title={tRemove("title", { name: removing?.display_name ?? "" })}
+        title={
+          // #625 AC3 — the member AND the firm. The unnamed-firm spelling is not a lesser variant
+          // of the same sentence: it is the honest one for a caller context this panel could not
+          // read as a single well-formed row, and it claims nothing it cannot see.
+          firmName
+            ? tRemove("titleInFirm", { name: removing?.display_name ?? "", firm: firmName })
+            : tRemove("title", { name: removing?.display_name ?? "" })
+        }
         description={tRemove("description")}
         confirmLabel={tRemove("confirm")}
         busy={roster.busy}
+        // #625 AC3 — the slot this component has declared since CB-AE2E-004 and nobody passed.
+        // The panel's own StateBanner sits BEHIND the modal backdrop; a refusal the human is being
+        // asked to act on has to travel in here with them.
+        refusal={rosterRefusal}
         onConfirm={async () => {
           const row = removing;
           if (!row) return false;
           // CB-AE2E-004: the dialog closes only on an accepted act, and the row
           // it is confirming is cleared only then too — a refusal keeps both.
-          const ok = await roster.act(async () => {
-            await removeMember(sessionTokenAccessor, row.membership_id);
-          });
+          const ok = await settleAndRefreshContext(() =>
+            roster.act(async () => {
+              await removeMember(sessionTokenAccessor, row.membership_id);
+            }),
+          );
           if (ok) setRemoving(null);
           return ok;
         }}
@@ -280,10 +400,15 @@ export function MembersPanel() {
         onOpenChange={(open) => {
           if (!open) setRevoking(null);
         }}
-        title={tRevoke("title", { email: revoking?.email ?? "" })}
+        title={
+          firmName
+            ? tRevoke("titleInFirm", { email: revoking?.email ?? "", firm: firmName })
+            : tRevoke("title", { email: revoking?.email ?? "" })
+        }
         description={tRevoke("description")}
         confirmLabel={tRevoke("confirm")}
         busy={invites.busy}
+        refusal={invitesRefusal}
         onConfirm={async () => {
           const row = revoking;
           if (!row) return false;
@@ -291,9 +416,11 @@ export function MembersPanel() {
           setIssued(null);
           // CB-AE2E-004: see the remove dialog above — clear the pending row
           // only when the door actually accepted.
-          const ok = await invites.act(async () => {
-            await revokeInvite(sessionTokenAccessor, row.id);
-          });
+          const ok = await settleAndRefreshContext(() =>
+            invites.act(async () => {
+              await revokeInvite(sessionTokenAccessor, row.id);
+            }),
+          );
           if (ok) setRevoking(null);
           return ok;
         }}

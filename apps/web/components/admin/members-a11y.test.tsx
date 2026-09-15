@@ -179,7 +179,8 @@ test("members: the remove confirm dialog, OPEN, scans clean and names the person
         for (let i = 0; i < 4; i++) await h.settle();
 
         const text = textOf(body as never);
-        assert.match(text, /Remove Siti Rahman from this firm\?/, "the dialog must name the row it acts on");
+        // #625 AC3: the confirmation names the member AND the firm, from `caller_context.firm_name`.
+        assert.match(text, /Remove Siti Rahman from ROME PROPERTIES\?/, "the dialog must name the row it acts on, and the firm");
         assert.match(text, /There is no undo verb/, "…and say what removal actually means");
         const violations = checkAccessibility(body as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
@@ -205,7 +206,8 @@ test("members: the revoke confirm dialog, OPEN, scans clean and names the addres
         });
         for (let i = 0; i < 4; i++) await h.settle();
         const text = textOf(body as never);
-        assert.match(text, /Revoke the invitation for stale@example\.test\?/);
+        // #625 AC3: the firm is named here too.
+        assert.match(text, /Revoke ROME PROPERTIES.s invitation for stale@example\.test\?/);
         const violations = checkAccessibility(body as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
