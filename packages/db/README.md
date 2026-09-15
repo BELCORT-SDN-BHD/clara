@@ -92,6 +92,21 @@ refuses the cutover while any pre-cutover classify task is still claimable witho
 extraction, and its rollback is a new append-only recovery migration applied while that consumer
 stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
 
+[0207_accrual_adjustments.sql](migrations/0207_accrual_adjustments.sql) (#652) owes no
+consumer-first obligation and states why in its header: every object it adds is new, it recuts
+nothing, and it re-hashes the six 0193 plan-lane bodies it depends on in its own tail so a stray
+`create or replace` reds the migration rather than shipping. It rides `kind='reversing_journal'`
+rather than minting a plan kind or an `accounting_work` purpose — an accrual occurrence is admitted
+by `clara._plan_admit_occurrence` exactly as every other occurrence is, with `adjustment_basis`
+NULL, and its typed particulars live in `clara.accrual_adjustments`, keyed by `(plan_id, revision)`
+so the durable record behind a due event is the same one whether the configuration door or the
+runtime scan admitted it. Its one foreign reference without a composite key —
+`document_service_period_id` into 0140's `clara.document_service_periods`, which carries no
+`(id, firm_id)` unique — has its tenant and its document proven by
+`t_accrual_adjustments_term_congruent` instead, because adding a unique to a foreign table is
+outside a slice migration's remit and its tail asserts that relation's constraint count is
+unchanged.
+
 Rebuilding a target from the migration chain and restoring a dump are different operations.
 A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials
 afterward and probe every configured runtime lane. Existing platform roles can also collide
@@ -192,6 +207,13 @@ only from runtime SQL with positional arguments. The labels that gate — `calle
 The census reports its frontier from `clara.schema_migrations` and compares it against the
 migration files on disk. It never reads a migration's own success text: a chain that ran green
 and a frontier that landed are different claims, and only the ledger states the second.
+
+At frontier 0207 the accrual lane adds four public names to that boundary:
+`create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
+`clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are
+attributed by `ACCRUAL_ADJUSTMENTS_0207_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs), whose
+cohort check is bimodal (wholly present once 0207 applies, wholly absent before it) because the
+`db-slice-frontiers` matrix runs this package against earlier frontiers.
 
 The census audits the public operation boundary, so a trigger below it is invisible to every
 label above. Read [#692](https://github.com/BELCORT-SDN-BHD/clara/issues/692) before adding the

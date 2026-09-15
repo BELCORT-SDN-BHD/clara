@@ -97,13 +97,17 @@ async function configure({
 } = {}) {
   const cli = client ?? (await freshAccrualClient(ALICE(), tag));
   const ref = await instructionRef({ client: cli, author: sub });
+  // MEASURED AFTER THE AUTHORITY INSTRUCTION IS MINTED. `instructionRef` admits a real
+  // `clara.accounting_work` row (a plan cites an instruction this database holds, 0193:1510-1512),
+  // so "this configuration admitted ONE Work" is counted against that baseline rather than zero.
+  const workBefore = await workCount(cli);
   const from = effectiveFrom ?? monthStart(await shiftMonths(today, -monthsBack));
   const answer = await createAccrualAdjustment(sub, {
     client: cli, purpose, authorityRef: ref, accrual: a ?? accrual(),
     frequency, dayRule, dayOfMonth, timezone: ACCRUAL_TZ,
     effectiveFrom: from, effectiveTo, opKey,
   });
-  return { ...answer, client: cli, author: sub, effectiveFrom: from, ref };
+  return { ...answer, client: cli, author: sub, effectiveFrom: from, ref, workBefore };
 }
 
 /** Every relation one configuration writes, counted for ONE client. The atomicity cells assert on
@@ -305,7 +309,6 @@ test("p652.basis.zero — a stated accrual amount of zero is refused as a TERM p
 test("p652.config.atomic — one accepted configuration leaves exactly one plan, one revision, one accrual, one occurrence and one admitted Work; a fault after the plan insert leaves none of the five", async (t) => {
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "atomic");
-  const baseWork = await workCount(client);
 
   const c = await configure({ client, tag: "atomic" });
   const after = await footprint(client);
@@ -313,7 +316,7 @@ test("p652.config.atomic — one accepted configuration leaves exactly one plan,
   assert.equal(after.revisions, 1, "one revision");
   assert.equal(after.accruals, 1, "one accrual record");
   assert.equal(after.occurrences, 1, "one occurrence — the current period's accrual leg");
-  assert.equal(after.work, baseWork + 1, "one admitted Work above the authority instruction's own");
+  assert.equal(after.work, c.workBefore + 1, "one admitted Work above the authority instruction's own");
   assert.equal(c.kind, PLAN_KIND.reversing,
     "an accrual rides the DELIVERED reversing_journal contract — it mints no new plan kind");
   assert.ok(c.accrual_id && c.plan_id && c.revision_id, "and the answer names all three rows");
@@ -324,7 +327,11 @@ test("p652.config.atomic — one accepted configuration leaves exactly one plan,
   // the failure lands AFTER the plan and revision inserts and BEFORE the door returns. Fault
   // injection, stated as such — the estate's own `CLARA_WORK_TEST_FAULT` idiom, at SQL grain.
   const victim = await freshAccrualClient(ALICE(), "atomicfault");
+  const victimRef = await instructionRef({ client: victim, author: BOB() });
+  // SNAPSHOT AFTER the authority instruction, which is a real Work this configuration did not
+  // create and must not be asked to roll back.
   const victimBase = await footprint(victim);
+  const victimFrom = monthStart(await shiftMonths(today, -2));
   await rootQuery(`create function clara._p652_fault() returns trigger
       language plpgsql as $f$ begin
         raise exception 'p652 injected fault after the accrual insert' using errcode='CLR13',
@@ -334,8 +341,9 @@ test("p652.config.atomic — one accepted configuration leaves exactly one plan,
       for each row execute function clara._p652_fault()`);
   try {
     await assertPair(CLR.conflict, "p652_injected_fault",
-      () => configure({ client: victim, tag: "atomicfault" }),
-      "a configuration that faults after the plan insert");
+      () => createAccrualAdjustment(BOB(), {
+        client: victim, authorityRef: victimRef, accrual: accrual(), effectiveFrom: victimFrom,
+      }), "a configuration that faults after the plan insert");
   } finally {
     await rootQuery("drop trigger t_p652_fault on clara.accrual_adjustments");
     await rootQuery("drop function clara._p652_fault()");
@@ -385,7 +393,6 @@ test("p652.config.vs.occurrence — accepting a configuration answers posted:fal
 test("p652.authority.future — an accrual whose authority starts in the future creates the plan and admits NOTHING; the answer is a preview, and a catch-up cannot reach back past the authority", async (t) => {
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "future");
-  const baseWork = await workCount(client);
   const from = monthStart(await shiftMonths(today, 2));
   const c = await configure({ client, tag: "future", effectiveFrom: from });
 
@@ -394,7 +401,7 @@ test("p652.authority.future — an accrual whose authority starts in the future 
   assert.equal(f.plans, 1, "the plan exists");
   assert.equal(f.accruals, 1, "the accrual record exists");
   assert.equal(f.occurrences, 0, "and there is no occurrence at all");
-  assert.equal(f.work, baseWork, "…and no Work above the authority instruction's own");
+  assert.equal(f.work, c.workBefore, "…and no Work above the authority instruction's own");
   assert.ok(c.next_occurrences.length > 0, "the answer previews what WILL be due");
   assert.ok(c.next_occurrences.every((e) => e.due_date > today),
     `every previewed due date is in the future (got ${JSON.stringify(c.next_occurrences)})`);
@@ -541,7 +548,9 @@ test("p652.role.floor — a viewer cannot configure an accrual but reads them; a
   // AND AN INACTIVE CLIENT TAKES NO NEW ACCRUAL.
   const parked = await freshAccrualClient(ALICE(), "floorparked");
   const ref = await instructionRef({ client: parked, author: BOB() });
-  await setClientStatus(parked, "inactive");
+  // `archived`, not `inactive`: clients_status_check_0017 admits active/archived/onboarding, and
+  // the door's own wall is `status <> 'active'`.
+  await setClientStatus(parked, "archived");
   const parkedFrom = monthStart(await shiftMonths(today, -1));
   await assertPair(CLR.badRequest, ACCRUAL_REASON.clientInactive,
     () => createAccrualAdjustment(BOB(), {
@@ -625,7 +634,16 @@ test("p652.lineage.join — get_accrual_adjustment returns plan → revision →
   // THE TENANT IS STRUCTURAL. FORCE RLS does not stop a DEFINER insert writing another client's
   // plan id under this firm; `fk_accrual_adjustments_plan_revision` does — and the proof is the
   // constraint NAME in the error, not merely that something refused.
-  const other = await configure({ tag: "lineageother" });
+  // A PLAIN plan on ANOTHER client of the SAME firm — deliberately not another accrual, because
+  // `uq_accrual_adjustments_plan_revision` would fire first and prove the wrong wall.
+  const otherClient = await freshAccrualClient(ALICE(), "lineageother");
+  const otherRef = await instructionRef({ client: otherClient, author: BOB() });
+  const other = await createAccountingPlan(BOB(), {
+    client: otherClient, kind: PLAN_KIND.reversing, authorityRef: otherRef,
+    dayRule: "last_day_of_month", dayOfMonth: null, reversalDayRule: "next_period_first_day",
+    effectiveFrom: c.effectiveFrom,
+    basis: basis({ postingDate: c.effectiveFrom, memo: "another client's schedule" }),
+  });
   const e = await assertRaises("23503", () => rootQuery(
     `insert into clara.accrual_adjustments(firm_id, client_id, plan_id, revision, purpose,
         expense_account_code, liability_account_code, amount_cents, currency, effective_from,

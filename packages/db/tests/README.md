@@ -16,6 +16,17 @@ pnpm --filter @clara/db seed
 pnpm --filter @clara/db test
 ```
 
+A focused run of one frontier-gated battery does **not** preload those gates, which is the point:
+`tests/accrual-adjustments.test.mjs` (#652) fails loudly on a database without migration 0207
+rather than skipping in silence, while the package-wide sweep's
+`tests/accrual-adjustments-preintegration-gate.mjs` turns that same absence into a counted skip.
+Run it focused with the 29 `--import ./tests/*-preintegration-gate.mjs` flags from
+[package.json](../package.json)'s `test` script:
+
+```sh
+node --test --test-concurrency=1 $GATES tests/accrual-adjustments.test.mjs
+```
+
 The package test command includes the preintegration gates and serializes files within this package.
 Some fixtures create sibling databases or cluster roles; they need a disposable **cluster**, not
 merely an empty schema. Do not run the suite against the production project.
