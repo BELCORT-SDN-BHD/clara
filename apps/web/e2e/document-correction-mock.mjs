@@ -6,12 +6,23 @@
 // `c0ee0c0c-` and are distinct from every id in every sibling lane and from `serve-built.mjs`'s
 // own CLIENT_A/CLIENT_B.
 //
-// TWO RPC VERBS ARE SHARED WITH `documents-viewer-mock.mjs` — `list_source_revisions` and
-// `list_source_dependents` — because BOTH lanes render the same document panel, which reads them
-// on mount. They are declared as shared in `e2e-fixture-ownership.test.ts`, each lane answers
-// only for its OWN document ids, and both fall through on anything else. The exact-verb allow-list
-// below runs BEFORE `readJson`, so a verb this lane does not own never touches the request stream
-// (the L7 hazard `e2e-fixture-ownership.test.ts` N7 fences).
+// FIVE RPC VERBS ARE SHARED with a sibling lane, and all five are declared in
+// `SHARED_RPC_VERBS` (`e2e-fixture-ownership.test.ts`), whose verb-ownership census reds on any
+// undeclared claimant. Four are shared with `documents-viewer-mock.mjs` — `get_document_state`,
+// `get_document_extract`, `list_source_revisions`, `list_source_dependents` — because BOTH lanes
+// render the same document panel, which reads all four on mount; each lane answers only for its
+// OWN document ids and falls through on anything else. The fifth, `record_client_resolution`, is
+// shared with `chat-parity-mock.mjs`, whose arm is UNSCOPED (declared debt there) and dispatched
+// first, so that lane is what actually answers the wizard's first step today — immaterial only
+// because the wizard treats the returned id as an opaque handle. See the declaration for the
+// full argument.
+//
+// THE DISPATCH VARIABLE IS CALLED `verb` ON PURPOSE. The census reads lane mocks as TEXT and
+// recognises exactly three dispatch spellings (`verb`, `fn`, or a literal rpc path compared with
+// `===`, all three spelled out in that file's own RPC_VERB_OPENER); a fourth spelling
+// makes a whole lane invisible to it, which is how these five shares went undeclared through
+// round 1. The exact-verb allow-list below runs BEFORE `readJson`, so a verb this lane does not
+// own never touches the request stream (the L7 hazard `e2e-fixture-ownership.test.ts` N7 fences).
 //
 // WHAT IS REAL AND WHAT IS FAKE. The browser, the built Next bundle, the routed views, the tab
 // parameter, both dialogs, the Sheet, the correction band and every line of client code under test
@@ -309,13 +320,13 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
   }
 
   if (request.method === "POST" && path.startsWith("/rest/v1/rpc/")) {
-    const rpc = path.slice("/rest/v1/rpc/".length);
+    const verb = path.slice("/rest/v1/rpc/".length);
     // THE ALLOW-LIST RUNS BEFORE `readJson`, so a verb this lane does not own reaches the next
     // hook with its request stream intact, in ANY hook order (the N7 hazard).
-    if (!matchVerb(CORRECTION_RPC_VERBS, rpc)) return false;
+    if (!matchVerb(CORRECTION_RPC_VERBS, verb)) return false;
     const body = await readJson(request);
 
-    if (rpc === "get_document_state") {
+    if (verb === "get_document_state") {
       if (body.p_document !== CORR.doc && body.p_document !== CORR.docOrphan) return false;
       return json(sendJson, response, {
         document_id: body.p_document, document_kind: state.kind, mime_type: "application/pdf",
@@ -340,7 +351,7 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "list_source_revisions") {
+    if (verb === "list_source_revisions") {
       if (body.p_document !== CORR.doc && body.p_document !== CORR.docOrphan) return false;
       return json(sendJson, response, {
         document_id: body.p_document, document_kind: state.kind,
@@ -351,7 +362,7 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "list_source_dependents") {
+    if (verb === "list_source_dependents") {
       if (body.p_document !== CORR.doc && body.p_document !== CORR.docOrphan) return false;
       const orphan = body.p_document === CORR.docOrphan;
       return json(sendJson, response, {
@@ -381,7 +392,7 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "revise_document_fact") {
+    if (verb === "revise_document_fact") {
       if (body.p_document !== CORR.doc) return false;
       const replay = state.receipts.get(`revise:${body.p_op_key}`);
       if (replay) return json(sendJson, response, replay, cors);
@@ -421,7 +432,7 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       return json(sendJson, response, receipt, cors);
     }
 
-    if (rpc === "dismiss_orphaned_classification_question") {
+    if (verb === "dismiss_orphaned_classification_question") {
       if (body.p_question !== CORR.questionOrphan && body.p_question !== CORR.question) return false;
       if (body.p_question === CORR.question) {
         return refuse(sendJson, response, cors, "CLR10",
@@ -435,7 +446,7 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "set_document_kind") {
+    if (verb === "set_document_kind") {
       if (body.p_document !== CORR.doc && body.p_document !== CORR.docOrphan) return false;
       state.kind = body.p_kind;
       state.revisions.push({
@@ -452,7 +463,7 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "preview_wrong_client_correction") {
+    if (verb === "preview_wrong_client_correction") {
       if (body.p_document !== CORR.doc) return false;
       return json(sendJson, response, {
         correction_id: null, document_id: CORR.doc, from_client: CORR.clientId,
@@ -465,12 +476,12 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "record_client_resolution") {
+    if (verb === "record_client_resolution") {
       if (body.p_subject !== CORR.doc) return false;
       return json(sendJson, response, { resolution_id: "c0ee0c0c-4e50-4111-8111-111111111111" }, cors);
     }
 
-    if (rpc === "propose_wrong_client_correction") {
+    if (verb === "propose_wrong_client_correction") {
       if (body.p_document !== CORR.doc) return false;
       return json(sendJson, response, {
         correction_id: CORR.correction, plan_hash: "b".repeat(64), books_version: 42,
@@ -478,19 +489,19 @@ export async function handleDocumentCorrectionSupabase(request, response, path, 
       }, cors);
     }
 
-    if (rpc === "approve_wrong_client_correction") {
+    if (verb === "approve_wrong_client_correction") {
       if (body.p_correction !== CORR.correction) return false;
       state.transferred = true;
       return json(sendJson, response, { correction_id: CORR.correction, status: "completed" }, cors);
     }
 
-    if (rpc === "reset_document_correction_fixture") {
+    if (verb === "reset_document_correction_fixture") {
       if (body.p_client !== CORR.clientId) return false;
       resetDocumentCorrection();
       return json(sendJson, response, { ok: true }, cors);
     }
 
-    if (rpc === "get_document_extract") {
+    if (verb === "get_document_extract") {
       if (body.p_document !== CORR.doc && body.p_document !== CORR.docOrphan) return false;
       return json(sendJson, response, null, cors);
     }

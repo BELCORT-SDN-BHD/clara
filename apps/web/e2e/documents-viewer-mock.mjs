@@ -539,9 +539,10 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
 
     // #646 — the document detail panel reads its source lineage and its dependents on mount, so
     // THIS lane has to answer them for ITS OWN documents or #624's walk would make two unmatched
-    // calls on every open. Both verbs are SHARED with `document-correction-mock.mjs` (declared as
-    // such in e2e-fixture-ownership.test.ts): each lane answers only for its own document ids and
-    // falls through otherwise.
+    // calls on every open. Both verbs are SHARED with `document-correction-mock.mjs` and declared
+    // as such in `SHARED_RPC_VERBS` (e2e-fixture-ownership.test.ts), together with the other two
+    // verbs the two lanes both answer, `get_document_state` and `get_document_extract`: each lane
+    // answers only for its own document ids and falls through otherwise.
     //
     // THE ANSWER IS AN EMPTY HISTORY, which is the honest fixture for this lane: #624's documents
     // have never been revised, so the correction band renders NOTHING and this walk's faces are
