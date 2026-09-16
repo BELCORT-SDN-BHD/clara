@@ -169,7 +169,11 @@ test("the document says which WORK it produced — and says so honestly when it 
   await openDocuments(page);
   // The FILED row, not the receipt row: the same filename appears in both tables and only
   // the filed one opens the detail. "filed by a human" is the filed table's own basis cell.
-  await page.getByRole("row")
+  // `getByRole("button")`, NOT `("row")`: a filed row carries `role="button"`, which
+  // REPLACES its implicit row role (filed-document-list.tsx's own note on why it is a
+  // button and why it uses `aria-current` rather than `aria-selected`). Measured off the
+  // page snapshot rather than assumed.
+  await page.getByRole("button")
     .filter({ hasText: "april-invoice.pdf" })
     .filter({ hasText: "filed by a human" })
     .first()
@@ -186,8 +190,14 @@ test("the document says which WORK it produced — and says so honestly when it 
 });
 
 test("320px and 200% zoom leave no page-wide horizontal scroll on the documents tab", async ({ page }) => {
+  // SIGN IN AT A NORMAL WIDTH FIRST. The shell's "Main" navigation landmark is the
+  // sign-in wait every documents walk uses, and at 320px the sidebar collapses — so
+  // signing in at the narrow width waits for a landmark the narrow layout does not
+  // render. Resize AFTER, which is also what a person does: they are already signed in
+  // when they turn the phone.
+  await signIn(page);
   await page.setViewportSize({ width: 320, height: 720 });
-  await openDocuments(page);
+  await page.goto(DOCUMENTS_URL);
   await expect(receiptsTable(page).getByText("april-invoice.pdf")).toBeVisible({ timeout: 20_000 });
 
   const overflow = await page.evaluate(() => {
@@ -236,8 +246,9 @@ test("the firm leaf lists an unassigned source with its kind phrase and its publ
 });
 
 test("the firm leaf is axe-clean and leaves no horizontal scroll at 320px", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 720 });
+  // Signed in at a normal width first — see the documents-tab cell's own note.
   await signIn(page);
+  await page.setViewportSize({ width: 320, height: 720 });
   await page.goto(FIRM_DOCUMENTS_URL);
   await expect(page.getByRole("heading", { name: "Documents" }).first()).toBeVisible({ timeout: 30_000 });
 
