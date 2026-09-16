@@ -22,6 +22,8 @@
 
 import { createServer as createHttpServer } from "node:http";
 
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 export const DOCS_INTAKE = {
   clientId: "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e",
   /** ADOPTED, filed to this client, kind already known — the settled receipt. */
@@ -157,16 +159,118 @@ function documentRow(id, over = {}) {
   };
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw.length === 0 ? {} : JSON.parse(raw);
-}
+// THE SHARED READER, NOT A LOCAL ONE (#722's `mock-dispatch.mjs`). This lane used to carry
+// its own read-and-parse loop, which is precisely the hazard that module exists to close: a
+// Node request stream drains ONCE, this lane runs EARLY in `serve-built.mjs`'s chain, and a
+// verb it reads and then declines (`get_document_state` for another lane's document,
+// `file_document` for another lane's file) would leave every later lane reading `{}` — whose
+// every field is `undefined`, which a permissive guard accepts just well enough for the
+// failure to be silent. `readCachedJson` parses once and re-serves the SAME object to every
+// caller in any order, so declining after reading costs nobody anything.
+const readJson = readCachedJson;
 
 async function drain(request) {
   for await (const chunk of request) void chunk;
 }
+
+/** Every document id this lane speaks for: the two client-tab fixtures, the firm leaf's own
+ *  subject, and anything uploaded during a walk. A read naming any other document is not this
+ *  lane's business and falls through. */
+function laneDocumentIds() {
+  return [
+    DOCS_INTAKE.settledDocumentId,
+    DOCS_INTAKE.movingDocumentId,
+    DOCS_INTAKE.unassignedDocumentId,
+    ...[...state.uploads.values()].map((u) => u.documentId),
+  ];
+}
+
+/** The ONE extraction this lane publishes, for the settled document. */
+const EXTRACTION_ID = "e0e0e0e0-e0e0-4e0e-8e0e-e0e0e0e0e001";
+
+/** `clara.get_document_state`'s answer for this lane's two client-tab documents, shaped from
+ *  the real RPC's jsonb (0191 section S8) exactly as `documents-viewer-mock.mjs` shapes its
+ *  own — never invented keys. The two are deliberately OPPOSITE on the facts axis, which is
+ *  what makes AC3(b) legible on the DETAIL surface as well as in the list:
+ *    * april-invoice.pdf — (pdf, invoice): facts supported, and validated.
+ *    * march-statement.pdf — (pdf, payroll_summary): bytes READ and facts UNSUPPORTED, while
+ *      `extraction_status` still reads `done`. That pair is the whole defect this ticket
+ *      closes, and here it is on the panel the person opens. */
+const DOCUMENT_STATES = {
+  [DOCS_INTAKE.settledDocumentId]: {
+    document_id: DOCS_INTAKE.settledDocumentId, document_kind: "invoice",
+    mime_type: "application/pdf", format: "pdf",
+    capability: {
+      format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
+      custody: "supported", byte_extraction: "supported",
+      typed_facts: "supported", business_operation: "supported",
+      engine_id: "azure-di:prebuilt-invoice:4.0", engine_byte: "azure-di:prebuilt-layout:4.0",
+      registry_version: 1,
+      basis: "An invoice is read end to end and its header facts are corroborated.",
+      limits: {}, known_pair: true, kind_known: true,
+    },
+    custody: {
+      state: "verified", sha256: "a".repeat(64), byte_size: 20480,
+      bytes_verified_at: iso(1), legal_hold: false, legal_hold_reason: null,
+      retention_state: "unanchored", retain_until: null, capability: "supported",
+    },
+    byte_extraction: {
+      status: "done", page_count: 2, capability: "supported",
+      engine_id: "azure-di:prebuilt-layout:4.0",
+      tasks: [{
+        id: `task-${DOCS_INTAKE.settledDocumentId}`, lane: "ocr", status: "done",
+        engine_id: "azure-di:prebuilt-layout:4.0", version_n: 1, attempt_count: 1,
+        error_code: null, finished_at: iso(1),
+      }],
+    },
+    facts: {
+      capability: "supported", limits: {},
+      extractions: [{
+        id: EXTRACTION_ID, engine_kind: "ocr", engine_id: "azure-di:prebuilt-layout:4.0",
+        version_n: 1, status: "done", superseded_by: null, extracted_at: iso(1), region_count: 0,
+      }],
+      validations: [],
+    },
+    operation: { capability: "supported", codeable_kind: true, entries: [], statements: [] },
+    lineage: {
+      sha256: "a".repeat(64), intakes: [], corrections: [], authoritative_extraction_id: EXTRACTION_ID,
+      filings: [{
+        id: "f0000000-0000-4000-8000-000000000001", client_id: DOCS_INTAKE.clientId,
+        filed_at: iso(1), basis: "human", retired_at: null, retirement_reason: null, correction_id: null,
+      }],
+    },
+  },
+  [DOCS_INTAKE.movingDocumentId]: {
+    document_id: DOCS_INTAKE.movingDocumentId, document_kind: "payroll_summary",
+    mime_type: "application/pdf", format: "pdf",
+    capability: {
+      format: "pdf", document_kind: "payroll_summary", mime_type: "application/pdf",
+      custody: "supported", byte_extraction: "supported",
+      typed_facts: "unsupported", business_operation: "unsupported",
+      engine_id: null, engine_byte: "azure-di:prebuilt-layout:4.0", registry_version: 1,
+      basis: "The bytes are read, but Clara derives no typed facts for this kind.",
+      limits: {}, known_pair: true, kind_known: true,
+    },
+    custody: {
+      state: "verified", sha256: "c".repeat(64), byte_size: 20480,
+      bytes_verified_at: iso(2), legal_hold: false, legal_hold_reason: null,
+      retention_state: "unanchored", retain_until: null, capability: "supported",
+    },
+    byte_extraction: {
+      status: "done", page_count: 2, capability: "supported",
+      engine_id: "azure-di:prebuilt-layout:4.0", tasks: [],
+    },
+    facts: { capability: "unsupported", limits: {}, extractions: [], validations: [] },
+    operation: { capability: "unsupported", codeable_kind: false, entries: [], statements: [] },
+    lineage: {
+      sha256: "c".repeat(64), intakes: [], corrections: [], authoritative_extraction_id: null,
+      filings: [{
+        id: "f0000000-0000-4000-8000-000000000002", client_id: DOCS_INTAKE.clientId,
+        filed_at: iso(2), basis: "human", retired_at: null, retirement_reason: null, correction_id: null,
+      }],
+    },
+  },
+};
 
 /**
  * The PostgREST half. Returns true when it answered.
@@ -226,6 +330,101 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
         created_at: iso(2),
       }),
     ], cors);
+    return true;
+  }
+
+  // -------------------------------------------------------------------------------------
+  // THE DETAIL BUNDLE — found by RUNNING the walk, not by reading it.
+  //
+  // Clicking a filed row opened the aside and it rendered "This isn't reachable today", so
+  // the file/Work boundary underneath it never mounted at all. The cause is one property of
+  // `loadDocumentDetail` (`lib/documents/loaders.ts:116-134`): FIVE reads in one
+  // `Promise.all`, and a single unanswered route fails the whole bundle. This lane answered
+  // one of the five (`documents?id=in.(…)`), so the other four 404'd.
+  //
+  // Every branch below is scoped by `laneDocumentIds()` and falls through otherwise — the
+  // same rule as the rest of the file, and the reason it can run early in the chain.
+  // -------------------------------------------------------------------------------------
+  /** `<param>=eq.<uuid>` when the id named is one of this lane's, else null. */
+  const namedLaneDocument = (key) => {
+    const raw = params.get(key);
+    const id = raw !== null && raw.startsWith("eq.") ? raw.slice(3) : null;
+    return id !== null && laneDocumentIds().includes(id) ? id : null;
+  };
+
+  if (request.method === "GET" && path === "/rest/v1/document_filings" && params.get("document_id") !== null) {
+    const doc = namedLaneDocument("document_id");
+    if (doc === null) return false; // another lane's document — its own handler answers
+    const known = {
+      [DOCS_INTAKE.settledDocumentId]: { id: "f0000000-0000-4000-8000-000000000001", at: iso(1) },
+      [DOCS_INTAKE.movingDocumentId]: { id: "f0000000-0000-4000-8000-000000000002", at: iso(2) },
+    }[doc];
+    // An UNFILED document (the firm leaf's subject, an upload not yet attributed) answers an
+    // honest empty — that is what "no live filing" looks like on this read.
+    sendJson(response, 200, known ? [{
+      id: known.id, document_id: doc, client_id: DOCS_INTAKE.clientId,
+      filed_at: known.at, filed_by: DOCS_INTAKE.userId, basis: "human",
+      retired_at: null, retirement_reason: null, revision_token: `rev-633-${doc.slice(0, 4)}`,
+    }] : [], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/document_extractions") {
+    const doc = namedLaneDocument("document_id");
+    if (doc === null) return false;
+    sendJson(response, 200, doc === DOCS_INTAKE.settledDocumentId ? [{
+      id: EXTRACTION_ID, document_id: doc, engine_id: "azure-di:prebuilt-layout:4.0",
+      engine_kind: "ocr", version_n: 1, superseded_by: null, status: "done",
+      page_count: 2, extracted_at: iso(1),
+    }] : [], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/document_regions") {
+    // Only ever asked for THIS lane's own extraction id, and the honest answer is that no
+    // regions were read: this walk proves the intake journey, not the evidence viewer
+    // (`documents-viewer-walk.spec.ts` owns that, with its own regions).
+    if (!url.search.includes(EXTRACTION_ID)) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/journal_entries") {
+    const doc = namedLaneDocument("document_id");
+    if (doc === null) return false;
+    // NO CODED ENTRY on this read, deliberately. The document -> Work boundary is rendered
+    // from `entry_evidence_links` (the link that carries `work_id`), and this arm exists to
+    // prove the other half: the coding-lane arm is empty, so nothing here can be mistaken
+    // for the Work.
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/document_processing_tasks_visible") {
+    const doc = namedLaneDocument("document_id");
+    if (doc === null) return false;
+    // TWO SETTLED TASKS — AC8's COUNT half, on the same read the queue row uses
+    // (`intake.ts`'s `listProcessingTasksForDocument`).
+    sendJson(response, 200, [
+      {
+        id: `t1-${doc.slice(0, 8)}`, document_id: doc, lane: "ocr", status: "done",
+        version_n: 1, attempt_count: 1, error_code: null,
+        created_at: iso(1), started_at: iso(1), finished_at: iso(1), updated_at: iso(1),
+      },
+      {
+        id: `t2-${doc.slice(0, 8)}`, document_id: doc, lane: "classify", status: "done",
+        version_n: 1, attempt_count: 1, error_code: null,
+        created_at: iso(1), started_at: iso(1), finished_at: iso(1), updated_at: iso(1),
+      },
+    ], cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_document_state") {
+    const body = await readJson(request);
+    const answer = DOCUMENT_STATES[body?.p_document];
+    if (!answer) return false; // another lane's document — and the body stays readable for it
+    sendJson(response, 200, answer, cors);
     return true;
   }
 

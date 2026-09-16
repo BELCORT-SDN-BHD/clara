@@ -991,7 +991,12 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // criterion is "Documents AND Work show the four states". Each lane answers only for the
   // document ids IT minted and falls through otherwise, so the share is a declared one rather than
   // a collision — which is exactly the distinction this census exists to force someone to make.
-  get_document_state: ["documents-viewer-mock.mjs", "work-list-mock.mjs"],
+  // #633 joins them as a THIRD, for the same reason and with the same scoping: its walk opens the
+  // documents-tab detail to read the file -> Work boundary, and that panel's four verdicts come
+  // from this RPC. It answers only for its own two documents, and it reads the POST body through
+  // the SHARED `readCachedJson` (`mock-dispatch.mjs`), so declining another lane's document leaves
+  // that lane's body fully readable.
+  get_document_state: ["documents-intake-mock.mjs", "documents-viewer-mock.mjs", "work-list-mock.mjs"],
   // #643 x #634/#728 — `clara.list_spoken_for_documents` is the EVIDENCE CHOOSER's advisory read,
   // and #643's whole AC3 is that the periodic-adjustment form mounts the composer's own chooser
   // component, so of course the two lanes both answer it. Declared at WAVE-2 INTEGRATION rather
