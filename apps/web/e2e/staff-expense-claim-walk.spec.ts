@@ -43,10 +43,15 @@ async function signInTo(page: Page, destination: string): Promise<void> {
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
   // The sign-in POST, the caller-context read and the destination's own server render all happen
-  // before the URL settles — one budget unit's worth of waiting, not `expect`'s 5 s default.
+  // before the URL settles, and the FIRST of them in a run also pays `next start`'s lazy route
+  // compilation. MEASURED 2026-09-17: the first cell of an isolated two-cell run sat on
+  // "Signing in…" past the 20 s the house gives ONE sign-in and red on the deadline rather than on
+  // anything about claims. The wait is therefore the cell's base budget, which is still well
+  // inside the budget the grant above just bought — so a genuinely broken sign-in still fails
+  // loudly, and only a slow one survives.
   await expect(page).toHaveURL(
     new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
-    { timeout: CELL_BUDGET.signIn },
+    { timeout: CELL_BUDGET.base },
   );
 }
 
