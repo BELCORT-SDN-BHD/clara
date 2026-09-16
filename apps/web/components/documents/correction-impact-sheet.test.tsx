@@ -6,8 +6,10 @@
 // terminate here — the run reached "Array buffer allocation failed" after 90s. The primitive's
 // focus trap and this environment's DOM stub do not compose, which is a property of the harness and
 // not of the surface. So the OPEN-overlay a11y scan for this Sheet is carried by the BROWSER, where
-// a real focus trap exists: `e2e/document-correction-walk.spec.ts` opens it and runs axe on that
-// face. What this file pins is the part a unit test can honestly answer — the pure projection that
+// a real focus trap exists: `e2e/document-correction-walk.spec.ts`'s "the impact radius opens in a
+// Sheet" cell opens it and runs axe SCOPED TO THE SHEET ELEMENT itself
+// (`.include('[data-testid="correction-impact-sheet"]')`), so that scan cannot pass while the
+// Sheet is closed. What this file pins is the part a unit test can honestly answer — the pure projection that
 // decides whether the transferred-away sentence is owed at all.
 
 import { test } from "node:test";

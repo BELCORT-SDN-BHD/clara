@@ -274,8 +274,11 @@ test.describe("#646 — the accounting view, and what stands on the old reading"
     await page.getByRole("button", { name: "Dismiss question" }).click();
 
     // The question is gone from the projection — and the panel says the honest empty rather than
-    // painting a list it no longer has.
+    // painting a list it no longer has. BOTH halves are asserted: an absence alone would also be
+    // satisfied by a panel that rendered nothing at all, while the successful-empty state AC7 names
+    // is a SENTENCE. (Round-1 red: with the EmptyState arm removed the absence still passed.)
     await expect(dependents).not.toContainText("What kind of document is this?", { timeout: 20_000 });
+    await expect(dependents).toContainText("Nothing recorded stands on this document's reading.");
   });
 });
 
@@ -301,6 +304,22 @@ test.describe("#646 — the wrong-client correction, its Sheet and the client it
     await expect(sheet).toContainText(CORR.entry);
     await expect(sheet).toContainText("separate accounting impact");
     await expect(page.getByRole("button", { name: "Record destination + propose" })).toHaveCount(0);
+
+    // AC6 · AC7 — THE OPEN SHEET IS SCANNED HERE, and only here: mounting this primitive open in
+    // the node harness and scanning `document.body` does not terminate (the measurement is in
+    // `components/documents/correction-impact-sheet.test.tsx`), so the browser is the only place
+    // its open-overlay a11y can be answered at all. `.include` scopes axe to the Sheet element
+    // itself, which is what stops this from passing vacuously: with the Sheet closed axe throws
+    // "No elements found for include" rather than scanning the page behind it (measured red,
+    // fix round 1).
+    const sheetAxe = await new AxeBuilder({ page })
+      .include('[data-testid="correction-impact-sheet"]')
+      .withTags(AXE_TAGS).analyze();
+    expect(
+      sheetAxe.violations,
+      JSON.stringify(sheetAxe.violations.map((v) => ({ id: v.id, nodes: v.nodes.length })), null, 2),
+    ).toEqual([]);
+
 
     // CLOSING IT RESTORES THE WIZARD AT THE SAME STEP, with the destination it already had — the
     // draft is not reset by looking at the evidence.
