@@ -94,7 +94,8 @@
 -- `clara.journal_entries`, NAMED TO SORT BEFORE `t_je_adv_movement_belt`, which registers the
 -- allocation idempotently from the claim row it reaches by join. It calls the SHARED temporal cap
 -- `clara._adv_over_application` (0043:1220) rather than a second copy of that arithmetic, and it
--- does NOT call the hook — the census stays at four, and §H re-derives it to prove so.
+-- does NOT call the hook — the census stays at the MEASURED SIX above, and §H re-derives it to
+-- prove so.
 --
 -- THE NAME IS THE MECHANISM, not a convention. Deferred constraint-trigger events for one row are
 -- QUEUED in trigger-name order at the moment of the row operation and fire at commit in queue
@@ -174,13 +175,24 @@
 --   CLR10 correction_target_not_found    + field
 --   CLR10 correction_target_live         + field + entry_id     reverse before you correct
 --   CLR10 correction_target_already_corrected + field + claim_id
+--   CLR19 write_into_closed_period       + field + fiscal_year_id + fy_status
+--                                          the sealed year, refused at ADMISSION rather than only
+--                                          at commit — because a claim's admission writes a
+--                                          DURABLE register row (see §B's world half, arm (o)).
+--                                          `clara._tf_period_wall` stays the law at commit.
 --   CLR39 advance_over_application       (the SHARED cap's own body, raised by §E's trigger)
+--
+-- THE TWO ARMS THAT RACE ARE ASKED TWICE, and only the second answer counts: `admit_...`'s step 5
+-- asks the world half before any lock (a cheap refusal), step 6a asks it again UNDER the client
+-- rung. That is what turns two concurrent corrections of one claim from a raw 23505 on
+-- `uq_staff_expense_claims_corrects` into the typed `correction_target_already_corrected`.
 --
 -- INHERITED UNCHANGED: CLR04 `actor_not_active` / `insufficient_role` / `obo_not_initiator`,
 -- CLR10 `client_inactive` / `invalid_intent_key` / `invalid_basis` / `intent_payload_conflict` /
--- `generic_control_leg`, CLR11 `client_not_found`, CLR13 `work_cancelled` / `source_conflict`,
--- CLR19 `write_into_closed_period`, CLR40 `advance_application_missing` /
--- `advance_movement_unregistered`.
+-- `generic_control_leg`, CLR11 `client_not_found`, CLR13 `work_cancelled` / `source_conflict` /
+-- `source_already_posted`, CLR19 `write_into_closed_period` AT COMMIT (`clara._tf_period_wall`,
+-- 0056:643 — the wall this file's admission arm front-runs but never replaces), CLR40
+-- `advance_application_missing` / `advance_movement_unregistered`.
 --
 -- LOCK ORDER. The advisory client rung (203005004) and 0041's role leaf are taken in 0043's own
 -- order (`enrol_staff_advance_account`: rung, then leaf) and BEFORE the core touches
@@ -700,7 +712,7 @@ declare
   v_total bigint; v_n int; v_live int; v_code text; v_class text; v_type text;
   v_enrol uuid; v_claimant jsonb; v_credit text; v_firm uuid;
   v_target_id uuid; v_target_corrected uuid; v_target_entry uuid; v_target_reversed uuid;
-  v_advance uuid; v_cap jsonb;
+  v_advance uuid; v_cap jsonb; v_fy record;
 begin
   if p_claim is null or jsonb_typeof(p_claim) <> 'object' then
     raise exception 'a staff expense claim is a JSON object' using errcode='CLR10',
@@ -861,6 +873,34 @@ begin
   -- THE WORLD HALF. Everything below can change between two attempts under one intent key.
   -- =========================================================================================
   select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+
+  -- (o) THE LOCKED PERIOD, TYPED AND EARLY — the arm `clara._assert_adjustment_relationships`
+  -- already raises for a periodic adjustment (0194:975-983), restated here because A CLAIM IS MORE
+  -- EXPOSED THAN A PLAIN JOURNAL WORK. A journal Work admitted into a sealed year leaves an
+  -- unpostable Work the Work list shows as refused; a CLAIM's admission also writes a DURABLE
+  -- REGISTER ROW (clara.staff_expense_claims + its status ledger, both append-only), so refusing
+  -- only at posting would leave a permanent claim the register cannot tell apart from one still
+  -- queued — `entry_id` null, ledger `['admitted']`, for ever.
+  --
+  -- `clara._tf_period_wall` (0056:643) stays THE LAW: it refuses the approved INSERT seconds later
+  -- with the same CLR19 and the same reason, and it is the only half that sees a permit. This arm
+  -- exists so nothing durable is spent on a posting the wall will refuse. The ordering preference
+  -- below is the wall's own (a sealed year wins if contiguity ever admitted two matches).
+  --
+  -- A year that closes BETWEEN admission and posting still refuses at COMMIT, and that residual is
+  -- deliberate and unavoidable: the claim was admitted into an open year. The register shows it as
+  -- an admitted-never-posted claim, which is the truth about it.
+  select * into v_fy from clara.fiscal_years fy
+   where fy.client_id = p_client and v_posting between fy.starts_on and fy.ends_on
+   order by (fy.status in ('closing','closed')) desc, fy.starts_on desc
+   limit 1;
+  if v_fy.id is not null and v_fy.status in ('closing','closed') then
+    raise exception 'fiscal year % (% to %) is %; a staff expense claim dated % is not admitted into it',
+      v_fy.label, v_fy.starts_on, v_fy.ends_on, v_fy.status, v_posting
+      using errcode='CLR19',
+      detail=jsonb_build_object('reason','write_into_closed_period','field','claim.posting_date',
+        'fiscal_year_id', v_fy.id, 'fy_status', v_fy.status, 'posting_date', v_posting)::text;
+  end if;
 
   -- (i) THE CLAIMANT IS A LIVE ENROLMENT OF THIS CLIENT — or a code the door may enrol.
   if v_enrol is not null then
@@ -1250,13 +1290,32 @@ begin
     return v_res || jsonb_build_object('claim_id', v_prior_claim);
   end if;
 
-  -- 5 · THE WORLD HALF.
+  -- 5 · THE WORLD HALF, ASKED CHEAPLY: before any lock, so an obviously impossible claim never
+  -- queues behind another client's admission. It is NOT the answer that counts — step 6 asks again.
   perform clara._assert_claim_basis(p_client, p_claim, true);
 
   -- 6 · THE CLAIMANT. The client rung, then 0041's role leaf — 0043's own order, taken BEFORE the
   -- core touches clara.accounting_work and clara.agent_tasks.
   perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
   perform clara._fa_lock_roles(p_client);
+
+  -- 6a · THE WORLD HALF AGAIN, THIS TIME UNDER THE RUNG THAT MAKES THE ANSWER DURABLE. Everything
+  -- step 5 asked can move between step 5 and here, because another admission on this client can
+  -- COMMIT in that window — and the (iv) correction-target arm is precisely the one whose truth
+  -- another admission changes. Without this re-ask, two concurrent corrections of one claim both
+  -- passed (iv), and the loser met `uq_staff_expense_claims_corrects` as a RAW 23505: an error
+  -- `workErrorResponse` does not classify (it claims 40P01/40001 and the CLR codes), so the route
+  -- answered 500 `{error:"internal"}` and the browser said "unavailable" where the successor
+  -- contract promises `correction_target_already_corrected`. The posting core's own evidence
+  -- handler states the house rule this restores: a conflict leaves as a TYPED refusal, never as a
+  -- raw 23505 the runtime cannot classify. Every other world fact — the enrolment's liveness, the
+  -- settlement account's class, the advance cap, the sealed year — is re-asked on the same footing.
+  --
+  -- IT IS A READ, NOT A SECOND LOCK: `_assert_claim_basis` is STABLE and takes its own snapshot at
+  -- this statement, which under READ COMMITTED is taken AFTER the rung was granted — so it sees
+  -- whatever the previous holder committed.
+  perform clara._assert_claim_basis(p_client, p_claim, true);
+
   v_enrol := clara._claim_resolve_claimant(p_client, p_author, p_claim, p_intent_key);
   select sa.person_label into v_label from clara.staff_advance_accounts sa where sa.id = v_enrol;
 
@@ -1421,7 +1480,8 @@ create trigger t_je_staff_expense_claim_reversed
 -- directly — the same relation, the same `kind='claim'` vocabulary (0043:543-544), the same
 -- entry-posting-date effective date (0043 SS3.2's hook-derived rule) — and never names
 -- `clara._subledger_on_approve`. §H re-derives the 0037:3840-3845 census at its UNCHANGED
--- cardinality of four.
+-- cardinality — the MEASURED SIX of this file's header (§0 and §H T.2 both assert that roster
+-- byte for byte), NOT the four 0037's own text names.
 --
 -- THE CAP IS ASKED, NOT RE-DERIVED. `clara._adv_over_application` (0043:1220) is the ONE body that
 -- knows whether an allocation would take the SS3.2 outstanding negative at its own date or at any
