@@ -21,15 +21,15 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, ROLES,
+  assertRaises, endPool, getPool, humanQuery, roleQuery, rootQuery, opk, ROLES,
 } from "./rig-fixtures.mjs";
 import { knowledgeWorld, committedPlan } from "./knowledge-fixtures.mjs";
 import {
-  deactivateMembership, fileDocument, firmDocument, knowledgeFirmCohortApplied, liveWork,
-  retireFiling,
+  deactivateMembership, evidenceViolators, fileDocument, fileDocumentPre0205, firmDocument,
+  knowledgeFirmCohortApplied, liveWork, retireFiling,
 } from "./knowledge-firm-fixtures.mjs";
 
-const EXPECTED_CELLS = 15;
+const EXPECTED_CELLS = 20;
 let live = false;
 let executed = 0;
 
@@ -115,6 +115,16 @@ const firmRowCount = async (firm) =>
   (await rootQuery(
     "select count(*)::int as n from clara.knowledge_records where firm_id = $1 and scope_kind = 'firm'",
     [firm])).rows[0].n;
+
+const withdraw = (sub, record, reason) =>
+  humanQuery(sub,
+    "select clara.withdraw_knowledge(p_record => $1, p_reason => $2, p_op_key => $3) as r",
+    [record, reason, opk("p654")]).then((r) => r.rows[0].r);
+
+const liveFilings = async (document) =>
+  (await rootQuery(
+    "select count(*)::int as n from clara.document_filings where document_id = $1 and retired_at is null",
+    [document])).rows[0].n;
 
 /** The admitted set, DERIVED the way the trigger derives it — seeded rows UNION the by-kind arm.
  *  A cell asserts against this rather than against a re-typed list, so the census and the wall
@@ -282,9 +292,25 @@ cell("p654.evidence.admits_unfiled_firm_document — the source 0192 reserves fo
     "select source_document_id from clara.knowledge_records where id = $1", [r.revision_id]);
   assert.equal(row.rows[0].source_document_id, doc, "the unfiled firm document was not pinned");
 
-  // …and the wall is about the FILING, not about the document: file it to a client and the NEXT
-  // firm-scope record naming it is refused, while the one already captured stands.
+  // …AND THE OTHER DIRECTION, which this battery used to pin as intended behaviour and which
+  // fix round 1 (adversarial finding 654-ADV-1) corrected: while a LIVE firm rule cites this
+  // document, it may no longer be FILED to a client at all. Filing it afterwards was the
+  // contamination route the INSERT wall could not see — one client's document and basis text
+  // travelling into every other client's runtime pack, with the same wall then refusing the
+  // retraction that would have removed it.
+  const blocked = await assertRaises("CLR10", () => fileDocument(w.firm, doc, w.clientA, w.admin),
+    "filing a document that a live firm-scope rule cites");
+  assert.equal(reasonOf(blocked), "document_cited_by_firm_default");
+  assert.equal(await liveFilings(doc), 0, "a refused filing left a row behind");
+
+  // …and the refusal names its own remedy rather than trapping the human: withdraw the firm rule
+  // first, and the filing lands.
+  await withdraw(w.admin, r.record_id, "the manual turned out to belong to one client");
   const filing = await fileDocument(w.firm, doc, w.clientA, w.admin);
+  assert.equal(await liveFilings(doc), 1);
+
+  // …and NOW the INSERT wall is what refuses the next firm-scope record naming it, which is what
+  // makes the pair symmetrical rather than one-way.
   const err = await assertRaises("CLR10", () => capture(w.admin, {
     key: "default_currency", scope: "firm", client: null, value: "MYR",
     basis: "the same manual, now filed against a client", source: { document_id: doc },
@@ -298,6 +324,100 @@ cell("p654.evidence.admits_unfiled_firm_document — the source 0192 reserves fo
     basis: "the manual, after the filing was retired", source: { document_id: doc },
   });
   assert.equal(again.status, "captured");
+  assert.deepEqual(await evidenceViolators(w.firm), { documents: 0, works: 0 },
+    "the runtime form of 0205 §0(8)/§E T.4: no LIVE firm-scope row may cite a filed document or a client's Work");
+});
+
+// ---------------------------------------------------------------------------------------------
+// FIX ROUND 1 — 654-ADV-1 (blocker) and 654-ADV-2 (should). The wall as first shipped inspected
+// `source_document_id` on INSERT into clara.knowledge_records and nothing else, so it was ONE-WAY
+// (file the document after the rule cited it and the contamination lands anyway, with the
+// retraction refused by the same trigger) and covered ONE of the two client-bearing pins
+// (`source_work_id` rode straight through).
+// ---------------------------------------------------------------------------------------------
+
+cell("p654.evidence.retraction_survives_contamination — a firm rule whose document became filed can still be corrected and withdrawn", async () => {
+  const w = await knowledgeWorld("p654v3");
+  const doc = await firmDocument(w.firm, w.admin, "p654v3");
+  const rule = await capture(w.admin, {
+    key: "accounting_basis", scope: "firm", client: null,
+    value: { accounting_basis: "accrual", accounting_basis_label: "Accrual" },
+    basis: "the firm's own accounting manual, held as a firm document",
+    source: { document_id: doc },
+  });
+  assert.equal(rule.status, "captured");
+
+  // THE ONLY WAY TO REACH THIS STATE IS TO BYPASS THE FILING WALL, which is exactly what a
+  // database PREDATING 0205 is: rows captured before either trigger existed. The escape hatch
+  // below is for them, and a cell that could not manufacture one would be asserting nothing.
+  const filing = await fileDocumentPre0205(w.firm, doc, w.clientA, w.admin);
+  assert.equal(await liveFilings(doc), 1, "the legacy filing did not land");
+
+  // A CORRECTION that introduces no new pin is admissible…
+  const corrected = await humanQuery(w.admin,
+    `select clara.correct_knowledge(p_record => $1, p_value => $2::jsonb, p_reason => $3,
+        p_op_key => $4) as r`,
+    [rule.record_id, JSON.stringify({ accounting_basis: "cash", accounting_basis_label: "Cash" }),
+      "the manual says cash", opk("p654")]).then((x) => x.rows[0].r);
+  assert.equal(corrected.status, "corrected");
+
+  // …and so is the WITHDRAWAL, which is the only remedy that actually removes the contamination.
+  const gone = await withdraw(w.admin, rule.record_id, "this belongs to one client, not the firm");
+  assert.equal(gone.status, "withdrawn");
+  const revisions = (await rootQuery(
+    "select revision_n, state, revision_kind from clara.knowledge_records where record_id = $1 order by revision_n",
+    [rule.record_id])).rows;
+  assert.deepEqual(revisions.map((x) => [x.revision_n, x.revision_kind, x.state]),
+    [[1, "capture", "superseded"], [2, "correction", "superseded"], [3, "withdrawal", "withdrawn"]],
+    "a contaminated firm rule must never be stuck live");
+
+  // THE SKIP IS NARROW: it admits a retraction that carries the SAME pins, never one that
+  // introduces a new contaminated pin. A correction naming a DIFFERENT filed document is refused.
+  const rule2 = await capture(w.admin, {
+    key: "default_currency", scope: "firm", client: null, value: "MYR",
+    basis: "the firm presents in ringgit",
+  });
+  const otherDoc = await firmDocument(w.firm, w.admin, "p654v3b");
+  await fileDocumentPre0205(w.firm, otherDoc, w.clientB, w.admin);
+  const refused = await assertRaises("CLR10", () => humanQuery(w.admin,
+    `select clara.correct_knowledge(p_record => $1, p_value => $2::jsonb, p_reason => $3,
+        p_op_key => $4, p_source_kind => 'user_statement', p_source => $5::jsonb) as r`,
+    [rule2.record_id, JSON.stringify("SGD"), "re-sourced onto a client's document", opk("p654"),
+      JSON.stringify({ document_id: otherDoc })]),
+  "correction re-pinning a firm rule onto a filed document");
+  assert.equal(reasonOf(refused), "firm_scope_client_evidence");
+
+  // Leave the rig the way 0205's own prestate expects to find it.
+  await retireFiling(filing, w.admin);
+  await rootQuery(
+    `update clara.document_filings set retired_at = now(), retired_by = $2,
+        retirement_reason = 'p654 rig retirement' where document_id = $1 and retired_at is null`,
+    [otherDoc, w.admin]);
+  assert.deepEqual(await evidenceViolators(w.firm), { documents: 0, works: 0 });
+});
+
+cell("p654.evidence.refuses_client_work — a firm-wide default may not pin a client's accounting_work either", async () => {
+  const w = await knowledgeWorld("p654v4");
+  const work = await liveWork(w.firm, w.clientA, w.bookkeeper);
+  // `clara.accounting_work.client_id` is NOT NULL (measured off information_schema), so EVERY
+  // Work belongs to exactly one client and no firm-scope record may cite one at all. Before the
+  // fix round, `clara._knowledge_source_pins` checked only firm congruence (0192:799-802) and
+  // `clara._knowledge_row_json` emitted the pin (0192:1022-1024) into every other client's pack.
+  const err = await assertRaises("CLR10", () => capture(w.admin, {
+    key: "default_currency", scope: "firm", client: null, value: "SGD",
+    basis: "a conclusion reached inside one client's Work", source: { work_id: work },
+  }), "firm capture pinning a client's accounting_work");
+  assert.equal(reasonOf(err), "firm_scope_client_work");
+  assert.equal(await firmRowCount(w.firm), 0, "a refused firm capture left a row behind");
+
+  // THE CLIENT LANE IS UNTOUCHED: a Work pin is exactly what a client-scope record is for, and
+  // it is the only link the firm register's live-Work affordance has to derive from.
+  const ok = await capture(w.bookkeeper, {
+    key: "default_currency", client: w.clientA, value: "SGD",
+    basis: "decided inside this client's own Work", source: { work_id: work },
+  });
+  assert.equal(ok.status, "captured");
+  assert.deepEqual(await evidenceViolators(w.firm), { documents: 0, works: 0 });
 });
 
 // =============================================================================================
@@ -618,6 +738,11 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
     // the conservative direction for a census that must not MISS a reader).
     "list_firm_knowledge", "get_knowledge_applicability", "_tf_knowledge_firm_eligibility",
     "_tf_knowledge_firm_evidence",
+    // …and 0205's filing-side half of the same wall (fix round 1, 654-ADV-1). It sits on
+    // clara.document_filings rather than on clara.knowledge_records, but it is a member of the
+    // knowledge cohort by SUBJECT: it reads knowledge_records to decide whether a filing may
+    // land, and it grants nothing.
+    "_tf_document_filing_firm_knowledge",
   ]);
   const strays = readers.filter((r) => !COHORT.has(r.proname)).map((r) => r.sig);
   assert.deepEqual(strays, [],
@@ -714,4 +839,111 @@ cell("p654.guards.fire_in_name_order_and_are_granted_to_nobody_else", async () =
     runtime_list: false, agent_list: false, agent_appl: false,
     human_read: true, agent_read: false, human_write: false,
   }, "the new reads are clara_authenticated ONLY (0057's dark-grant rule, restated 0192:1742-1745)");
+});
+
+// =============================================================================================
+// SEAM 8 — THE PROMOTION AS AN OPERATION (fix round 1, adversarial finding 654-ADV-4). The brief's
+// web section pins op_key behaviour ("a lost response re-reads current state before a distinct
+// resubmit and reuses the same op_key"), and no db cell covered it at firm scope. These three
+// are about the ACT rather than the wall: a replay is one receipt, a reused key with different
+// arguments is a typed refusal, and two humans promoting the same key at once leave ONE rule.
+// =============================================================================================
+
+cell("p654.promote.replay_is_one_receipt — the same op_key and the same payload return the same envelope, one receipt and one row", async () => {
+  const w = await knowledgeWorld("p654o1");
+  const key = opk("p654replay");
+  const args = {
+    key: "default_currency", scope: "firm", client: null, value: "MYR",
+    basis: "the firm presents in ringgit", opKey: key,
+  };
+  const first = await capture(w.admin, args);
+  const second = await capture(w.admin, args);
+  assert.equal(first.status, "captured");
+  assert.deepEqual(second, first, "a replayed promotion must return the FIRST envelope verbatim");
+
+  assert.equal(await firmRowCount(w.firm), 1, "a replay minted a second knowledge row");
+  const receipts = (await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where firm_id = $1 and fn = 'capture_knowledge' and op_key = $2",
+    [w.firm, key])).rows[0].n;
+  assert.equal(receipts, 1, "a replay minted a second reserve-before-effect receipt");
+});
+
+cell("p654.promote.op_key_conflict — the same op_key with a different payload is refused and nothing moves", async () => {
+  const w = await knowledgeWorld("p654o2");
+  const key = opk("p654conflict");
+  await capture(w.admin, {
+    key: "default_currency", scope: "firm", client: null, value: "MYR",
+    basis: "the firm presents in ringgit", opKey: key,
+  });
+  const err = await assertRaises("CLR10", () => capture(w.admin, {
+    key: "default_currency", scope: "firm", client: null, value: "SGD",
+    basis: "the firm presents in ringgit", opKey: key,
+  }), "the same op_key with a different value");
+  assert.match(err.message, /op_key reused with different args/,
+    `the reuse must be refused by name, not by a generic error: ${err.message}`);
+
+  assert.equal(await firmRowCount(w.firm), 1, "a refused reuse moved a row");
+  const live = (await rootQuery(
+    "select value from clara.knowledge_records where firm_id = $1 and scope_kind = 'firm' and state = 'live'",
+    [w.firm])).rows;
+  assert.deepEqual(live.map((r) => r.value), ["MYR"], "the refused payload reached the record");
+});
+
+cell("p654.promote.race — two admins promoting one key behind a barrier leave ONE live rule; the loser is refused by name and neither deadlocks", async () => {
+  const w = await knowledgeWorld("p654o3");
+  // TWO RAW CONNECTIONS, genuinely in flight. The pooled helpers commit and reset per call, so
+  // they cannot express a race at all (accounting-plan-occurrences.test.mjs's own reason).
+  const a = await getPool().connect();
+  const b = await getPool().connect();
+  let outcomes = null;
+  try {
+    for (const [c, sub] of [[a, w.admin], [b, w.owner]]) {
+      await c.query("set role clara_authenticated");
+      await c.query("select set_config('request.jwt.claims', $1, false)",
+        [JSON.stringify({ sub, role: "authenticated" })]);
+    }
+    // THE BARRIER IS `uq_knowledge_live` ITSELF. A begins the promotion and holds its
+    // uncommitted index entry; B's INSERT of the same (scope, firm, key, applicability) queues
+    // on it and cannot resolve until A commits — so the two are provably overlapping rather
+    // than serialised by luck.
+    await a.query("begin");
+    await b.query("begin");
+    const pidB = (await b.query("select pg_backend_pid() as p")).rows[0].p;
+    await a.query(CAPTURE, ["default_currency", JSON.stringify("MYR"), "A's promotion",
+      opk("p654raceA"), "firm", null, "user_statement", "{}", null, null, "{}"]);
+    const pb = b.query(CAPTURE, ["default_currency", JSON.stringify("SGD"), "B's promotion",
+      opk("p654raceB"), "firm", null, "user_statement", "{}", null, null, "{}"])
+      .then(() => ({ ok: true }), (e) => ({ ok: false, code: e.code, detail: e.detail, message: e.message }));
+
+    let queued = false;
+    for (let i = 0; i < 200 && !queued; i += 1) {
+      const r = await rootQuery("select wait_event_type as wt from pg_stat_activity where pid = $1", [pidB]);
+      queued = r.rows[0]?.wt === "Lock";
+      if (!queued) await new Promise((x) => setTimeout(x, 25));
+    }
+    assert.ok(queued, "the second promotion never queued on uq_knowledge_live -- this cell would prove nothing about a race");
+
+    await a.query("commit");
+    const loser = await pb;
+    await b.query("rollback").catch(() => {});
+    outcomes = loser;
+  } finally {
+    for (const c of [a, b]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+
+  assert.equal(outcomes.ok, false, "both promotions succeeded -- uq_knowledge_live did not decide the race");
+  assert.equal(outcomes.code, "CLR10", `the loser must be refused CLR10, got ${outcomes.code}: ${outcomes.message}`);
+  assert.notEqual(outcomes.code, "40P01", "a deadlock is not a refusal");
+  assert.equal(reasonOf(outcomes), "knowledge_already_live",
+    `the loser must be refused BY NAME rather than with a bare 23505: ${outcomes.message}`);
+
+  const live = (await rootQuery(
+    "select value from clara.knowledge_records where firm_id = $1 and scope_kind = 'firm' and state = 'live'",
+    [w.firm])).rows;
+  assert.deepEqual(live.map((r) => r.value), ["MYR"], "exactly one live firm rule may survive the race");
 });

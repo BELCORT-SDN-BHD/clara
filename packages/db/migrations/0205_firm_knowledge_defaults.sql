@@ -9,10 +9,11 @@
 --
 -- WHAT THIS FILE ADDS, IN ONE SENTENCE. A fail-closed catalog of the keys a firm may default
 -- (`clara.knowledge_key_firm_eligibility`), TWO BEFORE INSERT guards on `clara.knowledge_records`
--- that refuse an ineligible firm-scope key and a firm-scope record citing a document any client is
--- filed against, and TWO viewer-floored reads — the firm register and the per-client applicability
--- answer — so a human can finally SEE a firm rule, the clients that hold an exception to it, and
--- which of the two governs the client in front of them.
+-- that refuse an ineligible firm-scope key and a firm-scope record citing one client's evidence
+-- (a filed document, or any accounting_work at all), a THIRD guard on `clara.document_filings`
+-- that closes the same wall from the other side, and TWO viewer-floored reads — the firm register
+-- and the per-client applicability answer — so a human can finally SEE a firm rule, the clients
+-- that hold an exception to it, and which of the two governs the client in front of them.
 --
 -- =====================================================================================
 -- WHAT THIS FILE DELIBERATELY DOES NOT DO, each because something else already does it.
@@ -87,12 +88,40 @@
 --     document". Retiring the last filing makes the document admissible again: the predicate is
 --     the FILING's live state, not the document's history.
 --
+--     WHICH PINS THE WALL COVERS, AND WHY EXACTLY THESE TWO. `clara.knowledge_records` carries
+--     five source pins (0192:415-419). Three of them — extraction, region, field path — cannot
+--     exist without `source_document_id` (`ck_knowledge_records_extraction_pins` /
+--     `_extraction_required` / `_region_needs_extraction` / `_field_needs_extraction`,
+--     0192:461-470), so they are covered TRANSITIVELY by the document arm. That leaves exactly
+--     ONE other client-bearing pin: `source_work_id`. `clara.accounting_work.client_id` is NOT
+--     NULL (measured off information_schema on the rig), so EVERY Work belongs to exactly one
+--     client and a firm-wide rule may cite NONE of them — a second arm, CLR10
+--     `firm_scope_client_work`. Before it existed `clara._knowledge_source_pins` checked only
+--     firm congruence for the Work (0192:799-802) and `clara._knowledge_row_json` emitted the
+--     work id (0192:1022-1024) into every other client's pack.
+--
+--     AND THE WALL IS TWO-WAY, which the first cut of this file was not. Refusing the record at
+--     INSERT is only half of the invariant: with the other half missing, FILING a document to a
+--     client AFTER a firm rule cited it produced exactly the contamination this file exists to
+--     prevent, and the INSERT wall then refused the retraction too (a withdrawal carries the
+--     predecessor's pins verbatim, 0192:1294-1298), so the contaminated rule could never be
+--     withdrawn. §B.3 closes the filing direction (CLR10 `document_cited_by_firm_default`, on
+--     `clara.document_filings`) and §B.2 admits a correction or withdrawal that introduces NO
+--     new pin, so a rule that reached this state on a database predating this file can always
+--     be retracted. The INVARIANT, stated once: no LIVE firm-scope knowledge record may cite a
+--     document carrying a live client filing, or any accounting_work at all.
+--
 -- C · WHY TRIGGERS, AND WHY THESE NAMES. PostgreSQL fires same-event BEFORE triggers in NAME
 --     order, so `t_knowledge_records_firm_eligibility` and `t_knowledge_records_firm_evidence`
 --     both sort AFTER 0192's `t_knowledge_records_authority` — which is required, not incidental:
 --     that trigger stamps `applies_when_digest` and refuses an unknown key or a mismatched kind,
 --     and a wall that ran before it would be reasoning about a half-formed row. The tail asserts
 --     the order off `pg_trigger` rather than trusting the alphabet.
+--
+--     THE THIRD TRIGGER SITS ON A DIFFERENT TABLE, `clara.document_filings`, for the same reason
+--     and the reverse direction: a wall that only inspects the knowledge row at insert cannot see
+--     a filing created afterwards. Its name sorts before 0007's own `t_document_filings_stamp`,
+--     which is harmless — it reads `new.document_id` alone and stamps nothing.
 --
 --     A trigger also reaches every lane at once. `capture_knowledge` (human),
 --     `capture_knowledge_for` (runtime, client-scope only today) and
@@ -154,6 +183,12 @@ begin
      and tgname in ('t_knowledge_records_firm_eligibility','t_knowledge_records_firm_evidence');
   if v_n <> 0 then
     raise exception '#654 prestate: a firm-scope guard trigger already exists on clara.knowledge_records'
+      using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_trigger
+              where tgrelid = 'clara.document_filings'::regclass and not tgisinternal
+                and tgname = 't_document_filings_firm_knowledge') then
+    raise exception '#654 prestate: the filing-side half of the evidence wall already exists on clara.document_filings'
       using errcode='CLR10';
   end if;
 
@@ -255,8 +290,17 @@ begin
     raise exception '#654 prestate: % existing firm-scope knowledge record(s) cite a document with at least one LIVE client filing -- the cross-client evidence wall cannot grandfather a violator', v_n
       using errcode='CLR10';
   end if;
+  -- …and the SECOND client-bearing pin, on the same terms. `clara.accounting_work.client_id` is
+  -- NOT NULL, so a firm-scope record naming ANY Work is naming one client's Work.
+  select count(*)::int into v_n
+    from clara.knowledge_records r
+   where r.scope_kind = 'firm' and r.source_work_id is not null;
+  if v_n <> 0 then
+    raise exception '#654 prestate: % existing firm-scope knowledge record(s) pin a client''s accounting_work -- the cross-client evidence wall cannot grandfather a violator', v_n
+      using errcode='CLR10';
+  end if;
 
-  raise notice '#654 prestate: clean -- 0192''s four relations and its authority trigger are present, uq_knowledge_live is partial on state=''live'' and keyed by applicability, the catalog carries its 13 keys including the three D8 seeds, uq_document_filing_active is the (document_id, client_id) WHERE retired_at IS NULL index this file counts across, and NO existing firm-scope record would be refused by either wall.';
+  raise notice '#654 prestate: clean -- 0192''s four relations and its authority trigger are present, uq_knowledge_live is partial on state=''live'' and keyed by applicability, the catalog carries its 13 keys including the three D8 seeds, uq_document_filing_active is the (document_id, client_id) WHERE retired_at IS NULL index this file counts across, and NO existing firm-scope record cites a document with a live client filing or pins any client Work at all.';
 end
 $w654_pre$;
 
@@ -343,14 +387,43 @@ begin
 end $$;
 revoke all on function clara._tf_knowledge_firm_eligibility() from public;
 
--- B.2 — CROSS-CLIENT EVIDENCE. Counted across N live filings (the `uq_document_filing_active`
--- shape, 0007:92-94), refused on ANY of them, and silent about an UNFILED firm document — the case
--- 0192 reserves in its own voice at 0192:871-874.
+-- B.2 — CROSS-CLIENT EVIDENCE, on BOTH client-bearing pins. Counted across N live filings (the
+-- `uq_document_filing_active` shape, 0007:92-94), refused on ANY of them, and silent about an
+-- UNFILED firm document — the case 0192 reserves in its own voice at 0192:871-874.
 create function clara._tf_knowledge_firm_evidence() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_n int;
+declare v_n int; v_client uuid; p clara.knowledge_records;
 begin
   if new.scope_kind is distinct from 'firm' then return new; end if;
+
+  -- THE RETRACTION HATCH, FIRST, and it is narrow by construction. A withdrawal carries the
+  -- predecessor's pins VERBATIM (0192:1294-1298) and a correction that names no new source does
+  -- the same (0192:1252-1256), so without this arm a rule that reached a walled state could never
+  -- be corrected or withdrawn — the wall would refuse the only act that removes the harm. The
+  -- skip therefore applies ONLY to a revision that introduces NO new pin: a correction that
+  -- re-aims a firm rule onto a client's document or Work is still refused below.
+  if new.revision_kind in ('correction','withdrawal') and new.supersedes_id is not null then
+    select * into p from clara.knowledge_records where id = new.supersedes_id;
+    if found
+       and p.source_document_id is not distinct from new.source_document_id
+       and p.source_work_id     is not distinct from new.source_work_id then
+      return new;
+    end if;
+  end if;
+
+  -- ARM 2 — THE WORK PIN. `clara.accounting_work.client_id` is NOT NULL, so every Work is one
+  -- client's Work and a firm-wide rule may cite none of them. Fail-closed: a pin naming a row
+  -- this read cannot resolve is refused too (the FK would refuse it a moment later anyway).
+  if new.source_work_id is not null then
+    select w.client_id into v_client from clara.accounting_work w where w.id = new.source_work_id;
+    raise exception 'that Work belongs to one client; a firm-wide default may not cite it -- record the rule on that client, or cite the firm''s own source'
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'firm_scope_client_work',
+          'work_id', new.source_work_id, 'client_id', v_client)::text;
+  end if;
+
+  -- ARM 1 — THE DOCUMENT PIN (and, transitively, the extraction/region/field pins that cannot
+  -- exist without it — 0192:461-470).
   if new.source_document_id is null then return new; end if;
   select count(*)::int into v_n
     from clara.document_filings f
@@ -373,6 +446,51 @@ create trigger t_knowledge_records_firm_eligibility before insert on clara.knowl
   for each row execute function clara._tf_knowledge_firm_eligibility();
 create trigger t_knowledge_records_firm_evidence before insert on clara.knowledge_records
   for each row execute function clara._tf_knowledge_firm_evidence();
+
+-- B.3 — THE SAME WALL, FROM THE OTHER SIDE. Refusing the RECORD at insert is half an invariant:
+-- a document cited by a live firm rule could still be FILED to a client afterwards, and then one
+-- client's document id and basis text travelled into every other client's register and model pack
+-- exactly as if the wall had never existed — measured on a from-scratch chain before this arm was
+-- added. This trigger closes the direction, and the refusal names the remedy (withdraw the firm
+-- rule first) rather than leaving a human to guess at it.
+--
+-- WHY `state = 'live'` AND NOT EVERY REVISION. A superseded or withdrawn revision reaches no
+-- client: both reads and the runtime pack emit live rows. Blocking a filing on a rule somebody
+-- already withdrew would make a document permanently unfileable because of a rule that no longer
+-- exists — a wall nobody could state.
+--
+-- THE UPDATE ARM IS A BELT, NOT THE BUCKLE, and that is measured: 0007's own
+-- `clara._tf_document_filing_update` (0007:525-539) admits exactly one transition,
+-- active -> retired with actor and reason, and raises CLR17 on anything else — so UN-retiring a
+-- filing is already impossible. The arm below is scoped to precisely that (impossible) transition
+-- so that a normal retirement, and every other update, reaches 0007's trigger with its own error
+-- unchanged.
+create function clara._tf_document_filing_firm_knowledge() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare r record;
+begin
+  if tg_op = 'INSERT' and new.retired_at is not null then return new; end if;
+  if tg_op = 'UPDATE' and not (old.retired_at is not null and new.retired_at is null) then
+    return new;
+  end if;
+  select k.record_id, k.knowledge_key into r
+    from clara.knowledge_records k
+   where k.scope_kind = 'firm' and k.state = 'live'
+     and k.source_document_id = new.document_id
+   order by k.recorded_at
+   limit 1;
+  if not found then return new; end if;
+  raise exception 'this document is cited by the firm-wide rule for %; filing it to a client would carry that client''s evidence into every other client -- withdraw or re-source the firm rule first',
+    r.knowledge_key
+    using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'document_cited_by_firm_default',
+        'document_id', new.document_id, 'record_id', r.record_id,
+        'knowledge_key', r.knowledge_key)::text;
+end $$;
+revoke all on function clara._tf_document_filing_firm_knowledge() from public;
+
+create trigger t_document_filings_firm_knowledge before insert or update on clara.document_filings
+  for each row execute function clara._tf_document_filing_firm_knowledge();
 
 -- =====================================================================================
 -- §C — THE TWO READS. Both VIEWER-floored, the floor `clara.list_client_knowledge` already takes
@@ -654,15 +772,29 @@ declare v_n int; v_s text; v_src text; v_names text[]; v_admitted text[]; v_refu
 begin
   -- (T.1) THE FIRING ORDER, off pg_trigger. The two guards depend on 0192's stamp having run, and
   -- "Postgres fires BEFORE triggers alphabetically" is a fact about the server, not about this
-  -- file — so it is MEASURED. tgtype bit 2 = ROW, bit 4 = INSERT (pg_trigger's own encoding).
+  -- file — so it is MEASURED. pg_trigger's own tgtype encoding: value 1 = ROW, value 2 = BEFORE,
+  -- value 4 = INSERT (the first draft of this comment mislabelled 2 as ROW; the arithmetic below
+  -- was right, the sentence was not).
   select array_agg(tgname order by tgname) into v_names
     from pg_trigger
    where tgrelid = 'clara.knowledge_records'::regclass and not tgisinternal
-     and (tgtype & 2) <> 0 and (tgtype & 4) <> 0;
+     and (tgtype & 1) <> 0 and (tgtype & 2) <> 0 and (tgtype & 4) <> 0;
   if v_names is distinct from array['t_knowledge_records_authority',
                                     't_knowledge_records_firm_eligibility',
                                     't_knowledge_records_firm_evidence'] then
     raise exception '#654 tail: the BEFORE INSERT ROW trigger order on clara.knowledge_records is %, not authority -> firm_eligibility -> firm_evidence', v_names
+      using errcode='CLR10';
+  end if;
+
+  -- …AND THE OTHER SIDE OF THE SAME WALL IS ATTACHED, on the FILING table, for BOTH the INSERT
+  -- and the (0007-impossible) un-retire UPDATE. A wall enforced in one direction only is the
+  -- defect this arm exists to close, so its presence is asserted rather than assumed.
+  select count(*)::int into v_n from pg_trigger
+   where tgrelid = 'clara.document_filings'::regclass and not tgisinternal
+     and tgname = 't_document_filings_firm_knowledge'
+     and (tgtype & 1) <> 0 and (tgtype & 2) <> 0 and (tgtype & 4) <> 0 and (tgtype & 16) <> 0;
+  if v_n <> 1 then
+    raise exception '#654 tail: t_document_filings_firm_knowledge is not attached to clara.document_filings as a BEFORE INSERT OR UPDATE ROW trigger'
       using errcode='CLR10';
   end if;
 
@@ -767,6 +899,13 @@ begin
     raise exception '#654 tail: % firm-scope record(s) cite a document with a live client filing', v_n
       using errcode='CLR10';
   end if;
+  select count(*)::int into v_n
+    from clara.knowledge_records r
+   where r.scope_kind = 'firm' and r.source_work_id is not null;
+  if v_n <> 0 then
+    raise exception '#654 tail: % firm-scope record(s) pin a client''s accounting_work', v_n
+      using errcode='CLR10';
+  end if;
 
   -- (T.5) THE GRANT CENSUS ON THE FOUR NEW FUNCTIONS, grantee by grantee. The two reads are
   -- clara_authenticated ONLY; the two trigger bodies are callable by NOBODY (they run as the
@@ -777,7 +916,8 @@ begin
     end if;
   end loop;
   foreach v_s in array array['clara.list_firm_knowledge()','clara.get_knowledge_applicability(uuid,text)',
-                             'clara._tf_knowledge_firm_eligibility()','clara._tf_knowledge_firm_evidence()'] loop
+                             'clara._tf_knowledge_firm_eligibility()','clara._tf_knowledge_firm_evidence()',
+                             'clara._tf_document_filing_firm_knowledge()'] loop
     -- A NULL proacl means the DEFAULT ACL, which for a function includes EXECUTE to PUBLIC: the
     -- `revoke all ... from public` above is what makes it non-null, so both halves are one probe.
     if (select p.proacl is null from pg_proc p where p.oid = v_s::regprocedure) then
@@ -843,7 +983,7 @@ begin
     end if;
   end loop;
 
-  raise notice '#654 tail: OK -- clara.knowledge_key_firm_eligibility exists under FORCED row level security owned by clara_fn_owner, append-only and no-truncate belted, readable by clara_authenticated ALONE (no runtime, agent or wake role) and writable by no application role at all, seeded with the three keys owner ruling D8 named; the two BEFORE INSERT guards fire AFTER 0192''s own authority stamp in the order pg_trigger reports (authority -> firm_eligibility -> firm_evidence); the FIRM-DEFAULTABLE census measured off the live catalog is EXACTLY {%}, and the NINE keys refused at firm scope are {%} -- entity_type, msic, sst_regime and financial_year_end_month among them by name; NO existing firm-scope record names an ineligible key or cites a document carrying a live client filing (counted across N filings, not probed for one); clara.list_firm_knowledge and clara.get_knowledge_applicability are viewer-floored STABLE SECURITY DEFINER functions with search_path and plan_cache_mode pinned, PUBLIC revoked, granted to clara_authenticated and to nobody else; and every one of the five 0192 bodies this file was forbidden to recut still resolves at its exact signature with clara.knowledge_records carrying six non-internal triggers (0192''s four plus these two).',
+  raise notice '#654 tail: OK -- clara.knowledge_key_firm_eligibility exists under FORCED row level security owned by clara_fn_owner, append-only and no-truncate belted, readable by clara_authenticated ALONE (no runtime, agent or wake role) and writable by no application role at all, seeded with the three keys owner ruling D8 named; the two BEFORE INSERT guards fire AFTER 0192''s own authority stamp in the order pg_trigger reports (authority -> firm_eligibility -> firm_evidence), and the SAME wall is closed from the filing side by t_document_filings_firm_knowledge on clara.document_filings so that a document a live firm rule cites can no longer be filed to a client after the fact (CLR10 document_cited_by_firm_default) while a correction or withdrawal carrying the predecessor''s pins verbatim stays admissible, which is what keeps a contaminated rule retractable; the FIRM-DEFAULTABLE census measured off the live catalog is EXACTLY {%}, and the NINE keys refused at firm scope are {%} -- entity_type, msic, sst_regime and financial_year_end_month among them by name; NO existing firm-scope record names an ineligible key, cites a document carrying a live client filing (counted across N filings, not probed for one) or pins any client''s accounting_work; clara.list_firm_knowledge and clara.get_knowledge_applicability are viewer-floored STABLE SECURITY DEFINER functions with search_path and plan_cache_mode pinned, PUBLIC revoked, granted to clara_authenticated and to nobody else; and every one of the five 0192 bodies this file was forbidden to recut still resolves at its exact signature with clara.knowledge_records carrying six non-internal triggers (0192''s four plus these two).',
     array_to_string(v_admitted, ', '), array_to_string(v_refused, ', ');
 end
 $w654_tail$;

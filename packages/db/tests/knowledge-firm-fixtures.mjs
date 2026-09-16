@@ -5,7 +5,7 @@
 // without live client filings, a live Work to cite) are minted here.
 
 import { randomUUID } from "node:crypto";
-import { rootQuery } from "./rig-helpers.mjs";
+import { asRoot, rootQuery } from "./rig-helpers.mjs";
 
 /** True iff 0205's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a half-applied firm-default
@@ -29,7 +29,12 @@ export async function knowledgeFirmCohortApplied() {
        exists (select 1 from pg_trigger
                 where tgrelid = 'clara.knowledge_records'::regclass
                   and not tgisinternal and tgname = 't_knowledge_records_firm_evidence')
-                                                                        as evidence_trigger`,
+                                                                        as evidence_trigger,
+       to_regprocedure('clara._tf_document_filing_firm_knowledge()')     is not null as filing_fn,
+       exists (select 1 from pg_trigger
+                where tgrelid = 'clara.document_filings'::regclass
+                  and not tgisinternal and tgname = 't_document_filings_firm_knowledge')
+                                                                        as filing_trigger`,
   );
   const row = r.rows[0];
   const flags = Object.values(row);
@@ -95,4 +100,44 @@ export async function deactivateMembership(firm, user) {
     "update clara.firm_memberships set status = 'removed', removed_at = now() where firm_id = $1 and user_id = $2",
     [firm, user],
   );
+}
+
+/** A filing that is REFUSED by 0205's `t_document_filings_firm_knowledge` wall today, made
+ *  anyway — the only way to reach the contaminated state a database PREDATING 0205 could hold.
+ *
+ *  `session_replication_role = 'replica'` suppresses non-ALWAYS triggers for THIS SESSION ONLY
+ *  (never a global `alter table ... disable trigger`, which a crashed cell would leave off for
+ *  every other lane on the rig), and `withActor`'s own `reset all` clears it when the connection
+ *  goes back to the pool. It is used by exactly one cell — the one proving that a contaminated
+ *  firm rule can still be RETRACTED, which is the half of the wall a legacy row needs. */
+export async function fileDocumentPre0205(firm, document, client, filedBy) {
+  return asRoot(async (c) => {
+    await c.query("set session_replication_role = 'replica'");
+    try {
+      const r = await c.query(
+        `insert into clara.document_filings(firm_id, document_id, client_id, filed_by, basis)
+         values ($1,$2,$3,$4,'legacy-0007') returning id`,
+        [firm, document, client, filedBy],
+      );
+      return r.rows[0].id;
+    } finally {
+      await c.query("set session_replication_role = 'origin'").catch(() => {});
+    }
+  });
+}
+
+/** How many live firm-scope knowledge rows in this firm would the two evidence arms refuse if
+ *  they were inserted today — the RUNTIME form of 0205 §0(8) / §E T.4's apply-time census. */
+export async function evidenceViolators(firm) {
+  const r = await rootQuery(
+    `select
+       count(*) filter (where r.source_document_id is not null and exists (
+         select 1 from clara.document_filings f
+          where f.document_id = r.source_document_id and f.retired_at is null))::int as documents,
+       count(*) filter (where r.source_work_id is not null)::int as works
+     from clara.knowledge_records r
+    where r.firm_id = $1 and r.scope_kind = 'firm' and r.state = 'live'`,
+    [firm],
+  );
+  return r.rows[0];
 }

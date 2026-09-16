@@ -225,13 +225,26 @@ overrides the firm row carrying that condition and leaves an unconditional firm 
   append-only on UPDATE, so its already-seeded rows can never be re-defaulted.
 - **What a firm default may cite** — `clara._tf_knowledge_firm_evidence`, the second BEFORE INSERT
   trigger, refuses a firm-scope record pinning a document that carries **any** live
-  `clara.document_filings` row (CLR10 `firm_scope_client_evidence`). `uq_document_filing_active` is
-  over `(document_id, client_id) where retired_at is null`, so one document may hold N live
-  filings and the wall counts rather than probes for one. An **unfiled firm document stays
-  admissible** — the case 0192 reserves in its own voice — and retiring the last filing makes a
-  document admissible again. This is not an RLS disclosure fix (`clara.documents` is already
-  firm-readable); it stops one client's evidence travelling as the stated basis of a rule applied
-  to every other client, first of all inside a model's knowledge pack.
+  `clara.document_filings` row (CLR10 `firm_scope_client_evidence`) and a firm-scope record pinning
+  **any** `clara.accounting_work` at all (CLR10 `firm_scope_client_work`; `accounting_work.client_id`
+  is NOT NULL, so every Work is one client's). Those are the only two client-bearing pins — the
+  extraction / region / field pins cannot exist without `source_document_id` and are covered
+  transitively. `uq_document_filing_active` is over `(document_id, client_id) where retired_at is
+  null`, so one document may hold N live filings and the wall counts rather than probes for one. An
+  **unfiled firm document stays admissible** — the case 0192 reserves in its own voice — and
+  retiring the last filing makes a document admissible again. This is not an RLS disclosure fix
+  (`clara.documents` is already firm-readable); it stops one client's evidence travelling as the
+  stated basis of a rule applied to every other client, first of all inside a model's knowledge pack.
+- **The same wall from the filing side** — `clara._tf_document_filing_firm_knowledge`, a BEFORE
+  INSERT OR UPDATE trigger on `clara.document_filings`, refuses filing a document that a **live**
+  firm-scope record cites (CLR10 `document_cited_by_firm_default`, naming the record and the key).
+  Without it the wall was one-way: filing the document *after* the rule cited it produced the same
+  contamination, and the INSERT wall then refused the retraction too, because a withdrawal carries
+  the predecessor's pins verbatim. So `_tf_knowledge_firm_evidence` also **admits a correction or
+  withdrawal that introduces no new pin** — narrowly: a correction that re-aims a firm rule onto a
+  client's document or Work is still refused. The invariant, stated once: *no live firm-scope
+  knowledge record may cite a document carrying a live client filing, or any accounting_work at
+  all.* A superseded or withdrawn revision reaches no client and blocks no filing.
 - **Two viewer-floored reads, `clara_authenticated` only** — `clara.list_firm_knowledge()` returns
   this firm's rules with the authority each promotion recorded, the live client exceptions at the
   same key and applicability, and the non-terminal Work citing the key;
@@ -240,14 +253,15 @@ overrides the firm row carrying that condition and leaves an unconditional firm 
   `clara_runtime`, `clara_agent_ro` or either wake role (0057's dark-grant rule). "Today" in both
   reads is resolved server-side in `Asia/Kuala_Lumpur` and returned as `as_of`.
 
-Both guards fire only for `scope_kind = 'firm'`; the client lane is byte-unaffected. They are named
-so they sort AFTER 0192's own `t_knowledge_records_authority`, which stamps `applies_when_digest`
-and refuses an unknown key first — `0205`'s tail asserts that order off `pg_trigger` rather than
-trusting the alphabet. 0205 recuts no 0192 body and therefore pins none.
+Both `knowledge_records` guards fire only for `scope_kind = 'firm'`; the client lane is
+byte-unaffected. They are named so they sort AFTER 0192's own `t_knowledge_records_authority`, which
+stamps `applies_when_digest` and refuses an unknown key first — `0205`'s tail asserts that order off
+`pg_trigger` rather than trusting the alphabet, and asserts the filing-side guard's attachment
+beside it. 0205 recuts no 0192 body and therefore pins none.
 
 A promotion is `clara.capture_knowledge(p_scope_kind => 'firm')` with an **authored** reason, never
 the client row's own basis, and no source pins; a correction or withdrawal of a firm rule rides the
-shipped `correct_knowledge` / `withdraw_knowledge` at the same floor. Automatic re-evaluation of
+shipped `correct_knowledge` / `withdraw_knowledge` at the same floor, from `/settings/knowledge`. Automatic re-evaluation of
 affected work is NOT built here — `docs/PRD.md:123` defers it to #658/#663 — so the register ships
 the human-review affordance instead.
 
