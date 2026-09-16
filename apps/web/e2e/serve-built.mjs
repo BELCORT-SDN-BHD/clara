@@ -489,7 +489,14 @@ async function handleSupabase(request, response, url) {
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
     const bookkeeper = state.email.startsWith("bookkeeper@");
     const owner = state.email.startsWith("owner@");
-    if (!bookkeeper && !owner) {
+    // #639 — a THIRD rank prefix. A walk that must prove what a DENIED write looks like in the
+    // browser needs a session whose role is genuinely below the door's floor; before this there
+    // were only owner@ and bookkeeper@, and every other email was membership-less (which lands on
+    // /pending and never reaches a client surface at all). `viewer@` is rank 0, the real bottom of
+    // `FIRM_ROLES` (lib/firm/caller-context.ts:107), so the shell admits the viewer-floored leaves
+    // and the DOOR — not the UI — is what refuses the write.
+    const viewer = state.email.startsWith("viewer@");
+    if (!bookkeeper && !owner && !viewer) {
       // Every non-navigation persona remains membership-less by default.
       sendJson(response, 200, [], cors);
       return;
@@ -498,8 +505,8 @@ async function handleSupabase(request, response, url) {
       user_id: SUBJECT,
       firm_id: FIRM_ID,
       firm_name: "E2E Accounting",
-      role: bookkeeper ? "bookkeeper" : "owner",
-      role_rank: bookkeeper ? 1 : 3,
+      role: viewer ? "viewer" : bookkeeper ? "bookkeeper" : "owner",
+      role_rank: viewer ? 0 : bookkeeper ? 1 : 3,
       is_operator: owner,
     }], cors);
     return;

@@ -344,6 +344,23 @@ function readJson(request) {
   });
 }
 
+/** WHO IS ASKING. `serve-built.mjs` mints a real (unsigned) JWT whose payload carries the signed-in
+ *  email, so this lane can answer the way the DOOR would for a persona without any shared mutable
+ *  state: `clara.complete_fixed_asset_particulars` runs `clara._human_ctx(role_rank('bookkeeper'))`
+ *  (0004:299-309), which raises a bare CLR04 "insufficient role" for a viewer. Reading the bearer
+ *  is how this lane knows to give that answer; nothing else about the session is inspected. */
+function callerEmail(request) {
+  const header = request.headers?.authorization ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  const payload = token.split(".")[1];
+  if (!payload) return null;
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).email ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** The C7 acquisition lane's PostgREST half. Returns true when it answered, so the server's
  *  delegate chain falls through to every other lane for anything that is not this fixture's. */
 export async function handleFixedAssetSupabase(request, response, path, url, sendJson, cors) {
@@ -427,10 +444,22 @@ export async function handleFixedAssetSupabase(request, response, path, url, sen
     return true;
   }
 
-  // THE GOVERNED WRITE. Two refusal arms and one success, each the DOOR'S own shape.
+  // THE GOVERNED WRITE. Four refusal arms and one success, each the DOOR'S own shape.
   if (verb === "complete_fixed_asset_particulars") {
     if (body.p_client !== FA.clientId) return false;
     const p = body.p_particulars ?? {};
+
+    // DENIED — the role floor, and it is the FIRST thing the door checks (`clara._human_ctx`
+    // runs before the op key, before the client lookup, before anything else). A viewer may READ
+    // this register all day; what they may not do is write the particulars. The message is the
+    // estate's own, verbatim (0004:307), and it carries no `details` because the floor raises
+    // none — which is exactly why the surface must render it at FORM level and move no focus.
+    if ((callerEmail(request) ?? "").startsWith("viewer@")) {
+      sendJson(response, 400, {
+        code: "CLR04", message: "insufficient role", details: null,
+      }, cors);
+      return true;
+    }
 
     // COMPLETE-ONCE. The door's own law (0041:3066-3071), and the arm a second submit must hit.
     if (state.completed && body.p_asset === FA.answerableAssetId) {
@@ -457,6 +486,23 @@ export async function handleFixedAssetSupabase(request, response, path, url, sen
         code: "CLR37",
         message: "an in-service (depreciation start) date is required for every method, including none",
         details: JSON.stringify({ reason: "fa_particulars_invalid", axis: "start_date" }),
+      }, cors);
+      return true;
+    }
+
+    // THE REACHABLE INVALID ANSWER, and the reason this arm exists. `particularsReadyToSubmit`
+    // (fa-particulars-fields.tsx) gates method/date/life, so a browser cannot reach the two arms
+    // above through the form at all — but it checks residual against NOTHING, and `MoneyInput`
+    // clamps nothing, so a human CAN submit a residual above cost and the door refuses it with
+    // `axis: "residual"` (0201 §D, "a residual value cannot exceed cost"). That is the invalid
+    // path the walk drives, and the axis it maps onto a control.
+    const costOf = { [FA.assetId]: 850000, [FA.answerableAssetId]: 420000, [FA.completeAssetId]: 1200000 };
+    const cost = costOf[body.p_asset] ?? null;
+    if (p.method !== "none" && cost !== null && Number(p.residual_cents ?? 0) > cost) {
+      sendJson(response, 400, {
+        code: "CLR37",
+        message: "a residual value cannot exceed cost",
+        details: JSON.stringify({ reason: "fa_particulars_invalid", axis: "residual" }),
       }, cors);
       return true;
     }

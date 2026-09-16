@@ -38,9 +38,9 @@ const DETAIL_URL = `/clients/${CLIENT}/registers/assets/${FA.assetId}`;
 const ANSWERABLE_URL = `/clients/${CLIENT}/registers/assets/${FA.answerableAssetId}`;
 const REVERSED_URL = `/clients/${CLIENT}/registers/assets/${FA.reversedAssetId}`;
 
-async function signInTo(page: Page, destination: string): Promise<void> {
+async function signInTo(page: Page, destination: string, who = "owner@example.test"): Promise<void> {
   await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
+  await page.getByLabel("Email").fill(who);
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
   // A GENEROUS TIMEOUT, not the 5s default: this host runs several rigs at once and the
@@ -153,7 +153,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    // INITIAL FOCUS IS INSIDE THE DIALOG — a real focus manager, which jsdom cannot hold.
+    // INITIAL FOCUS IS INSIDE THE DIALOG - a real focus manager, which jsdom cannot hold.
     await expect
       .poll(async () => dialog.evaluate((node) => node.contains(document.activeElement)))
       .toBe(true);
@@ -170,8 +170,37 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     await dialogBody.getByLabel("Depreciation method").selectOption("straight_line");
     await dialogBody.getByLabel("In-service (start) date").fill("2026-08-20");
     await dialogBody.getByLabel("Useful life (months)").fill("60");
+
+    // AN ACTUALLY INVALID ANSWER - and a REACHABLE one. `particularsReadyToSubmit` gates method,
+    // date and life, so the only way to reach the door with something it refuses is a value the
+    // client does not check: a residual above cost (this asset cost RM 4,200.00). The door
+    // answers CLR37 with `axis: "residual"` (0201 SS D), which is the axis this walk exists to
+    // follow all the way to a control. ROUND-1 REVIEW (SPEC F1): this cell was titled exactly
+    // this and filled a wholly VALID form - it never submitted an invalid answer at all.
+    await dialogBody.getByLabel("Residual value (RM)").fill("99,999.00");
     const confirm = page.getByRole("dialog").getByRole("button", { name: "Complete particulars" });
     await expect(confirm).toBeEnabled();
+    await confirm.click();
+
+    // THE DIALOG STAYS OPEN, carrying the refusal the human must read - the caller's own page
+    // banner is behind a modal backdrop and cannot be read at all (CB-AE2E-004).
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(dialogBody.getByText("a residual value cannot exceed cost")).toBeVisible({ timeout: 20_000 });
+    await expect(dialogBody.getByText("CLR37", { exact: false }).first()).toBeVisible();
+
+    // ...AND FOCUS IS ON THE CONTROL THE AXIS NAMES. This is the assertion the whole cell is for:
+    // a refusal about ONE field puts the reader AT that field, marked invalid, rather than in
+    // front of a sentence and nine controls.
+    const residual = dialogBody.getByLabel("Residual value (RM)");
+    await expect(residual).toBeFocused();
+    await expect(residual).toHaveAttribute("aria-invalid", "true");
+
+    // THE DRAFT SURVIVES the refusal - correcting one field must not cost the other eight.
+    await expect(dialogBody.getByLabel("Useful life (months)")).toHaveValue("60");
+    await expect(dialogBody.getByLabel("In-service (start) date")).toHaveValue("2026-08-20");
+
+    // CORRECTED, then accepted.
+    await residual.fill("0.00");
     await confirm.click();
 
     // THE PERSISTENT OUTCOME, RE-READ: the surface must show the answered state because it read it
@@ -180,6 +209,46 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     await expect(page.getByText("Waiting on depreciation particulars")).toHaveCount(0, { timeout: 20_000 });
     await openTab(page, "Schedule");
     await expect(page.getByText("14,167.00").or(page.getByText("Projected charge"))).toBeVisible();
+  });
+
+  test("a VIEWER is refused by the door, reads the refusal where they are, and the asset is untouched", async ({ page }) => {
+    // AC9's "denied" leg, under a session whose role is genuinely below the door's floor rather
+    // than a scripted asset. `clara.complete_fixed_asset_particulars` calls
+    // `clara._human_ctx(role_rank('bookkeeper'))` FIRST (0004:299-309) - a viewer may read this
+    // register all day and may not write its particulars. ROUND-1 REVIEW (SPEC F1): no cell in
+    // this file signed in as anyone but the owner, so the denied leg was never exercised here.
+    await ensureRealFocus(page);
+    await signInTo(page, DETAIL_URL, "viewer@example.test");
+    await expect(page.getByRole("heading", { name: "Fixed asset", exact: true })).toBeVisible({ timeout: 20_000 });
+    // THE READ IS NOT THE WRITE: everything on the page is still there for a viewer.
+    await expect(page.getByText("RM 8,500.00").first()).toBeVisible();
+
+    await openTab(page, "Particulars & policy");
+    const trigger = page.getByRole("button", { name: "Complete particulars" });
+    // The trigger is NEVER pre-hidden on a client-side guess - the door is the wall, and a door
+    // that refuses is more honest than a control that silently is not there.
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Depreciation method").selectOption("straight_line");
+    await dialog.getByLabel("In-service (start) date").fill("2026-08-20");
+    await dialog.getByLabel("Useful life (months)").fill("60");
+    await page.getByRole("dialog").getByRole("button", { name: "Complete particulars" }).click();
+
+    // REFUSED, BY NAME, WHERE THE READER IS.
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(dialog.getByText("insufficient role")).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByText("CLR04", { exact: false }).first()).toBeVisible();
+    // A role refusal names no field, so NOTHING is marked invalid - the axis map must not invent
+    // a control for a refusal that is not about one.
+    await expect(dialog.getByLabel("Residual value (RM)")).not.toHaveAttribute("aria-invalid", "true");
+
+    // AND THE ASSET IS UNTOUCHED - the refusal erased nothing.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.getByText("Waiting on depreciation particulars").first()).toBeVisible();
+    await expect(page.getByText("RM 8,500.00").first()).toBeVisible();
   });
 
   test("320px and 200% zoom keep the identity, the amount and the primary action readable", async ({ page }) => {
@@ -202,6 +271,15 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
   });
 
   test("the whole detail is keyboard-reachable, announces its sections, and is axe-clean under reduced motion", async ({ page }) => {
+    // FOUR FULL AXE SCANS IN ONE CELL, and each is a multi-second `page.evaluate` that injects and
+    // runs axe-core over the whole document. MEASURED in fix round 1 on this host: the cell blew
+    // Playwright's default 30s budget three times — twice under load and ONCE ALONE on an
+    // otherwise idle machine (`pnpm --filter @clara/web e2e -- fixed-asset-acquisition-walk -g
+    // "axe-clean under reduced motion"` → `Error: page.evaluate: Test timeout of 30000ms
+    // exceeded` inside `AxeBuilder.analyze`). Nothing asserted ever failed; the cell simply does
+    // not fit in the default budget. `test.slow()` triples it rather than splitting the journey
+    // into four cells that would each re-sign-in and re-navigate.
+    test.slow();
     await page.emulateMedia({ reducedMotion: "reduce" });
     await ensureRealFocus(page);
     await signInTo(page, DETAIL_URL);
