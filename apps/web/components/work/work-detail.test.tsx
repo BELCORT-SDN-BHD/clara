@@ -1337,6 +1337,17 @@ function stateDoorCalls(calls: DoorCall[]): DoorCall[] {
   return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_document_state"));
 }
 
+/** #638 — `clara.get_work_claim_origin` is the IDENTITY BLOCK's read, fired ONCE on mount for every
+ *  Work (`work-detail.tsx`'s `loadClaimOrigin` effect), because a staff expense claim is admitted
+ *  with purpose `journal_entry` and the purpose alone therefore cannot say what a Work IS. It is
+ *  neither a Sources door nor an act on the Work, so the two cells below exclude it BY NAME and
+ *  then PIN what it actually did — one read on mount, and not one more per tab press. Widening
+ *  their filters to "anything that is not get_document_state" would have made the same red go away
+ *  while quietly admitting any number of new doors. */
+function claimOriginCalls(calls: DoorCall[]): DoorCall[] {
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_work_claim_origin"));
+}
+
 /** The four states are announced BY NAME — `role="group"` with an `aria-label` of
  *  "<axis>: <state>" — which is what a listener hears instead of eight adjacent fragments. A cell
  *  that matched the rendered TEXT would pass on a build that printed the four words with no
@@ -1380,8 +1391,14 @@ test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Doc
       const doors = stateDoorCalls(calls);
       assert.equal(doors.length, 1, "exactly one get_document_state read for one source document");
       assert.equal(doors[0]!.method, "POST", "the RPC is a POST, as every door on this app is");
+      // #638 — the identity block's one claim-origin read is excluded by name and pinned, so the
+      // exclusion cannot hide a second one.
+      assert.equal(claimOriginCalls(calls).length, 1, "exactly one get_work_claim_origin read, on mount");
       assert.equal(
-        calls.filter((c) => c.url.includes("/rest/v1/rpc/") && !c.url.includes("get_document_state")).length,
+        calls.filter((c) =>
+          c.url.includes("/rest/v1/rpc/")
+          && !c.url.includes("get_document_state")
+          && !c.url.includes("get_work_claim_origin")).length,
         0,
         "the Sources tab opens no other door",
       );
@@ -1452,6 +1469,7 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
       await settleUntil(h, () => groupLabelled(h, "Custody: Bytes verified") !== null,
         "the source document's states to render");
       const doorsBefore = stateDoorCalls(calls).length;
+      const originsBefore = claimOriginCalls(calls).length;
 
       const sources = h.find((n) =>
         n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Sources");
@@ -1462,8 +1480,15 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
 
       assert.equal(writes, 0, "a tab press is not an act on the Work");
       assert.equal(stateDoorCalls(calls).length, doorsBefore, "and it does not re-read the document's states");
+      // #638 — nor does it re-ask what this Work IS. The claim-origin read is a mount effect, and a
+      // tab press is not a mount.
+      assert.equal(claimOriginCalls(calls).length, originsBefore,
+        "and a tab press does not re-ask the Work's claim origin");
       assert.equal(
-        calls.filter((c) => c.method !== "GET" && !c.url.includes("get_document_state")).length,
+        calls.filter((c) =>
+          c.method !== "GET"
+          && !c.url.includes("get_document_state")
+          && !c.url.includes("get_work_claim_origin")).length,
         0,
         "no mutating request of any kind left this page",
       );

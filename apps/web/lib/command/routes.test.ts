@@ -234,6 +234,12 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   // the primary action of the Periodic adjustments destination (which IS a ⌘K row), and a Go row
   // for the form itself would put a write affordance in a list of read destinations at every rank.
   { pattern: "/clients/[clientId]/accounting/adjustments/new", builder: "periodicAdjustmentHref" },
+  // #638 — the staff-expense-claim form, on the same footing as the two above and for the same
+  // reason: it is the primary ACT of the Staff claims destination (which IS a ⌘K row,
+  // `staffExpenseClaims`), reached from that register's own "Record staff expense claim" control,
+  // and a Go row for the form itself would put a write affordance in a list of read destinations
+  // at every rank.
+  { pattern: "/clients/[clientId]/accounting/claims/new", builder: "staffExpenseClaimHref" },
   { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
   { pattern: "/clients/[clientId]/knowledge/[recordId]", builder: "knowledgeRecordHref" },
   // #640's three plan destinations. Each is reached from a surface that HOLDS the plan (the list
