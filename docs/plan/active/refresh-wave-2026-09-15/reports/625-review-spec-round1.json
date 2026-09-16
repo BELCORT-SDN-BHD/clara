@@ -1,0 +1,42 @@
+{
+  "ticket": 625,
+  "lens": "SPEC",
+  "head": "c6f18f8c",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "note",
+      "category": "test-flakiness",
+      "file": "apps/web/e2e/responsive-shell-walk.spec.ts",
+      "where": "apps/web/e2e/responsive-shell-walk.spec.ts:344,367,755,789,830",
+      "line": 344,
+      "what": "Two independent full runs of this spec on the review rig each produced 2-3 failures (net::ERR_CONNECTION_REFUSED / 30s locator timeouts) in DIFFERENT, pre-existing tests each time (#736 zoom/nav tests, #732 /pending test, 'Escape closes the overlay rail', 'rail is DOCKED at 1280') — none of them tests #625 touched. Every #625-owned cell (members-invite-walk.spec.ts x3, the new 'invite-acceptance card reflows' test, and the two narrow-face-loop/reflow additions inside pre-existing tests) passed cleanly in both runs.",
+      "evidence": "Run 1 (combined members-invite-walk + responsive-shell-walk, 28 tests): 25 passed, 3 failed at spec.ts:755/789/830, all net::ERR_ABORTED/ERR_CONNECTION_REFUSED against the Next dev server (cascading, consistent with the server itself going unresponsive rather than 3 independent assertion failures). Run 2 (responsive-shell-walk alone, 25 tests): 23 passed, 2 different failures at spec.ts:344 (30000ms locator.fill timeout) and :367 (ERR_CONNECTION_REFUSED). git diff origin/main...HEAD confirms neither failing test in either run is inside #625's diff hunks (@@ -134,+42 and @@ -622,+11 only). Confirmed via `git rev-parse` that this worktree is exactly the reviewed HEAD (c6f18f8c), so this is not stale state.",
+      "fix": "No action against this branch: the failures are non-deterministic across reruns, land on tests this diff never touched, and every #625-owned Playwright cell (members-invite-walk x3, the new narrow/reflow cells) passed in every run observed. Most likely local/CI resource contention under a long linear 1-worker Chromium suite on this Windows rig (the ticket's own brief already lists known Windows-specific Playwright reds — #707, #693, thread-live-clarify — as pre-existing and not to be 'fixed' by this ticket). Recording this only so a future reviewer isn't surprised by a non-repro red on this same file; not a reason to hold the ticket."
+    },
+    {
+      "id": "F2",
+      "severity": "note",
+      "category": "spec-deviation-verified",
+      "file": "apps/web/e2e/e2e-fixture-ownership.test.ts",
+      "where": "apps/web/e2e/e2e-fixture-ownership.test.ts:1062-1128",
+      "line": 1062,
+      "what": "The brief's binding instruction (brief-625.md line 66) says to declare caller_context/firm_members_visible/firm_invites_visible in the existing SHARED_RPC_VERBS map. The worker instead added a new, parallel CORE_RELATION_HANDOVERS census/test. Verified this is a sound, disclosed substitution rather than a silent narrowing: SHARED_RPC_VERBS's own census regex (RPC_VERB_OPENER, :937) matches only `verb === \"x\"` / `fn === \"x\"` / `path === \"/rest/v1/rpc/x\"` shapes and requires >=2 lane-mock claimants; the three relations here are queried as plain PostgREST relation reads (`path === \"/rest/v1/caller_context\"`, no `/rpc/`) answered by exactly one lane mock plus serve-built.mjs's own CORE — so literally declaring them in SHARED_RPC_VERBS would make the existing verb-ownership test's own self-check (`assert.ok(actual.length > 1, ...)`) fail, since the census would find zero or one claimant, never a collision. The new CORE-handover test was run and passes (16/16 in e2e-fixture-ownership.test.ts, including the new census) and functionally polices the exact same class of defect (an undeclared handover of a CORE-answered read) the brief was asking for.",
+      "evidence": "Read RPC_VERB_OPENER regex and rpcVerbCensus() at e2e-fixture-ownership.test.ts:937-949; confirmed lib/firm/caller-context.ts:50 and lib/members/reads.ts:91-92 name these three as RELATIONs, not RPC verbs. Ran `node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts` on the worktree: 16/16 pass including 'CORE-handover census · the member reads taken over from serve-built.mjs stay DECLARED...'. Worker's own report names this exact reasoning under 'Assumptions (orchestrator review) #1'.",
+      "fix": "No change needed — flagging only so the reviewer-of-record explicitly signs off on this documented deviation from the brief's literal text (the brief's premise that these three reads are 'RPC verbs' was itself imprecise; they are relation reads). If a stricter reading is wanted, the brief itself should be corrected in a follow-up rather than the code forced into a census mechanism that cannot express the fact being declared."
+    }
+  ],
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 tests/preview-invite.test.mjs tests/p4t1-invite.test.mjs tests/p4t1-reads.test.mjs tests/p4t1-identity.test.mjs tests/p4t1-add-member-regression.test.mjs tests/mdrw-rank-walls.test.mjs tests/p4-4-role-rank-pin.test.mjs -> 101 tests, 101 pass, 0 fail, 0 skipped (matches worker's claim exactly)",
+    "packages/db: node --test tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset flags) -> 31 tests, 30 pass, 0 fail, 1 skipped (destructive T19, expected) (matches worker's claim exactly)",
+    "node -e (pg client): SELECT count(*) FROM pg_proc WHERE proname='preview_invite' -> 1; SELECT count(*) FROM clara.schema_migrations -> 194 (matches 193+0209)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test <8 focused #625 files incl. e2e-fixture-ownership.test.ts, members-walls.test.tsx, invite-accept-form.test.tsx, invite-preview.test.ts, members-a11y/keyboard, invite-accept-a11y/keyboard> -> 113 tests, 113 pass, 0 fail",
+    "apps/web: node scripts/run-tests.mjs (whole unit suite) -> 3747 tests, 3745 pass, 0 fail, 2 skipped (both pre-existing live-provider-gated auth cells, confirmed by grep of skip reasons) — matches worker's claim exactly",
+    "packages/runtime: node --test tests/c5-stream-reauth-db.test.mjs against clara_625 -> 2 tests, 2 pass, 0 fail (matches worker's claim)",
+    "worktree root: pnpm typecheck -> exit 0 (apps/web, packages/runtime both 'Done')",
+    "worktree root: pnpm lint -> exit 0 (all 4 workspace projects, incl. check-test-manifest, check-message-keys, check-token-contrast selftests all PASS)",
+    "apps/web: pnpm --filter @clara/web e2e -- members-invite-walk responsive-shell-walk (build+playwright, ports 3230/3231/3232) run 1: 28 tests, 25 passed, 3 failed (all in pre-existing, #625-untouched tests: spec.ts:755/789/830) — all 4 #625-owned tests (3 in members-invite-walk.spec.ts + 1 new standalone in responsive-shell-walk.spec.ts) passed",
+    "apps/web: pnpm --filter @clara/web e2e -- responsive-shell-walk, run 2 (isolation retry): 25 tests, 23 passed, 2 failed (different pre-existing tests than run 1: spec.ts:344/367) — non-deterministic across runs, consistent with local resource-contention flake rather than a #625 regression",
+    "git diff origin/main...HEAD --stat / per-file diffs read in full for: packages/db/migrations/0209_preview_invite.sql, apps/web/lib/firm/invite-preview.ts, apps/web/components/invite-accept-form.tsx, apps/web/components/admin/members-panel.tsx, apps/web/components/admin/invite-dialog.tsx, apps/web/lib/firm/capabilities.ts, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/e2e/serve-built.mjs, apps/web/e2e/members-lifecycle-mock.mjs, apps/web/e2e/members-invite-walk.spec.ts, apps/web/e2e/responsive-shell-walk.spec.ts, CONTEXT.md, apps/web/README.md, packages/db/README.md, packages/db/tests/README.md, apps/web/messages/en.json, apps/web/test/manifest.txt, packages/db/tests/rig-meta.mjs, packages/db/package.json"
+  ]
+}

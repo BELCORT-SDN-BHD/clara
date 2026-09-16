@@ -1,0 +1,95 @@
+{
+  "ticket": 625,
+  "lens": "ADVERSARIAL MIGRATION + ACCOUNTING SAFETY — from-scratch chain proof, prestate/tail pins, tenant isolation, idempotency and races, atomicity, frozen closure, web trust boundary",
+  "head": "c6f18f8c",
+  "findings": [
+    {
+      "id": "F1-preview-accept-wall-divergence",
+      "severity": "should",
+      "where": "packages/db/migrations/0209_preview_invite.sql:38 (and the same claim at apps/web/lib/firm/invite-preview.ts:16); the body at 0209:192-205",
+      "what": "0209's header and the web reader's header both assert the preview door 'cannot show anything to a caller who could not also ACCEPT'. That is false: clara.accept_invite carries a THIRD wall that preview_invite does not reproduce — an issuer-rank re-check at accept time (`if clara.role_rank(inv.role) > coalesce(v_issuer_rank, -1) then raise ... 'invite exceeds the issuer''s rank -- re-issue by an owner' using errcode='CLR04'`). preview_invite walls only on sha256(token) + _jwt_email(), so such an invitation previews as `pending` with its full role, the password form renders, the invitee's account password is actually changed via updateUser, and only THEN accept_invite refuses. Because the check is `coalesce(v_issuer_rank, -1)`, this covers the ordinary case of an issuer who has since been demoted OR removed from the firm — i.e. every outstanding invitation issued by someone who has left. It is the exact shape D1/AC2 added the preview step to prevent ('a definite negative BLOCKS ... no password form at all').",
+      "evidence": "Measured on the from-scratch cluster rig625r (127.0.0.1:55601 / clara_625r, 194 migrations). Probe scratchpad/probe/p625-adv.mjs: firm admin issues an `admin`-role invite; the firm owner then runs clara.set_member_role to demote that admin to bookkeeper; then — ISSUER-DEMOTED preview = {\"role\":\"admin\",\"status\":\"pending\",\"firm_name\":\"ADV A 1789503571244\",\"masked_email\":\"p***@rig.test\"} / ISSUER-DEMOTED accept = {\"code\":\"CLR04\",\"message\":\"invite exceeds the issuer's rank -- re-issue by an owner\"}. The wall text is in the live body (read from pg_proc.prosrc for clara.accept_invite(text,text,text) on clara_625r, sha 42a1532...aeef2, which is the sha 0209 pins). preview_invite's body (0209:192-205) contains no membership lookup at all.",
+      "fix": "Either (a) fold the same issuer-rank lookup into 0209 §A's status computation so an unacceptable invitation reports a non-`pending` effective status and reaches the blocked face (a read of clara.firm_memberships, no lock, so the C-80 lock-order invariant is untouched) and add the face; or, minimum, (b) delete the 'cannot show anything to a caller who could not also ACCEPT' sentence from 0209:37-39 and the 'nothing is previewable that could not also be accepted' clause at apps/web/lib/firm/invite-preview.ts:16, record the issuer-rank wall as a NAMED residual in packages/db/README.md's 0209 note, and add a red-first cell to packages/db/tests/preview-invite.test.mjs that pins this exact divergence (preview=pending, accept=CLR04) so it cannot silently widen."
+    },
+    {
+      "id": "F2-readme-eleven-courier-codes",
+      "severity": "note",
+      "where": "apps/web/README.md:48",
+      "what": "The new Membership section says invitation issuing has 'ELEVEN typed courier codes', then lists TEN and appends 'plus a governed DoorRefusal relayed verbatim' — which is not a courier code. The closed set is ten.",
+      "evidence": "apps/web/lib/members/doors.ts:309-319 declares the `InviteCourierCode` union with exactly ten members (no_session, cross_origin, invalid_request, unsupported_address, not_permitted, mail_not_configured, recipient_has_account, mail_unavailable, mail_failed, transport) and :324-335 repeats them as the closed data set INVITE_COURIER_CODES. members-panel.tsx's own comment enumerates the same ten correctly.",
+      "fix": "In apps/web/README.md:48 write 'TEN typed courier codes ... — plus a governed `DoorRefusal` relayed verbatim when the door itself refused', so the count matches INVITE_COURIER_CODES."
+    },
+    {
+      "id": "F3-dead-tail-guard-T2",
+      "severity": "note",
+      "where": "packages/db/migrations/0209_preview_invite.sql:270-273",
+      "what": "§C (T.2)'s 'does not return a jsonb_build_object' guard can never fire. `v_ret := substr(v_src, position('return jsonb_build_object(' in v_src));` — when the fragment is absent, position() is 0 and substr(s, 0) returns the WHOLE source, never the empty string, so `if v_ret = ''` is dead code. The tail still fails closed by accident (the next check, `position('token' in v_ret)`, trips on the body's own `p_token`/`token_hash`), but the named guard proves nothing it claims to prove.",
+      "evidence": "PostgreSQL substr(string, 0) returns the whole string (start positions < 1 are clamped); 0209:270 takes the substring unconditionally and 0209:271-273 tests it for ''. The assertion is only reachable when v_src itself is empty.",
+      "fix": "Test the position first: `if position('return jsonb_build_object(' in v_src) = 0 then raise exception '#625 tail: clara.preview_invite does not return a jsonb_build_object' using errcode='CLR10'; end if;` and only then take the substring."
+    },
+    {
+      "id": "F4-preview-step-never-runs-in-a-browser",
+      "severity": "note",
+      "where": "apps/web/e2e/responsive-shell-walk.spec.ts (the new /invite/:token legs render the confirm stage only) and apps/web/components/invite-accept-form.test.tsx:924",
+      "what": "The preview step is the sole justification for migration 0209 (brief: 'a migration with no caller is not a delivery'), yet every proof of it is jsdom with a mocked global fetch. No browser leg — mocked OR real — ever drives /invite/:token past verifyOtp, so the first governed door call made on a session minted moments earlier (sessionTokenAccessor -> lib/session.ts getSessionToken -> supabase.auth.getSession()) is unexercised end to end. Because an INDEFINITE read degrades silently to 'password form, no preview block', a production deployment in which that token is not yet readable would look identical to a working one in all shipped evidence.",
+      "evidence": "apps/web/e2e/responsive-shell-walk.spec.ts's new cell asserts only the 'Accept your invitation' heading and the 'Accept invitation' button (the pre-click confirm stage); the narrow target-size loop adds the same URL. apps/web/e2e/members-lifecycle-mock.mjs declares no preview_invite verb. Every p625.web.* preview cell runs under withMockedEnv with a stubbed fetch (invite-accept-form.test.tsx:924-1099).",
+      "fix": "Add one e2e leg that stubs Supabase's verifyOtp response and answers /rest/v1/rpc/preview_invite from members-lifecycle-mock.mjs (declaring the verb in that lane's verb set), asserting the preview block renders above the password fields and that a revoked preview renders no password input — the brief already anticipates this ('if your walk drives past verification, declare preview_invite as that lane mock's own verb'). Keep labelling it LOCAL/mock-backed, not AC7 evidence."
+    },
+    {
+      "id": "F5-shared-rpc-verbs-substitution",
+      "severity": "note",
+      "where": "apps/web/e2e/e2e-fixture-ownership.test.ts:1081 (CORE_RELATION_HANDOVERS) vs brief-625.md:66's binding one-liner",
+      "what": "The brief required declaring caller_context, firm_members_visible and firm_invites_visible in SHARED_RPC_VERBS. The worker shipped a different gate instead and flagged it as assumption 1. The claim that the brief's instruction is mechanically impossible is CORRECT, and the substitute is equivalent in force for the three relations this change moved — recording it so the orchestrator ratifies the deviation rather than meeting it at merge.",
+      "evidence": "rpcVerbCensus only matches /rest/v1/rpc/<verb> openers, and the census's reverse check at apps/web/e2e/e2e-fixture-ownership.test.ts:1034 asserts `actual.length > 1` for every declared entry ('is declared shared but only N lane(s) answer it now — drop the declaration'), so a relation declared there would red immediately. The substitute census (:1081-1129) pins the exact claimant set for the three relations and carries its own positive control on /rest/v1/client_facts. Whole apps/web suite green: 3747 tests, 3745 pass, 0 fail, 2 skipped.",
+      "fix": "Ratify the substitution in the wave record (or amend brief-625.md:66), and file the widening of CORE_RELATION_HANDOVERS to the three pre-existing takeovers (/clients ×11, /chat_sessions ×2, /onboarding_plans) as its own repo-wide sweep ticket, as the census header proposes."
+    },
+    {
+      "id": "F6-dead-verb-set-export",
+      "severity": "note",
+      "where": "apps/web/e2e/members-lifecycle-mock.mjs:68",
+      "what": "MEMBERS_LIFECYCLE_RPC_VERBS is exported with the comment 'Exported so e2e-fixture-ownership.test.ts can census them against every sibling's, the way L7_RPC_VERBS is' — but nothing imports it. The verb census reads each lane mock's source with a regex, so the export does no work and cannot drift-check anything.",
+      "evidence": "grep -rn MEMBERS_LIFECYCLE_RPC_VERBS over apps/web (excluding node_modules) returns exactly one hit: the definition at members-lifecycle-mock.mjs:68.",
+      "fix": "Either delete the export and its claim, or have e2e-fixture-ownership.test.ts import it and assert it equals the regex-derived verb set for that file (which would also catch a verb added to the mock without a declaration)."
+    },
+    {
+      "id": "F7-preexisting-red-confirmed",
+      "severity": "note",
+      "where": "apps/web/e2e/firm-navigation-walk.spec.ts:370",
+      "what": "Confirming the worker's 'pre-existing red found (not mine)' claim so the orchestrator does not attribute it to this branch: the client-register cell asserts 4 rows while the shared register holds 7.",
+      "evidence": "git show origin/main:apps/web/e2e/serve-built.mjs lines 195-201 build the shared clients array as CLIENT_A, CLIENT_B, ...ACTIVITY_CLIENTS (2 rows, activity-mock.mjs:88-91), ...WORK_LIST_CLIENTS (3 rows, work-list-mock.mjs:80-84) = 7; firm-navigation-walk.spec.ts:370 asserts toHaveCount(4). `git diff origin/main...HEAD --stat -- apps/web/e2e/firm-navigation-walk.spec.ts` is empty — this branch does not touch the spec, and its serve-built.mjs diff is one import plus one hook call.",
+      "fix": "Out of scope for #625. File it as its own issue: update firm-navigation-walk.spec.ts:370 to 7 and extend the name assertions to the three WORK_LIST_CLIENTS rows, or exclude them from the unfiltered register."
+    },
+    {
+      "id": "F8-fresh-cluster-left-running",
+      "severity": "note",
+      "where": "docs/plan/active/refresh-wave-2026-09-15/RIG.md (rig table)",
+      "what": "As instructed, the from-scratch verification cluster is left running for the fix round: PostgreSQL 17 cluster `rig625r` on 127.0.0.1:PORT 55601, database `clara_625r`, 194 migrations applied from 0001, both seed files applied. It is a separate cluster from the ticket's own rig625/55501, which was not touched. Reuse it with PGHOST=127.0.0.1 PGPORT=55601 PGUSER=postgres PGDATABASE=clara_625r CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 (WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55601/clara_625r).",
+      "evidence": "pg_lsclusters shows `17 rig625r 55601 online`; `pnpm db:migrate` reported 'migrate: 194 new migration(s) applied · 194 total · target 127.0.0.1:55601/clara_625r' and a re-run reported '0 new migration(s) applied · 194 total'.",
+      "fix": "Drop it when the fix round closes: PowerShell `wsl -u root -- pg_dropcluster --stop 17 rig625r`."
+    }
+  ],
+  "ran": [
+    "PowerShell: wsl -u root -- bash /mnt/c/Users/zhant/Desktop/clara-rebuild/docs/plan/active/refresh-wave-2026-09-15/mkrig.sh rig625r 55601 → 127.0.0.1:55601 accepting connections; pg_lsclusters shows 17/rig625r/55601 online (rig625/55501 untouched)",
+    "node -e create database clara_625r on 127.0.0.1:55601 → created",
+    "PGPORT=55601 PGDATABASE=clara_625r pnpm db:migrate (worktree root) → 'migrate: 194 new migration(s) applied · 194 total · target 127.0.0.1:55601/clara_625r', EXIT=0; 0209 printed both '#625 prestate: clean …' and '#625 tail: OK …'",
+    "PGPORT=55601 PGDATABASE=clara_625r pnpm db:seed → 'seed: 2 seed file(s) applied', EXIT=0",
+    "PGPORT=55601 PGDATABASE=clara_625r pnpm db:migrate (re-run) → 'migrate: 0 new migration(s) applied · 194 total', EXIT=0",
+    "packages/db: node --test --test-concurrency=1 tests/preview-invite.test.mjs (CLARA_ALLOW_MISSING_PREVIEW_INVITE UNSET, fresh chain) → tests 11, pass 11, fail 0, skipped 0",
+    "packages/db: node --test --test-concurrency=1 $GATES(29 gates from package.json) tests/p4t1-invite.test.mjs tests/p4t1-reads.test.mjs tests/p4t1-identity.test.mjs tests/p4t1-add-member-regression.test.mjs tests/mdrw-rank-walls.test.mjs tests/p4-4-role-rank-pin.test.mjs → tests 90, pass 90, fail 0, skipped 0",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset/role-sweep flags) → tests 31, pass 30, fail 0, skipped 1 (destructive T19, as RIG.md requires)",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/chain-minted-roles-drift-guard.test.mjs tests/f-a2-grants.test.mjs tests/wave-a-grants.test.mjs tests/rig-invariants.test.mjs tests/rig-docs-isolation-grants.test.mjs tests/p4t2-role-ceiling.test.mjs tests/name-only-guard.test.mjs → tests 75, pass 75, fail 0, skipped 0",
+    "adversarial probe scratchpad/probe/p625-adv.mjs on clara_625r → 24 PASS / 1 FAIL. PASS: all six prestate pins match the live prosrc sha; recipient preview = {role,status,firm_name,masked_email} only; a real firm-B OWNER's refusal on firm-A's token is byte-identical (code+message+detail) to an invented token's; firm-B owner sees 0 of firm A's rows via firm_invites_visible; clara_authenticated direct SELECT and UPDATE on clara.firm_invites → 42501; clara_agent_ro / clara_wake_interactive / clara_wake_proactive / clara_runtime → 42501 on both preview_invite and clara.firm_invites; firm_invites RLS enabled=true forced=true; app-role grants on firm_invites = <none>; locks held after preview_invite inside a txn = AccessShareLock only. FAIL: the issuer-demotion divergence (finding F1)",
+    "race probe scratchpad/probe/p625-race2.mjs on clara_625r → 5/5 PASS: barriered two-session accept_invite on one token = exactly ONE membership, winner receipted, loser CLR09 'this invite is no longer open (status: accepted)', no 40P01, exactly ONE accept_invite op receipt for the firm; preview_invite answered in 10ms while an accept txn held the SAME invite row FOR UPDATE",
+    "atomicity probe scratchpad/probe/p625-atomic.mjs on clara_625r → 9/9 PASS: an expired accept refuses CLR09 leaving 0 receipts, 0 memberships, 0 clara.users rows and does NOT burn the op_key; a wrong-email accept (CLR04) writes nothing at all; a good accept commits +1 receipt, +1 membership, +1 user, +1 audit together; preview after acceptance reports status='accepted' and moves nothing",
+    "grep -nE 'create (or replace )?(function|view|table)|alter |drop |grant |revoke ' packages/db/migrations/0209_preview_invite.sql → one `create function clara.preview_invite(text)`, one revoke-from-public and one grant, both scoped to that function; no create-or-replace, no alter, no drop, no `execute format` dynamic SQL → no wave-assigned recut (DECISIONS §1.3) can be touched",
+    "worktree root: node scripts/check-frozen-workflows.mjs → 'freeze-lint: OK — 281 frozen file(s) verified', EXIT=0",
+    "worktree root: node packages/runtime/scripts/check-parts-parity.mjs → 'parts-parity: OK', EXIT=0",
+    "git diff origin/main...HEAD --name-only | grep -E 'proxy|packages/runtime|action.yml|frozen-workflows' → none (zero runtime change, no db-live-gates edit, proxy allowlist untouched); grep 'from \"node:' over the new web modules → none",
+    "apps/web: node scripts/run-tests.mjs → tests 3747, pass 3745, fail 0, skipped 2, EXIT=0",
+    "worktree root: pnpm typecheck → EXIT=0 (apps/web Done, packages/runtime Done)",
+    "worktree root: pnpm lint → EXIT=0 (all four workspace projects, including check-message-keys selftest)",
+    "packages/runtime: PGPORT=55601 PGDATABASE=clara_625r node --test tests/c5-stream-reauth-db.test.mjs → tests 2, pass 2, fail 0 (live-authority evidence re-measured on the FRESH chain)",
+    "worktree root: CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3230 CLARA_E2E_NEXT_PORT=3231 CLARA_E2E_RUNTIME_PORT=3232 pnpm --filter @clara/web e2e members-invite-walk → 3 passed (1.6m), PW_EXIT=0",
+    "git rev-parse --short HEAD → c6f18f8c; git status --porcelain → clean (no stray edits; the branch was not modified during review)"
+  ]
+}

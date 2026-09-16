@@ -1,0 +1,53 @@
+# #646 — correct a document's facts, type and client · final report
+
+**Branch** `impl/646-document-correction` · **worktree** `C:\Users\zhant\Desktop\clara-wt\646` · rig `127.0.0.1:55505`/`clara_646` (**194** migrations after 0202, PG 17.11). All evidence **LOCAL**; **hosted evidence pending**.
+
+```
+4ac11657 fix(web): walk — per-cell fixture reset, a two-page stale cell, two measured timeouts
+1d042586 test(web): the source-correction e2e lane and its browser walk
+0059e2c7 feat(web): three routed views, the revision dialog, the impact Sheet, the correction band
+92fefff8 feat(db): migration 0202 — human source revision, the orphan door, the observation stamp
+```
+The interrupted attempt left **nothing** (clean `git status`, empty `origin/main..HEAD`). Nothing kept, nothing discarded.
+
+## Acceptance criteria
+| AC | State | Evidence |
+|---|---|---|
+| AC1 revision with source version, actor, reason, one receipt | **done** | `p646.fact.appends`: one appended `clara-fact-human:v1`/`invoice_facts` extraction, the superseded extraction's regions **byte-identical**, one `document_fact_revisions` row, one committed receipt. `p646.kind.stamps_version`: the recut stamps `observed_extraction_id`+`observed_version` on receipt, audit and a `'kind'` row |
+| AC2 routed views; stale/duplicate/lost response keep the attempted value | **done** | `?document=&tab=original\|facts\|accounting`. `p646.fact.stale` (CLR19, both versions + attempted value in `detail`, zero rows, over-high version also refused). `p646.replay.one_receipt`: a replay quoting the now-stale version returns the **original receipt** (the reserve sits above the stale guard for exactly this); a concurrent pair converges to one row |
+| AC3 reassess Work + Knowledge, invalidate only obsolete | **partial by name** | Classification invalidation stays narrow (`p646.kind.stamps_version` re-asserts dba.5b/5c); the orphan door closes the one case that had none; `p646.dependents.projection` lists the record on the superseded reading and re-reads it **byte-unchanged**. Automatic re-assessment deferred (`docs/PRD.md:123` → #658/#663). Work half: see "cell 10" |
+| AC4 posted effects | **partial, residual #676** | The band states "revision accepted" and "accounting impact pending" as two persistent Alerts with #676's link. `p646.horn_a.no_work`: zero new `accounting_work`/`agent_tasks`/`operation_receipts`/`agent_interruptions`, **both purpose CHECK texts byte-identical** |
+| AC5 six shapes proven | **done** | `p646.fact.appends` · `p646.kind.stamps_version` · `p646.refile.original_client_view` (real preview→propose→approve) + `rig-docs-correction` 10/10 · `p646.orphan.dismiss` (re-measures the dead end: `resolve_open_question` and `set_document_kind` both CLR02) · `p646.dependents.projection`+`p646.orphan.narrow` · `p646.replay.one_receipt` |
+| AC6 Dialog/Sheet/Alert | **done** | `document-kind-dialog.tsx` (exported for #633), `document-revision-dialog.tsx`, `correction-impact-sheet.tsx` (wizard **suspended**: one overlay at a time). `door-feedback.tsx` renders `ui/alert.tsx` — its **first** importer; `focus-ring-contract.test.ts` count **21 unmoved** |
+| AC7 the journey's states | **done (mock-backed)** | the walk, below |
+| AC8 real roles, current migrations | **done; NO Workflow leg owed** | The battery drives the real doors through `humanQuery` at bookkeeper with the viewer refused (`p646.fact.floor`). D6 makes this database-only: it mints no Work, so no World e2e leg and no `db-live-gates` edit — proven by `p646.horn_a.no_work`, not asserted |
+
+**Historical**: UI-17 **verify-only** (Original keeps `DocumentEvidence`; overlay still lazy). H-22 **held**. ORPHAN-QUESTION **built** — predicate pinned at *zero live filings*; a retired-then-re-filed document still refuses. C48.4 **partial**, close half is #676. C88.16 **reviewed no-identification**: no `C-c` doc, no F3 finding, no migration or report anchor resolves it; two clue-only candidates (`0191:1197`, ARCHITECTURE §7).
+
+## Tests and commands
+- DB battery, **exact 29-gate chain**: `node --test --test-concurrency=1 $GATES tests/rig-docs-source-revision.test.mjs` → **15/15 pass, 0 fail, 0 skip**. **Red first**: the same file before 0202 → **15 fail** on "the doors do not exist".
+- Neighbours (same chain): `rig-docs-correction` + `rig-docs-filings-provenance` + `dba-coding-lane-classification` + `document-capability-registry` + `document-fact-validation-belt` + `knowledge-records` + `work-question(-reads)` + `field-path-grammar` → **138/138**. `operation-census` **10/10**; `rig-isolation` (no reset flags) **21: 20 pass, 1 skip**.
+- Whole `apps/web` suite (`node scripts/run-tests.mjs`): **3729 tests, 3727 pass, 0 fail, 2 skipped** — both pre-existing live-provider auth cells. `thread-live-clarify` did **not** flake; **2/2** in isolation.
+- Playwright on 3270/3271/3272: `document-correction-walk` **15 passed (2.5m)**; #624's `documents-viewer-walk` **22 passed (2.7m)**, green verbatim.
+- `pnpm typecheck` **exit 0**; `pnpm lint` **exit 0**. No `packages/runtime` file changed; `check-frozen-workflows` OK (281 files), `check-parts-parity` OK — both **not applicable** here, run anyway.
+- Added: `rig-docs-source-revision.test.mjs` (15 cells) + its preintegration gate; `document-revision-dialog.test.tsx` (4); `correction-impact-sheet.test.tsx` (3); +2 cells each in `documents-url-state` and `document-facts-table`; the e2e mock lane + walk (15).
+
+## Docs
+`packages/db/README.md` (0202's four doors in the census + D1 quiesce), `packages/db/tests/README.md`, `apps/web/README.md` (the three views), `CONTEXT.md` (Document filing · Source revision · Wrong-client correction · Correction Work).
+
+**Brief drift (not blueprint)**: the brief and DECISIONS say the transferred-away sentence comes from `get_document_state`. **Measured**: it answers NULL for the client the document moved away from (admission needs a live filing, `0191:1219-1227`) — the deliberate no-oracle fold. It is rendered from `list_source_revisions`, which is firm-scoped. No PRD/ARCHITECTURE sentence is contradicted.
+
+## Successor contract — NEGATIVE
+#646 contributes **no** `chatTurn_v20` tool and needs **no** `claraWork_v4` arm; the integration worker must add neither. No Work is minted, so no purpose-blind launcher can hand a correction to frozen `claraWork_v3`. `source-correction-basis.ts` is **not** shipped — the avoided cost is real: `check-frozen-workflows.mjs:452-454` hash-locks an imported module, still blocking #643's own follow-up 1. **One dependency**: a future automatic consumer keys on `claraWork_v4`'s `observedRevisions({knowledge_version})`, owned by **#654**; #646 ships only the read it would query, `clara.list_source_dependents(p_document)`.
+
+## Cell 10 — which horn fired
+Fallback, verbatim: *"after a fact revision the Work question is still at version 1, interruption basis_digest 4b4c281fc589 vs work basis_digest 4b4c281fc589; answering at the pre-revision version SUCCEEDED (no refusal)."* `answer_work_question` compares only `question_version` and the Work's `basis_digest` (`0180:820`, `:836`), and D6 keeps #646 out of `accounting_work` entirely. **AC3's Work half is partial by name**; the version bump is a runtime-lane capability, and widening `open_work_question`'s grant from a human door is forbidden.
+
+## Assumptions
+1. `observed_version_n` is the **facts version** (count of done `invoice_facts` extractions) because `version_n` is per `engine_id` and cannot tell machine v1 from human v1; `observed_extraction_id` is the authoritative pointer. 2. A revision **carries the whole fact set forward** — 0089 supersedes the entire kind, so a one-region append would delete the reading. 3. Both reads hold the writers' bookkeeper floor, so a viewer gets no band and no controls — which is also what gates the per-row control. 4. The fact door is **stricter than `persist_invoice_facts`** on `invoice.total` (a human typo is not an OCR artefact). 5. Original keeps #624's facts table verbatim so its walk stays green. 6. The open-Sheet a11y scan moved to the browser (measured: the node harness OOM'd after 90s). 7. The e2e lane carries a client-scoped fixture-reset verb.
+
+## Follow-ups
+1. Posted-effect integration — **#676** (also C48.4's close half). 2. Automatic re-assessment — **#658/#663**. 3. **A changed source can still be answered under the old Work-question version** (cell 10) — needs #654's `observedRevisions` plus a runtime re-ask. 4. D13's activity kind ladder still misfiles by prefix; named here because SYNTHESIS's row lists only #625/#633/#647/#650. 5. C88.16 discovery, carrying its two clue candidates. 6. Wave note: with twelve lanes live (594 processes, 70 node, 5 GB free of 32) `next build` panicked three times — `0xc0000142` in the PostCSS loader, i.e. Windows process creation, not this branch; a retry cleared it.
+
+## Unverified
+All hosted behaviour. The walk proves the journey against a mocked PostgREST, never that Postgres would accept those calls — that half is the DB battery, and both files say so. C88.16's anchor. `get_document_for_human_read_v2` for the origin client refused at the **grant wall** (`42501`), so `0190:216-226`'s fold was not itself exercised from the human lane; #646 changes nothing about it.

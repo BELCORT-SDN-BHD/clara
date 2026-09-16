@@ -1,0 +1,35 @@
+{
+  "ticket": 639,
+  "lens": "STANDARDS",
+  "head": "aecfb34e",
+  "ran": [
+    "node scripts/check-frozen-workflows.mjs -> freeze-lint OK, 281 frozen files verified, 51 workflow modules registered (exit 0)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader superset of emittable (exit 0)",
+    "pnpm typecheck (root) -> exit 0 (apps/web + packages/runtime tsc --noEmit clean)",
+    "pnpm lint (root) -> exit 0 across all 5 workspaces, including check-test-manifest and check-message-keys (2979 t() keys resolve)",
+    "node --test packages/db/tests/fixed-asset-acquisition.test.mjs against clara_639 (focused run, no preintegration-gate import) -> 18/18 pass, but p639.refusal.locked_period silently no-ops ('this client has no fiscal year row - cell recorded, not asserted') instead of asserting CLR19",
+    "node --test components/registers/fixed-asset-detail.test.tsx components/registers/work-asset-row.test.tsx (apps/web) -> 11/11 pass (8+3), matches worker's claimed counts",
+    "node --test apps/web/e2e/e2e-fixture-ownership.test.ts -> 15/15 pass, confirms fixed-asset-mock.mjs verb declarations",
+    "node pg client query against clara_639:55504 -> confirmed acquisition_document_id column and both t_je_fa_acquisition_birth/t_je_fa_movement_belt deferred constraint triggers exist post-migration",
+    "sha256sum packages/db/migrations/0201_fixed_asset_acquisition.sql -> 7f0fc66a... matches the pin just added to apps/web/tests/firm-scope-db-pins.corpus.ts",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (blueprints untouched, as required)"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "where": "packages/db/tests/fixed-asset-acquisition.test.mjs:335-374 (p639.refusal.locked_period)",
+      "what": "The CLR19 locked-fiscal-year refusal cell -- one of the three cells the final report's AC7 row cites as proof and one of the brief's own named TDD seams (brief-639.md seam #8: 'CLR19 on a seeded closed FY, copy work-journal-post.test.mjs:517-527') -- never actually exercises the refusal. It SELECTs an existing clara.fiscal_years row for the client instead of INSERTing one the way its own cited precedent does.",
+      "evidence": "acqClient/freshFaClient (packages/db/tests/x41-fa-world.mjs:162-170) never create a fiscal_years row for a fresh client. In fixed-asset-acquisition.test.mjs:338-344, the cell SELECTs a fiscal year row and, when none exists, calls noteLane('...cell recorded, not asserted') and returns -- no assertion runs. Running the file live against clara_639 (node --test packages/db/tests/fixed-asset-acquisition.test.mjs) printed exactly that note and the cell still reported 'ok 9'. Compare to the cited precedent, work-journal-post.test.mjs's w623.post.closed-period (around line 517), which INSERTs a clara.fiscal_years row via rootQuery precisely because a fresh client has none -- the seeding step #639's cell was told to copy is missing.",
+      "fix": "In p639.refusal.locked_period, INSERT a closed clara.fiscal_years row via rootQuery for the dedicated client (status='closed', spanning the posting date used) the way w623.post.closed-period does, then post through it and assert CLR19 plus entryCountOf/committedReceiptCountOf/assetCountOf are unchanged. Remove the 'if (fy.rowCount === 0) { noteLane(...); return; }' fallback (or make it a hard failure) so the cell can never again pass without asserting."
+    },
+    {
+      "id": "F2",
+      "severity": "should",
+      "where": "apps/web/components/registers/fixed-asset-detail.tsx:200-210 (Acquisition tab, 'Source document' Fact)",
+      "what": "The Acquisition tab's source-document link goes to the bare client Documents tab instead of deep-linking to the specific filed document, even though the exact document id is on hand and the codebase already has a mechanism for exactly this.",
+      "evidence": "fixed-asset-detail.tsx:202 renders `<Link href={`/clients/${clientId}/documents`}>` with no query string, even though `acquisition.document_id` is known at that point. apps/web/lib/documents/url-state.ts (pre-existing, #719-era) exports DOCUMENT_PARAM/documentUrl()/applyDocumentParam(), and DocumentsWorkbench (apps/web/components/documents/documents-workbench.tsx:40-43) reads `?document=<uuid>` via parseDocumentParam to open one specific document. Neither the param nor the helper is used here, so the link cannot land on the acquisition's own source document.",
+      "fix": "Build the href with the existing helper -- e.g. documentUrl(`/clients/${clientId}/documents`, applyDocumentParam(new URLSearchParams(), acquisition.document_id)) -- so the link opens the specific filed document the same way Activity's ?event= and Registers' ?tab= links already do."
+    }
+  ]
+}
