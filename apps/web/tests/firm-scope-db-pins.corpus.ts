@@ -135,4 +135,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "26ae1b702b415f88c4f6e388e0040bcef7a8e19ece37c35da02717051db1ab8b",
     },
   ],
+  // #778 (0201) — the same 0177/0191 family, except TWO splices in one file rather than one.
+  // Admitted at the 2026-09-15 riders-batch integration: the migration landed on its own worker
+  // branch without this entry, so the successor census red until the barrier was reviewed here.
+  [
+    "0201_document_regions_unique_field_path.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut exactly TWO named functions — clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text) and clara.persist_invoice_facts(uuid,jsonb,text,text,integer,jsonb) — each read by its exact regprocedure literal and re-installed with ONE counted anchor replaced by an `on conflict (extraction_id,field_path) ... do nothing` arm (plus, in persist_invoice_facts, the absorbed-element re-raise of its own conflicting-duplicate forfeiture). Both return jsonb, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable. Each splice asserts its anchor occurs EXACTLY once before replacing, and each postcheck pins the INSTALLED BODY's own sha256 as well as the unchanged owner, ACL, SECURITY DEFINER and search_path: the substring probes say the splices did the right things, only the whole-body hashes say they did nothing else. Every other object this file creates is static DDL the lexer inspects directly.",
+      sha256: "b89e03f9ca77d6409412f690b7e020e02c6b162831bfd1773fd4596c5ad88a0d",
+    },
+  ],
 ]);
