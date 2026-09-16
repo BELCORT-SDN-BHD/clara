@@ -347,11 +347,11 @@ lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
 lib/work/periodic-adjustment-draft.test.ts
 lib/work/periodic-adjustment.test.ts
-lib/work/staff-expense-claim-draft.test.ts
-lib/work/staff-expense-claim.test.ts
 lib/work/question-fields.test.ts
 lib/work/questions.test.ts
 lib/work/reads.test.ts
+lib/work/staff-expense-claim-draft.test.ts
+lib/work/staff-expense-claim.test.ts
 lib/work/work-list-url-state.test.ts
 lib/work/work-list.test.ts
 test/a11yRules.test.ts
