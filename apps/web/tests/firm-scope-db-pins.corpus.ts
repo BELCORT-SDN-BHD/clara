@@ -143,7 +143,7 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
     "0201_fixed_asset_acquisition.sql",
     {
       reason: "Reviewed grant loop only: `execute format(...)` over a LITERAL array of six function signatures spelled in this file (two recut FA reads, the runtime particulars overload and four ungranted internals), emitting revoke/grant/alter-owner statements alone. No pg_get_functiondef, no discovered target, and no `create [or replace] view` anywhere in the file — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. Every other object this migration creates (one column, two foreign keys, one index, one deferred constraint trigger and six function bodies, two of them `create or replace` at literal signatures) is static DDL the lexer inspects directly, and the file's own prestate pins the pre-image sha256 of both recut bodies while its tail re-reads the installed grant matrix grantee by grantee.",
-      sha256: "7f0fc66abc58f95f8e8f6cd5c054795056e3fb23ec91bc6674e7c6d958ebf3cc",
+      sha256: "7b477abd810acca3f25e9f531e3163c6dda20c692a728499808c4572911cd141",
     },
   ],
 ]);

@@ -427,7 +427,11 @@ revoke all on function clara._fa_acquisition_json(uuid) from public;
 -- What it projects instead is what the database actually knows, and EVERY ROW SAYS HOW IT WAS
 -- DERIVED so a reader can weigh it:
 --   * `supersede`        — the split/revision lineage. STRUCTURAL and exact.
---   * `source_document`  — both acquisitions cite the same source document. Exact where present.
+--   * `co_acquired_on_same_document` — the same document (usually the SAME entry) birthed both
+--     rows: one invoice, two cost lines, two register rows. Exact, and deliberately ORDERLESS —
+--     neither sibling precedes or supersedes the other.
+--   * `source_document`  — the same source document, booked at two DIFFERENT approvals, so the
+--     order is real; the comparison is strict, never `>=`.
 --   * `reversed_acquisition_on_same_enrolment` — a DERIVATION, not a link: the same client, the
 --     same enrolled cost account, across a reversal boundary. It is the honest candidate set, and
 --     naming it as derived is what keeps it from being read as a stored fact.
@@ -459,10 +463,22 @@ begin
                    as rev_at
             from clara.journal_entries ge where ge.id = g.acquisition_entry_id) ge on true
         join lateral (values
-            -- the strongest derivation first: one source document, two register rows
+            -- CO-ACQUIRED, NOT SUPERSEDING. One cost line births one register row BY DESIGN
+            -- (0041 SS9.4, :2591-2593), so a two-line invoice — a machine and its freight — is
+            -- ORDINARY. Round-1 review measured what the first cut said about such a pair: both
+            -- rows shared the acquisition entry, therefore the document, therefore this arm, and
+            -- because they also shared `approved_at` the `>=` below resolved to 'successor' in
+            -- BOTH directions — each sibling told a professional the other had superseded it.
+            -- Siblings get their OWN word instead, and it makes no claim about order.
+            ('co_acquired_on_same_document', 'co_acquired',
+             (v_doc is not null and ge.doc = v_doc
+              and (g.acquisition_entry_id = e.id or ge.approved_at = e.approved_at))),
+            -- one source document, two DIFFERENT approvals: now the order is real, and it is
+            -- STRICT — an equal timestamp can never resolve to 'successor' on both sides again.
             ('source_document',
-             case when ge.approved_at >= e.approved_at then 'successor' else 'predecessor' end,
-             (v_doc is not null and ge.doc = v_doc)),
+             case when ge.approved_at > e.approved_at then 'successor' else 'predecessor' end,
+             (v_doc is not null and ge.doc = v_doc
+              and g.acquisition_entry_id <> e.id and ge.approved_at <> e.approved_at)),
             -- this row's acquisition was reversed, and g was booked after that reversal
             ('reversed_acquisition_on_same_enrolment', 'successor',
              (v_rev_at is not null and ge.approved_at >= v_rev_at)),
@@ -754,13 +770,32 @@ begin
   select cl.firm_id, cl.status into v_firm, v_client_status
     from clara.clients cl where cl.id = p_client;
   if v_firm is null then
-    -- NO ORACLE: an unknown client and another firm's client answer the same way.
+    -- MEASURED, NOT CLAIMED (round-1 review). An earlier draft of this comment said "NO ORACLE: an
+    -- unknown client and another firm's client answer the same way". They do not: the lookup runs
+    -- as a SECURITY DEFINER owned by clara_fn_owner, so a FOREIGN firm's real client resolves a
+    -- firm here and falls through to the membership arm below (CLR04 `obo_not_active`), while an
+    -- unknown uuid stops here (CLR11 `client_not_found`). That difference is deliberate and is the
+    -- reason this door exists at all: it is granted to `clara_runtime` ONLY (§E), it names an
+    -- explicit `p_obo`, and 0195's commit-time ladder gives each of the three failures its own
+    -- diagnosis so a surface can tell "the client is gone" from "the human who asked is gone" from
+    -- "they are no longer allowed". The estate's no-existence-oracle discipline
+    -- (`packages/db/tests/rig-helpers.mjs:64`) is about HUMAN doors reachable from a browser;
+    -- `clara.complete_fixed_asset_particulars` (0041:3035) is that door and keeps CLR11 for both.
     raise exception 'client not found' using errcode = 'CLR11',
       detail = '{"reason":"client_not_found"}';
   end if;
+  -- THE LIVE READ IS TAKEN UNDER A LOCK, not merely re-read (round-1 review, note 639-A6).
+  -- `clara.set_member_role` (0157) takes `clara.firms … for update` and THEN updates the
+  -- membership, so 0195:1792-1797 records the measured pair a door needs to queue behind it: the
+  -- firm row `for key share` first (weakest mode, same lock ORDER as the posting core, so no new
+  -- 40P01 edge), then the membership `for share`. Without them a demotion committing between this
+  -- read and the register UPDATE would slip past an authority check whose whole purpose is to be
+  -- current.
+  perform 1 from clara.firms f where f.id = v_firm for key share;
   select m.role, m.status into v_role, v_status from clara.firm_memberships m
    where m.user_id = p_obo and m.firm_id = v_firm
-   order by (m.status = 'active') desc, m.created_at desc limit 1;
+   order by (m.status = 'active') desc, m.created_at desc limit 1
+     for share;
   if v_role is null or v_status <> 'active' then
     raise exception 'the initiating member is no longer active in this firm' using errcode = 'CLR04',
       detail = jsonb_build_object('reason', 'obo_not_active', 'obo', p_obo)::text;
@@ -980,6 +1015,21 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
+
+  -- (T.9b) THE RUNTIME DOOR'S LIVE READ IS TAKEN UNDER A LOCK, not merely re-read. `for key share`
+  -- on clara.firms then `for share` on the membership is the pair 0195:1792-1797 measured against
+  -- `clara.set_member_role`'s own `for update`; without them a demotion committing between the
+  -- role read and the register UPDATE would slip past the authority check this door exists for.
+  -- Pinned as text because the lock is invisible in the catalog.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.complete_fixed_asset_particulars_for(uuid,uuid,jsonb,text,uuid)'::regprocedure;
+  -- The EXECUTABLE forms, not the words: `prosrc` carries this function's comments too, and a pin
+  -- that a comment alone could satisfy is not a pin.
+  if position('clara.firms f where f.id = v_firm for key share;' in v_src) = 0
+     or position('for share;' in v_src) = 0 then
+    raise exception '#639 tail: the runtime particulars door no longer takes the firm key-share + membership share pair'
+      using errcode='CLR10';
+  end if;
 
   -- (T.10) THE GRANT MATRIX, grantee by grantee. The runtime door is runtime-only; the two recut
   -- reads are clara_authenticated-only; the four internals are granted to nobody.

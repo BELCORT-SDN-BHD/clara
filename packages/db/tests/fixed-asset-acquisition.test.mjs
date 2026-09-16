@@ -27,6 +27,7 @@ import {
   buyAsset, completeParticulars, getFixedAsset, listFixedAssets, upsertFaProfile,
   reverseAndSettle, approvedEntry, faRow, entryRowOf, eventCount,
   workRow, receiptsForWork, mintClientObo, wakeRecordJournalEntry,
+  withActor, ROLES,
   COST, ACCUM2, EXPENSE2, BANK, LAND, AP1, SHARE,
   mon, dayIn, opk, rootQuery, humanQuery, namedCall,
   refuses, caught, reasonToken, noteLane, printLaneNotes, printSkipCount, endPool,
@@ -225,6 +226,12 @@ test("p639.birth.exclusions opening entries, reversal mirrors, disposals and sch
     assert.ok(body.includes(guard),
       `exclusions: the birth trigger carries the ${guard} exclusion in its own body`);
   }
+  // A STRING SEARCH IS A BELT, NOT THE PROOF (round-1 review, 639-A5). The `scheduled_run` arm is
+  // proven BEHAVIOURALLY by `p639.depreciation.independent`, which runs a real depreciation period
+  // through the production command on an enrolled client and asserts the register count is
+  // unmoved. The K-family opening arm remains belt-only and is named as such in the report: no
+  // opening-seed fixture exists anywhere in packages/db/tests, and 0041 arm 1's own CLR38 guard is
+  // the standing evidence.
 });
 
 // ===========================================================================================
@@ -334,43 +341,51 @@ test("p639.provenance.document_lane a hook-born row carries its source document 
 
 test("p639.refusal.locked_period an acquisition into a CLOSED fiscal year is refused by name and leaves no entry, no receipt and no register row", async (t) => {
   if (await gate(t)) return;
+  // A DEDICATED client, and the closed year is SEEDED HERE. `freshFaClient` (x41-fa-world.mjs:162)
+  // creates no `clara.fiscal_years` row at all, so a cell that only SELECTS one can never assert —
+  // which is exactly what this cell did until round-1 review measured it ("cell recorded, not
+  // asserted", 18/18 green with zero assertions). The precedent it was told to copy,
+  // `work-journal-post.test.mjs`'s `w623.post.closed-period` (:517-527), INSERTs the year for the
+  // same reason and asserts the seeding was mandatory. `clara.fiscal_years` is append-only, so the
+  // year is seeded on a client of this cell's own rather than on a shared one.
+  const w = await acqWorld();
   const client = await acqClient("refusal_locked");
-  const fy = await rootQuery(
-    `select id, starts_on, ends_on from clara.fiscal_years
-      where client_id = $1 order by starts_on desc limit 1`, [client]);
-  if (fy.rowCount === 0) {
-    noteLane("refusal.locked_period: this client has no fiscal year row — cell recorded, not asserted");
-    return;
-  }
+  const postingDate = dayIn(mon(-1), 15);
+  const seeded = await rootQuery(
+    `insert into clara.fiscal_years(firm_id,client_id,label,starts_on,ends_on,ordinal,status,fy_end_source,opened_by)
+     values((select firm_id from clara.clients where id=$1), $1, 'p639 closed FY',
+            date_trunc('year', $2::date)::date,
+            (date_trunc('year', $2::date) + interval '1 year' - interval '1 day')::date,
+            1, 'closed', 'asserted', $3)
+     returning id, status, starts_on, ends_on`, [client, postingDate, w.users.alice]);
+  assert.ok(seeded.rows[0]?.id,
+    "locked_period: MANDATORY SETUP — without a genuinely closed fiscal year the refusal is unproven");
+  assert.equal(seeded.rows[0].status, "closed",
+    "locked_period: …and the seeded year really is CLOSED, read back from the catalog");
+
   // The period wall is the ESTATE's (clara._tf_period_wall, 0056) and the typed pre-check is
-  // 0194's; closing the year through a root UPDATE is a FIXTURE shortcut around the close lane,
+  // 0194's; seeding the year straight to `closed` is a FIXTURE shortcut around the close lane,
   // which needs a whole readiness run this cell is not about. Stated rather than hidden.
-  await rootQuery("update clara.fiscal_years set status='closed' where id=$1", [fy.rows[0].id]);
-  try {
-    const before = {
-      entries: await entryCountOf(client),
-      receipts: await committedReceiptCountOf(client),
-      assets: await assetCountOf(client),
-    };
-    const a = await armedAcquisition({
-      client,
-      basis: acqBasis({ cents: 120_000, postingDate: fy.rows[0].starts_on }),
-    });
-    const err = await caught(() => postAcquisition(a));
-    assert.ok(err, "locked_period: the acquisition is refused");
-    assert.equal(err.code, "CLR19",
-      `locked_period: …by the estate's period SQLSTATE (got ${err.code}: ${err.message})`);
-    assert.equal(reasonToken(err), ACQ.closedPeriod,
-      "locked_period: …and by the typed reason a surface can map to the period control");
-    assert.equal(await entryCountOf(client), before.entries,
-      "locked_period: no journal entry survives the refusal");
-    assert.equal(await committedReceiptCountOf(client), before.receipts,
-      "locked_period: …no committed receipt…");
-    assert.equal(await assetCountOf(client), before.assets,
-      "locked_period: …and no half-born register row (the acquisition/journal pair cannot mismatch)");
-  } finally {
-    await rootQuery("update clara.fiscal_years set status='open' where id=$1", [fy.rows[0].id]);
-  }
+  const before = {
+    entries: await entryCountOf(client),
+    receipts: await committedReceiptCountOf(client),
+    assets: await assetCountOf(client),
+  };
+  const a = await armedAcquisition({
+    client, basis: acqBasis({ cents: 120_000, postingDate }),
+  });
+  const err = await caught(() => postAcquisition(a));
+  assert.ok(err, "locked_period: the acquisition is refused");
+  assert.equal(err.code, "CLR19",
+    `locked_period: …by the estate's period SQLSTATE (got ${err.code}: ${err.message})`);
+  assert.equal(reasonToken(err), ACQ.closedPeriod,
+    "locked_period: …and by the typed reason a surface can map to the period control");
+  assert.equal(await entryCountOf(client), before.entries,
+    "locked_period: no journal entry survives the refusal");
+  assert.equal(await committedReceiptCountOf(client), before.receipts,
+    "locked_period: …no committed receipt…");
+  assert.equal(await assetCountOf(client), before.assets,
+    "locked_period: …and no half-born register row (the acquisition/journal pair cannot mismatch)");
 });
 
 // ===========================================================================================
@@ -545,6 +560,106 @@ test("p639.particulars.for_overload the runtime overload completes ONCE OBO the 
   await setRole("bookkeeper", "p639restore");
 });
 
+test("p639.particulars.race two runtime sessions arriving TOGETHER produce exactly ONE effect, and the loser is refused by name", async (t) => {
+  if (await gate(t)) return;
+  // ROUND-1 REVIEW (adversarial 639-A3). The whole point of a complete-ONCE door is what happens
+  // when two callers arrive together, and this battery had no two-session cell at all — every
+  // "complete once" assertion was sequential, which proves the guard only for a caller that can
+  // SEE the first write. The door takes `pg_advisory_xact_lock(203005004, hashtext(client))` and
+  // then `clara.fixed_assets … for update` (0201 §D); this cell drives both from two REAL
+  // `clara_runtime` sessions with a COMMIT barrier between them.
+  const client = await acqClient("particulars_race");
+  const { out, author } = await workLaneAcquisition({ client });
+  const asset = (await assetForEntry(out.entry_id))[0];
+  const entriesBefore = await entryCountOf(client);
+  const start = dayIn(mon(-1), 15);
+
+  const call = (c, months, key) => c.query(namedCall("complete_fixed_asset_particulars_for", [
+    { name: "p_client", cast: "uuid" }, { name: "p_asset", cast: "uuid" },
+    { name: "p_particulars", cast: "jsonb" }, { name: "p_op_key", cast: "text" },
+    { name: "p_obo", cast: "uuid" },
+  ]), [client, asset.id, JSON.stringify({
+    method: "straight_line", useful_life_months: months, residual_cents: 0, start_date: start,
+  }), key, author]);
+
+  let release = null;
+  const barrier = new Promise((r) => { release = r; });
+  let firstIsHolding = null;
+  const firstHasRun = new Promise((r) => { firstIsHolding = r; });
+
+  // SESSION 1 — writes, then HOLDS its transaction open on the barrier.
+  const s1 = withActor({ role: ROLES.runtime, transaction: true }, async (c) => {
+    const r = await call(c, 60, opk("p639-race-1"));
+    firstIsHolding();
+    await barrier;
+    return r.rows[0].result;
+  });
+  await firstHasRun;
+
+  // SESSION 2 — a DIFFERENT op key (so this is a genuine second act, never a replay), entering
+  // while session 1 still holds the locks. It must BLOCK, not race past.
+  const s2 = withActor({ role: ROLES.runtime, transaction: true }, (c) => call(c, 36, opk("p639-race-2")))
+    .then((r) => ({ ok: true, result: r.rows[0].result }), (e) => ({ ok: false, error: e }));
+  await new Promise((r) => setTimeout(r, 400));
+  release();
+
+  const first = await s1;
+  const second = await s2;
+  assert.equal(first.particulars_complete, true, "race: session 1 completed the particulars");
+  assert.equal(second.ok, false,
+    `race: session 2 must NOT also succeed (it returned ${JSON.stringify(second.result)})`);
+  assert.equal(second.error.code, "CLR37",
+    `race: …and it is refused by the door, not by a constraint (got ${second.error.code}: ${second.error.message})`);
+  assert.equal(reasonToken(second.error), ACQ.particularsAlreadyComplete,
+    "race: …by the complete-once name a surface can act on");
+
+  // EXACTLY ONE EFFECT, and it is the WINNER'S. A last-writer-wins door would show 36 here.
+  const row = await faRow(asset.id);
+  assert.equal(row.useful_life_months, 60,
+    "race: the register carries session 1's answer — the loser wrote nothing");
+  assert.equal(row.depreciation_start_date, start);
+  assert.equal(await entryCountOf(client), entriesBefore,
+    "race: …and neither session wrote a journal entry (answering is not a posting)");
+});
+
+test("p639.particulars.replay the SAME op key replays the identical receipt; the same key with DIFFERENT args is refused", async (t) => {
+  if (await gate(t)) return;
+  // The other half of 639-A3's ask. `_reserve_op` is the estate's idempotency instrument and this
+  // door rides it; a replay that quietly did the work twice, or a key reused for a different
+  // answer that quietly succeeded, would both be invisible to every other cell in this file.
+  const client = await acqClient("particulars_replay");
+  const { out, author } = await workLaneAcquisition({ client });
+  const asset = (await assetForEntry(out.entry_id))[0];
+  const entriesBefore = await entryCountOf(client);
+  const key = opk("p639-replay");
+  const particulars = {
+    method: "straight_line", useful_life_months: 48, residual_cents: 0,
+    start_date: dayIn(mon(-1), 15), description: "Replayed answer",
+  };
+
+  const first = await completeParticularsFor({ client, asset: asset.id, particulars, opKey: key, obo: author });
+  const again = await completeParticularsFor({ client, asset: asset.id, particulars, opKey: key, obo: author });
+  assert.deepEqual(again, first,
+    "replay: the same key and the same args return the IDENTICAL receipt, not a second act");
+  assert.equal(await entryCountOf(client), entriesBefore,
+    "replay: …and no journal entry appears on either call");
+  const row = await faRow(asset.id);
+  assert.equal(row.useful_life_months, 48);
+
+  // The same key carrying DIFFERENT args is a different act wearing the same name.
+  const err = await caught(() => completeParticularsFor({
+    client, asset: asset.id, opKey: key, obo: author,
+    particulars: { ...particulars, useful_life_months: 24 },
+  }));
+  assert.ok(err, "replay: a key reused with different args is refused");
+  assert.equal(err.code, "CLR10",
+    `replay: …by the estate's op-key SQLSTATE (got ${err.code}: ${err.message})`);
+  assert.match(String(err.message), /op_key reused/i,
+    "replay: …and the message names the reuse, so a caller can tell it from a validation refusal");
+  assert.equal((await faRow(asset.id)).useful_life_months, 48,
+    "replay: …and the register still carries the FIRST answer");
+});
+
 test("p639.particulars.axes every refusal the particulars door raises names the dependent FIELD, never a bare failure", async (t) => {
   if (await gate(t)) return;
   const w = await acqWorld();
@@ -698,6 +813,40 @@ test("p639.correction.chain reverse + rebook births a second row and the History
     "correction: …by the name that tells the professional to reverse and re-book");
 });
 
+test("p639.correction.co_acquired two cost lines on ONE invoice birth two rows, and NEITHER supersedes the other", async (t) => {
+  if (await gate(t)) return;
+  // ROUND-1 REVIEW (adversarial 639-A2), measured: a two-cost-line supplier invoice is the
+  // ORDINARY case (0041 §9.4 births one row per cost line), and the first cut of
+  // `clara._fa_acquisition_history` told each sibling the other was its `successor` — because
+  // they share the acquisition entry, therefore the document, therefore the `source_document`
+  // arm, and `approved_at >= approved_at` is true in BOTH directions. On the very tab AC4 adds to
+  // show corrections, that is a mutually contradictory accounting claim.
+  const w = await acqWorld();
+  const client = await acqClient("co_acquired");
+  const filed = await documentLaneAcquisition(w.users.alice, {
+    firm: w.firms.A, client, cents: 500_000, secondCostCents: 40_000,
+    postingDate: dayIn(mon(-1), 9),
+  });
+  const rows = await assetForEntry(filed.entry);
+  assert.equal(rows.length, 2,
+    `co_acquired: ONE invoice with two cost lines births TWO register rows (got ${rows.length})`);
+
+  for (const [self, other] of [[rows[0], rows[1]], [rows[1], rows[0]]]) {
+    const detail = await getFixedAsset(w.users.bob, self.id);
+    const rel = (detail.history.related ?? []).filter((r) => r.asset_id === other.id);
+    assert.equal(rel.length, 1,
+      `co_acquired: ${self.id} names its sibling exactly once (got ${JSON.stringify(rel)})`);
+    assert.equal(rel[0].link, "co_acquired_on_same_document",
+      "co_acquired: …by the link that says they were booked together…");
+    assert.equal(rel[0].relation, "co_acquired",
+      "co_acquired: …with an ORDERLESS relation: neither row supersedes the other");
+    assert.notEqual(rel[0].relation, "successor",
+      "co_acquired: …and above all NOT 'successor', which is what both rows used to claim");
+    assert.equal(detail.history.chain_open, false,
+      "co_acquired: a co-acquired sibling is not an open correction chain");
+  }
+});
+
 // ===========================================================================================
 // 9 · THE SECOND HALF OF AC6, RE-MEASURED (never copied): an incomplete asset is skipped ALONE.
 // ===========================================================================================
@@ -738,6 +887,14 @@ test("p639.depreciation.independent an asset waiting on particulars is skipped A
     "independent: …for the reason 'incomplete', by name — not a generic failure");
   assert.ok(Number(run.receipt.charged_cents) > 0,
     "independent: …while the complete neighbour still charged — the dependency is the ASSET'S, not the run's");
+
+  // AND THE SCHEDULED RUN BIRTHS NOTHING — the `origin='scheduled_run'` exclusion, proven by
+  // BEHAVIOUR here rather than only by the `prosrc` string search in `p639.birth.exclusions`
+  // (round-1 review, 639-A5: a guard that is present but ineffective would pass a string search).
+  // This is a real approved depreciation entry, posted by the production run, on a client whose
+  // cost account IS enrolled.
+  assert.equal(await assetCountOf(client), 2,
+    "independent: a scheduled depreciation run births no register row — the two acquisitions are all");
 });
 
 // ===========================================================================================

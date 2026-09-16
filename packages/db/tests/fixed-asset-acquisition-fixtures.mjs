@@ -197,18 +197,31 @@ export async function workLaneAcquisition({ client, author = null, basis = null 
  *  which 0017's post-approval immutability wall then makes unwritable forever. It is therefore the
  *  lane that proves the READ resolves the acquisition entry's own document as the authority.
  */
-export async function documentLaneAcquisition(sub, { firm, client, cents = 640_000, postingDate }) {
+export async function documentLaneAcquisition(sub, {
+  firm, client, cents = 640_000, postingDate, secondCostCents = null,
+}) {
   const doc = await filedDocument(sub, { firm, client });
+  // TWO COST LINES ON ONE INVOICE, when asked for. `clara._fa_on_approve` arm 4 births ONE row per
+  // debit line on an enrolled cost account BY DESIGN (0041 §9.4, :2591-2593) — a machine and its
+  // freight on one supplier invoice is the ordinary case, not an exotic one — so this fixture can
+  // produce the pair the co-acquisition cell is about.
+  const lines = secondCostCents === null
+    ? [
+      { account_code: COST, debit_cents: cents, credit_cents: 0, description: "asset cost" },
+      { account_code: BANK, debit_cents: 0, credit_cents: cents, description: "paid" },
+    ]
+    : [
+      { account_code: COST, debit_cents: cents, credit_cents: 0, description: "asset cost" },
+      { account_code: COST, debit_cents: secondCostCents, credit_cents: 0, description: "delivery and install" },
+      { account_code: BANK, debit_cents: 0, credit_cents: cents + secondCostCents, description: "paid" },
+    ];
   const draft = await s6DraftEntry(sub, {
     client,
     resolution: rigFreshResolution(sub, client, { subjectKind: "document", subjectId: doc.documentId }),
     document: doc.documentId, sha256: doc.sha256,
     memo: `p639 document-lane acquisition ${opk("memo")}`,
     postingDate,
-    lines: [
-      { account_code: COST, debit_cents: cents, credit_cents: 0, description: "asset cost" },
-      { account_code: BANK, debit_cents: 0, credit_cents: cents, description: "paid" },
-    ],
+    lines,
     opKey: opk("p639-docdraft"),
   });
   const w = await acqWorld();
