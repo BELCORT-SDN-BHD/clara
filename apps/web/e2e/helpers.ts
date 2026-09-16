@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { SIDEBAR_BREAKPOINT } from "../hooks/use-mobile";
+
 /**
  * Shared e2e instrument: the ONE spelling of "this page can be trusted to
  * receive a keyboard event next" — anchor every keyboard-first walk on this
@@ -208,15 +210,28 @@ export function grantCellBudget(ms: number): void {
  * existing 20 s, which this wait's own timeout below matches rather than replaces with a new
  * number. The measurement CONFIRMS the 20 s figure; it does not correct it.
  *
- * FOUR SHAPES, ONE IMPLEMENTATION. `signIn(page)` and `signIn(page, email)` sign in, land on `/`
- * (no `next` param) and wait on the post-login `navigation[name=Main]` landmark, exactly as their
- * own retired copies did. `signInTo(page, destination)` and `signInTo(page, destination, email)`
- * carry the `next` query param home-board-walk's, shell-migration-walk's and the rest's own
- * copies used, and assert only the caller's destination — NOT the landmark: several `signInTo`
- * callers deliberately sign in at a NARROW viewport set before the call
- * (`responsive-shell-walk.spec.ts`, `shell-migration-walk.spec.ts`), where the sidebar is a closed
- * Sheet and `navigation[name=Main]` is not visible by design; asserting it there would be a wrong
- * assertion, not a stronger one. This mirrors exactly what the retired `signInTo` copies checked.
+ * FOUR SHAPES, ONE IMPLEMENTATION. `signIn(page)` and `signIn(page, email)` sign in and land on
+ * `/` (no `next` param); `signInTo(page, destination)` and `signInTo(page, destination, email)`
+ * carry the `next` query param home-board-walk's, shell-migration-walk's and the rest's own copies
+ * used, and assert the caller's destination rather than a bare `/`.
+ *
+ * THE LANDMARK WAIT IS NOT UNCONDITIONAL, AND IT IS NOT ON `signInTo` AT ALL. Of the twenty-five
+ * retired copies only three waited on the post-login `navigation[name=Main]` landmark; the other
+ * twenty-two asserted the destination URL and stopped there. Making it unconditional was measured
+ * to be WRONG, not stronger: the sidebar that owns that landmark renders as a CLOSED Sheet below
+ * `SIDEBAR_BREAKPOINT` (`hooks/use-mobile.ts`, 768 — imported here rather than respelled so the two
+ * cannot drift), so every cell that sets a narrow viewport before signing in waited the full 20 s
+ * for an element that is absent by design — nine cells across `operator-support-walk`,
+ * `personal-settings-walk` and `work-list-walk` went red exactly that way on the 2026-09-16 full
+ * local browser suite, plus `responsive-shell-walk`'s and `shell-migration-walk`'s narrow
+ * `signInTo` cells before them.
+ *
+ * So: `signIn` keeps the landmark proof (its callers' own cells are overwhelmingly desktop-width,
+ * and it is a strictly stronger assertion there than a bare URL match) but SKIPS it when the
+ * viewport the caller set is narrower than the breakpoint, where the landmark is not part of the
+ * rendered shell; `signInTo` asserts the caller's destination only, exactly as its retired copies
+ * did. A cell that wants the narrow shell's own navigation asserts the Sheet it actually opens —
+ * `responsive-shell-walk.spec.ts` already does.
  */
 const SIGN_IN_PASSWORD = "Clara-e2e-password-1!";
 const DEFAULT_SIGN_IN_EMAIL = "owner@example.test";
@@ -242,7 +257,10 @@ export async function signInTo(page: Page, destination: string, email: string = 
 export async function signIn(page: Page, email: string = DEFAULT_SIGN_IN_EMAIL): Promise<void> {
   await signInTo(page, "/", email);
   // #614: the sidebar's ONE navigation landmark, over the one registry (lib/navigation/tree.ts)
-  // — "Firm navigation" retired with the bespoke `<aside>` it named. Only `signIn` (never
-  // `signInTo`) checks this — see this function's own header for why.
+  // — "Firm navigation" retired with the bespoke `<aside>` it named. Below the breakpoint that
+  // landmark lives inside a CLOSED Sheet and is absent by design, so waiting on it there is a
+  // wrong assertion rather than a stronger one — see this function's own header.
+  const viewportWidth = page.viewportSize()?.width;
+  if (viewportWidth !== undefined && viewportWidth < SIDEBAR_BREAKPOINT) return;
   await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: POST_LOGIN_NAV_TIMEOUT_MS });
 }
