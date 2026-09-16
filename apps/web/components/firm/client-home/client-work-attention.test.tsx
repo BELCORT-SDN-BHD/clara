@@ -192,6 +192,44 @@ test("with nothing to open, there is no drilldown and therefore nothing to discl
 });
 
 // ===========================================================================================
+// AND THE ONE ARM WHERE THAT SENTENCE WOULD OVERSTATE (round-2 review, finding 650-R2).
+//
+// `workAttentionHref` deliberately drops BOTH dates when the window is unreadable — a date this
+// build did not read is not invented (`lib/work/client-work-pack.ts`, pinned by
+// `client-work-pack.test.ts` "an unreadable window drops the dates rather than guessing them").
+// The link that comes out opens EVERY completed Work this client has ever had, so "the same
+// seven days" is false on exactly that link: the disclosure would be promising a narrowing the
+// URL does not carry. The honest move is not silence — a bare `?status=completed` link under a
+// seven-day count needs MORE explanation, not less — so the tile says the wider thing instead.
+// Defensive arm: the door always publishes a window, and nothing in the estate is known to
+// produce one without dates.
+// ===========================================================================================
+test("a window this build could not read makes the disclosure say the WIDER thing, not the false one", async () => {
+  const h = await mount({ load: async () => pack({
+    window: {
+      from: null, to: null, fromDate: null, toDate: null,
+      timezone: "Asia/Kuala_Lumpur", days: null,
+    },
+  }) });
+  try {
+    // The link really is dateless — this cell is about the SENTENCE that sits beside it.
+    assert.ok(hrefs(h).includes(`/clients/${CLIENT}/work?status=completed`), hrefs(h).join(" | "));
+    assert.ok(!h.text().includes("the same seven days"),
+      "a dateless link does not open the same seven days, so the tile must not say it does");
+    assert.match(h.text(), /opens every completed Work for this client/,
+      "the tile names the wider population the link actually carries");
+  } finally { await h.unmount(); }
+});
+
+test("a readable window keeps the narrow disclosure — the wider sentence is not the default", async () => {
+  const h = await mount();
+  try {
+    assert.match(h.text(), /dated by when each Work started, not when it posted/);
+    assert.ok(!h.text().includes("opens every completed Work for this client"));
+  } finally { await h.unmount(); }
+});
+
+// ===========================================================================================
 // THE ONE LINK A DENIED CALLER IS STILL OFFERED (round-1 review, finding 650-N4).
 //
 // The needs-you count is VIEWER-floored (`clara.list_review_queue`, 0016:4563) and the Work list

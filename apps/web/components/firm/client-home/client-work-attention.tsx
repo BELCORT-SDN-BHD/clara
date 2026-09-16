@@ -51,6 +51,7 @@ import type { ReviewQueueState } from "@/lib/firm/use-review-queue";
 import { workDetailHref } from "@/lib/navigation/tree";
 import {
   workAttentionHref,
+  workAttentionWindowDates,
   type ClientWorkPack,
   type WorkAttentionFacet,
   type WorkAttentionFacetKind,
@@ -150,8 +151,18 @@ function WorkAttentionTile({
             classes on the rig (a Work admitted weeks ago and posted this week; a Work started and
             completed this week with no receipt, which the door already names through
             `uncounted_completions`). */}
+        {/* AND THE ONE ARM WHERE "the same seven days" WOULD OVERSTATE (round-2 review, 650-R2):
+            a window this build could not read makes the builder drop BOTH dates rather than guess
+            them, so the link opens every completed Work this client has ever had. Silence would
+            leave a bare `?status=completed` under a seven-day count with less explanation, not
+            more, so the tile names the wider population instead. Defensive: the door always
+            publishes a window. */}
         {kind === "recent_success" ? (
-          <p className="text-xs text-muted-foreground">{t("recentSuccessListBasis")}</p>
+          <p className="text-xs text-muted-foreground">
+            {workAttentionWindowDates(pack) === null
+              ? t("recentSuccessListUndated")
+              : t("recentSuccessListBasis")}
+          </p>
         ) : null}
         {/* AND THE ONE LINK A DENIED CALLER IS STILL OFFERED. This number is viewer-floored; the
             list it opens is bookkeeper-floored (0189:344-347). A refused pack IS the evidence

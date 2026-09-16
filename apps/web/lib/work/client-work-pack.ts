@@ -278,14 +278,31 @@ export function workAttentionHref(
       status: [...WORK_ATTENTION_ACTIVE_STATUSES],
     }).toString()}`;
   }
-  const from = pack.window?.fromDate ?? null;
-  const to = pack.window?.toDate ?? null;
-  const dated = from !== null && to !== null && isDateOnly(from) && isDateOnly(to);
+  const dates = workAttentionWindowDates(pack);
   return `${base}?${applyWorkListUrlState(empty, {
     status: ["completed"],
-    since: dated ? from : null,
-    until: dated ? to : null,
+    since: dates?.from ?? null,
+    until: dates?.to ?? null,
   }).toString()}`;
+}
+
+/**
+ * IS THE RECENT-SUCCESS DRILLDOWN DATED AT ALL, AND WITH WHICH TWO DAYS.
+ *
+ * ONE predicate with THREE readers — the href builder above, the instant rebuilder below, and the
+ * board's own disclosure sentence (`client-work-attention.tsx`). The board has to ask because the
+ * sentence it prints beside the count promises a seven-day narrowing, and on an unreadable window
+ * the link carries no dates at all: that promise would be false on the one arm where the builder
+ * deliberately drops them (round-2 review, 650-R2). Two spellings of this question is exactly how
+ * a tile and the link under it drift apart, so there is one.
+ */
+export function workAttentionWindowDates(
+  pack: ClientWorkPack,
+): { from: string; to: string } | null {
+  const from = pack.window?.fromDate ?? null;
+  const to = pack.window?.toDate ?? null;
+  if (from === null || to === null || !isDateOnly(from) || !isDateOnly(to)) return null;
+  return { from, to };
 }
 
 /** The instant range a facet's drilldown dates rebuild, for a caller that wants to show it.
@@ -293,8 +310,7 @@ export function workAttentionHref(
 export function workAttentionWindowInstants(
   pack: ClientWorkPack,
 ): { from: string; to: string } | null {
-  const from = pack.window?.fromDate ?? null;
-  const to = pack.window?.toDate ?? null;
-  if (from === null || to === null || !isDateOnly(from) || !isDateOnly(to)) return null;
-  return { from: businessDayStart(from), to: businessDayEnd(to) };
+  const dates = workAttentionWindowDates(pack);
+  if (dates === null) return null;
+  return { from: businessDayStart(dates.from), to: businessDayEnd(dates.to) };
 }
