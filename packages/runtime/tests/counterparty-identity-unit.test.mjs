@@ -111,8 +111,12 @@ test("ci.4 every local refusal MIRRORS a 0200 wall and uses the database's own r
   // ck_counterparty_aliases_extraction_pins / CLR10 source_not_extracted.
   const strayPin = localAliasRefusal({ ...proposal({ source_extraction_id: EXT }) });
   assert.equal(strayPin?.reason, "source_not_extracted");
+  // …but a DOCUMENT-only pin on a non-extracted origin is NOT refused, because the door does not
+  // refuse it either: 0200 section 7.1 tests only the extraction/region/field pins, and
+  // ck_counterparty_aliases_extraction_pins names the same three columns. A carrier stricter than
+  // the wall it claims to mirror would refuse locally what the door would admit.
   const strayDoc = localAliasRefusal({ ...proposal({ source_document_id: DOC }) });
-  assert.equal(strayDoc?.reason, "source_not_extracted");
+  assert.equal(strayDoc, null);
 
   // ck_counterparty_aliases_region_needs_extraction — a deeper pin needs the one above it.
   const orphanRegion = localAliasRefusal({
@@ -136,7 +140,8 @@ test("ci.5 the refusal map keys on (code, reason) and leaves an unmapped pair to
   assert.equal(refusalKey("CLR04", null), "CLR04:", "a refusal with no reason token keys on its code alone");
 
   for (const key of ["CLR23:target_retired", "CLR23:alias_collision", "CLR23:source_not_this_client",
-    "CLR10:source_incomplete", "CLR10:source_not_extracted", "CLR04:"]) {
+    "CLR10:source_incomplete", "CLR10:source_not_extracted",
+    "CLR10:source_extraction_not_of_document", "CLR10:source_region_not_of_extraction", "CLR04:"]) {
     assert.equal(typeof ALIAS_REFUSAL_MESSAGES[key], "string", `${key} is mapped`);
     assert.ok(ALIAS_REFUSAL_MESSAGES[key].length > 20, `${key} says something a human can act on`);
   }

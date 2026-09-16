@@ -2609,8 +2609,7 @@
       "registry_lookup": "From a registry lookup",
       "imported_bundle": "From an imported bundle",
       "model_inference": "Inferred by Clara",
-      "legacy_client_fact": "Recorded as a client fact before the Knowledge register",
-      "counterparty_alias": "Recorded on a counterparty alias"
+      "legacy_client_fact": "Recorded as a client fact before the Knowledge register"
     },
     "recordedVia": {
       "human_ui": "entered in the app",
@@ -4030,26 +4029,28 @@
       "originHuman": "Stated by a person",
       "originExtracted": "Read off a document",
       "originAgentProposed": "Proposed by Clara"
+    },
+    "clientIdentifiers": {
+      "heading": "This client's own identifiers",
+      "intro": "The registration numbers and tax identifiers recorded for this client itself. One row per kind and value; the same value may legitimately appear on another client of this firm.",
+      "loading": "Loading identifiers…",
+      "empty": "No identifier has been recorded for this client yet.",
+      "columnKind": "Kind",
+      "columnValue": "Value",
+      "columnAdded": "Recorded",
+      "addTrigger": "Add identifier",
+      "addTitle": "Add an identifier",
+      "addDescription": "Records one identifier for this client. The value is normalised by the database; the same kind and value cannot be recorded twice for one client.",
+      "addConfirm": "Add",
+      "kindLabel": "Kind",
+      "kindHint": "Clara records three kinds of client identifier, and the database admits no others.",
+      "kindSsm": "SSM registration number",
+      "kindTin": "Tax identification number (TIN)",
+      "kindBankAccount": "Bank account number",
+      "valueLabel": "Value",
+      "valueHint": "Spaces are removed when it is stored.",
+      "valueRequired": "Enter the identifier value before adding it."
     }
-  },
-  "ClientIdentifiers": {
-    "heading": "This client's own identifiers",
-    "intro": "The registration numbers and tax identifiers recorded for this client itself. One row per kind and value; the same value may legitimately appear on another client of this firm.",
-    "loading": "Loading identifiers…",
-    "empty": "No identifier has been recorded for this client yet.",
-    "columnKind": "Kind",
-    "columnValue": "Value",
-    "columnAdded": "Recorded",
-    "addTrigger": "Add identifier",
-    "addTitle": "Add an identifier",
-    "addDescription": "Records one identifier for this client. The value is normalised by the database; the same kind and value cannot be recorded twice for one client.",
-    "addConfirm": "Add",
-    "kindLabel": "Kind",
-    "kindHint": "For example ssm, tin or sst.",
-    "valueLabel": "Value",
-    "valueHint": "Spaces are removed when it is stored.",
-    "kindRequired": "Name the kind of identifier before adding it.",
-    "valueRequired": "Enter the identifier value before adding it."
   },
   "ReportsSnapshotsSeeding": {
     "internalProcessing": {

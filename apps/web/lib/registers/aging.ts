@@ -41,10 +41,6 @@ export type AgingItem = {
    *  merged away — which is the one case a reader must be told about rather than left to
    *  assume the invoice was always under this name. */
   recorded_counterparty_id: string | null;
-  /** The recorded party's own name at read time, when the DB supplies it. Null is a real
-   *  answer (the splice does not join a name for every shape), and a surface renders the id's
-   *  own short form rather than inventing one. */
-  recorded_counterparty_name?: string | null;
 };
 
 export type AgingCounterpartyRow = {

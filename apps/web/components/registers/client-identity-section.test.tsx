@@ -280,6 +280,142 @@ test("H-34: a SUCCESSFUL EMPTY says what was asked, and every count on a real ro
   });
 });
 
+test("H-20: the Kind control is the DATABASE's own closed vocabulary — three options, no free text, and no hint pointing at a kind the CHECK refuses", async () => {
+  // `clara.client_identifiers.kind` is a three-value CHECK (`tin`, `ssm`, `bank_account`;
+  // 0007:227) and `clara.add_client_identifier` maps only `unique_violation` — so a kind outside
+  // that set comes back as a bare 23514 with no CLR code and no typed reason, which
+  // `toDialogRefusal` can only paint as a raw Postgres sentence. A free-text box (and a hint that
+  // named `sst`, a kind the CHECK does not admit) steered the human straight at it.
+  const posted: Record<string, unknown>[] = [];
+  await withMockedEnv(
+    mock({
+      counterparties: [listRow()],
+      onRpc: (fn, body) => { if (fn === "add_client_identifier") posted.push(body); return null; },
+    }),
+    async () => {
+      const h = await renderComponent(App());
+      const body = docBody();
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 8; i++) await h.settle();
+        await h.act(async () => {
+          await clickButton(findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Add identifier")) as never);
+        });
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        const kind = findIn(body, (n) => n.id === "client-identifier-kind");
+        assert.ok(kind, "the Kind control renders");
+        assert.equal(kind?.tagName, "SELECT", "the kind is CHOSEN from the database's vocabulary, never typed");
+        // The option's value is read off the ATTRIBUTE, the journal-composer cell's own idiom:
+        // this DOM stub does not reflect a select option's `value` property.
+        const attrOf = (n: unknown, k: string) =>
+          (n as { getAttribute?: (name: string) => string | null }).getAttribute?.(k) ?? null;
+        const options = ((kind as { childNodes?: { tagName?: string }[] }).childNodes ?? [])
+          .filter((n) => n.tagName === "OPTION")
+          .map((n) => attrOf(n, "value"));
+        assert.deepEqual(options, ["ssm", "tin", "bank_account"],
+          "exactly the three values clara.client_identifiers.kind's CHECK admits, and nothing the door would refuse");
+
+        const text = textOf(body as never);
+        assert.doesNotMatch(text, /sst/i, "no copy steers the human at a kind the database refuses");
+
+        // …and what the door receives is one of the three, taken from the control itself.
+        await h.act(() => { setFieldValue(findIn(body, (n) => n.id === "client-identifier-value") as never, "C24680135790"); });
+        await h.act(() => { setFieldValue(kind as never, "tin"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+        await h.act(async () => {
+          await clickButton(findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Add") as never);
+        });
+        for (let i = 0; i < 8; i++) await h.settle();
+        assert.equal(posted.length, 1, "the door was called once");
+        assert.equal(posted[0]?.p_kind, "tin", "…with a kind the CHECK admits");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+test("AC6 loading: before any read has answered, the section shows its LOADING face — and that face is terminal, replaced by data once the reads land", async () => {
+  // AC6 names `loading` as a journey state of its own. Every read here is held until the cell
+  // releases it, so the loading face is REACHED rather than raced past.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const impl = (async (u: RequestInfo | URL) => {
+    await held;
+    const url = String(u);
+    const rpc = /\/rest\/v1\/rpc\/([a-z_]+)/.exec(url);
+    if (rpc) {
+      const fn = rpc[1] ?? "";
+      if (fn === "list_counterparty_identity") {
+        return jsonResponse({ client_id: "c1", kind: null, as_of: "2026-09-16T10:00:00", counterparties: [listRow()] });
+      }
+      if (fn === "list_counterparty_merge_corrections") {
+        return jsonResponse({ client_id: "c1", as_of: "2026-09-16T10:00:00", merges: [] });
+      }
+      return jsonResponse({});
+    }
+    if (url.includes("/rest/v1/client_identifiers")) return jsonResponse([IDENTIFIER]);
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App());
+    try {
+      for (let i = 0; i < 3; i++) await h.settle();
+      const loading = h.text();
+      assert.match(loading, /Loading…/, "the loading face is shown while the reads are in flight");
+      assert.doesNotMatch(loading, /No identifier has been recorded for this client yet/,
+        "a read that has not answered is never painted as a successful empty");
+      assert.doesNotMatch(loading, /No counterparties are recorded for this client yet/);
+
+      release();
+      for (let i = 0; i < 10; i++) await h.settle();
+      const settled = h.text();
+      assert.doesNotMatch(settled, /Loading…/, "Skeleton stops on the terminal face (appendix D 53)");
+      assert.match(settled, /Acme Sdn Bhd/);
+      assert.match(settled, /201801012345/);
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});
+
+test("AC6 partial: one read failing is not a failed page — the halves that answered still render, and the half that failed says so in its OWN place", async () => {
+  // The three reads of this section are independent on purpose. A 500 on the merge-corrections
+  // read must not blank the identifiers or the counterparties, and must never be shown as
+  // "nothing has been merged" — a failed read and a valid no-data answer are different facts
+  // (H-34's rule, and appendix C's stale/partial state).
+  await withMockedEnv(
+    mock({
+      identifiers: [IDENTIFIER],
+      counterparties: [listRow()],
+      onRpc: (fn) =>
+        fn === "list_counterparty_merge_corrections"
+          ? jsonResponse({ message: "merge corrections read failed" }, 500)
+          : null,
+    }),
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        for (let i = 0; i < 10; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /201801012345/, "the identifiers half still renders its rows");
+        assert.match(text, /Acme Sdn Bhd/, "the counterparty half still renders its rows");
+        assert.match(text, /2 live aliases/, "…including the counts from the read that DID answer");
+        assert.match(text, /Something went wrong/, "the failed read is reported where it failed");
+        assert.doesNotMatch(text, /No counterparty of this client has been merged/,
+          "a failed read is never painted as a successful empty");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
 test("AC3: the bounded discovery separates a representable merge from a legacy one, and says out loud that no un-merge exists", async () => {
   await withMockedEnv(
     mock({

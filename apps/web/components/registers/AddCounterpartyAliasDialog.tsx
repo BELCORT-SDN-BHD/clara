@@ -53,7 +53,19 @@ export function AddCounterpartyAliasDialog({
       busy={busy}
       confirmDisabled={!canSubmit}
       refusal={refusal}
-      onConfirm={() => onSubmit(alias, origin, basis.trim() === "" ? null : basis.trim())}
+      onConfirm={async () => {
+        const ok = await onSubmit(alias, origin, basis.trim() === "" ? null : basis.trim());
+        // THE DRAFT RULE THESE THREE DIALOGS SHARE, written down because they used to differ: a
+        // draft SURVIVES a refusal, so the human can correct the thing that was refused, and is
+        // DISCARDED on success, so the next open never re-offers a fact that is already recorded.
+        // Here that matters twice over -- re-confirming the same alias is refused CLR23
+        // alias_collision, and the basis would arrive attached to a name it was never written
+        // for. AddClientIdentifierDialog clears the same way; SetCounterpartyIdentifiersDialog
+        // RE-SEEDS on open instead, because its fields are the party's CURRENT values rather than
+        // a new fact.
+        if (ok) { setAlias(""); setOrigin("trade_name"); setBasis(""); }
+        return ok;
+      }}
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">

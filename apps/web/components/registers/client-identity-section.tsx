@@ -51,7 +51,7 @@ type RoleFilter = "all" | CounterpartyKind;
 
 export function ClientIdentitySection({ clientId }: { clientId: string }) {
   const t = useTranslations("ArApCounterparty.identity");
-  const ti = useTranslations("ClientIdentifiers");
+  const ti = useTranslations("ArApCounterparty.clientIdentifiers");
   const [role, setRole] = useState<RoleFilter>("all");
 
   // BOTH roles are always READ; the filter is a presentation choice over already-fetched facts,

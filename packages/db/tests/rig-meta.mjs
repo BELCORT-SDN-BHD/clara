@@ -1950,8 +1950,9 @@ const COUNTERPARTY_IDENTITY_0200_HUMAN_FNS = [
   "list_counterparty_merge_corrections",
 ];
 //   …and the UNGRANTED closure: the ONE revision writer (the only place a revision number is
-//   chosen, and the only body that takes the per-counterparty row lock that makes two concurrent
-//   corrections safe), the append-only trigger of the revision relation, the honesty trigger that
+//   chosen -- optimistically, against uq_cir_counterparty_revision, holding no lock of its own so
+//   that it inverts no other door's lock order), the append-only trigger of the revision relation,
+//   the honesty trigger that
 //   refuses a machine lane claiming recorded_via='human_ui', and the two lane-agnostic revision
 //   triggers that cover the writers this slice may NOT recut (clara.merge_counterparties, whose
 //   live body is a 0149 splice, and clara.tick_seeding_proposal). Listed so cohortFailures

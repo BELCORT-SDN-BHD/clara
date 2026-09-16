@@ -8,23 +8,39 @@
 // a bare button somewhere, because C-41's ruling is "one section, not one control per database
 // function".
 //
-// THE TWO FIELD ERRORS HERE ARE REQUIRED-FIELD ERRORS, NOT COPIES OF A DATABASE PREDICATE. The
+// THE ONE FIELD ERROR HERE IS A REQUIRED-FIELD ERROR, NOT A COPY OF A DATABASE PREDICATE. The
 // door's own refusals — CLR11 for a client outside the firm, CLR10 `already_recorded` for a
 // (client, kind, value) `uq_client_identifiers_client_kind_value` already holds — render
 // VERBATIM in the caller's persistent banner and inside this dialog through `refusal`. What is
-// checked here is only that the human typed something into each box, and the TYPED TEXT SURVIVES
-// that failure (appendix C's field rule: preserve user input).
+// checked here is only that the human typed a VALUE, and the TYPED TEXT SURVIVES that failure
+// (appendix C's field rule: preserve user input).
 //
 // NORMALISATION IS THE DATABASE'S. `add_client_identifier` stores
 // `lower(regexp_replace(value,'\s+','','g'))` (0155:446); this dialog sends what was typed and
 // never pre-normalises, so the value a human sees refused is the value they entered.
+//
+// THE KIND IS A CLOSED CHOICE, BECAUSE THE COLUMN IS. `clara.client_identifiers.kind` carries a
+// three-value CHECK (`tin`, `ssm`, `bank_account`; 0007:227) and `clara.add_client_identifier`
+// (0155:426-459) maps only `unique_violation` to a typed refusal -- so ANY other kind leaves the
+// database as a bare 23514 which `toDialogRefusal` classifies `clr: null` and paints as a raw
+// Postgres sentence. A free-text box over a closed vocabulary offers the human an option that can
+// only be refused (and the old hint steered at `sst`, which the CHECK does not admit), so this is
+// the NativeSelect idiom AddCounterpartyAliasDialog already uses for `origin`. Cell of record:
+// client-identity-section.test.tsx, "H-20: the Kind control is the DATABASE's own closed
+// vocabulary".
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/common/native-select";
 import { ArApCounterpartyDoorDialog } from "./ArApCounterpartyDoorDialog";
 import type { DialogRefusal } from "@/components/common/dialog-refusal";
+
+/** The exact vocabulary `clara.client_identifiers.kind`'s CHECK admits, in the order a Malaysian
+ *  bookkeeper meets them. Widening it means widening that CHECK in a migration first. */
+const IDENTIFIER_KINDS = ["ssm", "tin", "bank_account"] as const;
+type IdentifierKind = (typeof IDENTIFIER_KINDS)[number];
 
 export function AddClientIdentifierDialog({
   busy,
@@ -35,22 +51,20 @@ export function AddClientIdentifierDialog({
   refusal?: DialogRefusal;
   onSubmit: (kind: string, value: string) => Promise<boolean>;
 }) {
-  const t = useTranslations("ClientIdentifiers");
-  const [kind, setKind] = useState("");
+  const t = useTranslations("ArApCounterparty.clientIdentifiers");
+  const [kind, setKind] = useState<IdentifierKind>(IDENTIFIER_KINDS[0]);
   const [value, setValue] = useState("");
-  const [kindError, setKindError] = useState<string | null>(null);
   const [valueError, setValueError] = useState<string | null>(null);
 
   async function run(): Promise<boolean> {
-    const k = kind.trim();
     const v = value.trim();
-    // Both errors are computed BEFORE anything is sent, and neither clears the other's input:
-    // a human who filled one box keeps it.
-    setKindError(k === "" ? t("kindRequired") : null);
+    // THE KIND NO LONGER NEEDS A REQUIRED-FIELD ERROR: a closed select always carries one of the
+    // three values the CHECK admits. The VALUE still does, and the typed text SURVIVES that
+    // failure (appendix C's field rule: preserve user input).
     setValueError(v === "" ? t("valueRequired") : null);
-    if (k === "" || v === "") return false;
-    const ok = await onSubmit(k, v);
-    if (ok) { setKind(""); setValue(""); }
+    if (v === "") return false;
+    const ok = await onSubmit(kind, v);
+    if (ok) { setKind(IDENTIFIER_KINDS[0]); setValue(""); }
     return ok;
   }
 
@@ -68,15 +82,17 @@ export function AddClientIdentifierDialog({
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="client-identifier-kind">{t("kindLabel")}</Label>
-          <Input
+          <NativeSelect
             id="client-identifier-kind"
             value={kind}
-            aria-invalid={kindError !== null}
             aria-describedby="client-identifier-kind-hint"
-            onChange={(e) => { setKind(e.target.value); setKindError(null); }}
-          />
+            onChange={(e) => setKind(e.target.value as IdentifierKind)}
+          >
+            <option value="ssm">{t("kindSsm")}</option>
+            <option value="tin">{t("kindTin")}</option>
+            <option value="bank_account">{t("kindBankAccount")}</option>
+          </NativeSelect>
           <p id="client-identifier-kind-hint" className="text-xs text-muted-foreground">{t("kindHint")}</p>
-          {kindError ? <p className="text-xs text-error">{kindError}</p> : null}
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="client-identifier-value">{t("valueLabel")}</Label>

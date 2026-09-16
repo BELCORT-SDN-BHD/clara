@@ -265,7 +265,9 @@ test("H-20: adding an identifier is a governed act, and a duplicate renders the 
   await signInTo(page, `/clients/${CI.clientOk}/knowledge`);
   await page.getByRole("button", { name: "Add identifier" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Kind").fill("tin");
+  // The kind is a CLOSED choice over clara.client_identifiers.kind's three-value CHECK, so it is
+  // selected, never typed (AddClientIdentifierDialog's header says why).
+  await dialog.getByLabel("Kind").selectOption("tin");
   await dialog.getByLabel("Value").fill("C24680135790");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText("C24680135790").first()).toBeVisible();
@@ -273,7 +275,7 @@ test("H-20: adding an identifier is a governed act, and a duplicate renders the 
   // …and the SAME pair again is refused by uq_client_identifiers_client_kind_value, verbatim.
   await page.getByRole("button", { name: "Add identifier" }).click();
   const again = page.getByRole("dialog");
-  await again.getByLabel("Kind").fill("tin");
+  await again.getByLabel("Kind").selectOption("tin");
   await again.getByLabel("Value").fill("C24680135790");
   await again.getByRole("button", { name: "Add", exact: true }).click();
   // The refusal renders in BOTH places on purpose, and this names them rather than hiding the

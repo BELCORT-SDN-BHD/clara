@@ -322,6 +322,12 @@ export function CounterpartyIdentityPanel({
 
             <section className="flex flex-col gap-2">
               <SectionHeader level={2}>{t("aliasesHeading")}</SectionHeader>
+              {/* H-34, said precisely: every count on this page is derived from a read that RAN.
+                  On the LIST it is the database's own aggregate (clara.list_counterparty_identity
+                  computes alias_count / live_alias_count / revision_count / unsourced_alias_count
+                  in SQL); HERE it is counted over the collections get_counterparty_identity
+                  actually returned, which it returns unbounded. Neither is a guess, and neither is
+                  a filtered array's length standing in for a total. */}
               <p className="text-xs text-muted-foreground">
                 {t("countAliases", { n: data.aliases.filter((a) => a.retired_at === null).length })}
                 {" · "}

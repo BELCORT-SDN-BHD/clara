@@ -359,10 +359,22 @@ alter table clara.counterparty_aliases
 -- inherited (§7's `source_not_this_client`).
 alter table clara.counterparty_aliases add constraint fk_counterparty_aliases_source_document
   foreign key (source_document_id, firm_id) references clara.documents (id, firm_id);
+-- …and the two DEEPER pins ride the TRIPLE-KEY house pattern (0149:361-372, the same shape this
+-- file uses on the revision relation's own counterparty/alias keys) rather than the (id, firm_id)
+-- pair: `uq_document_extractions_id_firm_document` and `uq_document_regions_id_firm_extraction`
+-- already exist for exactly this, so the trio is made to HANG TOGETHER structurally — an
+-- extraction must be an extraction OF the pinned document and a region a region OF the pinned
+-- extraction. With the pair FKs alone an alias could name THIS client's document while its
+-- extraction and region belonged to a SIBLING CLIENT's page, and `get_counterparty_identity`
+-- would render that mixture as provenance. MATCH SIMPLE keeps the unpinned row free: a NULL in
+-- any column satisfies the constraint, and the CHECKs below are what make `source_extraction_id`
+-- non-null imply `source_document_id` non-null.
 alter table clara.counterparty_aliases add constraint fk_counterparty_aliases_source_extraction
-  foreign key (source_extraction_id, firm_id) references clara.document_extractions (id, firm_id);
+  foreign key (source_extraction_id, firm_id, source_document_id)
+  references clara.document_extractions (id, firm_id, document_id);
 alter table clara.counterparty_aliases add constraint fk_counterparty_aliases_source_region
-  foreign key (source_region_id, firm_id) references clara.document_regions (id, firm_id);
+  foreign key (source_region_id, firm_id, source_extraction_id)
+  references clara.document_regions (id, firm_id, extraction_id);
 
 -- TWO-WAY, the 0192:455-470 reading: an extraction pin RIDES an 'extracted' origin and nothing
 -- else (a stray extraction id on a human statement is provenance theatre), an 'extracted' origin
@@ -473,14 +485,30 @@ create table clara.counterparty_identity_revisions (
 
   constraint uq_cir_id_firm_client unique (id, firm_id, client_id),
   -- "WHICH REVISION IS NEXT" IS NEVER AMBIGUOUS, and two concurrent corrections cannot silently
-  -- become one: the helper below takes a row lock on the counterparty, and this key is the wall
-  -- behind it rather than in front of it.
+  -- become one: THIS KEY is the wall that says so, and the helper below retries against it. It is
+  -- deliberately the ONLY wall -- an earlier cut serialised the choice under a
+  -- clara.counterparties row lock instead, which inverted the lock order clara.rename_counterparty
+  -- itself takes, and deadlocked two shipped human doors (see section 4).
   constraint uq_cir_counterparty_revision unique (counterparty_id, revision_n),
 
-  -- THE TRIPLE-KEY HOUSE PATTERN (0149:361-372): a revision may only name a counterparty and an
-  -- alias of the SAME firm AND client, enforced by the FK rather than by the writer's care.
-  constraint fk_cir_counterparty foreign key (counterparty_id, firm_id, client_id)
-    references clara.counterparties (id, firm_id, client_id),
+  -- THE TRIPLE-KEY HOUSE PATTERN (0149:361-372) for the ALIAS -- and DELIBERATELY NOT for the
+  -- counterparty, which is the one wall in this file that is a writer check rather than a
+  -- constraint. The reason is measured, not stylistic: a foreign key check takes FOR KEY SHARE on
+  -- the row it points at, so an FK here would make EVERY append -- including the one the
+  -- retirement trigger fires while it already holds the alias row -- ask for a lock on
+  -- clara.counterparties. clara.rename_counterparty holds that same row FOR UPDATE (and its own
+  -- UPDATE of name_normalized takes a key lock, because that column sits in
+  -- uq_counterparties_client_unregistered_name) and only THEN inserts its former-name alias, so
+  -- the two orders invert and two SHIPPED human doors on one counterparty deadlock. MEASURED on
+  -- rig clara_647 (2026-09-17): 6 of 10 rounds raised 40P01, victim context
+  -- "while locking tuple in relation counterparties ... FOR KEY SHARE" inside this very insert,
+  -- and clara.merge_counterparties -- which this file may NOT recut -- takes the same
+  -- counterparty-then-alias order, so no recut of rename alone would close the class.
+  -- The alias key is safe and stays a constraint: every appender either just inserted that alias
+  -- row or already holds it locked, so its KEY SHARE is a self-lock and adds no wait edge.
+  -- Tenant congruence for the counterparty is asserted instead, lock-free, in the ONE writer
+  -- below (clara._append_counterparty_identity_revision, which is ungranted and the only body
+  -- that may insert here at all -- no application role holds DML on this relation).
   constraint fk_cir_alias foreign key (alias_id, firm_id, client_id)
     references clara.counterparty_aliases (id, firm_id, client_id),
   constraint fk_cir_source_document foreign key (source_document_id, firm_id)
@@ -541,13 +569,31 @@ comment on table clara.counterparty_identity_revisions is
 -- =====================================================================================
 -- 4. THE ONE WRITER. Ungranted, DEFINER, and the ONLY place a revision number is chosen.
 --
---    IT TAKES A ROW LOCK ON THE COUNTERPARTY FIRST. Without it two concurrent corrections both
---    read max(revision_n)=N, both compute N+1, and one dies on uq_cir_counterparty_revision --
---    turning an ordinary concurrent edit into a 23505 the human cannot act on. The lock
---    serialises appends PER COUNTERPARTY and touches no other relation, so it joins no lock
---    ordering constraint (accounting_plans -> accounting_work -> agent_tasks ->
---    agent_interruptions is untouched here). clara.rename_counterparty and
---    clara.set_counterparty_identifiers already hold this exact row lock, so the re-take is free.
+--    IT TAKES NO LOCK OF ITS OWN, AND THAT IS THE POINT. The obvious shape -- lock the
+--    counterparty row, then read max(revision_n)+1 -- serialises the choice, but it also hands
+--    every writer of clara.counterparty_aliases an alias-row -> counterparty-row lock order,
+--    because this helper is reached from an AFTER trigger on that table. clara.rename_counterparty
+--    takes the OPPOSITE order (counterparty row first in 7.2 below, then an alias insert), so two
+--    SHIPPED human doors on ONE counterparty deadlocked: MEASURED 6 of 10 rounds on rig clara_647
+--    (2026-09-17) with that lock and 0 of 10 without it, and the act that died was the human
+--    retirement, raised as a bare 40P01 rather than as a governed refusal. Both doors are wired in
+--    the browser (the retire dialog renders per live alias on the identity detail; the rename is
+--    posted from the hygiene panel), so that was a real journey, not a rig artefact. An advisory
+--    lock keyed on the counterparty does NOT fix it -- it rebuilds the same cycle out of a
+--    different lock type -- and neither does dropping this body's own `for update` ALONE: a
+--    counterparty FOREIGN KEY on the revision relation takes the very same row lock implicitly
+--    (FOR KEY SHARE), measured 7 of 10 rounds after the explicit lock was gone, which is why that
+--    one key is a lock-free writer check here instead (section 3's note on fk_cir_alias).
+--
+--    SO THE NUMBER IS CHOSEN OPTIMISTICALLY AND uq_cir_counterparty_revision IS THE WALL. An
+--    appender that wins the number first makes this one fail with a unique_violation, caught in
+--    its OWN subtransaction and retried against a re-read max(). Five attempts: a retry happens
+--    only when another append COMMITTED in between, so the loop is bounded by real contention on
+--    ONE counterparty, and exhausting it is reported as a retryable 40001 (the 0059:235 idiom)
+--    rather than as a lost correction. The helper still touches no relation other than its own,
+--    so it joins no lock ordering constraint (accounting_plans -> accounting_work -> agent_tasks
+--    -> agent_interruptions is untouched here). Cells of record: p647.revisions.lock_order and
+--    p647.revisions.race.
 -- =====================================================================================
 create function clara._append_counterparty_identity_revision(
     p_firm uuid, p_client uuid, p_counterparty uuid, p_act text,
@@ -559,17 +605,37 @@ create function clara._append_counterparty_identity_revision(
   language plpgsql security definer set search_path = clara, pg_temp as $fn$
 declare v_n integer;
 begin
-  perform 1 from clara.counterparties cp where cp.id = p_counterparty for update;
-  select coalesce(max(r.revision_n), 0) + 1 into v_n
-    from clara.counterparty_identity_revisions r where r.counterparty_id = p_counterparty;
-  insert into clara.counterparty_identity_revisions(firm_id, client_id, counterparty_id,
-      revision_n, act, before_state, after_state, basis, changed_by, recorded_via, alias_id,
-      source_document_id, source_extraction_id, source_region_id, source_field_path)
-    values (p_firm, p_client, p_counterparty, v_n, p_act,
-      coalesce(p_before,'{}'::jsonb), coalesce(p_after,'{}'::jsonb),
-      p_basis, p_changed_by, p_recorded_via, p_alias,
-      p_source_document, p_source_extraction, p_source_region, p_source_field_path);
-  return v_n;
+  -- TENANT CONGRUENCE, ASSERTED RATHER THAN INHERITED (see the note on fk_cir_alias above): a
+  -- plain SELECT takes no row lock at all, so this wall costs the estate nothing in lock order
+  -- while saying exactly what the dropped foreign key would have said.
+  if not exists (select 1 from clara.counterparties cp
+                  where cp.id = p_counterparty and cp.firm_id = p_firm and cp.client_id = p_client) then
+    raise exception 'a counterparty identity revision must name a counterparty of its own firm and client'
+      using errcode = 'CLR10', detail = '{"reason":"identity_revision_tenant_mismatch"}';
+  end if;
+  for v_attempt in 1..5 loop
+    select coalesce(max(r.revision_n), 0) + 1 into v_n
+      from clara.counterparty_identity_revisions r where r.counterparty_id = p_counterparty;
+    begin
+      insert into clara.counterparty_identity_revisions(firm_id, client_id, counterparty_id,
+          revision_n, act, before_state, after_state, basis, changed_by, recorded_via, alias_id,
+          source_document_id, source_extraction_id, source_region_id, source_field_path)
+        values (p_firm, p_client, p_counterparty, v_n, p_act,
+          coalesce(p_before,'{}'::jsonb), coalesce(p_after,'{}'::jsonb),
+          p_basis, p_changed_by, p_recorded_via, p_alias,
+          p_source_document, p_source_extraction, p_source_region, p_source_field_path);
+      return v_n;
+    exception when unique_violation then
+      -- Another correction on THIS counterparty committed that number while this one was
+      -- choosing it. Nothing is lost and nothing is guessed: re-read the maximum and take the
+      -- next one. A bounded loop rather than an unbounded one, so a defect elsewhere can never
+      -- turn this into a spin.
+      null;
+    end;
+  end loop;
+  raise exception 'this counterparty is being corrected by several sessions at once and the revision number could not be settled'
+    using errcode = '40001',
+          detail = '{"reason":"identity_revision_contended","fix":"retry the correction; nothing was written"}';
 end $fn$;
 revoke all on function clara._append_counterparty_identity_revision(uuid,uuid,uuid,text,jsonb,
   jsonb,text,uuid,text,uuid,uuid,uuid,uuid,text) from public;
@@ -747,6 +813,27 @@ begin
                        and f.client_id=p_client and f.retired_at is null) then
     raise exception 'the source document is not filed to this client'
       using errcode='CLR23',detail='{"reason":"source_not_this_client"}';
+  end if;
+  -- AND THE PIN TRIO HAS TO HANG TOGETHER. The check above asks only whether the DOCUMENT is
+  -- filed to this client; the FKs ask only whether each row belongs to this FIRM. Neither asks
+  -- whether the extraction is an extraction OF that document, or the region a region OF that
+  -- extraction -- so without these two the door would admit this client's document carrying a
+  -- SIBLING CLIENT's extraction and region, and the detail would render the mixture as
+  -- provenance. The triple-key FKs refuse the same thing structurally; these say it in a sentence
+  -- a human can act on rather than as a bare 23503.
+  if p_source_extraction is not null
+     and not exists(select 1 from clara.document_extractions e
+                     where e.id=p_source_extraction and e.firm_id=c.firm
+                       and e.document_id=p_source_document) then
+    raise exception 'the extraction named is not an extraction of that document'
+      using errcode='CLR10',detail='{"reason":"source_extraction_not_of_document"}';
+  end if;
+  if p_source_region is not null
+     and not exists(select 1 from clara.document_regions g
+                     where g.id=p_source_region and g.firm_id=c.firm
+                       and g.extraction_id=p_source_extraction) then
+    raise exception 'the region named is not a region of that extraction'
+      using errcode='CLR10',detail='{"reason":"source_region_not_of_extraction"}';
   end if;
   if exists(select 1 from clara.counterparties cp where cp.client_id=p_client
       and cp.name_normalized=v_norm) then

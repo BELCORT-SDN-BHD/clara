@@ -144,14 +144,17 @@ export function localAliasRefusal(input: RecordCounterpartyAliasInput): LocalRef
           "An alias recorded as read off a document must name both the document and the extraction it came from.",
       };
     }
-  } else if (hasExtractionPin || input.source_document_id !== undefined) {
-    // ck_counterparty_aliases_extraction_pins: a stray pin on any other origin is provenance
-    // theatre, and the door refuses CLR10 source_not_extracted.
+  } else if (hasExtractionPin) {
+    // ck_counterparty_aliases_extraction_pins: a stray EXTRACTION, REGION or FIELD pin on any
+    // other origin is provenance theatre, and the door refuses CLR10 source_not_extracted. A
+    // DOCUMENT-only pin is deliberately NOT refused here, because neither 0200 section 7.1's
+    // guard nor ck_counterparty_aliases_extraction_pins mentions source_document_id: a mirror
+    // that is stricter than the wall it mirrors would refuse locally what the door would admit.
     return {
       refusal: true,
       reason: "source_not_extracted",
       message:
-        "Only an alias recorded as read off a document may carry a document, extraction, region or field reference.",
+        "Only an alias recorded as read off a document may carry an extraction, region or field reference.",
     };
   }
 
@@ -194,7 +197,11 @@ export const ALIAS_REFUSAL_MESSAGES: Readonly<Record<string, string>> = Object.f
   "CLR10:source_incomplete":
     "An alias read off a document must name both the document and the extraction it came from.",
   "CLR10:source_not_extracted":
-    "Only an alias read off a document may carry a document, extraction, region or field reference.",
+    "Only an alias read off a document may carry an extraction, region or field reference.",
+  "CLR10:source_extraction_not_of_document":
+    "That extraction does not belong to the document named, so the two together do not describe where this name was read.",
+  "CLR10:source_region_not_of_extraction":
+    "That region does not belong to the extraction named, so the two together do not describe where this name was read.",
   "CLR04:":
     "This lane is not authorised to record an identity for this client.",
 });

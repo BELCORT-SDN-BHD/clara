@@ -112,10 +112,11 @@ test("p647.provenance.no_lie — a direct insert claiming 'human_ui' with no cla
   assert.notEqual(row.recorded_via, "human_ui");
 });
 
-test("p647.provenance.source_pins — a stray extraction pin is refused; a cross-FIRM document is refused by the FK; a cross-CLIENT document is refused by the DOOR (the #646 hole)", async (t) => {
+test("p647.provenance.source_pins — a stray extraction pin is refused; a cross-FIRM document is refused by the FK; a cross-CLIENT document is refused by the DOOR (the #646 hole); and a pin trio that does not hang together (an extraction of another document, a region of another extraction) is refused BOTH ways", async (t) => {
   if (need(t)) return;
   const cp = await createCounterparty(w.bookkeeper, { client: w.clientA, name: name("PINS") });
   const own = await sourceDocument({ firm: w.firm, client: w.clientA, filedBy: w.bookkeeper, tag: "own" });
+  const own2 = await sourceDocument({ firm: w.firm, client: w.clientA, filedBy: w.bookkeeper, tag: "own2" });
   const sibling = await sourceDocument({ firm: w.firm, client: w.clientB, filedBy: w.bookkeeper, tag: "sib" });
   const foreign = await sourceDocument({ firm: w.other, client: w.otherClient, filedBy: w.otherAdmin, tag: "for" });
 
@@ -175,6 +176,53 @@ test("p647.provenance.source_pins — a stray extraction pin is refused; a cross
   assert.equal(sib.code, "CLR23", "p647.provenance.source_pins: the DOOR refuses it (CLR23) — the firm-congruent FK cannot");
   assert.equal(reasonOf(sib), "source_not_this_client",
     "p647.provenance.source_pins: the refusal names the reason a human can act on");
+
+  // W12/W13 — THE PIN TRIO MUST HANG TOGETHER. The client-congruence check above asks only "is
+  // this DOCUMENT filed to this client"; the composite (id, firm_id) FKs ask only "is each row of
+  // this firm". Neither asks whether the EXTRACTION is an extraction OF that document, or the
+  // REGION a region OF that extraction — so without these walls an alias could name this client's
+  // document while its extraction and region belong to a SIBLING CLIENT's page, and the identity
+  // detail would render that as provenance through the verbatim KnowledgeSourceBlock.
+  const foreignExtraction = await caught(() => addAlias(w.bookkeeper, {
+    client: w.clientA, counterparty: cp, alias: name("MIXEDX"), origin: "extracted",
+    document: own.document, extraction: sibling.extraction,
+  }));
+  assert.ok(foreignExtraction, "p647.provenance.source_pins: an extraction of ANOTHER CLIENT's document may not ride this client's document");
+  assert.equal(foreignExtraction.code, "CLR10");
+  assert.equal(reasonOf(foreignExtraction), "source_extraction_not_of_document");
+
+  const otherDocExtraction = await caught(() => addAlias(w.bookkeeper, {
+    client: w.clientA, counterparty: cp, alias: name("MIXEDSAME"), origin: "extracted",
+    document: own.document, extraction: own2.extraction,
+  }));
+  assert.ok(otherDocExtraction, "p647.provenance.source_pins: …and the same holds INSIDE one client: an extraction of document A2 is not provenance for document A1");
+  assert.equal(otherDocExtraction.code, "CLR10");
+  assert.equal(reasonOf(otherDocExtraction), "source_extraction_not_of_document");
+
+  const foreignRegion = await caught(() => addAlias(w.bookkeeper, {
+    client: w.clientA, counterparty: cp, alias: name("MIXEDR"), origin: "extracted",
+    document: own.document, extraction: own.extraction, region: sibling.region,
+  }));
+  assert.ok(foreignRegion, "p647.provenance.source_pins: a region of another extraction may not ride this extraction");
+  assert.equal(foreignRegion.code, "CLR10");
+  assert.equal(reasonOf(foreignRegion), "source_region_not_of_extraction");
+
+  // …and the SAME two lies from a writer that never goes through a door: the triple-key FKs are
+  // the structural half of each wall, exactly as the two-way CHECK is for W2 above.
+  const mixedRaw = await caught(() => rootQuery(
+    `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
+        alias_display,origin,created_by,source_document_id,source_extraction_id)
+     values($1,$2,$3,'mixeddirect','mixeddirect','extracted',$4,$5,$6)`,
+    [w.firm, w.clientA, cp, w.bookkeeper, own.document, own2.extraction]));
+  assert.equal(mixedRaw?.code, "23503",
+    "p647.provenance.source_pins: the (extraction, firm, document) triple-key FK refuses the same lie structurally");
+  const mixedRegionRaw = await caught(() => rootQuery(
+    `insert into clara.counterparty_aliases(firm_id,client_id,counterparty_id,alias_normalized,
+        alias_display,origin,created_by,source_document_id,source_extraction_id,source_region_id)
+     values($1,$2,$3,'mixedregiondirect','mixedregiondirect','extracted',$4,$5,$6,$7)`,
+    [w.firm, w.clientA, cp, w.bookkeeper, own.document, own.extraction, sibling.region]));
+  assert.equal(mixedRegionRaw?.code, "23503",
+    "p647.provenance.source_pins: …and the (region, firm, extraction) triple-key FK does the same for the deeper pin");
 });
 
 test("p647.overload.one — clara.add_counterparty_alias resolves to EXACTLY ONE regprocedure, and the shipped web door's FIVE NAMED ARGS still reach it", async (t) => {
@@ -301,6 +349,67 @@ test("p647.revisions.race — two concurrent alias adds on ONE counterparty both
   assert.deepEqual([...new Set(rows.map((r) => Number(r.revision_n)))].sort((a, b) => a - b),
     rows.map((r) => Number(r.revision_n)).sort((a, b) => a - b),
     "p647.revisions.race: no two revisions share a number");
+});
+
+test("p647.revisions.lock_order — RETIRING an alias and RENAMING the same counterparty are two SHIPPED human doors on one party: they must never deadlock, and each act still appends exactly one revision", async (t) => {
+  if (need(t)) return;
+  // THE SHAPE THAT PUTS THE TWO DOORS IN CONTACT, and why it is built this way: rename A -> TMP
+  // -> A leaves the counterparty carrying its ORIGINAL name again while the SAME name is also a
+  // LIVE alias (the first rename minted it as a former_name). A further rename therefore aims its
+  // own former-name insert at the very alias row a concurrent retirement is updating, so the two
+  // doors touch clara.counterparty_aliases and clara.counterparties in OPPOSITE orders —
+  // retire_counterparty_alias locks the alias row first, rename_counterparty locks the
+  // counterparty row first. Both doors are wired in the browser (the retire dialog renders per
+  // live alias on the identity detail; the rename is posted from the hygiene panel), so a human
+  // would see an untyped "deadlock detected" rather than a governed refusal.
+  //
+  // MEASURED on this rig before the fix (2026-09-17, clara_647 at frontier 0200): 5 of 8 rounds
+  // raised 40P01 and the RETIREMENT was the act that died — its revision never appended. Ten
+  // rounds is therefore a hard red for the defect and a deterministic green once the revision
+  // helper stops choosing its number under a clara.counterparties row lock.
+  const ROUNDS = 10;
+  const deadlocks = [];
+  const otherFailures = [];
+  const revisionReports = [];
+  for (let round = 0; round < ROUNDS; round++) {
+    const original = name("LOCKORDER");
+    const cp = await createCounterparty(w.bookkeeper, { client: w.clientA, name: original });
+    await renameCounterparty(w.bookkeeper, { client: w.clientA, counterparty: cp, name: name("LOCKTMP") });
+    await renameCounterparty(w.bookkeeper, { client: w.clientA, counterparty: cp, name: original });
+    const live = (await rootQuery(
+      `select id from clara.counterparty_aliases
+        where counterparty_id = $1 and alias_normalized = $2 and retired_at is null`,
+      [cp, original.toLowerCase().replace(/[^a-z0-9]/g, "")])).rows[0]?.id;
+    assert.ok(live, "p647.revisions.lock_order: the staged rename left the original name as a LIVE alias");
+
+    const outcome = await Promise.allSettled([
+      retireAlias(w.bookkeeper, { client: w.clientA, alias: live }),
+      renameCounterparty(w.admin, { client: w.clientA, counterparty: cp, name: name("LOCKRC") }),
+    ]);
+    for (const r of outcome) {
+      if (r.status !== "rejected") continue;
+      if (r.reason?.code === "40P01") {
+        deadlocks.push(`round ${round}: 40P01 ${String(r.reason.detail ?? r.reason.message).replace(/\s+/g, " ")}`);
+      } else {
+        otherFailures.push(`round ${round}: ${r.reason?.code} ${r.reason?.message}`);
+      }
+    }
+    const acts = (await revisionRows(cp)).map((r) => r.act);
+    revisionReports.push({
+      round,
+      retired: acts.filter((a) => a === "alias_retired").length,
+      renames: acts.filter((a) => a === "rename").length,
+    });
+  }
+
+  assert.deepEqual(deadlocks, [],
+    "p647.revisions.lock_order: two shipped human doors on ONE counterparty deadlocked — a human sees an untyped 40P01, not a governed refusal");
+  assert.deepEqual(otherFailures, [],
+    "p647.revisions.lock_order: neither door may fail for any other reason in this race");
+  assert.deepEqual(
+    revisionReports.filter((r) => r.retired !== 1 || r.renames !== 3),
+    [],
+    "p647.revisions.lock_order: every round leaves exactly ONE alias_retired revision and THREE rename revisions — no append is lost and none is doubled");
 });
 
 // ===========================================================================
