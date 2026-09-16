@@ -82,6 +82,15 @@
 -- nowhere else until `clientOnboarding_v5` makes it an interview answer and #654 mints a
 -- `financial_year_end_day` key through 0205.
 --
+-- THE LOCK ORDER IS THE ONBOARDING FAMILY'S: CLIENT ROW FIRST, PLAN ROW SECOND. Every other door
+-- in this family takes them that way -- commit_client_onboarding (0017:2764 then :2768),
+-- cancel_client_onboarding (0017:2852 then :2853) -- and 0037:2514-2536 states why a single total
+-- order over the estate's locks is what makes concurrent doors deadlock-free rather than merely
+-- documented. A settle that locked the plan first would deadlock against a concurrent commit or
+-- cancel of the same client IN BOTH DIRECTIONS, and one of those victims is the accounting write:
+-- 40P01 is untyped, so the human door would have no refusal face for it. The cell that keeps this
+-- honest is `p649.settle.lock_order`.
+--
 -- HUMAN LANE ONLY, NO `_for` TWIN, AND THE GROUND IS STRUCTURAL: `clara.set_client_fy_end` opens
 -- with `clara._human_ctx`, which raises CLR04 when `clara.jwt_sub()` is NULL (0004:302-303), and
 -- it is EXECUTE-granted to clara_authenticated alone (0041:4414, :4421). A machine twin could
@@ -112,6 +121,8 @@
 --   CLR10 (op receipt)                the house receipt-hash refusal: same op_key, different month/day
 --   CLR11 plan_not_in_firm            unknown plan, or another firm's (no existence oracle)
 --   CLR10 plan_not_client_scoped      a FIRM-scope onboarding plan has no client record to settle
+--   CLR10 plan_client_moved           belt: the plan changed clients between the two locks
+--                                     (unreachable today -- nothing updates onboarding_plans.client_id)
 --   CLR10 onboarding_plan_open        the plan is still open: settle follows commit
 --   CLR10 onboarding_plan_not_committed   cancelled, or any other non-committed state
 --   CLR10 fy_end_day_required         p_fy_end_day NULL — the day is asked, never derived (D7)
@@ -276,13 +287,22 @@ cross join clara.taxonomy_active a;
 -- the same as one answered by the interview. ANY OTHER SHAPE READS AS ABSENT: an object, an
 -- array, a number outside 1..12 or a non-numeric string is not a month, and pretending it is
 -- would let the settle door write a financial year nobody stated.
+--
+-- BOTH BRANCHES ARE BOUNDED TO TWO DIGITS BEFORE THE CAST, and that is not tidiness. `::int`
+-- raises 22003 (`value out of range`) for a JSON number wider than an integer, and 22003 is an
+-- UNTYPED error with no `detail.reason` — it would leave the human settle door raising something
+-- no refusal face in this estate can read, for an answer that is not a month by anyone's
+-- reckoning. `clara.update_onboarding_plan` (0017:2632) validates item_key/item_kind/state only
+-- and stores `j->'answer'` verbatim, so a wide number is reachable through a GRANTED door, not
+-- only by hand. Bounded first, cast second: an unreadable month reads as ABSENT and the settle
+-- door refuses CLR10 `fy_end_month_unanswered` like it does for every other unreadable shape.
 -- =====================================================================================
 create function clara._plan_fye_month(p_plan uuid) returns int
   language sql stable set search_path = clara, pg_temp as $fn$
   select m.month from (
     select case
              when jsonb_typeof(i.answer) = 'number'
-               and (i.answer)::text ~ '^[0-9]+$'
+               and (i.answer)::text ~ '^[0-9]{1,2}$'
                then (i.answer)::text::int
              when jsonb_typeof(i.answer) = 'string'
                and (i.answer #>> '{}') ~ '^[0-9]{1,2}$'
@@ -440,7 +460,7 @@ create function clara.settle_client_onboarding_facts(
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; p record; v_dedupe jsonb; v_plan_month int; v_month int; v_source text;
-  v_inner jsonb; v_result jsonb;
+  v_client uuid; v_inner jsonb; v_result jsonb;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -451,6 +471,26 @@ begin
     clara._hash(jsonb_build_object('plan', p_plan, 'month', p_fy_end_month, 'day', p_fy_end_day)));
   if v_dedupe is not null then return v_dedupe; end if;
 
+  -- THE CLIENT ROW IS LOCKED BEFORE THE PLAN ROW, and the order is the onboarding family's, not
+  -- this door's preference. `commit_client_onboarding` locks clara.clients (0017:2764) and THEN
+  -- clara.onboarding_plans (0017:2768); `cancel_client_onboarding` does the same (0017:2852,
+  -- :2853). Taking them the other way round here would invert against BOTH, and the loser of that
+  -- cycle is a 40P01: an untyped deadlock error out of a human door, killing a legitimate
+  -- financial-year write while the face has nothing to say about it. 0037:2514-2536 states the
+  -- estate's single-total-order rule; this is that rule applied to a fifth door.
+  --
+  -- THE PRE-READ IS UNLOCKED AND THAT IS SAFE: it only says WHICH client row to lock.
+  -- `clara.onboarding_plans.client_id` is written at insert and never updated (no
+  -- `update clara.onboarding_plans … set client_id` exists anywhere in packages/db/migrations), so
+  -- the row locked here is the row the locked plan names — and the assertion after the plan lock
+  -- keeps that true if a future writer ever moves a plan between clients. A plan that does not
+  -- exist, or belongs to another firm, yields NULL and locks nothing: the refusal below is still
+  -- the one answer for both, with no existence oracle.
+  select op.client_id into v_client from clara.onboarding_plans op where op.id = p_plan;
+  if v_client is not null then
+    perform 1 from clara.clients where id = v_client for update;
+  end if;
+
   select * into p from clara.onboarding_plans where id = p_plan for update;
   -- NO EXISTENCE ORACLE (0021's rule): an unknown plan and another firm's plan are one answer.
   if not found or p.firm_id is distinct from c.firm then
@@ -460,6 +500,14 @@ begin
   if p.scope_kind <> 'client' or p.client_id is null then
     raise exception 'a firm-scope onboarding plan has no client record to settle'
       using errcode = 'CLR10', detail = '{"reason":"plan_not_client_scoped","class":"settle"}';
+  end if;
+  -- BELT, AND LABELLED AS ONE: unreachable today, because nothing in this estate updates a plan's
+  -- client_id. It exists so that a future writer which moves a plan between clients meets a TYPED
+  -- refusal here rather than silently resurrecting the lock-order inversion above (the client row
+  -- this transaction holds would no longer be the one the write is about).
+  if p.client_id is distinct from v_client then
+    raise exception 'this onboarding plan changed clients while it was being settled'
+      using errcode = 'CLR10', detail = '{"reason":"plan_client_moved","class":"settle"}';
   end if;
   if p.state = 'open' then
     raise exception 'this onboarding plan is still open; settle the client''s facts after the commit'

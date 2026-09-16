@@ -26,13 +26,18 @@ import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
-  CLR, PG, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery, ROLES,
+  CLR, PG, asRoot, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery, ROLES,
 } from "./rig-fixtures.mjs";
+
+/** Postgres' own deadlock SQLSTATE. Named here rather than in `rig-helpers.mjs`'s shared `PG`
+ *  table: eleven other lanes are editing that file in this wave and this constant has exactly one
+ *  reader (`p649.settle.lock_order`). */
+const PG_DEADLOCK = "40P01";
 
 const CLR37 = "CLR37";
 const CLR38 = "CLR38";
 
-const EXPECTED_CELLS = 9;
+const EXPECTED_CELLS = 11;
 let live = false;
 let executed = 0;
 
@@ -515,4 +520,101 @@ cell("p649.settle.replay_isolation — the door never touches another client's p
   assert.equal(events.rows.length, 1, "one settle, one domain event");
   assert.equal(events.rows[0].client_id, c1);
   assert.equal(events.rows[0].payload.fy_end_day, 30);
+});
+
+cell("p649.settle.lock_order — the settle door takes the CLIENT before the PLAN, so it cannot deadlock against commit/cancel, which take them in that order", async () => {
+  // THE LAW THIS CELL DEFENDS. Every other door in the onboarding family locks the CLIENT row
+  // first and the PLAN row second — `commit_client_onboarding` (0017:2764 then 0017:2768),
+  // `cancel_client_onboarding` (0017:2852 then 0017:2853) — and 0037:2514-2536 states the
+  // estate's single-total-order rule that makes those acquisitions deadlock-free rather than
+  // merely documented. A settle door that took the plan first would invert against BOTH of them,
+  // and the loser of that cycle is a 40P01 the web door has no refusal face for: a legitimate
+  // financial-year write dying with an untyped error while the human is told nothing.
+  //
+  // THE ADVERSARY IS ROOT, and deliberately: what it performs is cancel/commit's OWN first
+  // acquisition (`select … from clara.clients … for update`), which no application role may issue
+  // directly (no app-role DML, so a human session cannot take a row lock at all). The DOOR under
+  // test is still called through `humanQuery`, as this battery's own posture requires — the root
+  // session is the substrate the door races, never the subject.
+  const w = await firmWorld("lock");
+  const client = await addClient(w.firm, `Lock Order ${w.suffix}`, "onboarding");
+  const planId = await plan({ firm: w.firm, client, state: "committed", answeredBy: w.admin, answers: { fye: 6 } });
+
+  const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  const held = defer();
+  const settleIssued = defer();
+  let holderOutcome = null;
+
+  const holder = asRoot(async (c) => {
+    await c.query("begin");
+    // 1 · cancel/commit's FIRST acquisition.
+    await c.query("select 1 from clara.clients where id=$1 for update", [client]);
+    held.resolve();
+    // 2 · let the settle door run and reach whatever it blocks on.
+    await settleIssued.promise;
+    await new Promise((r) => setTimeout(r, 1_500));
+    try {
+      // 3 · cancel/commit's SECOND acquisition. Under the INVERTED order this closes the cycle
+      //     and Postgres shoots one of the two transactions with 40P01.
+      await c.query("select 1 from clara.onboarding_plans where id=$1 for update", [planId]);
+      holderOutcome = "acquired";
+    } catch (err) {
+      holderOutcome = err.code ?? String(err);
+    }
+    await c.query("rollback");
+  });
+
+  const settle = (async () => {
+    await held.promise;
+    const call = settleAs(w.admin, planId, null, 30, opk("p649_lockorder"));
+    settleIssued.resolve();
+    try { return { ok: await call }; } catch (err) { return { code: err.code ?? null, message: err.message }; }
+  })();
+
+  const [outcome] = await Promise.all([settle, holder]);
+
+  assert.notEqual(outcome.code, PG_DEADLOCK,
+    `the settle door deadlocked against cancel/commit's own lock order: ${outcome.message}`);
+  assert.notEqual(holderOutcome, PG_DEADLOCK,
+    "…and neither did the transaction holding the client row: a settle must QUEUE behind the onboarding family, never race it");
+  assert.equal(holderOutcome, "acquired", "the client-first transaction took the plan lock unobstructed");
+
+  // AND THE WRITE LANDED. Queuing is only the right answer if the door still does its work once
+  // the row is free — a settle that merely avoided the deadlock by refusing would be a worse bug.
+  assert.equal(outcome.ok?.client_id, client);
+  assert.deepEqual(await clientFy(client), { fy_end_month: 6, fy_end_day: 30, status: "active" });
+});
+
+cell("p649.settle.fye_unreadable — an unreadable `fye` answer reads as ABSENT and refuses with a TYPED reason, never an untyped cast error", async () => {
+  // `clara.update_onboarding_plan` (0017:2632) is the RUNTIME's interview writer and it validates
+  // item_key/item_kind/state only — the answer goes in as whatever JSON the caller sent. So every
+  // shape below is reachable through a GRANTED door, and `clara._plan_fye_month`'s own comment
+  // makes the promise this cell measures: "ANY OTHER SHAPE READS AS ABSENT … a number outside
+  // 1..12 or a non-numeric string is not a month". A JSON number too large for `int` must meet
+  // that promise too, rather than raising 22003 out of a human door with no refusal face.
+  const w = await firmWorld("fye_shape");
+  const unreadable = async (label, literal) => {
+    const client = await addClient(w.firm, `Shape ${label} ${w.suffix}`, "onboarding");
+    const planId = await plan({ firm: w.firm, client, state: "committed", answeredBy: w.admin, answers: {} });
+    await rootQuery(
+      `insert into clara.onboarding_plan_items(plan_id, firm_id, item_kind, item_key, question,
+          answer, state, required_for_commit, answered_by, answered_at)
+       values ($1,$2,'capture','fye','rig fye', $3::jsonb, 'answered', false, $4, now())`,
+      [planId, w.firm, literal, w.admin],
+    );
+    const err = await assertRaises(CLR.badRequest,
+      () => settleAs(w.admin, planId, null, 30, opk(`p649_shape_${label}`)),
+      `a plan whose fye answer is ${label}`);
+    assert.equal(reasonOf(err), "fy_end_month_unanswered",
+      `an unreadable fye (${label}) must read as ABSENT and refuse with the typed reason`);
+    assert.deepEqual(await clientFy(client), { fy_end_month: null, fy_end_day: null, status: "active" },
+      `…and nothing may be written for ${label}`);
+  };
+
+  await unreadable("out_of_range_number", "99999999999999999999");
+  await unreadable("month_thirteen", "13");
+  await unreadable("month_zero", "0");
+  await unreadable("object", '{"month":6}');
+  await unreadable("array", "[6]");
+  await unreadable("word", '"June"');
 });
