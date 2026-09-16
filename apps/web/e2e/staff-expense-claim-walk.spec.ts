@@ -33,7 +33,12 @@ async function signInTo(page: Page, destination: string): Promise<void> {
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  // A GENEROUS DEADLINE, and it is a measurement rather than a habit: the sign-in POST, the
+  // caller-context read and the destination's own server render all happen before the URL
+  // settles, and on a loaded machine that exceeded `expect`'s 5 s default often enough to red
+  // four cells for a reason that had nothing to do with claims.
+  await expect(page).toHaveURL(
+    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
 }
 
 /** Drive the fixture through the app's OWN proxy — the same instrument the sibling walks use, and
@@ -77,9 +82,24 @@ async function scan(page: Page, what: string): Promise<void> {
 
 const field = (page: Page, name: string) => page.locator(`#staff-expense-claim-${name.replace(/\./g, "-")}`);
 
+/**
+ * WAIT FOR THE CHART BEFORE TOUCHING AN ACCOUNT CONTROL, and the reason is a real degradation this
+ * form ships rather than a harness quirk: `AccountPicker` renders a FREE-TEXT INPUT while the
+ * client's chart has not been read (and for ever, if it could not be read) — a preparer who knows
+ * the code can still type it, and the commit rechecks every code against the live chart anyway. So
+ * `selectOption` against the control before the read settles legitimately meets an `<input>`, and
+ * Playwright throws rather than retrying. Waiting for the `<select>` is waiting for the state this
+ * walk is about.
+ */
+async function chartReady(page: Page): Promise<void> {
+  await expect(page.locator("select#staff-expense-claim-claimantAccountCode"))
+    .toBeVisible({ timeout: 15_000 });
+}
+
 /** The one claim this walk records: Farah's March travel, RM 480.00 on an EXISTING enrolment, owed
  *  to her on the non-control payable. */
 async function fillClaim(page: Page): Promise<void> {
+  await chartReady(page);
   await field(page, "claimantAccountCode").selectOption(SEC.advance);
   await field(page, "incurredDate").fill("2026-03-04");
   await field(page, "postingDate").fill("2026-03-31");
@@ -109,8 +129,10 @@ test("t638 the form derives the entry from the claim, shows it, and admits ONE W
   // THE DERIVED ENTRY IS VISIBLE AND NOT EDITABLE: the browser sends no lines at all, so a grid a
   // preparer could type into would be offering an act that never reaches the wire.
   await expect(page.getByText("The entry this claim produces")).toBeVisible();
-  const previewInputs = page.locator("#journal-basis-lines input");
-  await expect(previewInputs.first()).toBeDisabled();
+  // …and the preview is a PREVIEW: its money controls are not editable. Asserted through the
+  // control's own accessible name, the way the sibling walk does — the line grid's element ids
+  // belong to `journal-basis-fields.tsx` and this walk has no business knowing their shape.
+  await expect(page.getByLabel("Debit, line 1")).toBeDisabled();
 
   await page.getByRole("button", { name: "Submit" }).click();
 
@@ -141,6 +163,7 @@ test("t638 the form derives the entry from the claim, shows it, and admits ONE W
 
 test("t638 a NEW claimant is asked for the register's three answers BEFORE anything is admitted", async ({ page }) => {
   await page.goto(FORM_URL);
+  await chartReady(page);
   // `1191` carries no live enrolment, so recording this claim would ENROL it.
   await field(page, "claimantAccountCode").selectOption(SEC.advanceFresh);
   await expect(page.getByTestId("claimant-new")).toBeVisible();
@@ -234,6 +257,7 @@ test("t638 an ITEM WAITING on a named fact posts nothing and holds nothing else 
 
 test("t638 an INVALID claim sends nothing and names the first control", async ({ page }) => {
   await page.goto(FORM_URL);
+  await chartReady(page);
   await page.getByRole("button", { name: "Submit" }).click();
   const nothing = (await control(page, { op: "received" })) as { received: unknown[] };
   expect(nothing.received).toHaveLength(0);
@@ -400,6 +424,7 @@ test("t638 at 320 px and at 200 % zoom the amount, the identity and the primary 
   await scan(page, "the claim register at 320 px");
 
   await page.goto(FORM_URL);
+  await chartReady(page);
   await settle(page);
   const formOverflow = await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -411,6 +436,7 @@ test("t638 at 320 px and at 200 % zoom the amount, the identity and the primary 
   await page.setViewportSize({ width: 640, height: 720 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(FORM_URL);
+  await chartReady(page);
   await settle(page);
   await expect(page.getByRole("button", { name: "Submit" })).toBeVisible();
   await expect(page.getByTestId("claim-total")).toBeVisible();
@@ -419,6 +445,7 @@ test("t638 at 320 px and at 200 % zoom the amount, the identity and the primary 
 
 test("t638 every control has a screen-reader name, and the keyboard reaches the primary action", async ({ page }) => {
   await page.goto(FORM_URL);
+  await chartReady(page);
   await settle(page);
 
   // EVERY FOCUSABLE CONTROL IS NAMED. An unnamed control is a control a screen-reader user meets as
