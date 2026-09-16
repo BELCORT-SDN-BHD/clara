@@ -27,10 +27,22 @@ import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
+import { CLIENT_RECORD_CHANGED_EVENT } from "../../lib/command/bus";
 import { OnboardingChecklistCard, planFyEndMonth } from "./OnboardingChecklistCard";
 import { fyEndDraftBlocks, fyEndDraftIsBlank } from "./OnboardingFyEndField";
 
 enableDomInspection();
+
+// H-50 — `test/hookHarness.ts` stubs a minimal `window` whose three event methods are NO-OPS.
+// This file now asserts a real dispatch/listen round trip on `CLIENT_RECORD_CHANGED` (the settle
+// refusal cell below), so the stub's methods are swapped for a real `EventTarget`'s — the same
+// swap `onboarding-checklist.test.tsx` and `tests/focusRailSubscription.test.mjs` already make,
+// and for the same reason: without it an announcement assertion would be measuring an instrument
+// that cannot announce anything.
+const realEventTarget = new EventTarget();
+globalThis.window.addEventListener = realEventTarget.addEventListener.bind(realEventTarget);
+globalThis.window.removeEventListener = realEventTarget.removeEventListener.bind(realEventTarget);
+globalThis.window.dispatchEvent = realEventTarget.dispatchEvent.bind(realEventTarget);
 
 type Stub = Record<string, unknown>;
 type Call = { url: string; body: unknown };
@@ -332,6 +344,50 @@ test("649 · AC2 — the settle door's CLR38 renders VERBATIM with its code: a r
         "a refusal is never retried");
     } finally {
       await h.unmount();
+    }
+  });
+});
+
+test("649 · H-50 — a settle refusal AFTER a successful commit still announces CLIENT_RECORD_CHANGED exactly once: the commit already changed the record", async () => {
+  // THE INVARIANT THIS CELL OWNS. `clientRecordChanged` is the ONLY re-read trigger the surfaces
+  // in the other React subtree have — `client-workspace-overview.tsx` (the identity band, mounted
+  // beside this card on the very same page) and `client-register-list.tsx` both say so in their
+  // own comments: nothing there could know to re-read. The existing H-50 cell
+  // (`onboarding-checklist.test.tsx`) pins "a SUCCESSFUL commit announces once, a REFUSED one
+  // announces nothing" — and a settle refusal is NOT a refused commit. The client is already
+  // `status='active'` and the plan already committed by the time the settle door is called, so an
+  // announcement withheld here leaves the band showing "Onboarding" for a client the database
+  // calls active, with no trigger left that could correct it.
+  const router = baseRouter([FYE_ITEM, OPENING_ITEM], (url) =>
+    url.includes("/rpc/settle_client_onboarding_facts")
+      ? json({
+        code: "CLR38",
+        message: "this client has a live ANNUAL-cadence adjustment template (Year-end stock); retire it before moving the financial-year end, then propose and sign it again against the new one",
+        details: '{"reason":"fy_end_locked_by_annual_cadence","axis":"adjustment_template"}',
+      }, 400)
+      : null);
+  await withFetch(router, async (calls) => {
+    const seen: string[] = [];
+    const listener = (e: Event) => seen.push((e as CustomEvent<{ clientId: string }>).detail.clientId);
+    window.addEventListener(CLIENT_RECORD_CHANGED_EVENT, listener);
+    const { h, body } = await mountInBody();
+    try {
+      const trigger = await openCommitDialog(h, body);
+      await h.act(() => setFieldValue(labelled(body, "Financial year-end day")!, "30"));
+      const confirm = findIn(body, (n) => buttonNamed("Commit onboarding")(n) && (n as unknown) !== (trigger as unknown))!;
+      await h.act(() => clickButton(confirm));
+      await settleUntil(h, () => /CLR38/.test(textOf(body)), "the CLR38 banner", () => textOf(body));
+
+      assert.equal(calls.filter((c) => c.url.includes("/rpc/commit_client_onboarding")).length, 1,
+        "the commit itself SUCCEEDED — this cell is about what follows it");
+      assert.deepEqual(seen, [CLIENT_ID],
+        `the record changed, so it is announced exactly once even though the settle refused; saw ${JSON.stringify(seen)}`);
+      // …and the refusal is still on screen: announcing is not the same as pretending it worked.
+      assert.match(textOf(body), /fy_end_locked_by_annual_cadence/);
+    } finally {
+      window.removeEventListener(CLIENT_RECORD_CHANGED_EVENT, listener);
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
     }
   });
 });

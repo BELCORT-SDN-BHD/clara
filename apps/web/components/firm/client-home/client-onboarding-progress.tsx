@@ -58,6 +58,11 @@ export const ONBOARDING_ANSWERED_STATES: readonly string[] = ["answered", "resol
  *  Anything else (including a finalized seed, which the caller reads separately) is `null`: the
  *  section then says nothing about openings rather than guessing which story applies.
  *
+ *  THE TWO KEYS CARRY DIFFERENT STATE LISTS, and they are the DOOR's: `first_year_zero_opening`
+ *  counts in ('answered','resolved'), `carry_down_deferred` in ('deferred','resolved')
+ *  (0017:2814-2819). This surface reads exactly those, so it can never call an opening position
+ *  settled in a state the commit gate would still refuse.
+ *
  *  THE DISTINCTION IS THE ACCEPTANCE CRITERION ITSELF — "separate first-year/no-opening-needed
  *  from missing imported opening evidence" — and CONTEXT.md's own Avoid for *Opening position*
  *  names the failure: treating a deferred carry-down as "no opening needed". */
@@ -67,7 +72,12 @@ export function openingStory(items: readonly OnboardingPlanItemRow[]): OpeningSt
   const has = (key: string, states: readonly string[]) =>
     items.some((i) => i.item_key === key && states.includes(i.state));
   if (has("first_year_zero_opening", ["answered", "resolved"])) return "first_year";
-  if (has("carry_down_deferred", ["deferred", "resolved", "answered"])) return "deferred";
+  // THE STATES ARE THE DOOR'S, key by key. `commit_client_onboarding` accepts
+  // `first_year_zero_opening` in ('answered','resolved') and `carry_down_deferred` in
+  // ('deferred','resolved') -- 0017:2814-2819 -- and they are deliberately different lists:
+  // a carry-down that was ANSWERED is not a deferral, and reading it as one would let this
+  // surface call an opening position settled that the commit gate would still refuse.
+  if (has("carry_down_deferred", ["deferred", "resolved"])) return "deferred";
   return null;
 }
 

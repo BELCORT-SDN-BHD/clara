@@ -27,10 +27,10 @@ Some routes intentionally show an unavailable or not-built state where a product
 
 ## Creating a client, and the two facts the commit does not write
 
-The client register's **Add client** control is the only surface in the product that opens a client
-file, and it reuses ⌘K's own dispatch rather than minting a second call site. Confirm now asks
-`clara.client_identity_candidates` before it reaches `clara.begin_client_onboarding`, and the
-answer decides what happens next — the three arities the owner ruled on 2026-09-15:
+The client register's **Add client** control reuses ⌘K's own dispatch rather than minting a second
+call site. Confirm asks `clara.client_identity_candidates` before it reaches
+`clara.begin_client_onboarding`, and the answer decides what happens next — the three arities the
+owner ruled on 2026-09-15:
 
 - **0** — nothing in the firm answers to that name. The same click goes straight on to the door.
 - **1** — the candidate is **shown**, with a real link to the record and the reason it matched, and
@@ -50,6 +50,16 @@ which is why the browser is given a definer wrapper and never the predicate.
 **The wall is the READ, not the birth door.** A caller that never asks can still call
 `begin_client_onboarding` and a client is born — a named residual, kept honest by
 `packages/db/tests/client-onboarding-identity.test.mjs`'s `p649.identity.direct_birth_residual`.
+
+**⌘K is a SECOND entrance to that door, and it does not ask.** `DO_ACTIONS`'
+`beginClientOnboarding` (`lib/command/do-actions.ts`) is dispatched straight from the palette
+(`components/command/command-palette.tsx`), with no `client_identity_candidates` read anywhere in
+that path — `agentic-finish-walk.spec.ts`'s 裁-37 arm proves it green, dispatching with zero
+identity reads in the whole run. So the arities above are the register control's wall, not the
+product's: the same name typed into the palette is born unchecked. That is a **named residual**,
+not a claim, and it is a face-level sibling of the birth-door one above — closing it means giving
+the palette an arity-1 acknowledgement of its own (a design, not a one-liner), or moving the wall
+into the door, which needs the new birth verb the residual above describes.
 
 **Committing an onboarding plan writes neither Knowledge nor the client's own record.** Two
 separate, named acts follow it at the same call site, and they are treated differently on purpose:

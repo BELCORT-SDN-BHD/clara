@@ -149,6 +149,18 @@ async function openDialog() {
   return { h, body, trigger: trigger! };
 }
 
+/** The dialog's own popup, addressed by the slot `components/ui/dialog.tsx` stamps on it
+ *  (`data-slot="dialog-content"`). The page-level banner lives OUTSIDE it, behind the modal
+ *  backdrop, so "is this text inside the dialog?" is a structural question about this node —
+ *  `textOf(body)` cannot answer it, and a cell that asks the body would pass on a refusal the
+ *  human cannot read. */
+const dialogContent = (body: Stub): Stub => {
+  const found = findIn(body, (n) => typeof n.getAttribute === "function"
+    && (n.getAttribute as (a: string) => string | null)("data-slot") === "dialog-content");
+  assert.ok(found, "the dialog popup must be on screen");
+  return found!;
+};
+
 /** The dialog's own Confirm, distinct from anything in the mount root: the dialog is portalled
  *  onto document.body, so "not inside h.container" is the structural rule. */
 function dialogConfirm(h: { container: unknown }, body: Stub): Stub {
@@ -297,6 +309,16 @@ test("649 · AC1 — a FAILED identity read is reported as itself and dispatches
       await settleUntil(h, () => /unavailable/.test(textOf(body)), "the failure", () => textOf(body));
       assert.equal(beginCalls.length, 0, "a duplicate check that could not run must not wave the door through");
       assert.equal((labelled(body, "Client name") as { value?: string }).value, "Rome Ventures");
+
+      // A FAILED READ IS NOT AN ANSWER OF "NOTHING". Rendering the arity-0 line for a read that
+      // never ran is absence-of-evidence sold as evidence-of-absence — this file's own law, and
+      // the inversion is exactly what the human would act on.
+      assert.doesNotMatch(textOf(body), /Nothing in this firm answers to that name/,
+        "a read that could not run must never claim the name is free");
+      // …and the failure has to be readable WHERE THE HUMAN IS: inside the dialog that stayed
+      // open, not on the page banner behind the modal backdrop.
+      assert.match(textOf(dialogContent(body)), /unavailable/,
+        "the refusal must render inside the open dialog, not behind it");
     } finally {
       await h.unmount();
     }

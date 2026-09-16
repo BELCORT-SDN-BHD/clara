@@ -441,6 +441,25 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
                       { clientId, planId: plan.id, expectedPlanRevision: plan.revision_token, attestation: attestation.trim() || null },
                       { session },
                     );
+                    // H-50 — ANNOUNCED HERE, THE MOMENT THE RECORD ACTUALLY CHANGED, and not from
+                    // `act`'s `onOk`.
+                    //
+                    // `onOk` fires only when the WHOLE closure resolves, so the two calls below
+                    // would gate it: a settle refusal (CLR38, or a month contradicting the plan —
+                    // neither of which the client-side validation can see) would suppress the
+                    // announcement for a commit that ALREADY SUCCEEDED. The client is
+                    // `status='active'` and the plan is committed as of the line above; the
+                    // identity band and the register (different React subtrees, mounted beside
+                    // this card) have no other re-read trigger — both files say so in their own
+                    // comments — so they would keep showing "Onboarding" for an active client with
+                    // nothing left to correct them.
+                    //
+                    // A REFUSED COMMIT STILL ANNOUNCES NOTHING: this line is unreachable when the
+                    // call above throws. That is the half of the invariant
+                    // `onboarding-checklist.test.tsx`'s H-50 cell has always pinned;
+                    // `onboarding-field-composition.test.tsx`'s "a settle refusal AFTER a
+                    // successful commit" cell pins this one.
+                    clientRecordChanged({ clientId });
                     // #644 / CB-AE2E-030 — THE ANSWERS BECOME KNOWLEDGE, HERE.
                     //
                     // `commit_client_onboarding` writes nothing into any fact
@@ -493,11 +512,6 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
                       );
                     }
                   },
-                  // H-50 — the client's own record just changed (`status='active'`,
-                  // 0017:2825) and the surfaces that render it live in a different React
-                  // subtree. `onOk` fires INSIDE act's try block, so a refusal never reaches
-                  // it: a refused commit changed nothing and announces nothing.
-                  () => clientRecordChanged({ clientId }),
                 )
               }
             >

@@ -40,6 +40,7 @@ import { meetsFloor } from "@/lib/identity/caller-context";
 import { onClientRecordChanged } from "@/lib/command/bus";
 import { isDoorRefusal } from "@/lib/doors";
 import {
+  arityFromRefusal,
   candidatesFromRefusal,
   isNameFamilyCollision,
   readClientIdentityCandidates,
@@ -141,6 +142,12 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
   const [refusal, setRefusal] = useState<{ message: string; code: string | null } | null>(null);
   // The identity answer, and the NAME it answers for. `null` means "not asked yet for this name".
   const [checkedFor, setCheckedFor] = useState<string | null>(null);
+  // WHAT THE READ DID, kept SEPARATELY from what it found -- because "the database answered
+  // nothing" and "the read never ran" are different facts and only one of them is evidence.
+  // Collapsing them (arity 0 for both) renders "Nothing in this firm answers to that name" for a
+  // read that FAILED: absence of evidence sold as evidence of absence, which is the exact
+  // inversion this file's own law forbids.
+  const [checkOutcome, setCheckOutcome] = useState<"answered" | "walled" | "unavailable" | null>(null);
   const [candidates, setCandidates] = useState<ClientIdentityCandidate[]>([]);
   const [arity, setArity] = useState(0);
   const [acknowledged, setAcknowledged] = useState(false);
@@ -163,8 +170,9 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
   // The candidates on screen answer for `checkedFor`. Anything else and they are stale by
   // construction, so nothing about them may gate this Confirm.
   const checkStands = checkedFor !== null && checkedFor === typed;
-  const acknowledgementOwed = checkStands && arity === 1 && !acknowledged;
-  const walled = checkStands && arity >= 2;
+  const answered = checkStands && checkOutcome === "answered";
+  const acknowledgementOwed = answered && arity === 1 && !acknowledged;
+  const walled = checkStands && checkOutcome === "walled";
 
   /** The identity read, and the three answers it can give. Returns `true` when the caller may go
    *  on to the door on THIS click. Never throws: every failure is a face, not an exception. */
@@ -172,6 +180,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
     try {
       const answer = await readClientIdentityCandidates(typed, { session: sessionTokenAccessor });
       setCheckedFor(typed);
+      setCheckOutcome("answered");
       setCandidates(answer.candidates);
       setArity(answer.arity);
       setAcknowledged(false);
@@ -182,14 +191,23 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
       if (isNameFamilyCollision(err)) {
         // THE WALL. The refusal carried the rows, so the list beside it is the DATABASE's own —
         // never a second read of the fact being reported.
-        setCandidates(candidatesFromRefusal(err));
-        setArity(candidatesFromRefusal(err).length || 2);
+        const rows = candidatesFromRefusal(err);
+        setCheckOutcome("walled");
+        setCandidates(rows);
+        // THE DATABASE'S OWN ARITY (0204 carries it in the refusal detail), never `rows.length`:
+        // a row this browser could not parse must not silently lower the number the human is told
+        // about, which is the law `lib/onboarding/identity.ts` already states for the SUCCESS
+        // path. The fallbacks run in that order -- the count second, the token's own floor (this
+        // wall raises at two or more, never at one) last.
+        setArity(arityFromRefusal(err) ?? (rows.length || 2));
         setRefusal({ message: (err as Error).message, code: isDoorRefusal(err) ? err.code : null });
         return false;
       }
       // Any other failure of the CHECK is reported as itself and blocks nothing beyond this
       // click: a read that could not run is not evidence that the name is free, and it is not
-      // evidence that it is taken either.
+      // evidence that it is taken either. `checkOutcome` says which of the two happened, so no
+      // arm below can mistake this for an answer of "nothing".
+      setCheckOutcome("unavailable");
       setCandidates([]);
       setArity(0);
       if (isDoorRefusal(err)) setRefusal({ message: err.message, code: err.code });
@@ -211,6 +229,13 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
         confirmLabel={t("addClientConfirm")}
         busy={busy}
         confirmDisabled={!isDoActionPermitted(spec, doEnv) || acknowledgementOwed || walled}
+        // EVERY FAILURE TRAVELS INTO THE DIALOG, through the wrapper's own slot. The page banner
+        // below sits BEHIND the modal backdrop while this dialog stands (OnboardingDoorDialog's
+        // own header says exactly that), so a refusal rendered only there is a refusal the human
+        // cannot read -- and this surface has three kinds: the >= 2 wall, a check that could not
+        // run at all, and the birth door's own. The slot also takes focus when it appears, which
+        // the hand-rolled in-dialog banner this replaces never did.
+        refusal={refusal ? { err: refusal.message, clr: refusal.code ? { code: refusal.code, reason: null } : null } : undefined}
         // CB-AE2E-004 (#549): resolves the OUTCOME. This dialog keeps its OWN `refusal`
         // state rather than a hydrated part's, so it reports success itself, and
         // OnboardingDoorDialog closes only on an explicit `true` — the not-permitted arm and
@@ -250,6 +275,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
             }
             setName("");
             setCheckedFor(null);
+            setCheckOutcome(null);
             setCandidates([]);
             setArity(0);
             setAcknowledged(false);
@@ -287,6 +313,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
                 // A CHECK BELONGS TO A NAME. Changing the name retires the candidates, the
                 // acknowledgement and the refusal — never the typed text.
                 setCheckedFor(null);
+                setCheckOutcome(null);
                 setCandidates([]);
                 setArity(0);
                 setAcknowledged(false);
@@ -305,16 +332,12 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
           <ClientIdentityCandidateList arity={arity} candidates={candidates} />
         ) : null}
 
-        {checkStands && arity >= 2 && refusal ? (
-          <StateBanner tone="error" code={refusal.code ?? undefined}>{refusal.message}</StateBanner>
-        ) : null}
-
         {/* ARITY 1 — the only wall here, and it is the human's own act (appendix D #16:
             Checkbox for an explicit acknowledgement, inside a FieldSet). No shadcn Checkbox is
             installed in this project (appendix D lists it as "None"), so this is the native
             control the rest of the estate already uses for acknowledgements
             (components/bank/matching-section.tsx:201 is the same shape). */}
-        {checkStands && arity === 1 ? (
+        {answered && arity === 1 ? (
           <FieldSet>
             <Field orientation="horizontal" data-invalid={acknowledgementOwed ? "true" : undefined}>
               <input
@@ -330,7 +353,10 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
           </FieldSet>
         ) : null}
 
-        {checkStands && arity === 0 ? (
+        {/* ONLY WHEN THE DATABASE ACTUALLY ANSWERED. This line states a FACT about the firm's
+            books, and a read that never ran knows no facts -- so it is gated on the OUTCOME, not
+            on an arity that reads 0 for both "nothing matched" and "the read failed". */}
+        {answered && arity === 0 ? (
           <p className="text-xs text-muted-foreground">{tid("noCandidates")}</p>
         ) : null}
       </OnboardingDoorDialog>

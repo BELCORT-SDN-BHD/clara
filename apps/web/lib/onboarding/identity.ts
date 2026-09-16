@@ -113,6 +113,19 @@ export function candidatesFromRefusal(err: unknown): ClientIdentityCandidate[] {
   return toCandidates((err.detail as Record<string, unknown> | null)?.candidates);
 }
 
+/** The ARITY a `name_family_collision` refusal carried, or `null` for any other failure.
+ *
+ *  THE DATABASE'S OWN NUMBER, for the same reason `readClientIdentityCandidates` insists on it
+ *  above: `candidates.length` is what this module could PARSE, and a row it could not parse must
+ *  not silently lower the number the human is told about. 0204 puts `arity` in the refusal detail
+ *  beside the rows precisely so the refused face never has to count them. */
+export function arityFromRefusal(err: unknown): number | null {
+  if (!isDoorRefusal(err)) return null;
+  if (err.reason !== NAME_FAMILY_COLLISION) return null;
+  const raw = (err.detail as Record<string, unknown> | null)?.arity;
+  return Number.isInteger(raw) ? (raw as number) : null;
+}
+
 /** True when this failure is the arity->=2 wall rather than a transport or authority problem.
  *  The CODE is checked too: a `reason` token arriving on some other CLR would not be this wall. */
 export function isNameFamilyCollision(err: unknown): boolean {
