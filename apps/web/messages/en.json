@@ -3131,6 +3131,7 @@
       "derivedFrom": "Derived from",
       "predecessor": "Predecessor",
       "successor": "Successor",
+      "coAcquired": "Co-acquired",
       "reversedBy": "Acquisition reversed by",
       "disposedAt": "Disposed",
       "empty": "No related register rows.",
@@ -3138,6 +3139,7 @@
       "derivationNote": "These relationships are derived from the books, not stored links. Each row says how it was derived.",
       "links": {
         "supersede": "Revision or part-disposal lineage",
+        "co_acquired_on_same_document": "Same source document, booked together",
         "source_document": "Same source document",
         "reversed_acquisition": "Reversed acquisition on the same account"
       }

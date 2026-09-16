@@ -184,8 +184,12 @@ export type FaRelatedAsset = {
   acquired_date: string | null;
   acquisition_entry_id: string | null;
   particulars_complete: boolean;
-  relation: "predecessor" | "successor" | (string & {});
-  link: "supersede" | "source_document" | "reversed_acquisition_on_same_enrolment" | (string & {});
+  /** `co_acquired` is ORDERLESS on purpose: two cost lines on ONE invoice birth two register rows
+   *  by design (0041 §9.4), and neither supersedes the other. Round-1 review measured the first
+   *  cut calling each sibling the other's `successor`. */
+  relation: "predecessor" | "successor" | "co_acquired" | (string & {});
+  link: "supersede" | "co_acquired_on_same_document" | "source_document"
+    | "reversed_acquisition_on_same_enrolment" | (string & {});
 };
 
 export type FaHistory = {

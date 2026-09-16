@@ -14,6 +14,7 @@ import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "@/lib/session-accessor";
 import messages from "../../messages/en.json";
 import { CompleteParticularsDialog, DisposeDialog } from "./fa-row-actions";
+import { DoorRefusal } from "@/lib/doors";
 import type { FixedAssetRow } from "@/lib/registers/fixed-assets";
 import type { AccountRow } from "@/lib/registers/accounts";
 
@@ -100,6 +101,84 @@ test("Complete-particulars dialog: trigger is enabled from first render (no fiel
       triggerAfterClose && focusableElements(h.container as never).includes(triggerAfterClose as never),
       "the trigger must be reachable again after the dialog closes — focus is not stranded on a removed node",
     );
+  } finally {
+    await h.unmount();
+    for (let i = 0; i < 5; i++) await h.settle();
+  }
+});
+
+test("p639 a CLR37 that names an AXIS lands focus on that CONTROL, marks it invalid, and keeps the draft", async () => {
+  // ROUND-1 REVIEW (SPEC F1). Brief-639's Web slice item 6 — "read `details.axis`/`details.field`
+  // off the DoorRefusal and focus the named control (AC7)" — was delivered only as a runtime
+  // helper for the future claraWork_v4 tool; nothing under `apps/web` read an axis at all, so the
+  // human door showed a generic banner and left focus on the confirm button. This cell drives the
+  // REAL dialog with the REAL refusal shape the door raises (`clara._fa_complete_particulars_core`
+  // :713 — "a residual value cannot exceed cost", `axis: "residual"`).
+  const refusal = new DoorRefusal("CLR37", "a residual value cannot exceed cost", {
+    reason: "fa_particulars_invalid",
+    status: 400,
+    pgCode: "CLR37",
+    codeSource: "sqlstate",
+    detail: { reason: "fa_particulars_invalid", axis: "residual" },
+  });
+  const h = await renderComponent(
+    withProvider(createElement(CompleteParticularsDialog, {
+      clientId: "c1", asset: ASSET, accounts: ACCOUNTS, busy: false,
+      // The caller's `act` resolves FALSE on a refusal (lib/firm/use-async-read.ts), which is what
+      // keeps the dialog — and everything typed into it — open.
+      act: async () => false,
+      error: refusal,
+    })),
+  );
+  const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+  body.appendChild(h.container);
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Complete particulars"));
+    assert.ok(trigger);
+    await h.fireEvent(trigger as never, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    // A submittable draft: the door's own two always-required fields plus the straight-line driver.
+    // ONE FIELD PER act(), deliberately: `FaParticularsFields` is a controlled component whose
+    // `patch` spreads the CURRENT `value` prop, so three changes batched into one act would each
+    // start from the same stale object and only the last would survive.
+    for (const [id, value] of [
+      ["fa-complete-a1-start", "2026-08-20"],
+      ["fa-complete-a1-life", "60"],
+      ["fa-complete-a1-residual", "99,999.00"],
+    ] as const) {
+      await h.act(() => setFieldValue(byId(body as never, id) as never, value));
+      for (let i = 0; i < 2; i++) await h.settle();
+    }
+
+    const confirm = findIn(
+      body as never,
+      (node) => node.tagName === "BUTTON" && textOf(node as never).includes("Complete particulars") && node !== trigger,
+    );
+    assert.ok(confirm);
+    await clickButton(confirm as never);
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    // THE REFUSAL TRAVELS INTO THE DIALOG — behind a modal backdrop, the caller's page banner is
+    // unreadable, so the sentence has to be here beside the fields it is about.
+    const text = textOf(body as never);
+    assert.match(text, /a residual value cannot exceed cost/,
+      "the DB's own message renders inside the open dialog, verbatim");
+    assert.match(text, /CLR37/, "…with its code, the way every other governed refusal paints");
+
+    // …AND FOCUS IS ON THE CONTROL THE AXIS NAMES, not on the confirm button and not on the banner.
+    const residual = byId(body as never, "fa-complete-a1-residual");
+    assert.equal(activeElement(), residual,
+      "axis 'residual' must put the reader AT the residual control");
+    assert.equal(
+      (residual as unknown as { getAttribute: (k: string) => string | null }).getAttribute("aria-invalid"),
+      "true",
+      "…and the control says it is the invalid one, so a screen reader hears WHICH field");
+
+    // THE DRAFT SURVIVES. A refusal asks for a correction; destroying the other eight answers
+    // would make the correction more expensive than the mistake.
+    assert.equal((byId(body as never, "fa-complete-a1-life") as unknown as { value: string }).value, "60");
   } finally {
     await h.unmount();
     for (let i = 0; i < 5; i++) await h.settle();

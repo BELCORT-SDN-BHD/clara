@@ -9,7 +9,7 @@
 // surface) stays independently reviewable with its own i18n namespace
 // ("FixedAssetsDepreciation.dialog" here).
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -35,6 +35,7 @@ export function FaDoorDialog({
   busy,
   confirmDisabled,
   refusal,
+  refusalFocusId,
   onConfirm,
   children,
 }: {
@@ -55,6 +56,13 @@ export function FaDoorDialog({
    *  so the refusal the human must read has to travel in here with them. Omit it
    *  and nothing extra renders; the dialog still stays open. */
   refusal?: DialogRefusal;
+  /** #639 — AXIS → CONTROL. The DOM id of the control the standing refusal NAMES
+   *  (`lib/registers/fa-refusal-field.ts` reads `detail.axis`/`detail.field` off the
+   *  `DoorRefusal`), or null/undefined when the refusal is about the form as a whole. A refusal
+   *  that names a field is an instruction to change ONE control, and a reader — keyboard or
+   *  mouse — should be standing at it. Omit it and nothing changes: `DoorDialogRefusal` keeps
+   *  focus on its own announced banner, which is the honest place for a form-level refusal. */
+  refusalFocusId?: string | null;
   /** Performs exactly one governed call and RESOLVES ITS OUTCOME: `true` only
    *  when the door accepted. `useHydratedPart`'s `act()` already returns exactly
    *  this, so `onConfirm={() => act(...)}` is the whole contract; a handler that
@@ -71,6 +79,34 @@ export function FaDoorDialog({
   // CB-AE2E-004: bumped on every settled confirm so a repeated, byte-identical
   // refusal still re-announces and re-takes focus.
   const [attempt, setAttempt] = useState(0);
+
+  // #639 — AND WHEN THE REFUSAL NAMES A CONTROL, FOCUS LANDS ON THE CONTROL.
+  //
+  // `DoorDialogRefusal` focuses its own banner, which is right for a refusal about the form as a
+  // whole. A CLR37 that carries `axis: "residual"` is not that: it is a sentence about ONE field,
+  // and the next thing the human must do is edit that field. This effect runs AFTER the banner's
+  // (React flushes child effects before parent effects), so the control wins the focus when — and
+  // only when — the caller could name one. `aria-invalid` is set beside it, and removed on the
+  // next settled attempt, so a screen reader hears WHICH control the refusal is about rather than
+  // only that focus moved.
+  //
+  // The id is addressed through `document.getElementById` deliberately: `FaParticularsFields` is
+  // reused UNCHANGED by the register, this dialog and the inline affordance, and its deterministic
+  // `${idPrefix}-${suffix}` ids are the seam. A ref or a context would have meant editing the one
+  // shared field set three surfaces depend on.
+  useEffect(() => {
+    if (!open || attempt === 0 || !refusalFocusId) return;
+    // `typeof … === "function"` rather than a bare call: the unit harness's stub document
+    // (apps/web/test/hookHarness.ts) is not a full DOM, and a missing lookup must degrade to "no
+    // focus move", never to a thrown effect that takes the whole dialog down with it.
+    const node = typeof document === "undefined" || typeof document.getElementById !== "function"
+      ? null
+      : document.getElementById(refusalFocusId);
+    if (node === null) return;
+    node.setAttribute("aria-invalid", "true");
+    (node as HTMLElement).focus();
+    return () => node.removeAttribute("aria-invalid");
+  }, [open, attempt, refusalFocusId]);
 
   return (
     <Dialog

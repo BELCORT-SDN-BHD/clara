@@ -158,13 +158,13 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
                       ) : null}
                       <div className="flex flex-wrap justify-end gap-1.5">
                         {!a.particulars_complete && (a.status === "pending" || a.status === "active") ? (
-                          <CompleteParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} />
+                          <CompleteParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} error={error} />
                         ) : null}
                         {a.particulars_complete && a.status === "active" ? (
-                          <ReviseParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} />
+                          <ReviseParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} error={error} />
                         ) : null}
                         {a.status === "active" ? (
-                          <DisposeDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} />
+                          <DisposeDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} error={error} />
                         ) : null}
                       </div>
                     </div>

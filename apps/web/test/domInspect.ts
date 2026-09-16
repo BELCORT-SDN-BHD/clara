@@ -428,6 +428,28 @@ export function enableDomInspection(): void {
     g.getComputedStyle = computedStyle as unknown;
   }
 
+  // #639 — `document.getElementById`, ADDITIVELY (this file's own stated pattern). The stub
+  // document has no lookup by id at all, so any production code that addresses a control the
+  // ordinary way — `document.getElementById(id).focus()`, which is how a refusal naming an axis
+  // reaches the control it names (`components/registers/FaDoorDialog.tsx`) — THREW here instead of
+  // being testable. A depth-first walk over the live tree reading the same `id` attribute
+  // `enhanceElement` already stores is enough, and nothing previously depended on this name.
+  if (typeof doc.getElementById !== "function") {
+    doc.getElementById = (id: string): Stub | null => {
+      const walk = (node: Stub | null | undefined): Stub | null => {
+        if (!node) return null;
+        const attr = (node.getAttribute as ((name: string) => string | null) | undefined)?.call(node, "id");
+        if (attr === id) return node;
+        for (const child of (node.childNodes ?? []) as Stub[]) {
+          const found = walk(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      return walk(doc.documentElement as Stub) ?? walk(doc.body as Stub);
+    };
+  }
+
   enhanceElement(doc.documentElement as Stub);
   enhanceElement(doc.body as Stub);
   if ((doc.body as Stub).parentNode !== doc.documentElement) {

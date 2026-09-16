@@ -43,6 +43,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { CompleteParticularsDialog, ReviseParticularsDialog } from "./fa-row-actions";
 import { fixedAssetHref, journalEntryHref, workDetailHref } from "@/lib/navigation/tree";
+import { applyDocumentParam, documentUrl } from "@/lib/documents/url-state";
 
 type TabId = "acquisition" | "particulars" | "schedule" | "history";
 
@@ -91,8 +92,18 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
   };
   const linkLabels: Record<string, string> = {
     supersede: t("history.links.supersede"),
+    co_acquired_on_same_document: t("history.links.co_acquired_on_same_document"),
     source_document: t("history.links.source_document"),
     reversed_acquisition_on_same_enrolment: t("history.links.reversed_acquisition"),
+  };
+  // A WORD PER RELATION, never a two-way `predecessor ? : successor`. Round-1 review measured a
+  // pair of rows born from ONE two-line invoice each rendering "Successor" for the other -- a
+  // mutually contradictory accounting claim on the tab that exists to show corrections. 0201 now
+  // gives co-acquired siblings their own orderless relation and this table renders it.
+  const relationLabels: Record<string, string> = {
+    predecessor: t("history.predecessor"),
+    successor: t("history.successor"),
+    co_acquired: t("history.coAcquired"),
   };
 
   const items: readonly { value: TabId; label: string }[] = [
@@ -109,9 +120,7 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
           {r.description ?? r.asset_id.slice(0, 8)}
         </Link>
       </TableCell>
-      <TableCell className="text-muted-foreground">
-        {r.relation === "predecessor" ? t("history.predecessor") : t("history.successor")}
-      </TableCell>
+      <TableCell className="text-muted-foreground">{relationLabels[r.relation] ?? r.relation}</TableCell>
       <TableCell className="text-muted-foreground">{statusLabels[r.status] ?? r.status}</TableCell>
       <TableCell>{fmtCents(r.cost_cents, tc("centsUnsafe"))}</TableCell>
       <TableCell className="text-muted-foreground">{r.acquired_date ?? dash}</TableCell>
@@ -199,7 +208,19 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
                         </Fact>
                         <Fact label={t("acquisition.sourceDocument")}>
                           {acquisition.document_id ? (
-                            <Link href={`/clients/${clientId}/documents`} className="underline-offset-4 hover:underline">
+                            // THE SPECIFIC FILED DOCUMENT, not the Documents tab. `?document=<id>`
+                            // is the workbench's own URL state (`lib/documents/url-state.ts`,
+                            // read by `DocumentsWorkbench` through `parseDocumentParam`) — the
+                            // same shape Activity's `?event=` and Registers' `?tab=` already use.
+                            // The id is on hand here, so landing the reader on a list and asking
+                            // them to find it again would be a link that knows more than it says.
+                            <Link
+                              href={documentUrl(
+                                `/clients/${clientId}/documents`,
+                                applyDocumentParam(new URLSearchParams(), acquisition.document_id),
+                              )}
+                              className="underline-offset-4 hover:underline"
+                            >
                               {acquisition.document_filename ?? acquisition.document_id}
                             </Link>
                           ) : (
@@ -252,6 +273,7 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
                         accounts={accountsRead.data ?? []}
                         busy={busy}
                         act={actAndReload}
+                        error={error}
                       />
                     ) : null}
                     {asset.particulars_complete && asset.status === "active" ? (
@@ -261,6 +283,7 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
                         accounts={accountsRead.data ?? []}
                         busy={busy}
                         act={actAndReload}
+                        error={error}
                       />
                     ) : null}
                   </div>

@@ -210,6 +210,36 @@ test("detail.pending the waiting-on-particulars state is said in WORDS, and the 
   });
 });
 
+test("detail.source_document the acquisition's source document DEEP-LINKS to that one document, never to the bare Documents tab", async () => {
+  // ROUND-1 REVIEW (STANDARDS F2). The link went to `/clients/c1/documents` with no query at all,
+  // while `acquisition.document_id` was on hand — so a reader was handed a list and asked to find
+  // the invoice again. `lib/documents/url-state.ts` (`DOCUMENT_PARAM`/`applyDocumentParam`/
+  // `documentUrl`) is the workbench's own URL state, read back by `DocumentsWorkbench` through
+  // `parseDocumentParam`; this cell pins that the href carries it.
+  const filed = {
+    ...DETAIL,
+    acquisition: {
+      ...ACQUISITION,
+      document_id: "11111111-2222-4333-8444-555555555555",
+      document_filename: "INV-8842.pdf",
+      document_sha256: "a".repeat(64),
+    },
+  };
+  await withMockedEnv(mockFor(filed), async () => {
+    const h = await renderComponent(App());
+    try {
+      for (let i = 0; i < 5; i++) await h.settle();
+      const link = h.find((n) => n.tagName === "A" && textOf(n).includes("INV-8842.pdf"));
+      assert.ok(link, "the filed document is named by its own filename, not by its uuid");
+      const href = (link as unknown as { getAttribute: (k: string) => string | null }).getAttribute("href");
+      assert.equal(href, "/clients/c1/documents?document=11111111-2222-4333-8444-555555555555",
+        `the source-document link must open THAT document (got ${href})`);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("detail.schedule an empty schedule names the reason rather than saying nothing happened", async () => {
   await withMockedEnv(mockFor(DETAIL), async () => {
     const h = await renderComponent(App());
@@ -237,6 +267,43 @@ test("detail.history a derived relationship SAYS it was derived", async () => {
         "…and HOW it was derived is on the row, so a candidate match cannot read as a stored link");
       assert.match(text, /derived from the books, not stored links/,
         "…with the boundary stated once for the whole table");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("detail.co_acquired two rows born from ONE invoice are CO-ACQUIRED, never each other's successor", async () => {
+  // ROUND-1 REVIEW (adversarial 639-A2). Measured on a from-scratch rig: one document-lane entry
+  // with two debits on the enrolled cost account births TWO register rows (0041 §9.4 — one row per
+  // cost line, BY DESIGN), and 0201's first cut had each of them name the other `relation:
+  // 'successor'`, because they share the acquisition entry (therefore the document) and the
+  // `approved_at >= approved_at` comparison was true in both directions. The migration now gives
+  // that pair its own orderless vocabulary; this cell pins what the reader is told.
+  const coAcquired = {
+    ...DETAIL,
+    history: {
+      ...HISTORY,
+      related: [{
+        asset_id: "a2", description: "Freight on compressor", status: "active",
+        cost_cents: 40000, acquired_date: "2026-08-15", acquisition_entry_id: "e-1111",
+        particulars_complete: false, relation: "co_acquired",
+        link: "co_acquired_on_same_document",
+      }],
+    },
+  };
+  await withMockedEnv(mockFor(coAcquired), async () => {
+    const h = await renderComponent(App());
+    try {
+      for (let i = 0; i < 5; i++) await h.settle();
+      await openTab(h, "History");
+      const text = h.text();
+      assert.match(text, /Freight on compressor/, "the sibling row is named…");
+      assert.match(text, /Co-acquired/, "…and the relation word makes no claim about order");
+      assert.match(text, /Same source document, booked together/,
+        "…and how it was derived is on the row");
+      assert.ok(!/Successor/.test(text),
+        "a co-acquired sibling must NEVER be called a successor — that is an accounting claim nobody made");
     } finally {
       await h.unmount();
     }
