@@ -16,13 +16,37 @@
 // `clara.request_autodraft`. That door was rewritten by #614 into a RECOVERY act
 // ("start processing again"), not a gate, and the automatic lane runs entirely without
 // it — `startWorld.ts:476` starts the facts-gate consumer, `:390` the autodraft
-// consumer, and `autodraft.mjs` calls `clara.admit_autodraft_task` directly. Leg 1
-// asserts both halves: the chain reaches an admitted coding task on its own, AND no
-// module in the automatic lane so much as names the recovery door.
+// consumer, and `autodraft.mjs` calls `clara.admit_autodraft_task` directly.
+//
+// FIX ROUND 1 — WHAT LEG 1 USED TO CLAIM, AND WHAT IT NOW PROVES (review findings
+// SPEC-F1 / 633-ADV-1). Its poll predicate was `(row) => row !== null`, so "a classify
+// task exists" passed even though every one of them was, on this fixture, an immediate
+// and permanent `firm_narrow_consent_inactive` failure: the leg never got past the first
+// gate and the header nevertheless said "the chain reaches an admitted coding task on
+// its own". The leg now has three arms, each of which can go red on its own:
+//   (a) CONTROL — an UNFILED upload's classify task settles `failed` with the estate's
+//       OWN named verdict (`firm_narrow_consent_inactive`), and no kind is invented. So
+//       arm (b)'s `done` is a filter doing work, not a poll that ignores status.
+//   (b) THE CONSENTED CHAIN — with the client's `document_processing` consent granted
+//       through the REAL governed verbs and the document filed the way the browser's own
+//       queue files it, the chain runs ingest -> extraction done -> classify `done` ->
+//       `documents.document_kind` set -> `document.classified`, with NO human act in it.
+//   (c) THE ADMISSION DOOR — a real MyInvois UBL invoice runs upload -> structured_parse
+//       -> local_facts `done` -> `document.invoice_facts_completed` -> the autodraft
+//       consumer calling `clara.admit_autodraft_task` for that filing, ON ITS OWN. The
+//       door's own verdict is read back and printed VERBATIM, never dressed as success.
+//
+// THE RESIDUAL, NAMED. Arm (c) proves the admission door is REACHED automatically; it
+// does not prove an admitted CODING TASK, because `_coding_lane_core` refuses this
+// fixture's document (`tier_a_fails`, `direction_unresolved`, `vendor_unresolved`,
+// `no_consent` — measured on clara_633) and routes it to `needs_you` instead. A document
+// that satisfies Tier A needs counterparty resolution, a resolved direction and coding
+// consent — the autodraft lane's own fixture, not this ticket's. #633 owns the chain up
+// to the door and says exactly that.
 //
 // SEVEN LEGS:
-//   1. upload -> ocr done -> classify enqueued -> admitted coding task, with ZERO
-//      `request_autodraft` anywhere in the automatic lane.
+//   1. upload -> ingest -> classify -> facts -> `admit_autodraft_task`, with ZERO
+//      `request_autodraft` anywhere in the automatic lane (three arms, above).
 //   2. a FAILED extraction never yields a kind (0177's router returns
 //      `awaiting_extraction` until a `done` ocr/structured_parse extraction exists).
 //   3. duplicate bytes answer `adopted` and bind to the EXISTING document — one
@@ -45,6 +69,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { crc32 } from "node:zlib";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 
@@ -126,20 +151,89 @@ const OFX_BYTES = Buffer.from(
   + "</STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>\n",
 );
 
-/** A real (minimal) XLSX — a ZIP container, which is what the scanner sniffs. */
-async function xlsxBytes() {
-  const { default: JSZip } = await import("jszip").catch(() => ({ default: null }));
-  if (JSZip) {
-    const zip = new JSZip();
-    zip.file("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
-    zip.file("xl/worksheets/sheet1.xml", '<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>memo</t></is></c></row></sheetData></worksheet>');
-    return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+/** A REAL, minimal XLSX — built here, with no dependency.
+ *
+ *  FIX ROUND 1 (review finding 633-ADV-2). This used to try `jszip` (which is not a
+ *  dependency of @clara/runtime, so the import always failed) and fall back to a 45-byte
+ *  `PK\x03\x04` stub. `lib/scan.mjs:68-136` reads the END-OF-CENTRAL-DIRECTORY record,
+ *  walks the central directory and requires `[Content_Types].xml` + `xl/workbook.xml`, so
+ *  the stub was quarantined on every run ("ZIP central directory is missing") while the
+ *  leg printed `outcome: admitted` for it and asserted only on registry rows.
+ *
+ *  This is a genuine stored-entry (method 0) ZIP: local file header + data per entry,
+ *  then the central directory, then the EOCD. Verified against `scan.detectDocument`
+ *  itself, which reads it as `{format:'xlsx', pages:1}`. */
+function xlsxBytes() {
+  const files = [
+    ["[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>'],
+    ["xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="TB" sheetId="1"/></sheets></workbook>'],
+    ["xl/worksheets/sheet1.xml", '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Trial balance</t></is></c></row></sheetData></worksheet>'],
+  ];
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBuf = Buffer.from(name, "utf8");
+    const data = Buffer.from(text, "utf8");
+    const crc = crc32(data) >>> 0;
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    locals.push(local, nameBuf, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBuf);
+    offset += local.length + nameBuf.length + data.length;
   }
-  // No zip library in this workspace: fall back to the smallest byte sequence that
-  // still carries the PK\x03\x04 local-file-header magic the sniffer keys on. The leg
-  // reports which form it used so a reader knows what was actually sent.
-  return Buffer.concat([Buffer.from("PK\x03\x04"), Buffer.alloc(26, 0), Buffer.from("xl/workbook.xml")]);
+  const localPart = Buffer.concat(locals);
+  const centralPart = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(centralPart.length, 12);
+  eocd.writeUInt32LE(localPart.length, 16);
+  return Buffer.concat([localPart, centralPart, eocd]);
 }
+
+/** A minimal VALID MyInvois UBL invoice — the same shape `ingest-workflow-db.test.mjs`
+ *  proves the local structured_parse identity pass accepts. An XML rides `local_facts`
+ *  (`_enqueue_invoice_facts_core`'s xml arm) with NO model and NO vendor egress, which is
+ *  what makes the whole automatic chain to `admit_autodraft_task` deterministic here. */
+const UBL_INVOICE = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>ADMISSION-E2E-1</cbc:ID>
+  <cbc:IssueDate>2026-01-15</cbc:IssueDate>
+  <cbc:InvoiceTypeCode listVersionID="1.1">01</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>MYR</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="TIN">C1234567890</cbc:ID></cac:PartyIdentification>
+    <cac:PartyLegalEntity><cbc:RegistrationName>ROME PROPERTIES SDN BHD</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyLegalEntity><cbc:RegistrationName>DARE TO DREAM SDN BHD</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:TaxTotal><cbc:TaxAmount currencyID="MYR">60.00</cbc:TaxAmount></cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxExclusiveAmount currencyID="MYR">1000.00</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="MYR">1060.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="MYR">1060.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>`;
 
 async function waitHealthy() {
   for (let i = 0; i < 100; i += 1) {
@@ -189,6 +283,26 @@ async function upload(jwt, bytes, filename, mime) {
   };
 }
 
+/** THE BROWSER'S OWN ATTRIBUTION ACT, through the estate's real doors: the two-step
+ *  `record_client_resolution` then `file_document` that `apps/web/lib/documents/doors.ts`'s
+ *  `fileToClient` performs after finalize on the client's documents tab. It is the ONE
+ *  human act in leg 1 — everything before and after it is the machine's. */
+async function fileToClient(rig, owner, documentId, client, tag) {
+  const res = await rig.humanQuery(
+    owner,
+    `select clara.record_client_resolution(p_client => $1, p_subject_kind => 'document', p_subject => $2,
+       p_confidence => 1.0, p_method => 'human', p_evidence => '{"source":"intake-admission-e2e"}'::jsonb,
+       p_op_key => $3) as out`,
+    [client, documentId, `p633-${tag}-res-${randomUUID()}`],
+  );
+  const out = res.rows[0].out;
+  await rig.humanQuery(
+    owner,
+    "select clara.file_document(p_document => $1, p_client => $2, p_resolution => $3, p_op_key => $4)",
+    [documentId, client, out?.resolution_id ?? out, `p633-${tag}-file-${randomUUID()}`],
+  );
+}
+
 async function poll(rig, sql, params, predicate, label, tries = 400) {
   let last;
   for (let i = 0; i < tries; i += 1) {
@@ -207,8 +321,37 @@ async function main() {
   const { owner, firm, client } = await rig.buildFirm("intake-admission-e2e");
   const jwt = await mint(owner);
 
-  const { mockTextModel } = await import("./mockModel.mjs");
-  globalThis.__claraModelForTest = mockTextModel("admission chain");
+  // ONE model for BOTH lanes. The classify consumer calls `generateObject`
+  // (`lib/classify-llm.mjs:205`) and every chat/text lane calls `streamText`; they share
+  // the SAME `__claraModelForTest` override, so a text-only mock left every classify task
+  // failing its three attempts — which is part of why leg 1 could not reach a kind before
+  // this fix round. No network, no key, deterministic.
+  const { MockLanguageModelV4, simulateReadableStream } = await import("ai/test");
+  const mockUsage = () => ({
+    inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 7, reasoning: undefined, audio: undefined },
+    raw: undefined,
+  });
+  globalThis.__claraModelForTest = new MockLanguageModelV4({
+    doGenerate: async () => ({
+      content: [{ type: "text", text: JSON.stringify({ kind: "invoice", confidence: 0.93, rationale: "line items + a total due + one seller and one buyer" }) }],
+      finishReason: { unified: "stop", raw: "stop" },
+      usage: mockUsage(),
+      warnings: [],
+    }),
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks: [
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t1" },
+          { type: "text-delta", id: "t1", delta: "admission chain " },
+          { type: "text-end", id: "t1" },
+          { type: "finish", usage: mockUsage(), finishReason: { unified: "stop", raw: "stop" } },
+        ],
+        chunkDelayInMs: 5,
+      }),
+    }),
+  });
   await import("../.output/server/index.mjs");
   await waitHealthy();
 
@@ -238,20 +381,54 @@ async function main() {
   );
   assert.equal(recoveryExists.rows[0].n, 1, "control: clara.request_autodraft exists — it is a recovery door, not an absent one");
 
-  // Half two is BEHAVIOURAL: the chain runs to a done extraction and an enqueued
-  // classify task with nothing but the upload happening.
+  // -------------------------------------------------------------------------
+  // 1(a) CONTROL — THE ESTATE REFUSES BY NAME, so 1(b)'s `done` is a filter.
+  // -------------------------------------------------------------------------
+  // An UNFILED document is the pre-attribution class (0123's D-21 branch): classify needs
+  // the firm's own `firm_narrow_intake`/`attribution` activation, which this fixture
+  // deliberately does not hold. The verdict is a terminal, never-claimed failed task
+  // carrying the estate's own word for it — not a stall, and not a kind invented anyway.
+  const control = await upload(jwt, pdfBytes("leg1-control"), "never-attributed.pdf", "application/pdf");
+  assert.equal(control.refusedAt, null, `the control upload was refused at ${control.refusedAt}`);
+  const controlDoc = control.receipt.document_id;
+  assert.ok(controlDoc, "the control document was adopted");
+  const gated = await poll(
+    rig,
+    "select status, error_code from clara.document_processing_tasks where document_id=$1 and lane='classify' order by version_n desc limit 1",
+    [controlDoc],
+    (row) => row?.status === "failed",
+    "leg 1(a): an UNFILED document's classify task settles as the estate's own refusal",
+  );
+  assert.equal(
+    gated.error_code, "firm_narrow_consent_inactive",
+    `the refusal must NAME itself — saw ${gated.error_code}`,
+  );
+  const controlKind = await rig.rootQuery("select document_kind from clara.documents where id=$1", [controlDoc]);
+  assert.equal(controlKind.rows[0].document_kind, null, "and a refused classify invents no kind");
+
+  // -------------------------------------------------------------------------
+  // 1(b) THE CONSENTED CHAIN — upload -> extraction -> classify DONE -> a kind.
+  // -------------------------------------------------------------------------
+  // The client's `document_processing` consent is granted through the REAL governed verbs
+  // (classify_consent_evidence_document -> grant_client_egress_purpose ->
+  // activate_client_egress_purpose), never a raw table write; the filing is the same
+  // two-step the browser's own queue performs after finalize
+  // (`apps/web/lib/documents/useUploadQueue.ts:322` -> `doors.ts`'s `fileToClient`).
+  // Everything after that is the machine's.
+  await rig.ensureClassifyConsent(owner, { firm, client });
   const one = await upload(jwt, pdfBytes("leg1"), "supplier-invoice.pdf", "application/pdf");
   assert.equal(one.refusedAt, null, `leg 1 upload was refused at ${one.refusedAt}`);
   assert.equal(one.status, 202, `finalize returned ${one.status}`);
   const documentId = one.receipt.document_id;
   assert.ok(documentId, "finalize adopted a document");
+  await fileToClient(rig, owner, documentId, client, "leg1");
 
   await poll(
     rig,
     "select status from clara.document_processing_tasks where id=$1",
     [one.receipt.task_id],
     (row) => row?.status === "done",
-    "leg 1: the ingest task reaches done with NO human act",
+    "leg 1(b): the ingest task reaches done with NO human act",
   );
   const extraction = await rig.rootQuery(
     "select status, engine_kind from clara.document_extractions where document_id=$1 order by version_n desc",
@@ -262,13 +439,86 @@ async function main() {
 
   const classify = await poll(
     rig,
-    "select status from clara.document_processing_tasks where document_id=$1 and lane='classify' order by created_at desc limit 1",
+    "select status, error_code from clara.document_processing_tasks where document_id=$1 and lane='classify' order by version_n desc limit 1",
     [documentId],
-    (row) => row !== null,
-    "leg 1: a classify task is enqueued automatically once the extraction lands",
+    (row) => row?.status === "done",
+    "leg 1(b): the classify task itself reaches DONE — not merely 'a row exists'",
   );
-  assert.ok(classify, "the classify lane was entered without a human gate");
-  console.log(`[leg 1] PASS — ingest done, classify enqueued (${classify.status}), zero request_autodraft in the automatic lane`);
+  assert.equal(classify.status, "done", "the classify lane settled on its own");
+  const kinded = await poll(
+    rig,
+    "select document_kind from clara.documents where id=$1",
+    [documentId],
+    (row) => row?.document_kind !== null,
+    "leg 1(b): the classifier's verdict reaches the document",
+  );
+  assert.ok(kinded.document_kind, "a kind landed with no human classifying anything");
+  const classified = await rig.rootQuery(
+    "select count(*)::int n from clara.domain_events where event_type='document.classified' and document_id=$1",
+    [documentId],
+  );
+  assert.equal(classified.rows[0].n, 1, "and it reached the spine exactly once as document.classified");
+
+  // -------------------------------------------------------------------------
+  // 1(c) THE ADMISSION DOOR, REACHED ON ITS OWN.
+  // -------------------------------------------------------------------------
+  // A real MyInvois UBL invoice is the deterministic path to the end of the chain: an XML
+  // rides `structured_parse` at intake and then `local_facts` (`clara-myinvois:v1`), both
+  // LOCAL — no model, no vendor egress, no second typed consent — so
+  // `document.invoice_facts_completed` really lands and the autodraft consumer really
+  // wakes. What it does next is `clara.admit_autodraft_task` for this document's filing,
+  // under a sweep run it opened itself: origin `sweep`, never `one_click` (the door's own
+  // CLR10 makes that pairing impossible), and with nothing human in between.
+  const ubl = await upload(jwt, Buffer.from(UBL_INVOICE, "utf8"), "myinvois-invoice.xml", "application/xml");
+  assert.equal(ubl.refusedAt, null, `the UBL upload was refused at ${ubl.refusedAt}`);
+  const ublDoc = ubl.receipt.document_id;
+  assert.ok(ublDoc, "the UBL invoice was adopted");
+  await fileToClient(rig, owner, ublDoc, client, "leg1-ubl");
+
+  const facts = await poll(
+    rig,
+    "select status, error_code from clara.document_processing_tasks where document_id=$1 and lane='local_facts' order by version_n desc limit 1",
+    [ublDoc],
+    (row) => row?.status === "done",
+    "leg 1(c): the local facts pass runs itself to done",
+  );
+  assert.equal(facts.status, "done", "the MyInvois facts pass settled with no human act");
+  const factsEvent = await rig.rootQuery(
+    "select count(*)::int n from clara.domain_events where event_type='document.invoice_facts_completed' and document_id=$1",
+    [ublDoc],
+  );
+  assert.equal(factsEvent.rows[0].n, 1, "and it reached the spine as document.invoice_facts_completed");
+
+  const admission = await poll(
+    rig,
+    `select i.outcome, i.refusal_token, i.filing_id, s.state as run_state
+       from clara.sweep_run_items i join clara.sweep_runs s on s.id = i.run_id
+      where i.document_id = $1 order by i.created_at desc limit 1`,
+    [ublDoc],
+    (row) => row !== null,
+    "leg 1(c): the autodraft consumer calls admit_autodraft_task for this filing, on its own",
+  );
+  assert.ok(admission.filing_id, "the admission is keyed on the document's FILING, as the door requires");
+  assert.ok(admission.outcome, "and the door answered with one of its own named outcomes");
+  const filingRow = await rig.rootQuery(
+    "select id from clara.document_filings where document_id=$1 and retired_at is null", [ublDoc],
+  );
+  assert.equal(
+    admission.filing_id, filingRow.rows[0].id,
+    "and on THIS document's live filing, not some other row the sweep happened to touch",
+  );
+  // A run-bound item is itself the proof of origin: `admit_autodraft_task` raises CLR10
+  // for `one_click` WITH a run id and for `sweep` WITHOUT one, so an item inside an open
+  // sweep run can only have come from the unattended lane.
+  const oneClick = await rig.rootQuery(
+    "select count(*)::int n from clara.sweep_run_items where document_id=$1 and run_id is null", [ublDoc],
+  );
+  assert.equal(oneClick.rows[0].n, 0, "no one-click (human recovery) admission exists for this document");
+  console.log(
+    `[leg 1] PASS — control refused ${gated.error_code}; consented chain classified as '${kinded.document_kind}'; `
+    + `admit_autodraft_task reached on its own for filing ${admission.filing_id} with outcome '${admission.outcome}'`
+    + `${admission.refusal_token ? ` (${JSON.stringify(admission.refusal_token)})` : ""}; zero request_autodraft in the automatic lane`,
+  );
 
   // =========================================================================
   // LEG 2 — A FAILED OR EMPTY EXTRACTION NEVER YIELDS A KIND.
@@ -464,12 +714,22 @@ async function main() {
   assert.equal(ofx.refusedAt, null, `a real OFX must be admitted — refused at ${ofx.refusedAt}`);
   assert.ok(ofx.receipt.document_id, "and adopted into custody");
 
-  const xlsx = await xlsxBytes();
+  // FIX ROUND 1 (633-ADV-2): the XLSX arm is now ASSERTED, not merely printed. The old
+  // stub was quarantined on every run while this line said "admitted".
+  const xlsx = xlsxBytes();
   const xlsxResult = await upload(
     jwt, xlsx, "trial-balance.xlsx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   );
-  console.log(`[leg 7] xlsx bytes: ${xlsx.length} (${xlsx.subarray(0, 4).toString("hex")}), outcome: ${xlsxResult.refusedAt ?? "admitted"}`);
+  assert.equal(xlsxResult.refusedAt, null, `a REAL xlsx must be admitted — refused at ${xlsxResult.refusedAt} (status ${xlsxResult.status})`);
+  assert.ok(xlsxResult.receipt.document_id, "and adopted into custody, with a document id on the receipt");
+  const xlsxIntake = await rig.rootQuery(
+    "select status, failure_code, document_id from clara.document_intakes where id=$1", [xlsxResult.intakeId],
+  );
+  assert.notEqual(xlsxIntake.rows[0].status, "failed", `the intake row must not be a failure — saw ${xlsxIntake.rows[0].status}/${xlsxIntake.rows[0].failure_code}`);
+  assert.equal(xlsxIntake.rows[0].failure_code, null, "and it carries no quarantine code");
+  assert.ok(xlsxIntake.rows[0].document_id, "and the intake really bound a document");
+  console.log(`[leg 7] xlsx bytes: ${xlsx.length} (${xlsx.subarray(0, 4).toString("hex")}), intake status: ${xlsxIntake.rows[0].status}`);
 
   const ofxTask = await rig.rootQuery(
     "select lane from clara.document_processing_tasks where document_id=$1 order by created_at asc limit 1",

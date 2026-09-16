@@ -50,12 +50,18 @@ runs:
     # #633 intake ADMISSION e2e. Reuses the database the step above just built and
     # bootstrapped (same throwaway, same world) because it proves the chain that begins
     # where that one stops: after the bytes are read, nobody calls
-    # `clara.request_autodraft`. Seven legs — no human gate on admission, no kind from a
-    # failed extraction, duplicate bytes converging on the existing document, a mixed
-    # five-file batch settling independently, a replayed finalize staying idempotent,
-    # H-53 custody for a non-coding kind, and C-37's real OFX + XLSX with the levels the
-    # registry actually publishes. Standalone (not collected by `node --test`), so it is
-    # wired explicitly, exactly like the step above.
+    # `clara.request_autodraft`. Seven legs. Leg 1 runs three arms — an UNFILED upload's
+    # classify task settling on the estate's own `firm_narrow_consent_inactive` refusal
+    # (the control), a CONSENTED and filed document classifying itself to a kind, and a
+    # real MyInvois UBL invoice running all the way to `clara.admit_autodraft_task` for
+    # its own filing under a sweep run the consumer opened itself. The door's verdict is
+    # printed verbatim; it does NOT claim an admitted coding task (this fixture's document
+    # is Tier-A-incomplete, a residual named in packages/runtime/README.md). Then: no kind
+    # from a failed extraction, duplicate bytes converging on the existing document, a
+    # mixed five-file batch settling independently, a replayed finalize staying idempotent,
+    # H-53 custody for a non-coding kind, and C-37's real OFX + real XLSX with the levels
+    # the registry actually publishes. Standalone (not collected by `node --test`), so it
+    # is wired explicitly, exactly like the step above.
     - name: "#633 intake admission e2e (same isolated DB + world)"
       shell: bash -e {0}
       run: |
