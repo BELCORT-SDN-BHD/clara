@@ -173,12 +173,24 @@ filing's own history, not on the queue.
   re-read at mount so a reload recovers it, and re-read by a hard-bounded settle-poll
   (`lib/documents/use-settle-poll.ts`) while any row can still change. The predicate
   is "filed to this client, or mine and unattributed" — never "my uploads", because
-  `clara.document_intakes` has no client column.
+  `clara.document_intakes` has no client column. **A tick costs ONE read.** The mount
+  pays four (the masked intake view, this client's filings, the unassigned set and
+  `caller_context`) and keeps the last three as a derivation; each tick re-reads the
+  masked view alone through `refreshIntakeReceipts` and rebuilds the rows against that
+  derivation, and the full four are paid again exactly once, on the tick where the batch
+  settles. Until fix round 1 the tick re-ran the whole derivation — up to four reads a
+  tick under the caller's own JWT, the heaviest of them a SECURITY INVOKER RPC.
 - *Filed to this client* — unchanged.
 
 **The firm's unassigned sources** live at `/documents`
 (`components/firm/documents/unassigned-sources.tsx`), over the already-granted
-`clara.list_unassigned_documents`. Each document is asked about ONCE. The nav floor is
+`clara.list_unassigned_documents`. Each document is asked about ONCE — one act per row,
+and the row leaves the population on the next settled read because the DB's own predicate
+stops matching it. What the DOOR guarantees is narrower than that and is stated where it
+matters (the leaf's header, `packages/db/tests/unassigned-intake-reuse.test.mjs`): a
+repeat to the SAME client is refused CLR10 in the estate's own words, but a second
+attribution to a DIFFERENT client is ACCEPTED and leaves two live filings — which 0123's
+classify gate then refuses as `document_processing_multi_client`. The nav floor is
 `viewer` because that is what the READ admits (measured on a rig persona); the
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
