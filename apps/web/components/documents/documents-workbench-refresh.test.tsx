@@ -256,9 +256,20 @@ function receiptFetch(counts: Record<string, number>, intakes: () => unknown[]):
   }) as typeof fetch;
 }
 
+/** FIX ROUND 1. The shipped poll waits 1.5 s before its FIRST tick and backs off from
+ *  there, while `h.settle()` is a 0 ms macrotask hop — so every cell here used to assert
+ *  a read budget the poll had not spent a single tick of. The bounds are now passed in
+ *  with a zero base delay (the component's documented option, shipped defaults
+ *  otherwise), and every budget assertion below is non-vacuous. */
+const FAST_POLL = { baseDelayMs: 0, maxDelayMs: 0 } as const;
+/** The same zero delay with a ceiling the harness's own mount-time settles cannot
+ *  exhaust — for the two cells that must still have budget left when the body runs. */
+const WIDE_POLL = { baseDelayMs: 0, maxDelayMs: 0, maxTicks: 60 } as const;
+
 async function withReceipts(
   intakes: () => unknown[],
   run: (h: Awaited<ReturnType<typeof renderComponent>>, counts: Record<string, number>) => Promise<void>,
+  poll: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number } = FAST_POLL,
 ): Promise<void> {
   const counts: Record<string, number> = {};
   const originalFetch = globalThis.fetch;
@@ -267,7 +278,7 @@ async function withReceipts(
   globalThis.fetch = receiptFetch(counts, intakes);
   configureSessionTokenSource(async () => "tok");
   const nav = makeNavigation();
-  const h = await renderComponent(documentsApp(createElement(DocumentsWorkbench, { clientId: CLIENT }), nav));
+  const h = await renderComponent(documentsApp(createElement(DocumentsWorkbench, { clientId: CLIENT, settlePoll: poll }), nav));
   try {
     for (let i = 0; i < 10; i++) await h.settle();
     await run(h, counts);
@@ -338,8 +349,55 @@ test("[633]: an UNSETTLED receipt keeps a bounded watch and says so; the poll's 
     const mount = counts.document_intakes_visible ?? 0;
     for (let i = 0; i < 40; i++) await h.settle();
     const grew = (counts.document_intakes_visible ?? 0) - mount;
+    // NON-VACUITY (fix round): the poll must have actually run, or "inside its ceiling"
+    // is a statement about nothing — which is exactly what this cell used to assert.
+    assert.ok(grew > 0, "the poll must issue SOME read while a row is still moving");
     assert.ok(grew <= 12, `the settle-poll must stay inside its tick ceiling — issued ${grew} extra reads`);
     assert.ok(h.find((n) => (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("data-testid") === "receipts-refresh"),
       "an unsettled list must offer a manual Refresh, so an exhausted poll is a visible end and not a silent one");
   });
+});
+
+test("[633] fix round: a tick re-reads the MASKED VIEW ALONE — the other three reads stay flat", async () => {
+  // Review finding 633-ADV-4: `onTick` called `reload()`, which re-ran the WHOLE
+  // derivation — `document_intakes_visible` + `document_filings` +
+  // `rpc/list_unassigned_documents` + `caller_context` (+ a conditional
+  // `documents?id=in.(...)`) — so a settling batch could issue up to ~60 reads under
+  // the caller's own JWT against the module header's own promise of one. The tick now
+  // goes through `refreshIntakeReceipts`, which reads the masked view and nothing else.
+  await withReceipts(() => [receiptRow({ status: "verifying", document_id: null })], async (h, counts) => {
+    const mountIntakes = counts.document_intakes_visible ?? 0;
+    const mountFilings = counts.document_filings ?? 0;
+    const mountUnassigned = counts.list_unassigned_documents ?? 0;
+    const mountCaller = counts.caller_context ?? 0;
+    for (let i = 0; i < 40; i++) await h.settle();
+    const ticks = (counts.document_intakes_visible ?? 0) - mountIntakes;
+    assert.ok(ticks > 0, "non-vacuity: the poll must actually have ticked, or 'flat' means nothing");
+    assert.equal(counts.document_filings ?? 0, mountFilings, `document_filings grew by ${(counts.document_filings ?? 0) - mountFilings} across ${ticks} ticks`);
+    assert.equal(counts.list_unassigned_documents ?? 0, mountUnassigned, `list_unassigned_documents (SECURITY INVOKER, the heaviest of the four) grew by ${(counts.list_unassigned_documents ?? 0) - mountUnassigned} across ${ticks} ticks`);
+    assert.equal(counts.caller_context ?? 0, mountCaller, `caller_context grew by ${(counts.caller_context ?? 0) - mountCaller} across ${ticks} ticks`);
+  }, WIDE_POLL);
+});
+
+test("[633] fix round: the three slow reads ARE paid again, exactly once, on the tick where the batch settles", async () => {
+  // The other half of the promise: a document filed to this client DURING a batch must
+  // get its real kind and mime, so the full derivation runs once more when the list
+  // settles — and then the poll stops, so it never runs a third time.
+  let settled = false;
+  await withReceipts(
+    () => [receiptRow(settled ? { status: "adopted" } : { status: "verifying", document_id: null })],
+    async (h, counts) => {
+      const mountUnassigned = counts.list_unassigned_documents ?? 0;
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(counts.list_unassigned_documents ?? 0, mountUnassigned, "still unsettled: the slow reads have not been re-issued");
+      settled = true;
+      for (let i = 0; i < 40; i++) await h.settle();
+      assert.equal(
+        (counts.list_unassigned_documents ?? 0) - mountUnassigned, 1,
+        `the settling tick must re-derive EXACTLY once, saw ${(counts.list_unassigned_documents ?? 0) - mountUnassigned}`,
+      );
+      assert.match(h.text(), /Every upload here has settled/);
+    },
+    WIDE_POLL,
+  );
 });

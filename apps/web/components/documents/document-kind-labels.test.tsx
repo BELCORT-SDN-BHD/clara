@@ -116,3 +116,25 @@ test("an UNCLASSIFIED document names that state on the detail surface — never 
     await h.unmount();
   }
 });
+
+test("[633] fix round: the list/receipt classify control never offers a kind the door ALWAYS refuses", async () => {
+  // Review finding 633-ADV-7. `clara.set_document_kind` raises CLR28 ("consent-evidence
+  // classification is owned by the egress consent path") for `consent_evidence` on either
+  // side of the change — measured on the #633 rig — so offering it here could only ever
+  // produce an honest-but-useless refusal. The audited path is
+  // `classifyConsentEvidenceDocument` (`lib/documents/doors.ts:189`), owner-floored.
+  //
+  // `DocumentAdmin`'s own classify Select (the #624/#646 detail surface) still offers the
+  // full roster; that surface is not this ticket's to change and is recorded as an
+  // observation, not edited here.
+  const { CLASSIFIABLE_DOCUMENT_KINDS } = await import("./document-kind-control");
+  assert.equal(CLASSIFIABLE_DOCUMENT_KINDS.includes("consent_evidence" as never), false,
+    "a kind the door always refuses must not be offered");
+  // Non-vacuity: everything ELSE the roster carries is still offered — this is a single
+  // named exclusion, not a quietly narrowed vocabulary.
+  assert.deepEqual(
+    [...CLASSIFIABLE_DOCUMENT_KINDS].sort(),
+    DOCUMENT_KINDS.filter((k) => k !== "consent_evidence").sort(),
+  );
+  assert.equal(CLASSIFIABLE_DOCUMENT_KINDS.length, DOCUMENT_KINDS.length - 1);
+});

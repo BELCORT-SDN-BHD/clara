@@ -51,6 +51,7 @@ components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/composer-attachment-control.test.tsx
 components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
 components/clara/composer-keyboard.test.tsx

@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderHook } from "../../test/hookHarness";
 import { useUploadQueue, pastFinalize, type QueueRejection, type QueueState } from "./useUploadQueue";
+import { COMPOSER_IN_FLIGHT_STATES } from "@/components/clara/ComposerAttachmentControl";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function session(): SessionTokenAccessor {
@@ -718,12 +719,21 @@ test("p633.queue.authority_lost — a denied row is NEVER silently retried by th
   );
 });
 
-test("#633: the exact IN_FLIGHT state strings ComposerAttachmentControl.tsx:58 keys on are unchanged", () => {
+test("#633: the exact IN_FLIGHT state strings the composer's Send gate keys on are unchanged", () => {
   // A rename here breaks the composer's Send gate AND chat-parity-walk.spec.ts:209's
-  // shipped terminal word in one move. Pinned as DATA, not by reading that component.
-  const inFlight: QueueState[] = ["queued", "starting", "uploading", "verifying", "filing"];
+  // shipped terminal word in one move.
+  //
+  // FIX ROUND 1, review finding STANDARDS-F1: the cell this replaces hand-wrote BOTH
+  // arrays and compared their concatenation against a third hand-written literal — it
+  // never read the composer at all, so editing the real set could not have changed its
+  // outcome. It now imports COMPOSER_IN_FLIGHT_STATES from ComposerAttachmentControl.tsx
+  // itself, so the assertion is against the LIVE source and an edit there flips it.
+  assert.deepEqual([...COMPOSER_IN_FLIGHT_STATES].sort(), ["filing", "queued", "starting", "uploading", "verifying"]);
+  // The partition is total and disjoint: every QueueState is either in flight or
+  // terminal. A NEW state added to the queue without a decision here fails this.
   const terminal: QueueState[] = ["ready", "failed", "error", "stopped"];
-  assert.deepEqual([...inFlight, ...terminal].sort(), [
+  assert.equal(terminal.some((s) => COMPOSER_IN_FLIGHT_STATES.has(s)), false, "a terminal state must never block Send");
+  assert.deepEqual([...COMPOSER_IN_FLIGHT_STATES, ...terminal].sort(), [
     "error", "failed", "filing", "queued", "ready", "starting", "stopped", "uploading", "verifying",
   ].sort());
 });

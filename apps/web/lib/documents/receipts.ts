@@ -28,6 +28,17 @@
 // the unassigned set and the document metadata are re-derived once when the batch
 // settles. That is what keeps an open tab from becoming a hot read loop under the
 // caller's own JWT.
+//
+// FIX ROUND 1 (review finding 633-ADV-4): that paragraph was a PROMISE the code did not
+// keep — the poll's tick called `reload()`, which re-ran this whole function, so each of
+// up to 12 ticks issued four reads (the heaviest being the SECURITY INVOKER
+// `list_unassigned_documents`) instead of one. The derivation is now split in two:
+// `loadIntakeReceipts` reads the three slow halves ONCE and returns them as
+// `derivation`; `refreshIntakeReceipts` re-reads the masked view alone and rebuilds the
+// same rows against that captured derivation. The caller re-derives in full exactly once,
+// on the tick where the batch settles. A document filed to this client DURING a batch
+// therefore carries its intake's own canonical `declared_mime` and a null kind until that
+// settling re-derivation lands — an honest, momentary absence rather than a guess.
 
 import { getRows } from "@/lib/read";
 import { callDoor } from "@/lib/doors";
@@ -63,12 +74,25 @@ export type IntakeReceipt = {
   mimeType: string | null;
 };
 
+/** The three halves the settle-poll does NOT repeat, captured by the mount-time read so
+ *  a narrow refresh can rebuild every row without re-issuing them. Opaque to the surface:
+ *  it is carried, never rendered. */
+export type IntakeReceiptDerivation = {
+  filedHere: ReadonlySet<string>;
+  unassignedById: ReadonlyMap<string, UnassignedProjection>;
+  /** The caller's own `user_id`, or null when identity is not exactly one row. */
+  me: string | null;
+  meta: ReadonlyMap<string, Pick<DocumentRow, "mime_type" | "document_kind">>;
+};
+
 export type IntakeReceiptsLoad = {
   receipts: IntakeReceipt[];
   /** The instant this derivation was READ, for the surface's own watermark. */
   readAt: string;
   /** How many of the returned receipts can still change by themselves. */
   unsettled: number;
+  /** The captured halves, for `refreshIntakeReceipts`. */
+  derivation: IntakeReceiptDerivation;
 };
 
 export function isSettled(load: IntakeReceiptsLoad | null): boolean {
@@ -83,7 +107,7 @@ export async function listIntakeReceipts(opts: Opts & { limit?: number } = {}): 
   );
 }
 
-type UnassignedProjection = {
+export type UnassignedProjection = {
   id: string;
   mime_type: string | null;
   document_kind: string | null;
@@ -98,6 +122,44 @@ type UnassignedProjection = {
 export async function listUnassignedDocuments(limit = 50, opts: Opts = {}): Promise<UnassignedProjection[]> {
   const out = await callDoor<UnassignedProjection[] | null>("list_unassigned_documents", { p_limit: limit }, opts);
   return Array.isArray(out) ? out : [];
+}
+
+/** PURE. The predicate and the row shape, applied to a freshly-read intake list against
+ *  an already-captured derivation. Both the mount-time load and the narrow poll refresh
+ *  go through this ONE body, so a rehydrated row and a polled row can never disagree. */
+function buildReceipts(intakes: IntakeRow[], d: IntakeReceiptDerivation): IntakeReceipt[] {
+  const shown = intakes.filter((row) => {
+    if (row.document_id && d.filedHere.has(row.document_id)) return true;
+    if (d.me === null || row.uploaded_by !== d.me) return false;
+    // MINE AND UNATTRIBUTED. A row with no document yet (still uploading, or refused)
+    // is mine to watch; a row whose document exists is only mine to watch while
+    // nothing has claimed it.
+    return row.document_id === null || d.unassignedById.has(row.document_id);
+  });
+
+  return shown.map((intake) => {
+    const doc = intake.document_id;
+    const un = doc ? d.unassignedById.get(doc) : undefined;
+    const filed = doc !== null && d.filedHere.has(doc);
+    return {
+      intake,
+      filedHere: filed,
+      unassigned: un !== undefined,
+      // The intake's own `declared_mime` is already the canonical spelling, so it is
+      // the fallback rather than a blank when no document row was read.
+      mimeType: (filed ? d.meta.get(doc!)?.mime_type : un?.mime_type) ?? intake.declared_mime ?? null,
+      documentKind: (filed ? d.meta.get(doc!)?.document_kind : un?.document_kind) ?? null,
+    };
+  });
+}
+
+function asLoad(receipts: IntakeReceipt[], derivation: IntakeReceiptDerivation): IntakeReceiptsLoad {
+  return {
+    receipts,
+    readAt: new Date().toISOString(),
+    unsettled: receipts.filter((r) => INTAKE_NON_TERMINAL.has(r.intake.status)).length,
+    derivation,
+  };
 }
 
 export async function loadIntakeReceipts(
@@ -121,22 +183,14 @@ export async function loadIntakeReceipts(
   const filedHere = new Set(filings.map((f) => f.document_id));
   const unassignedById = new Map(unassigned.map((u) => [u.id, u]));
   const me = caller.length === 1 ? caller[0]!.user_id : null;
-
-  const shown = intakes.filter((row) => {
-    if (row.document_id && filedHere.has(row.document_id)) return true;
-    if (me === null || row.uploaded_by !== me) return false;
-    // MINE AND UNATTRIBUTED. A row with no document yet (still uploading, or refused)
-    // is mine to watch; a row whose document exists is only mine to watch while
-    // nothing has claimed it.
-    return row.document_id === null || unassignedById.has(row.document_id);
-  });
+  const meta = new Map<string, Pick<DocumentRow, "mime_type" | "document_kind">>();
+  const derivation: IntakeReceiptDerivation = { filedHere, unassignedById, me, meta };
 
   // ONE metadata read for the documents filed to this client — the unassigned half
   // already carries its own `mime_type`/`document_kind` in the function's projection.
-  const needMeta = shown
-    .map((r) => r.document_id)
+  const needMeta = buildReceipts(intakes, derivation)
+    .map((r) => r.intake.document_id)
     .filter((id): id is string => typeof id === "string" && filedHere.has(id));
-  const meta = new Map<string, Pick<DocumentRow, "mime_type" | "document_kind">>();
   if (needMeta.length > 0) {
     const rows = await getRows<Pick<DocumentRow, "id" | "mime_type" | "document_kind">>(
       `documents?id=in.(${needMeta.map(encodeURIComponent).join(",")})&select=id,mime_type,document_kind`,
@@ -145,24 +199,18 @@ export async function loadIntakeReceipts(
     for (const row of rows) meta.set(row.id, { mime_type: row.mime_type, document_kind: row.document_kind });
   }
 
-  const receipts: IntakeReceipt[] = shown.map((intake) => {
-    const doc = intake.document_id;
-    const un = doc ? unassignedById.get(doc) : undefined;
-    const filed = doc !== null && filedHere.has(doc);
-    return {
-      intake,
-      filedHere: filed,
-      unassigned: un !== undefined,
-      // The intake's own `declared_mime` is already the canonical spelling, so it is
-      // the fallback rather than a blank when no document row was read.
-      mimeType: (filed ? meta.get(doc!)?.mime_type : un?.mime_type) ?? intake.declared_mime ?? null,
-      documentKind: (filed ? meta.get(doc!)?.document_kind : un?.document_kind) ?? null,
-    };
-  });
+  return asLoad(buildReceipts(intakes, derivation), derivation);
+}
 
-  return {
-    receipts,
-    readAt: new Date().toISOString(),
-    unsettled: receipts.filter((r) => INTAKE_NON_TERMINAL.has(r.intake.status)).length,
-  };
+/** THE ONE READ THE SETTLE-POLL REPEATS (fix round, review finding 633-ADV-4). Re-reads
+ *  `document_intakes_visible` alone and rebuilds every row against the derivation the
+ *  mount-time load already captured — no `document_filings`, no
+ *  `rpc/list_unassigned_documents`, no `caller_context` and no `documents?id=in.(...)`.
+ *  The caller pays the full derivation again exactly once, when the batch settles. */
+export async function refreshIntakeReceipts(
+  previous: IntakeReceiptsLoad,
+  opts: Opts & { limit?: number } = {},
+): Promise<IntakeReceiptsLoad> {
+  const intakes = await listIntakeReceipts(opts);
+  return asLoad(buildReceipts(intakes, previous.derivation), previous.derivation);
 }

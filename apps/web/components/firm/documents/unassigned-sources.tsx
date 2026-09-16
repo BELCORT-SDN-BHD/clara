@@ -16,13 +16,25 @@
 // surface uses: `record_client_resolution` then `file_document` (`doors.ts`'s
 // `fileToClient`).
 //
-// ASK ONCE, AND ONLY ONCE. A document is asked about here exactly one time: the
-// control disappears the moment its act settles, and the row leaves the population on
-// the next read because the DB's own predicate stops matching it. A second attempt on
-// the same row is refused by `file_document` itself, and that refusal renders VERBATIM
-// — never re-worded, never retried, and never replaced by a fabricated success. This
-// question is also deliberately DISTINCT from #647's counterparty-identity question,
-// so one file is never asked two different things by two different surfaces.
+// ASK ONCE, AND ONLY ONCE — AND WHAT THE DOOR ACTUALLY GUARANTEES.
+// A document is asked about here exactly one time: the control disappears the moment
+// its act settles, and the row leaves the population on the next read because the DB's
+// own predicate stops matching it. This question is also deliberately DISTINCT from
+// #647's counterparty-identity question, so one file is never asked two different
+// things by two different surfaces.
+//
+// MEASURED (fix round 1, review finding 633-ADV-5 — the earlier header overstated this).
+// Re-filing the SAME document to the SAME client is refused by the estate with its own
+// words (CLR10, "document is already actively filed to this client"), and a replay of
+// the same op_key with the same arguments is idempotent — still one filing. But filing
+// it to a DIFFERENT client is ACCEPTED: the estate permits two live filings on one
+// document, and 0123's classify gate then refuses that document with
+// `document_processing_multi_client`, so its processing stops. This surface therefore
+// does not claim a wall the door does not hold; it offers ONE act per row, renders
+// whatever the door answers VERBATIM — never re-worded, never retried, never replaced
+// by a fabricated success — and the second-attribution behaviour is pinned by
+// `packages/db/tests/unassigned-intake-reuse.test.mjs` (p633.unassigned.second_attempt)
+// rather than asserted here.
 //
 // THE READ FLOOR IS MEASURED, NOT ASSUMED. On the #633 rig (clara_633, PG 17.11) a
 // VIEWER persona reads `list_unassigned_documents(50)` successfully, while

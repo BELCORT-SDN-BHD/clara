@@ -500,12 +500,23 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
     if (body?.p_subject !== DOCS_INTAKE.unassignedDocumentId) return false;
     state.attributionAttempts += 1;
     if (state.attributionAttempts > 1) {
-      // THE SECOND ATTEMPT IS REFUSED, VERBATIM, by the DB's own words — the surface
-      // renders them and mints no second filing.
+      // THE SECOND ATTEMPT TO THE SAME CLIENT IS REFUSED, VERBATIM, by the DB's own
+      // words — the surface renders them and mints no second filing.
+      //
+      // FIX ROUND 1 (review finding 633-ADV-5): this used to answer `CLR01
+      // document_already_filed`, which NO door in this chain produces. Measured on a
+      // real chain (clara_633r): a same-client repeat answers CLR10 "document is
+      // already actively filed to this client"; a replay of the same op_key with the
+      // same arguments is idempotent; and a second attribution to a DIFFERENT client is
+      // ACCEPTED, leaving two live filings — which 0123's classify gate then refuses as
+      // `document_processing_multi_client`. The leaf offers one act per row, so this
+      // lane only ever exercises the same-client repeat; the different-client outcome
+      // is pinned in packages/db/tests/unassigned-intake-reuse.test.mjs, never faked
+      // here as a refusal the estate does not give.
       sendJson(response, 400, {
-        code: "CLR01",
-        message: "document_already_filed",
-        details: "This document already has a live filing; retire it before filing again.",
+        code: "CLR10",
+        message: "document is already actively filed to this client",
+        details: "A live filing already binds this document to that client.",
       }, cors);
       return true;
     }

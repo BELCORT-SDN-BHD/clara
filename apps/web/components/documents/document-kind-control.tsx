@@ -29,6 +29,15 @@ import { renderKindLabel } from "@/lib/documents/kind-label";
 import { DOCUMENT_KINDS } from "@/lib/documents/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
+/** The kinds this control may OFFER. `clara.set_document_kind` raises CLR28 for
+ *  `consent_evidence` on either side of the change — "consent-evidence classification is
+ *  owned by the egress consent path" — so offering it here could only ever produce an
+ *  honest refusal the person can do nothing about. That classification is minted by
+ *  `classifyConsentEvidenceDocument` (`lib/documents/doors.ts:189`, owner-floored) on the
+ *  consent path itself. Exported so the exclusion is pinned against THIS source
+ *  (`document-kind-labels.test.tsx`), never against a second copy of the roster. */
+export const CLASSIFIABLE_DOCUMENT_KINDS = DOCUMENT_KINDS.filter((k) => k !== "consent_evidence");
+
 export function DocumentKindControl({
   documentId, filename, busy, refusal, act, session,
 }: {
@@ -66,7 +75,7 @@ export function DocumentKindControl({
             <SelectValue placeholder={t("kindPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
+            {CLASSIFIABLE_DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Input
