@@ -96,6 +96,12 @@ import { handlePlansSupabase } from "./plans-mock.mjs";
 // fixed fixtures, and a roster that cannot be revoked, re-roled or removed cannot walk a
 // lifecycle. Every handler in that module returns false unless the signed-in address is its own
 // persona, which is why the handover costs every other walk nothing.
+//
+// It also answers TWO shapes this file has no branch for: `verifyOtp`'s `type: "invite"` (the
+// `/auth/v1/verify` branch below answers `type: "signup"` and 400s the rest) and
+// `/rest/v1/rpc/preview_invite` (0209, which no other lane and no CORE branch answers). Those
+// are EXTENSIONS, not handovers — nothing here used to answer them — and they are what lets a
+// browser leg drive `/invite/:token` past verification to the preview step.
 import { handleMembersLifecycleSupabase } from "./members-lifecycle-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
@@ -363,6 +369,15 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  // #625 — the membership-lifecycle lane. It runs ahead of BOTH the auth branches and the three
+  // member branches below: the roster reads because fixed fixtures cannot walk a lifecycle (a
+  // DECLARED CORE handover, see its import note), and `/auth/v1/verify` because that branch
+  // answers `type: "signup"` only and 400s the `type: "invite"` shape `/invite/:token` sends,
+  // so nothing is taken from it. Every handler in that module returns false outside its own
+  // scope — this persona's address, or one of its two invite tokens — without opening a request
+  // body, so its position in this chain costs no other lane anything.
+  if (await handleMembersLifecycleSupabase(request, response, path, url, sendJson, cors, state.email)) return;
+
   if (request.method === "POST" && path === "/auth/v1/token") {
     const body = await readJson(request);
     const grantType = url.searchParams.get("grant_type");
@@ -489,10 +504,6 @@ async function handleSupabase(request, response, url) {
     }] : [], cors);
     return;
   }
-
-  // #625 — the membership-lifecycle lane, consulted BEFORE the three member branches below (see
-  // its import note). `state.email` is its whole scope.
-  if (await handleMembersLifecycleSupabase(request, response, path, url, sendJson, cors, state.email)) return;
 
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
     const bookkeeper = state.email.startsWith("bookkeeper@");

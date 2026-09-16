@@ -224,3 +224,105 @@ test("#625: the roster and both confirmations scan clean, and the row menu drops
   const withDialog = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(withDialog.violations, "the remove confirmation, open").toEqual([]);
 });
+
+// ---------------------------------------------------------------------------------------------
+// THE PREVIEW STEP, IN A REAL BROWSER (round-1 F4).
+//
+// Migration 0209 exists for exactly ONE caller, and until these two cells every proof of it was
+// jsdom with a stubbed global `fetch`: no browser leg drove `/invite/:token` past `verifyOtp`, so
+// the first governed door call made on a session minted moments earlier was never exercised end
+// to end — and because an INDEFINITE read degrades silently to "password form, no preview block",
+// a deployment where that session token was not yet readable would have looked identical to a
+// working one in all shipped evidence.
+//
+// What these cells add over the jsdom ones is the part jsdom cannot hold: a real
+// `createSupabaseClient()`, a real `verifyOtp` round trip, the real session store it writes, and
+// the real `Authorization` header the next request carries — asserted on the wire below, not
+// inferred. What they still do NOT prove: the door itself. It is answered by
+// `members-lifecycle-mock.mjs`, and `clara.preview_invite`'s own behaviour (the JWT-email wall,
+// the no-oracle refusal, the mask, the effective status) is the DB battery's claim under real
+// least-privileged roles. LOCAL, mock-backed, never AC7 evidence.
+// ---------------------------------------------------------------------------------------------
+
+/** The invitation URL as `invite-mail.ts` builds it: Supabase's `token_hash` in the PATH, Clara's
+ *  own token in the `ct` QUERY parameter. The two are not interchangeable and this harness keeps
+ *  them distinct for the same reason the product does. */
+function inviteUrl(claraToken: string): string {
+  return `/invite/${MEMBERS_LIFECYCLE.supabaseToken}?ct=${claraToken}`;
+}
+
+test("#625: the preview step runs in a REAL browser — firm, role and masked address render ABOVE the password fields, on the session verifyOtp just minted", async ({ page }) => {
+  grantCellBudget(CELL_BUDGET.poll * 2);
+  const faults = watchReactFaults(page);
+
+  // Every request the browser really makes to the preview door, with the header that carries the
+  // session — the claim under test is not "the block rendered" but "the door was called, as this
+  // person, before the fields existed".
+  const doorCalls: { auth: string }[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/rest/v1/rpc/preview_invite")) {
+      doorCalls.push({ auth: request.headers()["authorization"] ?? "" });
+    }
+  });
+
+  await page.goto(inviteUrl(MEMBERS_LIFECYCLE.previewPendingToken));
+  await expect(page.getByRole("heading", { name: "Accept your invitation", level: 1 })).toBeVisible();
+  // NOTHING TO TYPE A PASSWORD INTO YET, and this is the half of AC2 the jsdom cell can only
+  // assert about a virtual DOM: the confirm stage is a single button.
+  await expect(page.locator("input[type=password]")).toHaveCount(0);
+  await expect(doorCalls, "no door is called before the person acts").toHaveLength(0);
+
+  await page.getByRole("button", { name: "Accept invitation" }).click();
+
+  const preview = page.getByRole("region", { name: "Your invitation" });
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText(MEMBERS_LIFECYCLE.firmName);
+  await expect(preview).toContainText("Bookkeeper");
+  // The MASK the door sends, rendered as-is: one leading character, three fixed stars, the domain.
+  await expect(preview).toContainText("n***@larkin.test");
+  await expect(preview).not.toContainText(MEMBERS_LIFECYCLE.inviteeEmail);
+
+  // …and ONLY NOW do the fields exist.
+  const password = page.locator("input[type=password]");
+  await expect(password).toHaveCount(1);
+
+  // ABOVE, as the document really orders them — not "both are present somewhere".
+  const order = await page.evaluate(() => {
+    const block = document.querySelector('section[aria-labelledby="invite-preview-heading"]');
+    const field = document.querySelector('input[type="password"]');
+    if (!block || !field) return null;
+    // 4 === Node.DOCUMENT_POSITION_FOLLOWING: the field comes AFTER the block.
+    return (block.compareDocumentPosition(field) & 4) !== 0;
+  });
+  expect(order, "the preview block must precede the password field in document order").toBe(true);
+
+  // THE WIRE. One call, carrying the access token `verifyOtp` minted for the INVITEE — which is
+  // the whole "a session minted moments earlier is readable by the next governed call" claim.
+  expect(doorCalls, "the preview door is called exactly once").toHaveLength(1);
+  const bearer = doorCalls[0]!.auth.replace(/^Bearer /, "");
+  const claims = JSON.parse(Buffer.from(bearer.split(".")[1] ?? "", "base64url").toString("utf8"));
+  expect(claims.email, "the door is called as the invited person, not as nobody").toBe(MEMBERS_LIFECYCLE.inviteeEmail);
+  expect(claims.sub).toBe(MEMBERS_LIFECYCLE.inviteeSubject);
+
+  expect(faults.faults(), "no React fault on the invite surface").toEqual([]);
+});
+
+test("#625: a REVOKED preview BLOCKS in the browser — its own face, naming the firm, and no password field anywhere", async ({ page }) => {
+  grantCellBudget(CELL_BUDGET.poll);
+  const faults = watchReactFaults(page);
+
+  await page.goto(inviteUrl(MEMBERS_LIFECYCLE.previewRevokedToken));
+  await page.getByRole("button", { name: "Accept invitation" }).click();
+
+  await expect(page.getByRole("heading", { name: "This invitation was revoked", level: 1 })).toBeVisible();
+  // The face NAMES the firm it was for: a dead invitation still answers "which firm was this?".
+  await expect(page.getByText(new RegExp(`Someone at ${MEMBERS_LIFECYCLE.firmName} withdrew it`))).toBeVisible();
+
+  // THE POINT OF THE WHOLE STEP: a definite negative leaves NOTHING to fill in. A control that
+  // can only refuse is not rendered.
+  await expect(page.locator("input[type=password]")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Your invitation" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(0);
+
+  expect(faults.faults(), "no React fault on the blocked face").toEqual([]);
+});

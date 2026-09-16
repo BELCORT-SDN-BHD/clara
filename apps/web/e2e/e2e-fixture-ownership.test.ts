@@ -343,7 +343,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // rather than a client id, because the three relations it answers carry no client at all — they
   // are firm-altitude reads keyed on the caller. `serve-built.mjs` passes the address it already
   // tracks and every handler returns false for anybody else's, including the control endpoint,
-  // which is scoped on a persona named in its own body.
+  // which is scoped on a persona named in its own body. Its RPC half additionally runs an
+  // exact-verb allow-list before any branch (`plans-mock.mjs:286`'s shape), so a verb it does not
+  // declare falls through with the request body never opened.
+  //
+  // TWO OF ITS HANDLERS THIS CENSUS CANNOT SEE, named here rather than left silent: the acceptance
+  // leg answers `/auth/v1/verify` (only for `type: "invite"` AND this lane's own token_hash; the
+  // CORE branch answers `signup` and 400s the rest) and the preview door (only for one of this
+  // lane's two `ct` tokens). `HANDLER_OPENER` matches `/rest/…` and `/api/…` openers, so the auth
+  // one is outside its reach — it is scoped by token, and falls through for everything else.
   "members-lifecycle-mock.mjs": { unscopeable: [], debt: [] },
 };
 
