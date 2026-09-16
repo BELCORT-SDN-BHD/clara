@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { CELL_BUDGET, grantCellBudget } from "./helpers";
 import { SEC } from "./staff-expense-claim-mock.mjs";
 
 // #638 — "完整处理员工报销、垫款与应付明细".
@@ -29,16 +30,24 @@ const FORM_URL = `/clients/${CLIENT}/accounting/claims/new`;
 const REGISTER_URL = `/clients/${CLIENT}/accounting/claims`;
 
 async function signInTo(page: Page, destination: string): Promise<void> {
+  // #706 — EVERY cell in this walk signs in (the `beforeEach` below), and the flat 30 s Playwright
+  // gives a cell is the whole budget for a real round trip through the mock auth server plus the
+  // destination's own server render. MEASURED on this host, 2026-09-16, twelve lanes live and the
+  // CPU pinned at 100 %: the `/login` navigation ALONE exceeded 30 s and timed out the
+  // `beforeEach` hook. The grant lives here rather than on each cell so a cell that signs in twice
+  // gets twice the headroom — the shape `agentic-finish-walk.spec.ts:53` already uses.
+  grantCellBudget(CELL_BUDGET.signIn);
+
   await page.goto(`/login?next=${encodeURIComponent(destination)}`);
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
-  // A GENEROUS DEADLINE, and it is a measurement rather than a habit: the sign-in POST, the
-  // caller-context read and the destination's own server render all happen before the URL
-  // settles, and on a loaded machine that exceeded `expect`'s 5 s default often enough to red
-  // four cells for a reason that had nothing to do with claims.
+  // The sign-in POST, the caller-context read and the destination's own server render all happen
+  // before the URL settles — one budget unit's worth of waiting, not `expect`'s 5 s default.
   await expect(page).toHaveURL(
-    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
+    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+    { timeout: CELL_BUDGET.signIn },
+  );
 }
 
 /** Drive the fixture through the app's OWN proxy — the same instrument the sibling walks use, and
@@ -74,6 +83,10 @@ async function settle(page: Page): Promise<void> {
 }
 
 async function scan(page: Page, what: string): Promise<void> {
+  // #706 — one full-page `AxeBuilder.analyze()` is 14.4 s alone and 33 s under load, and two cells
+  // below scan three faces each. The grant is additive, so the budget grows with the number of
+  // scans that actually run (`identity-finish.spec.ts:28`).
+  grantCellBudget(CELL_BUDGET.scan);
   await settle(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);
@@ -92,8 +105,10 @@ const field = (page: Page, name: string) => page.locator(`#staff-expense-claim-$
  * walk is about.
  */
 async function chartReady(page: Page): Promise<void> {
+  // #706 — the chart is a real client-side read, so waiting for it is one poll unit of work.
+  grantCellBudget(CELL_BUDGET.poll);
   await expect(page.locator("select#staff-expense-claim-claimantAccountCode"))
-    .toBeVisible({ timeout: 15_000 });
+    .toBeVisible({ timeout: CELL_BUDGET.poll });
 }
 
 /** The one claim this walk records: Farah's March travel, RM 480.00 on an EXISTING enrolment, owed
