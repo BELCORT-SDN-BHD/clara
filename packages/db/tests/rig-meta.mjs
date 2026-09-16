@@ -1897,7 +1897,8 @@ const ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS = ["create_accrual_adjustment_for"];
 const ACCRUAL_ADJUSTMENTS_0207_UNGRANTED_FNS = [
   "_accrual_plan_core", "_accrual_finish", "_accrual_occurrences", "_accrual_methods",
   "_accrual_date", "_accrual_journal_basis", "_accrual_canonical",
-  "_assert_accrual_particulars", "_assert_accrual_account", "_assert_accrual_world",
+  "_assert_accrual_particulars", "_assert_accrual_term_window", "_assert_accrual_account",
+  "_assert_accrual_world",
   "_tf_accrual_adjustment_append_only", "_tf_accrual_adjustment_term_congruent",
 ];
 export const ACCRUAL_ADJUSTMENTS_0207_COHORT = [

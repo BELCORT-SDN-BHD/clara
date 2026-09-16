@@ -99,6 +99,7 @@ export const ACCRUAL_REASON = {
   methodUnsupported: "accrual_method_unsupported",
   accountRelationship: "accrual_account_relationship",
   termDocumentMismatch: "accrual_term_document_mismatch",
+  termWindowMismatch: "accrual_term_window_mismatch",
   invalidPurpose: "invalid_purpose",
   clientNotFound: "client_not_found",
   clientInactive: "client_inactive",
@@ -114,12 +115,13 @@ export const ACCRUAL_REASON = {
   catchUpBeforeAuthority: "catch_up_before_authority",
 };
 
-/** The closed selection-rule set `accrual.method.rule` admits. A SELECTION among amounts a human
- *  stated — never a formula, which is why it is an enum here rather than a registered
- *  `clara.evaluator_versions` closure (the migration header states the argument in full). */
-export const ACCRUAL_METHODS = [
-  "stated_amount", "stated_period_amount", "source_document_amount", "prior_period_amount",
-];
+/** The closed selection-rule set `accrual.method.rule` admits: ONE member, because one member is
+ *  what the schedule performs. The frozen revision basis carries the amount a human stated and
+ *  `clara._plan_occurrence_basis` only moves the posting date, so "the amount stated here, every
+ *  period" is the whole of what this slice selects. The three rules drafted beside it
+ *  (`stated_period_amount`, `source_document_amount`, `prior_period_amount`) would each have posted
+ *  the SAME cents — they are a successor residual, not a shipped choice (review round 1, A2). */
+export const ACCRUAL_METHODS = ["stated_amount"];
 
 /** The liability account this lane accrues into. The #623 chart (`WCHART`) carries an expense, a
  *  bank asset, a receivable control and a retired expense — no liability at all — so the accrual's

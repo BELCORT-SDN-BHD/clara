@@ -34,7 +34,8 @@ const INPUT = {
   method: "stated_amount",
   instruction: "the client's standing instruction of 2026-06-30, minuted by the engagement partner",
   authority_work_id: "11111111-1111-4111-8111-111111111111",
-  effective_from: "2026-07-31",
+  effective_from: "2026-07-01",
+  effective_to: "2026-07-31",
   frequency: "monthly",
   day_rule: "last_day_of_month",
 };
@@ -78,12 +79,23 @@ test("652.schema: term_source admits ONE literal, so a model cannot express a pe
   assert.equal(parse({ term_source: "human_stated" }).success, true);
 });
 
-test("652.schema: the method set is closed and is migration 0207's own", () => {
-  assert.deepEqual([...mod.ACCRUAL_METHODS],
-    ["stated_amount", "stated_period_amount", "source_document_amount", "prior_period_amount"]);
-  for (const m of mod.ACCRUAL_METHODS) assert.equal(parse({ method: m, source_document_id: "22222222-2222-4222-8222-222222222222" }).success, true, m);
+test("652.schema: the method set is closed, and it is exactly the rule the schedule performs", () => {
+  assert.deepEqual([...mod.ACCRUAL_METHODS], ["stated_amount"],
+    "one rule is offered because one rule is performed: the configuration freezes the stated amount "
+    + "into the revision basis and clara._plan_occurrence_basis only moves the posting date");
+  assert.equal(parse({ method: "stated_amount" }).success, true);
+  for (const drafted of ["stated_period_amount", "source_document_amount", "prior_period_amount"]) {
+    assert.equal(parse({ method: drafted }).success, false,
+      `${drafted} was drafted for a successor and posts nothing different here; the tool must not offer it`);
+  }
   assert.equal(parse({ method: "straight_line_over_term" }).success, false,
     "a formula is not a selection rule and has no home on this lane");
+});
+
+test("652.schema: the authority window is REQUIRED and bracketed by the stated term", () => {
+  const bare = Object.fromEntries(Object.entries(INPUT).filter(([k]) => k !== "effective_to"));
+  assert.equal(mod.startAccrualWorkInputSchema.safeParse(bare).success, false,
+    "an accrual for a term that ENDS cannot authorise a schedule that does not (0207's SIXTH MEASUREMENT)");
 });
 
 test("652.schema: an accrual of zero or a negative amount never even parses", () => {
@@ -114,12 +126,22 @@ test("652.refusal: one account cannot play both legs", () => {
   assert.equal(r.details.constraint, "distinct");
 });
 
-test("652.refusal: `source_document_amount` with no document asks for the missing half BY NAME", () => {
-  const r = mod.localAccrualRefusal(ok({ method: "source_document_amount" }));
-  assert.equal(r.reason, "accrual_method_unsupported");
-  assert.equal(r.details.field, "accrual.source_document_id");
-  assert.deepEqual(r.details.supported, [...mod.ACCRUAL_METHODS],
-    "…and lists the rules that ARE supported, so the model can choose one instead of guessing");
+test("652.refusal: a schedule that starts before its own stated term is refused BY NAME", () => {
+  // MEASURED on a rig before this wall existed: an authority from June under a July term posted
+  // three entries, two of them describing a period they did not accrue for (review round 1, A1).
+  const r = mod.localAccrualRefusal(ok({ effective_from: "2026-06-01" }));
+  assert.equal(r.reason, "accrual_term_window_mismatch");
+  assert.equal(r.details.field, "effective_from");
+  assert.equal(r.details.constraint, "within_term");
+  assert.equal(r.details.service_period_start, "2026-07-01",
+    "…and it hands back the boundary it was measured against, so a model can correct in one step");
+});
+
+test("652.refusal: a schedule that would still be accruing after its term ends is refused BY NAME", () => {
+  const r = mod.localAccrualRefusal(ok({ effective_to: "2026-12-31" }));
+  assert.equal(r.reason, "accrual_term_window_mismatch");
+  assert.equal(r.details.field, "effective_to");
+  assert.equal(r.details.constraint, "within_term");
 });
 
 test("652.refusal: a term anchored to a document must name the document", () => {
@@ -189,7 +211,7 @@ test("652.emit: basisFromAccrual derives ONE debit on the expense leg and ONE cr
   const b = mod.basisFromAccrual(ok());
   assert.equal(b.currency, "MYR");
   assert.equal(b.memo, "Monthly office rent accrual", "the purpose is the memo when none was given");
-  assert.equal(b.posting_date, "2026-07-31",
+  assert.equal(b.posting_date, "2026-07-01",
     "…and the posting date is a PLACEHOLDER: every occurrence replaces it with its own due date");
   assert.equal(b.lines.length, 2);
   assert.equal(b.lines[0].account_code, "6100");
@@ -198,8 +220,10 @@ test("652.emit: basisFromAccrual derives ONE debit on the expense leg and ONE cr
   assert.equal(b.lines[1].account_code, "2020");
   assert.equal(b.lines[1].debit_cents, 0);
   assert.equal(b.lines[1].credit_cents, 120000);
-  assert.equal(b.lines[0].description, "accrued 2026-07-01 to 2026-07-31",
-    "the service period travels on the line, so a reader of the posted entry can see the term");
+  assert.equal(b.lines[0].description, "one period of the accrual term 2026-07-01 to 2026-07-31",
+    "the term travels on the line — and says what is true of EVERY occurrence, because the basis is "
+    + "frozen on the revision and each occurrence posts one PERIOD of that term (0207's SIXTH "
+    + "MEASUREMENT, and clara._accrual_journal_basis's own wording)");
   const debits = b.lines.reduce((n, l) => n + l.debit_cents, 0);
   const credits = b.lines.reduce((n, l) => n + l.credit_cents, 0);
   assert.equal(debits, credits, "balanced to the cent, with no rounding line invented");

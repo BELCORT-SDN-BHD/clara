@@ -105,7 +105,19 @@ runtime scan admitted it. Its one foreign reference without a composite key —
 `(id, firm_id)` unique — has its tenant and its document proven by
 `t_accrual_adjustments_term_congruent` instead, because adding a unique to a foreign table is
 outside a slice migration's remit and its tail asserts that relation's constraint count is
-unchanged.
+unchanged against a value its own prestate MEASURED (never a transcribed literal, which would
+assert a property of the chain below it rather than of this file).
+
+Two of its rules are structural and are worth knowing before reading the doors. `effective_to` is
+NOT NULL and `ck_accrual_adjustments_window_in_term` requires the authority window to sit inside the
+stated service period, so every occurrence posts a date INSIDE the term its own journal line names —
+0193's `_plan_window_ceiling` already lifts an auto-reversing plan's ceiling to the reversal of
+`effective_to`, so an authority ending on its last accrual can still be undone. And the `method`
+CHECK admits exactly one selection rule (`stated_amount`), because exactly one is performed: the
+configuration freezes the stated amount into the plan revision's basis and
+`clara._plan_occurrence_basis` only moves the posting date. Three further rules were drafted and
+would each have posted the same cents; they are a successor residual, and widening that CHECK is the
+migration that must arrive with the lane that honours them.
 
 Rebuilding a target from the migration chain and restoring a dump are different operations.
 A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials

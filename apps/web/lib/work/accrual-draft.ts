@@ -269,16 +269,29 @@ export function validateAccrualDraft(
     issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
   }
 
-  if (draft.method === "source_document_amount" && t(draft.sourceDocumentId) === "") {
-    issues.push({ field: "sourceDocumentId", code: "methodNeedsDocument" });
-  }
-
   if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
 
   if (t(draft.effectiveFrom) === "") issues.push({ field: "effectiveFrom", code: "effectiveFromRequired" });
-  if (t(draft.effectiveTo) !== "" && t(draft.effectiveFrom) !== ""
-      && draft.effectiveTo < draft.effectiveFrom) {
+  // THE AUTHORITY ENDS, AND IT ENDS INSIDE THE TERM IT ACCRUES FOR (0207's SIXTH MEASUREMENT,
+  // mirrored here so the mistake is named beside the control rather than a round trip later). An
+  // open-ended authority under a term that ends would go on posting a line naming a period it had
+  // already run past — measured on a rig before the wall existed.
+  if (t(draft.effectiveTo) === "") {
+    issues.push({ field: "effectiveTo", code: "effectiveToRequired" });
+  } else if (t(draft.effectiveFrom) !== "" && draft.effectiveTo < draft.effectiveFrom) {
     issues.push({ field: "effectiveTo", code: "effectiveToBeforeFrom" });
+  }
+  // ONLY ONCE THE TERM ITSELF STANDS UP. A term that is absent or ends before it starts is the
+  // mistake to fix first, and piling two window issues on top of it would send the preparer to the
+  // wrong control.
+  const termStands = t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
+    && draft.servicePeriodEnd >= draft.servicePeriodStart;
+  if (termStands && t(draft.effectiveFrom) !== ""
+      && draft.effectiveFrom < draft.servicePeriodStart) {
+    issues.push({ field: "effectiveFrom", code: "windowBeforeTerm" });
+  }
+  if (termStands && t(draft.effectiveTo) !== "" && draft.effectiveTo > draft.servicePeriodEnd) {
+    issues.push({ field: "effectiveTo", code: "windowAfterTerm" });
   }
 
   if (draft.dayRule === "day_of_month") {

@@ -56,7 +56,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { isDoorRefusal } from "@/lib/doors";
 import {
-  ACCRUAL_DAY_OF_MONTH_MAX, ACCRUAL_DAY_RULES, ACCRUAL_FREQUENCIES, ACCRUAL_METHODS,
+  ACCRUAL_DAY_OF_MONTH_MAX, ACCRUAL_DAY_RULES, ACCRUAL_FREQUENCIES,
   createAccrual, derivedAccrualLines, type AccrualCreated,
 } from "@/lib/accruals/api";
 import {
@@ -281,7 +281,7 @@ export function AccrualFormView({
         dayRule: draft.dayRule,
         dayOfMonth: draft.dayRule === "day_of_month" ? Number(draft.dayOfMonth.trim()) : null,
         effectiveFrom: draft.effectiveFrom,
-        effectiveTo: draft.effectiveTo.trim() === "" ? null : draft.effectiveTo,
+        effectiveTo: draft.effectiveTo,
         opKey: keyToUse,
       });
       // THE DRAFT IS RETIRED ONLY NOW: until the door named the accrual, the typed particulars were
@@ -475,24 +475,16 @@ export function AccrualFormView({
           </Field>
         </div>
 
-        <Field
-          id={accrualFieldElementId("method")}
-          label={t("fieldMethod")}
-          error={message("method")}
-          hint={t("methodHint")}
-        >
-          <NativeSelect
-            id={accrualFieldElementId("method")}
-            ref={(node) => registerField("method", node)}
-            value={draft.method}
-            disabled={busy}
-            onChange={(e) => set("method", e.target.value as AccrualDraft["method"])}
-          >
-            {ACCRUAL_METHODS.map((m) => (
-              <option key={m} value={m}>{methodOption(t, m)}</option>
-            ))}
-          </NativeSelect>
-        </Field>
+        {/* THE SELECTION RULE IS STATED, NOT OFFERED. Migration 0207 admits exactly one rule
+            because exactly one is performed: the configuration freezes the stated amount into the
+            plan revision's basis and every occurrence posts it. A select listing rules that all
+            post the same cents would invite a preparer to record an intention the ledger never
+            carries out, so this says what will happen instead of asking. */}
+        <div className="flex flex-col gap-1">
+          <h4 className="text-sm font-medium">{t("fieldMethod")}</h4>
+          <p className="text-sm">{methodOption(t, draft.method)}</p>
+          <p className="text-xs text-muted-foreground">{t("methodHint")}</p>
+        </div>
       </section>
 
       <section className="flex flex-col gap-3">
@@ -764,11 +756,10 @@ function Field({
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 function methodOption(t: Translate, rule: string): string {
+  // ONE RULE, and an HONEST raw-value fallback for anything outside it (the adjustments-register
+  // N10 idiom): a value this build has not enumerated prints as itself, never as a key path.
   const labels: Record<string, string> = {
     stated_amount: t("methodStatedAmount"),
-    stated_period_amount: t("methodStatedPeriodAmount"),
-    source_document_amount: t("methodSourceDocumentAmount"),
-    prior_period_amount: t("methodPriorPeriodAmount"),
   };
   return labels[rule] ?? rule;
 }
@@ -784,7 +775,9 @@ function issueText(t: Translate, code: string): string {
     amountRequired: t("issueAmountRequired"),
     silentTerm: t("issueSilentTerm"),
     servicePeriodOrder: t("issueServicePeriodOrder"),
-    methodNeedsDocument: t("issueMethodNeedsDocument"),
+    effectiveToRequired: t("issueEffectiveToRequired"),
+    windowBeforeTerm: t("issueWindowBeforeTerm"),
+    windowAfterTerm: t("issueWindowAfterTerm"),
     instructionRequired: t("issueInstructionRequired"),
     effectiveFromRequired: t("issueEffectiveFromRequired"),
     effectiveToBeforeFrom: t("issueEffectiveToBeforeFrom"),

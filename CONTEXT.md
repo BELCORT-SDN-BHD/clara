@@ -283,7 +283,9 @@ _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its sc
 A cost a period has incurred but nobody has invoiced yet, recorded with the particulars that make it
 checkable: the amount, the expense account it charges and the non-control liability account it
 accrues into, the SERVICE PERIOD it belongs to, the rule that selects each period's amount, the
-window its authority covers, and the instruction that authorised it. It rides the accrual-and-
+window its authority covers, and the instruction that authorised it. Its authority window runs
+INSIDE the service period it names — it starts no earlier and ends no later, and it always ends — so
+every entry it posts falls within the term it claims to accrue for. It rides the accrual-and-
 reversal schedule rather than standing alone, so accepting one records the schedule, its first due
 event and the accounting work for it — and posts nothing.
 _Avoid_: A balanced journal entry wearing a marker; a periodic stock adjustment or a supplied
@@ -308,12 +310,13 @@ _Avoid_: The posting date; the authority window; an extracted or inferred period
 derived from a filename, a date range it saw, or a conversation it summarised.
 
 **Calculation method**:
-The rule that says WHICH stated amount each of a schedule's periods uses — the figure stated on the
-record, the figure stated for the named service period, the figure stated on the cited source
-document, or the figure the previous period recorded. It selects among amounts a person supplied; it
-computes none, which is why it is a closed set of named rules rather than a versioned formula.
-_Avoid_: A rate, a proration or an allocation the product performs; a formula; anything a caller can
-extend without a new named rule.
+The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
+person supplied; it computes none, which is why it is a closed set of named rules rather than a
+versioned formula. Today the set holds exactly the rule the schedule performs — the amount stated on
+the record, accrued in every period of the window — because a recorded selection nobody performs is
+a promise the ledger does not keep.
+_Avoid_: A rate, a proration or an allocation the product performs; a formula; a rule offered on a
+form that no lane applies; anything a caller can extend without a new named rule.
 
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.

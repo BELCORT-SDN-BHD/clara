@@ -34,21 +34,24 @@ export const START_ACCRUAL_WORK_TOOL = "start_accrual_work";
 
 /**
  * The CLOSED selection-rule set `accrual.method.rule` admits — migration 0207's own enum, restated
- * here so the tool can offer exactly these four and a refusal can list them.
+ * here so the tool offers exactly what the schedule performs and a refusal can list it.
  *
- * EACH ONE SELECTS AMONG AMOUNTS A HUMAN STATED; NONE COMPUTES. That is why this is an enum rather
+ * IT SELECTS AMONG AMOUNTS A HUMAN STATED; IT COMPUTES NOTHING. That is why this is an enum rather
  * than a registered `clara.evaluator_versions` closure: the estate's house home for a FORMULA is a
  * frozen single-member evaluator with "a changed formula is a _v2, never an edit"
  * (`clara.prepayment_schedule_v1`, 0140:962-1201; the freeze verb is 0059:248), and that freeze
  * exists because a prepayment schedule turns one term and one amount into n period amounts. An
  * accrual method turns nothing into anything — it names WHICH stated figure the schedule uses.
+ *
+ * ONE MEMBER, BECAUSE ONE MEMBER IS WHAT THE LEDGER DOES. The configuration freezes the stated
+ * amount into the plan revision's basis and `clara._plan_occurrence_basis` only moves the posting
+ * date, so `stated_amount` — "the amount stated here, every period" — is the whole of what this
+ * slice selects. `stated_period_amount`, `source_document_amount` and `prior_period_amount` were
+ * drafted beside it and would each have posted the SAME cents; offering a model a rule nothing
+ * performs is a promise the ledger does not keep (review round 1, A2). They are a successor
+ * residual and return with the lane that honours them.
  */
-export const ACCRUAL_METHODS = [
-  "stated_amount",
-  "stated_period_amount",
-  "source_document_amount",
-  "prior_period_amount",
-] as const;
+export const ACCRUAL_METHODS = ["stated_amount"] as const;
 export type AccrualMethod = (typeof ACCRUAL_METHODS)[number];
 
 /** The plan schedule an accrual rides. `reversing_journal` IS the accrual→reversal pair (0193),
@@ -102,10 +105,8 @@ export const startAccrualWorkInputSchema = z
     method: z
       .enum(ACCRUAL_METHODS)
       .describe(
-        "Which STATED amount each period uses. `stated_amount` is the figure given here; "
-        + "`stated_period_amount` the figure stated for the named service period; "
-        + "`source_document_amount` the figure stated on the cited document; "
-        + "`prior_period_amount` the figure the previous period recorded. None of them computes.",
+        "Which STATED amount each period uses. One rule is admitted: `stated_amount`, the figure "
+        + "given here, accrued in every period of the window. It computes nothing.",
       ),
     instruction: z
       .string()
@@ -121,7 +122,14 @@ export const startAccrualWorkInputSchema = z
         + "The database RESOLVES it; a Knowledge preference or a remembered sentence cannot supply it.",
       ),
     effective_from: isoDate.describe("The day this accrual's authority starts. It never reaches back past this."),
-    effective_to: isoDate.optional().describe("The day it stops, when the human named one."),
+    // REQUIRED, and bracketed by the stated term (0207's SIXTH MEASUREMENT). An accrual for a
+    // service period that ends cannot authorise a schedule that does not: every occurrence must
+    // post inside the term its own line names, so an open-ended accrual is a refusal rather than a
+    // default. Ask the human when it stops.
+    effective_to: isoDate.describe(
+      "The day the authority stops. It is required, and it must fall on or before "
+      + "`service_period_end`: the schedule runs INSIDE the term it names.",
+    ),
     frequency: z.enum(ACCRUAL_FREQUENCIES).default("monthly"),
     day_rule: z.enum(ACCRUAL_DAY_RULES).default("last_day_of_month"),
     day_of_month: z
@@ -196,15 +204,6 @@ export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusa
       { constraint: "distinct" },
     );
   }
-  if (input.method === "source_document_amount" && input.source_document_id === undefined) {
-    return refuse(
-      "accrual_method_unsupported",
-      "accrual.source_document_id",
-      "That method selects the amount stated on a source document, and no document is named.",
-      "Ask the human which filed document carries the figure, or state the amount directly.",
-      { constraint: "required_by_rule", rule: input.method, supported: [...ACCRUAL_METHODS] },
-    );
-  }
   if (input.document_service_period_id !== undefined && input.source_document_id === undefined) {
     return refuse(
       "invalid_accrual",
@@ -244,13 +243,36 @@ export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusa
       { constraint: "reversal_collision" },
     );
   }
-  if (input.effective_to !== undefined && input.effective_to < input.effective_from) {
+  if (input.effective_to < input.effective_from) {
     return refuse(
       "invalid_schedule",
       "effective_to",
       `The authority ends (${input.effective_to}) before it starts (${input.effective_from}).`,
-      "Give an end on or after the start, or leave it open-ended.",
+      "Give an end on or after the start.",
       { constraint: "after_effective_from" },
+    );
+  }
+  // THE SCHEDULE RUNS INSIDE THE TERM IT NAMES (0207's SIXTH MEASUREMENT, mirrored here so a model
+  // is told before the round trip). Otherwise an occurrence posts a line naming a period it did
+  // not accrue for — measured on a rig: a June entry carrying "2026-07-01 to 2026-07-31".
+  if (input.effective_from < input.service_period_start) {
+    return refuse(
+      "accrual_term_window_mismatch",
+      "effective_from",
+      `The authority starts (${input.effective_from}) before the service period it accrues for `
+      + `(${input.service_period_start}).`,
+      "Start the authority on or after the first day of the service period.",
+      { constraint: "within_term", service_period_start: input.service_period_start },
+    );
+  }
+  if (input.effective_to > input.service_period_end) {
+    return refuse(
+      "accrual_term_window_mismatch",
+      "effective_to",
+      `The authority would still be accruing on ${input.effective_to}, after the term it names `
+      + `ends (${input.service_period_end}).`,
+      "End the authority on or before the last day of the service period.",
+      { constraint: "within_term", service_period_end: input.service_period_end },
     );
   }
   return null;
@@ -315,7 +337,11 @@ export function basisFromAccrual(
         account_code: input.expense_account_code.trim(),
         debit_cents: input.amount_cents,
         credit_cents: 0,
-        description: `accrued ${input.service_period_start} to ${input.service_period_end}`,
+        // WHAT IS TRUE OF EVERY OCCURRENCE, and the database's own wording
+        // (`clara._accrual_journal_basis`): the revision's basis is FROZEN and each occurrence
+        // posts one PERIOD of the stated term, not the whole of it.
+        description:
+          `one period of the accrual term ${input.service_period_start} to ${input.service_period_end}`,
       },
       {
         account_code: input.liability_account_code.trim(),
@@ -352,7 +378,7 @@ export function basisFromAccrual(
 //          $8::int,    -- input.day_of_month ?? null
 //          $9::text,   -- ACCRUAL_TIMEZONE
 //          $10::date,  -- input.effective_from
-//          $11::date,  -- input.effective_to ?? null
+//          $11::date,  -- input.effective_to  (required: the schedule runs inside its term)
 //          $12::text   -- opKey
 //        ) as r
 //

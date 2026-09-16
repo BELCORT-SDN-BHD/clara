@@ -86,7 +86,10 @@ async function fillForm(page: Page, opts: { liability?: string; purpose?: string
   await page.getByLabel("Liability account").selectOption(opts.liability ?? "2020");
   await page.getByLabel("The instruction, in the client's own terms")
     .fill("The client's standing instruction of 2026-06-30, minuted by the engagement partner.");
-  await page.getByLabel("Authority starts").fill("2026-07-31");
+  // THE AUTHORITY WINDOW SITS INSIDE THE STATED TERM (0207's SIXTH MEASUREMENT): the form
+  // refuses a schedule that would post outside the period it names, before any round trip.
+  await page.getByLabel("Authority starts").fill("2026-07-01");
+  await page.getByLabel("Authority ends").fill("2026-07-31");
 }
 
 // ===========================================================================================
@@ -112,7 +115,7 @@ test("accrual.walk.evidenced: the list names what is accrued, its service period
   const unposted = page.getByRole("row").filter({ hasText: ACC.unpostedPurpose });
   await expect(unposted).toContainText("Configured");
   await expect(unposted).toContainText("4,500.00");
-  await expect(unposted).toContainText("The amount stated for the named service period");
+  await expect(unposted).toContainText("The amount stated here, accrued in every period of the authority window");
 
   await scan(page, "accrual list");
 });
@@ -124,10 +127,14 @@ test("accrual.walk.evidenced: the detail carries the particulars, the authority,
   await expect(page.getByText(SHAPE_BOUNDARY)).toBeVisible();
   await expect(page.getByRole("heading", { name: ACC.purpose })).toBeVisible();
 
-  // THE TERM AND ITS LAW, together.
-  await expect(page.getByText("2026-07-01 to 2026-07-31")).toBeVisible();
+  // THE TERM AND ITS LAW, together. The term appears TWICE on this page — once as the service
+  // period and once as the authority window — because this accrual accrues one stated period and
+  // its schedule runs exactly inside it (0207's SIXTH MEASUREMENT: the window is bracketed by the
+  // term, so every entry posts within the period it names).
+  await expect(page.getByText("2026-07-01 to 2026-07-31")).toHaveCount(2);
+  await expect(page.getByText("2026-07-01 to 2026-07-31").first()).toBeVisible();
   await expect(page.getByText(/Stated by a person; a period read off a document by a model is never recorded here\./)).toBeVisible();
-  await expect(page.getByText("The amount stated here, every period")).toBeVisible();
+  await expect(page.getByText("The amount stated here, accrued in every period of the authority window")).toBeVisible();
   await expect(page.getByText("1,200.00")).toBeVisible();
 
   // THE AUTHORITY IS A ROW, and it links to the Work that carries it.

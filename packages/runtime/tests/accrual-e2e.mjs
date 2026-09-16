@@ -231,13 +231,18 @@ async function main() {
   const zone = await rig.rootQuery(`
     select ((now() at time zone 'Asia/Kuala_Lumpur')::date)::text as today,
            (((now() at time zone 'Asia/Kuala_Lumpur')::date - interval '2 months')::date)::text as back,
-           ((date_trunc('month', (now() at time zone 'Asia/Kuala_Lumpur')::date) - interval '1 day')::date)::text as prev_month_end,
-           ((date_trunc('month', (now() at time zone 'Asia/Kuala_Lumpur')::date) + interval '1 month' - interval '1 day')::date)::text as this_month_end`);
+           ((date_trunc('month', (now() at time zone 'Asia/Kuala_Lumpur')::date) - interval '1 day')::date)::text as prev_month_end`);
   const today = zone.rows[0].today;
   const effectiveFrom = `${zone.rows[0].back.slice(0, 7)}-01`;
   const accrualDue = zone.rows[0].prev_month_end;
+  // THE AUTHORITY ENDS ON THE LAST ACCRUAL IT AUTHORISES, and the stated term brackets exactly
+  // that window (0207's SIXTH MEASUREMENT): every occurrence then posts inside the term its own
+  // line names, and the latest due date is in the past on EVERY calendar day — which is why this
+  // e2e no longer skips its reversal legs at a month end (review round 1, A1 + A5). 0193's
+  // `_plan_window_ceiling` (0193:1008) lifts an auto-reversing plan's ceiling to the reversal of
+  // `effective_to`, so an authority ending on its last accrual can still undo it.
+  const effectiveTo = accrualDue;
   const reversalDue = `${today.slice(0, 7)}-01`;
-  const monthEndToday = zone.rows[0].this_month_end === today;
 
   // THE AUTHORITY IS A REAL ROW: an admitted Work carrying the instruction, exactly as the door
   // requires. An accrual citing anything this database does not hold is refused at configuration.
@@ -264,8 +269,8 @@ async function main() {
     liability_account_code: "2020",
     amount_cents: 120000,
     currency: "MYR",
-    service_period_start: `${accrualDue.slice(0, 7)}-01`,
-    service_period_end: accrualDue,
+    service_period_start: effectiveFrom,
+    service_period_end: effectiveTo,
     term_source: "human_stated",
     method: { rule: "stated_amount" },
     instruction: "the client's standing instruction of the engagement letter, minuted by the partner",
@@ -276,9 +281,9 @@ async function main() {
         p_client => $1::uuid, p_purpose => $2::text, p_authority_ref => $3::jsonb,
         p_accrual => $4::jsonb, p_frequency => 'monthly', p_day_rule => 'last_day_of_month',
         p_day_of_month => null, p_timezone => 'Asia/Kuala_Lumpur',
-        p_effective_from => $5::date, p_effective_to => null, p_op_key => $6::text) as r`,
+        p_effective_from => $5::date, p_effective_to => $6::date, p_op_key => $7::text) as r`,
     [client, "Monthly office rent accrual", JSON.stringify({ kind: "accounting_work", id: instructionWork }),
-      JSON.stringify(particulars), effectiveFrom, configKey]);
+      JSON.stringify(particulars), effectiveFrom, effectiveTo, configKey]);
   const answer = configured.rows[0].r;
   const plan = answer.plan_id;
   const accrualId = answer.accrual_id;
@@ -290,10 +295,8 @@ async function main() {
   assert.equal(answer.configuration_receipt?.op_key, configKey);
   assert.equal(answer.occurrence?.admitted, true, "the current period's occurrence was admitted");
   assert.equal(answer.occurrence?.leg, "primary");
-  if (!monthEndToday) {
-    assert.equal(answer.occurrence?.due_date, accrualDue,
-      "…on LAST month's month end, the latest due event at or before today");
-  }
+  assert.equal(answer.occurrence?.due_date, accrualDue,
+    "…on LAST month's month end, the latest due event inside the authority window");
   const accrualWork = answer.occurrence.work_id;
   assert.ok(accrualWork, "…and it names a real Work");
 
@@ -417,9 +420,7 @@ ${(faulty.state.tail ?? []).join("")}`,
   // =========================================================================
   // 3. THE REVERSAL WAITS FOR THE ACCRUAL'S ENTRY, THEN NAMES IT AND POSTS.
   // =========================================================================
-  if (monthEndToday) {
-    console.log("[accrual-e2e] PASS 3+4 SKIPPED — today is the month end, so this accrual's reversal is still in the future");
-  } else {
+  {
     const beltOnce = () => rig.withActor({ role: "clara_runtime" }, (c) =>
       reconcilePlanOccurrences(c, { limit: 50, log: () => {} }));
 

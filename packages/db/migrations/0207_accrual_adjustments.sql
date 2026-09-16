@@ -74,13 +74,23 @@
 -- because a prepayment schedule COMPUTES: it turns one term and one amount into n period amounts
 -- with an exact-cent residual, and a changed computation silently restates posted books.
 --
--- AN ACCRUAL'S METHOD COMPUTES NOTHING. Each of the four rules names WHICH amount a human already
--- stated the schedule uses — the figure stated here, the figure stated for the named service
--- period, the figure stated on the cited source document, or the figure the previous period
--- recorded. There is no arithmetic to version, so a registered closure would be a frozen wrapper
--- around an identity function and the `_v2` discipline would have nothing to protect. The rule is
+-- AN ACCRUAL'S METHOD COMPUTES NOTHING. It names WHICH amount a human already stated the schedule
+-- uses. There is no arithmetic to version, so a registered closure would be a frozen wrapper around
+-- an identity function and the `_v2` discipline would have nothing to protect. The rule is
 -- therefore a CLOSED jsonb enum with NO other admitted key, which is what stops it becoming a
 -- place to smuggle a formula in later: `{"rule": "..."}` and nothing else.
+--
+-- AND THE ENUM HOLDS EXACTLY THE ONE RULE THIS SLICE PERFORMS: `stated_amount` — "the amount
+-- stated here, every period of the window". That is what the schedule posts, measurably: the
+-- configuration freezes the stated amount into the plan revision's basis and
+-- `clara._plan_occurrence_basis` (0193:1037, #653-owned and pinned in §0) only moves the posting
+-- date and exchanges the sides for a reversal. THREE FURTHER RULES WERE DRAFTED HERE and are NOT
+-- admitted: `stated_period_amount`, `source_document_amount` and `prior_period_amount` would each
+-- have posted the SAME cents, because no lane reads `clara.accrual_adjustments` at run time and
+-- nothing in this estate selects a per-period figure — `prior_period_amount` does not even have a
+-- prior period to select from in the FIRST period. A recorded selection nobody performs is a
+-- promise the ledger does not keep (review round 1, A2), so they are a SUCCESSOR RESIDUAL, named
+-- in #652's report, and they return with the code that honours them.
 --
 -- =====================================================================================
 -- THE FIFTH MEASUREMENT: THE RUNTIME DOOR RESOLVES ITS ACTOR FROM AN ARGUMENT.
@@ -93,6 +103,39 @@
 -- actor-explicit caller use, and the HUMAN door keeps nesting the estate's own audited plan verb so
 -- a human-configured accrual's plan is byte-for-byte the plan that verb has always written. The
 -- two paths are proven equal by `p652.plan.equivalence`.
+--
+-- =====================================================================================
+-- THE SIXTH MEASUREMENT: THE SCHEDULE RUNS INSIDE THE TERM IT NAMES, AND NO LINE CLAIMS OTHERWISE.
+--
+-- One accrual carries ONE stated service period, and a `reversing_journal` plan reaches MANY due
+-- dates. Left unchecked, those two facts produce a false ledger, and it was measured on a rig
+-- before this wall existed (review round 1, A1): a July term under an authority running from June
+-- with no end posted the SAME line — "accrued 2026-07-01 to 2026-07-31" — on 30 June, 31 July and
+-- 31 August, so the sentence was false on two entries of three; and a term wholly outside the
+-- window (a 2031 term on a one-month 2026 authority) was ACCEPTED without a word.
+--
+-- TWO RULES CLOSE IT, and neither recuts the plan lane:
+--
+--   1. `clara._assert_accrual_term_window` refuses a configuration whose AUTHORITY WINDOW is not
+--      bracketed by the stated term: `effective_to` is REQUIRED, `effective_from` is on or after
+--      `service_period_start`, and `effective_to` is on or before `service_period_end` (CLR10
+--      `accrual_term_window_mismatch`, at the control that holds the mistake). Every occurrence
+--      therefore posts a date INSIDE the term its line names, and a schedule can never outrun the
+--      term a person stated. THE REVERSAL LEG IS UNAFFECTED: 0193's `_plan_window_ceiling`
+--      (0193:1008) already lifts an auto-reversing plan's ceiling to the reversal of `effective_to`
+--      — exactly so an authority ending on its last accrual can still undo it.
+--
+--   2. THE DERIVED EXPENSE LINE READS "one period of the accrual term <start> to <end>" rather
+--      than "accrued <start> to <end>". An occurrence of a recurring accrual accrues ONE PERIOD of
+--      the term, not the whole of it, and `clara._plan_occurrence_basis` is PINNED here and may not
+--      vary a description per occurrence — so what this file freezes into the basis is the sentence
+--      that is true of EVERY occurrence, including the single-period case. The term itself stays
+--      where it can be audited: on `clara.accrual_adjustments`, and on every surface that reads it.
+--
+-- WHAT IS DELIBERATELY NOT CLOSED, and is named rather than hidden: the per-occurrence AMOUNT is
+-- the stated figure in every period (THE FOURTH MEASUREMENT), so a term spanning several periods
+-- with one stated amount accrues that amount in each of them — which is exactly what "the amount
+-- stated here, every period" says on the form and in the method's own label.
 --
 -- =====================================================================================
 -- THE REFUSAL VOCABULARY THIS FILE OWNS. Every one carries a typed `detail.reason`; the
@@ -108,6 +151,13 @@
 --   CLR10 accrual_account_relationship   + field + constraint + account_code
 --   CLR10 accrual_term_document_mismatch + field                the bound term is not this
 --                                                               document's live human-stated one
+--   CLR10 accrual_term_window_mismatch   + field + constraint   the schedule is not bracketed by
+--                                                               the term it names (SIXTH
+--                                                               MEASUREMENT)
+--   CLR10 op_key_conflict                + field                this key already configured a
+--                                                               DIFFERENT accrual (0004's own
+--                                                               reservation conflict, given the
+--                                                               typed reason it never carried)
 --   CLR10 invalid_purpose                + constraint
 --   CLR10 invalid_op_key                 + constraint
 --   CLR04 insufficient_role / no_authenticated_actor / actor_not_active   the human door's floor
@@ -265,6 +315,16 @@ begin
   end if;
 end $w652_pin$;
 
+-- THE FOREIGN RELATION THIS FILE MUST NOT ALTER, pinned the SAME WAY the six bodies are —
+-- MEASURED here, into a temp table, and re-compared in §E. A transcribed literal would assert a
+-- property of the whole chain BELOW this file rather than of this file: any earlier migration that
+-- ever added a constraint to `clara.document_service_periods` would then red THIS migration with a
+-- message about #652 (review round 1, A4).
+create temp table w652_foreign_pin on commit drop as
+select 'clara.document_service_periods'::text as relname,
+       (select count(*)::int from pg_constraint
+         where conrelid = 'clara.document_service_periods'::regclass) as constraints;
+
 create temp table w652_plan_pin on commit drop as
 select p.oid::regprocedure::text as sig, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as digest
   from pg_proc p
@@ -308,7 +368,11 @@ create table clara.accrual_adjustments (
   amount_cents              bigint      not null check (amount_cents > 0),
   currency                  text        not null check (currency = 'MYR'),
   effective_from            date        not null,
-  effective_to              date,
+  -- NOT NULL, because the law is STRUCTURAL rather than a door's promise (THE SIXTH MEASUREMENT):
+  -- an accrual states a service period that ENDS, so the authority that accrues for it ends too,
+  -- on or before the last day of that period. An open-ended accrual would go on posting a line
+  -- naming a term it had already run past.
+  effective_to              date        not null,
   -- THE SERVICE PERIOD: the span of time the accrued cost belongs to. NOT NULL on both sides,
   -- because "a silent term is rejected" is this ticket's own acceptance line and a nullable column
   -- would make it a door's promise instead of a fact about the row.
@@ -325,11 +389,15 @@ create table clara.accrual_adjustments (
   -- `method - 'rule' = '{}'` is the "and nothing else" half, spelled as an EXPRESSION because a
   -- CHECK may not carry a subquery (`select count(*) from jsonb_object_keys(...)` is a subquery and
   -- PostgreSQL refuses it outright). Removing the one admitted key must leave an empty object.
+  --
+  -- ONE ADMITTED RULE, because one rule is what the schedule PERFORMS: a column that could hold a
+  -- selection nobody applies would make the durable record say something the ledger does not do.
+  -- The three drafted rules are a successor residual (THE FOURTH MEASUREMENT), and a widening of
+  -- this CHECK is the migration that must arrive WITH the lane that honours them.
   method                    jsonb       not null
                               check (jsonb_typeof(method) = 'object'
                                      and (method - 'rule') = '{}'::jsonb
-                                     and (method ->> 'rule') in ('stated_amount','stated_period_amount',
-                                                                 'source_document_amount','prior_period_amount')),
+                                     and (method ->> 'rule') = 'stated_amount'),
   authority_kind            text        not null check (authority_kind in ('explicit_instruction')),
   authority_ref             jsonb       not null check (jsonb_typeof(authority_ref) = 'object'),
   -- FIRM-WIDE, because `clara.documents` carries no client column: the FILING binds a document to
@@ -344,7 +412,11 @@ create table clara.accrual_adjustments (
   recorded_by               uuid        not null references clara.users(id),
   created_at                timestamptz not null default now(),
   constraint ck_accrual_adjustments_service_period check (service_period_end >= service_period_start),
-  constraint ck_accrual_adjustments_window check (effective_to is null or effective_to >= effective_from),
+  constraint ck_accrual_adjustments_window check (effective_to >= effective_from),
+  -- THE SCHEDULE RUNS INSIDE THE TERM IT NAMES, at the storage layer as well as at the door: a
+  -- definer INSERT cannot write a row whose window reaches outside the period it accrues for.
+  constraint ck_accrual_adjustments_window_in_term check (
+    effective_from >= service_period_start and effective_to <= service_period_end),
   constraint ck_accrual_adjustments_self check (
     id is distinct from corrects_accrual_id and id is distinct from corrected_by_accrual_id),
   -- A TERM BOUND TO A DOCUMENT NEEDS THAT DOCUMENT NAMED. The pair travels together or not at all.
@@ -464,10 +536,12 @@ create trigger t_accrual_adjustments_term_congruent before insert on clara.accru
 -- =====================================================================================
 
 -- THE CLOSED SELECTION-RULE SET, stated once so the refusal can LIST it and a form can offer
--- exactly these four.
+-- exactly what the schedule honours. ONE MEMBER (THE FOURTH MEASUREMENT): `stated_amount` is the
+-- rule this slice performs, and a refusal that listed three more would be telling a caller to
+-- re-send under a rule that changes nothing.
 create function clara._accrual_methods() returns text[]
   language sql immutable security definer set search_path = clara, pg_temp as $$
-  select array['stated_amount','stated_period_amount','source_document_amount','prior_period_amount']::text[]
+  select array['stated_amount']::text[]
 $$;
 revoke all on function clara._accrual_methods() from public;
 
@@ -595,14 +669,6 @@ begin
         detail=jsonb_build_object('reason','accrual_method_unsupported','field','accrual.method.rule',
           'rule', v_rule, 'supported', to_jsonb(clara._accrual_methods()))::text;
   end if;
-  if v_rule = 'source_document_amount'
-     and nullif(btrim(coalesce(p_accrual ->> 'source_document_id','')),'') is null then
-    raise exception 'that method selects the amount stated on a source document; name the document'
-      using errcode='CLR10',
-        detail=jsonb_build_object('reason','accrual_method_unsupported','field','accrual.source_document_id',
-          'constraint','required_by_rule', 'rule', v_rule)::text;
-  end if;
-
   if nullif(btrim(coalesce(p_accrual ->> 'instruction','')),'') is null then
     raise exception 'an accrual records the instruction that authorised it' using errcode='CLR10',
       detail='{"reason":"invalid_accrual","field":"accrual.instruction","constraint":"nonempty"}';
@@ -633,6 +699,50 @@ begin
   end if;
 end $$;
 revoke all on function clara._assert_accrual_particulars(jsonb) from public;
+
+-- THE SCHEDULE RUNS INSIDE THE TERM IT NAMES (THE SIXTH MEASUREMENT). PAYLOAD-HALF, exactly like
+-- the particulars: it reads nothing but its arguments, so it is asked BEFORE the reservation and a
+-- refusal costs nothing — not even an `op_receipts` row.
+--
+-- THE THREE RULES, AND WHAT EACH ONE STOPS:
+--   · `effective_to` present  — an authority with no end under a term that ends would go on posting
+--     a line naming a term it had already run past.
+--   · `effective_from >= service_period_start` — the first occurrence would otherwise post BEFORE
+--     the period it claims to accrue for.
+--   · `effective_to <= service_period_end` — the last occurrence would otherwise post after it.
+-- Together they make "every posting date lies inside the stated term" a property of the ROW rather
+-- than of the preparer's care. The reversal leg is out of scope by construction: 0193's
+-- `_plan_window_ceiling` (0193:1008) lifts an auto-reversing plan's ceiling to the reversal of
+-- `effective_to`, so an authority ending on its last accrual can still undo it.
+create function clara._assert_accrual_term_window(p_accrual jsonb, p_effective_from date,
+    p_effective_to date) returns void
+  language plpgsql immutable security definer set search_path = clara, pg_temp as $$
+declare v_start date; v_end date;
+begin
+  v_start := clara._accrual_date(p_accrual, 'service_period_start', 'silent_term');
+  v_end := clara._accrual_date(p_accrual, 'service_period_end', 'silent_term');
+  if p_effective_to is null then
+    raise exception 'an accrual for a term that ends needs an authority that ends with it'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','accrual_term_window_mismatch','field','effective_to',
+          'constraint','bounded_window','service_period_end', to_char(v_end,'YYYY-MM-DD'))::text;
+  end if;
+  if p_effective_from is null or p_effective_from < v_start then
+    raise exception 'the authority would start % , before the service period it accrues for (%)',
+      coalesce(to_char(p_effective_from,'YYYY-MM-DD'),'(null)'), to_char(v_start,'YYYY-MM-DD')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','accrual_term_window_mismatch','field','effective_from',
+          'constraint','within_term','service_period_start', to_char(v_start,'YYYY-MM-DD'))::text;
+  end if;
+  if p_effective_to > v_end then
+    raise exception 'the authority would still be accruing on % , after the term it names ends (%)',
+      to_char(p_effective_to,'YYYY-MM-DD'), to_char(v_end,'YYYY-MM-DD')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','accrual_term_window_mismatch','field','effective_to',
+          'constraint','within_term','service_period_end', to_char(v_end,'YYYY-MM-DD'))::text;
+  end if;
+end $$;
+revoke all on function clara._assert_accrual_term_window(jsonb,date,date) from public;
 
 -- ONE ACCOUNT, ONE ROLE. Absent and INACTIVE answer identically, for the reason 0194's own account
 -- wall states: neither is a postable account, and telling them apart would say whether a code the
@@ -728,7 +838,12 @@ create function clara._accrual_journal_basis(p_accrual jsonb, p_purpose text, p_
         'account_code', btrim(p_accrual ->> 'expense_account_code'),
         'debit_cents', (p_accrual ->> 'amount_cents')::numeric,
         'credit_cents', 0,
-        'description', 'accrued ' || (p_accrual ->> 'service_period_start')
+        -- WHAT IS TRUE OF EVERY OCCURRENCE (THE SIXTH MEASUREMENT). This basis is FROZEN on the
+        -- revision and `clara._plan_occurrence_basis` only moves the posting date, so a line
+        -- reading "accrued <start> to <end>" would be a claim each of a recurring accrual's
+        -- entries makes about a term only the whole schedule covers. The term is named; the
+        -- entry's share of it is stated honestly.
+        'description', 'one period of the accrual term ' || (p_accrual ->> 'service_period_start')
                        || ' to ' || (p_accrual ->> 'service_period_end')),
       jsonb_build_object(
         'account_code', btrim(p_accrual ->> 'liability_account_code'),
@@ -972,14 +1087,24 @@ begin
 
   -- THE PAYLOAD HALF, BEFORE THE RESERVATION.
   perform clara._assert_accrual_particulars(p_accrual);
+  perform clara._assert_accrual_term_window(p_accrual, p_effective_from, p_effective_to);
   v_basis := clara._accrual_journal_basis(p_accrual, p_purpose, p_effective_from);
 
-  v_dedupe := clara._reserve_op(v_firm, 'create_accrual_adjustment', p_op_key,
-    clara._hash(jsonb_build_object('client', p_client, 'author', v_actor, 'purpose', btrim(p_purpose),
-      'authority', p_authority_ref, 'frequency', p_frequency, 'day_rule', p_day_rule,
-      'day_of_month', p_day_of_month, 'timezone', p_timezone,
-      'effective_from', p_effective_from, 'effective_to', p_effective_to,
-      'accrual', clara._accrual_canonical(p_accrual))));
+  -- THE RESERVATION, WITH THE ONE REFUSAL 0004 RAISES OUT OF IT GIVEN A TYPED REASON. The estate's
+  -- `_reserve_op` (0004:46) raises exactly one CLR10 — `op_key reused with different args` — and it
+  -- carries NO detail, so a surface could neither classify it nor say which control to look at
+  -- (review round 1, A3). Re-raised here as this file's own token; the CLASS is unchanged.
+  begin
+    v_dedupe := clara._reserve_op(v_firm, 'create_accrual_adjustment', p_op_key,
+      clara._hash(jsonb_build_object('client', p_client, 'author', v_actor, 'purpose', btrim(p_purpose),
+        'authority', p_authority_ref, 'frequency', p_frequency, 'day_rule', p_day_rule,
+        'day_of_month', p_day_of_month, 'timezone', p_timezone,
+        'effective_from', p_effective_from, 'effective_to', p_effective_to,
+        'accrual', clara._accrual_canonical(p_accrual))));
+  exception when sqlstate 'CLR10' then
+    raise exception 'this accrual key already configured a DIFFERENT accrual' using errcode='CLR10',
+      detail='{"reason":"op_key_conflict","field":"op_key"}';
+  end;
   if v_dedupe is not null then
     if v_dedupe ? 'pending' then
       raise exception 'this accrual key is held by an in-flight sibling' using errcode='CLR13',
@@ -1061,14 +1186,22 @@ begin
   end if;
 
   perform clara._assert_accrual_particulars(p_accrual);
+  perform clara._assert_accrual_term_window(p_accrual, p_effective_from, p_effective_to);
   v_basis := clara._accrual_journal_basis(p_accrual, p_purpose, p_effective_from);
 
-  v_dedupe := clara._reserve_op(v_firm, 'create_accrual_adjustment', p_op_key,
-    clara._hash(jsonb_build_object('client', p_client, 'author', p_author, 'purpose', btrim(p_purpose),
-      'authority', p_authority_ref, 'frequency', p_frequency, 'day_rule', p_day_rule,
-      'day_of_month', p_day_of_month, 'timezone', p_timezone,
-      'effective_from', p_effective_from, 'effective_to', p_effective_to,
-      'accrual', clara._accrual_canonical(p_accrual))));
+  -- The same typed re-raise as the human door's (review round 1, A3): one key, one payload, and a
+  -- second payload under it is a CONFLICT a caller can classify rather than a bare CLR10.
+  begin
+    v_dedupe := clara._reserve_op(v_firm, 'create_accrual_adjustment', p_op_key,
+      clara._hash(jsonb_build_object('client', p_client, 'author', p_author, 'purpose', btrim(p_purpose),
+        'authority', p_authority_ref, 'frequency', p_frequency, 'day_rule', p_day_rule,
+        'day_of_month', p_day_of_month, 'timezone', p_timezone,
+        'effective_from', p_effective_from, 'effective_to', p_effective_to,
+        'accrual', clara._accrual_canonical(p_accrual))));
+  exception when sqlstate 'CLR10' then
+    raise exception 'this accrual key already configured a DIFFERENT accrual' using errcode='CLR10',
+      detail='{"reason":"op_key_conflict","field":"op_key"}';
+  end;
   if v_dedupe is not null then
     if v_dedupe ? 'pending' then
       raise exception 'this accrual key is held by an in-flight sibling' using errcode='CLR13',
@@ -1356,13 +1489,16 @@ begin
   if v_names <> '(none)' then
     raise exception '#652 tail: this file changed plan-lane body(ies): %', v_names using errcode='CLR10';
   end if;
-  -- …AND IT ALTERED NO FOREIGN TABLE. The four relations this file references are asked for their
-  -- own column counts and constraint counts, which a widening or a new constraint would move.
-  -- MEASURED on the migrated rig before this file ran (14), not guessed: this file adds no
-  -- constraint to that relation, and a composite unique smuggled in here to carry the tenant on
-  -- `document_service_period_id` would move this number. The tenant is a TRIGGER's job instead.
-  if (select count(*)::int from pg_constraint where conrelid='clara.document_service_periods'::regclass) <> 14 then
-    raise exception '#652 tail: clara.document_service_periods'' constraint set moved -- this file adds none to it'
+  -- …AND IT ALTERED NO FOREIGN TABLE. The count is compared against the one §0 MEASURED on this
+  -- chain moments ago (`w652_foreign_pin`), never against a literal: a transcribed number asserts a
+  -- property of every migration below this one, so an earlier file adding a constraint to that
+  -- relation would red THIS migration with a message about #652 (review round 1, A4). This form
+  -- asserts what it claims — that this file added nothing to it.
+  if (select count(*)::int from pg_constraint where conrelid='clara.document_service_periods'::regclass)
+     is distinct from (select constraints from w652_foreign_pin) then
+    raise exception '#652 tail: clara.document_service_periods'' constraint set moved WHILE THIS FILE RAN (% -> %) -- this file adds none to it',
+      (select constraints from w652_foreign_pin),
+      (select count(*)::int from pg_constraint where conrelid='clara.document_service_periods'::regclass)
       using errcode='CLR10';
   end if;
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
@@ -1389,6 +1525,60 @@ begin
     raise exception '#652 tail: the derived basis does not debit the expense leg with the accrued amount'
       using errcode='CLR10';
   end if;
+  -- …and the expense line says what is true of EVERY occurrence (THE SIXTH MEASUREMENT), not what
+  -- is true only when the schedule reaches exactly one due date.
+  if (clara._accrual_journal_basis(
+        '{"expense_account_code":"6100","liability_account_code":"2020","amount_cents":120000,
+          "currency":"MYR","service_period_start":"2026-07-01","service_period_end":"2026-09-30",
+          "term_source":"human_stated","method":{"rule":"stated_amount"},"instruction":"x"}'::jsonb,
+        'x', date '2026-07-31') -> 'lines' -> 0 ->> 'description')
+     <> 'one period of the accrual term 2026-07-01 to 2026-09-30' then
+    raise exception '#652 tail: the derived expense line claims this entry covers the whole stated term'
+      using errcode='CLR10';
+  end if;
+  -- …and there is exactly ONE admitted selection rule, in the function AND in the CHECK.
+  if array_length(clara._accrual_methods(), 1) <> 1
+     or not ('stated_amount' = any (clara._accrual_methods())) then
+    raise exception '#652 tail: the selection-rule set is not the single rule this slice performs'
+      using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid='clara.accrual_adjustments'::regclass and contype='c'
+                    and pg_get_constraintdef(oid) like '%stated_amount%'
+                    and pg_get_constraintdef(oid) not like '%prior_period_amount%') then
+    raise exception '#652 tail: the method CHECK does not admit exactly the rule the schedule performs'
+      using errcode='CLR10';
+  end if;
+  -- …and the term/window wall is LIVE, exercised here rather than left to the battery.
+  begin
+    perform clara._assert_accrual_term_window(
+      '{"service_period_start":"2026-07-01","service_period_end":"2026-07-31"}'::jsonb,
+      date '2026-06-01', null);
+    raise exception '#652 tail: an OPEN-ENDED authority under a closed term was ADMITTED'
+      using errcode='CLR10';
+  exception when sqlstate 'CLR10' then
+    get stacked diagnostics v_detail = pg_exception_detail;
+    if coalesce(v_detail,'') not like '%accrual_term_window_mismatch%' then
+      raise exception '#652 tail: the window wall refused, but not as accrual_term_window_mismatch (detail %)', v_detail
+        using errcode='CLR10';
+    end if;
+  end;
+  begin
+    perform clara._assert_accrual_term_window(
+      '{"service_period_start":"2026-07-01","service_period_end":"2026-07-31"}'::jsonb,
+      date '2026-06-01', date '2026-08-31');
+    raise exception '#652 tail: a schedule reaching outside its own stated term was ADMITTED'
+      using errcode='CLR10';
+  exception when sqlstate 'CLR10' then
+    get stacked diagnostics v_detail = pg_exception_detail;
+    if coalesce(v_detail,'') not like '%accrual_term_window_mismatch%' then
+      raise exception '#652 tail: the window wall refused, but not as accrual_term_window_mismatch (detail %)', v_detail
+        using errcode='CLR10';
+    end if;
+  end;
+  perform clara._assert_accrual_term_window(
+    '{"service_period_start":"2026-07-01","service_period_end":"2026-09-30"}'::jsonb,
+    date '2026-07-01', date '2026-09-30');
   -- …and the term law is LIVE, exercised here rather than left to the battery: a period that is
   -- not a human's, and an accrual of zero, are each refused with the token this lane owns.
   begin
@@ -1419,6 +1609,6 @@ begin
     end if;
   end;
 
-  raise notice '#652 tail: OK -- clara.accrual_adjustments is RLS-forced with no application ACL; the plan-revision FK carries (plan_id, revision, firm_id, client_id) and unique (plan_id, revision) makes the occurrence join single-valued; term_source is a one-member CHECK and amount_cents is strictly positive; three triggers (append-only, no-truncate, term congruence); three human doors on clara_authenticated and the OBO door on clara_runtime alone, with no crossing and nothing PUBLIC; the six pinned 0193 bodies hash byte-identically to the digests taken before this file created anything, so NOTHING was recut; no foreign table was altered; and the derived accrual basis passes 0178''s own validator.';
+  raise notice '#652 tail: OK -- clara.accrual_adjustments is RLS-forced with no application ACL; the plan-revision FK carries (plan_id, revision, firm_id, client_id) and unique (plan_id, revision) makes the occurrence join single-valued; term_source is a one-member CHECK, method admits exactly the one rule this slice performs, the authority window is bracketed by the stated term and the derived line names one period of it, and amount_cents is strictly positive; three triggers (append-only, no-truncate, term congruence); three human doors on clara_authenticated and the OBO door on clara_runtime alone, with no crossing and nothing PUBLIC; the six pinned 0193 bodies hash byte-identically to the digests taken before this file created anything, so NOTHING was recut; no foreign table was altered; and the derived accrual basis passes 0178''s own validator.';
 end
 $w652_tail$;

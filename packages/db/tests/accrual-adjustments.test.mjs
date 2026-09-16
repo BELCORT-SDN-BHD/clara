@@ -36,6 +36,7 @@ import {
   closeYearAround, claimWorkRun, settleWorkRun, mintClientObo, wakeRecordJournalEntry,
   workRow, receiptsForWork, instructionRef, occurrenceRows, occurrenceCount, occurrenceExtras,
   liveRevision, planRow, revisionRows, postPlanWork, wakeDuePlanOccurrences, requestPlanCatchUp,
+  linesOf,
   createAccountingPlan, listPlanOccurrences, todayInPlanZone, shiftMonths,
   // #652's own surface
   accrual, accrualRows, accrualCount, opReceiptRows, freshAccrualClient,
@@ -69,16 +70,6 @@ const SCAN_LIMIT = 100;
 
 const monthStart = (day) => `${day.slice(0, 7)}-01`;
 
-/** True when TODAY is the last day of its month: a month-end reversing schedule's LATEST accrual
- *  is then today's rather than last month's, so the "accrual admitted, reversal outstanding"
- *  scenario does not exist. A counted skip beats a cell that is green 30 days in 31. */
-async function isMonthEnd() {
-  const r = await rootQuery(
-    "select ((date_trunc('month', $1::date) + interval '1 month' - interval '1 day')::date)::text as d",
-    [today]);
-  return r.rows[0].d === today;
-}
-
 /** The month end `n` months back, as YYYY-MM-DD in the plan zone. */
 async function monthEndBack(n) {
   const r = await rootQuery(
@@ -87,10 +78,35 @@ async function monthEndBack(n) {
   return r.rows[0].d;
 }
 
+/**
+ * THE WINDOW A CONFIGURATION RUNS OVER, AND THE STATED TERM THAT BRACKETS IT (0207's SIXTH
+ * MEASUREMENT): `effective_from >= service_period_start` and `effective_to <= service_period_end`,
+ * so every occurrence posts a date INSIDE the term its own line names.
+ *
+ * `monthsBack` months, ENDING at the month end `monthsBack - 1` months ago — which also puts the
+ * latest due date of the window in the past on EVERY calendar day, month end included. That is why
+ * the reversal, locked-period and entrance-independence cells below no longer carry a month-end
+ * skip: "an accrual admitted, its reversal outstanding" now exists every day of the month
+ * (review round 1, A5).
+ */
+async function span(monthsBack = 2) {
+  return {
+    from: monthStart(await shiftMonths(today, -monthsBack)),
+    to: await monthEndBack(Math.max(monthsBack - 1, 0)),
+  };
+}
+
+/** The canonical particulars for a span: the STATED TERM is the window this configuration runs
+ *  over. A cell that cares about something else does not have to restate the term law. */
+function termed({ from, to }, over = {}) {
+  return accrual({ servicePeriodStart: from, servicePeriodEnd: to, ...over });
+}
+
 /** A complete, valid accrual configuration on a FRESH client of firm A, through the HUMAN door as
- *  the least-privileged persona that should succeed (a bookkeeper). */
+ *  the least-privileged persona that should succeed (a bookkeeper). `over` carries the ONE
+ *  particular a cell wants to change; the term always brackets the window. */
 async function configure({
-  sub = BOB(), tag = "p652", client = null, monthsBack = 2, accrual: a = null,
+  sub = BOB(), tag = "p652", client = null, monthsBack = 2, over = {},
   purpose = "Monthly office rent accrual", frequency = "monthly",
   dayRule = "last_day_of_month", dayOfMonth = null, effectiveFrom = null, effectiveTo = null,
   opKey = null,
@@ -101,13 +117,19 @@ async function configure({
   // `clara.accounting_work` row (a plan cites an instruction this database holds, 0193:1510-1512),
   // so "this configuration admitted ONE Work" is counted against that baseline rather than zero.
   const workBefore = await workCount(cli);
-  const from = effectiveFrom ?? monthStart(await shiftMonths(today, -monthsBack));
+  const s = await span(monthsBack);
+  const from = effectiveFrom ?? s.from;
+  const to = effectiveTo ?? s.to;
+  const particulars = termed({ from, to }, over);
   const answer = await createAccrualAdjustment(sub, {
-    client: cli, purpose, authorityRef: ref, accrual: a ?? accrual(),
+    client: cli, purpose, authorityRef: ref, accrual: particulars,
     frequency, dayRule, dayOfMonth, timezone: ACCRUAL_TZ,
-    effectiveFrom: from, effectiveTo, opKey,
+    effectiveFrom: from, effectiveTo: to, opKey,
   });
-  return { ...answer, client: cli, author: sub, effectiveFrom: from, ref, workBefore };
+  return {
+    ...answer, client: cli, author: sub, effectiveFrom: from, effectiveTo: to, particulars,
+    ref, workBefore,
+  };
 }
 
 /** Every relation one configuration writes, counted for ONE client. The atomicity cells assert on
@@ -140,13 +162,13 @@ test("p652.basis.required — amount, both account legs, purpose, effective wind
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "required");
   const ref = await instructionRef({ client, author: BOB() });
-  const from = monthStart(await shiftMonths(today, -1));
+  const { from, to } = await span(1);
   const before = await footprint(client);
 
   const call = (over = {}, a = {}) => createAccrualAdjustment(BOB(), {
     client, purpose: "Monthly office rent accrual", authorityRef: ref,
-    accrual: accrual(a), frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
-    timezone: ACCRUAL_TZ, effectiveFrom: from, effectiveTo: null, ...over,
+    accrual: termed({ from, to }, a), frequency: "monthly", dayRule: "last_day_of_month",
+    dayOfMonth: null, timezone: ACCRUAL_TZ, effectiveFrom: from, effectiveTo: to, ...over,
   });
 
   // THE AMOUNT. Absent is a SHAPE refusal; a stated zero is its own TERM refusal (p652.basis.zero).
@@ -331,7 +353,7 @@ test("p652.config.atomic — one accepted configuration leaves exactly one plan,
   // SNAPSHOT AFTER the authority instruction, which is a real Work this configuration did not
   // create and must not be asked to roll back.
   const victimBase = await footprint(victim);
-  const victimFrom = monthStart(await shiftMonths(today, -2));
+  const victimSpan = await span(2);
   await rootQuery(`create function clara._p652_fault() returns trigger
       language plpgsql as $f$ begin
         raise exception 'p652 injected fault after the accrual insert' using errcode='CLR13',
@@ -342,7 +364,8 @@ test("p652.config.atomic — one accepted configuration leaves exactly one plan,
   try {
     await assertPair(CLR.conflict, "p652_injected_fault",
       () => createAccrualAdjustment(BOB(), {
-        client: victim, authorityRef: victimRef, accrual: accrual(), effectiveFrom: victimFrom,
+        client: victim, authorityRef: victimRef, accrual: termed(victimSpan),
+        effectiveFrom: victimSpan.from, effectiveTo: victimSpan.to,
       }), "a configuration that faults after the plan insert");
   } finally {
     await rootQuery("drop trigger t_p652_fault on clara.accrual_adjustments");
@@ -393,8 +416,11 @@ test("p652.config.vs.occurrence — accepting a configuration answers posted:fal
 test("p652.authority.future — an accrual whose authority starts in the future creates the plan and admits NOTHING; the answer is a preview, and a catch-up cannot reach back past the authority", async (t) => {
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "future");
+  // A WINDOW WHOLLY AHEAD OF TODAY, and the term that brackets it: two months out to the month end
+  // four months out, so three due dates are previewed and none has arrived.
   const from = monthStart(await shiftMonths(today, 2));
-  const c = await configure({ client, tag: "future", effectiveFrom: from });
+  const to = await monthEndBack(-4);
+  const c = await configure({ client, tag: "future", effectiveFrom: from, effectiveTo: to });
 
   assert.equal(c.occurrence, null, "no due event has arrived, so none was admitted");
   const f = await footprint(client);
@@ -423,11 +449,9 @@ test("p652.authority.future — an accrual whose authority starts in the future 
 
 test("p652.reversal.binds — a reversal with no POSTED accrual behind it is refused reversal_before_primary with a typed primary_state; once the accrual posts, the same due event is admitted and NAMES the entry it undoes", async (t) => {
   if (await gateAccruals(t)) return;
-  if (await isMonthEnd()) {
-    markSkip();
-    t.skip("p652.reversal.binds needs a day that is not the month end, so this month's accrual is still in the future");
-    return;
-  }
+  // NO MONTH-END SKIP. The window ENDS at last month's month end (see `span`), so the latest due
+  // date is in the past on every calendar day and this scenario exists every day (review round 1,
+  // A5 — "a skipped battery is not evidence").
   const c = await configure({ tag: "revbinds", monthsBack: 2, purpose: "Monthly audit fee accrual" });
   const accrualDue = await monthEndBack(1);
   assert.equal(c.occurrence?.due_date, accrualDue,
@@ -481,11 +505,6 @@ test("p652.reversal.binds — a reversal with no POSTED accrual behind it is ref
 
 test("p652.catchup.locked — a catch-up window before the authority is refused by name; an occurrence whose period is sealed settles refused CLR19 and the scan does not re-admit it", async (t) => {
   if (await gateAccruals(t)) return;
-  if (await isMonthEnd()) {
-    markSkip();
-    t.skip("p652.catchup.locked needs a day that is not the month end");
-    return;
-  }
   const c = await configure({ tag: "locked", monthsBack: 2 });
   const due = c.occurrence.due_date;
 
@@ -526,8 +545,8 @@ test("p652.role.floor — a viewer cannot configure an accrual but reads them; a
 
   await assertPair(CLR.authz, ACCRUAL_REASON.insufficientRole,
     () => createAccrualAdjustment(CAROL(), {
-      client: c.client, authorityRef: c.ref, accrual: accrual(),
-      effectiveFrom: c.effectiveFrom,
+      client: c.client, authorityRef: c.ref, accrual: c.particulars,
+      effectiveFrom: c.effectiveFrom, effectiveTo: c.effectiveTo,
     }), "a viewer configuring an accrual");
 
   const listed = await listAccrualAdjustments(CAROL(), { client: c.client });
@@ -551,10 +570,11 @@ test("p652.role.floor — a viewer cannot configure an accrual but reads them; a
   // `archived`, not `inactive`: clients_status_check_0017 admits active/archived/onboarding, and
   // the door's own wall is `status <> 'active'`.
   await setClientStatus(parked, "archived");
-  const parkedFrom = monthStart(await shiftMonths(today, -1));
+  const parkedSpan = await span(1);
   await assertPair(CLR.badRequest, ACCRUAL_REASON.clientInactive,
     () => createAccrualAdjustment(BOB(), {
-      client: parked, authorityRef: ref, accrual: accrual(), effectiveFrom: parkedFrom,
+      client: parked, authorityRef: ref, accrual: termed(parkedSpan),
+      effectiveFrom: parkedSpan.from, effectiveTo: parkedSpan.to,
     }), "an accrual on an inactive client");
 });
 
@@ -566,9 +586,10 @@ test("p652.accounts.roles — the expense leg must be an expense account and the
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "roles");
   const ref = await instructionRef({ client, author: BOB() });
-  const from = monthStart(await shiftMonths(today, -1));
+  const w = await span(1);
   const call = (a) => createAccrualAdjustment(BOB(), {
-    client, authorityRef: ref, accrual: accrual(a), effectiveFrom: from,
+    client, authorityRef: ref, accrual: termed(w, a),
+    effectiveFrom: w.from, effectiveTo: w.to,
   });
 
   const asset = await assertPair(CLR.badRequest, ACCRUAL_REASON.accountRelationship,
@@ -599,7 +620,7 @@ test("p652.accounts.roles — the expense leg must be an expense account and the
 
 test("p652.lineage.join — get_accrual_adjustment returns plan → revision → occurrence → Work → committed receipt → entry with exact cents and ISO dates, and a revision belonging to ANOTHER client of the same firm is refused by the composite FK rather than by RLS", async (t) => {
   if (await gateAccruals(t)) return;
-  const c = await configure({ tag: "lineage", accrual: accrual({ cents: 98765 }) });
+  const c = await configure({ tag: "lineage", over: { cents: 98765 } });
   const entry = await postPlanWork({
     work: c.occurrence.work_id, client: c.client, author: c.author, firm: FIRM_A(),
   });
@@ -607,8 +628,10 @@ test("p652.lineage.join — get_accrual_adjustment returns plan → revision →
   const got = await getAccrualAdjustment(BOB(), c.accrual_id);
   assert.equal(got.amount_cents, 98765, "exact minor units, never a float");
   assert.equal(got.currency, "MYR");
-  assert.equal(got.service_period_start, "2026-07-01", "ISO dates, not a locale rendering");
-  assert.equal(got.service_period_end, "2026-07-31");
+  assert.equal(got.service_period_start, c.effectiveFrom, "ISO dates, not a locale rendering");
+  assert.equal(got.service_period_end, c.effectiveTo,
+    "…and the stated term is the one the schedule runs inside (0207's SIXTH MEASUREMENT)");
+  assert.match(got.service_period_start, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(got.term_source, "human_stated");
   assert.deepEqual(got.method, { rule: "stated_amount" });
   assert.equal(got.plan.plan_id, c.plan_id, "the plan it rides");
@@ -647,12 +670,13 @@ test("p652.lineage.join — get_accrual_adjustment returns plan → revision →
   const e = await assertRaises("23503", () => rootQuery(
     `insert into clara.accrual_adjustments(firm_id, client_id, plan_id, revision, purpose,
         expense_account_code, liability_account_code, amount_cents, currency, effective_from,
-        service_period_start, service_period_end, term_source, method, authority_kind,
+        effective_to, service_period_start, service_period_end, term_source, method, authority_kind,
         authority_ref, instruction, recorded_by)
-      values ($1,$2,$3,1,'cross-client smuggle',$4,$5,100,'MYR',$6,'2026-07-01','2026-07-31',
+      values ($1,$2,$3,1,'cross-client smuggle',$4,$5,100,'MYR',$6,$9,$8,$9,
         'human_stated','{"rule":"stated_amount"}'::jsonb,'explicit_instruction','{}'::jsonb,
         'smuggled',$7)`,
-    [FIRM_A(), c.client, other.plan_id, ACHART.expense, ACHART.liability, c.effectiveFrom, ALICE()]),
+    [FIRM_A(), c.client, other.plan_id, ACHART.expense, ACHART.liability, c.effectiveFrom, ALICE(),
+     c.effectiveFrom, c.effectiveTo]),
     "an accrual naming another client's plan revision under the same firm");
   assert.match(e.message, /fk_accrual_adjustments_plan_revision/,
     `the composite FK is the wall, by name (got ${e.message})`);
@@ -706,12 +730,7 @@ test("p652.acl.grants — the accrual relation is RLS-forced with no application
 
 test("p652.plan.occurrence.typed — an occurrence admitted by the RUNTIME SCAN resolves to the same typed accrual particulars as the one the configuration door admitted, by plan+revision join", async (t) => {
   if (await gateAccruals(t)) return;
-  if (await isMonthEnd()) {
-    markSkip();
-    t.skip("p652.plan.occurrence.typed needs a day that is not the month end");
-    return;
-  }
-  const c = await configure({ tag: "typed", monthsBack: 2, accrual: accrual({ cents: 54321 }) });
+  const c = await configure({ tag: "typed", monthsBack: 2, over: { cents: 54321 } });
   const entry = await postPlanWork({
     work: c.occurrence.work_id, client: c.client, author: c.author, firm: FIRM_A(),
   });
@@ -748,11 +767,12 @@ test("p652.plan.nested_op — the configuration reserves its OWN key and the pla
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "nested");
   const ref = await instructionRef({ client, author: BOB() });
-  const from = monthStart(await shiftMonths(today, -1));
+  const w = await span(2);
   const key = opk("p652-nested");
 
   const first = await createAccrualAdjustment(BOB(), {
-    client, authorityRef: ref, accrual: accrual(), effectiveFrom: from, opKey: key,
+    client, authorityRef: ref, accrual: termed(w),
+    effectiveFrom: w.from, effectiveTo: w.to, opKey: key,
   });
   const receipts = await opReceiptRows(FIRM_A(), key);
   assert.deepEqual(receipts.map((r) => r.fn).sort(),
@@ -762,7 +782,8 @@ test("p652.plan.nested_op — the configuration reserves its OWN key and the pla
 
   // THE REPLAY. The same decision, re-sent — a lost response, not a second question.
   const replay = await createAccrualAdjustment(BOB(), {
-    client, authorityRef: ref, accrual: accrual(), effectiveFrom: from, opKey: key,
+    client, authorityRef: ref, accrual: termed(w),
+    effectiveFrom: w.from, effectiveTo: w.to, opKey: key,
   });
   assert.deepEqual(replay, first, "the stored result comes back byte-identically");
   const f = await footprint(client);
@@ -770,10 +791,19 @@ test("p652.plan.nested_op — the configuration reserves its OWN key and the pla
   assert.equal(f.accruals, 1, "one accrual record");
   assert.equal(f.occurrences, 1, "one occurrence");
 
-  // A DIFFERENT PAYLOAD UNDER THE SAME KEY IS A CONFLICT, never a silent replay.
-  await assertRaises(CLR.badRequest, () => createAccrualAdjustment(BOB(), {
-    client, authorityRef: ref, accrual: accrual({ cents: 999 }), effectiveFrom: from, opKey: key,
-  }), "the same key carrying different figures");
+  // A DIFFERENT PAYLOAD UNDER THE SAME KEY IS A CONFLICT, never a silent replay — and it is a
+  // TYPED one. `clara._reserve_op` (0004:46) raises its one CLR10 with NO detail at all, so a
+  // surface could neither classify it nor say which control to look at; both doors re-raise it as
+  // this lane's own `op_key_conflict` (review round 1, A3).
+  const conflict = await assertPair(CLR.badRequest, "op_key_conflict",
+    () => createAccrualAdjustment(BOB(), {
+      client, authorityRef: ref, accrual: termed(w, { cents: 999 }),
+      effectiveFrom: w.from, effectiveTo: w.to, opKey: key,
+    }), "the same key carrying different figures");
+  assert.equal(conflict.detail.field, "op_key",
+    "…named at the identity that collided, not at the figure that changed");
+  const stillOne = await footprint(client);
+  assert.equal(stillOne.accruals, 1, "and the conflict wrote nothing");
 });
 
 test("p652.plan.equivalence — the plan the OBO door writes inline and the plan the human door writes through clara.create_accounting_plan are the same plan, field for field", async (t) => {
@@ -782,8 +812,8 @@ test("p652.plan.equivalence — the plan the OBO door writes inline and the plan
   const runtimeClient = await freshAccrualClient(ALICE(), "equivruntime");
   const runtimeRef = await instructionRef({ client: runtimeClient, author: BOB() });
   const runtimeSide = await createAccrualAdjustmentFor({
-    client: runtimeClient, author: BOB(), authorityRef: runtimeRef, accrual: accrual(),
-    effectiveFrom: humanSide.effectiveFrom,
+    client: runtimeClient, author: BOB(), authorityRef: runtimeRef, accrual: humanSide.particulars,
+    effectiveFrom: humanSide.effectiveFrom, effectiveTo: humanSide.effectiveTo,
   });
 
   const shape = async (planId, clientId) => {
@@ -817,7 +847,7 @@ test("p652.obo.for_door — create_accrual_adjustment_for admits a real plan, re
   if (await gateAccruals(t)) return;
   const client = await freshAccrualClient(ALICE(), "obo");
   const ref = await instructionRef({ client, author: BOB() });
-  const from = monthStart(await shiftMonths(today, -1));
+  const w = await span(2);
   const baseWork = await workCount(client);
 
   // THE CELL THAT WOULD GO RED IF THIS DOOR NESTED `clara.create_accounting_plan`: that door
@@ -825,7 +855,8 @@ test("p652.obo.for_door — create_accrual_adjustment_for admits a real plan, re
   // and a runtime connection has no `request.jwt.claims` at all, so it would raise CLR04
   // `no authenticated actor` here — a failure a grant assertion could never see.
   const answer = await createAccrualAdjustmentFor({
-    client, author: BOB(), authorityRef: ref, accrual: accrual({ cents: 4242 }), effectiveFrom: from,
+    client, author: BOB(), authorityRef: ref, accrual: termed(w, { cents: 4242 }),
+    effectiveFrom: w.from, effectiveTo: w.to,
   });
   assert.ok(answer.accrual_id, "a real accrual record");
   assert.ok(answer.plan_id, "a real plan");
@@ -853,12 +884,132 @@ test("p652.obo.for_door — create_accrual_adjustment_for admits a real plan, re
   try {
     await assertPair(CLR.authz, ACCRUAL_REASON.authorityLost,
       () => createAccrualAdjustmentFor({
-        client: gone, author: BOB(), authorityRef: goneRef, accrual: accrual(), effectiveFrom: from,
+        client: gone, author: BOB(), authorityRef: goneRef, accrual: termed(w),
+        effectiveFrom: w.from, effectiveTo: w.to,
       }), "an OBO configuration for a human whose membership was withdrawn");
   } finally {
     await reactivateMember({ firm: FIRM_A(), user: BOB() });
   }
   assert.deepEqual(await footprint(gone), goneBase, "and nothing at all was written");
+});
+
+// ===========================================================================================
+// p652.term.window — THE SCHEDULE RUNS INSIDE THE TERM IT NAMES (review round 1, A1).
+// ===========================================================================================
+
+test("p652.term.window — an open-ended authority, a window that starts before the stated term and a term that is a stranger to the window are each refused accrual_term_window_mismatch, and nothing at all is written", async (t) => {
+  if (await gateAccruals(t)) return;
+  const client = await freshAccrualClient(ALICE(), "window");
+  const ref = await instructionRef({ client, author: BOB() });
+  const TERM = { servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-09-30" };
+  const call = (over = {}) => createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref,
+    accrual: accrual({ ...TERM, ...(over.accrual ?? {}) }),
+    effectiveFrom: "effectiveFrom" in over ? over.effectiveFrom : "2026-07-01",
+    effectiveTo: "effectiveTo" in over ? over.effectiveTo : "2026-09-30",
+    opKey: opk("p652-window"),
+  });
+
+  // 1 - AN OPEN-ENDED AUTHORITY UNDER A TERM THAT ENDS. The schedule would go on posting a line
+  //     naming a term it had already run past, for ever.
+  const open = await assertPair(CLR.badRequest, ACCRUAL_REASON.termWindowMismatch,
+    () => call({ effectiveTo: null }), "a closed term under an open-ended authority");
+  assert.equal(open.detail.field, "effective_to", "at the control that holds the mistake");
+  assert.equal(open.detail.constraint, "bounded_window");
+
+  // 2 - A WINDOW THAT STARTS BEFORE THE TERM. MEASURED before this wall existed: a June posting
+  //     carrying "accrued 2026-07-01 to 2026-07-31" on its face.
+  const early = await assertPair(CLR.badRequest, ACCRUAL_REASON.termWindowMismatch,
+    () => call({ effectiveFrom: "2026-06-01" }), "an authority starting before the term it accrues for");
+  assert.equal(early.detail.field, "effective_from");
+  assert.equal(early.detail.constraint, "within_term");
+
+  // 3 - A TERM THAT IS A STRANGER TO THE WINDOW: a 2031 term on a 2026 authority, accepted in full
+  //     before this wall.
+  const stranger = await assertPair(CLR.badRequest, ACCRUAL_REASON.termWindowMismatch,
+    () => call({ accrual: { servicePeriodStart: "2031-01-01", servicePeriodEnd: "2031-12-31" } }),
+    "a stated term wholly outside the authority window");
+  assert.equal(stranger.detail.field, "effective_from");
+
+  const f = await footprint(client);
+  assert.equal(f.plans, 0, "no plan");
+  assert.equal(f.accruals, 0, "no accrual record");
+  assert.equal(f.occurrences, 0, "no occurrence");
+  assert.deepEqual(await opReceiptRows(FIRM_A(), "p652-window"), [],
+    "and not even a RESERVATION: the window wall is payload-half, asked before _reserve_op");
+
+  // AND THE BRACKETED CONFIGURATION IS ACCEPTED, which is what keeps this a wall rather than a ban.
+  const ok = await call();
+  assert.ok(ok.accrual_id, "an authority window bracketed by its own stated term is configured");
+  const row = (await accrualRows(client))[0];
+  assert.equal(row.service_period_start, "2026-07-01");
+  assert.equal(row.service_period_end, "2026-09-30");
+  assert.equal(row.effective_to, "2026-09-30", "and the window it recorded is the one it was given");
+});
+
+// ===========================================================================================
+// p652.basis.period_text — WHAT THE LEDGER SAYS ABOUT A PERIOD IT DID NOT ACCRUE.
+// ===========================================================================================
+
+test("p652.basis.period_text — every occurrence of one accrual posts the SAME true line: one period of the stated term, never a claim that this entry covers the whole of it", async (t) => {
+  if (await gateAccruals(t)) return;
+  const client = await freshAccrualClient(ALICE(), "periodtext");
+  const ref = await instructionRef({ client, author: BOB() });
+  // A WINDOW WITH MORE THAN ONE DUE DATE IN IT, wholly in the past: two month ends, two postings,
+  // one frozen basis. This is the shape that made the old wording false.
+  const from = monthStart(await shiftMonths(today, -3));
+  const to = await monthEndBack(2);
+  const c = await createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref, purpose: "Monthly office rent accrual",
+    accrual: accrual({ servicePeriodStart: from, servicePeriodEnd: to }),
+    effectiveFrom: from, effectiveTo: to, opKey: opk("p652-periodtext"),
+  });
+  assert.ok(c.occurrence?.work_id, "the latest due event in the window was admitted");
+
+  // THE SECOND DUE DATE, through the human catch-up door: the same window, explicitly scoped.
+  const caught = await requestPlanCatchUp(BOB(), { plan: c.plan_id, from, to });
+  assert.equal(caught.admitted, 1, "the window holds a SECOND primary due date (that is the point)");
+
+  const rows = (await occurrenceRows(c.plan_id)).filter((o) => o.leg === "primary");
+  assert.equal(rows.length, 2, "two accrual legs, one stated term");
+  const expected = `one period of the accrual term ${from} to ${to}`;
+  for (const o of rows) {
+    const entry = await postPlanWork({ work: o.work_id, client, author: BOB(), firm: FIRM_A() });
+    const lines = await linesOf(entry);
+    assert.equal(lines[0].account_code, ACHART.expense);
+    assert.equal(String(lines[0].debit_cents), "120000", "the amount stated here, in every period");
+    assert.equal(lines[0].description, expected,
+      "the line is true of EVERY occurrence: it names the accrual term and says this entry is one period of it");
+    assert.doesNotMatch(lines[0].description, /^accrued /,
+      "and it does NOT claim this one entry accrued the whole stated term");
+    assert.ok(String(o.due_date) >= from && String(o.due_date) <= to,
+      `every posting date lies inside the stated term (${o.due_date})`);
+  }
+});
+
+// ===========================================================================================
+// p652.method.honoured — THE ENUM HOLDS THE RULE THIS SLICE ACTUALLY POSTS (review round 1, A2).
+// ===========================================================================================
+
+test("p652.method.honoured — the closed selection set is exactly the rule the schedule honours; the three drafted rules are refused by name and write nothing", async (t) => {
+  if (await gateAccruals(t)) return;
+  assert.deepEqual(ACCRUAL_METHODS, ["stated_amount"],
+    "one rule is recorded because one rule is performed: the frozen basis carries the stated amount "
+    + "and clara._plan_occurrence_basis only moves the posting date");
+  const client = await freshAccrualClient(ALICE(), "method");
+  const ref = await instructionRef({ client, author: BOB() });
+  for (const rule of ["stated_period_amount", "source_document_amount", "prior_period_amount"]) {
+    const refused = await assertPair(CLR.badRequest, ACCRUAL_REASON.methodUnsupported,
+      () => createAccrualAdjustment(BOB(), {
+        client, authorityRef: ref,
+        accrual: accrual({ method: { rule }, servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-07-31" }),
+        effectiveFrom: "2026-07-01", effectiveTo: "2026-07-31", opKey: opk("p652-method"),
+      }),
+      `the drafted selection rule ${rule}, which nothing in this slice performs`);
+    assert.deepEqual(refused.detail.supported, ["stated_amount"],
+      "the refusal LISTS what is honoured, so a caller is not left guessing");
+  }
+  assert.equal(await accrualCount(client), 0, "and no accrual was recorded under a rule nobody applies");
 });
 
 // ===========================================================================================
@@ -875,16 +1026,21 @@ test("p652.term.document — an accrual whose basis cites a filed document binds
   }
   const client = await freshAccrualClient(ALICE(), "term");
   const ref = await instructionRef({ client, author: BOB() });
-  const from = monthStart(await shiftMonths(today, -1));
+  // THE DOCUMENT'S OWN TERM IS THE WINDOW the schedule may run inside (0207's SIXTH MEASUREMENT):
+  // an accrual bound to a filed term cannot go on accruing past the period that document states.
+  const from = "2026-07-01";
+  const to = "2026-07-31";
   const term = await filedDocumentWithTerm(BOB(), {
-    firm: FIRM_A(), client, start: "2026-07-01", end: "2026-07-31",
+    firm: FIRM_A(), client, start: from, end: to,
   });
   assert.ok(term.servicePeriodId, "0140's own door anchored the term");
 
   // THE DISAGREEING TERM IS REFUSED rather than silently preferring one of the two.
   const clash = await assertPair(CLR.badRequest, ACCRUAL_REASON.termDocumentMismatch,
     () => createAccrualAdjustment(BOB(), {
-      client, authorityRef: ref, effectiveFrom: from,
+      // The window brackets the STATED term here, so what is under test is the document
+      // disagreement and not the window wall in front of it.
+      client, authorityRef: ref, effectiveFrom: "2026-08-01", effectiveTo: "2026-08-31",
       accrual: accrual({
         sourceDocumentId: term.document, documentServicePeriodId: term.servicePeriodId,
         servicePeriodStart: "2026-08-01", servicePeriodEnd: "2026-08-31",
@@ -894,7 +1050,7 @@ test("p652.term.document — an accrual whose basis cites a filed document binds
 
   // AND THE AGREEING ONE BINDS.
   const c = await createAccrualAdjustment(BOB(), {
-    client, authorityRef: ref, effectiveFrom: from,
+    client, authorityRef: ref, effectiveFrom: from, effectiveTo: to,
     accrual: accrual({
       sourceDocumentId: term.document, documentServicePeriodId: term.servicePeriodId,
     }),
@@ -917,7 +1073,7 @@ test("p652.term.document — an accrual whose basis cites a filed document binds
   });
   await assertPair(CLR.badRequest, ACCRUAL_REASON.termDocumentMismatch,
     () => createAccrualAdjustment(BOB(), {
-      client, authorityRef: ref, effectiveFrom: from,
+      client, authorityRef: ref, effectiveFrom: from, effectiveTo: to,
       accrual: accrual({
         sourceDocumentId: term.document, documentServicePeriodId: other.servicePeriodId,
       }),

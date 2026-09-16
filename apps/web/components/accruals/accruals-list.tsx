@@ -104,8 +104,7 @@ function AccrualRow({ clientId, row }: { clientId: string; row: AccrualListRow }
       </TableCell>
       <TableCell className="tabular-nums">{formatCents(row.amount_cents)}</TableCell>
       <TableCell className="text-muted-foreground">
-        {row.effective_from}
-        {row.effective_to === null ? ` ${t("windowOpenEnded")}` : ` – ${row.effective_to}`}
+        {t("windowFromTo", { from: row.effective_from, to: row.effective_to })}
       </TableCell>
       <TableCell>
         {/* COLOUR IS NEVER THE ONLY CUE (appendix D, Badge): each badge carries its own word, and
@@ -124,15 +123,13 @@ function AccrualRow({ clientId, row }: { clientId: string; row: AccrualListRow }
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
-/** The four selection rules, as sentences — with an HONEST raw-value fallback for anything outside
- *  the known set (the adjustments-register N10 idiom): a rule this build has not enumerated prints
- *  as itself, never as a key path and never as a silent blank. */
+/** The selection rule, as a sentence — with an HONEST raw-value fallback for anything outside the
+ *  admitted set (the adjustments-register N10 idiom): a rule this build has not enumerated prints
+ *  as itself, never as a key path and never as a silent blank. One rule is admitted because one is
+ *  performed (migration 0207's FOURTH MEASUREMENT). */
 export function methodLabel(t: Translate, rule: string): string {
   const labels: Record<string, string> = {
     stated_amount: t("methodStatedAmount"),
-    stated_period_amount: t("methodStatedPeriodAmount"),
-    source_document_amount: t("methodSourceDocumentAmount"),
-    prior_period_amount: t("methodPriorPeriodAmount"),
   };
   return labels[rule] ?? rule;
 }

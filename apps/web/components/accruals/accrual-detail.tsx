@@ -77,9 +77,7 @@ function Body({ clientId, row }: { clientId: string; row: AccrualDetailRow }) {
           <Fact label={t("factLiabilityLeg")} value={row.liability_account_code} />
           <Fact
             label={t("factWindow")}
-            value={row.effective_to === null
-              ? t("windowFromOpen", { from: row.effective_from })
-              : t("windowFromTo", { from: row.effective_from, to: row.effective_to })}
+            value={t("windowFromTo", { from: row.effective_from, to: row.effective_to })}
           />
           <Fact
             label={t("factSchedule")}

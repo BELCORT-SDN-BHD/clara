@@ -166,7 +166,10 @@ async function fill(h: Awaited<ReturnType<typeof renderComponent>>, over: Record
     expenseAccountCode: "6100",
     liabilityAccountCode: "2020",
     instruction: "The client's standing instruction of 2026-06-30.",
-    effectiveFrom: "2026-07-31",
+    // THE AUTHORITY WINDOW SITS INSIDE THE STATED TERM (0207's SIXTH MEASUREMENT): the form
+    // refuses a schedule that would post outside the period it names, before any round trip.
+    effectiveFrom: "2026-07-01",
+    effectiveTo: "2026-07-31",
     ...over,
   };
   for (const [field, value] of Object.entries(values)) {
@@ -230,6 +233,43 @@ test("652.form: a failed submit focuses the first invalid control and SENDS NOTH
     assert.deepEqual(sent, []);
     assert.equal(focusedId(), F("amountCents"));
     assert.match(h.text(), /An accrual of zero accrues nothing\./);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("652.form: a schedule that would post outside its own stated term is refused BEFORE the door, at the control", async () => {
+  // #652's own ruling — refuse before admission — applied to 0207's SIXTH MEASUREMENT. MEASURED on
+  // a rig before that wall existed: an authority running from June under a July term posted three
+  // entries, two of them describing a period they did not accrue for (review round 1, A1).
+  const sent: CreateAccrualInput[] = [];
+  const h = await renderComponent(App({ submit: async (input) => { sent.push(input); return ACCEPTED; } }));
+  try {
+    await fill(h, { effectiveFrom: "2026-06-01" });
+    await clickSubmit(h);
+    assert.equal(sent.length, 0, "a schedule reaching outside its term never reaches the door");
+    assert.equal(focusedId(), F("effectiveFrom"));
+    assert.match(h.text(), /cannot start before the service period it accrues for/);
+
+    await fill(h, { effectiveTo: "2026-12-31" });
+    await clickSubmit(h);
+    assert.equal(sent.length, 0);
+    assert.equal(focusedId(), F("effectiveTo"));
+    assert.match(h.text(), /cannot still be accruing after the service period ends\./);
+
+    // AND AN OPEN-ENDED AUTHORITY IS ITS OWN REFUSAL, not a silent null on the wire.
+    await fill(h, { effectiveTo: "" });
+    await clickSubmit(h);
+    assert.equal(sent.length, 0);
+    assert.equal(focusedId(), F("effectiveTo"));
+    assert.match(h.text(), /Say when this accrual's authority ends\./);
+
+    // …and the bracketed configuration goes through, carrying the window it was given.
+    await fill(h);
+    await clickSubmit(h);
+    assert.equal(sent.length, 1, "a window inside its own term is sent");
+    assert.equal(sent[0]?.effectiveTo, "2026-07-31",
+      "the end is a DATE on the wire, never a null the door would have to refuse");
   } finally {
     await h.unmount();
   }

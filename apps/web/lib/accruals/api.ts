@@ -33,15 +33,15 @@ const opts = (o: Opts) => ({ session: o.session ?? sessionTokenAccessor, signal:
 
 // ── the shapes the doors answer with ────────────────────────────────────────
 
-/** The CLOSED selection-rule set migration 0207's `method` CHECK admits. Each one names WHICH
- *  amount a human already stated the schedule uses; none of them computes, which is why this is an
- *  enum and not a registered evaluator closure (the migration header argues it in full). */
-export const ACCRUAL_METHODS = [
-  "stated_amount",
-  "stated_period_amount",
-  "source_document_amount",
-  "prior_period_amount",
-] as const;
+/** The CLOSED selection-rule set migration 0207's `method` CHECK admits. It names WHICH amount a
+ *  human already stated the schedule uses; it computes nothing, which is why this is an enum and
+ *  not a registered evaluator closure (the migration header argues it in full).
+ *
+ *  ONE MEMBER, BECAUSE ONE MEMBER IS WHAT THE SCHEDULE DOES: the configuration freezes the stated
+ *  amount into the plan revision's basis and every occurrence posts it. Three further rules were
+ *  drafted and would each have posted the same cents — a control that records a selection nobody
+ *  performs is a promise the ledger does not keep, so they wait for the lane that honours them. */
+export const ACCRUAL_METHODS = ["stated_amount"] as const;
 export type AccrualMethod = (typeof ACCRUAL_METHODS)[number];
 
 export const ACCRUAL_FREQUENCIES = ["monthly", "quarterly", "annual"] as const;
@@ -62,7 +62,9 @@ export type AccrualListRow = {
   amount_cents: number;
   currency: string;
   effective_from: string;
-  effective_to: string | null;
+  /** NOT NULL on the relation (0207 §A): an accrual states a term that ENDS, so the authority
+   *  that accrues for it ends too, on or before the last day of that term. */
+  effective_to: string;
   service_period_start: string;
   service_period_end: string;
   term_source: string;
@@ -268,7 +270,10 @@ export function derivedAccrualLines(input: {
       account_code: input.expenseAccountCode.trim(),
       debit_cents: input.amountCents,
       credit_cents: 0,
-      description: `accrued ${input.servicePeriodStart} to ${input.servicePeriodEnd}`,
+      // THE DATABASE'S OWN WORDING (`clara._accrual_journal_basis`): the revision's basis is
+      // FROZEN, so every occurrence posts this same line — and one occurrence accrues ONE PERIOD
+      // of the stated term, not the whole of it.
+      description: `one period of the accrual term ${input.servicePeriodStart} to ${input.servicePeriodEnd}`,
     },
     {
       account_code: input.liabilityAccountCode.trim(),

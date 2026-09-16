@@ -68,7 +68,9 @@ function goodDraft(over: Partial<AccrualDraft> = {}): AccrualDraft {
     servicePeriodEnd: "2026-07-31",
     method: "stated_amount",
     instruction: "the client's standing instruction of 2026-06-30",
-    effectiveFrom: "2026-07-31",
+    // THE WINDOW SITS INSIDE THE STATED TERM (0207's SIXTH MEASUREMENT).
+    effectiveFrom: "2026-07-01",
+    effectiveTo: "2026-07-31",
     ...over,
   };
 }
@@ -267,12 +269,23 @@ test("652.valid: the purpose, the authority and the instruction are each require
     [{ field: "instruction", code: "instructionRequired" }]);
 });
 
-test("652.valid: a method that takes its amount from a document asks for the document BY NAME", () => {
-  assert.deepEqual(validateAccrualDraft(goodDraft({ method: "source_document_amount" }), KNOWN),
-    [{ field: "sourceDocumentId", code: "methodNeedsDocument" }]);
+test("652.valid: the schedule runs INSIDE the term it names, and an open-ended authority is refused", () => {
+  // The three arms of 0207's window wall, mirrored at the control that holds each mistake. MEASURED
+  // before the wall existed: a June authority under a July term posted three entries, two of them
+  // describing a period they did not accrue for (review round 1, A1).
+  assert.deepEqual(validateAccrualDraft(goodDraft({ effectiveTo: "" }), KNOWN),
+    [{ field: "effectiveTo", code: "effectiveToRequired" }],
+    "a cost belongs to a period that ENDS, so the schedule that accrues it ends too");
+  assert.deepEqual(validateAccrualDraft(goodDraft({ effectiveFrom: "2026-06-01" }), KNOWN),
+    [{ field: "effectiveFrom", code: "windowBeforeTerm" }],
+    "the first entry would otherwise name a period it did not accrue for");
+  assert.deepEqual(validateAccrualDraft(goodDraft({ effectiveTo: "2026-12-31" }), KNOWN),
+    [{ field: "effectiveTo", code: "windowAfterTerm" }],
+    "…and the last entry would post after the term it names had ended");
   assert.deepEqual(
-    validateAccrualDraft(goodDraft({ method: "source_document_amount", sourceDocumentId: "d-1" }), KNOWN),
-    []);
+    validateAccrualDraft(goodDraft({ servicePeriodStart: "2026-07-01", servicePeriodEnd: "2026-09-30",
+      effectiveFrom: "2026-08-01", effectiveTo: "2026-09-30" }), KNOWN),
+    [], "a window strictly inside its term is fine: the term may be wider than the schedule");
 });
 
 test("652.valid: the schedule's two day-rule halves, and 0193's own reversal collision", () => {
@@ -297,7 +310,8 @@ test("652.valid: the authority window", () => {
   assert.deepEqual(validateAccrualDraft(goodDraft({ effectiveFrom: "" }), KNOWN),
     [{ field: "effectiveFrom", code: "effectiveFromRequired" }]);
   assert.deepEqual(
-    validateAccrualDraft(goodDraft({ effectiveFrom: "2026-07-31", effectiveTo: "2026-06-30" }), KNOWN),
+    validateAccrualDraft(goodDraft({ servicePeriodStart: "2026-06-01", effectiveFrom: "2026-07-31",
+      effectiveTo: "2026-06-30" }), KNOWN),
     [{ field: "effectiveTo", code: "effectiveToBeforeFrom" }]);
 });
 
