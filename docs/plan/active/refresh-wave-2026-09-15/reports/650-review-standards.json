@@ -1,0 +1,28 @@
+{
+  "ticket": 650,
+  "lens": "STANDARDS",
+  "head": "a948fb8b",
+  "findings": [
+    {
+      "id": "1",
+      "severity": "note",
+      "where": "apps/web/messages/en.json:547",
+      "what": "The `attempt` message key uses cardinal ICU plural (`one`/`other`) with hand-added `=2`/`=3` exact matches to fake ordinals, but has no exact match beyond 3, so `attempts` values of 21, 31, etc. would render as \"21th run\" instead of \"21st run\". Purely cosmetic and extremely unlikely to be hit in practice (retry counts realistically stay in the single digits), so this is polish, not a defect the ticket promises to avoid.",
+      "evidence": "apps/web/messages/en.json:547: `\"attempt\": \"{n, plural, one {#st run} =2 {2nd run} =3 {3rd run} other {#th run}}\"`. For n=4..20 `other` correctly yields \"4th\"..\"20th\", but for n=21 it yields \"21th run\" instead of \"21st run\".",
+      "fix": "If ever worth fixing, add explicit `=21`, `=31`, ... exact matches or switch to `selectordinal`; not urgent given realistic attempt counts."
+    }
+  ],
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 tests/client-work-pack.test.mjs (env PGHOST=127.0.0.1 PGPORT=55509 PGUSER=postgres PGDATABASE=clara_650) -> 12 tests, 12 pass, 0 fail, 0 skip (matches report)",
+    "worktree root: pnpm typecheck -> exit 0 (apps/web + packages/runtime both 'Done')",
+    "worktree root: pnpm lint -> exit 0 (all 4 workspaces incl. check-token-contrast, check-test-manifest [369 files], check-message-keys [2929 keys] all green)",
+    "worktree root: node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, 51 'use workflow' modules all frozen+registered",
+    "worktree root: node packages/runtime/scripts/check-parts-parity.mjs -> OK (run though not applicable; packages/runtime diff is empty)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (blueprints untouched)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/work/client-work-pack.test.ts lib/work/use-client-work-pack.test.ts components/firm/client-home/client-work-attention.test.tsx components/firm/client-workspace-overview.test.tsx -> 48 tests, 48 pass, 0 fail",
+    "apps/web e2e (killed two stale node listeners left on ports 3310/3312 from an earlier run in this same worktree before starting): pnpm --filter @clara/web e2e -- home-board-walk (full spec, 9 tests) under host load (CPU 100%, 64 node procs) -> 3 passed, 6 failed, all failures were signInTo timeouts/ECONNREFUSED (2 pre-existing tests timed out waiting for the login field, then the HTTPS proxy died) -- host contention, matching the exact class of flake the worker's own report documents for responsive-shell-walk",
+    "apps/web e2e re-run, isolated: pnpm --filter @clara/web e2e -- home-board-walk --grep home.facets (the 4 new #650 legs only) under still-heavy load -> 3 passed, 1 failed (home.facets.drilldown, a 5s signInTo toHaveURL timeout)",
+    "apps/web e2e re-run again, same grep, after host CPU dropped to 37% -> 4 passed, 0 failed, 41.8s (confirms host contention, not a #650 regression)",
+    "manual diff review: packages/db/migrations/0199_client_work_pack.sql (full read), packages/db/tests/client-work-pack.test.mjs (full read), apps/web/lib/work/client-work-pack.ts, use-client-work-pack.ts, use-client-work-pack.test.ts, client-work-pack.test.ts, components/firm/client-home/client-work-attention.tsx + .test.tsx, client-workspace-overview.tsx + .test.tsx diff, client-close-summary.tsx diff, e2e/home-board-mock.mjs diff, e2e/home-board-walk.spec.ts diff, e2e-fixture-ownership.test.ts diff, test/manifest.txt diff, rig-meta.mjs diff, package.json diff, CONTEXT.md/README diffs (all read in full)"
+  ]
+}

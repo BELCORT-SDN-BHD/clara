@@ -1,0 +1,42 @@
+{
+  "ticket": 647,
+  "lens": "STANDARDS",
+  "head": "e7b905e4",
+  "findings": [
+    {
+      "id": "en-json-third-namespace",
+      "severity": "should",
+      "where": "apps/web/messages/en.json:4035 (\"ClientIdentifiers\" key), used from apps/web/components/registers/client-identity-section.tsx:54 and apps/web/components/registers/AddClientIdentifierDialog.tsx:38",
+      "what": "The brief's binding 'Orchestrator decisions' section is explicit: \"messages/en.json: extend ClientKnowledge (:2527) and ArApCounterparty (:3815) — the four counterparty recordedVia.* strings under ArApCounterparty, any new sourceKind.* key under ClientKnowledge; no third namespace.\" DECISIONS.md restates the same rule for #647 (\"do not mint a third namespace (shared file — keep the edit localised)\"). The branch adds a brand-new top-level namespace `\"ClientIdentifiers\": { ... }` (sibling of `ArApCounterparty` and `ClientKnowledge`) and wires H-20's client-identifier section/dialog strings through it instead of nesting them under `ArApCounterparty`.",
+      "evidence": "`grep -n '^  \"ArApCounterparty\"\\|^  \"ClientIdentifiers\"\\|^  \"ClientKnowledge\"' apps/web/messages/en.json` -> 2530:ClientKnowledge, 3819:ArApCounterparty, 4035:ClientIdentifiers — three siblings at the same 2-space top-level indent, not two. `grep -rn 'useTranslations(\"ClientIdentifiers' apps/web/components/registers/*.tsx` -> AddClientIdentifierDialog.tsx:38, client-identity-section.tsx:54 confirm it is a live, wired namespace.",
+      "fix": "Fold `ClientIdentifiers.*` under `ArApCounterparty` (e.g. `ArApCounterparty.clientIdentifiers.*`) as the brief and DECISIONS.md require, and update the two `useTranslations` call sites accordingly."
+    },
+    {
+      "id": "dead-sourcekind-key",
+      "severity": "note",
+      "where": "apps/web/messages/en.json:2612 (`ClientKnowledge.sourceKind.counterparty_alias`)",
+      "what": "A new `sourceKind.counterparty_alias` string (\"Recorded on a counterparty alias\") was added under `ClientKnowledge`, but every call site that renders an identity alias's source (`counterparty-identity-panel.tsx:130`) passes only `\"document_extraction\"` or `\"user_statement\"` — both pre-existing keys — into `KnowledgeSourceBlock`. `knowledge-shared.tsx:142` is the only place that interpolates `sourceKind.${sourceKind}`, and nothing in the diff ever resolves to `counterparty_alias`, so the string is unreachable dead i18n content. `pnpm lint`'s `check-message-keys` only flags missing keys, not unused ones, so it did not catch this.",
+      "evidence": "`grep -rn 'sourceKind\\.' apps/web --include=*.tsx --include=*.ts | grep -v test` -> only two hits: `counterparty-identity-panel.tsx:126` (a comment) and `knowledge-shared.tsx:142` (`t(\\`sourceKind.${sourceKind}\\`)`); `counterparty-identity-panel.tsx:130` sets `sourceKind={alias.source.extraction_id ? \"document_extraction\" : \"user_statement\"}` — `counterparty_alias` is never assigned anywhere in the diff.",
+      "fix": "Either wire a call site that actually needs this source-kind, or delete the unused `sourceKind.counterparty_alias` key."
+    }
+  ],
+  "ran": [
+    "node --test --test-concurrency=1 --import ./tests/counterparty-identity-preintegration-gate.mjs tests/counterparty-identity.test.mjs (packages/db, rig 127.0.0.1:55506/clara_647) -> 18 pass / 0 fail (matches report)",
+    "node --test --test-concurrency=1 --import (alias-kind + identity + knowledge-0192 gates) tests/counterparty-merge-pr-1.test.mjs tests/counterparty-alias-kind.test.mjs tests/wave-a-aliases.test.mjs tests/wave-a2-counterparty-kind.test.mjs tests/s6-counterparty.test.mjs tests/p4t2-counterparty-aliases.test.mjs tests/debt-human-read-surfaces.test.mjs tests/knowledge-records.test.mjs tests/knowledge-onboarding-promotion.test.mjs -> 131 pass / 0 fail (matches report's 131/131)",
+    "node --test --test-concurrency=1 tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset flags) -> 30 pass / 0 fail / 1 skip T19 destructive (matches report)",
+    "node packages/db/scripts/operation-census.mjs --strict -> exit 0; called_missing 0/0, called_ungranted 2/0, frontier_mismatch 0/0, named_arg_mismatch 0/0, public_execute 0/0, unattributed 0/0, granted_uncalled 172/172 (matches report exactly)",
+    "node --test packages/runtime/tests/counterparty-identity-unit.test.mjs -> 5 pass / 0 fail (matches report)",
+    "node scripts/check-frozen-workflows.mjs (worktree root) -> OK, 281 frozen files, 51 use-workflow modules, exit 0",
+    "node packages/runtime/scripts/check-parts-parity.mjs (worktree root) -> OK, reader superset of emittable, exit 0",
+    "pnpm typecheck (worktree root) -> exit 0",
+    "pnpm lint (worktree root) -> exit 0 (token-contrast, test-manifest 369 files ordered, message-keys 2964 keys all resolve)",
+    "node scripts/run-tests.mjs (whole apps/web unit suite, run alone) -> 3745 tests / 3743 pass / 0 fail / 2 skipped",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (blueprints untouched)",
+    "node -e \"select max(version), count(*) from clara.schema_migrations\" against rig -> 0200_counterparty_identity_provenance, 194 applied",
+    "node -e query against pg_policy/information_schema.role_table_grants for clara.client_identifiers -> clara_authenticated SELECT + p_client_identifiers_human policy present (matches H-20 direct-RLS-read claim)",
+    "Manual full read of packages/db/migrations/0200_counterparty_identity_provenance.sql (1450 lines): prestate sha256 pins (5, 64-hex, measured not transcribed), FORCE RLS + owner/human policy pair on counterparty_identity_revisions, SECURITY DEFINER + search_path + plan_cache_mode on all three reads, _reserve_op/_finish_op + _audit in all three writer recuts, typed CLR refusals with detail.reason, no lock-order tables touched (N/A, correctly noted), Asia/Kuala_Lumpur used for as_of, exhaustive tail self-verification T1-T12",
+    "Manual diff review of shared files: packages/db/package.json (one-liner gate import), apps/web/lib/navigation/tree.ts (4 minimal edits), apps/web/test/manifest.txt (2 sorted insertions), apps/web/e2e/serve-built.mjs + e2e-fixture-ownership.test.ts (one-liner registrations, 7 RPC verbs declared, none in SHARED_RPC_VERBS), packages/db/tests/rig-meta.mjs (wholly-present-or-absent cohort), CONTEXT.md (house term/*Avoid* shape), READMEs (apps/web, packages/db/tests, packages/runtime) updated in-commit",
+    "Manual review of packages/runtime/lib/counterparty-identity.ts -> only `import { z } from \"zod\"`, no module-level node: imports",
+    "git log origin/main..HEAD -> all 6 commits carry a Co-Authored-By line"
+  ]
+}

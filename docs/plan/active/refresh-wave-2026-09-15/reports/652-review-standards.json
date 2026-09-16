@@ -1,0 +1,19 @@
+{
+  "ticket": 652,
+  "lens": "STANDARDS",
+  "head": "b579e25a",
+  "findings": [],
+  "ran": [
+    "pnpm typecheck (worktree root) — exit 0",
+    "pnpm lint (worktree root) — exit 0 (apps/web check-token-contrast, check-test-manifest, check-message-keys all PASS; packages/reporting-render eslint PASS)",
+    "node scripts/check-frozen-workflows.mjs — OK, 281 frozen files, 51 \"use workflow\" modules, append-only vs origin/main",
+    "node packages/runtime/scripts/check-parts-parity.mjs — OK, exit 0, reader proven to superset emittable set",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md — empty (untouched)",
+    "git diff origin/main...HEAD --name-only | grep for workRoutes.ts / purpose-label.ts / accounting-work-list.tsx / work-list-filters.tsx / client-workspace-overview.tsx / lib/firm/capabilities.ts — no matches (forbidden shared files untouched)",
+    "grep for rootQuery/humanQuery/roleQuery usage in packages/db/tests/accrual-adjustments.test.mjs and -fixtures.mjs — confirmed assertion-under-test calls route through humanQuery (bookkeeper/viewer personas) or a real clara_runtime roleQuery connection; rootQuery appears only for setup/footprint corroboration",
+    "grep -c '^test(' across accrual-form.test.tsx (11), accrual-draft.test.ts (21), accrual-walk.spec.ts (14), accrual-basis-unit.test.mjs (16), accrual-adjustments.test.mjs (17) — all match the final report's stated counts exactly",
+    "node -e JSON.parse(en.json) — valid; cross-checked every t(\"...\") call in components/accruals/*.tsx and app/(firm)/clients/[clientId]/accruals/**/*.tsx against the Accruals namespace — zero used-but-undefined keys, zero genuinely dead keys",
+    "git diff origin/main...HEAD for apps/web/test/manifest.txt, packages/db/package.json, packages/db/tests/rig-meta.mjs, .github/actions/db-live-gates/action.yml, apps/web/lib/navigation/tree.ts, apps/web/lib/command/routes.ts, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/e2e/serve-built.mjs — inspected by hand for sorted-position one-liner registrations",
+    "Read packages/db/migrations/0207_accrual_adjustments.sql in full (1424 lines) — header/deploy-order note, §0 prestate cohort + NON-REGRESSION sha256 pins (measured, not transcribed), FORCE RLS + zero app-role grants on clara.accrual_adjustments, SECURITY DEFINER + search_path=clara,pg_temp + clara_fn_owner throughout, typed CLR refusals with detail.reason/field/constraint, _reserve_op/_finish_op on both write doors, _audit calls, integer-cents CHECK, tail census re-reading the live catalog"
+  ]
+}

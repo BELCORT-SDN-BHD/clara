@@ -3,6 +3,11 @@
 **Branch** `impl/654-firm-defaults` · **worktree** `C:\Users\zhant\Desktop\clara-wt\654` · rig PG `127.0.0.1:55512` / `clara_654` (194 migrations after 0205). All evidence LOCAL; **hosted evidence pending** (no hosted lane exists for this slice).
 
 ```
+1251e374 fix(db): the evidence wall decides the CONCURRENT case, on one advisory key    [fix round 2]
+ba2c1cfe fix(db): 0205's evidence census is the LIVE invariant, with history reported  [fix round 1]
+0618b8f2 fix(web): the correct leg must change the value it asserts                     [fix round 1]
+e734b6b5 feat(web): Correct and Withdraw a firm rule, from the register that owns it    [fix round 1]
+4c60a5f7 fix(db): the cross-client evidence wall is two-way and covers both client pins [fix round 1]
 4b69d2b2 test(web,db): the four census suites the new settings section reds, and one lint fix
 4f0d7bb1 feat(web,db): the browser walk, three new mock verbs, and the two defects it caught
 8bd80bc2 feat(web): /settings/knowledge, the promote dialog and the firm-vs-exception pair
@@ -14,26 +19,26 @@
 
 | Row | State | Evidence |
 |---|---|---|
-| **AC1** | done | Eligibility wall `clara._tf_knowledge_firm_eligibility` + `clara.knowledge_key_firm_eligibility` (0205 §A/§B) → `p654.eligibility.refuses_client_key`, `.admits_seeded`, `.admits_by_kind` (all 13 keys probed one by one). Evidence wall `_tf_knowledge_firm_evidence` → `p654.evidence.refuses_filed_document` (N=1 and N=2), `.admits_unfiled_firm_document`. Exceptions survive → `p654.exception.survives_promotion`. Promotion act records promoter/authored reason/applicability/window → `p654.authority.floor`. |
+| **AC1** | done | Eligibility wall `clara._tf_knowledge_firm_eligibility` + `clara.knowledge_key_firm_eligibility` (0205 §A/§B) → `p654.eligibility.refuses_client_key`, `.admits_seeded`, `.admits_by_kind` (all 13 keys probed one by one). Evidence wall `_tf_knowledge_firm_evidence` → `p654.evidence.refuses_filed_document` (N=1 and N=2), `.admits_unfiled_firm_document`, `.refuses_client_work`; the FILING side `_tf_document_filing_firm_knowledge` (0205 §B.3) and the retraction hatch → `.retraction_survives_contamination`; the wall under CONCURRENCY (one shared advisory lock keyed on the document, after the documents row lock) → `.race_capture_vs_filing`, all four arrival orders. Exceptions survive → `p654.exception.survives_promotion`. Promotion act records promoter/authored reason/applicability/window → `p654.authority.floor`. |
 | **AC2** | partial (built) | Sentence 1 verify-only (0192). Firm-vs-exception pair built: `clara.get_knowledge_applicability` + `knowledge-exception.tsx` → `ke.01`–`ke.04`, walk "the client that already had its own value keeps it". "Where it applies in a subsequent Work" = **successor contract**, not claimed on this branch. |
 | **AC3** | partial, by blueprint | Clauses 1–2 **not built** (`docs/PRD.md:123` defers to #658/#663). Human-review affordance shipped instead: `exceptions` + `live_work` per rule, and the register STATES it re-runs nothing (`kf.07`, walk leg 1). Clause 3 → `p654.census.not_a_posting_grant`. |
-| **AC4** | done | Floors `p654.authority.floor`; revoked membership on all three lanes `p654.authority.revoked_membership` (first db cells for `answerer_not_active` and for `capture_knowledge_for` at all); cross-client evidence `p654.evidence.*`; independent overrides `p654.exception.independent_overrides`; negative census `p654.census.not_a_posting_grant`. |
-| **AC5** | done | `e2e/knowledge-firm-walk.spec.ts`, 11 walks: empty face, denied-below-floor, dialog (required authored reason, server MYT default, exceptions statement), register with authority + both exception holders, the pair, the recipient client, verbatim CLR10 with draft intact, cancel/Escape with focus return + preserved draft, stable URL/Back/reload, 320px, 200% zoom; every face axe-checked (wcag2a/2aa/21a/21aa). |
+| **AC4** | done | Floors `p654.authority.floor`; revoked membership on all three lanes `p654.authority.revoked_membership` (first db cells for `answerer_not_active` and for `capture_knowledge_for` at all); cross-client evidence **in both directions, on both client-bearing pins, and with the two acts in flight at once** `p654.evidence.*` (incl. `.race_capture_vs_filing`); independent overrides `p654.exception.independent_overrides`; negative census `p654.census.not_a_posting_grant`; the promotion as an operation `p654.promote.replay_is_one_receipt` / `.op_key_conflict` / `.race`. |
+| **AC5** | done | `e2e/knowledge-firm-walk.spec.ts`, **14 walks**: empty face, denied-below-floor, dialog (required authored reason, server MYT default, exceptions statement), register with authority + both exception holders, the pair, the recipient client, verbatim CLR10 with draft intact, cancel/Escape with focus return + preserved draft, stable URL/Back/reload, 320px, 200% zoom, **reduced motion**, **Correct/Withdraw denied below the floor**, **correct then withdraw with the register as the receipt**; every face axe-checked (wcag2a/2aa/21a/21aa). |
 | **AC6** | done at DB+web | Real Postgres, real least-privileged roles, current migrations. **No Workflow clause**: this slice ships no runtime module and no belt, so there is no World e2e leg to run — stated, not skipped. |
 | CB-AE2E-007 | firm half done | The promotion now has its caller (`promoteKnowledgeToFirm`); client half verify-only (#644). |
 | H-21 | named residual | `claraWork.v3.impl.ts:474` still records `observedRevisions({basis_digest:null})`; carried by the successor contract. |
 | H-52 | done | Applicability on the promotion act (`p654.authority.floor`) and its display (`KnowledgeApplicability` on the firm register). |
-| C-41 / C-52 / C48.5 / C83.24 | not this ticket | One composed control shipped (Promote beside Correct/Withdraw), not one button per function. `/settings/knowledge` carries no setup pointer beyond the section itself. |
+| C-41 / C-52 / C48.5 / C83.24 | not this ticket | One composed control per surface (Promote beside Correct/Withdraw on the client record; Correct beside Withdraw on the firm register), never one button per DB function. `/settings/knowledge` carries no setup pointer beyond the section itself. |
 | C79.3 | firm-setting half done | `/settings/knowledge`; re-evaluation half out of scope (PRD:123). |
 | C79.6 | verify-only, cell added | `p654.trust.no_laundering` (inferred and extracted both refused as firm policy, as owner). |
 
 ## Tests and commands
 
-- `packages/db/tests/knowledge-firm-defaults.test.mjs` (15 cells, new) + `knowledge-firm-fixtures.mjs` + `knowledge-firm-defaults-preintegration-gate.mjs` (appended to `packages/db/package.json`'s chain → 29 gates). Run from `packages/db` with the exact 29 `--import` flags: **15 pass / 0 fail / 0 skipped**. With `knowledge-records` + `knowledge-onboarding-promotion`: **55/55**. With `operation-census` + `rig-isolation` (no reset flags): **86 tests, 85 pass, 0 fail, 1 skipped** (the destructive T19 cell, by design).
-- RED FIRST, measured: before 0205 existed, the focused run was **15 fail / 0 pass**, each "the 0205 firm-default cohort is required for a focused run". The evidence hole was reproduced through the real doors first: a document with **two** live client filings was pinned by a firm-scope `capture_knowledge`, and client B's runtime pack came back carrying client A's document id and basis text verbatim.
-- Web unit (new, all in `test/manifest.txt`): `knowledge-firm-panel.test.tsx` 8/8 (four faces, authority, revoked promoter, exceptions, live Work, MYT dates), `knowledge-promote-dialog.test.tsx` 9/9 (floors, ineligible key, already-defaulted, required authored reason, door args, verbatim refusal, preserved draft), `knowledge-exception.test.tsx` 5/5 (pair ≠ conflict, per-applicability, unreadable firm rule).
-- **Whole `apps/web` suite** (`node scripts/run-tests.mjs`): **3741 tests, 3739 pass, 0 fail, 2 skipped**, 186 s. The 2 skips are the live-provider auth cells (absent `CLARA_LIVE_SUPABASE_AUTH_*`). `thread-live-clarify.test.tsx` passed inside the whole run **and** in isolation (2/2) — no flake this time.
-- Playwright on **3340/3341/3342**: `pnpm --filter @clara/web e2e knowledge` → **24 passed, 0 failed** (11 new + #644's 13, unchanged).
+- `packages/db/tests/knowledge-firm-defaults.test.mjs` (**21 cells**, new) + `knowledge-firm-fixtures.mjs` + `knowledge-firm-defaults-preintegration-gate.mjs` (appended to `packages/db/package.json`'s chain → 29 gates). Run from `packages/db` with the exact 29 `--import` flags: **21 pass / 0 fail / 0 skipped**. With `knowledge-records` + `knowledge-onboarding-promotion`: **61/61**. All five together (the three knowledge batteries + `operation-census` + `rig-isolation`, no reset flags): **92 tests, 91 pass, 0 fail, 1 skipped** (the destructive T19 cell, by design). Fix round 2 also ran the FILING-lane regression set, because `t_document_filings_firm_knowledge` now takes a lock: `document-filing-conflict` + `rig-docs-filings-provenance` + `rig-docs-attribution` + `rig-docs-correction` + `rig-docs-download-door` + `f-a7-beta-filing-verb` → **99 tests, 98 pass, 0 fail, 1 skipped**.
+- RED FIRST, measured: before 0205 existed, the focused run was **15 fail / 0 pass**, each "the 0205 firm-default cohort is required for a focused run". Fix round 1's five new cells were red again for their own reasons before the wall moved (see `reports/654-fixround-1.md`). The evidence hole was reproduced through the real doors first: a document with **two** live client filings was pinned by a firm-scope `capture_knowledge`, and client B's runtime pack came back carrying client A's document id and basis text verbatim.
+- Web unit (new, all in `test/manifest.txt`): `knowledge-firm-panel.test.tsx` **11/11** (four faces, authority, revoked promoter, exceptions, live Work, MYT dates, plus fix round 1's Correct / Withdraw / below-the-floor cells), `knowledge-promote-dialog.test.tsx` 9/9 (floors, ineligible key, already-defaulted, required authored reason, door args, verbatim refusal, preserved draft), `knowledge-exception.test.tsx` 5/5 (pair ≠ conflict, per-applicability, unreadable firm rule).
+- **Whole `apps/web` suite** (`node scripts/run-tests.mjs`), fix round 1: **3744 tests, 3741 pass, 1 fail, 2 skipped**, 306 s. The 2 skips are the live-provider auth cells (absent `CLARA_LIVE_SUPABASE_AUTH_*`). The 1 fail is cell 630 of `lib/clara/use-clara-thread-stop.test.ts`, a file this branch never touches; re-run in isolation immediately afterwards it is **25 pass / 0 fail**. Reported as host contention (twelve lanes on one machine), not fixed. The pre-fix-round run of the same suite was 3741 tests / 3739 pass / 0 fail / 2 skipped in 186 s.
+- Playwright on **3340/3341/3342**: `pnpm --filter @clara/web e2e knowledge` → **27 passed, 0 failed** (14 in this lane + #644's 13, unchanged). The pre-fix-round run was 24 passed / 0 failed. Per-run honesty: the first fix-round run was 26 passed / 1 failed on my own new leg (it filled the reason but not the value it then asserted) — a real defect in the cell, fixed in `0618b8f2`, not a flake.
 - `pnpm typecheck` **exit 0**; `pnpm lint` **exit 0** (all four workspaces). `node scripts/check-frozen-workflows.mjs` → "OK — 281 frozen file(s)". `node packages/runtime/scripts/check-parts-parity.mjs` → OK (run though not applicable). Known Windows reds #707/#693 untouched.
 
 ## Two shipped cells changed deliberately (D8 is a real behaviour change)
@@ -42,7 +47,7 @@
 
 ## Docs
 
-`packages/db/README.md` — new "Knowledge scope, firm defaults and exceptions". `packages/db/tests/README.md` — the battery + its gate. `apps/web/README.md` — application map row for `/settings/knowledge`. `CONTEXT.md` — exactly two terms (*Knowledge promotion*, *Client knowledge exception*).
+`packages/db/README.md` — new "Knowledge scope, firm defaults and exceptions" (fix round 2 added the concurrency bullet: the shared advisory lock, the row-lock ordering and the cell that proves it). `packages/db/tests/README.md` — the battery + its gate. `apps/web/README.md` — application map row for `/settings/knowledge`. `CONTEXT.md` — exactly two terms (*Knowledge promotion*, *Client knowledge exception*).
 
 **Blueprint drift.** The ticket's AC3 clauses 1–2 ask for automatic re-evaluation of affected work; `docs/PRD.md:123` defers that to #658/#663 with human review as the accepted interim. Not built; the affordance is. Second: `docs/PRD.md:122` says #654's remainder is 「界面或对话入口」 — the interface half is delivered, the chat half is a successor contract only. Neither blueprint edited.
 
@@ -65,7 +70,7 @@ z.object({
 }).strict()
 ```
 
-Door: `clara.open_work_question(p_task => $1, p_hook_token => $2, p_question => $3::jsonb, p_fields => $4::jsonb, p_reason => $5, p_source_ref => null)` — `clara_runtime` + hook token (`0180:578-686`). The question names both rows, both scopes and both applicability statements and **picks no winner**; `p_fields` offers one choice per row plus "neither — I will correct the record". Refusal map: CLR10 `invalid_hook_token` → retry with a fresh token; CLR13 `hook_token_bound` → replay, return the existing question; CLR10 `invalid_question_fields` → terminal author error; CLR11 → the Work vanished, terminal. Part kind: the existing `work_question` (`claraWork.v3.impl.ts:546`) — no new part kind, so parts-parity is unmoved. **Expiry:** `0198:143-147` removed `work_id is not null` from `clara.expire_due_interruptions`, so this question sweeps to `expired` on the chat-clarification clock while the CONFLICT outlives it; the successor must re-open rather than treat expiry as resolution, and the C13 register is where the conflict stays visible meanwhile.
+Door: `clara.open_work_question(p_task => $1, p_hook_token => $2, p_question => $3::jsonb, p_fields => $4::jsonb, p_reason => $5, p_source_ref => null)` — `clara_runtime` + hook token (`0180:578-686`). The question names both rows, both scopes and both applicability statements and **picks no winner**; `p_fields` offers one choice per row plus "neither — I will correct the record". Refusal map, re-measured off `0180_work_questions.sql:55-67` and its ten raise sites (`:317-402`) in fix round 1: CLR10 `invalid_hook_token` → retry with a fresh token; CLR10 **`invalid_fields`** (+ `field` + `constraint`) → terminal author error — the first draft named `invalid_question_fields`, a reason that appears nowhere in 0180; CLR10 `wrong_task_kind` / `work_unbound` → terminal author error; CLR13 `hook_token_bound` → replay, return the existing question; CLR13 `question_already_pending` → a question already blocks this task or this Work, so do not open a second; CLR13 `task_not_running` → the run is no longer parkable, terminal; CLR11 `task_not_found` → the Work vanished, terminal. Part kind: the existing `work_question` (`claraWork.v3.impl.ts:546`) — no new part kind, so parts-parity is unmoved. **Expiry:** `0198:143-147` removed `work_id is not null` from `clara.expire_due_interruptions`, so this question sweeps to `expired` on the chat-clarification clock while the CONFLICT outlives it; the successor must re-open rather than treat expiry as resolution, and the C13 register is where the conflict stays visible meanwhile.
 
 ## Assumptions and deviations
 
@@ -85,7 +90,26 @@ Door: `clara.open_work_question(p_task => $1, p_hook_token => $2, p_question => 
 
 - **Record the promoter's role at the instant of a governed act.** `clara.firm_memberships` has no history and `clara.audit_log` has no role column, so "who could do this then" is unanswerable after a role change. A membership-revision relation (#625's lane) or a role column on the audit row would close it; #654 emits the required floor plus the current role and labels both.
 - **`clara.knowledge_keys.scope_default` is now provably dead.** 0205 deliberately did not make it load-bearing (the table is append-only on UPDATE, so its rows can never be re-defaulted). Three repo-wide writes, zero reads. A later migration should drop or comment it so a reader does not take it for the wall.
-- **Firm-scope correction/withdrawal has no dedicated surface yet.** `correct_knowledge` / `withdraw_knowledge` accept a firm record at the same floor, but `/settings/knowledge` renders no control for them; today a firm rule is corrected through the record detail route. Worth a small follow-up once #648 lands beside it.
+
+## Fix round 1 (2026-09-17)
+
+Three findings applied, each with a measured red first: **654-ADV-1** (blocker — the evidence wall was one-way, so filing a document AFTER a firm rule cited it produced the contamination anyway and the same trigger then refused the retraction), **654-ADV-2** (`source_work_id` unwalled), **654-ADV-3** (Correct/Withdraw missing from the only surface that can carry them). Two notes applied (three orphaned message keys deleted; a reduced-motion walk leg added) and one verified-and-corrected (the successor contract's refusal map). 0205 was rolled back on the rig and re-applied from a true prestate; its prestate and tail notices both printed clean. Full finding-by-finding evidence, and what was deliberately left: `reports/654-fixround-1.md`.
+
+## Fix round 2 (2026-09-17)
+
+One finding applied, red first: **654-RC1** — the two halves of the cross-client evidence wall are
+BEFORE-row triggers that each read the other's table, so under READ COMMITTED two CONCURRENT
+transactions (a firm-scope capture pinning a document, and `clara.file_document` naming it) could
+both commit and leave exactly the state 0205 §0(8) refuses to apply against. Measured in all four
+arrival orders before the fix: **three of the four** left `{documents:1}` live violators, and the
+fourth was safe only incidentally (`_file_document_write` takes `clara.documents ... for update`).
+Both guards now take one shared advisory transaction lock keyed on the document, and the knowledge
+half takes the `clara.documents` FOR KEY SHARE row lock first so both lanes acquire in the same
+order and cannot deadlock. New cell `p654.evidence.race_capture_vs_filing` (the 21st) stages all
+four orders through both filing paths; a new §E tail assertion pins that both bodies carry the
+shared key literal. 0205 was rolled back on the rig and re-applied from a true prestate. Also
+**654-RATIFY-1**: no defect, no action — the LIVE-only census is the orchestrator's to ratify.
+Full evidence: `reports/654-fixround-2.md`.
 
 ## Unverified
 

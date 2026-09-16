@@ -1,0 +1,89 @@
+{
+  "ticket": 648,
+  "lens": "adversarial migration + accounting safety",
+  "head": "6a3893e1",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "where": "apps/web/components/firm-setup/firm-setup-checklist.tsx:456 (and :312-316, :145-147 of apps/web/lib/firm-setup/types.ts)",
+      "what": "Nine of the twelve catalogue facts have NO correction path once answered, and a skipped item can never be answered later — although the shipped copy promises exactly that and the database door supports both. The brief closes C48.5 here on \"persisted answers, applicability and correction path\"; the final report claims \"applicability + correction path on the facts panel\", but the facts panel only reaches knowledge records, i.e. the three D8 keys.",
+      "evidence": "checklist.tsx:456 gates every write control on `!committed && isPending(item)`, and `isPending` is `state === \"pending\"` (types.ts:145-147). The group walk is filtered the same way (checklist.tsx:316) and `setOpen({kind:\"item\"})` is only reachable from that same gated button, so an `answered`/`resolved`/`deferred` item has no Answer, no Change and no un-skip control anywhere on the page. `FirmConfirmedFactsPanel` (checklist.tsx:518) renders `env.confirmed_facts`, which `clara.get_firm_setup` builds from `clara.knowledge_records` joined to the catalogue (0203_firm_setup.sql:1057-1061) — only `currency`, `framework`, `accounting_basis`. So `legal_name`, `ssm`, `entity_type`, `address`, `mia`, `turnover`, `tin`, `fye`, `mpers_eligibility` are write-once from this surface. apps/web/messages/en.json `FirmSetup.skip.description` says \"It does not hold up finishing setup, and you can answer it later.\" — there is no control that can. The door is not the limit: on the fresh rig, `clara.answer_firm_setup_item` accepted a re-answer of an item whose record had been withdrawn (probe1 P7: \"P7 re-answer after withdraw -> ACCEPTED\"), and 0203:786-789 sets `state='answered'` from any non-committed state.",
+      "fix": "Render a write control for settled items: for a plan-only item (`knowledge_key === null`) an \"Answer again\"/\"Change\" button that opens the same `FirmSetupItemForm` prefilled with `answerText(item)`; for a deferred item the same button labelled \"Answer this now\"; for the three captured keys keep pointing at the facts panel, since the door's `knowledge_already_live` already has a designed face (`form.alreadyLive`). Add two red-first cells: (a) `firm-setup-checklist.test.tsx` — a deferred item exposes an answer control and the submit reaches `answer_firm_setup_item`; (b) `packages/db/tests/firm-setup.test.mjs` — `defer` then `answer` the same item leaves it `answered` with the new value and the deferral reason gone."
+    },
+    {
+      "id": "F2",
+      "severity": "blocker",
+      "where": "apps/web/lib/firm-setup/api.ts:63-77 with packages/db/migrations/0203_firm_setup.sql:757-759",
+      "what": "The lost-response recovery the brief names (\"re-read `get_firm_setup` before offering a distinct resubmit, same op_key for a retry\") provably cannot work against the real door. `_reserve_op`'s request hash includes `p_expected_revision`, and the surface reloads the envelope before offering the retry, so the retry always carries a DIFFERENT hash under the SAME op key and is refused `CLR10 \"op_key reused with different args\"` — a raw, unmapped message painted beside the control, next to \"The database refused this value\", when in fact the answer was accepted. The only test covering this (`fs.web.06`) passes because its mock returns a frozen envelope whose revision never rotates.",
+      "evidence": "Probe on the fresh rig (55607/clara_648r), exactly reproducing the browser sequence answer→lost ack→`loadFirmSetup`→press Save again with the same derived key: `L1 lost-response retry (write HAD landed) -> CLR10 \"op_key reused with different args\" detail=<none>`. Same class inside one walk: `L2 re-submitting an ALREADY-LANDED step of the same walk -> CLR10 \"op_key reused with different args\"`. `classify` (checklist.tsx:137-160) has no arm for that message (no `detail.reason`), so it falls through to `kind:\"invalid\"`; `firm-setup-item-form.tsx:195-199,256-257` then sets `problems[...]=\"server\"` and renders `outcome.message` verbatim. en.json `FirmSetup.form.failed` asserts \"pressing Save again sends the same request rather than answering twice\". The fix is proven on the same rig: retrying with the op key AND the revision that was actually sent replays the receipt with no second effect — `F2 fix — retry with the ORIGINALLY SENT revision -> receipt replayed: \"legal_name\"` / `receipts: 2 | plan revision_n: 4`.",
+      "fix": "Keep the exact request that was sent (op key + `expectedRevision` + answer) in the form's state on a transport failure, and resend that same triple on the retry instead of the freshly reloaded token — `_reserve_op` short-circuits before the CAS check (0203:757-760 precedes :765-770), so the stale token is never evaluated and the receipt replays. Also map the bare `CLR10 \"op_key reused with different args\"` to its own face (\"this answer was already recorded — the checklist has been re-read\"). Re-point `fs.web.06` so the mock rotates `revision_token` on the first (lost) write, which is what makes it a real test."
+    },
+    {
+      "id": "F3",
+      "severity": "should",
+      "where": "apps/web/lib/firm-setup/api.ts:38-46 (firmSetupOpKey), used at :70-77 and :83-90",
+      "what": "The op key is a pure function of (verb, plan, item_key, value), so it is stable across TIME, not across one attempt. Any intent that was ever submitted can never be submitted again: the key matches an existing receipt while the payload hash (which carries the current revision) does not, so the door refuses `CLR10 \"op_key reused with different args\"` permanently. Today F1 hides this for answers; the moment F1's change control lands, \"A → B → back to A\" is a dead end, and `defer` already carries the same defect (its key is f(verb, plan, item_key, reason), so skipping an item with a reason ever used before is refused).",
+      "evidence": "Probe on 55607/clara_648r with the exact `firmSetupOpKey` derivation: `P1 revert-to-earlier-value -> CLR10 \"op_key reused with different args\" detail=<none> | item still: \"MIA-2\"` — the earlier value can never be restored. Same-key/different-payload is a typed refusal and same-key/same-payload correctly replays one receipt (`P2 same-key/diff-payload -> CLR10 … | same-key/same-payload replay -> receipt replayed | receipts: 1`), so the door is behaving; the client's key derivation is the defect.",
+      "fix": "Mint a fresh op key when a form is opened or its value is edited (e.g. `crypto.randomUUID()` held in form state), and reuse it only for an explicit retry of that same attempt — which is the same state F2's fix already has to keep. Keep the FNV derivation, if it is wanted at all, only as a tiebreaker seeded with that per-attempt nonce. Cover it with a DB cell: answer `mia`=X, answer `mia`=Y, answer `mia`=X again, and assert the third call succeeds and the item reads X."
+    },
+    {
+      "id": "N1",
+      "severity": "note",
+      "where": "PG17 cluster rig648r, 127.0.0.1:55607, db clara_648r",
+      "what": "The from-scratch cluster is left running for the fix round, as instructed.",
+      "evidence": "`wsl -u root -- bash .../mkrig.sh rig648r 55607` → `127.0.0.1:55607 - accepting connections`; `clara_648r` created, `pnpm db:migrate` applied 194 migrations (0001→0203) exit 0 with 0203's own tail notice printed, a second `pnpm db:migrate` applied 0 new / 194 total, `pnpm db:seed` applied 2 seed files exit 0. The ticket's own battery plus the two census batteries were then run against it: 46 tests / 45 pass / 0 fail / 1 skip (the destructive reset cell, no `CLARA_RIG_ALLOW_RESET`).",
+      "fix": "Reuse port 55607 / db clara_648r for the fix round; drop it with `pg_dropcluster --stop 17 rig648r` when the wave closes."
+    },
+    {
+      "id": "N2",
+      "severity": "note",
+      "where": "packages/db/migrations/0203_firm_setup.sql:698-702",
+      "what": "A reconciliation that adds nothing still rotates the CAS token and appends a snapshot, so a second press of \"Start firm setup\" (a different op key) stales every in-flight editor for no state change.",
+      "evidence": "Probe on 55607/clara_648r: `L4 no-op reseed bumped revision 2 -> 3 | an in-flight answer then -> CLR06/stale_plan`; and under concurrency two simultaneous seeds both succeed (`P4b seed race -> ok seeded=0 | ok seeded=12 | items: 12 | revisions: 3`). The concurrency storm found no lock-order defect at all — 30 concurrent seed/answer/defer/commit calls produced only `ok` and `CLR06`, zero `40P01`, zero CHECK inconsistencies, exactly one live `reporting_framework` record and a revision counter matching the snapshot count.",
+      "fix": "Skip the bump when `v_added = 0` (return the unchanged plan in the receipt), or keep it and say so in `seed.help`. Not a correctness problem either way."
+    },
+    {
+      "id": "N3",
+      "severity": "note",
+      "where": "packages/db/migrations/0203_firm_setup.sql:1030-1052",
+      "what": "For a firm that holds no firm-scope plan at all, `get_firm_setup` still returns twelve items, `counter.required_total = 8` and eight `required_outstanding` keys — a progress reading for a plan that does not exist.",
+      "evidence": "Probe on 55607/clara_648r: `S2 no-plan envelope: {\"plan_id\":null,\"state\":null,\"seeded\":false,\"items\":12,\"counter\":{\"required_total\":8,\"required_answered\":0},\"outstanding\":8,\"facts\":0}`; `S2 seed on a planless firm -> CLR11`. Harmless today because both consumers check `plan_id === null` first (firm-setup-checklist.tsx:305-308, firm-setup-tile.tsx:40-41).",
+      "fix": "Return a zeroed counter and an empty `required_outstanding` when `p.id is null`, so no consumer can ever paint progress for an absent plan."
+    },
+    {
+      "id": "N4",
+      "severity": "note",
+      "where": "packages/db/migrations/0203_firm_setup.sql:1057-1061",
+      "what": "`confirmed_facts` filters on `r.superseded_at is null` only (no `state = 'live'`), so a withdrawn record stays in \"Facts confirmed in setup\" forever and `facts.empty` can never return once anything has been withdrawn.",
+      "evidence": "Probe on 55607/clara_648r: `P7 withdraw -> ok | record: {\"state\":\"superseded\",\"superseded_at\":\"…\"}` and then `P7 confirmed_facts after withdraw: [[\"default_currency\",\"withdrawn\"]] | item.knowledge_record_id: null` — the withdrawal tombstone is the surviving row. The panel does badge it (`facts.withdrawn`, firm-confirmed-facts-panel.tsx:101) and blocks correction (`facts.notCorrectable`), so this is a legibility choice rather than a defect; it is unstated in the file header and untested.",
+      "fix": "Either state the intent in §F's header and add a cell asserting a withdrawn fact keeps rendering with its badge, or exclude `state = 'withdrawn'` and let the item fall back to pending-for-recapture (which F1's control would then reach)."
+    },
+    {
+      "id": "N5",
+      "severity": "note",
+      "where": "apps/web/lib/require-firm-scope.ts:253-266",
+      "what": "The branch deviates from brief merge-risk 2 (\"one `SCOPE_ENTRANCES` row for `/settings/setup`\") and the deviation is correct — I checked it rather than taking the report's word.",
+      "evidence": "`SCOPE_ENTRANCES` holds exactly four entries and every one is a layout or an API route (`app/(firm)/layout.tsx`, `app/(full)/layout.tsx`, `app/api/runtime/[...path]/route.ts`, `app/api/build-info/route.ts`) — there are no per-page rows, so adding one for a page under `app/(firm)` would have made it a fifth entrance. Final-report assumption #5 is verified. Also verified clean: zero `create or replace` and zero foreign `alter table` in 0203 (so none of DECISIONS §1.3's assigned recuts is touched and no pre-image sha pin is owed), `git diff origin/main...HEAD --stat -- packages/runtime` and `-- .github` both empty (no Workflow, no World leg, no `db-live-gates` row — the ticket promises none), `node scripts/check-frozen-workflows.mjs` OK (281 files), `packages/runtime/scripts/check-parts-parity.mjs` OK, no view and no masked human-read path added, FORCE RLS on the one new table, and full tenant/machine isolation (firm B reads 0 rows of firm A's plan items and knowledge records; `clara_agent_ro`/`clara_runtime`/both wake roles get 42501 on all three surfaces; `clara_authenticated` gets 42501 on every direct DML including `onboarding_plan_items`; the catalogue refuses owner UPDATE/DELETE/TRUNCATE with CLR08).",
+      "fix": "No change. Record the deviation in the ticket's evidence so the merge-prep step does not re-add the row."
+    }
+  ],
+  "ran": [
+    "wsl -u root -- bash /mnt/c/Users/zhant/Desktop/clara-rebuild/docs/plan/active/refresh-wave-2026-09-15/mkrig.sh rig648r 55607 — cluster up, 127.0.0.1:55607 accepting connections",
+    "node -e (pg) create database clara_648r on 55607 — created",
+    "PGHOST=127.0.0.1 PGPORT=55607 PGDATABASE=clara_648r pnpm db:migrate (worktree root) — 194 new migration(s) applied · 194 total, exit 0; 0203_firm_setup applied last with its §J tail notice printed",
+    "PGPORT=55607 PGDATABASE=clara_648r pnpm db:migrate (re-run) — 0 new migration(s) applied · 194 total",
+    "PGPORT=55607 PGDATABASE=clara_648r pnpm db:seed — 2 seed file(s) applied, exit 0",
+    "node -e (pg) select count(*) from clara.schema_migrations / clara.firm_setup_keys on clara_648r — 194 migrations, 12 catalogue rows",
+    "PGPORT=55607 PGDATABASE=clara_648r node --test --test-concurrency=1 --import ./tests/firm-setup-preintegration-gate.mjs --import ./tests/knowledge-0192-preintegration-gate.mjs tests/firm-setup.test.mjs tests/operation-census.test.mjs tests/rig-isolation.test.mjs — 46 tests, 45 pass, 0 fail, 1 skip (T19 destructive reset), exit 0",
+    "node scripts/check-frozen-workflows.mjs (worktree root) — OK, 281 frozen files verified, exit 0",
+    "node packages/runtime/scripts/check-parts-parity.mjs — parts-parity OK, exit 0",
+    "cd apps/web && node --import ./test/bootstrap.mjs --import tsx --test --test-concurrency=1 components/firm-setup/{firm-setup-checklist,firm-setup-a11y,firm-setup-keyboard}.test.tsx — 16 tests, 16 pass, 0 fail",
+    "review probe1.mjs on 55607/clara_648r (10 groups: op-key revert, replay/conflict, capture rollback, answer race, seed race, tenancy + 4 machine roles + 5 direct-DML attempts, append-only belts, withdrawal, unseeded commit, one-open-firm index, refusal ordering) — all reported inline; 0 unexpected ALLOWED",
+    "review probe2.mjs on 55607/clara_648r (L1 lost-response retry, L2 mid-walk retry, L3 group shape, L4 no-op reseed) — L1 and L2 both CLR10 'op_key reused with different args'",
+    "review probe3.mjs on 55607/clara_648r (S1 30-call concurrency storm across all four doors, S2 planless firm) — 12 ok / 18 CLR06, zero 40P01, zero CHECK inconsistencies, 1 live knowledge record, revision_n 14 = 14 snapshot rows",
+    "review probe4.mjs on 55607/clara_648r (F2 fix proof) — retry with the originally sent revision replays the receipt, no second effect",
+    "git log --oneline origin/main..HEAD (7 commits) · git diff origin/main...HEAD --stat (31 files, +5774/-8) · git diff origin/main...HEAD --stat -- packages/runtime .github apps/web/app/api apps/web/lib/doors.ts (all empty)",
+    "grep -c 'create or replace' packages/db/migrations/0203_firm_setup.sql — 2, both inside comments; 'alter table' — only the two FORCE-RLS lines on the new table; no create view, no drop"
+  ]
+}

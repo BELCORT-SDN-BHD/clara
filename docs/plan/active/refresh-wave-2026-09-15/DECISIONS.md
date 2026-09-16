@@ -111,3 +111,57 @@ reversible (beta, test data). Everything here is local-evidence scope; hosted ev
 - D8/D9: new fail-closed relation `clara.knowledge_key_firm_eligibility` (seeded: `default_currency`, `reporting_framework`, `accounting_basis`; preference/policy-kind records eligible by kind) enforced by a NEW BEFORE INSERT trigger on `knowledge_records` for `scope_kind='firm'` (CLR10 `knowledge_scope_not_firm_defaultable`); private-evidence wall as a second BEFORE INSERT trigger: a firm-scope record may not pin a document with any live client filing (CLR10 `firm_scope_client_evidence`); zero recuts of the 0192 bodies. `list_firm_knowledge` (viewer floor aligned with `list_client_knowledge`) + `get_knowledge_applicability`.
 - Entrance: `/settings/knowledge` section (id `knowledge`): firm register, Promote dialog (scope, actor, applicability/effective period, source, authored reason), Correct/Withdraw, and the firm-rule-vs-client-exception pair in every client's C13 (firm rows labelled, exception shown as overriding). Web entrance only; chat capture of firm scope → successor stanza.
 - Re-evaluation engine: not built (PRD:123); ship the human-review affordance (which clients hold exceptions; which live Work cites the key) and the claraWork_v4 `observedRevisions({knowledge_version})` contract; record the ticket-vs-blueprint contradiction as blueprint drift. Cells: current permission on promotion/use, revoked membership, cross-client evidence refusal, independent client overrides, a firm preference is not a posting grant nor plan authority. #648 consumes the same doors.
+
+## 3 · Post-review ratifications (2026-09-17, orchestrator; owner-overridable)
+
+Ruled after the three-lens review and the fix/re-check rounds (`reports/<n>-review-*.json`, `reports/<n>-fixround-*.md`, `reports/<n>-recheck-*.json`; the digest is `reports/WAVE-DIGEST.md`). Each row is a deviation a worker or reviewer asked the orchestrator to rule on. Reversible in beta.
+
+### 3.0 · 大白话（产品相关的几条）
+
+| # | 问题 | 裁定 | 为什么 |
+|---|---|---|---|
+| R1 | 邀请人后来被降级/移除，他发出的邀请预览还显示「待接受」，要不要多加一种状态？ | **不加**，四种结果不变；预览页与管理员名册保持一致；差异用一个 cell 钉住并记为残留，另开 issue | 多一种状态会让预览和名册各说各话 |
+| R2 | #649 的「全屏入门」那条走查（UI-21）本波没跑，怎么记？ | **记为具名残留**，另开 issue（需要 docker/PostgREST 的 live-stack runner，本机十二条 lane 都没有） | 写一条从没跑过的断言不是证据 |
+| R3 | 客户首页「处理中」要不要把「正在停止」的 Work 也算进去？ | **不算**，按 brief 原文（queued/running）；残留具名 | 改口径是产品决定，不在本波 |
+| R4 | 应计（#652）授权窗口必须落在服务期间之内、且至少产生一个到期日，否则拒绝？ | **要**（两条新拒绝都采纳） | 一条永远不会入账的应计，是账本不会兑现的承诺；比默默接受更诚实 |
+| R5 | 事务所默认规则撤回后，它引用过的文件还能不能归到某个客户名下？ | **能**：只统计「在用」的规则；历史版本只提示不阻止 | 撤回就是拒绝理由里指向的补救办法，不能让文件永远无法归档 |
+
+### 3.1 · Rulings (all thirteen)
+
+| Ticket | Item | Ruling |
+|---|---|---|
+| #625 | `CORE_RELATION_HANDOVERS` census instead of the brief's `SHARED_RPC_VERBS` declaration for three relation reads | **Ratified.** The brief's instruction was mechanically inert (that census matches RPC verbs only); the substitute is stronger. brief-625 §3 is corrected by this row. |
+| #625 | Issuer-rank blind spot (invite from a since-demoted issuer previews `pending`) | **Ratified as shipped** (R1): four outcomes stay; `p625.preview.issuer_rank` pins the divergence; follow-up issue. |
+| #639 | Keep `client_not_found` vs `obo_not_active` distinct on `complete_fixed_asset_particulars_for` | **Ratified.** The runtime door is OBO-explicit; 0195's ladder separates the classes; the browser-reachable door already folds both to CLR11. |
+| #639 | `serve-built.mjs` gained a ten-line `viewer@` rank-0 persona branch; `test/domInspect.ts` gained `getElementById` | **Ratified.** Needed to drive the denied leg by role. Integration keeps the hunk as a union; if a second lane added a competing persona branch the integrator reconciles them into one. |
+| #646 | Two unconditional persistent Alerts ("revision accepted" / "accounting impact pending") | **Ratified**; brief-646 §64 specifies two rows. A conditional second row is #676's concern. |
+| #647 | No FK from `counterparty_identity_revisions` to `counterparties`; tenant congruence by a lock-free assertion inside the sole ungranted writer | **Ratified.** The FK's `FOR KEY SHARE` re-opened a measured deadlock between two shipped human doors. Follow-up: document `merge_counterparties`' lock order (0149 splice). |
+| #647 | Only `KnowledgeSourceBlock` reused from `knowledge-shared.tsx`; the kind/trust vocabularies are not called | **Ratified.** An alias has no kind/trust concept in 0200; calling those helpers would invent data. brief-647 "call verbatim" is narrowed to the one applicable export. |
+| #649 | UI-21 altitude leg not authored | **Ratified as a named residual** (R2); follow-up issue for a docker-free path or a mock lane owning the rail + full-screen thread. |
+| #649 | `name_family_collision` detail carries candidate ROWS, not bare ids | **Ratified.** brief-649 lines 51/74 are corrected by this row. |
+| #650 | `active` facet = queued/running only; `stopping` Work carries no tile | **Ratified** (R3); residual named on the surface and in the report. |
+| #652 | Authority window must lie inside the stated term (`effective_to` required) | **Ratified** (R4). The chat tool's schema is the module's (`lib/accrual-basis.ts`): `effective_to` is no longer optional there and the cut follows the module, not the older stanza text. |
+| #652 | CLR10 `accrual_schedule_yields_no_occurrence` for a schedule that reaches no due date | **Ratified** (R4). Follow-up for the plan lane's own door (owned by #653's recuts) to share the refusal. |
+| #654 | Firm-scope evidence census counts LIVE violations only; superseded/withdrawn revisions raise NOTICE | **Ratified** (R5). It is the invariant the three guards enforce and what every read emits. |
+
+### 3.2 · Blueprint drift — recorded for the #683 blueprint sync, NOT edited this wave (owner ruling 2026-09-15)
+
+| Pointer | Claim | Measured state |
+|---|---|---|
+| `docs/PRD.md:114` | high-stakes gating reads as amount-based | `clara.is_high_stakes` (0004:72-78) also fires on opening balance, year end and tax-affecting; the Work lane never calls it, `book_staff_advance_application`'s drafted branch (0043:2666) still does (#638). |
+| `docs/ARCHITECTURE.md` §3.5 / PRD F3 | fixed-asset materialisation is intrinsic because the hook runs at every approve path | False since 0178; true again only because 0201 adds a lane-agnostic birth trigger. `0041:4528-4529` and `x41-wave-d-a-fa.test.mjs:186` still say the old thing; `p639.census.approve_paths` enumerates the paths (#639). |
+| `docs/ARCHITECTURE.md:171` | pins are `chatTurn→chatTurn_v19`, `claraWork→claraWork_v3` only | omits `clientOnboarding→clientOnboarding_v4` today; after this wave's cut the three pins are v20 / v4 / v5 (#649, integration). |
+| `docs/PRD.md:69` | "an existing authorisation rule" is accepted plan authority | `accounting_plans.authority_kind` admits exactly `explicit_instruction` (0193:418); `create_accounting_plan` refuses `authority_rule` by name (0193:1474-1480). Unchanged by 0208 (#653). |
+| `docs/PRD.md:69` | prepayment amortisation is handled "through conversation, documents or Accounting directly" today | The chat half is delivered only by the `chatTurn_v20` cut in this wave's integration (#653). |
+| `docs/PRD.md:123` | re-evaluation deferred to #658/#663 with human review as interim | Confirmed as built: the human-review affordance ships; no engine (#654). |
+| `docs/PRD.md:122` | #654's remainder is "界面或对话入口" | Interface half delivered; the chat capture of firm scope is a `claraWork_v4` contract only (#654). |
+
+### 3.3 · Integration notes derived from the reports (binding for the integration worker)
+
+1. Merge order (migration order, no-migration branch first): #633 → #650 (0199) → #647 (0200) → #639 (0201) → #646 (0202) → #648 (0203) → #649 (0204) → #654 (0205) → #638 (0206) → #652 (0207) → #653 (0208) → #625 (0209).
+2. 0201 (T.5) and 0206 (§0) both pin the `_subledger_on_approve` caller roster at six names by whole-schema regex; a sibling body that merely NAMES the hook trips 0206's prestate. On the from-scratch merged chain: if §0 refuses, re-measure and re-issue the roster string in 0206 (unmerged, so allowed — record it); never weaken the assertion.
+3. The from-scratch chain needs a cluster that has never run a clara migration (0154's role census is cluster-global, `= 14`): `rigint` on 55600 is fresh; never re-apply into a second database on it.
+4. Shared files with known merge hazards: `e2e-fixture-ownership.test.ts` (`SHARED_RPC_VERBS`, `CORE_RELATION_HANDOVERS`, `LANE_MOCKS`, `LANE_DECLARATIONS`), `serve-built.mjs` (#639 persona branch, #648/#639 default responses, twelve hooks), `packages/db/package.json` gate chain (migration order, not alphabetical), `rig-meta.mjs` cohorts (`];` repairs), `action.yml` (each ticket's stated step order; per-line `\` continuations), `tree.ts`/`routes.ts` leaves (re-run #652's `resolveActive` wall in `tree.test.ts`), `en.json`, `manifest.txt`, `CONTEXT.md`, `kp.01` stays exactly ten (no lane minted a knowledge key).
+5. Successor cut reads EVERY report's stanza, not §1.1's summary: `chatTurn_v20` carries #638 `start_staff_expense_claim_work`, #652 `start_accrual_work`, #653 `start_prepayment_schedule_work`; #647's `record_counterparty_alias` needs an OBO door no branch shipped → NOT cut, stays a contract (D11). `claraWork_v4` carries #654 (a) knowledge-context step + `observedRevisions({knowledge_version})` and (b) `ask_knowledge_conflict`, #639 `apply_fixed_asset_particulars`, #652 `answer_accrual_term` park, #653 term park (`read_prepayment_source` + prompt sentence) — only what each stanza specifies; anything a stanza leaves open stays out and is named. `clientOnboarding_v5` + `interview.v4.questions.ts` per #649 (`fye_day` stays `required_for_commit:false`).
+6. Host-contention flakes are documented per report (sign-in timeouts; `thread-live-clarify`, `use-clara-thread-stop` cell 630, `onboarding-checklist`, `work-detail` "641 switching a tab"); a red in those files is a merge regression only if it reproduces in isolation.
+7. Rigs: `rig654r` (55612) is STALE (pre-round-2 0205) — drop before any use; all `rig<n>r` and `rig647z` are dropped at wave close.

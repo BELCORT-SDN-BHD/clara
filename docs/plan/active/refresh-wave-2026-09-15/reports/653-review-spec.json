@@ -1,0 +1,33 @@
+{
+  "ticket": 653,
+  "lens": "SPEC",
+  "head": "cc2beaa5",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "note",
+      "where": ".github/actions/db-live-gates/action.yml:261",
+      "what": "The new prepayment-occurrence-e2e CI step lost the `\\`-per-line continuation its #640 sibling block above it uses, so the four env-var assignments plus the command landed on one long line separated by runs of spaces (cosmetic only — `bash -n` on the exact text confirms it is syntactically valid, and multi-space word separation is legal shell).",
+      "evidence": "git diff origin/main...HEAD -- .github/actions/db-live-gates/action.yml shows `PGPORT=$PGC_PORT         PGDATABASE=clara_wave_b_ci         RELAY_TEST_MODE=1         WORKFLOW_POSTGRES_URL=\"...\"           node tests/prepayment-occurrence-e2e.mjs` as one line, vs. the neighbouring #640 block's `PGPORT=$PGC_PORT \\` / `PGDATABASE=... \\` / ... style. `bash -n` on the exact text exits 0.",
+      "fix": "Reformat the new step's env-var line with the same trailing-`\\` continuation as the #640 block immediately above it, for readability parity. No functional change needed."
+    },
+    {
+      "id": "F2",
+      "severity": "note",
+      "where": "apps/web/e2e/plans-mock.mjs (commit cc2beaa5)",
+      "what": "The branch edits `plans-mock.mjs`, a file belonging to the already-merged #640 lane and not on brief-653's declared one-liner list, to fix a real cross-lane bug (an uncached stream-drain that broke #653's shared `pause_accounting_plan` verb). The fix is disclosed as finding #4 in the final report and is verified by the fixture-ownership test and a clean Playwright run, so this is not a defect — flagging only so the integration/merge step is aware a non-declared shared file moved.",
+      "evidence": "Report `docs/plan/active/refresh-wave-2026-09-15/reports/653-final.md` \"Findings\" #4; `git diff origin/main...HEAD -- apps/web/e2e/plans-mock.mjs` shows the `readCachedJson` refactor; `apps/web/e2e/e2e-fixture-ownership.test.ts` diff declares the four shared verbs; independently reran `pnpm exec playwright test prepayments-walk` on a quiet host → 6/6 passed in 53.9s with no pause-dialog-stuck symptom.",
+      "fix": "No code change requested; note for the wave's integration pass to check `plans-mock.mjs` against any other concurrently-landing lane that also touches it before final merge order is fixed."
+    }
+  ],
+  "ran": [
+    "packages/db$ PGHOST=127.0.0.1 PGPORT=55511 PGUSER=postgres PGDATABASE=clara_653 CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 node --test --test-concurrency=1 $GATES tests/prepayment-schedule.test.mjs -> 15/15 pass, 0 fail, 0 skip, exit 0",
+    "packages/db$ (same env) node --test --test-concurrency=1 $GATES tests/prepayment-occurrences.test.mjs -> 8/8 pass, 0 fail, 0 skip, exit 0",
+    "packages/runtime$ node --test tests/prepayment-schedule-basis-unit.test.mjs -> 11/11 pass, exit 0",
+    "apps/web$ node --import ./test/bootstrap.mjs --import tsx --test components/prepayments/prepayments-render-states.test.tsx components/prepayments/prepayments-a11y.test.tsx components/prepayments/prepayments-keyboard.test.tsx lib/prepayments/schedule.test.ts -> 30/30 pass, 0 fail, exit 0 (11+3+4+12 matches report's per-file counts)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, 51 \"use workflow\" modules frozen+registered, exit 0",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, exit 0",
+    "apps/web$ CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3330 CLARA_E2E_NEXT_PORT=3331 CLARA_E2E_RUNTIME_PORT=3332 pnpm exec playwright test prepayments-walk --reporter=line (against existing .output/.next build, this lane alone on a quiet host) -> 6/6 passed, 53.9s, exit 0 -- corroborates AC7 beyond the report's own three contended runs",
+    "git log --oneline origin/main..HEAD (8 commits); git diff origin/main...HEAD --stat (40 files, +8055/-16); read migration packages/db/migrations/0208_prepayment_amortisation.sql in full (prestate section 0, section A kind CHECK, section B prepayment_schedules table, section C per-period basis recuts, section D doors incl. create_prepayment_schedule and _plan_admit_occurrence, section E list_prepayment_attention two-arm read, section D.1 grants, TAIL census) and packages/runtime/lib/prepayment-schedule-basis.ts (successor-contract footer) against DECISIONS.md #653 section, brief-653.md, gap-653.md, and the ticket body/comments via gh issue view 653"
+  ]
+}

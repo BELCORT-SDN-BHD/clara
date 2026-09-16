@@ -1,0 +1,44 @@
+{
+  "ticket": 647,
+  "lens": "SPEC",
+  "head": "e7b905e4",
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 --import ./tests/counterparty-alias-kind-preintegration-gate.mjs --import ./tests/counterparty-identity-preintegration-gate.mjs tests/counterparty-identity.test.mjs -> 18/18 pass",
+    "packages/db: same gates + neighbours (counterparty-merge-pr-1, counterparty-alias-kind, wave-a-aliases, wave-a2-counterparty-kind, s6-counterparty, p4t2-counterparty-aliases, debt-human-read-surfaces, knowledge-records, knowledge-onboarding-promotion) -> 131/131 pass",
+    "packages/db: node scripts/operation-census.mjs --strict -> exit 0, called_missing 0, called_ungranted 2->0 after waivers, frontier_mismatch 0",
+    "packages/runtime: node --test tests/counterparty-identity-unit.test.mjs -> 5/5 pass",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, counterparty-identity.ts not present",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader ⊇ emittable",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test client-identity-section.test.tsx counterparty-identity-correct.test.tsx counterparty-identity-panel.test.tsx aging.test.ts counterparty.test.ts counterparty-doors.test.ts tree.test.ts routes.test.ts counterparty-hygiene-kinds.test.tsx -> 90/90 pass",
+    "apps/web: node scripts/check-test-manifest.mjs -> 369 files, alphabetical, all present",
+    "apps/web e2e: pnpm --filter @clara/web e2e counterparty-identity (ports 3280/3281/3282) -> 17/17 passed (1.0m), run alone",
+    "gh issue view 647 --json body,comments (0 comments) -- cross-checked AC/historical-row text against brief-647.md and gap-647.md",
+    "git diff origin/main...HEAD --stat / per-file diffs read in full for migration 0200, tree.ts, counterparty-doors.ts, counterparty-identity.ts (lib + panel + section), counterparty-hygiene-panel.tsx, aging.ts/aging-register.tsx, counterparty.ts, en.json, CONTEXT.md, READMEs, rig-meta.mjs, e2e-fixture-ownership.test.ts, serve-built.mjs"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-1",
+      "severity": "should",
+      "where": "apps/web/messages/en.json (new top-level \"ClientIdentifiers\" key, ~line 144); apps/web/components/registers/AddClientIdentifierDialog.tsx:38; apps/web/components/registers/client-identity-section.tsx:54",
+      "what": "The delivery mints a brand-new top-level i18n namespace `ClientIdentifiers` for H-20's client-own-identifiers copy, directly contradicting the brief's binding text (repeated twice: \"Orchestrator decisions\" and §5 Web slice): \"extend `ClientKnowledge` ... and `ArApCounterparty` ... no third namespace\" / \"do not mint a third namespace (shared file — keep the edit localised)\". `en.json` is a wave-shared file (WORK-ORDER rule 8, brief risk 13) precisely because multiple concurrent tickets edit it; adding a new top-level key instead of nesting under `ArApCounterparty` is exactly the kind of non-localised edit the rule exists to prevent. The final report's own \"Docs updated\" and \"Assumptions\" sections do not mention or justify this deviation.",
+      "evidence": "git diff origin/main...HEAD -- apps/web/messages/en.json shows `+  \"ClientIdentifiers\": { \"heading\": ..., \"addTrigger\": \"Add identifier\", ... }` as a new top-level object (sibling of `ArApCounterparty`, not nested inside it). Two call sites use `useTranslations(\"ClientIdentifiers\")`. No test hardcodes the namespace name (they assert rendered strings), so the fix is contained.",
+      "fix": "Move the `ClientIdentifiers` block's keys under `ArApCounterparty.clientIdentifiers` (or another existing namespace's sub-object), update the two `useTranslations(\"ClientIdentifiers\")` call sites to `useTranslations(\"ArApCounterparty.clientIdentifiers\")`, and re-run `client-identity-section.test.tsx` / the Playwright walk to confirm the rendered strings are unchanged."
+    },
+    {
+      "id": "SPEC-2",
+      "severity": "should",
+      "where": "apps/web/e2e/counterparty-identity-walk.spec.ts (whole file, 17 tests); apps/web/components/registers/counterparty-identity-panel.test.tsx; client-identity-section.test.tsx; counterparty-identity-correct.test.tsx",
+      "what": "AC6's own text (gh issue #647, and gap-647.md/brief-647.md's TDD seam (e)) explicitly requires verifying \"meaningful loading\" and \"partial/stale\" as journey states, alongside empty/filtered/invalid-saving/denied/cancelled-recovery. Every other named state (empty, filtered-to-nothing, denied 403, invalid/saving via the confirm-gate and CLR23 refusal, cancelled+recovery, 320px, 200% zoom, keyboard/focus, reduced motion, stable URL/Back, preserved draft) has a dedicated cell across the Playwright walk and/or the three jsdom files. \"loading\" and \"partial/stale\" have none — no cell asserts a loading skeleton/spinner state is reached, and none exercises a partial failure (e.g. one of `ClientIdentitySection`'s three independent `useAsyncRead`s — identities/corrections/identifiers — failing or returning stale data while the others succeed). The final report marks AC6 \"done\" with no residual named for either state.",
+      "evidence": "`grep -n \"stale\\|Skeleton\\|loading\\|Loading\" apps/web/e2e/counterparty-identity-walk.spec.ts apps/web/components/registers/counterparty-identity-panel.test.tsx apps/web/components/registers/client-identity-section.test.tsx apps/web/components/registers/counterparty-identity-correct.test.tsx` returns nothing; `counterparty-identity-mock.mjs` fixtures are `clientOk / clientEmpty / clientDenied / clientVendorOnly` only, no delayed/partial-failure fixture. The 17 Playwright test titles (grep `^test(`) list every other required state by name but never \"loading\" or \"stale\"/\"partial\".",
+      "fix": "Add at least one cell exercising the loading state (e.g. delay the mock's `get_counterparty_identity`/`list_counterparty_identity` response and assert the loading affordance renders before data), and one exercising a partial/stale read (e.g. have `list_counterparty_merge_corrections` 500 while `list_counterparty_identity`/`loadClientIdentifiers` succeed, and assert the section shows the succeeded halves plus a scoped error for the failed one, per `ClientIdentitySection`'s three-independent-reads design). If genuinely deferred, name it as a residual in the final report rather than marking AC6 done outright."
+    },
+    {
+      "id": "SPEC-3",
+      "severity": "note",
+      "where": "apps/web/components/registers/counterparty-identity-panel.tsx:10-19 (header comment) and its use of components/registers/knowledge-shared.tsx",
+      "what": "The brief's \"Surface ownership\" section names five `knowledge-shared.tsx` exports to \"call verbatim\": `KnowledgeSourceBlock`, `knowledgeValueText`, `appliesWhenText`, `KnowledgeKindBadge`, `KnowledgeTrustBadge`. Only `KnowledgeSourceBlock` is used; the other four are never imported or called anywhere in the delivered diff. The deviation is defensible on inspection — `KnowledgeKindBadge`'s translations (`ClientKnowledge.kind.*` = assertion/extracted_fact/preference/policy) and `KnowledgeTrustBadge`'s (`ClientKnowledge.trust.*` = asserted/extracted/imported_unverified/inferred) have no counterpart in the counterparty-identity domain (kind=vendor/customer; there is no \"trust\" concept on an alias at all in migration 0200), so calling them as directed would either mis-render or require inventing data the schema does not carry — but the final report's \"Assumptions\" section is silent on this specific deviation (it explains why the `KnowledgeBadges`/`KnowledgeApplicability`/`KnowledgeProvenance` record-typed wrappers are not called, but not why the four atomic \"call verbatim\" functions are also unused).",
+      "evidence": "`git diff origin/main...HEAD -- apps/web | grep -n 'knowledgeValueText\\|appliesWhenText\\|KnowledgeKindBadge\\|KnowledgeTrustBadge'` returns nothing. `apps/web/components/registers/knowledge-shared.tsx:47-73` shows `KnowledgeKindBadge`/`KnowledgeTrustBadge` keyed to `ClientKnowledge.kind.*`/`ClientKnowledge.trust.*`, whose only values (checked via en.json) are assertion/extracted_fact/preference/policy and asserted/extracted/imported_unverified/inferred — none matching vendor/customer or human_ui/agent/seeding/legacy_unknown.",
+      "fix": "Add one sentence to the final report's Assumptions naming this deviation and the domain-vocabulary mismatch that justifies it, so a reviewer does not have to re-derive it from the code comments."
+    }
+  ]
+}

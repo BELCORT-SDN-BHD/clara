@@ -1,0 +1,56 @@
+{
+  "ticket": 647,
+  "head": "bda62a1d",
+  "closed": [
+    "647-A1-revision-lock-deadlock",
+    "647-A2-client-identifier-kind",
+    "en-json-third-namespace",
+    "SPEC-1",
+    "SPEC-2",
+    "647-A3-source-pin-coherence",
+    "647-A4-carrier-diverges-from-door",
+    "647-A5-dead-wire-field",
+    "647-A6-alias-dialog-stale-draft",
+    "647-A7-h34-count-provenance",
+    "dead-sourcekind-key",
+    "SPEC-3"
+  ],
+  "open": [
+    {
+      "id": "647-A8-rigs-left-running",
+      "why": "Housekeeping only, not a defect, and still literally true. I DROPPED AND RECREATED rig647r (55606) with mkrig.sh for this re-check, so that cluster now holds the FIXED chain (clara_647r, 194/194, frontier 0200) and is the right rig for the next loop. rig647z (55706, the pre-0200 backfill rehearsal) is untouched and still online. Both are the orchestrator's to drop at wave close (pg_dropcluster --stop 17 rig647r / rig647z). The ticket's own rig 55506/clara_647 and all eleven other lanes' clusters were not touched."
+    },
+    {
+      "id": "obs-lock-order-cell-is-probabilistic",
+      "why": "NOT a verdict finding and nothing is blocked — an observation from this re-check about the strength of the new regression guard. p647.revisions.lock_order races two autocommit door calls (Promise.allSettled x 10 rounds); it was red 5-6/10 on the defect, so it has real power but is not deterministic. MEASURED here: my own 8-rounds-each-way held-transaction race did NOT reproduce the deadlock even with fk_cir_counterparty put BACK (the regressed shape) — only the forced interleave did. So a future regression of this class could slip past that cell on unlucky timing. A deterministic variant (issue rename's two lock steps by hand around the real retire door — my scratch probe a1-cycle.mjs) would be a hard guard; worth a follow-up, not a fix round."
+    },
+    {
+      "id": "obs-tail-claims-triple-keys-without-measuring-them",
+      "why": "NOT a verdict finding, note-level. 0200's tail notice now says the extraction and region pins ride TRIPLE keys 'so a pin trio that does not hang together is a row this table cannot hold', but T4 (0200:1349-1361) only counts the eight provenance constraints BY NAME — it never reads pg_get_constraintdef, the way T3 does for the origin CHECK. The claim is true today (measured: fk_counterparty_aliases_source_extraction = FK (source_extraction_id, firm_id, source_document_id) REFERENCES document_extractions(id, firm_id, document_id)), but the tail would keep printing the sentence if a later migration replaced those FKs with pair keys. One pg_get_constraintdef comparison per FK would close it."
+    }
+  ],
+  "new_blockers": [],
+  "ran": [
+    "RIG REBUILT (migration changed): wsl mkrig.sh rig647r 55606 -> cluster online; create database clara_647r; PGPORT=55606 pnpm db:migrate -> 194 new / 194 total, 'identity prestate (substrate) OK' + 'identity prestate (privilege) OK' + 'identity tail: OK'; re-run -> 0 new / 194 total (no checksum drift); pnpm db:seed -> 2 seed file(s)",
+    "647-A1 CLOSED, cell: node --test --test-concurrency=1 --import (alias-kind + identity gates) tests/counterparty-identity.test.mjs (clara_647r) -> 19/19 pass / 0 fail / 0 skip, including the NEW p647.revisions.lock_order (10 rounds, 0 deadlocks, every round exactly 1 alias_retired + 3 rename revisions)",
+    "647-A1 CLOSED, my own race (reviewer's exact shape: A->TMP->A so a LIVE alias carries the party's current name, two clara_authenticated sessions in EXPLICIT transactions HELD 250 ms, 8 rounds x both stagger orders = 16) -> 0 x 40P01, 0 other failures, 0 bad revision shapes",
+    "647-A1 CLOSED, DETERMINISTIC interleave (rename's two lock steps issued by hand around the REAL retire door): shipped shape -> the retirement NEVER waits on a lock (pg_stat_activity Lock waits = [] while R held the alias row), retire OK + rename OK, revisions include alias_retired",
+    "647-A1 POSITIVE CONTROL on the SAME rig and probe: fk_cir_counterparty put back -> the retirement blocks on transactionid and the rename dies 40P01 'deadlock detected ... Process 53302 waits for ShareLock on transaction 2271; blocked by process 53303 ... while inserting index tuple in relation counterparty_aliases'. So the probe can see the cycle, and the FK drop is load-bearing (supports the ratification the fix worker requested). Constraint dropped again; catalog re-read shows fk_cir_counterparty absent, frontier 0200 / 194 applied",
+    "647-A1 controls: all five clara.counterparty_aliases triggers tgenabled='O' (t_counterparty_aliases_revision ENABLED, so the appends really fired); clara.retire_counterparty_alias's live body takes exactly ONE lock (the alias row); clara.merge_counterparties (unrecut) touches counterparty_aliases only BEFORE its revision append, so the new uq_cir_counterparty_revision wait edge cannot close a cycle",
+    "647-A2 CLOSED: AddClientIdentifierDialog renders NativeSelect id=client-identifier-kind with exactly ssm/tin/bank_account, no free text, no required-field error; kindHint no longer names sst (grep -i sst over the face's strings clean); cell 'H-20: the Kind control is the DATABASE's own closed vocabulary' asserts SELECT + the three option values in order + no /sst/i anywhere + p_kind posted = 'tin'; the Playwright walk drives selectOption",
+    "647-A2 door re-measured through humanQuery on clara_647r (behaviour deliberately unchanged, the fix is the closed vocabulary): p_kind ssm/tin/bank_account accepted; sst, passport and 'TIN' -> bare 23514 client_identifiers_kind_check (still untyped, now unreachable from H-20's face); duplicate (kind,value) -> CLR10 already_recorded",
+    "647-A3 CLOSED, door arms as a real bookkeeper on clara_647r: coherent trio ACCEPTED (control); document of sibling client -> CLR23 source_not_this_client; document of another firm -> CLR23; this client's doc + ANOTHER CLIENT's extraction -> CLR10 source_extraction_not_of_document; + another client's region -> CLR10 source_region_not_of_extraction; same client's OTHER document's extraction -> CLR10 source_extraction_not_of_document; another extraction's region -> CLR10 source_region_not_of_extraction; only the coherent alias landed",
+    "647-A3 CLOSED, structural half (direct owner inserts, display/normalized kept congruent): extraction of another client's document -> 23503 fk_counterparty_aliases_source_extraction; region of another extraction -> 23503 fk_counterparty_aliases_source_region; extraction of another document of the same client -> 23503; extraction with NO document -> 23514 ck_counterparty_aliases_extraction_required (so MATCH SIMPLE's null hole is shut). clara.document_extractions.document_id and clara.document_regions.extraction_id are both NOT NULL, so the triple keys cannot refuse a legitimate pin",
+    "en-json-third-namespace / SPEC-1 CLOSED: grep '^  \"ArApCounterparty\"|^  \"ClientIdentifiers\"|^  \"ClientKnowledge\"' apps/web/messages/en.json -> only ClientKnowledge (2530) and ArApCounterparty (3818); no 'ClientIdentifiers' string anywhere in apps/web; both call sites now useTranslations('ArApCounterparty.clientIdentifiers')",
+    "SPEC-2 CLOSED: client-identity-section.test.tsx now carries 'AC6 loading' (every read held until the cell releases it; asserts Loading is reached, that no half is painted as a successful empty in flight, and that the face is terminal afterwards) and 'AC6 partial' (list_counterparty_merge_corrections 500 while the other two answer; asserts both halves still render with their real counts, the failure is reported in its own place, and is never shown as 'no counterparty has been merged') -- read in full, both green",
+    "NOTE findings verified in the diff: A4 localAliasRefusal no longer refuses a document-only pin (carrier now matches 0200 7.1 and ck_counterparty_aliases_extraction_pins) and ALIAS_REFUSAL_MESSAGES gained both new reasons; A5 AgingItem.recorded_counterparty_name deleted (repo-wide grep: no hits); A6 AddCounterpartyAliasDialog discards alias+origin+basis on a resolved-true submit with the three dialogs' shared draft rule written down; A7 H-34 row reworded in 647-final.md and the same sentence sits beside the three detail counts; dead sourceKind.counterparty_alias key gone; SPEC-3 answered as Assumptions 4 in 647-final.md",
+    "REGRESSION SWEEP, all on the branch tip: packages/db battery + the nine neighbours (counterparty-merge-pr-1, counterparty-alias-kind, wave-a-aliases, wave-a2-counterparty-kind, s6-counterparty, p4t2-counterparty-aliases, debt-human-read-surfaces, knowledge-records, knowledge-onboarding-promotion) -> 150/150 pass / 0 fail",
+    "REGRESSION SWEEP: tests/operation-census.test.mjs + tests/rig-isolation.test.mjs -> 31 tests / 30 pass / 0 fail / 1 skip (T19 destructive); node packages/db/scripts/operation-census.mjs --strict -> exit 0, called_missing 0/0, called_ungranted 2/0, frontier_mismatch 0/0, named_arg_mismatch 0/0, public_execute 0/0, unattributed 0/0, granted_uncalled 172/172 (identical to the reviewed run -- no waiver moved)",
+    "REGRESSION SWEEP: packages/runtime node --test tests/counterparty-identity-unit.test.mjs -> 5/5; node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files, 51 'use workflow' modules, exit 0; node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader superset of emittable, exit 0",
+    "REGRESSION SWEEP: apps/web touched cells (client-identity-section, counterparty-identity-panel, counterparty-identity-correct, counterparty-hygiene-kinds, aging, counterparty, counterparty-doors, tree, routes, e2e-fixture-ownership) -> 108/108 pass / 0 fail",
+    "REGRESSION SWEEP: pnpm typecheck (root) -> exit 0; pnpm lint (root) -> exit 0 (check-message-keys: 2966 static keys all resolve; test manifest 369 files in order; token contrast clean)",
+    "REGRESSION SWEEP: pnpm --filter @clara/web e2e counterparty-identity on 3280/3281/3282, RUN ALONE (no stale listeners on my three ports beforehand) -> 17 passed (52.5 s), exit 0",
+    "REGRESSION SWEEP: node scripts/run-tests.mjs (whole apps/web), RUN ALONE -> 3748 tests / 3746 pass / 0 fail / 2 skipped, exit 0. No host-contention pair to report this round: nothing failed, so no stack named another lane's worktree and nothing needed a solo re-run",
+    "HYGIENE: git status --porcelain empty at bda62a1d on impl/647-counterparty-identity throughout (all probe scripts live in the session scratchpad); all 8 commits on origin/main..HEAD carry a Co-Authored-By trailer; no git worktree command run, no push, nothing edited on the branch"
+  ]
+}

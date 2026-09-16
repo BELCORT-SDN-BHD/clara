@@ -1,0 +1,25 @@
+{
+  "ticket": 654,
+  "lens": "STANDARDS",
+  "head": "4b69d2b2",
+  "ran": [
+    "git log --oneline origin/main..HEAD; git diff origin/main...HEAD --stat (5 commits, 33 files, +4405/-28)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (blueprints untouched)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen file(s) verified, 51 \"use workflow\" modules frozen+registered (exit 0)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader supseteq emittable proven (exit 0)",
+    "pnpm typecheck (worktree root) -> apps/web + packages/runtime typecheck: Done (exit 0)",
+    "pnpm lint (worktree root) -> all four workspaces (apps/web, packages/db, packages/runtime, packages/reporting-render) Done, check-token-contrast/check-test-manifest(369 files)/check-message-keys(2972 keys) all green (exit 0)",
+    "node --test --test-concurrency=1 packages/db/tests/knowledge-firm-defaults.test.mjs (against rig clara_654) -> 15 pass / 0 fail / 0 skipped, matches report exactly",
+    "node apps/web/scripts/run-tests.mjs (whole apps/web unit suite) -> 3741 tests, 3739 pass, 0 fail, 2 skipped -- matches report's whole-suite count exactly (report cites 186s; this run measured 555s, plausibly host contention from the twelve shared lanes since counts match exactly)"
+  ],
+  "findings": [
+    {
+      "id": "unused-i18n-keys",
+      "severity": "note",
+      "where": "apps/web/messages/en.json:2657 (FirmKnowledge.exceptionOpen), :2692-2693 (FirmKnowledge.exception.inForce, FirmKnowledge.exception.clientOnly)",
+      "what": "Three message keys are defined but never referenced by any component in the diff (checked via grep across knowledge-firm-panel.tsx, knowledge-promote-dialog.tsx, knowledge-exception.tsx). `exceptionOpen` duplicates the namespaced `promote.openRegister`/`exception.openRegister` that are actually used; `inForce`/`clientOnly` look like vestigial copy for states `KnowledgeExceptionPair` no longer renders (the component only shows entries where `in_force === \"client_exception\" && firm_rule !== null`, so the pure-firm-default and pure-client-only cases never reach these strings).",
+      "evidence": "`grep -oE 't\\(\"[a-zA-Z0-9_.]+\"' apps/web/components/registers/knowledge-firm-panel.tsx apps/web/components/registers/knowledge-promote-dialog.tsx apps/web/components/registers/knowledge-exception.tsx` never yields `exceptionOpen`, `inForce`, or `clientOnly`; `check-message-keys.mjs` (run via `pnpm lint`, exit 0) only checks that used keys resolve, not that defined keys are used, so this doesn't fail CI.",
+      "fix": "Either wire the two exception-state strings into `KnowledgeExceptionPair` for completeness, or delete the three orphaned keys so a future reader doesn't assume they're live copy."
+    }
+  ]
+}

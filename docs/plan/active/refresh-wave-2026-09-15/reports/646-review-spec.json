@@ -1,0 +1,44 @@
+{
+  "ticket": 646,
+  "lens": "SPEC",
+  "head": "4ac11657",
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 <29 --import gates from package.json> tests/rig-docs-source-revision.test.mjs → 15/15 pass, 0 fail, 0 skip (exact match to 646-final.md)",
+    "packages/db: same 29 gates + tests/rig-docs-correction.test.mjs tests/rig-docs-filings-provenance.test.mjs tests/dba-coding-lane-classification.test.mjs tests/document-capability-registry.test.mjs tests/document-fact-validation-belt.test.mjs tests/knowledge-records.test.mjs tests/work-question.test.mjs tests/work-question-reads.test.mjs tests/field-path-grammar.test.mjs → 138/138 pass (exact match)",
+    "packages/db: same gates + tests/operation-census.test.mjs → 10/10 pass (exact match)",
+    "packages/db: same gates + tests/rig-isolation.test.mjs, no CLARA_RIG_ALLOW_RESET/ROLE_SWEEP → 21 tests: 20 pass, 1 skip (exact match)",
+    "worktree root: pnpm typecheck → exit 0",
+    "worktree root: pnpm lint → exit 0 (apps/web eslint+check-token-contrast+check-test-manifest+check-message-keys, packages/db eslint, packages/runtime eslint, packages/reporting-render eslint all green)",
+    "apps/web: node scripts/run-tests.mjs (whole unit suite) → 3729 tests, 3727 pass, 0 fail, 2 skip (both pre-existing live-Supabase-auth cells; exact match)",
+    "worktree root: node scripts/check-frozen-workflows.mjs → OK, 281 frozen files verified, 51 workflow modules registered (exact match)",
+    "worktree root: node packages/runtime/scripts/check-parts-parity.mjs → OK, reader ⊇ emittable (matches report's 'not applicable, run anyway')",
+    "apps/web: pnpm --filter @clara/web e2e -- document-correction-walk.spec.ts documents-viewer-walk.spec.ts on ports 3270/3271/3272 → 37 tests attempted, 24 observed before I redirected to isolation (18 pass, 6 fail: document-correction-walk cells 5/9/10/14 AND documents-viewer-walk cells 23/24 — the latter file is untouched by this branch); every failure timed out at a consistent ~33-37s ceiling while host CPU measured 87-98% with up to 54 concurrent chrome-headless-shell processes from the other eleven lanes",
+    "apps/web: pnpm --filter @clara/web e2e -- document-correction-walk.spec.ts alone (isolated re-run, same ports) → cell 1 (C2: the three views are addressable...), which had passed at 22.4s in the combined run, now failed at 33.7s under continuing measured contention (77-97% CPU, 40+ competing chrome-headless-shell processes still on the shared host); stopped after this cell per the host-contention protocol rather than burn more of the shared host chasing a moving target"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should",
+      "where": "apps/web/components/documents/correction-impact-sheet.test.tsx:9",
+      "what": "Test comment overclaims WCAG coverage for the wrong-client impact Sheet's open state: it says the browser walk 'runs axe on that face', but no cell in document-correction-walk.spec.ts ever calls AxeBuilder while the Sheet is open.",
+      "evidence": "correction-impact-sheet.test.tsx:9 says 'e2e/document-correction-walk.spec.ts opens it and runs axe on that face'. In that spec the Sheet is opened at lines 297-298 for content/visibility checks only (no AxeBuilder call anywhere near it); the file's only two axe scans are at lines 383 and 396, and those run on the three routed tabs and on the revision dialog respectively — never on the open Sheet. AC6 names Dialog/Sheet/Alert as the three compositions this ticket must get right, and AC7 requires accessibility verification of the journey's faces; the Sheet face has zero WCAG scan anywhere, unit or e2e, despite the code asserting otherwise.",
+      "fix": "Add an axe scan (new AxeBuilder({page}).withTags(AXE_TAGS).analyze(), asserting zero violations) inside the 'C2 · AC6: the impact radius opens in a Sheet...' cell while the Sheet is visible, matching the axe cadence already used for the three tabs and the revision dialog; or, if that coverage is deliberately deferred, correct the comment in correction-impact-sheet.test.tsx to say the Sheet's open-state a11y is unverified rather than claiming browser coverage that does not exist."
+    },
+    {
+      "id": "F2",
+      "severity": "should",
+      "where": "apps/web/e2e/document-correction-walk.spec.ts:276-278",
+      "what": "The ORPHAN-QUESTION walk cell claims to prove the Accounting view's 'successful-empty' state (AC7) but its assertion never checks for the empty-state message.",
+      "evidence": "Line 276's comment says 'the panel says the honest empty rather than painting a list it no longer has' after the orphaned question on CORR.docOrphan is dismissed. document-correction-mock.mjs's list_source_dependents handler always answers knowledge_records: [] for docOrphan and drops open_questions to [] once dismissed, so SourceDependentsPanel should render its dependentsEmpty EmptyState (source-dependents-panel.tsx:96, 'Nothing recorded stands on this document's reading') at that point — but the only assertion (line 278) is `.not.toContainText(\"What kind of document is this?\")`, which checks that the stale text is GONE, never that the empty-state message APPEARS. No other test, unit or e2e, exercises this render branch.",
+      "fix": "Add await expect(dependents).toContainText(\"Nothing recorded stands on this document's reading\") (or the exact dependentsEmpty string) immediately after the existing assertion on line 278, closing the gap between what the comment claims and what the cell actually proves."
+    },
+    {
+      "id": "F3",
+      "severity": "note",
+      "where": "apps/web/e2e/document-correction-walk.spec.ts and apps/web/e2e/documents-viewer-walk.spec.ts (the latter untouched by this branch)",
+      "what": "I could not myself reproduce a clean full Playwright run during this review; both a combined run and an isolated re-run hit timeouts, but the pattern points at shared-host contention rather than a defect in this branch.",
+      "evidence": "A combined run of both walk files showed 6 timeouts at an identical ~33-37s ceiling while host CPU measured 87-98% with up to 54 concurrent chrome-headless-shell processes across the shared twelve-lane host (~3.6GB of 32GB RAM free) — two of the six failures were in documents-viewer-walk.spec.ts, a file #646 never touches, which is strong evidence the failures are host-load artifacts. A follow-up isolated re-run of only document-correction-walk.spec.ts alone still hit the same ~34s ceiling on a cell (C2: the three views are addressable...) that had passed cleanly at 22.4s minutes earlier in the combined run, under continuing 77-97% host CPU from the other eleven lanes. My confidence in the underlying implementation instead rests on: the DB battery re-run directly against real Postgres (15/15, plus 138/138 neighbours, 10/10 operation-census, 21:20/1 rig-isolation — all exact matches to 646-final.md), the whole apps/web unit suite (3729/3727/0/2, exact match), typecheck/lint/frozen-workflow/parts-parity all green, code review of the walk and its mock finding no logical defects, and the cells that DID complete under contention (3, 4, 6, 7, 8, 11-13, 15) cleanly covering the core fact-revision, stale-recovery, non-revisable-field, live-claim, stale-dependents, transferred-away, responsive, keyboard and refusal-axe behaviours.",
+      "fix": "Re-run pnpm --filter @clara/web e2e -- document-correction-walk.spec.ts documents-viewer-walk.spec.ts on ports 3270/3271/3272 once the shared host's other lanes are quieter; do not change branch code in response to these specific timeouts."
+    }
+  ]
+}

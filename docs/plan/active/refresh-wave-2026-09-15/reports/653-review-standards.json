@@ -1,0 +1,22 @@
+{
+  "findings": [],
+  "head": "cc2beaa5",
+  "lens": "STANDARDS",
+  "ran": [
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen file(s) verified, 51 \"use workflow\" modules all frozen+registered, exit 0",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, exit 0",
+    "pnpm typecheck (worktree root) -> exit 0 (packages/runtime, apps/web both Done)",
+    "pnpm lint (worktree root) -> exit 0 (token-contrast AA, test manifest 370 files ordered, 3036 message keys resolve, apps/web + reporting-render eslint clean)",
+    "packages/db$ node --test --test-concurrency=1 $GATES tests/prepayment-schedule.test.mjs -> 15/15 pass, 0 fail, 0 skip",
+    "packages/db$ node --test --test-concurrency=1 $GATES tests/prepayment-occurrences.test.mjs -> 8/8 pass, 0 fail, 0 skip",
+    "packages/runtime$ node --test tests/prepayment-schedule-basis-unit.test.mjs -> 11/11 pass, 0 fail",
+    "node -e 'pg count/latest migration query on clara_653' -> count=194, latest=0208_prepayment_amortisation (matches report)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (blueprints untouched)",
+    "grep for module-level imports of packages/runtime/lib/prepayment-schedule-basis.ts across packages/runtime/{lib,routes,workflows} -> zero references (not imported by any frozen body)",
+    "git log origin/main..HEAD --format with Co-Authored-By grep -> 8/8 commits carry the line",
+    "manual full read of packages/db/migrations/0208_prepayment_amortisation.sql (1808 lines): prestate measured-sha256 pins, kind-CHECK drop/re-add, FORCE RLS + NULL relacl + append-only/no-truncate triggers on clara.prepayment_schedules, SECURITY DEFINER/owner/search_path posture census in tail, per-function ACL census, lock-order (accounting_plans FOR UPDATE rung 1) preserved and tail-asserted, typed CLR10/CLR13/CLR19 refusals with detail.reason throughout, _reserve_op/_finish_op idempotency on both write doors, _audit calls present, Asia/Kuala_Lumpur timezone pinned, integer-cents arithmetic, tail census (T.1-T.8) reproduces every claim live",
+    "manual diff review of shared files: CONTEXT.md (two new terms, sorted, extends 'Plan occurrence' rather than rivalling), tree.ts/routes.ts (one ACCOUNTING_ITEMS row + helpers, sorted), en.json (kindNote correction + new Prepayments block), manifest.txt (three entries at sorted position), serve-built.mjs (one import + one dispatch), e2e-fixture-ownership.test.ts (mock declared + 4 shared plan-lifecycle verbs declared shared with rationale), packages/db/package.json (one gate import), db-live-gates/action.yml (one e2e step, brief explicitly asked for 'one line'), rig-meta.mjs (PREPAYMENT_0208 cohort on the 0193 idiom, wired into HUMAN_FNS census and cohortFailures sweep)",
+    "spot-checked persona discipline: prepayment-schedule-fixtures.mjs door wrappers all route through humanQuery(sub, namedCall(...)) as bookkeeper/viewer; rootQuery appears only in setup/verification reads (row counts, catalog metadata), never as the door call under test"
+  ],
+  "ticket": 653
+}
