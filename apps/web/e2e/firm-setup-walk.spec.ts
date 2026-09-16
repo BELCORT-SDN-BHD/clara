@@ -35,6 +35,18 @@ import { FIRM_SETUP_COOKIE } from "./firm-setup-mock.mjs";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const SETUP_URL = "/settings/setup";
 
+/**
+ * A BUDGET FOR AN ASSERTION THAT HAS ALREADY PAID FOR A SECOND SIGN-IN — not a hope that slowness
+ * eventually passes.
+ *
+ * `expect`'s default is 5s, which is a budget for a single-page interaction. The convergence cell
+ * below is not one: two full sign-ins and two server renders happen inside it, which is why the
+ * describe carries its own 180s test budget. On a host running twelve worktree lanes at once, the
+ * 5s per-assertion default turns a slow-but-correct convergence into a reported missing one — the
+ * same reason `signInTo` above already takes 30s rather than 5.
+ */
+const CONVERGED = { timeout: 30_000 };
+
 async function arm(context: BrowserContext): Promise<void> {
   const origin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
   await context.addCookies([{ name: FIRM_SETUP_COOKIE, value: "armed", url: origin }]);
@@ -134,6 +146,31 @@ test.describe.serial("#648 · A5 firm setup", () => {
     await expect(page.getByTestId("firm-setup-answer-legal_name")).toHaveText("Rig & Co PLT");
     await expect(page.getByTestId("firm-setup-state-legal_name")).toHaveText("Recorded");
     await expect(page.getByTestId("firm-setup-answer-legal_name-action")).toHaveCount(0);
+
+    // C48.5 — AND IT CAN STILL BE CORRECTED. "Never asked again" is not "never changeable": the
+    // control comes back with a different word, and the form it opens starts from what is on
+    // record rather than blank.
+    const change = page.getByTestId("firm-setup-change-legal_name-action");
+    await expect(change).toBeVisible();
+    await expect(change).toHaveText("Change this answer");
+    await change.click();
+    await expect(page.getByRole("textbox").first()).toHaveValue("Rig & Co PLT");
+    await page.getByRole("textbox").first().fill("Rig & Partners PLT");
+    await page.getByTestId("firm-setup-submit").click();
+    await expect(page.getByTestId("firm-setup-answer-legal_name")).toHaveText("Rig & Partners PLT");
+    // An accepted answer CLOSES its form and hands focus back to the control that opened it —
+    // which is now the correction control, so the person can reach it without hunting.
+    await expect(page.getByTestId("firm-setup-item-form")).toHaveCount(0);
+    await expect(change).toBeFocused();
+
+    // …AND BACK AGAIN. This is the leg a value-derived op key made permanently impossible: the
+    // third attempt carries a key the door has already seen naming different arguments, and the
+    // fixture models `_reserve_op`'s refusal of exactly that (firm-setup-mock.mjs).
+    await change.click();
+    await page.getByRole("textbox").first().fill("Rig & Co PLT");
+    await page.getByTestId("firm-setup-submit").click();
+    await expect(page.getByTestId("firm-setup-answer-legal_name")).toHaveText("Rig & Co PLT");
+    await expect(page.getByTestId("firm-setup-already-recorded")).toHaveCount(0);
   });
 
   test("firmSetup.walk.stale: a second browser context answers the same plan, and the first converges with its draft intact", async ({ page, context, browser }) => {
@@ -162,20 +199,24 @@ test.describe.serial("#648 · A5 firm setup", () => {
     // The first context's submit converges INLINE — never a toast, never a navigation — and the
     // authoritative plan it re-reads already carries the other editor's answer.
     await page.getByTestId("firm-setup-submit").click();
-    await expect(page.getByTestId("firm-setup-stale")).toBeVisible();
-    await expect(page.getByTestId("firm-setup-answer-currency")).toHaveText("MYR");
+    await expect(page.getByTestId("firm-setup-stale")).toBeVisible(CONVERGED);
+    await expect(page.getByTestId("firm-setup-answer-currency")).toHaveText("MYR", CONVERGED);
     await expect(page).toHaveURL(new RegExp(`${SETUP_URL}$`));
 
     // THE DRAFT SURVIVED the convergence: the radio the person chose is still chosen.
-    await expect(page.getByRole("radio", { name: "USD" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "USD" })).toBeChecked(CONVERGED);
     await scan(page, "the stale convergence with a preserved draft");
 
     // AC3 — the winner's fact is on the SAME canonical record Settings and Knowledge read, with
     // its scope, its source and its actor. The loser is deliberately NOT offered a second capture
     // of it: the real door refuses that with `knowledge_already_live`, and the honest next step is
     // the correction path on the fact itself, which is what this surface offers.
-    await expect(page.getByTestId("firm-setup-fact-default_currency")).toHaveText("MYR");
-    await expect(page.getByTestId("firm-setup-fact-actor-default_currency")).toContainText("Aisyah Rahman");
+    await expect(page.getByTestId("firm-setup-fact-default_currency")).toHaveText("MYR", CONVERGED);
+    await expect(page.getByTestId("firm-setup-fact-actor-default_currency")).toContainText("Aisyah Rahman", CONVERGED);
+    // …and the checklist row for it does NOT offer a second capture: a live firm default is
+    // corrected on the register, which the row names in words.
+    await expect(page.getByTestId("firm-setup-change-currency-action")).toHaveCount(0);
+    await expect(page.getByTestId("firm-setup-correct-on-register-currency")).toBeVisible(CONVERGED);
     await expect(page.getByTestId("firm-setup-confirmed-facts")).toContainText("Firm default");
     await expect(page.getByTestId("firm-setup-confirmed-facts")).toContainText("Stated by a user");
     await expect(page.getByTestId("firm-setup-correct-default_currency")).toBeVisible();

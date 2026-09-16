@@ -131,6 +131,39 @@ function rotate() {
   state.revision = `rev-${state.revisionN}`;
 }
 
+/**
+ * `clara._reserve_op`'s OWN RULE, modelled rather than approximated (0004_governed_fns.sql:46-60):
+ * one op key names exactly ONE request. The same key carrying the same arguments replays the
+ * stored receipt; the same key carrying DIFFERENT arguments is refused CLR10 "op_key reused with
+ * different args", with no detail.
+ *
+ * It is modelled here because it is the one server rule the client's op-key derivation can get
+ * wrong in a way no fixture that ignores keys would ever show: a key derived from the intent
+ * (verb, plan, item, value) repeats whenever a value repeats, and the argument list it is checked
+ * against carries `p_expected_revision`, which does not. `p648.opkey.attempt`
+ * (packages/db/tests/firm-setup.test.mjs) proves both halves against a real Postgres; this keeps
+ * the browser leg honest about them.
+ *
+ * Recorded on SUCCESS only: a real reservation rolls back with its transaction when the door
+ * raises, so a refused call leaves no receipt for the browser to meet.
+ */
+const receipts = new Map();
+
+function reserve(verb, body) {
+  const key = `${verb}:${body.p_op_key}`;
+  const hash = JSON.stringify(
+    Object.entries(body).filter(([k]) => k !== "p_op_key").sort(([a], [b]) => (a < b ? -1 : 1)));
+  const prior = receipts.get(key);
+  if (!prior) return { key, hash, replay: null, conflict: false };
+  if (prior.hash !== hash) return { key, hash, replay: null, conflict: true };
+  return { key, hash, replay: prior.result, conflict: false };
+}
+
+function finish(slot, result) {
+  receipts.set(slot.key, { hash: slot.hash, result });
+  return result;
+}
+
 function itemRow(row) {
   const settled = state.answers.get(row.item_key) ?? null;
   return {
@@ -205,12 +238,15 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
 
   if (verb === "seed_firm_setup_plan") {
     if (!armed(request)) return false;
+    const body = await readCachedJson(request);
+    const slot = reserve(verb, body);
+    if (slot.replay) { sendJson(response, 200, slot.replay, cors); return true; }
     state.seeded = true;
     rotate();
-    sendJson(response, 200, {
+    sendJson(response, 200, finish(slot, {
       plan_id: FS.planId, revision_token: state.revision, revision_n: state.revisionN,
       state: "open", seeded: CATALOGUE.length, catalogue_total: CATALOGUE.length,
-    }, cors);
+    }), cors);
     return true;
   }
 
@@ -218,6 +254,15 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
     if (!armed(request)) return false;
     const body = await readCachedJson(request);
     if (body.p_plan !== FS.planId) return false;
+    // RESERVE BEFORE THE MUTABLE VALIDATION, the door's own order: `_reserve_op` runs before the
+    // CAS comparison, which is exactly why replaying the revision that was SENT works and
+    // replaying a re-read one does not.
+    const slot = reserve(verb, body);
+    if (slot.conflict) {
+      refusal(response, sendJson, cors, "CLR10", "op_key reused with different args", null);
+      return true;
+    }
+    if (slot.replay) { sendJson(response, 200, slot.replay, cors); return true; }
     // THE PLAN CAS, and it is the real mechanism rather than a scripted refusal: the walk's
     // SECOND browser context answers first through the same door, which rotates the token below,
     // so the first context's submit arrives carrying a revision this plan has left behind.
@@ -227,13 +272,13 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
     }
     state.answers.set(body.p_item_key, { state: "answered", answer: body.p_answer });
     rotate();
-    sendJson(response, 200, {
+    sendJson(response, 200, finish(slot, {
       plan_id: FS.planId, revision_token: state.revision, revision_n: state.revisionN,
       item_key: body.p_item_key, state: "answered", answered_by: FS.userId,
       knowledge: CATALOGUE.find((c) => c.item_key === body.p_item_key)?.knowledge_key
         ? { status: "captured", record_id: FS.recordCurrency }
         : null,
-    }, cors);
+    }), cors);
     return true;
   }
 
@@ -241,12 +286,18 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
     if (!armed(request)) return false;
     const body = await readCachedJson(request);
     if (body.p_plan !== FS.planId) return false;
+    const slot = reserve(verb, body);
+    if (slot.conflict) {
+      refusal(response, sendJson, cors, "CLR10", "op_key reused with different args", null);
+      return true;
+    }
+    if (slot.replay) { sendJson(response, 200, slot.replay, cors); return true; }
     state.answers.set(body.p_item_key, { state: "deferred", answer: { deferred_reason: body.p_reason } });
     rotate();
-    sendJson(response, 200, {
+    sendJson(response, 200, finish(slot, {
       plan_id: FS.planId, revision_token: state.revision, revision_n: state.revisionN,
       item_key: body.p_item_key, state: "deferred", deferred_reason: body.p_reason,
-    }, cors);
+    }), cors);
     return true;
   }
 
@@ -262,12 +313,18 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
       }, cors);
       return true;
     }
+    const slot = reserve(verb, body);
+    if (slot.conflict) {
+      refusal(response, sendJson, cors, "CLR10", "op_key reused with different args", null);
+      return true;
+    }
+    if (slot.replay) { sendJson(response, 200, slot.replay, cors); return true; }
     state.committed = true;
     rotate();
-    sendJson(response, 200, {
+    sendJson(response, 200, finish(slot, {
       plan_id: FS.planId, revision_token: state.revision, revision_n: state.revisionN,
       state: "committed", committed_at: "2026-09-16T03:00:00.000Z",
-    }, cors);
+    }), cors);
     return true;
   }
 
