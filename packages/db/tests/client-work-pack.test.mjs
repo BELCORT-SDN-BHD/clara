@@ -165,6 +165,30 @@ async function backdateReceipt(receiptId, instantExpr) {
   );
 }
 
+/** The same owner-level move for a Work's ADMISSION instant. `clara.accounting_work` is guarded
+ *  by `clara._tf_accounting_work_immutable` (0178) and by FORCE RLS, so `created_at` cannot be
+ *  restated through any verb either — which is exactly the point: this is how a fixture builds
+ *  the ordinary real-world Work that was ADMITTED weeks ago and POSTED this week. */
+async function backdateWorkAdmission(workId, instantExpr) {
+  assert.match(workId, UUID_RE, "a fixture work id must be uuid-shaped before interpolation");
+  await rootQuery(
+    "set session_replication_role = replica; "
+    + `update clara.accounting_work set created_at = ${instantExpr} where id = '${workId}'; `
+    + "reset session_replication_role",
+  );
+}
+
+/** `clara.list_accounting_work` called with EXACTLY the arguments the browser sends for a facet
+ *  drilldown (`apps/web/lib/work/work-list.ts:105-117`). Named arguments only. */
+async function listWork(sub, { client = null, status = null, since = null, until = null, limit = 100 } = {}) {
+  const r = await humanQuery(sub,
+    "select clara.list_accounting_work(p_client => $1::uuid, p_status => $2::text[],"
+    + " p_initiator => null, p_purpose => null, p_since => $3::timestamptz,"
+    + " p_until => $4::timestamptz, p_q => null, p_cursor => null, p_limit => $5::int) as result",
+    [client, status, since, until, limit]);
+  return r.rows[0].result;
+}
+
 // ===========================================================================================
 // p650.pack.active_distinct — ACTIVE IS A COUNT OF DISTINCT WORK IDS, never of runs.
 // ===========================================================================================
@@ -289,6 +313,72 @@ test("p650.pack.completed_no_receipt — a completed Work with no committed rece
   assert.equal(successOf(p).status, "partial", "and the facet's answer state says so to the reader");
   assert.equal(successOf(p).coverage_reason, "completions_without_receipt");
   assert.equal(successOf(p).uncounted_completions, 1, "and it names HOW MANY it could not date");
+});
+
+// ===========================================================================================
+// p650.pack.recent_success_drilldown — THE TILE AND THE LIST IT LINKS TO ARE DATED BY DIFFERENT
+// INSTANTS, and this cell is the measurement that makes the board say so instead of implying
+// otherwise. (Round-1 review, finding 650-B1.)
+//
+// The tile counts a COMMITTED RECEIPT inside the seven MYT dates — the estate's only durable
+// completion instant (0178:411-465, and `clara.accounting_work` carries none: 0178:324-325).
+// The list it links to is `clara.list_accounting_work`, whose `p_since`/`p_until` fence
+// `w.created_at` on `clara.accounting_work` — the ADMISSION instant (0189:427-428). There is no
+// receipt-dated axis on that door and this wave recuts nothing in 0189 (DECISIONS §1.3), so the
+// two populations are the same WEEK over two different SUBJECTS, and they diverge in exactly two
+// ways. This cell pins both, so no later change can widen the gap silently and no reader can
+// mistake the drilldown for the tile's own population.
+//
+// The arguments below are the ones the browser really sends: `p_since => window.from` and
+// `p_until => window.to` are precisely what `businessDayStart(since)` / `businessDayEnd(until)`
+// rebuild from the two calendar dates the href carries — asserted instant-for-instant in
+// `apps/web/lib/work/client-work-pack.test.ts` ("recent success → status=completed plus the
+// pack's OWN window dates, which rebuild the same instants").
+// ===========================================================================================
+test("p650.pack.recent_success_drilldown — same week, different subject: the drilldown diverges in exactly two named ways", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "p650drill");
+
+  // (a) ADMITTED LONG AGO, POSTED TODAY — counted by the tile, dropped by the list.
+  const old = await postedWork(client, { memo: "admitted-long-ago" });
+  await backdateWorkAdmission(old.work_id, mytInstant(-30, "9 hours"));
+  // (b) ADMITTED AND COMPLETED TODAY WITH NO COMMITTED RECEIPT — returned by the list, and the
+  //     one the tile already names out loud through `uncounted_completions`.
+  const undated = await completedWithoutReceipt(client, "no-receipt");
+  // (c) THE ORDINARY CASE — admitted today, posted today. In both, which is why this is a
+  //     disclosure obligation and not a board that is wrong about every row.
+  const ordinary = await postedWork(client, { memo: "same-day" });
+
+  const p = await pack(BOB(), client);
+  assert.equal(successOf(p).count, 2, "two committed receipts landed inside the window");
+  const tileIds = successOf(p).rows.map((r) => r.work_id).sort();
+  assert.deepEqual(tileIds, [old.work_id, ordinary.work_id].sort(),
+    "the tile is dated by the RECEIPT, so an old admission posted today is in it");
+
+  const page = await listWork(BOB(), {
+    client, status: ["completed"], since: p.window.from, until: p.window.to,
+  });
+  const listIds = page.rows.map((r) => r.id).sort();
+  assert.deepEqual(listIds, [undated.work_id, ordinary.work_id].sort(),
+    "the list is dated by the ADMISSION, so the same week holds a different set of Works");
+
+  // THE TWO DIVERGENCE CLASSES, named rather than summarised.
+  const inTileOnly = tileIds.filter((id) => !listIds.includes(id));
+  const inListOnly = listIds.filter((id) => !tileIds.includes(id));
+  assert.deepEqual(inTileOnly, [old.work_id],
+    "class 1: posted inside the window, admitted before it — the list cannot express this");
+  assert.deepEqual(inListOnly, [undated.work_id],
+    "class 2: completed inside the window with no receipt — already disclosed as uncounted");
+  assert.deepEqual(tileIds.filter((id) => listIds.includes(id)), [ordinary.work_id],
+    "and the ordinary same-day Work is in both — the sets overlap, they are not disjoint");
+
+  // CLASS 2 IS ALREADY SAID OUT LOUD BY THE DOOR. Class 1 is not expressible here at all, so it
+  // is disclosed by the BOARD: `ClientWorkAttention`'s recent-success tile renders
+  // `recentSuccessListBasis` ("The list … is dated by when each Work was started …"), pinned by
+  // `client-work-attention.test.tsx` and by the `home.facets.drilldown` walk leg.
+  assert.equal(successOf(p).coverage, "partial");
+  assert.equal(successOf(p).coverage_reason, "completions_without_receipt");
+  assert.equal(successOf(p).uncounted_completions, 1, "the door names class 2 by size");
 });
 
 // ===========================================================================================

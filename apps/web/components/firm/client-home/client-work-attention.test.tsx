@@ -153,6 +153,75 @@ test("the three tiles carry the three numbers, each a link into its OWN scoped l
   } finally { await h.unmount(); }
 });
 
+// ===========================================================================================
+// THE DRILLDOWN SAYS WHAT IT IS DATED BY (round-1 review, finding 650-B1).
+//
+// The recent-success tile counts a COMMITTED RECEIPT inside the seven Malaysian dates; the list
+// its number opens fences `clara.accounting_work.created_at` — when the Work was STARTED
+// (0189:427-428). There is no receipt-dated axis on that door, so the drilldown is the same week
+// over a different subject, and the divergence is measured, not assumed:
+// `packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown` builds both
+// classes on the rig. The board's obligation is therefore the same one it already carries for
+// "retrying": name the filter the list CAN express and disclose the part it cannot, rather than
+// let a number imply a page it does not open.
+// ===========================================================================================
+test("the recent-success count DISCLOSES what its list is dated by — the same week, not the same Works", async () => {
+  const h = await mount();
+  try {
+    const text = h.text();
+    assert.match(text, /dated by when each Work started, not when it posted/,
+      "the tile says which instant its drilldown fences on");
+    // ONCE, and on the tile that owns it. "Running now" links to a status-only filter with no
+    // dates at all, so the sentence would be false there.
+    assert.equal(text.match(/dated by when each Work started/g)?.length, 1);
+    const beforeActive = text.split("Running now")[0] ?? "";
+    assert.ok(!beforeActive.includes("dated by when each Work started"),
+      "the disclosure belongs to the dated facet, not to the one with no window");
+  } finally { await h.unmount(); }
+});
+
+test("with nothing to open, there is no drilldown and therefore nothing to disclose", async () => {
+  const h = await mount({ load: async () => pack({
+    recentSuccess: { status: "ok", count: 0, coverage: "ok", coverageReason: null, uncountedCompletions: 0, rows: [] },
+  }) });
+  try {
+    assert.match(h.text(), /No Work finished for this client in the last seven days\./);
+    assert.ok(!h.text().includes("dated by when each Work started"),
+      "an empty facet offers no link, so it makes no promise to qualify");
+  } finally { await h.unmount(); }
+});
+
+// ===========================================================================================
+// THE ONE LINK A DENIED CALLER IS STILL OFFERED (round-1 review, finding 650-N4).
+//
+// The needs-you count is VIEWER-floored (`clara.list_review_queue`, 0016:4563) and the Work list
+// it opens is BOOKKEEPER-floored (0189:344-347). A caller the pack refused is exactly a caller
+// below that floor, so the one populated tile on their board points at a door that will refuse
+// them. The link stays — a role can change, and hiding the destination would hide the reason —
+// but it stops being silent about where it leads.
+// ===========================================================================================
+test("a DENIED pack makes the needs-you tile say that the list behind its number needs a bookkeeper role", async () => {
+  const h = await mount({
+    load: async () => {
+      throw new DoorRefusal("CLR04", "insufficient role",
+        { reason: null, status: 403, pgCode: "CLR04", codeSource: "sqlstate" });
+    },
+  });
+  try {
+    const text = h.text();
+    assert.match(text, /4 Works are waiting on a person/, "the viewer-floored number still shows");
+    assert.match(text, /Opening the Work list needs a bookkeeper role/);
+    // And it is the DENIAL that puts it there, not the tile.
+  } finally { await h.unmount(); }
+});
+
+test("a readable pack leaves the needs-you count unqualified — the caller can open what it points at", async () => {
+  const h = await mount();
+  try {
+    assert.ok(!h.text().includes("Opening the Work list needs a bookkeeper role"));
+  } finally { await h.unmount(); }
+});
+
 test("the overlap is stated in WORDS, and nothing on the band can be added up", async () => {
   const h = await mount();
   try {
@@ -250,6 +319,31 @@ test("RETRYING is a row label derived from the run count, and it is not offered 
     // …and the tile discloses that, rather than letting the drilldown look complete.
     assert.match(h.text(), /The list cannot filter by retrying/);
   } finally { await h.unmount(); }
+});
+
+test("the run ordinal is computed by the locale, not by three hand-written exceptions", async () => {
+  // Round-1 review note (STANDARDS 1 / SPEC F1): the key was ICU `plural` with `=2`/`=3` exact
+  // matches standing in for ordinals, which is right up to 20 and wrong from 21 on ("21th run").
+  // `selectordinal` asks CLDR for the English ordinal category instead, so the suffix is derived
+  // rather than enumerated. `attempts` has no ceiling in the estate — `clara._work_run_attempts`
+  // counts every run a Work has had — so "unlikely" was the only thing holding the old spelling up.
+  const many = (n: number) => pack({
+    active: {
+      status: "ok", count: 1, coverage: "ok", coverageReason: null, uncountedCompletions: null,
+      rows: [{
+        work_id: WORK_A, purpose: "journal_entry", status: "running", memo: "Office rent",
+        attempts: n, current_run_status: "running", retrying: true,
+        created_at: "2026-09-16T01:00:00.000Z", committed_at: null, receipt_id: null, entry_id: null,
+      }],
+    },
+  });
+  for (const [n, expected] of [[1, "1st run"], [2, "2nd run"], [3, "3rd run"], [4, "4th run"],
+    [11, "11th run"], [21, "21st run"], [22, "22nd run"], [33, "33rd run"]] as const) {
+    const h = await mount({ load: async () => many(n) });
+    try {
+      assert.ok(h.text().includes(expected), `attempts=${n} must render "${expected}"`);
+    } finally { await h.unmount(); }
+  }
 });
 
 test("a preview row renders its purpose through the SHARED label map, unknown values verbatim", async () => {

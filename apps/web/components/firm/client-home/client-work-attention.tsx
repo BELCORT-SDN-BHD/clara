@@ -78,9 +78,15 @@ type TileProps = {
   /** The failure to attach to THIS tile, or null. */
   error: unknown;
   onRetry: (() => void) | null;
+  /** The pack came back as a governed refusal, which is this board's only evidence that the
+   *  caller is below the Work floor. The needs-you tile is read at VIEWER floor and still has a
+   *  number in that case; the list its number links to is not. */
+  packDenied: boolean;
 };
 
-function WorkAttentionTile({ kind, clientId, pack, facet, loading, error, onRetry }: TileProps) {
+function WorkAttentionTile({
+  kind, clientId, pack, facet, loading, error, onRetry, packDenied,
+}: TileProps) {
   const t = useTranslations("ClientWorkAttention");
   const tm = useTranslations("ManualJournal");
   const headingId = `client-home-attention-${kind}`;
@@ -133,6 +139,27 @@ function WorkAttentionTile({ kind, clientId, pack, facet, loading, error, onRetr
         ) : null}
         {kind === "active" ? (
           <p className="text-xs text-muted-foreground">{t("retryNotFilterable")}</p>
+        ) : null}
+        {/* THE DRILLDOWN IS THE SAME WEEK OVER A DIFFERENT SUBJECT, and saying so is the same
+            obligation the line above discharges for "retrying". This tile counts a COMMITTED
+            RECEIPT inside the seven Malaysian dates — the estate's only durable completion
+            instant — while `clara.list_accounting_work` fences `accounting_work.created_at`,
+            when the Work was STARTED (0189:427-428). That door has no receipt-dated axis, so the
+            link carries the closest filter it can express and the sentence carries the rest. The
+            divergence is measured, not assumed: `p650.pack.recent_success_drilldown` builds both
+            classes on the rig (a Work admitted weeks ago and posted this week; a Work started and
+            completed this week with no receipt, which the door already names through
+            `uncounted_completions`). */}
+        {kind === "recent_success" ? (
+          <p className="text-xs text-muted-foreground">{t("recentSuccessListBasis")}</p>
+        ) : null}
+        {/* AND THE ONE LINK A DENIED CALLER IS STILL OFFERED. This number is viewer-floored; the
+            list it opens is bookkeeper-floored (0189:344-347). A refused pack IS the evidence
+            that this caller is below that floor, so the destination is named rather than
+            silently offered — and kept, because a role can change and a hidden door explains
+            nothing. */}
+        {kind === "needs_you" && packDenied ? (
+          <p className="text-xs text-muted-foreground">{t("needsYouListFloor")}</p>
         ) : null}
         {facet.rows.length > 0 ? (
           <ul className="flex flex-col gap-1 text-sm">
@@ -264,6 +291,7 @@ export function ClientWorkAttention({
             loading={queue.loading && queue.counts === null}
             error={tileError("needs_you")}
             onRetry={queue.counts === null ? () => queue.reload() : null}
+            packDenied={state.denied !== null}
           />
           <WorkAttentionTile
             kind="active"
@@ -273,6 +301,7 @@ export function ClientWorkAttention({
             loading={state.loading}
             error={tileError("active")}
             onRetry={state.denied ? null : () => state.reload()}
+            packDenied={state.denied !== null}
           />
           <WorkAttentionTile
             kind="recent_success"
@@ -282,6 +311,7 @@ export function ClientWorkAttention({
             loading={state.loading}
             error={tileError("recent_success")}
             onRetry={state.denied ? null : () => state.reload()}
+            packDenied={state.denied !== null}
           />
         </div>
       </div>

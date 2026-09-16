@@ -87,7 +87,10 @@ const WORK_PACK = {
         },
         {
           work_id: "99999999-9999-4999-8999-999999999992", purpose: "payroll_obligation",
-          status: "queued", memo: null, attempts: 1, current_run_status: null,
+          // The preview row and the list row below carry the SAME memo on purpose: the drilldown
+          // leg asserts the population it lands on, and a fixture that spelled one Work two ways
+          // would make that assertion about the fixture rather than about the journey.
+          status: "queued", memo: "Payroll run", attempts: 1, current_run_status: null,
           retrying: false, created_at: "2026-09-16T00:00:00.000Z", updated_at: null,
         },
       ],
@@ -104,10 +107,82 @@ const WORK_PACK = {
   needs_you_ref: { source: "list_review_queue.counts.work_questions" },
 };
 
-/** An empty Work-list page, so a facet drilldown lands on a real list rather than on a 404 this
- *  walk is not about. The LIST's own behaviour is `work-list-walk.spec.ts`'s subject; what is
- *  under test here is the URL the home spells and the return journey. */
-const EMPTY_WORK_PAGE = { rows: [], next_cursor: null, truncated: false };
+/**
+ * THE WORK LIST A DRILLDOWN ACTUALLY LANDS ON — answered from the SAME fixture the pack above is
+ * built from, rather than from a hard-coded empty page (round-1 review, finding 650-S1).
+ *
+ * An empty list passes every URL assertion no matter what the URL means, which is precisely how
+ * finding 650-B1 shipped green through a db battery, 48 web cells and a nine-leg walk. These rows
+ * are `clara.list_accounting_work`'s own projection shape (0189:445-470) and the handler below
+ * applies the door's own fences: `p_status` against `status`, and `p_since`/`p_until` against
+ * `created_at` — the ADMISSION instant, which is the whole point.
+ *
+ * So the fixture carries the two divergence classes the rig measured
+ * (`packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown`):
+ *   · "Bank fee" is the recent-success tile's one row — a committed receipt on 2026-09-15 — and
+ *     it was ADMITTED on 2026-08-20, before the window, so the list it links to drops it.
+ *   · "Rates accrual" was admitted and completed inside the window with no receipt, so the list
+ *     returns it and the tile never counted it.
+ * A walk that asserted "the drilldown shows exactly the tile's Works" would be asserting a
+ * falsehood; what it asserts instead is that the board SAID so before the person clicked.
+ */
+const LIST_ROW_BASE = {
+  client_id: CLIENT_ACTIVE,
+  client_name: "Rome Properties",
+  purpose: "journal_entry",
+  initiator: "11111111-1111-1111-1111-111111111111",
+  initiated_by: "11111111-1111-1111-1111-111111111111",
+  initiator_role: "bookkeeper",
+  basis_origin: "user_direct",
+  posting_date: "2026-09-01",
+  currency: "MYR",
+  source_ref_count: 0,
+  current_task_id: null,
+  entry_id: null,
+  receipt_id: null,
+  error_code: null,
+  error_reason: null,
+  attempts: 1,
+  current_run_status: null,
+  pending_question_id: null,
+  pending_question_version: null,
+  updated_at: null,
+};
+
+const LIST_ROWS = [
+  // The three the ACTIVE tile counts — its number is 3 and its preview is 2, so the drilldown is
+  // also the proof that a count is never `rows.length`.
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999991", status: "running",
+    memo: "Office rent", attempts: 2, current_run_status: "running",
+    created_at: "2026-09-16T01:00:00.000Z" },
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999992", status: "queued",
+    memo: "Payroll run", purpose: "payroll_obligation", created_at: "2026-09-16T00:00:00.000Z" },
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999994", status: "queued",
+    memo: "Depreciation posting", created_at: "2026-09-15T23:00:00.000Z" },
+  // CLASS 1 — in the tile, not in the list.
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999993", status: "completed",
+    memo: "Bank fee", receipt_id: "r1", entry_id: "e1", created_at: "2026-08-20T02:00:00.000Z" },
+  // CLASS 2 — in the list, not in the tile.
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999995", status: "completed",
+    memo: "Rates accrual", created_at: "2026-09-14T02:00:00.000Z" },
+];
+
+/** `clara.list_accounting_work`'s own fences, applied to the fixture: status membership, and a
+ *  HALF-OPEN `[p_since, p_until)` over `created_at` (0189:427-428). */
+function listWorkPage(body: unknown): { rows: unknown[]; next_cursor: null; truncated: false } {
+  const b = (body ?? {}) as { p_status?: string[] | null; p_since?: string | null; p_until?: string | null };
+  const status = Array.isArray(b.p_status) && b.p_status.length > 0 ? b.p_status : null;
+  const since = typeof b.p_since === "string" ? Date.parse(b.p_since) : null;
+  const until = typeof b.p_until === "string" ? Date.parse(b.p_until) : null;
+  const rows = LIST_ROWS.filter((r) => {
+    const at = Date.parse(r.created_at);
+    if (status !== null && !status.includes(r.status)) return false;
+    if (since !== null && at < since) return false;
+    if (until !== null && at >= until) return false;
+    return true;
+  });
+  return { rows, next_cursor: null, truncated: false };
+}
 
 function json(route: Route, body: unknown): Promise<void> {
   return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -131,7 +206,8 @@ async function seed(page: Page): Promise<void> {
   await page.route("**/e2e-supabase/rest/v1/rpc/list_fiscal_years", (route) =>
     json(route, [{ fiscal_year_id: "fy1", label: "FY 2026", ordinal: 2, starts_on: "2026-01-01", ends_on: "2026-12-31", status: "open", fy_end_source: "asserted", has_active_reopen_receipt: false }]));
   await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => json(route, WORK_PACK));
-  await page.route("**/e2e-supabase/rest/v1/rpc/list_accounting_work", (route) => json(route, EMPTY_WORK_PAGE));
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_accounting_work", (route) =>
+    json(route, listWorkPage(route.request().postDataJSON())));
   await page.route("**/e2e-supabase/rest/v1/rpc/get_close_readiness", (route) =>
     json(route, { fiscal_year_id: "fy1", close_run_id: null, run_state: null, fy_end_source: "asserted", gates: [
       { check_key: "a", drawer: 1, state: "pass", measured: null, measured_digest: "x", attested: false },
@@ -311,18 +387,46 @@ test("home.facets.drilldown — each count opens its OWN scoped list, and Back r
 
   // The three counts, each a full noun phrase rather than a bare number beside a label — the
   // accessible NAME of each link IS the sentence.
+  // EVERY LEG NAMES THE POPULATION IT EXPECTS TO LAND ON, not only the URL it expects to spell.
+  // The list is answered from the same fixture as the band (`listWorkPage`), so a drilldown that
+  // opened a different set of Works than its tile described reds HERE, in the browser — which an
+  // empty-page mock could never do (round-1 review, 650-S1).
+  const table = () => page.getByRole("table", { name: "Durable work" });
   const legs = [
-    ["2 Works are waiting on a person", /\/work\?view=needs-you$/],
-    ["3 Works are queued or running", /\/work\?status=queued%2Crunning$/],
-    ["1 Work finished in the last 7 days", /\/work\?status=completed&since=2026-09-10&until=2026-09-16$/],
+    ["2 Works are waiting on a person", /\/work\?view=needs-you$/,
+      // The needs-you count is the review queue's; this fixture mints no parked Work, so what is
+      // proven here is the URL and the return journey, and the list is honestly empty.
+      async () => { await expect(table()).toHaveCount(0); }],
+    ["3 Works are queued or running", /\/work\?status=queued%2Crunning$/,
+      async () => {
+        // THE TILE SAID THREE AND THE LIST HOLDS THREE — while the tile's own preview showed two,
+        // which is the count-is-never-rows.length rule seen from both ends in one journey.
+        await expect(table().getByRole("link", { name: "Office rent" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Payroll run" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Depreciation posting" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+      }],
+    ["1 Work finished in the last 7 days", /\/work\?status=completed&since=2026-09-10&until=2026-09-16$/,
+      async () => {
+        // AND THE DISCLOSED CASE. The tile counted "Bank fee" (its receipt posted inside the
+        // window); the list is fenced on when a Work was STARTED, so it drops that row and
+        // returns "Rates accrual", which the tile never counted. The band said this on the home
+        // before the click — asserted below — and that sentence is the whole fix for 650-B1.
+        await expect(table().getByRole("link", { name: "Rates accrual" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+      }],
   ] as const;
 
-  for (const [name, expected] of legs) {
+  // THE QUALIFICATION IS ON THE BOARD, beside the number, before anyone clicks it.
+  await expect(board.getByText(/dated by when each Work started, not when it posted/)).toBeVisible();
+
+  for (const [name, expected, landed] of legs) {
     const link = board.getByRole("link", { name });
     await expect(link, `${name} must be on the board as a link`).toBeVisible();
     await link.focus();
     await link.press("Enter");
     await expect(page).toHaveURL(expected);
+    await landed();
 
     await page.goBack();
     // THE HOME'S OWN URL, not merely "a client page": a Back that landed on the workspace root
