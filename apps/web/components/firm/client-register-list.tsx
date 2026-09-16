@@ -173,6 +173,12 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
   const answered = checkStands && checkOutcome === "answered";
   const acknowledgementOwed = answered && arity === 1 && !acknowledged;
   const walled = checkStands && checkOutcome === "walled";
+  // UNREACHABLE THROUGH THE LIVE DOOR, AND SAID ANYWAY (review round 2). `walled` and
+  // `acknowledgementOwed` describe HOW the read answered, and neither of them describes an
+  // ambiguity the read ANSWERED rather than refused — 0204 raises at arity >= 2 and never returns
+  // it as a success. `onConfirm`'s own `arity >= 2` belt already keeps the door unreached, so what
+  // this adds is the button telling the truth instead of looking live and doing nothing.
+  const ambiguousAnswer = answered && arity >= 2;
 
   /** The identity read, and the three answers it can give. Returns `true` when the caller may go
    *  on to the door on THIS click. Never throws: every failure is a face, not an exception. */
@@ -228,7 +234,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
         description={t("addClientDescription")}
         confirmLabel={t("addClientConfirm")}
         busy={busy}
-        confirmDisabled={!isDoActionPermitted(spec, doEnv) || acknowledgementOwed || walled}
+        confirmDisabled={!isDoActionPermitted(spec, doEnv) || acknowledgementOwed || walled || ambiguousAnswer}
         // EVERY FAILURE TRAVELS INTO THE DIALOG, through the wrapper's own slot. The page banner
         // below sits BEHIND the modal backdrop while this dialog stands (OnboardingDoorDialog's
         // own header says exactly that), so a refusal rendered only there is a refusal the human

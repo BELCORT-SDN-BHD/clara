@@ -267,6 +267,34 @@ test("649 · AC1 arity >= 2 — the DATABASE's refusal renders VERBATIM with its
   });
 });
 
+
+test("649 · AC1 — a read that ANSWERS arity >= 2 instead of refusing still shuts Confirm, and dispatches nothing", async () => {
+  // REVIEW ROUND 2, the recheck's minor note. Today `clara.client_identity_candidates` RAISES at
+  // arity >= 2 and never returns that arity as a success answer, so this state is unreachable
+  // through the live door — which is exactly why it is worth pinning: the `walled` /
+  // `acknowledgementOwed` predicates that shut Confirm both describe HOW the read answered, and
+  // neither of them describes an ANSWERED ambiguity. The door call itself was already belted in
+  // `onConfirm`, so what this cell defends is the button telling the truth rather than looking
+  // live and then doing nothing.
+  const { impl, beginCalls } = mockEstate({ kind: "ok", arity: 2, candidates: [CANDIDATE_CLIENT, CANDIDATE_COUNTERPARTY] });
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await openDialog();
+    try {
+      await h.act(() => setFieldValue(labelled(body, "Client name")!, "Rome Ventures"));
+      await h.act(() => clickButton(dialogConfirm(h, body)));
+      await settleUntil(h, () => /Rome Public Advisory Sdn Bhd/.test(textOf(body)),
+        "the candidate list", () => textOf(body));
+
+      assert.equal(beginCalls.length, 0, "an ambiguous name never reaches the birth door");
+      assert.equal((dialogConfirm(h, body) as { disabled?: boolean }).disabled, true,
+        "…and Confirm SAYS it is shut rather than refusing silently on the click");
+      assert.equal((labelled(body, "Client name") as { value?: string }).value, "Rome Ventures",
+        "the typed name stands");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
 test("649 · AC1 — editing the name RETIRES the check and the acknowledgement, and keeps the typed text", async () => {
   let arity = 1;
   const { impl, beginCalls, identityCalls } = mockEstate(() =>
