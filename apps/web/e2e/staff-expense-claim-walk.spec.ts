@@ -337,16 +337,33 @@ test("t638 a STALE claim under one intent key is a conflict with a route to the 
   await control(page, { op: "seed_intent" });
   // Force the draft onto the seeded key — the state a preparer reaches by editing a draft whose
   // figures were already submitted under it.
-  await page.evaluate((key: string) => {
-    for (let i = 0; i < window.sessionStorage.length; i += 1) {
-      const name = window.sessionStorage.key(i);
-      if (name === null || !name.startsWith("clara:staff-expense-claim-draft")) continue;
-      const stored = JSON.parse(window.sessionStorage.getItem(name) ?? "null");
-      if (stored === null) continue;
-      stored.intentKey = key;
-      window.sessionStorage.setItem(name, JSON.stringify(stored));
-    }
-  }, SEC.seededIntentKey);
+  //
+  // POLL UNTIL THE REWRITE ACTUALLY LANDS. The draft is written by an EFFECT
+  // (`staff-expense-claim-form.tsx:253-259`) that cannot run until `draftScope` resolves, and that
+  // waits on the caller-context read — so on a loaded host `page.goto` resolves BEFORE any
+  // `clara:staff-expense-claim-draft` key exists and a single-shot rewrite silently touches
+  // nothing. MEASURED 2026-09-17: the cell then submitted under a FRESH key, was accepted, and
+  // navigated to a Work detail instead of driving the conflict it exists to prove. Counting the
+  // keys rewritten is the difference between driving the stale-key state and passing through it.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate((key: string) => {
+          let rewritten = 0;
+          for (let i = 0; i < window.sessionStorage.length; i += 1) {
+            const name = window.sessionStorage.key(i);
+            if (name === null || !name.startsWith("clara:staff-expense-claim-draft")) continue;
+            const stored = JSON.parse(window.sessionStorage.getItem(name) ?? "null");
+            if (stored === null) continue;
+            stored.intentKey = key;
+            window.sessionStorage.setItem(name, JSON.stringify(stored));
+            rewritten += 1;
+          }
+          return rewritten;
+        }, SEC.seededIntentKey),
+      { timeout: CELL_BUDGET.poll, message: "the form must have written a draft to re-key" },
+    )
+    .toBeGreaterThan(0);
   await page.reload();
   await fillClaim(page);
   await page.getByRole("button", { name: "Submit" }).click();
