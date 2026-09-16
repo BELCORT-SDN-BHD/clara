@@ -208,13 +208,15 @@ export function grantCellBudget(ms: number): void {
  * existing 20 s, which this wait's own timeout below matches rather than replaces with a new
  * number. The measurement CONFIRMS the 20 s figure; it does not correct it.
  *
- * FOUR SHAPES, ONE IMPLEMENTATION. `signIn(page)` and `signIn(page, email)` sign in and land on
- * `/` (no `next` param); `signInTo(page, destination)` and `signInTo(page, destination, email)`
+ * FOUR SHAPES, ONE IMPLEMENTATION. `signIn(page)` and `signIn(page, email)` sign in, land on `/`
+ * (no `next` param) and wait on the post-login `navigation[name=Main]` landmark, exactly as their
+ * own retired copies did. `signInTo(page, destination)` and `signInTo(page, destination, email)`
  * carry the `next` query param home-board-walk's, shell-migration-walk's and the rest's own
- * copies used, and assert the caller's destination rather than a bare `/`. Every shape ends at
- * the SAME landmark wait — a cell that only ever checked `toHaveURL` before now also gets the
- * "Firm navigation retired with the bespoke `<aside>` it named" landmark proof for free, which is
- * a strictly stronger assertion than a bare URL match, never a weaker one.
+ * copies used, and assert only the caller's destination — NOT the landmark: several `signInTo`
+ * callers deliberately sign in at a NARROW viewport set before the call
+ * (`responsive-shell-walk.spec.ts`, `shell-migration-walk.spec.ts`), where the sidebar is a closed
+ * Sheet and `navigation[name=Main]` is not visible by design; asserting it there would be a wrong
+ * assertion, not a stronger one. This mirrors exactly what the retired `signInTo` copies checked.
  */
 const SIGN_IN_PASSWORD = "Clara-e2e-password-1!";
 const DEFAULT_SIGN_IN_EMAIL = "owner@example.test";
@@ -235,11 +237,12 @@ export async function signInTo(page: Page, destination: string, email: string = 
     new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
     { timeout: POST_LOGIN_NAV_TIMEOUT_MS },
   );
-  // #614: the sidebar's ONE navigation landmark, over the one registry (lib/navigation/tree.ts)
-  // — "Firm navigation" retired with the bespoke `<aside>` it named.
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: POST_LOGIN_NAV_TIMEOUT_MS });
 }
 
 export async function signIn(page: Page, email: string = DEFAULT_SIGN_IN_EMAIL): Promise<void> {
   await signInTo(page, "/", email);
+  // #614: the sidebar's ONE navigation landmark, over the one registry (lib/navigation/tree.ts)
+  // — "Firm navigation" retired with the bespoke `<aside>` it named. Only `signIn` (never
+  // `signInTo`) checks this — see this function's own header for why.
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: POST_LOGIN_NAV_TIMEOUT_MS });
 }

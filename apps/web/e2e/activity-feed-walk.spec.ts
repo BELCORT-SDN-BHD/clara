@@ -2,7 +2,13 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ACTIVITY } from "./activity-mock.mjs";
-import { settleForScan, signIn } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
+
+// #804 — this file's own sign-in never checked `navigation[name=Main]` (several of its cells sign
+// in at a NARROW viewport, where the sidebar is a closed Sheet and that landmark is not visible by
+// design), so it composes the shared `signInTo` at "/" rather than the shared `signIn`, which does
+// check it.
+const signIn = (page: Page) => signInTo(page, "/");
 
 /**
  * #632 (refresh spec #612, journey B5) — the attributable Activity feed's real content:
