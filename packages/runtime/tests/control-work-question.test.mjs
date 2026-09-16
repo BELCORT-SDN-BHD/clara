@@ -124,8 +124,16 @@ async function parkedWorkQuestion(label) {
   return { owner, firm, client, runId, token, taskId: admitted.task_id, workId: admitted.work_id, questionId: opened.question_id };
 }
 
-/** Accept the answer through the REAL human door, so the row carries what a real answer carries. */
-async function answer(owner, questionId, answerObj = { posting_date: "2026-09-05", amount_cents: 98765 }) {
+/** Accept the answer through the REAL human door, so the row carries what a real answer carries.
+ *  THE DATE CONFIRMS, IT DOES NOT MOVE (#721, migration 0200). `posting_date` is DECLARED by this
+ *  question's FIELDS and is also carried by the admitted basis, so `clara.answer_work_question`
+ *  now refuses (CLR10, `basis_change_not_allowed`) any answer that states a DIFFERENT date — a
+ *  reply that changes the basis is a restatement, and `clara.restate_accounting_work` is where it
+ *  goes. This fixture answers the date the basis already admitted (the confirm case, which still
+ *  lands) and completes `amount_cents`, which the basis carries nowhere at the top level. Nothing
+ *  below this line is about the answer's CONTENT: these cells prove delivery, leasing and
+ *  reconciliation. */
+async function answer(owner, questionId, answerObj = { posting_date: "2026-09-01", amount_cents: 98765 }) {
   await rig.humanQuery(owner,
     "select clara.answer_work_question($1::uuid,$2::int,$3::jsonb,$4::text)",
     [questionId, 1, JSON.stringify(answerObj), `k-${randomUUID()}`]);
@@ -174,7 +182,7 @@ test("deliver: an answered work question is leased, resumed and stamped delivere
   assert.equal(calls[0].pl.question_id, p.questionId, "deliver: the payload names the question");
   assert.equal(calls[0].pl.question_version, 1);
   assert.equal(calls[0].pl.answered_role, "owner", "deliver: …and the role whose authority accepted it");
-  assert.deepEqual(calls[0].pl.answer, { posting_date: "2026-09-05", amount_cents: 98765 });
+  assert.deepEqual(calls[0].pl.answer, { posting_date: "2026-09-01", amount_cents: 98765 });
 
   const row = await rig.readInterruption(p.questionId);
   assert.ok(row.delivered_at, "deliver: delivered_at stamped");
