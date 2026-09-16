@@ -82,14 +82,30 @@
 -- nowhere else until `clientOnboarding_v5` makes it an interview answer and #654 mints a
 -- `financial_year_end_day` key through 0205.
 --
--- THE LOCK ORDER IS THE ONBOARDING FAMILY'S: CLIENT ROW FIRST, PLAN ROW SECOND. Every other door
--- in this family takes them that way -- commit_client_onboarding (0017:2764 then :2768),
--- cancel_client_onboarding (0017:2852 then :2853) -- and 0037:2514-2536 states why a single total
--- order over the estate's locks is what makes concurrent doors deadlock-free rather than merely
--- documented. A settle that locked the plan first would deadlock against a concurrent commit or
--- cancel of the same client IN BOTH DIRECTIONS, and one of those victims is the accounting write:
--- 40P01 is untyped, so the human door would have no refusal face for it. The cell that keeps this
--- honest is `p649.settle.lock_order`.
+-- THE LOCK ORDER IS THE ESTATE'S, AND IT HAS THREE RUNGS, NOT TWO:
+--     client rung (203005004)  ->  clara.clients row  ->  clara.onboarding_plans row
+-- Each step is another door's existing law, measured off the LIVE bodies rather than read off a
+-- creating file: commit_client_onboarding takes the client row then the plan row (0017:2764 then
+-- :2768) and cancel_client_onboarding does the same (0017:2852 then :2853); set_client_fy_end --
+-- the door THIS one writes through -- takes `pg_advisory_xact_lock(203005004, hashtext(client))`
+-- and only then updates clara.clients (0042 §S5.12, "THE RUNG BEFORE THE GUARD READS"); and
+-- approve_opening_seed takes the seed row, that same rung, and THEN the plan row FOR UPDATE.
+-- 0037 SECTION K states the rung ladder as a partial order over who takes what and says plainly
+-- why the rungs are taken EARLY, before the row locks: that is what makes an extension
+-- deadlock-free rather than merely documented, and advisory xact locks being re-entrant makes the
+-- inner door's re-take free. A settle that took the two rows first and met the rung only inside
+-- set_client_fy_end inverts against approve_opening_seed and against a plain set_client_fy_end on
+-- the same client, and one victim of that cycle is the accounting write: 40P01 is untyped, so the
+-- human door would have no refusal face for it. Two cells keep this honest --
+-- `p649.settle.lock_order` (the two rows, against commit/cancel) and
+-- `p649.settle.opening_rung_order` (the rung, against the opening / fy-end family).
+--
+-- AND NONE OF THOSE THREE IS TAKEN FOR A PLAN OUTSIDE THE CALLER'S FIRM. Both plan reads carry
+-- `firm_id = c.firm`, so a foreign or unknown plan locks nothing at all and meets CLR11 at once.
+-- A lock is a side effect an unauthorised caller can time, and 0021's no-existence-oracle rule is
+-- not only about the words in the refusal: `p649.settle.foreign_plan_takes_no_lock` holds the
+-- rung and both rows inside the owning firm and requires the outsider's CLR11 to arrive without a
+-- wait, with a same-firm control proving the instrument would have caught one.
 --
 -- HUMAN LANE ONLY, NO `_for` TWIN, AND THE GROUND IS STRUCTURAL: `clara.set_client_fy_end` opens
 -- with `clara._human_ctx`, which raises CLR04 when `clara.jwt_sub()` is NULL (0004:302-303), and
@@ -471,29 +487,50 @@ begin
     clara._hash(jsonb_build_object('plan', p_plan, 'month', p_fy_end_month, 'day', p_fy_end_day)));
   if v_dedupe is not null then return v_dedupe; end if;
 
-  -- THE CLIENT ROW IS LOCKED BEFORE THE PLAN ROW, and the order is the onboarding family's, not
-  -- this door's preference. `commit_client_onboarding` locks clara.clients (0017:2764) and THEN
-  -- clara.onboarding_plans (0017:2768); `cancel_client_onboarding` does the same (0017:2852,
-  -- :2853). Taking them the other way round here would invert against BOTH, and the loser of that
-  -- cycle is a 40P01: an untyped deadlock error out of a human door, killing a legitimate
-  -- financial-year write while the face has nothing to say about it. 0037:2514-2536 states the
-  -- estate's single-total-order rule; this is that rule applied to a fifth door.
+  -- THE ORDER IS THE ESTATE'S, NOT THIS DOOR'S PREFERENCE:
+  --     client rung (203005004)  ->  clara.clients row  ->  clara.onboarding_plans row
+  -- and every step of it is somebody else's law, measured off the LIVE bodies on the rig:
+  --   * `commit_client_onboarding` locks clara.clients (0017:2764) and THEN clara.onboarding_plans
+  --     (0017:2768); `cancel_client_onboarding` does the same (0017:2852, :2853). CLIENT BEFORE
+  --     PLAN.
+  --   * `clara.set_client_fy_end` — the door this one writes THROUGH — takes
+  --     `pg_advisory_xact_lock(203005004, hashtext(client))` and only then updates clara.clients
+  --     ("THE RUNG BEFORE THE GUARD READS", 0042 §S5.12). RUNG BEFORE CLIENT.
+  --   * `clara.approve_opening_seed` takes the seed row, then that same rung, then the PLAN row
+  --     FOR UPDATE (0017 §K5). RUNG BEFORE PLAN.
+  -- 0037 SECTION K states the rung ladder as a PARTIAL order over who takes what
+  -- ("firm (203005002) -> client (203005004)") and says why taking the rungs EARLY, before the
+  -- row locks, is what makes an extension deadlock-free rather than merely documented. Taking the
+  -- two rows first and meeting the rung only inside `set_client_fy_end` inverts against BOTH of
+  -- the last two doors, and the loser of that cycle is a 40P01: an untyped deadlock error out of a
+  -- human door, killing a legitimate financial-year write while the face has nothing to say about
+  -- it. Advisory transaction locks are re-entrant, so `set_client_fy_end` re-taking the rung
+  -- below is free.
   --
-  -- THE PRE-READ IS UNLOCKED AND THAT IS SAFE: it only says WHICH client row to lock.
-  -- `clara.onboarding_plans.client_id` is written at insert and never updated (no
-  -- `update clara.onboarding_plans … set client_id` exists anywhere in packages/db/migrations), so
-  -- the row locked here is the row the locked plan names — and the assertion after the plan lock
-  -- keeps that true if a future writer ever moves a plan between clients. A plan that does not
-  -- exist, or belongs to another firm, yields NULL and locks nothing: the refusal below is still
-  -- the one answer for both, with no existence oracle.
-  select op.client_id into v_client from clara.onboarding_plans op where op.id = p_plan;
+  -- THE PRE-READ IS UNLOCKED, AND IT IS SCOPED TO THE CALLER'S FIRM. Unlocked, because it only
+  -- says WHICH client to lock: `clara.onboarding_plans.client_id` is written at insert and never
+  -- updated (no `update clara.onboarding_plans … set client_id` exists anywhere in
+  -- packages/db/migrations), so the row locked here is the row the locked plan names — and the
+  -- assertion after the plan lock keeps that true if a future writer ever moves a plan between
+  -- clients. SCOPED, because a lock is a side effect an unauthorised caller can MEASURE: without
+  -- `op.firm_id = c.firm` this SECURITY DEFINER read yields a real client_id for ANOTHER firm's
+  -- plan, and the rung and row lock below would then be taken on that firm's client before the
+  -- CLR11 refusal — so an outsider holding a stopwatch could tell a foreign plan (waits) from an
+  -- unknown one (does not). 0021's no-existence-oracle rule is not only about the words in the
+  -- refusal. The plan lock below carries the same predicate for the same reason.
+  select op.client_id into v_client
+    from clara.onboarding_plans op
+    where op.id = p_plan and op.firm_id = c.firm;
   if v_client is not null then
+    perform pg_advisory_xact_lock(203005004, hashtext(v_client::text));
     perform 1 from clara.clients where id = v_client for update;
   end if;
 
-  select * into p from clara.onboarding_plans where id = p_plan for update;
-  -- NO EXISTENCE ORACLE (0021's rule): an unknown plan and another firm's plan are one answer.
-  if not found or p.firm_id is distinct from c.firm then
+  -- NO EXISTENCE ORACLE (0021's rule): an unknown plan and another firm's plan are one answer —
+  -- the same refusal, and now also the same absence of any wait.
+  select * into p from clara.onboarding_plans
+    where id = p_plan and firm_id = c.firm for update;
+  if not found then
     raise exception 'onboarding plan not in your firm'
       using errcode = 'CLR11', detail = '{"reason":"plan_not_in_firm","class":"settle"}';
   end if;

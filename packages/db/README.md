@@ -191,6 +191,20 @@ client onboarding plan's financial-year end onto `clara.clients` by calling
   (0042 §S5.12 and 0045 §S5.12-b2 spliced two live-ANNUAL cadence guards into it); both raise CLR38
   `fy_end_locked_by_annual_cadence`, and 0204 lets them propagate with the inner door's own
   message, code and detail. The raise aborts the transaction, so the settle receipt goes with it.
+- **One lock order, three rungs, and not one of them taken outside the caller's firm.** The door
+  takes the client advisory rung `203005004`, then the `clara.clients` row, then the
+  `clara.onboarding_plans` row. Each step is another door's existing law, measured off the LIVE
+  bodies: `commit_client_onboarding` (`0017:2764` then `:2768`) and `cancel_client_onboarding`
+  (`0017:2852` then `:2853`) take the client row before the plan row; `set_client_fy_end` takes the
+  rung before it touches `clara.clients` (0042 §S5.12, "the rung before the guard reads");
+  `approve_opening_seed` takes the rung before the plan row. 0037 SECTION K states the rung ladder
+  as a partial order and says why the rungs are taken EARLY — that is what makes an extension
+  deadlock-free rather than merely documented. `p649.settle.lock_order` and
+  `p649.settle.opening_rung_order` race the real door against each of those orders and require a
+  queued success, never 40P01. Both plan reads carry `firm_id = c.firm`, so a foreign or unknown
+  plan locks nothing at all: a lock is a side effect an outsider can time, and 0021's
+  no-existence-oracle rule is not only about the words in the refusal
+  (`p649.settle.foreign_plan_takes_no_lock`).
 - **There is no machine twin, and the ground is structural**: `set_client_fy_end` opens with
   `clara._human_ctx`, which raises CLR04 with no `jwt_sub`, and is EXECUTE-granted to
   `clara_authenticated` alone. A runtime-role twin could not call it.

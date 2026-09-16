@@ -40,15 +40,26 @@ Database cleanup and cluster-role cleanup must account for other live test conne
 
 ## `client-onboarding-identity.test.mjs` (0204, #649)
 
-Nine cells over the two 0204 doors, every assertion under test issued through `humanQuery` as a
+Thirteen cells over the two 0204 doors, every assertion under test issued through `humanQuery` as a
 real per-role session under real RLS. `rootQuery` appears only where the subject IS the catalog
-(the `has_function_privilege` census) or where a fixture is being planted.
+(the `has_function_privilege` census), where a fixture is being planted, or where the ADVERSARY in a
+concurrency cell performs an acquisition no application role may issue directly (no app-role DML, so
+a human session cannot take a row lock or an advisory rung at all).
 
 Frontier-gated on the live catalog through
 `client-onboarding-identity-preintegration-gate.mjs`, which the package `test` script preloads: a
 package-wide run against a chain below 0204 SKIPS loudly, a focused run FAILS. A **partial** cohort
 throws rather than skipping — a settle door without its identity read is a narrower boundary nobody
 chose.
+
+Three of the thirteen are concurrency cells that pin the settle door's lock order — the two row
+locks against `commit_client_onboarding` / `cancel_client_onboarding` (`p649.settle.lock_order`),
+the client advisory rung `203005004` against `approve_opening_seed` / `set_client_fy_end`
+(`p649.settle.opening_rung_order`), and the absence of ANY lock on another firm's plan
+(`p649.settle.foreign_plan_takes_no_lock`, which turns the timing difference into a SQLSTATE by
+running the outsider under `lock_timeout = '1s'` and carries a same-firm control proving the
+timeout was live). They are barrier-driven, not sleep-driven, and each asserts the door still does
+its work once the adversary rolls back.
 
 Two cells are worth knowing about before editing them:
 

@@ -26,18 +26,24 @@ import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
-  CLR, PG, asRoot, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery, ROLES,
+  CLR, PG, asHuman, asRoot, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery, ROLES,
 } from "./rig-fixtures.mjs";
 
 /** Postgres' own deadlock SQLSTATE. Named here rather than in `rig-helpers.mjs`'s shared `PG`
- *  table: eleven other lanes are editing that file in this wave and this constant has exactly one
- *  reader (`p649.settle.lock_order`). */
+ *  table: eleven other lanes are editing that file in this wave, and this constant has exactly two
+ *  readers: `p649.settle.lock_order` and `p649.settle.opening_rung_order`. */
 const PG_DEADLOCK = "40P01";
+
+/** Postgres' `lock_not_available` — what a statement raises when `lock_timeout` expires while it
+ *  waits for a lock. Named here for the same reason as PG_DEADLOCK: one reader
+ *  (`p649.settle.foreign_plan_takes_no_lock`), and eleven other lanes are editing `rig-helpers.mjs`
+ *  this wave. */
+const PG_LOCK_TIMEOUT = "55P03";
 
 const CLR37 = "CLR37";
 const CLR38 = "CLR38";
 
-const EXPECTED_CELLS = 11;
+const EXPECTED_CELLS = 13;
 let live = false;
 let executed = 0;
 
@@ -583,6 +589,152 @@ cell("p649.settle.lock_order — the settle door takes the CLIENT before the PLA
   // the row is free — a settle that merely avoided the deadlock by refusing would be a worse bug.
   assert.equal(outcome.ok?.client_id, client);
   assert.deepEqual(await clientFy(client), { fy_end_month: 6, fy_end_day: 30, status: "active" });
+});
+
+cell("p649.settle.opening_rung_order — the settle door takes the CLIENT ADVISORY RUNG before any row lock, so it cannot deadlock against the opening / fy-end family, which takes that rung first", async () => {
+  // THE SECOND HALF OF THE SAME LAW, AND THE HALF THE FIRST FIX DID NOT REACH.
+  // `p649.settle.lock_order` above settles the order of the two ROW locks. This cell settles
+  // where the CLIENT ADVISORY RUNG — `pg_advisory_xact_lock(203005004, hashtext(client))` — sits
+  // relative to them, because two LIVE doors have already answered that, and both put the rung
+  // ABOVE the rows (measured on this rig, off `pg_proc.prosrc`):
+  //   * `clara.approve_opening_seed` — the seed row FOR UPDATE, then the rung, THEN
+  //     `select * into p from clara.onboarding_plans … for update`. The rung precedes the PLAN row.
+  //   * `clara.set_client_fy_end` — the rung ("THE RUNG BEFORE THE GUARD READS", 0042 §S5.12),
+  //     then `update clara.clients`. The rung precedes the CLIENT row — and that is the very
+  //     write this door makes, through that very door.
+  // 0037 SECTION K states the rung ladder as a PARTIAL order over who takes what
+  // ("firm (203005002) -> client (203005004)"), which is exactly how it must be read here: a
+  // settle that took the two rows FIRST and only met the rung deep inside `set_client_fy_end`
+  // would invert against BOTH doors above, and the loser of that cycle is a 40P01 out of a human
+  // door — the financial-year write dead, the face with nothing to say.
+  //
+  // THE ADVERSARY IS ROOT and performs `approve_opening_seed`'s OWN two acquisitions in its own
+  // order (the rung, then the plan row). No application role may take either directly. The DOOR
+  // is still called through `humanQuery`, as this battery's posture requires.
+  const w = await firmWorld("rung");
+  const client = await addClient(w.firm, `Rung Order ${w.suffix}`, "onboarding");
+  const planId = await plan({ firm: w.firm, client, state: "committed", answeredBy: w.admin, answers: { fye: 6 } });
+
+  const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  const held = defer();
+  const settleIssued = defer();
+  let holderOutcome = null;
+
+  const holder = asRoot(async (c) => {
+    await c.query("begin");
+    // 1 · approve_opening_seed's rung, on this client.
+    await c.query("select pg_advisory_xact_lock(203005004, hashtext($1::text))", [client]);
+    held.resolve();
+    // 2 · let the settle door run and reach whatever it blocks on.
+    await settleIssued.promise;
+    await new Promise((r) => setTimeout(r, 1_500));
+    try {
+      // 3 · approve_opening_seed's NEXT acquisition. Under a rung-last settle this closes the
+      //     cycle — the settle holds the plan row and waits for the rung — and Postgres shoots
+      //     one of the two transactions with 40P01.
+      await c.query("select 1 from clara.onboarding_plans where id=$1 for update", [planId]);
+      holderOutcome = "acquired";
+    } catch (err) {
+      holderOutcome = err.code ?? String(err);
+    }
+    await c.query("rollback");
+  });
+
+  const settle = (async () => {
+    await held.promise;
+    const call = settleAs(w.admin, planId, null, 30, opk("p649_rungorder"));
+    settleIssued.resolve();
+    try { return { ok: await call }; } catch (err) { return { code: err.code ?? null, message: err.message }; }
+  })();
+
+  const [outcome] = await Promise.all([settle, holder]);
+
+  assert.notEqual(outcome.code, PG_DEADLOCK,
+    `the settle door deadlocked against the client advisory rung's own order: ${outcome.message}`);
+  assert.notEqual(holderOutcome, PG_DEADLOCK,
+    "…and neither did the transaction holding the rung: a settle must QUEUE behind the rung, never race it");
+  assert.equal(holderOutcome, "acquired", "the rung-first transaction took the plan lock unobstructed");
+
+  // AND THE WRITE LANDED once the rung was free — queuing is only the right answer if the door
+  // still does its work.
+  assert.equal(outcome.ok?.client_id, client);
+  assert.deepEqual(await clientFy(client), { fy_end_month: 6, fy_end_day: 30, status: "active" });
+});
+
+cell("p649.settle.foreign_plan_takes_no_lock — another firm's plan refuses CLR11 without ever waiting on that firm's rung or rows", async () => {
+  // NO EXISTENCE ORACLE MEANS NO TIMING ORACLE EITHER. This door's own header cites 0021's rule
+  // and promises that a plan which "does not exist, or belongs to another firm, yields NULL and
+  // locks nothing". A caller who cannot see the plan must not be able to MEASURE it — and any
+  // lock taken on the owning firm's rung, client row or plan row BEFORE the firm check hands
+  // them exactly that measurement: hold those locks inside the owning firm and the outsider's
+  // refusal arrives late instead of at once.
+  //
+  // THE DIFFERENCE IS A SQLSTATE, NOT A STOPWATCH. The outsider runs under `lock_timeout = 1s`,
+  // so a door that queues on any of those objects aborts with 55P03 lock_not_available, and a
+  // door that locks nothing answers CLR11 straight away. The second arm is the CONTROL that
+  // proves the instrument: the same timeout, the same door, a plan the caller DOES own, one lock
+  // held — and there the door is supposed to wait.
+  const a = await firmWorld("xta");
+  const b = await firmWorld("xtb");
+  const client = await addClient(a.firm, `Cross Tenant ${a.suffix}`, "onboarding");
+  const planId = await plan({ firm: a.firm, client, state: "committed", answeredBy: a.admin, answers: { fye: 6 } });
+
+  const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  const settleUnder = async (sub, key) => asHuman(sub, async (c) => {
+    await c.query("set lock_timeout = '1s'");
+    const started = Date.now();
+    try {
+      const r = await c.query(SETTLE, [planId, 6, 30, key]);
+      return { ok: r.rows[0].r, ms: Date.now() - started };
+    } catch (err) {
+      return { code: err.code ?? null, reason: reasonOf(err), ms: Date.now() - started, message: err.message };
+    }
+  });
+
+  // ARM 1 — the owning firm holds EVERYTHING this door could want on its own client.
+  const held1 = defer();
+  const release1 = defer();
+  const holder1 = asRoot(async (c) => {
+    await c.query("begin");
+    await c.query("select pg_advisory_xact_lock(203005004, hashtext($1::text))", [client]);
+    await c.query("select 1 from clara.clients where id=$1 for update", [client]);
+    await c.query("select 1 from clara.onboarding_plans where id=$1 for update", [planId]);
+    held1.resolve();
+    await release1.promise;
+    await c.query("rollback");
+  });
+  await held1.promise;
+  const outsider = await settleUnder(b.admin, opk("p649_xtenant"));
+  release1.resolve();
+  await holder1;
+
+  assert.notEqual(outsider.code, PG_LOCK_TIMEOUT,
+    `an outsider queued on the owning firm's locks before being refused (${outsider.ms}ms) — that wait IS the oracle`);
+  assert.equal(outsider.code, CLR.notFound, `expected CLR11, got ${outsider.code ?? "success"}`);
+  assert.equal(outsider.reason, "plan_not_in_firm",
+    "and it is the SAME refusal an unknown plan gets — one answer for both");
+  assert.deepEqual(await clientFy(client), { fy_end_month: null, fy_end_day: null, status: "active" },
+    "nothing was written for a firm the caller is not in");
+
+  // ARM 2 — THE CONTROL. Same door, same 1s timeout, a plan this caller DOES own, with only the
+  // plan row held: the door is supposed to queue here, and 55P03 is the proof that the timeout in
+  // arm 1 was live and would have fired had the door waited at all.
+  const held2 = defer();
+  const release2 = defer();
+  const holder2 = asRoot(async (c) => {
+    await c.query("begin");
+    await c.query("select 1 from clara.onboarding_plans where id=$1 for update", [planId]);
+    held2.resolve();
+    await release2.promise;
+    await c.query("rollback");
+  });
+  await held2.promise;
+  const insider = await settleUnder(a.admin, opk("p649_xtenant_ctl"));
+  release2.resolve();
+  await holder2;
+
+  assert.equal(insider.code, PG_LOCK_TIMEOUT,
+    `the control must WAIT and time out on the plan row (got ${insider.code ?? "success"})`);
 });
 
 cell("p649.settle.fye_unreadable — an unreadable `fye` answer reads as ABSENT and refuses with a TYPED reason, never an untyped cast error", async () => {
