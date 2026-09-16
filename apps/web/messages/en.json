@@ -1814,7 +1814,7 @@
       "expired": "The upload slot expired before the file finished. Upload it again and it gets a fresh slot.",
       "malware_detected": "The scanner found malware in this file, so it was refused and nothing was stored. Do not re-upload it; get a clean copy from its source.",
       "quarantined": "This file is quarantined pending review. Nothing was stored against this client. An owner can tell you the outcome.",
-      "internal": "Something failed inside Clara before this file was stored. Nothing was kept. Upload it again; if it keeps failing, report it with the file name."
+      "internal": "Something failed inside ClaraBook before this file was stored. Nothing was kept. Upload it again; if it keeps failing, report it with the file name."
     },
     "queueFailureUnknown": "This upload was refused with a code Clara has no advice for yet ({code}). Nothing was stored.",
     "capabilityTier": {
