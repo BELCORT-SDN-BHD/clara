@@ -146,6 +146,54 @@ export function isPending(item: FirmSetupItem): boolean {
   return item.state === "pending";
 }
 
+/** An item that has been decided: answered, resolved, or deliberately skipped. */
+export function isSettled(item: FirmSetupItem): boolean {
+  return item.state === "answered" || item.state === "resolved" || item.state === "deferred";
+}
+
+/**
+ * CAN THIS SURFACE STILL SEND AN ANSWER FOR THIS ITEM? — C48.5's "correction path", which is a
+ * separate word from "persisted answers" and is not satisfied by either of the other two.
+ *
+ * `clara.answer_firm_setup_item` sets `state='answered'` from ANY non-committed state and replaces
+ * `answer` wholesale (0203_firm_setup.sql:783-787), so the door corrects a recorded fact and
+ * un-skips a deferred one by the same act — proven under real roles by `p648.answer.correct`. The
+ * ONE case it refuses is a key that already carries a LIVE knowledge record: `capture_knowledge`
+ * answers the second capture `knowledge_already_live` (0192:852), and the honest path for those is
+ * `clara.correct_knowledge` on the facts panel, which this surface already renders. A withdrawn
+ * record leaves `knowledge_record_id` null (the read joins `state = 'live'`), so a withdrawn fact
+ * becomes answerable again here rather than dead-ending.
+ */
+export function isAnswerable(item: FirmSetupItem): boolean {
+  if (item.state === "unseeded") return false;
+  if (item.state === "pending") return true;
+  return item.knowledge_record_id === null;
+}
+
+/** An item whose correction belongs to the knowledge register rather than to this checklist. */
+export function correctsOnRegister(item: FirmSetupItem): boolean {
+  return isSettled(item) && item.knowledge_key !== null && item.knowledge_record_id !== null;
+}
+
+/**
+ * The raw text a re-opened form should start from. A DEFERRAL prefills NOTHING: its `answer`
+ * carries only the reason it was skipped, and offering that back as the answer would turn "we
+ * could not find the certificate" into the firm's MIA number.
+ */
+export function answerDraftText(item: FirmSetupItem): string {
+  if (item.state !== "answered" && item.state !== "resolved") return "";
+  const value = item.answer;
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object" && item.answer_field) {
+    const field = (value as Record<string, unknown>)[item.answer_field];
+    if (typeof field === "string") return field;
+    if (typeof field === "number" || typeof field === "boolean") return String(field);
+  }
+  return "";
+}
+
 /** What a written answer looks like for each shape. The DOOR validates this again — this function
  *  exists so the form can refuse locally, with the error beside the control, before a round trip. */
 export function buildAnswer(item: FirmSetupItem, raw: string): unknown {

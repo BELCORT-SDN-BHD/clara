@@ -51,7 +51,7 @@ import {
   readFirmSetupDraft,
   writeFirmSetupDraft,
 } from "@/lib/firm-setup/api";
-import { buildAnswer, validateAnswer, type FirmSetupItem } from "@/lib/firm-setup/types";
+import { answerDraftText, buildAnswer, validateAnswer, type FirmSetupItem } from "@/lib/firm-setup/types";
 
 /** A radio group stays readable up to six options; beyond that the native select is the honest
  *  control (eight legal forms is a list, not a choice a reader scans). */
@@ -70,9 +70,13 @@ export type FirmSetupSubmitOutcome =
    *  be promoted to firm scope, and a firm-scope record that would pin a document with a live
    *  client filing. Both are about the KEY or the SOURCE rather than the typed value, so neither
    *  belongs in a field error. */
+  /** `already_recorded` is `clara._reserve_op`'s bare CLR10 "op_key reused with different args":
+   *  this attempt's key already names a DIFFERENT request, so the answer it carried was recorded
+   *  under an earlier press. It is a REPORT, not a refusal of the value. */
   | {
       ok: false;
-      kind: "denied" | "already_live" | "not_firm_defaultable" | "client_evidence" | "failed";
+      kind: "denied" | "already_live" | "already_recorded" | "not_firm_defaultable"
+        | "client_evidence" | "failed";
       message: string;
       code: string | null;
     };
@@ -112,8 +116,13 @@ export function FirmSetupItemForm({
     [items, userId, firmId],
   );
 
+  // A CORRECTION STARTS FROM WHAT IS RECORDED, not from a blank control: "change this" and "state
+  // this for the first time" are different acts and must not look identical. An unsent draft still
+  // wins — it is the more recent intent — and a DEFERRAL prefills nothing, because its stored value
+  // is the reason it was skipped rather than an answer (`answerDraftText`).
   const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(items.map((i) => [i.item_key, readFirmSetupDraft(draftKeys[i.item_key] ?? "")?.value ?? ""])));
+    Object.fromEntries(items.map((i) =>
+      [i.item_key, readFirmSetupDraft(draftKeys[i.item_key] ?? "")?.value ?? answerDraftText(i)])));
   const [step, setStep] = useState(0);
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [outcome, setOutcome] = useState<FirmSetupSubmitOutcome | null>(null);
@@ -213,6 +222,13 @@ export function FirmSetupItemForm({
       {outcome && !outcome.ok && outcome.kind === "stale" ? (
         <div data-testid="firm-setup-stale">
           <StateBanner tone="warning" silent={silent}>{t("form.stale")}</StateBanner>
+        </div>
+      ) : null}
+      {outcome && !outcome.ok && outcome.kind === "already_recorded" ? (
+        <div data-testid="firm-setup-already-recorded">
+          <StateBanner tone="info" silent={silent} code={outcome.code ?? undefined}>
+            {t("form.alreadyRecorded")}
+          </StateBanner>
         </div>
       ) : null}
       {outcome && !outcome.ok && outcome.kind === "already_live" ? (

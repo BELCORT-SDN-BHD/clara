@@ -333,9 +333,20 @@ test("fs.web.05 an optional item is skippable with a stated reason, and the chec
   });
 });
 
-test("fs.web.06 a lost response RE-READS first, then offers the SAME request again rather than a second answer", async () => {
+test("fs.web.06 a lost response RE-READS first, then REPLAYS the byte-identical request — same op key AND the revision it was sent with", async () => {
   const calls: Call[] = [];
+  // THE WRITE LANDED; only the acknowledgement was lost. So by the time the surface re-reads, the
+  // plan's CAS token HAS rotated — and a retry carrying the RE-READ token would be a different
+  // request under the same op key, which `clara._reserve_op` refuses with a bare CLR10
+  // "op_key reused with different args" (0004_governed_fns.sql:46-60) even though the answer was
+  // accepted. A frozen envelope hides that: this fixture rotates, so the cell can see it.
+  const ROTATED = {
+    ...ENVELOPE,
+    revision_token: "66666666-6666-4666-8666-666666666666",
+    revision_n: 4,
+  };
   await withMockedEnv(mock({
+    setup: (n) => jsonResponse(n === 1 ? ENVELOPE : ROTATED),
     // A transport failure: not a governed refusal, so nothing is known about whether it landed.
     answer: () => { throw new TypeError("network down"); },
   }, calls), async () => {
@@ -354,16 +365,22 @@ test("fs.web.06 a lost response RE-READS first, then offers the SAME request aga
       assert.ok(calls.filter((c) => c.url.includes("get_firm_setup")).length > readsBefore,
         "the current state was not re-read before offering a resubmit");
 
-      // The SAME control, carrying the SAME derived op key: a second press REPLAYS.
+      // The SAME control, and the SAME request: a second press REPLAYS.
       await press(h, byTestId(h, "firm-setup-submit"), "Save");
       await settleUntil(h, () => calls.filter((c) => c.url.includes("answer_firm_setup_item")).length === 2, "the retry");
       const writes = calls.filter((c) => c.url.includes("answer_firm_setup_item"));
       assert.equal(writes.length, 2);
-      assert.equal(
-        (writes[0]?.body as Record<string, unknown>).p_op_key,
-        (writes[1]?.body as Record<string, unknown>).p_op_key,
-        "the retry minted a NEW op key — the server would answer twice instead of replaying",
-      );
+      const first = writes[0]?.body as Record<string, unknown>;
+      const second = writes[1]?.body as Record<string, unknown>;
+      assert.equal(first.p_op_key, second.p_op_key,
+        "the retry minted a NEW op key — the server would answer twice instead of replaying");
+      // …AND the same expected revision. `_reserve_op` hashes the WHOLE argument list, revision
+      // included, and short-circuits before the CAS check — so replaying the revision that was
+      // actually sent is what makes the receipt replay instead of a CLR10 refusal.
+      assert.equal(second.p_expected_revision, first.p_expected_revision,
+        "the retry carried the RE-READ revision, so the same op key now names a different request: "
+        + "the door answers CLR10 'op_key reused with different args' for a write that was accepted");
+      assert.equal(first.p_expected_revision, ENVELOPE.revision_token);
     } finally { await h.unmount(); }
   });
 });
@@ -470,6 +487,173 @@ test("fs.web.09 a confirmed fact renders scope, source and actor, and says so wh
       assert.match(textOf(authority as never), /now a bookkeeper/);
       // The correction path exists — without it, `knowledge_already_live` would dead-end.
       assert.ok(byTestId(h, "firm-setup-correct-default_currency"), "no correction path for a live fact");
+    } finally { await h.unmount(); }
+  });
+});
+
+/** Drafts live in this process's `localStorage` and the cells above deliberately leave some
+ *  behind. A cell whose subject is what a form PREFILLS has to start from nothing. */
+function clearDrafts(): void {
+  try { globalThis.localStorage?.clear(); } catch { /* storage unavailable — nothing to clear */ }
+}
+
+test("fs.web.10 a settled fact keeps a correction path: a skipped one can be answered, a plan-only one changed, a captured one corrected on the register", async () => {
+  clearDrafts();
+  const SETTLED = {
+    ...ENVELOPE,
+    counter: { required_answered: 3, required_total: 3 },
+    required_outstanding: [],
+    items: ENVELOPE.items.map((i) => {
+      if (i.item_key === "mia") {
+        return { ...i, state: "deferred", answer: { deferred_reason: "The firm is not MIA-registered." } };
+      }
+      if (i.item_key === "currency") {
+        return { ...i, state: "answered", answer: "MYR", knowledge_record_id: "rec-1" };
+      }
+      return { ...i, state: "answered", answer: `recorded ${i.item_key}` };
+    }),
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(SETTLED) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+
+      // A settled fact is no longer ASKED — AC1's "an accepted fact is never re-asked"…
+      assert.equal(byTestId(h, "firm-setup-answer-legal_name-action"), null, "a recorded fact was re-asked");
+      // …but C48.5 closes on "persisted answers, applicability AND correction path", and a plan
+      // item is not on the knowledge register, so the register's Correct control cannot reach it.
+      const change = byTestId(h, "firm-setup-change-legal_name-action");
+      assert.ok(change, "a recorded plan-only fact has NO correction path anywhere on this surface");
+
+      // A SKIPPED fact can be answered later — which is exactly what the skip dialog promises
+      // ("It does not hold up finishing setup, and you can answer it later").
+      const unskip = byTestId(h, "firm-setup-change-mia-action");
+      assert.ok(unskip, "a skipped fact can never be answered: the skip dialog's promise is false");
+      assert.match(textOf(unskip as never), /Answer this now/);
+
+      // A LIVE firm default is corrected on the register instead: a second capture of the same
+      // key is refused `knowledge_already_live` by the real door, so offering one would dead-end.
+      assert.equal(byTestId(h, "firm-setup-change-currency-action"), null,
+        "a live firm default offered a second capture the door refuses");
+      const onRegister = byTestId(h, "firm-setup-correct-on-register-currency");
+      assert.ok(onRegister, "a captured fact names no path to the register that owns its correction");
+      assert.match(textOf(onRegister as never), /Facts confirmed in setup/);
+
+      // …and Change opens the SAME form, prefilled with what was recorded rather than blank.
+      await press(h, change, "Change legal_name");
+      assert.ok(byTestId(h, "firm-setup-item-form"), "the correction opened no form");
+      const input = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      assert.ok(input, "the correction form mounted no control");
+      assert.equal(input?.value, "recorded legal_name",
+        "the correction form did not prefill the recorded answer");
+    } finally { await h.unmount(); }
+  });
+
+  // …AND AFTER A WITHDRAWAL the register no longer owns it. `clara.get_firm_setup` joins the item's
+  // record on `state = 'live'` (0203_firm_setup.sql:1016-1018), so a withdrawn fact leaves
+  // `knowledge_record_id` null — and the facts panel refuses to correct a withdrawn revision. If
+  // the checklist still pointed at the panel there would be no path at all; it offers the form.
+  const WITHDRAWN = {
+    ...SETTLED,
+    items: SETTLED.items.map((i) =>
+      i.item_key === "currency" ? { ...i, knowledge_record_id: null } : i),
+  };
+  await withMockedEnv(mock({ setup: () => jsonResponse(WITHDRAWN) }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      assert.ok(byTestId(h, "firm-setup-change-currency-action"),
+        "a withdrawn firm default can be neither corrected on the register nor answered again");
+      assert.equal(byTestId(h, "firm-setup-correct-on-register-currency"), null,
+        "the row still points at a register row that no longer holds it");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.11 every attempt mints its OWN op key, so an answer can be changed and then changed back", async () => {
+  clearDrafts();
+  const calls: Call[] = [];
+  // A STATEFUL fixture, because the subject is a SEQUENCE: answer, correct, revert. A key derived
+  // from (verb, plan, item, value) alone repeats on the revert, and `_reserve_op` then refuses it
+  // CLR10 "op_key reused with different args" forever — the earlier value can never be restored.
+  const recorded: Record<string, unknown> = {};
+  let token = ENVELOPE.revision_token;
+  let rotations = 0;
+  const now = () => ({
+    ...ENVELOPE,
+    revision_token: token,
+    items: ENVELOPE.items.map((i) =>
+      Object.hasOwn(recorded, i.item_key)
+        ? { ...i, state: "answered", answer: recorded[i.item_key] }
+        : i),
+  });
+  await withMockedEnv(mock({
+    setup: () => jsonResponse(now()),
+    answer: (_n, body) => {
+      const b = body as Record<string, unknown>;
+      recorded[b.p_item_key as string] = b.p_answer;
+      rotations += 1;
+      token = `rotated-${rotations}`;
+      return jsonResponse({ plan_id: ENVELOPE.plan_id, revision_token: token, item_key: b.p_item_key });
+    },
+  }, calls), async () => {
+    const h = await renderComponent(App());
+    const typeAndSave = async (value: string) => {
+      const input = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      assert.ok(input, `no control to type "${value}" into`);
+      await h.act(() => { setFieldValue(input as never, value); });
+      await press(h, byTestId(h, "firm-setup-submit"), `Save ${value}`);
+    };
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      await press(h, byTestId(h, "firm-setup-answer-legal_name-action"), "Answer legal_name");
+      await typeAndSave("Rig & Co PLT");
+      await settleUntil(h, () => byTestId(h, "firm-setup-change-legal_name-action") !== null, "the change control");
+
+      await press(h, byTestId(h, "firm-setup-change-legal_name-action"), "Change legal_name");
+      await typeAndSave("Rig & Partners PLT");
+      await settleUntil(h, () => /Rig & Partners PLT/.test(h.text()), "the corrected answer");
+
+      // BACK TO THE FIRST VALUE — the case a value-derived op key makes unreachable for good.
+      await press(h, byTestId(h, "firm-setup-change-legal_name-action"), "Change legal_name back");
+      await typeAndSave("Rig & Co PLT");
+      await settleUntil(h,
+        () => calls.filter((c) => c.url.includes("answer_firm_setup_item")).length === 3, "the revert");
+
+      const writes = calls.filter((c) => c.url.includes("answer_firm_setup_item"))
+        .map((c) => c.body as Record<string, unknown>);
+      assert.equal(writes.length, 3);
+      assert.equal(new Set(writes.map((w) => w.p_op_key)).size, 3,
+        "two attempts shared an op key — the door refuses the second as 'op_key reused with different args'");
+      // …and each attempt carries the revision the plan is actually on, not a frozen one.
+      assert.deepEqual(writes.map((w) => w.p_expected_revision),
+        [ENVELOPE.revision_token, "rotated-1", "rotated-2"]);
+    } finally { await h.unmount(); }
+  });
+});
+
+test("fs.web.12 `_reserve_op`'s bare CLR10 is reported as ALREADY RECORDED, not as a refusal of the typed value", async () => {
+  clearDrafts();
+  // The one refusal in this journey that carries NO detail (0004_governed_fns.sql:56-58), so the
+  // message is the only discriminant. It means the answer WAS recorded under an earlier attempt —
+  // rendering it as "the database refused this value" beside the control would be the opposite of
+  // what happened.
+  await withMockedEnv(mock({
+    answer: () => refusal("CLR10", "op_key reused with different args", null),
+  }), async () => {
+    const h = await renderComponent(App());
+    try {
+      await settleUntil(h, () => /required facts recorded/.test(h.text()), "the envelope");
+      await press(h, byTestId(h, "firm-setup-answer-legal_name-action"), "Answer legal_name");
+      const input = h.find((n) => (n as Stub).tagName === "INPUT") as Stub | null;
+      await h.act(() => { setFieldValue(input as never, "Rig & Co PLT"); });
+      await press(h, byTestId(h, "firm-setup-submit"), "Save");
+      await settleUntil(h, () => byTestId(h, "firm-setup-already-recorded") !== null, "the already-recorded face");
+
+      assert.match(textOf(byTestId(h, "firm-setup-already-recorded") as never), /already recorded/);
+      assert.equal(byTestId(h, "firm-setup-error-legal_name"), null,
+        "a receipt-level refusal was painted as a field error on the typed value");
+      assert.doesNotMatch(h.text(), /The database refused this value/);
     } finally { await h.unmount(); }
   });
 });

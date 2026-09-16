@@ -41,7 +41,7 @@
 // no history entry — so Back returns to wherever the person came from (the firm home tile, in the
 // journey this ticket owns) rather than unwinding a form.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -72,12 +72,15 @@ import {
   answerFirmSetupItem,
   commitFirmSetup,
   deferFirmSetupItem,
+  firmSetupOpKey,
   loadFirmSetup,
   seedFirmSetup,
 } from "@/lib/firm-setup/api";
 import {
   answerText,
+  correctsOnRegister,
   firmSetupGroups,
+  isAnswerable,
   isPending,
   type FirmSetupEnvelope,
   type FirmSetupItem,
@@ -92,6 +95,42 @@ import { FirmSetupItemForm, type FirmSetupSubmitEntry, type FirmSetupSubmitOutco
 
 type OpenTarget = { kind: "item"; itemKey: string } | { kind: "group"; groupKey: string } | null;
 
+// ---------------------------------------------------------------------------------------------
+// WHAT WAS PUT ON THE WIRE, kept so a LOST RESPONSE can be replayed byte-for-byte.
+//
+// `clara._reserve_op` hashes the WHOLE argument list — `p_expected_revision` included
+// (0004_governed_fns.sql:46-60) — and short-circuits BEFORE the CAS check. So the one request it
+// replays instead of refusing is the identical one: the same op key AND the same expected
+// revision. Every caller here re-reads the plan after a failure (hydrate-never-trust), which means
+// the token this render holds is no longer the token the lost write carried — and re-sending the
+// re-read one under the same key is refused CLR10 "op_key reused with different args" for a write
+// that was ACCEPTED. `p648.opkey.attempt` proves both halves on a real rig.
+//
+// NEVER RETRY A REFUSAL (doors.ts). A governed refusal CLOSES the attempt, so the next press is a
+// new intent with a new op key; only a transport failure — where nothing is known about whether
+// the write landed — keeps it open.
+// ---------------------------------------------------------------------------------------------
+type SentCall = { opKey: string; expectedRevision: string | null; itemKey: string; answer: unknown };
+type Attempt = { signature: string; sent: SentCall[] };
+
+/** The attempt in progress for this intent, or a fresh one when the person changed their mind. */
+function openAttempt(ref: MutableRefObject<Attempt | null>, signature: string): Attempt {
+  if (ref.current?.signature === signature) return ref.current;
+  const fresh: Attempt = { signature, sent: [] };
+  ref.current = fresh;
+  return fresh;
+}
+
+/** The call at `index` — minted ONCE, recorded BEFORE it is sent (after a throw there is nothing
+ *  left to record it from), and re-sent unchanged by a retry. */
+function sentCall(attempt: Attempt, index: number, mint: () => SentCall): SentCall {
+  const existing = attempt.sent[index];
+  if (existing) return existing;
+  const call = mint();
+  attempt.sent[index] = call;
+  return call;
+}
+
 export function FirmSetupChecklist() {
   const t = useTranslations("FirmSetup");
   const caller = useAsyncRead(() => loadCallerContext(sessionTokenAccessor));
@@ -103,6 +142,11 @@ export function FirmSetupChecklist() {
   const [notice, setNotice] = useState<"seeded" | "committed" | null>(null);
   const [writeError, setWriteError] = useState<unknown>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // One in-flight attempt per verb — see `Attempt` above.
+  const answerAttempt = useRef<Attempt | null>(null);
+  const skipAttempt = useRef<Attempt | null>(null);
+  const seedAttempt = useRef<Attempt | null>(null);
+  const commitAttempt = useRef<Attempt | null>(null);
 
   const context = caller.data?.length === 1 ? (caller.data[0] ?? null) : null;
   const env = setup.data;
@@ -139,12 +183,38 @@ export function FirmSetupChecklist() {
     setPendingFocus(null);
   }, [pendingFocus]);
 
+  /**
+   * AN ACCEPTED ANSWER CLOSES ITS FORM and hands focus back to the control that opened it.
+   *
+   * Before the correction path existed, leaving the form mounted after a successful save was
+   * merely untidy: the item was settled, so no control came back to return focus to and nothing
+   * on screen contradicted anything. It is not tidy now — a settled fact keeps a write control,
+   * and that control lives in the branch this open form suppresses, so a person who had just
+   * saved could never reach it. Closing is also what makes "focus return after each step" true
+   * for a SAVE rather than only for a Cancel (AC6).
+   */
+  const closeOpenForm = useCallback(() => {
+    if (open === null) return;
+    if (open.kind === "group") { closeAndReturn(`${open.groupKey}:group`); return; }
+    const group = env?.items.find((i) => i.item_key === open.itemKey)?.group_key ?? "";
+    closeAndReturn(`${group}:${open.itemKey}`);
+  }, [closeAndReturn, env, open]);
+
   const classify = useCallback((err: unknown, itemKey: string): FirmSetupSubmitOutcome => {
     if (isDoorRefusal(err)) {
       if (err.code === "CLR06" && err.reason === "stale_plan") return { ok: false, kind: "stale" };
       if (err.code === "CLR04") return { ok: false, kind: "denied", message: err.message, code: err.code };
       if (err.reason === "knowledge_already_live") {
         return { ok: false, kind: "already_live", message: err.message, code: err.code };
+      }
+      // `clara._reserve_op` raises this one with NO detail (0004_governed_fns.sql:56-58), so the
+      // message is the only discriminant there is. It means this op key already names a DIFFERENT
+      // request -- i.e. the intent was recorded under an earlier attempt of the same press. The
+      // plan has been re-read by the time this renders, so the honest sentence is "already
+      // recorded", never "the database refused this value".
+      if (err.code === "CLR10" && err.reason === null
+          && err.message.includes("op_key reused with different args")) {
+        return { ok: false, kind: "already_recorded", message: err.message, code: err.code };
       }
       // #654's TWO WALLS, mapped AHEAD of the migration that raises them (0205). Both are
       // `CLR10`s from a BEFORE INSERT trigger on `clara.knowledge_records`, and both are about
@@ -172,56 +242,84 @@ export function FirmSetupChecklist() {
     if (!env?.plan_id || !env.revision_token) return { ok: false, kind: "failed", message: "", code: null };
     setBusy(true);
     setWriteError(null);
+    const attempt = openAttempt(answerAttempt,
+      JSON.stringify(["answer", env.plan_id, entries.map((e) => [e.itemKey, e.answer ?? null])]));
     let revision = env.revision_token;
     let failing = entries[0]?.itemKey ?? "";
     try {
-      for (const entry of entries) {
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (!entry) continue;
         failing = entry.itemKey;
+        const call = sentCall(attempt, index, () => ({
+          opKey: firmSetupOpKey(), expectedRevision: revision,
+          itemKey: entry.itemKey, answer: entry.answer,
+        }));
         const receipt = await answerFirmSetupItem({
-          plan: env.plan_id, expectedRevision: revision, itemKey: entry.itemKey, answer: entry.answer,
+          plan: env.plan_id, expectedRevision: call.expectedRevision ?? revision,
+          itemKey: call.itemKey, answer: call.answer, opKey: call.opKey,
         });
         revision = receipt.revision_token;
       }
+      answerAttempt.current = null;
       await setup.reload();
+      closeOpenForm();
       return { ok: true };
     } catch (err) {
       // HYDRATE-NEVER-TRUST, and the lost-response rule in one act: whatever went wrong, the
-      // AUTHORITATIVE plan is re-read before anything is offered again. A replay of the same
-      // request then carries the same op key and replays its receipt instead of answering twice.
+      // AUTHORITATIVE plan is re-read before anything is offered again. The attempt survives a
+      // TRANSPORT failure only -- a second press then re-sends the identical request, which the
+      // door replays -- and is closed by a governed refusal, which is never retried.
+      if (isDoorRefusal(err)) answerAttempt.current = null;
       setWriteError(err);
       await setup.reload();
       return classify(err, failing);
     } finally {
       setBusy(false);
     }
-  }, [classify, env, setup]);
+  }, [classify, closeOpenForm, env, setup]);
 
   const runSeed = useCallback(async () => {
     setBusy(true);
     setWriteError(null);
     setNotice(null);
+    const attempt = openAttempt(seedAttempt, JSON.stringify(["seed", env?.plan_id ?? null]));
+    const call = sentCall(attempt, 0,
+      () => ({ opKey: firmSetupOpKey(), expectedRevision: null, itemKey: "", answer: null }));
     try {
-      await seedFirmSetup();
+      await seedFirmSetup({ opKey: call.opKey });
+      seedAttempt.current = null;
       await setup.reload();
       setNotice("seeded");
     } catch (err) {
+      if (isDoorRefusal(err)) seedAttempt.current = null;
       setWriteError(err);
       await setup.reload();
     } finally {
       setBusy(false);
     }
-  }, [setup]);
+  }, [env, setup]);
 
   const runCommit = useCallback(async () => {
     if (!env?.plan_id || !env.revision_token) return;
     setBusy(true);
     setWriteError(null);
     setNotice(null);
+    const attempt = openAttempt(commitAttempt, JSON.stringify(["commit", env.plan_id]));
+    const call = sentCall(attempt, 0, () => ({
+      opKey: firmSetupOpKey(), expectedRevision: env.revision_token, itemKey: "", answer: null,
+    }));
     try {
-      await commitFirmSetup({ plan: env.plan_id, expectedRevision: env.revision_token });
+      await commitFirmSetup({
+        plan: env.plan_id,
+        expectedRevision: call.expectedRevision ?? env.revision_token,
+        opKey: call.opKey,
+      });
+      commitAttempt.current = null;
       await setup.reload();
       setNotice("committed");
     } catch (err) {
+      if (isDoorRefusal(err)) commitAttempt.current = null;
       setWriteError(err);
       await setup.reload();
     } finally {
@@ -233,13 +331,25 @@ export function FirmSetupChecklist() {
     if (!env?.plan_id || !env.revision_token) return false;
     setBusy(true);
     setWriteError(null);
+    const attempt = openAttempt(skipAttempt,
+      JSON.stringify(["defer", env.plan_id, item.item_key, reason]));
+    const call = sentCall(attempt, 0, () => ({
+      opKey: firmSetupOpKey(), expectedRevision: env.revision_token,
+      itemKey: item.item_key, answer: reason,
+    }));
     try {
       await deferFirmSetupItem({
-        plan: env.plan_id, expectedRevision: env.revision_token, itemKey: item.item_key, reason,
+        plan: env.plan_id,
+        expectedRevision: call.expectedRevision ?? env.revision_token,
+        itemKey: call.itemKey,
+        reason,
+        opKey: call.opKey,
       });
+      skipAttempt.current = null;
       await setup.reload();
       return true;
     } catch (err) {
+      if (isDoorRefusal(err)) skipAttempt.current = null;
       setWriteError(err);
       await setup.reload();
       return false;
@@ -453,17 +563,34 @@ export function FirmSetupChecklist() {
                         </p>
                       ) : null}
 
-                      {!committed && isPending(item) && !itemOpen && !groupOpen ? (
+                      {/* THE CORRECTION PATH — C48.5 closes on "persisted answers, applicability
+                          AND correction path", and the first two do not imply the third.
+                          A settled fact is no longer ASKED (AC1: "an accepted fact is never asked
+                          again"), but it can still be CHANGED, and a skipped one can still be
+                          answered — which is exactly what the skip dialog promises in words
+                          ("you can answer it later"). One door does both: it sets
+                          `state='answered'` from any non-committed state and replaces the answer
+                          wholesale, so the deferral reason does not survive beside the new value
+                          (`p648.answer.correct`).
+                          THE ONE EXCEPTION is a fact that already carries a LIVE knowledge record.
+                          A second capture of that key is refused `knowledge_already_live`, so its
+                          correction path is `clara.correct_knowledge` on the facts panel below —
+                          named here rather than offered as a form the database would refuse. */}
+                      {!committed && !itemOpen && !groupOpen && isAnswerable(item) ? (
                         <div className="flex flex-wrap gap-2">
                           <Button
                             type="button" variant="outline" size="sm" disabled={busy}
-                            data-testid={`firm-setup-answer-${item.item_key}-action`}
+                            data-testid={isPending(item)
+                              ? `firm-setup-answer-${item.item_key}-action`
+                              : `firm-setup-change-${item.item_key}-action`}
                             ref={(el) => { triggerRefs.current[`${group.key}:${item.item_key}`] = el; }}
                             onClick={() => { setOpen({ kind: "item", itemKey: item.item_key }); setNotice(null); }}
                           >
-                            {t("item.answer")}
+                            {isPending(item)
+                              ? t("item.answer")
+                              : item.state === "deferred" ? t("item.answerNow") : t("item.change")}
                           </Button>
-                          {!item.required ? (
+                          {isPending(item) && !item.required ? (
                             <Button
                               type="button" variant="ghost" size="sm" disabled={busy}
                               data-testid={`firm-setup-skip-${item.item_key}`}
@@ -474,6 +601,14 @@ export function FirmSetupChecklist() {
                           ) : null}
                         </div>
                       ) : null}
+                      {!committed && correctsOnRegister(item) ? (
+                        <p
+                          className="text-xs text-muted-foreground"
+                          data-testid={`firm-setup-correct-on-register-${item.item_key}`}
+                        >
+                          {t("item.correctOnRegister")}
+                        </p>
+                      ) : null}
 
                       {itemOpen && context ? (
                         <FirmSetupItemForm
@@ -483,7 +618,7 @@ export function FirmSetupChecklist() {
                           revision={env.revision_token}
                           busy={busy}
                           onSubmit={submit}
-                          onSkip={(skipItem) => setSkipping(skipItem)}
+                          onSkip={isPending(item) ? (skipItem) => setSkipping(skipItem) : undefined}
                           onCancel={() => closeAndReturn(`${group.key}:${item.item_key}`)}
                         />
                       ) : null}

@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
 
-const EXPECTED_CELLS = 15;
+const EXPECTED_CELLS = 17;
 let live = false;
 let executed = 0;
 
@@ -459,6 +459,119 @@ cell("p648.defer.reason the deferred CHECK arm admits an answer, so a skip's sta
     plan: w.plan, revision: env.revision_token, itemKey: "tin", reason: "   ",
   }), "defer without a reason");
   assert.equal(reasonOf(err2), "firm_setup_reason_required");
+});
+
+// =============================================================================================
+// SEAM 3b — THE CORRECTION PATH (C48.5's third word), AND WHAT AN OP KEY MAY BE DERIVED FROM.
+//
+// The surface's correction control (components/firm-setup/firm-setup-checklist.tsx) rests on two
+// claims about this door, and both are asserted here rather than assumed there:
+//   · a settled item is corrected by ANSWERING IT AGAIN, and a deferral is un-skipped the same
+//     way — the door sets `state='answered'` from any non-committed state and replaces `answer`
+//     wholesale, so the deferral reason does not survive as a ghost beside the new value;
+//   · an item whose answer reached the KNOWLEDGE REGISTER is NOT corrected that way — the second
+//     capture of a live key is refused `knowledge_already_live`, which is why the surface sends a
+//     captured fact to `clara.correct_knowledge` on the facts panel instead of offering a form.
+// =============================================================================================
+
+cell("p648.answer.correct a settled item is corrected by answering it again, a deferral is un-skipped, and a LIVE firm default is not re-captured", async () => {
+  const w = await firmSetupWorld("t16");
+  await seed(w.admin);
+  let env = await readSetup(w.admin);
+
+  // (a) DEFER, then ANSWER: the item lands on `answered` with the new value and NO ghost reason.
+  await defer(w.admin, {
+    plan: w.plan, revision: env.revision_token, itemKey: "mia",
+    reason: "Nobody could find the certificate this morning.",
+  });
+  env = await readSetup(w.admin);
+  assert.equal(env.items.find((i) => i.item_key === "mia").state, "deferred");
+  await answer(w.admin, { plan: w.plan, revision: env.revision_token, itemKey: "mia", answer: "MIA-9911" });
+  env = await readSetup(w.admin);
+  const mia = env.items.find((i) => i.item_key === "mia");
+  assert.equal(mia.state, "answered", "answering a skipped item did not un-skip it");
+  assert.equal(mia.answer, "MIA-9911");
+  assert.equal(mia.answered_by, w.admin);
+  const miaRow = await itemRow(w.plan, "mia");
+  assert.equal(miaRow.answer?.deferred_reason, undefined,
+    "the deferral reason survived beside the new answer -- the item now says two things at once");
+
+  // (b) ANSWER, then ANSWER AGAIN: a plan-only fact is corrected in place, by the corrector.
+  await answer(w.admin, {
+    plan: w.plan, revision: env.revision_token, itemKey: "legal_name", answer: "Rig & Co PLT",
+  });
+  env = await readSetup(w.admin);
+  await answer(w.admin2, {
+    plan: w.plan, revision: env.revision_token, itemKey: "legal_name", answer: "Rig & Partners PLT",
+  });
+  env = await readSetup(w.admin);
+  const legal = env.items.find((i) => i.item_key === "legal_name");
+  assert.equal(legal.answer, "Rig & Partners PLT", "a recorded plan item could not be corrected");
+  assert.equal(legal.answered_by, w.admin2, "the correction did not re-attribute the item to its corrector");
+
+  // (c) A LIVE FIRM DEFAULT is a different path: the capture door refuses the second one by name,
+  // so the surface must NOT offer a second answer for it.
+  const captured = env.items.find((i) => i.knowledge_key !== null && i.state === "pending");
+  assert.ok(captured, "the catalogue carries no pending firm-defaultable item to prove this on");
+  await answer(w.admin, {
+    plan: w.plan, revision: env.revision_token, itemKey: captured.item_key,
+    answer: sampleAnswer(captured),
+  });
+  env = await readSetup(w.admin);
+  const live = env.items.find((i) => i.item_key === captured.item_key);
+  assert.ok(live.knowledge_record_id, "answering a firm-defaultable item recorded no knowledge row");
+  const err = await assertRaises("CLR10", () => answer(w.admin, {
+    plan: w.plan, revision: env.revision_token, itemKey: captured.item_key,
+    answer: sampleAnswer(captured),
+  }), "re-answer a live firm-defaultable item");
+  assert.equal(reasonOf(err), "knowledge_already_live",
+    "a second capture of a live key is not refused by name -- the surface's 'correct it on the register' "
+    + "sentence would then be wrong");
+});
+
+cell("p648.opkey.attempt an op key derived from the VALUE alone can never be re-sent; a per-attempt key can, and an identical replay still yields one receipt", async () => {
+  const w = await firmSetupWorld("t17");
+  await seed(w.admin);
+  let env = await readSetup(w.admin);
+
+  // THE DEFECT A VALUE-DERIVED KEY CARRIES. `_reserve_op` hashes the WHOLE argument list — the
+  // expected revision included (0004_governed_fns.sql:46-60) — so the same key against a plan that
+  // has moved on is a DIFFERENT request and is refused, permanently, by name.
+  const stableKey = opk("fsattempt");
+  const rev0 = env.revision_token;
+  await answer(w.admin, { plan: w.plan, revision: rev0, itemKey: "mia", answer: "MIA-1", opKey: stableKey });
+  env = await readSetup(w.admin);
+  assert.notEqual(env.revision_token, rev0, "an accepted answer did not rotate the CAS token");
+
+  const reused = await assertRaises("CLR10", () => answer(w.admin, {
+    plan: w.plan, revision: env.revision_token, itemKey: "mia", answer: "MIA-1", opKey: stableKey,
+  }), "the same op key against a plan that has moved on");
+  assert.match(reused.message, /op_key reused with different args/);
+  assert.equal(reasonOf(reused), null, "this refusal carries no detail -- the message is the only discriminant");
+
+  // …while the BYTE-IDENTICAL request under that key — the op key AND the revision that was
+  // actually sent — replays its receipt rather than acting twice. That is the whole lost-response
+  // contract, and it is why the surface remembers what it sent instead of what it has since read.
+  const replay = await answer(w.admin, {
+    plan: w.plan, revision: rev0, itemKey: "mia", answer: "MIA-1", opKey: stableKey,
+  }).catch((e) => e);
+  assert.ok(!(replay instanceof Error), `the identical replay was refused: ${replay?.message}`);
+  assert.equal(replay.item_key, "mia");
+  const receipts = (await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where firm_id = $1 and fn = 'answer_firm_setup_item' and op_key = $2",
+    [w.firm, stableKey])).rows[0].n;
+  assert.equal(receipts, 1, "one op key minted more than one receipt");
+
+  // A PER-ATTEMPT KEY, on the other hand, lets a person go A -> B -> back to A.
+  for (const value of ["MIA-2", "MIA-1"]) {
+    env = await readSetup(w.admin);
+    await answer(w.admin, {
+      plan: w.plan, revision: env.revision_token, itemKey: "mia", answer: value, opKey: opk("fsattempt"),
+    });
+  }
+  env = await readSetup(w.admin);
+  assert.equal(env.items.find((i) => i.item_key === "mia").answer, "MIA-1",
+    "the earlier value could not be restored");
 });
 
 // =============================================================================================

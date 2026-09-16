@@ -9,10 +9,21 @@
 // the door, and a second path would mean the battery proves a door the browser never calls.
 //
 // EVERY WRITE MINTS A FRESH op_key PER ATTEMPT — doors.ts's "never retry a refusal" law. The one
-// exception is a LOST RESPONSE, where the caller holds the SAME key and presses again so the
-// server replays its receipt instead of acting twice; `firmSetupOpKey` below is how a caller keeps
-// one stable across a retry, and it is derived from the intent (plan, item, value) so an EDITED
-// draft is a new intent with its own key.
+// exception is a LOST RESPONSE, where the caller presses again holding the SAME key AND the same
+// arguments, so the server replays its receipt instead of acting twice.
+//
+// AN OP KEY IS A PROPERTY OF ONE ATTEMPT, NEVER OF AN INTENT. This module used to DERIVE the key
+// from (verb, plan, item_key, value), which looks like idempotency and is not: `clara._reserve_op`
+// hashes the WHOLE argument list — `p_expected_revision` included (0004_governed_fns.sql:46-60) —
+// so the same key against a plan that has moved on is a DIFFERENT request and is refused CLR10
+// "op_key reused with different args", permanently. Two consequences, both proven on a real rig by
+// `p648.opkey.attempt` (packages/db/tests/firm-setup.test.mjs): a value that was ever recorded
+// could never be recorded again (A → B → back to A dead-ends), and the lost-response retry the
+// surface advertises always refused, because the surface re-reads the plan before offering it.
+//
+// So the key is minted here, fresh, per call; the CALLER remembers the exact triple it put on the
+// wire (op key + expected revision + answer) and re-sends THAT for a retry — the only thing
+// `_reserve_op` replays rather than refuses, because it short-circuits before the CAS check.
 //
 // HYDRATE-NEVER-TRUST. None of these resolve a value a caller may paint as the new truth: every
 // caller re-reads `loadFirmSetup` afterwards (through `useAsyncRead`'s `act`, which reloads
@@ -24,24 +35,10 @@ import type { FirmSetupEnvelope } from "./types";
 
 type CallOpts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
-const freshOpKey = (): string => crypto.randomUUID();
-
-/**
- * A STABLE op key for one intent. Same plan + item + value ⇒ same key, so a press after a lost
- * acknowledgement REPLAYS the receipt rather than answering twice; a changed value is a different
- * intent and gets its own key, which is what makes `_reserve_op`'s receipt-hash refusal impossible
- * to trip by accident. FNV-1a in two 32-bit halves, the `answerOpKey` derivation (lib/work/questions.ts:222).
- */
-export function firmSetupOpKey(verb: string, plan: string, itemKey: string, value: unknown): string {
-  const canonical = JSON.stringify([verb, plan, itemKey, value ?? null]);
-  let hi = 0x811c9dc5;
-  let lo = 0x811c9dc5;
-  for (let i = 0; i < canonical.length; i += 1) {
-    const c = canonical.charCodeAt(i);
-    lo = Math.imul(lo ^ (c & 0xff), 0x01000193) >>> 0;
-    hi = Math.imul(hi ^ ((c >>> 8) & 0xff) ^ lo, 0x01000193) >>> 0;
-  }
-  return `fs:${verb}:${hi.toString(16).padStart(8, "0")}${lo.toString(16).padStart(8, "0")}`;
+/** ONE ATTEMPT'S key. Callers that need to replay an attempt keep the key they were handed rather
+ *  than deriving a new one that happens to match — see this module's header. */
+export function firmSetupOpKey(): string {
+  return crypto.randomUUID();
 }
 
 /** `clara.get_firm_setup()` — admin+. The plan, every catalogue row with its state, the measured
@@ -56,7 +53,7 @@ export function loadFirmSetup(opts: CallOpts = {}): Promise<FirmSetupEnvelope> {
 export function seedFirmSetup(
   opts: CallOpts & { opKey?: string } = {},
 ): Promise<{ plan_id: string; revision_token: string; seeded: number; catalogue_total: number }> {
-  return callDoor("seed_firm_setup_plan", { p_op_key: opts.opKey ?? freshOpKey() }, opts);
+  return callDoor("seed_firm_setup_plan", { p_op_key: opts.opKey ?? firmSetupOpKey() }, opts);
 }
 
 /** `clara.answer_firm_setup_item` — admin+, and then the catalogue row's own `min_role`. A stale
@@ -70,7 +67,7 @@ export function answerFirmSetupItem(
     p_expected_revision: args.expectedRevision,
     p_item_key: args.itemKey,
     p_answer: args.answer,
-    p_op_key: args.opKey ?? firmSetupOpKey("answer", args.plan, args.itemKey, args.answer),
+    p_op_key: args.opKey ?? firmSetupOpKey(),
   }, opts);
 }
 
@@ -85,7 +82,7 @@ export function deferFirmSetupItem(
     p_expected_revision: args.expectedRevision,
     p_item_key: args.itemKey,
     p_reason: args.reason,
-    p_op_key: args.opKey ?? firmSetupOpKey("defer", args.plan, args.itemKey, args.reason),
+    p_op_key: args.opKey ?? firmSetupOpKey(),
   }, opts);
 }
 
@@ -98,7 +95,7 @@ export function commitFirmSetup(
   return callDoor("commit_firm_setup", {
     p_plan: args.plan,
     p_expected_revision: args.expectedRevision,
-    p_op_key: args.opKey ?? firmSetupOpKey("commit", args.plan, "", args.expectedRevision),
+    p_op_key: args.opKey ?? firmSetupOpKey(),
   }, opts);
 }
 
