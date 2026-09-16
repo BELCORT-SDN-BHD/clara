@@ -23,12 +23,15 @@
 //
 // THE MEASUREMENT BEHIND THIS SHAPE. The 0183 plan-cache pathology (a pooled
 // PostgREST connection degrading 145 ms -> 2.0-2.8 s from the sixth call) was probed
-// on the #633 rig against THIS read shape — 14 sequential reads of
-// `document_intakes_visible` through one `clara_authenticated` session reusing its
-// connection — and did not reproduce: 1.3 ms on the first call, 0.5 ms flat from the
-// fourth, named-prepared and ad-hoc alike. So the poll ships. A direct view read
-// cannot pin `plan_cache_mode` the way a SECURITY DEFINER door can, which is exactly
-// why it is bounded this hard rather than trusted.
+// on the #633 rig (clara_633, PG 17.11) against THIS read shape — 28 sequential reads
+// of `document_intakes_visible` (the 12-column receipt projection, `order by
+// created_at desc limit 50`, 17 rows visible) through ONE `clara_authenticated`
+// session reusing one connection, half ad-hoc and half server-side named-prepared —
+// and did NOT reproduce: 41.0 ms on the cold first call, then 6-9 ms flat, worst call
+// from the sixth onward 8.8 ms ad-hoc / 7.0 ms named. So the poll ships. What the
+// probe CANNOT do is pin `plan_cache_mode` the way a SECURITY DEFINER door can (the
+// session read `auto`, and a plain view read has no body to set it in), which is
+// exactly why the poll is bounded this hard rather than trusted.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
