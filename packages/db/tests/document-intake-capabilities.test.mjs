@@ -168,3 +168,29 @@ test("p633.capability.registry — the catalogue has NO tenant column, which is 
   assert.equal(a.rows[0].n, b.rows[0].n, "the catalogue is global vocabulary, identical for every firm");
   assert.ok(a.rows[0].n > 0, "control: it is not empty for either of them");
 });
+test("p633.capability.registry — custody and byte extraction DO NOT vary by kind, which is the assumption `byFormat` rests on", async (t) => {
+  if (unready(t)) return;
+  // FIX ROUND 1 (review finding 633-ADV-6). `capability-registry.ts` publishes `custody`
+  // and `byte_extraction` from `byFormat` — the FIRST registry row it happened to read
+  // for that format — because 0191's own column comment (:207-208) says the intake lane
+  // does not know the kind yet. That is true today and was pinned NOWHERE: a future
+  // registry row varying either level by kind would make the surface publish a guess
+  // rather than a level. This is the invariant, asserted over the WHOLE catalogue rather
+  // than over the ofx family alone.
+  const rows = await humanQuery(
+    world.users.carol,
+    `select format,
+            count(distinct custody)::int as custody_levels,
+            count(distinct byte_extraction)::int as byte_levels,
+            count(*)::int as pairs
+       from clara.document_capabilities
+      group by format
+      order by format`,
+  );
+  assert.ok(rows.rowCount > 0, "control: the catalogue is not empty, or every assertion below is vacuous");
+  for (const row of rows.rows) {
+    assert.equal(row.pairs > 1, true, `control: format ${row.format} must publish MORE THAN ONE kind, or 'does not vary by kind' says nothing`);
+    assert.equal(row.custody_levels, 1, `format ${row.format} varies its custody level by kind — the intake surface cannot publish it from the format alone`);
+    assert.equal(row.byte_levels, 1, `format ${row.format} varies its byte_extraction level by kind — same`);
+  }
+});

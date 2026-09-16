@@ -323,19 +323,53 @@ test("p633.grants.nonregression — a foreign firm's persona reads ZERO evidence
   const { users, clients } = world;
   const firmA = (await rootQuery("select firm_id from clara.clients where id=$1", [clients.A1])).rows[0].firm_id;
 
-  // A real link, written by the estate's own lane rather than hand-inserted: seed a
-  // document, file it, draft and approve an entry citing it. If the fixture cannot be
-  // built the cell says so rather than asserting on an empty table.
-  const linkCount = await rootQuery(
-    "select count(*)::int n from clara.entry_evidence_links where firm_id = $1", [firmA],
+  // FIX ROUND 1 (review findings STANDARDS-F2 / 633-ADV-3). This cell used to LOG the
+  // population count and then assert two zeroes over an EMPTY table: it would have
+  // passed identically with RLS removed. The fixture is now built here, so the zeroes
+  // below are a filter doing work.
+  //
+  // WHY `late_attachment` AND NOT A WORK COMMIT: `ck_entry_evidence_links_receipt`
+  // admits exactly two shapes — `work_commit` (which needs a committed
+  // operation_receipt AND an accounting_work row, i.e. a whole Work lane run) and
+  // `late_attachment` (which needs neither). #633 READS this relation and writes it
+  // never, so the property under test is the RLS scope, not the writer; the cheaper
+  // legal shape is the honest fixture for it. The insert is rootQuery — fixture setup
+  // only; every assertion below runs through a least-privileged `humanQuery` persona.
+  const { documentId, sha256 } = await seedVerifiedDocument({ firm: firmA });
+  const res = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: documentId });
+  await fileDocument(users.alice, { document: documentId, client: clients.A1, resolution: res });
+  const drafted = await draftEntry(human(users.alice), {
+    client: clients.A1, resolution: res, document: documentId, sha256,
+    lines: balanced({ cash: "1000", sales: "4000" }, ROUTINE_CENTS), opKey: opk("eel-d"),
+  });
+  const entryId = idOf(drafted, "entry_id", "entry");
+  const linkId = (await rootQuery(
+    `insert into clara.entry_evidence_links
+       (firm_id, client_id, entry_id, document_id, logical_op_id, attached_via, attached_by)
+     values ($1,$2,$3,$4,$5,'late_attachment',$6)
+     returning id`,
+    [firmA, clients.A1, entryId, documentId, opk("eel-link"), users.alice],
+  )).rows[0].id;
+  noteLane(`p633 seeded a real late_attachment evidence link ${linkId} in firm A`);
+
+  // NON-VACUITY, ASSERTED (not logged): firm A's own persona READS the row. Without
+  // this the two zeroes below mean nothing.
+  const own = await humanQuery(
+    users.alice,
+    "select count(*)::int n from clara.entry_evidence_links where id = $1", [linkId],
   );
-  noteLane(`p633 evidence links in firm A at cell time: ${linkCount.rows[0].n}`);
+  assert.equal(own.rows[0].n, 1, "control: firm A's own persona must READ the link — otherwise every zero below is an empty table, not a filter");
 
   const theirs = await humanQuery(
     users.dave,
     "select count(*)::int n from clara.entry_evidence_links where firm_id = $1", [firmA],
   );
   assert.equal(theirs.rows[0].n, 0, "a foreign firm's persona reads none of firm A's evidence links, by exact firm id");
+  const theirsById = await humanQuery(
+    users.dave,
+    "select count(*)::int n from clara.entry_evidence_links where id = $1", [linkId],
+  );
+  assert.equal(theirsById.rows[0].n, 0, "and not even the exact row id — the read is a no-existence-oracle");
 
   const mine = await humanQuery(
     users.alice,

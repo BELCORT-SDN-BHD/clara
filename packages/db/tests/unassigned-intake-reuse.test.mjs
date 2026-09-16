@@ -7,6 +7,16 @@
 //   p633.unassigned.reuse      — the population under viewer and bookkeeper personas;
 //                                every row carries `unassigned: true`; filing REMOVES a
 //                                document from the set; `p_limit` clamps at 500 (:2610).
+//   p633.unassigned.second_attempt
+//                              — WHAT "ASK ONCE" ACTUALLY BUYS (fix round 1, review
+//                                finding 633-ADV-5). The leaf's header used to claim
+//                                `file_document` refuses ANY second attempt. Measured
+//                                here: a repeat to the SAME client is refused with the
+//                                estate's own words and leaves ONE filing; a second
+//                                attribution to a DIFFERENT client is ACCEPTED and
+//                                leaves TWO live filings — a state 0123's classify gate
+//                                then refuses as `document_processing_multi_client`,
+//                                stopping that document's processing.
 //   p633.unassigned.file_floor — THE MEASUREMENT THE NAV ROW COMES FROM. A persona that
 //                                can LIST is not necessarily a persona that can FILE. The
 //                                leaf must render the DB's own refusal rather than a
@@ -23,7 +33,7 @@ import { randomUUID, createHash } from "node:crypto";
 import {
   CLR, rootQuery, humanQuery, ensureReady, endPool, buildWorld, opk,
 } from "./rig-fixtures.mjs";
-import { docsReady, seedIntake, finalizeIntake } from "./rig-docs-fixtures.mjs";
+import { docsReady, seedIntake, finalizeIntake, seedExtraction } from "./rig-docs-fixtures.mjs";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -192,5 +202,61 @@ test("p633.unassigned.reuse — the population is FIRM-SCOPED: firm B never sees
   assert.equal(
     theirs.some((r) => r.id === documentId), false,
     "the firm leaf shows one firm's material only — SECURITY INVOKER means RLS is the wall",
+  );
+});
+test("p633.unassigned.second_attempt — a repeat to the SAME client is refused; a DIFFERENT client is ACCEPTED, and processing stops", async (t) => {
+  if (unready(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const documentId = await bornUnassigned(firm, world.users.bob, "second-attempt.pdf");
+
+  const fileTo = async (client, tag) => {
+    const res = await humanQuery(
+      world.users.bob,
+      `select clara.record_client_resolution(p_client => $1, p_subject_kind => 'document', p_subject => $2,
+         p_confidence => 1.0, p_method => 'human', p_evidence => '{"source":"p633"}'::jsonb, p_op_key => $3) as out`,
+      [client, documentId, opk(tag)],
+    );
+    const out = res.rows[0].out;
+    return humanQuery(
+      world.users.bob,
+      "select clara.file_document(p_document => $1, p_client => $2, p_resolution => $3, p_op_key => $4)",
+      [documentId, client, out?.resolution_id ?? out, opk(`${tag}-file`)],
+    );
+  };
+  const liveFilings = async () => (await rootQuery(
+    "select client_id from clara.document_filings where document_id=$1 and retired_at is null order by client_id",
+    [documentId],
+  )).rows.map((r) => r.client_id);
+
+  // 1. THE ACT THE LEAF OFFERS, ONCE.
+  await fileTo(world.clients.A1, "p633-sa1");
+  assert.deepEqual(await liveFilings(), [world.clients.A1].sort(), "control: the one act the leaf offers really filed it");
+
+  // 2. THE SAME CLIENT AGAIN — REFUSED, IN THE ESTATE'S OWN WORDS.
+  let repeat = null;
+  try { await fileTo(world.clients.A1, "p633-sa2"); } catch (e) { repeat = e; }
+  assert.ok(repeat, "a repeat attribution to the SAME client must be refused");
+  assert.equal(repeat.code, CLR.badRequest, `MEASURED: the same-client repeat refuses with ${CLR.badRequest}, saw ${repeat.code}`);
+  assert.match(
+    String(repeat.message), /already .*filed/i,
+    `and it names the reason — the words the leaf renders verbatim; saw: ${repeat.message}`,
+  );
+  assert.deepEqual(await liveFilings(), [world.clients.A1].sort(), "and it minted no second filing");
+
+  // 3. A DIFFERENT CLIENT — ACCEPTED. This is the half the header used to deny.
+  await fileTo(world.clients.A2, "p633-sa3");
+  const both = await liveFilings();
+  assert.equal(both.length, 2, `the estate PERMITS a second live filing to a different client — saw ${both.length}`);
+
+  // 4. THE CONSEQUENCE, NAMED. Two live filings put the document into 0123's
+  //    multi-client arm: its classify task is a terminal, never-claimed failure and the
+  //    document stops being processed. Driven through the enqueue core the way the
+  //    RUNTIME lane reaches it (this is an observation of the consequence, not the
+  //    tenancy assertion under test — those all ran through `humanQuery` above).
+  await seedExtraction({ firm, document: documentId, engineKind: "ocr", status: "done" });
+  const routed = await rootQuery("select clara._enqueue_invoice_facts_core($1) as out", [documentId]);
+  assert.match(
+    JSON.stringify(routed.rows[0].out), /document_processing_multi_client/,
+    `two live filings must stop classify with its own named verdict — saw ${JSON.stringify(routed.rows[0].out)}`,
   );
 });
