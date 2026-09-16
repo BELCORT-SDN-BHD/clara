@@ -45,7 +45,7 @@ and the Invite entry on the next authoritative response, refused acts included.
 `clara.invite_member` hands its caller the plaintext token exactly once, above persistence, and
 sending the mail needs a service-role key; neither may reach a browser. The route calls the door as
 the caller — so the authority check runs against the real person — and the plaintext goes into the
-mail body and nowhere else. Its failures are ELEVEN typed courier codes, rendered under their own
+mail body and nowhere else. Its failures are TEN typed courier codes, rendered under their own
 title so they are never mistaken for the database's words: `no_session`, `cross_origin`,
 `invalid_request`, `unsupported_address`, `not_permitted`, `mail_not_configured`,
 `recipient_has_account`, `mail_unavailable`, `mail_failed`, `transport` — plus a governed
@@ -81,6 +81,16 @@ workspace — the journey never navigates on its own.
 Pre-authentication preview is a NAMED RESIDUAL: `clara.preview_invite` is granted to
 `clara_authenticated` only and this estate declares no `anon` role, so showing an invitation to a
 signed-out visitor needs a server route holding a service key, which is a separate ticket.
+
+A SECOND NAMED RESIDUAL, in the other direction: the preview reproduces two of `clara.accept_invite`'s
+three walls, not three. The acceptance door also re-checks the ISSUER's *current* rank, so an
+invitation whose issuer has since been demoted — or who has left the firm at all — previews as
+pending, the password form renders, and the refusal arrives at the last step in the database's own
+words ("re-issue by an owner"), relayed verbatim. The admin roster is blind in exactly the same
+place, because `clara.firm_invites_visible` does not carry the issuer's rank either; closing it means
+a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0209
+note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
+(`p625.preview.issuer_rank`).
 
 ## Close and bank operating order
 

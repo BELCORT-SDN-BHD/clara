@@ -12,8 +12,14 @@
 //   - EXECUTE granted to `clara_authenticated` and to NOBODY else (no runtime, no agent, no wake
 //     lane, no PUBLIC, and this estate declares no `anon` role at all);
 //   - it answers for the ONE invite whose `sha256(token)` matches AND whose stored email equals
-//     `clara._jwt_email()` — the same two facts `clara.accept_invite` (`0145:694`) walls on, so
-//     nothing is previewable that could not also be accepted;
+//     `clara._jwt_email()` — TWO of the three facts `clara.accept_invite` (`0145:694`) walls on.
+//     The THIRD is a named residual, not a claim this module makes: the acceptance door also
+//     re-checks the ISSUER's CURRENT rank (`CLR04 'invite exceeds the issuer''s rank -- re-issue
+//     by an owner'`), which neither this door nor `clara.firm_invites_visible` can see, so an
+//     invitation whose issuer was demoted or has left the firm previews as `pending`, the
+//     password form renders, and `acceptInvite`'s own verbatim CLR path is what refuses it.
+//     Pinned by `packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`;
+//     see `packages/db/README.md`'s 0209 note for why closing it needs a fifth status;
 //   - the answer is `{firm_name, role, status, masked_email}` and nothing else: never the token,
 //     never `token_hash`, never the invite id, never the unmasked address;
 //   - `status` is the EFFECTIVE status — `clara.firm_invites_visible`'s own expression

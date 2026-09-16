@@ -30,13 +30,29 @@
 -- pinned `search_path`, reachable by exactly one application role, returning a MASKED projection.
 --
 -- =====================================================================================
--- THE WALL IS `accept_invite`'s OWN WALL, AND IT IS THE SAME ONE.
+-- THE WALL IS `accept_invite`'s OWN — TWO OF ITS THREE, AND THE THIRD IS NAMED HERE.
 --
 -- `clara.accept_invite` (live body `0145:694`) resolves the invite by `sha256(token)` and then
--- refuses unless `clara._jwt_email()` equals the invite's stored email. This door asks the SAME
--- two questions in the SAME order against the SAME two facts. It therefore cannot show anything
--- to a caller who could not also ACCEPT — holding the token is not enough, and being signed in
--- is not enough; both must be true together.
+-- refuses unless `clara._jwt_email()` equals the invite's stored email. This door asks those SAME
+-- two questions in the SAME order against the SAME two facts: holding the token is not enough,
+-- and being signed in is not enough; both must be true together.
+--
+-- IT DOES NOT REPRODUCE accept_invite's THIRD WALL, AND THAT IS A NAMED RESIDUAL RATHER THAN AN
+-- OVERSIGHT. Since 0157's F2 fix the acceptance door ALSO re-checks the ISSUER's CURRENT rank
+-- (`if clara.role_rank(inv.role) > coalesce(v_issuer_rank, -1) then raise ... CLR04 'invite
+-- exceeds the issuer''s rank -- re-issue by an owner'`) — a fact that lives in
+-- `clara.firm_memberships` and that `clara.firm_invites_visible` does not carry either. So an
+-- invitation whose issuer has since been DEMOTED, or who has left the firm altogether (which
+-- `coalesce(..., -1)` refuses outright, for every role), still previews as `pending` HERE and
+-- still lists as `pending` on the admin roster THERE, and the acceptance door is what refuses
+-- it — with its own actionable sentence, relayed verbatim by the web surface.
+--
+-- WHY THIS DOOR IS NOT WIDENED TO MATCH. Reporting it would need a FIFTH effective status: the
+-- invite-outcome face set is fixed at four (DECISIONS §2 #625) and this door's status expression is
+-- deliberately `clara.firm_invites_visible`'s own (below), so a fifth value would put the preview
+-- and the roster into disagreement about the same row. Widening BOTH is its own ticket; until
+-- then the divergence is PINNED by `packages/db/tests/preview-invite.test.mjs`'s
+-- `p625.preview.issuer_rank` cell and recorded in `packages/db/README.md`'s 0209 note.
 --
 -- NO EXISTENCE ORACLE (the §B risk 0141 wrote this table's whole posture around). Three
 -- observations — a token no row carries, a token a row DOES carry but whose email is somebody
@@ -267,10 +283,15 @@ begin
 
   -- (T.2) THE OUTPUT SHAPE IS CLOSED, and neither the token nor the address can reach it. Read
   -- off the RETURN expression itself rather than asserted about the door in prose.
-  v_ret := substr(v_src, position('return jsonb_build_object(' in v_src));
-  if v_ret = '' then
+  -- The POSITION is tested BEFORE the substring, on purpose: `substr(s, 0)` CLAMPS to the whole
+  -- string rather than returning '', so an unconditional substr followed by `if v_ret = ''` is a
+  -- guard that can never fire — it is reachable only when prosrc itself is empty. Ask the
+  -- question that has an answer, then cut.
+  v_n := position('return jsonb_build_object(' in v_src);
+  if v_n = 0 then
     raise exception '#625 tail: clara.preview_invite does not return a jsonb_build_object' using errcode='CLR10';
   end if;
+  v_ret := substr(v_src, v_n);
   if position('token' in v_ret) <> 0 then
     raise exception '#625 tail: the returned object names a token' using errcode='CLR10';
   end if;

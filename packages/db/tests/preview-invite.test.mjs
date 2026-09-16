@@ -25,7 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   CLR, PG, assertRaises, opk, rootQuery, insertUser, createFirm, seedAdmission,
-  humanQuery, ensureReady, endPool,
+  humanQuery, ensureReady, endPool, membershipId, setMemberRole,
 } from "./rig-fixtures.mjs";
 import { inviteMember, revokeInvite, acceptInvite, expireInvite, freshPersona, humanEmailQuery } from "./p4t1-fixtures.mjs";
 
@@ -345,4 +345,69 @@ test("p625.doors.nonregression: accept_invite's JWT-email wall still precedes _r
   assert.ok(Number(wall) > 0, "the wall must be present in CODE, not only in a comment");
   assert.ok(Number(reserve) > 0, "…and so must the dedupe call this cell orders it against");
   assert.ok(Number(wall) < Number(reserve), "F4: the JWT-email wall must still run BEFORE _reserve_op");
+});
+
+// ---------------------------------------------------------------------------
+// 6 — the THIRD wall accept_invite carries and this door does NOT
+// ---------------------------------------------------------------------------
+//
+// A NAMED DIVERGENCE, PINNED SO IT CANNOT WIDEN SILENTLY. `clara.accept_invite` walls on THREE
+// facts, not two: sha256(token), `_jwt_email()` — and, since 0157's F2 fix, the ISSUER'S CURRENT
+// RANK (`if clara.role_rank(inv.role) > coalesce(v_issuer_rank, -1) then raise ... CLR04`). That
+// third wall reads `clara.firm_memberships` for the person who ISSUED the invitation, which is a
+// fact `clara.firm_invites_visible` does not carry either — so the admin roster and this preview
+// agree with each other and BOTH are blind to it. The consequence is real and is written down
+// rather than implied: an invitation issued by someone who has since been demoted, or who has
+// left the firm at all (`coalesce(..., -1)` refuses every role for a non-member issuer), still
+// previews as `pending`, the password form renders, the password is really set, and only the
+// acceptance door refuses — with its own actionable sentence, rendered verbatim.
+//
+// WHY THIS DOOR IS NOT WIDENED TO MATCH. Reporting it would need a FIFTH effective status, and
+// the invite-outcome face set is fixed at four by the wave's own ruling (DECISIONS §2 #625) while
+// the effective-status expression is bound to `firm_invites_visible`'s (brief-625 §3) — a fifth
+// value would put the preview and the roster into disagreement about the same row. Closing it
+// properly is a product decision plus a matching widening of the VIEW, i.e. its own ticket.
+// Until then, this cell is the record: preview says `pending`, accept says CLR04.
+
+test("p625.preview.issuer_rank: an invitation whose ISSUER was demoted still previews as `pending` and is then REFUSED by accept_invite -- the one wall this door does not reproduce, pinned", async (t) => {
+  if (unready(t)) return;
+  const sc = await scene("issuer");
+  const invitee = freshPersona("issuer_rank");
+  // The admin issues at its own ceiling …
+  const issued = await inviteMember(sc.admin, { email: invitee.email, role: "admin", opKey: opk("isr_i") });
+  // … and the OWNER then demotes that admin, which is the ordinary shape: the invitation outlives
+  // the authority that minted it.
+  const adminMembership = await membershipId(sc.firm, sc.admin);
+  await setMemberRole(sc.owner, { membership: adminMembership, role: "bookkeeper", opKey: opk("isr_d") });
+
+  const shown = await preview(invitee.sub, invitee.email, issued.token);
+  assert.equal(shown.status, "pending", "the ROW is untouched, so the effective status is still pending");
+  assert.equal(shown.role, "admin", "…and it still advertises the role it was minted with");
+  assert.equal(shown.firm_name, sc.firmName);
+
+  // THE DIVERGENCE ITSELF. If this ever stops refusing — or starts refusing with a different
+  // code or sentence — the preview door's documented blind spot has moved and this file, the
+  // 0209 header, `apps/web/lib/firm/invite-preview.ts` and `packages/db/README.md`'s residual
+  // must move with it.
+  const refusal = await refusalOf(() => acceptInvite(invitee.sub, invitee.email, {
+    token: issued.token, displayName: "Issuer Rank", opKey: opk("isr_a"),
+  }));
+  assert.ok(refusal, "accept_invite must refuse an invitation that outranks its issuer's CURRENT rank");
+  assert.equal(refusal.code, CLR.authz, "CLR04 -- an authority refusal, not a lifecycle one");
+  assert.match(refusal.message, /invite exceeds the issuer's rank/, "0157 F2's own sentence, verbatim");
+
+  // The refusal is total: nothing was minted on the way to it.
+  const m = await rootQuery("select count(*)::int as n from clara.firm_memberships where user_id = $1", [invitee.sub]);
+  assert.equal(m.rows[0].n, 0, "a refused acceptance mints no membership");
+  const row = await rootQuery("select status from clara.firm_invites where id = $1", [issued.invite_id]);
+  assert.equal(row.rows[0].status, "pending", "…and leaves the invitation exactly where it was");
+
+  // AND THE ROSTER IS BLIND IN THE SAME PLACE, which is why the preview is not the outlier: the
+  // admin who lists invitations sees `pending` too.
+  const seen = await humanEmailQuery(
+    sc.owner, null,
+    "select status from clara.firm_invites_visible where id = $1",
+    [issued.invite_id],
+  );
+  assert.equal(seen.rows[0].status, "pending", "clara.firm_invites_visible does not carry the issuer's rank either");
 });

@@ -120,6 +120,18 @@ shape for three different facts (unknown token, real token / wrong signed-in add
 no verified address), because distinguishing them would rebuild the existence oracle
 [0141_p4_tranche1_invite_rbac.sql](migrations/0141_p4_tranche1_invite_rbac.sql) §B closed.
 
+**Named residual — the preview reproduces two of `accept_invite`'s three walls.** The acceptance
+door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
+-1)` → `CLR04 'invite exceeds the issuer''s rank -- re-issue by an owner'`), a fact that lives in
+`clara.firm_memberships` and that `clara.firm_invites_visible` does not carry either. So an
+invitation whose issuer has since been demoted — or who has left the firm at all, which the
+`coalesce(…, -1)` refuses for every role — still reads `pending` in BOTH the preview and the admin
+roster, and the acceptance door is what refuses it, at the last step, in its own words. Closing it
+means a fifth effective status in the view *and* in the door (the invite-outcome face set is fixed at
+four for this delivery), so it is a ticket of its own. The divergence is pinned meanwhile by
+`packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`, which fails if either side
+of it moves.
+
 ## The `interactive_client` wake kind
 
 `clara.wake_fn_allowlist` rows for the `interactive_client` wake kind are not "structurally
