@@ -28,8 +28,17 @@ import {
 } from "./work-journal-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 import { upsertAccountClassed } from "./s6-helpers.mjs";
+import { asRole } from "./rig-helpers.mjs";
 
 export * from "./periodic-adjustment-fixtures.mjs";
+
+// #634's document/evidence helpers, re-exported BY NAME rather than by a second `export *` (two
+// star exports that both carry `reverseEntry` would silently exclude it). AC4's unwind has a
+// document half — "the document released by `t_entry_evidence_release`" — and these are the
+// estate's own doors for it.
+export {
+  evidenceDocument, docRef, linksForEntry, linksForDocument,
+} from "./journal-work-evidence-fixtures.mjs";
 
 // ===========================================================================================
 // 1 · The #638 frontier gate — keyed on the migration's STABLE STEM, never its number.
@@ -96,6 +105,9 @@ export const SEC_REASON = {
   applicationMissing: "advance_application_missing",
   genericControlLeg: "generic_control_leg",
   closedPeriod: "write_into_closed_period",
+  correctionAlreadyCorrected: "correction_target_already_corrected",
+  correctionLive: "correction_target_live",
+  sourceAlreadyPosted: "source_already_posted",
   intentConflict: "intent_payload_conflict",
 };
 
@@ -276,6 +288,55 @@ export async function admitStaffExpenseClaimWork({
   ]), [client, author, intentKey ?? `sec-intent-${randomUUID()}`, JSON.stringify(c), origin,
     JSON.stringify(sourceRefs), model]);
   return r.rows[0].result;
+}
+
+/**
+ * HOLD THE DOOR'S OWN CLIENT RUNG from a THIRD session, so two concurrent admissions are BOTH
+ * past their (unlocked) world half before either can take it.
+ *
+ * `clara.admit_staff_expense_claim_work` step 6 takes `pg_advisory_xact_lock(203005004,
+ * hashtext(client))`. A race that is not barriered is a coin toss: whichever caller reaches step 5
+ * after the other has committed refuses for the ordinary reason and proves nothing about the
+ * window. Holding the rung makes the window DETERMINISTIC — both callers pass step 5 against the
+ * same world, then queue.
+ *
+ * `fn` receives a `release()`; the lock also dies with the transaction, so a throwing body cannot
+ * wedge the rig.
+ */
+export async function withClientRungHeld(client, fn) {
+  return asRole(ROLES.runtime, async (c) => {
+    await c.query("begin");
+    await c.query("select pg_advisory_xact_lock(203005004, hashtext($1::text))", [client]);
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      await c.query("commit");
+    };
+    try {
+      return await fn(release);
+    } finally {
+      await release().catch(() => { /* the transaction's end releases it anyway */ });
+    }
+  });
+}
+
+/** Wait until `n` sessions are BLOCKED on the claim door's client rung (classid 203005004), read
+ *  from `pg_locks` rather than slept for — a fixed sleep is the flake this battery must not add. */
+export async function awaitRungWaiters(n, timeoutMs = 30000) {
+  const started = Date.now();
+  for (;;) {
+    const waiting = (await rootQuery(
+      "select count(*)::int as n from pg_locks"
+      + " where locktype='advisory' and classid=203005004 and not granted")).rows[0].n;
+    if (waiting >= n) return waiting;
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(
+        `awaitRungWaiters: ${waiting} of ${n} session(s) queued on the claim door's client rung `
+        + `after ${timeoutMs} ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 export async function listStaffExpenseClaims(sub, { client, from = null, to = null }) {

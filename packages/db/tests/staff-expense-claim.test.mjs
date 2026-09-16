@@ -33,12 +33,15 @@ import {
   WCHART, BUNDLE_DIGEST, assertPair, assertRaises,
   rootQuery, humanQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf,
   entryCount, committedReceiptCount, AGENT_USER_ID, admitJournalWork, basis,
-  reverseEntry, seedFiscalYear,
+  reverseEntry, seedFiscalYear, detailOf,
+  // #634's document/evidence doors — AC4's unwind has a document half
+  evidenceDocument, docRef, linksForEntry,
   // #638
   gateSec, SEC_REASON, SECHART, SETTLEMENT, SEC_DATE, ensureSecChart, enrolAdvanceFor,
   liveEnrolment, claim, basisForClaim, admitStaffExpenseClaimWork, listStaffExpenseClaims,
   getStaffExpenseClaim, getWorkClaimOrigin, claimRow, claimCount, claimStatus,
   applicationsForEntry, advanceOutstanding, seedAdvance, linesWithIds,
+  withClientRungHeld, awaitRungWaiters,
 } from "./staff-expense-claim-fixtures.mjs";
 
 let world = null;
@@ -210,6 +213,62 @@ test("p638.claim.posts a reimbursement claim posts ONE entry, ONE receipt, ONE c
   const after = await claimRow(a.claim_id);
   assert.equal(String(after.amount_cents), "60500");
   assert.deepEqual(after.items, row.items, "claim.posts: the items were born at admission and never moved");
+});
+
+// ===========================================================================================
+// 1b · p638.claim.settled — the THIRD settlement, posted through the same unchanged core.
+//
+// AC2 asks that the three settlements be DISTINGUISHED, and `already_settled` is the one the
+// itemisation alone cannot tell you about: the employee has already been paid, so there is no
+// payable and no advance — the expense debits land against the account the money actually left.
+// It is NOT "no journal" (§B's own rule, and the migration header's fifth risk), which is exactly
+// why it needs a cell that posts through the real door rather than a derivation unit test.
+// ===========================================================================================
+
+test("p638.claim.settled an already-settled claim posts the expense debits against the STATED payment account, with no payable and no advance", async (t) => {
+  if (await gateSec(t)) return;
+  const client = await secClient("settled");
+  const c = claim({ settlement: SETTLEMENT.settled });   // payment_account_code => 1150 bank
+  const a = await armed({ client, claim: c });
+
+  // --- the CLAIM ROW: the settlement is TYPED, and the other two arms' columns are NULL --------
+  const row = await claimRow(a.claim_id);
+  assert.equal(row.settlement, SETTLEMENT.settled);
+  assert.equal(row.payment_account_code, SECHART.bank,
+    "claim.settled: the claim names the account the money left");
+  assert.equal(row.payable_account_code, null,
+    "claim.settled: nothing is owed to the claimant, so no employee payable is recorded");
+  assert.equal(row.advance_account_code, null);
+  assert.equal(row.advance_id, null,
+    "claim.settled: an already-settled claim discharges no advance");
+  assert.equal(String(row.amount_cents), "60500");
+
+  // --- the POSTING ---------------------------------------------------------------------------
+  const out = await post(a);
+  assert.equal(out.posted, true, "claim.settled: posted");
+  assert.equal(await entryCount(client), 1, "claim.settled: exactly ONE entry");
+  const lines = await linesOf(out.entry_id);
+  assert.equal(lines.length, 3,
+    "claim.settled: `already_settled` is NOT `no journal` — two expense debits and one payment credit");
+  assert.equal(String(lines.find((l) => l.account_code === SECHART.travel).debit_cents), "48000");
+  assert.equal(String(lines.find((l) => l.account_code === SECHART.meals).debit_cents), "12500");
+  assert.equal(String(lines.find((l) => l.account_code === SECHART.bank).credit_cents), "60500",
+    "claim.settled: the credit is the ASSET the payment came out of, never a liability");
+  assert.equal(lines.filter((l) => l.account_code === SECHART.payable).length, 0,
+    "claim.settled: no employee payable leg is invented for money already paid");
+
+  // --- ONE receipt, ONE claim row, the ledger at admitted+posted -----------------------------
+  assert.equal(await committedReceiptCount(client), 1, "claim.settled: ONE committed receipt");
+  assert.equal(await claimCount(client), 1, "claim.settled: ONE claim row");
+  assert.deepEqual((await claimStatus(a.claim_id)).map((s) => s.state).sort(), ["admitted", "posted"]);
+  assert.equal((await applicationsForEntry(out.entry_id)).length, 0,
+    "claim.settled: NO staff-advance allocation is minted — §E's birth trigger reads the settlement");
+
+  // …and the register discloses it under its own word, at the viewer floor.
+  const seen = await listStaffExpenseClaims(CAROL(), { client });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].settlement, SETTLEMENT.settled,
+    "claim.settled: C6 can tell this claim apart from a reimbursement and from an advance application");
 });
 
 // ===========================================================================================
@@ -524,22 +583,66 @@ test("p638.refusals every typed claim refusal fires by name, before anything dur
       `refusals.${label}`);
   }
 
+  // ALREADY-SETTLED PAYS FROM AN ASSET, and from an asset that is not a control account. Money
+  // already paid left something the client HAS; a liability or a receivable/payable control is
+  // not that, and the claim would balance while saying something untrue. Both arms fold to
+  // `invalid_claim` with the SAME `constraint` token the form maps onto `paymentAccountCode`.
+  for (const [label, code] of [["liability", SECHART.payable], ["control", SECHART.control]]) {
+    const out = await refusesSec(client, "CLR10", SEC_REASON.invalidClaim,
+      () => admitStaffExpenseClaimWork({
+        client, author: ALICE(),
+        claim: claim({ settlement: SETTLEMENT.settled, paymentAccountCode: code }),
+      }), `refusals.settledPaymentIs${label}`);
+    assert.equal(out.detail.constraint, "asset",
+      `refusals.settledPaymentIs${label}: the refusal names the class it needed`);
+    assert.equal(out.detail.field, "claim.payment_account_code",
+      `refusals.settledPaymentIs${label}: …on the control the preparer chose`);
+  }
+
   // CLR04 — a VIEWER may not admit a claim.
   await refusesSec(client, "CLR04", "insufficient_role",
     () => admitStaffExpenseClaimWork({ client, author: CAROL(), claim: claim() }),
     "refusals.viewer");
 });
 
-test("p638.refusals a claim into a CLOSED fiscal year is refused CLR19 write_into_closed_period at COMMIT", async (t) => {
+test("p638.refusals a claim dated into a CLOSED fiscal year is refused CLR19 at ADMISSION, so no register row is stranded", async (t) => {
   if (await gateSec(t)) return;
   const client = await secClient("closedfy");
   await seedFiscalYear(client, {
     startsOn: "2025-01-01", endsOn: "2025-12-31", status: "closed", openedBy: ALICE(),
   });
-  const c = claim({ incurredDate: "2025-06-01", postingDate: "2025-06-30" });
-  const a = await armed({ client, claim: c });
-  await assertRaises("CLR19", () => post(a), "refusals.closedPeriod");
-  assert.equal(await entryCount(client), 0, "refusals.closedPeriod: nothing posted");
+
+  // WHY ADMISSION AND NOT ONLY COMMIT. A claim's admission writes a DURABLE, APPEND-ONLY register
+  // row; a journal Work's does not. Refused only at posting, the sealed year would leave a claim
+  // `clara.list_staff_expense_claims` can never tell apart from one still queued — entry_id null,
+  // ledger ['admitted'], for ever, and the register's own history badge would say "admitted" on a
+  // claim that can never post. So §B's world half asks the fiscal year, exactly as
+  // `clara._assert_adjustment_relationships` does for a periodic adjustment (0194:975-983).
+  // `refusesSec` re-reads all four halves: no entry, no receipt, NO CLAIM ROW, no enrolment.
+  const out = await refusesSec(client, "CLR19", SEC_REASON.closedPeriod,
+    () => admitStaffExpenseClaimWork({
+      client, author: ALICE(),
+      claim: claim({ incurredDate: "2025-06-01", postingDate: "2025-06-30" }),
+    }), "refusals.closedPeriod");
+  assert.equal(out.detail.field, "claim.posting_date",
+    "refusals.closedPeriod: the refusal lands on the date the preparer can change");
+  assert.equal(out.detail.fy_status, "closed");
+
+  // THE COMMIT WALL IS STILL THE LAW, and this arm is not a substitute for it: a year that seals
+  // BETWEEN admission and posting is refused by `clara._tf_period_wall` (0056:643) on the approved
+  // INSERT, and that trigger — not this validator — is the one that sees close permits.
+  const wall = await rootQuery(
+    `select count(*)::int n from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+      where t.tgrelid = 'clara.journal_entries'::regclass and not t.tgisinternal
+        and p.proname = '_tf_period_wall'`);
+  assert.equal(wall.rows[0].n, 1,
+    "refusals.closedPeriod: t_period_wall still stands on clara.journal_entries — the admission arm front-runs it, never replaces it");
+
+  // …and a claim dated in an OPEN stretch of the same client posts, so the arm refuses the sealed
+  // year and nothing else.
+  const open = await armed({ client, claim: claim() });          // 2026-03-31, no fiscal year row
+  assert.equal((await post(open)).posted, true,
+    "refusals.closedPeriod: a claim outside the sealed year is untouched by the new arm");
 });
 
 test("p638.refusals CLR04 obo_not_initiator — a credential minted for one human cannot post another's claim", async (t) => {
@@ -715,6 +818,112 @@ test("p638.correction reversal + a linked correction claim: two rows linked both
     "select count(*)::int n from clara.operation_receipts where client_id=$1 and outcome='committed'",
     [client])).rows[0].n;
   assert.equal(receipts, 2, "correction: two committed receipts under two logical identities");
+});
+
+test("p638.correction.race two concurrent corrections of ONE claim: the loser is a TYPED refusal, never a raw 23505", async (t) => {
+  if (await gateSec(t)) return;
+  const client = await secClient("correctrace");
+  const first = await armed({ client, claim: claim() });
+  const posted = await post(first);
+  assert.equal(posted.posted, true);
+  await reverseEntry(ALICE(), { entry: posted.entry_id, reason: "#638: posted in error" });
+
+  // BOTH callers pass the world half — including its (iv) correction-target arm — against a world
+  // in which the target is NOT yet corrected, then queue on the door's client rung. Exactly one
+  // may land: `uq_staff_expense_claims_corrects` is partial-unique on `corrects_claim_id`. The
+  // question this cell asks is not WHETHER one loses but WHAT THE LOSER IS TOLD: a raw 23505 is
+  // an error `workErrorResponse` does not classify (it claims 40P01/40001 and the CLR codes), so
+  // the route answers 500 {error:"internal"} and the browser says "unavailable" — where the
+  // successor contract promises `correction_target_already_corrected`.
+  const mk = (n) => claim({
+    correctsClaimId: first.claim_id,
+    instruction: `corrected claim, attempt ${n}`,
+    items: [{ description: `KL–Penang return flight (corrected ${n})`,
+      expense_account_code: SECHART.travel, amount_cents: 40000 }],
+  });
+  const settled = await withClientRungHeld(client, async (release) => {
+    const race = Promise.allSettled([
+      admitStaffExpenseClaimWork({ client, author: ALICE(), claim: mk(1) }),
+      admitStaffExpenseClaimWork({ client, author: ALICE(), claim: mk(2) }),
+    ]);
+    await awaitRungWaiters(2);
+    await release();
+    return race;
+  });
+
+  const won = settled.filter((r) => r.status === "fulfilled");
+  const lost = settled.filter((r) => r.status === "rejected");
+  assert.equal(won.length, 1,
+    `correction.race: exactly ONE correction lands (got ${won.length}); `
+    + `outcomes ${JSON.stringify(settled.map((r) => r.status === "fulfilled" ? "ok" : (r.reason?.code ?? "err")))}`);
+  const err = lost[0].reason;
+  assert.equal(err.code, "CLR10",
+    `correction.race: the loser is a TYPED refusal, not a raw ${err.code} — "${err.message}"`);
+  assert.equal(detailOf(err)?.reason, SEC_REASON.correctionAlreadyCorrected,
+    `correction.race: …and it names WHAT happened, got ${JSON.stringify(detailOf(err))}`);
+  assert.equal(detailOf(err)?.field, "claim.corrects_claim_id");
+
+  // THE DATA WAS NEVER IN DANGER — that is the point. The defect was the WORD, so assert both.
+  assert.equal(await claimCount(client), 2, "correction.race: one original and one correction");
+  assert.equal((await claimRow(first.claim_id)).corrected_by_claim_id, won[0].value.claim_id,
+    "correction.race: the chain names the winner, once");
+});
+
+test("p638.correction.evidence the reversal RELEASES the claim's document, so the correcting claim may cite the same receipt", async (t) => {
+  if (await gateSec(t)) return;
+  const client = await secClient("correctdoc");
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client, kind: "receipt" });
+
+  const first = await armed({
+    client, sourceRefs: [docRef(doc.documentId)], claim: claim({ sourceKind: "document" }),
+  });
+  assert.equal((await claimRow(first.claim_id)).source_document_id, doc.documentId,
+    "correction.evidence: the claim register names the document it stands on");
+  const posted = await post(first);
+  assert.equal(posted.posted, true);
+
+  // THE LINK IS BORN INSIDE THE POSTING TRANSACTION and is LIVE while the entry stands.
+  const born = await linksForEntry(posted.entry_id);
+  assert.equal(born.length, 1, "correction.evidence: ONE evidence link");
+  assert.equal(born[0].document_id, doc.documentId);
+  assert.equal(born[0].attached_via, "work_commit");
+  assert.equal(born[0].released_at, null, "correction.evidence: LIVE while the entry stands");
+
+  // …so a SECOND claim citing the same receipt is refused CLR13 while that entry is in the books.
+  await refusesSec(client, "CLR13", SEC_REASON.sourceAlreadyPosted,
+    () => admitStaffExpenseClaimWork({
+      client, author: ALICE(), sourceRefs: [docRef(doc.documentId)],
+      claim: claim({ sourceKind: "document", instruction: "the same receipt, claimed twice" }),
+    }), "correction.evidence.live");
+
+  // THE UNWIND'S DOCUMENT HALF (brief §4 seam 11). `t_entry_evidence_release` (0182:417) stamps
+  // `released_at` on the reversal — without it the correcting claim would meet CLR13 for ever and
+  // AC4's unwind would be unprovable for a documented claim.
+  await reverseEntry(ALICE(), { entry: posted.entry_id, reason: "#638: the receipt was misread" });
+  const released = await linksForEntry(posted.entry_id);
+  assert.equal(released.length, 1, "correction.evidence: the link is released, never deleted");
+  assert.ok(released[0].released_at,
+    "correction.evidence: t_entry_evidence_release freed the document on reversal");
+  assert.equal(released[0].document_id, doc.documentId,
+    "correction.evidence: …and it still says WHICH document backed the reversed entry");
+
+  const second = await armed({
+    client, sourceRefs: [docRef(doc.documentId)],
+    claim: claim({
+      sourceKind: "document", correctsClaimId: first.claim_id,
+      items: [{ description: "Client dinner (corrected)", expense_account_code: SECHART.meals,
+        amount_cents: 9900 }],
+    }),
+  });
+  const out2 = await post(second);
+  assert.equal(out2.posted, true,
+    "correction.evidence: the correcting claim cites the SAME receipt and posts");
+  const relinked = await linksForEntry(out2.entry_id);
+  assert.equal(relinked.length, 1);
+  assert.equal(relinked[0].document_id, doc.documentId);
+  assert.equal(relinked[0].released_at, null,
+    "correction.evidence: the correction now holds the document, and only the correction");
+  assert.equal((await claimRow(first.claim_id)).corrected_by_claim_id, second.claim_id);
 });
 
 // ===========================================================================================
