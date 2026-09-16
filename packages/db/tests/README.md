@@ -45,7 +45,9 @@ source-revision doors on the real chain under the real role matrix: a revision A
 the superseded extraction's regions byte-identical, a revision quoting a moved reading refuses
 CLR19 and echoes the attempted value, the arithmetic belt measures the NEW numbers, the orphaned
 classification door is narrow (zero live filings — a retired-then-re-filed document still refuses),
-op-key replay returns the original receipt, and NOTHING in the ticket reaches
+op-key replay returns the original receipt, a `'fact'` row names the `invoice_facts` reading it
+superseded even after a kind change has repointed the document-wide pointer at a classification,
+and NOTHING in the ticket reaches
 `clara.accounting_work`, `clara.agent_tasks` or `clara.knowledge_records`. Its pre-integration gate
 is `document-source-revision-preintegration-gate.mjs`; a focused run without that module FAILS
 rather than skipping.

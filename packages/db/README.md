@@ -215,9 +215,20 @@ A document's own *reading* now has two governed human doors and two reads, all f
 `clara.document_fact_revisions` is the append-only identity + receipt relation behind them — FORCE
 RLS, SELECT-only for `clara_authenticated`, no DML for any application role, two `revision_kind`
 values (`fact`, `kind`) and **no** `correction_id` column. `observed_extraction_id` is the
-document's authoritative extraction as it stood inside the revising transaction;
-`observed_version_n` is its facts version (the count of done `invoice_facts` extractions), which a
+reading the decision was made against, as it stood inside the revising transaction, and which row
+that is depends on the kind: a `'fact'` row names the kind-current `invoice_facts` extraction it
+superseded, a `'kind'` row names `clara.documents.authoritative_extraction_id` (the document-wide
+pointer, which a human kind change repoints at a `doc_classify` row).
+`observed_version_n` is the facts version (the count of done `invoice_facts` extractions), which a
 fact revision QUOTES and a kind revision derives.
+
+`document.fact_revised` is registered `client_scoped` and emitted with the document's **sole live
+filing's** client, which is SQL NULL when the document is live in zero or in more than one client.
+`clara.list_activity` filters `(p_client is null or client_id = p_client)`, so such a revision
+appears in the firm-wide activity feed and in **no** client's feed. That is the deliberate
+consequence of not guessing a client for a multi-filed document (the ledger row's `client_id`
+carries the same NULL for the same reason); emitting one event per live filing is a change #676's
+posted-effect work should decide, not this ticket.
 
 0202 also recuts `clara.set_document_kind` — signature unchanged — so a kind change records the
 same observation and its own `'kind'` revision row. **D1 write-quiesce is owed** for that recut

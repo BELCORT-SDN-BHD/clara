@@ -260,9 +260,18 @@ set role clara_fn_owner;
 -- the two READ-SIDE into one chronological lineage, so nothing is denormalised and nothing is
 -- lost.
 --
--- WHAT `observed_*` MEAN, stated once so both writers agree. `observed_extraction_id` is
--- `clara.documents.authoritative_extraction_id` AS IT STOOD inside the revising transaction — the
--- source version the human was reading. `observed_version_n` is the document's FACTS VERSION at
+-- WHAT `observed_*` MEAN, stated once so both writers agree. `observed_extraction_id` is THE
+-- READING THE DECISION WAS MADE AGAINST, as it stood inside the revising transaction — and which
+-- row that is depends on WHICH reading the door revised. A 'fact' row names the KIND-CURRENT
+-- `invoice_facts` extraction it superseded (`obs.facts_extraction_id`, the same row its appended
+-- extraction's `revises_extraction_id` names); a 'kind' row names the DOCUMENT-WIDE pointer
+-- `clara.documents.authoritative_extraction_id`, because a classification is a judgement about the
+-- document as a whole. The two are the SAME row until something re-kinds the document: the human
+-- kind door appends a `doc_classify` extraction and 0089:237 repoints the document-wide pointer at
+-- it, after which a 'fact' row that quoted the pointer would name a classification as "the reading
+-- the figures were corrected against" — measured, and fixed in fix round 1; cell
+-- p646.fact.observes_facts_reading is what goes red the day it drifts back.
+-- `observed_version_n` is the document's FACTS VERSION at
 -- that same instant: the number of `status='done'` `invoice_facts` extractions it carries. For a
 -- 'fact' revision the caller QUOTES that number and the door refuses CLR19 when it has moved; for
 -- a 'kind' revision the caller quotes nothing (a classification does not race the facts chain) and
@@ -328,9 +337,13 @@ comment on table clara.document_fact_revisions is
   'Wrong-client refiles are NOT recorded here -- their identity is clara.filing_corrections '
   '(0007:310-335) and clara.list_source_revisions joins the two read-side.';
 comment on column clara.document_fact_revisions.observed_extraction_id is
-  '#646: clara.documents.authoritative_extraction_id as it stood inside the revising transaction '
-  '-- the source version the human was reading. NULL where the document carried no extraction at '
-  'all (a kind set on a never-extracted document).';
+  '#646: the reading this decision was made against, as it stood inside the revising transaction. '
+  'For revision_kind=''fact'' that is the kind-current invoice_facts extraction the revision '
+  'superseded (the same row the appended extraction''s envelope names in revises_extraction_id); '
+  'for ''kind'' it is clara.documents.authoritative_extraction_id, the DOCUMENT-WIDE pointer, '
+  'because a classification is a judgement about the whole document. The two rows are identical '
+  'until a human kind change repoints the pointer at a doc_classify extraction. NULL where the '
+  'document carried no extraction at all (a kind set on a never-extracted document).';
 comment on column clara.document_fact_revisions.observed_version_n is
   '#646: the document''s FACTS version at the revising instant -- the count of status=''done'' '
   'invoice_facts extractions. A ''fact'' revision QUOTES this number (clara.revise_document_fact '
@@ -710,13 +723,13 @@ begin
       field_path, prior_value, new_value, observed_extraction_id, observed_version_n,
       resulting_extraction_id, reason, recorded_by, op_key)
     values (c.firm, v_client, p_document, 'fact', p_field_path, v_prior_value, v_new_value,
-      obs.authoritative_extraction_id, obs.facts_version, v_ext, btrim(p_reason), c.actor, p_op_key)
+      obs.facts_extraction_id, obs.facts_version, v_ext, btrim(p_reason), c.actor, p_op_key)
     returning id into v_revision;
 
   perform clara._audit(c.firm, c.actor, null, null, 'revise_document_fact', null,
     jsonb_build_object('document', p_document, 'field_path', p_field_path,
       'prior_value', v_prior_value, 'new_value', v_new_value,
-      'observed_extraction', obs.authoritative_extraction_id,
+      'observed_extraction', obs.facts_extraction_id,
       'observed_version', obs.facts_version, 'extraction', v_ext, 'revision', v_revision,
       'reason', p_reason, 'op_key', p_op_key));
   perform clara._append_event(c.firm, 'document.fact_revised', v_client, c.actor, null, null,
@@ -728,7 +741,7 @@ begin
   return clara._finish_op(c.firm, 'revise_document_fact', p_op_key,
     jsonb_build_object('document_id', p_document, 'revision_id', v_revision,
       'field_path', p_field_path, 'prior_value', v_prior_value, 'new_value', v_new_value,
-      'extraction_id', v_ext, 'observed_extraction_id', obs.authoritative_extraction_id,
+      'extraction_id', v_ext, 'observed_extraction_id', obs.facts_extraction_id,
       'observed_version', obs.facts_version, 'facts_version', obs.facts_version + 1,
       'carried_regions', v_carried));
 end $fn$;
@@ -1007,7 +1020,13 @@ begin
         'work_status', w.status)
         order by i.created_at, i.id)
       from clara.agent_interruptions i
-      join clara.accounting_work w on w.id = i.work_id
+      -- THE TENANT TERM IS STATED ON BOTH SIDES, not inherited. clara.agent_interruptions.work_id's
+      -- foreign key is single-column (no (work_id, firm_id) composite), so without w.firm_id this
+      -- projection would read w.status and w.source_refs out of a row nothing firm-filtered. Not
+      -- reachable today -- interruptions are minted with their Work's firm -- but every other arm
+      -- of this read carries its own firm term, and one inherited term is exactly the kind of
+      -- asymmetry a later widening rides through (round-1 review note).
+      join clara.accounting_work w on w.id = i.work_id and w.firm_id = c.firm
      where i.firm_id = c.firm and i.work_id is not null and i.status = 'pending'
        and exists (select 1 from jsonb_array_elements(coalesce(w.source_refs, '[]'::jsonb)) x
                     where x->>'kind' = 'document' and x->>'document_id' = p_document::text)),

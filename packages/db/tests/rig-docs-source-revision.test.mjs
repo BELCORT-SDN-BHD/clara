@@ -40,7 +40,7 @@ import { openQuestion, resolveOpenQuestion } from "./wave-a-fixtures.mjs";
 import { openWorkQuestion, answerWorkQuestion, twoFieldAnswer } from "./work-question-fixtures.mjs";
 
 const STEM = "document_source_revision$";
-const EXPECTED_CELLS = 15;
+const EXPECTED_CELLS = 16;
 
 let live = false;
 let world = null;
@@ -455,6 +455,77 @@ cell("p646.kind.stamps_version: set_document_kind stamps the observed extraction
     "select clara._coding_lane_core($1,$2) as r", [A1(), doc3.filingId])).rows[0].r;
   assert.ok(!String(laneAfter.reasons ?? laneAfter).includes("open_question"),
     "the filing left needs_you on the answered-question ground");
+});
+
+// =============================================================================================
+// p646.fact.observes_facts_reading — WHICH READING A 'fact' ROW NAMES, ON THE ORDINARY SEQUENCE.
+//
+// THE SEQUENCE IS THE MOST ORDINARY ONE THERE IS: classify the document, then correct a figure on
+// it. `clara.set_document_kind` appends a `clara-classify-human:v1` / `doc_classify` extraction and
+// 0089:237 repoints `clara.documents.authoritative_extraction_id` at it, so from that instant the
+// DOCUMENT-WIDE pointer names a classification rather than a reading of the figures. A 'fact'
+// revision's answer to "which reading was this decision made against" must therefore be the
+// KIND-CURRENT `invoice_facts` row it actually superseded, not the document-wide pointer.
+//
+// p646.fact.appends cannot catch this: it never re-kinds, so the two pointers are the same row
+// there. This cell is the one that separates them (round-1 review finding
+// 646-A1-observed-extraction-names-the-wrong-chain).
+// =============================================================================================
+cell("p646.fact.observes_facts_reading: after a kind change repoints the document-wide pointer at a classification, a fact revision's ledger row, receipt, audit payload and read all still name the invoice_facts reading it superseded", async () => {
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 88000, tag: "obschain" });
+
+  await setDocumentKind(KEEPER(), {
+    document: s.documentId, kind: "receipt", reason: "#646 rig: it is a cash receipt, not a bill" });
+  const pointer = (await rootQuery(
+    "select authoritative_extraction_id from clara.documents where id=$1", [s.documentId]))
+    .rows[0].authoritative_extraction_id;
+  const pointed = (await extractionsOf(s.documentId)).find((e) => e.id === pointer);
+  assert.equal(pointed.engine_kind, "doc_classify",
+    "mandatory setup: the document-wide pointer now names the CLASSIFICATION, not the figures");
+  assert.notEqual(pointer, s.machineExtraction, "mandatory setup: the two pointers have separated");
+
+  const opKey = opk("p646-obschain");
+  const out = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 900.00",
+    observedVersion: 1, opKey });
+
+  // THE LEDGER ROW. Its observed reading is the invoice_facts extraction this revision superseded.
+  const rows = await revisionsOf(s.documentId);
+  const factRow = rows.find((r) => r.revision_kind === "fact");
+  const observed = (await extractionsOf(s.documentId)).find((e) => e.id === factRow.observed_extraction_id);
+  assert.equal(observed.engine_kind, "invoice_facts",
+    "a 'fact' row's observed reading is a reading of the FIGURES, never a classification row");
+  assert.equal(factRow.observed_extraction_id, s.machineExtraction,
+    "and it is the very extraction the appended one superseded");
+  assert.equal(factRow.observed_version_n, 1);
+
+  // THE RECEIPT AND THE AUDIT PAYLOAD SAY THE SAME THING — three surfaces, one answer.
+  assert.equal(out.observed_extraction_id, s.machineExtraction, "the receipt agrees with the ledger");
+  assert.equal(await opReceipt("revise_document_fact", opKey).then((r) => r.observed_extraction_id),
+    s.machineExtraction, "and the COMMITTED receipt does too");
+  const audit = await rootQuery(
+    "select args from clara.audit_log where fn='revise_document_fact' and args->>'op_key'=$1", [opKey]);
+  assert.equal(audit.rowCount, 1);
+  assert.equal(audit.rows[0].args.observed_extraction, s.machineExtraction,
+    "and so does the audit payload");
+
+  // THE ENVELOPE'S OWN `revises_extraction_id` ALWAYS NAMED THE RIGHT ROW — this cell is what
+  // stops the ledger from disagreeing with it.
+  const appended = (await extractionsOf(s.documentId)).find((e) => e.id === out.extraction_id);
+  assert.equal(appended.envelope.revises_extraction_id, factRow.observed_extraction_id,
+    "the appended extraction's envelope and the ledger row name ONE reading between them");
+
+  // THE 'kind' ROW IS UNMOVED: the document-wide pointer is the right answer for a classification,
+  // and the fix must not have changed it. At that instant the pointer was still the machine facts.
+  const kindRow = rows.find((r) => r.revision_kind === "kind");
+  assert.equal(kindRow.observed_extraction_id, s.machineExtraction,
+    "the 'kind' writer keeps naming clara.documents.authoritative_extraction_id as it stood");
+
+  // AND THE READ RE-EXPORTS IT VERBATIM, so the audit answer a human sees is the same row.
+  const lineage = await listRevisions(KEEPER(), s.documentId);
+  const entry = lineage.lineage.find((l) => l.entry_kind === "fact");
+  assert.equal(entry.observed_extraction_id, s.machineExtraction,
+    "clara.list_source_revisions projects the ledger's own answer");
 });
 
 // =============================================================================================
