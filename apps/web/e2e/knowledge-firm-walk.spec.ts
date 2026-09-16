@@ -290,6 +290,7 @@ test("correct then withdraw: the register is the persistent receipt for both, an
   await expect(correct.getByText("Their exception still wins where it applies", { exact: false })).toBeVisible();
   await expect(correct.getByRole("button", { name: "Record correction" })).toBeDisabled();
   await expectAccessible(page, "firm rule correct dialog, open");
+  await correct.getByLabel("Corrected value").fill("SGD");
   await correct.getByLabel("Why is it being corrected?")
     .fill("the partners moved the firm's presentation currency to SGD from 1 October");
   await correct.getByRole("button", { name: "Record correction" }).click();
