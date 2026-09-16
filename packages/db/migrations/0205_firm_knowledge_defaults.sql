@@ -280,27 +280,46 @@ begin
     raise exception '#654 prestate: % existing firm-scope knowledge record(s) name a key the eligibility wall would refuse -- withdraw them before applying, or the rule is one nobody can state', v_n
       using errcode='CLR10';
   end if;
+  -- THE CENSUS IS OVER *LIVE* ROWS, and that is the invariant itself rather than a relaxation of
+  -- it: `clara.list_client_knowledge`, `clara.get_knowledge_pack` and `clara.list_firm_knowledge`
+  -- reach a client only through a row that is still live, and §B's two guards enforce exactly
+  -- that — a withdrawal or an unchanged-pin correction is admitted precisely so a rule that
+  -- reached a walled state can be RETRACTED. History is therefore counted and REPORTED below, not
+  -- refused: once a firm rule has been withdrawn, filing its document to a client is the remedy
+  -- the refusal points at, and the superseded revisions that still name the document are the
+  -- record of what happened, reaching nobody.
   select count(*)::int into v_n
     from clara.knowledge_records r
-   where r.scope_kind = 'firm' and r.source_document_id is not null
+   where r.scope_kind = 'firm' and r.state = 'live' and r.source_document_id is not null
      and exists (select 1 from clara.document_filings f
                   where f.document_id = r.source_document_id and f.firm_id = r.firm_id
                     and f.retired_at is null);
   if v_n <> 0 then
-    raise exception '#654 prestate: % existing firm-scope knowledge record(s) cite a document with at least one LIVE client filing -- the cross-client evidence wall cannot grandfather a violator', v_n
+    raise exception '#654 prestate: % LIVE firm-scope knowledge record(s) cite a document with at least one LIVE client filing -- the cross-client evidence wall cannot grandfather a violator', v_n
       using errcode='CLR10';
   end if;
   -- …and the SECOND client-bearing pin, on the same terms. `clara.accounting_work.client_id` is
   -- NOT NULL, so a firm-scope record naming ANY Work is naming one client's Work.
   select count(*)::int into v_n
     from clara.knowledge_records r
-   where r.scope_kind = 'firm' and r.source_work_id is not null;
+   where r.scope_kind = 'firm' and r.state = 'live' and r.source_work_id is not null;
   if v_n <> 0 then
-    raise exception '#654 prestate: % existing firm-scope knowledge record(s) pin a client''s accounting_work -- the cross-client evidence wall cannot grandfather a violator', v_n
+    raise exception '#654 prestate: % LIVE firm-scope knowledge record(s) pin a client''s accounting_work -- the cross-client evidence wall cannot grandfather a violator', v_n
       using errcode='CLR10';
   end if;
+  select count(*)::int into v_n
+    from clara.knowledge_records r
+   where r.scope_kind = 'firm' and r.state <> 'live'
+     and (r.source_work_id is not null
+          or (r.source_document_id is not null
+              and exists (select 1 from clara.document_filings f
+                           where f.document_id = r.source_document_id and f.firm_id = r.firm_id
+                             and f.retired_at is null)));
+  if v_n > 0 then
+    raise notice '#654 prestate: % superseded/withdrawn firm-scope revision(s) still NAME a client-bearing source. Reported, not refused: they are history, they reach no client through any read, and refusing them would make a withdrawn rule''s document permanently unfileable.', v_n;
+  end if;
 
-  raise notice '#654 prestate: clean -- 0192''s four relations and its authority trigger are present, uq_knowledge_live is partial on state=''live'' and keyed by applicability, the catalog carries its 13 keys including the three D8 seeds, uq_document_filing_active is the (document_id, client_id) WHERE retired_at IS NULL index this file counts across, and NO existing firm-scope record cites a document with a live client filing or pins any client Work at all.';
+  raise notice '#654 prestate: clean -- 0192''s four relations and its authority trigger are present, uq_knowledge_live is partial on state=''live'' and keyed by applicability, the catalog carries its 13 keys including the three D8 seeds, uq_document_filing_active is the (document_id, client_id) WHERE retired_at IS NULL index this file counts across, and NO LIVE firm-scope record cites a document with a live client filing or pins any client Work at all (superseded and withdrawn revisions are counted and reported, never refused -- they reach no client).';
 end
 $w654_pre$;
 
@@ -891,19 +910,19 @@ begin
   end if;
   select count(*)::int into v_n
     from clara.knowledge_records r
-   where r.scope_kind = 'firm' and r.source_document_id is not null
+   where r.scope_kind = 'firm' and r.state = 'live' and r.source_document_id is not null
      and exists (select 1 from clara.document_filings f
                   where f.document_id = r.source_document_id and f.firm_id = r.firm_id
                     and f.retired_at is null);
   if v_n <> 0 then
-    raise exception '#654 tail: % firm-scope record(s) cite a document with a live client filing', v_n
+    raise exception '#654 tail: % LIVE firm-scope record(s) cite a document with a live client filing', v_n
       using errcode='CLR10';
   end if;
   select count(*)::int into v_n
     from clara.knowledge_records r
-   where r.scope_kind = 'firm' and r.source_work_id is not null;
+   where r.scope_kind = 'firm' and r.state = 'live' and r.source_work_id is not null;
   if v_n <> 0 then
-    raise exception '#654 tail: % firm-scope record(s) pin a client''s accounting_work', v_n
+    raise exception '#654 tail: % LIVE firm-scope record(s) pin a client''s accounting_work', v_n
       using errcode='CLR10';
   end if;
 
@@ -983,7 +1002,7 @@ begin
     end if;
   end loop;
 
-  raise notice '#654 tail: OK -- clara.knowledge_key_firm_eligibility exists under FORCED row level security owned by clara_fn_owner, append-only and no-truncate belted, readable by clara_authenticated ALONE (no runtime, agent or wake role) and writable by no application role at all, seeded with the three keys owner ruling D8 named; the two BEFORE INSERT guards fire AFTER 0192''s own authority stamp in the order pg_trigger reports (authority -> firm_eligibility -> firm_evidence), and the SAME wall is closed from the filing side by t_document_filings_firm_knowledge on clara.document_filings so that a document a live firm rule cites can no longer be filed to a client after the fact (CLR10 document_cited_by_firm_default) while a correction or withdrawal carrying the predecessor''s pins verbatim stays admissible, which is what keeps a contaminated rule retractable; the FIRM-DEFAULTABLE census measured off the live catalog is EXACTLY {%}, and the NINE keys refused at firm scope are {%} -- entity_type, msic, sst_regime and financial_year_end_month among them by name; NO existing firm-scope record names an ineligible key, cites a document carrying a live client filing (counted across N filings, not probed for one) or pins any client''s accounting_work; clara.list_firm_knowledge and clara.get_knowledge_applicability are viewer-floored STABLE SECURITY DEFINER functions with search_path and plan_cache_mode pinned, PUBLIC revoked, granted to clara_authenticated and to nobody else; and every one of the five 0192 bodies this file was forbidden to recut still resolves at its exact signature with clara.knowledge_records carrying six non-internal triggers (0192''s four plus these two).',
+  raise notice '#654 tail: OK -- clara.knowledge_key_firm_eligibility exists under FORCED row level security owned by clara_fn_owner, append-only and no-truncate belted, readable by clara_authenticated ALONE (no runtime, agent or wake role) and writable by no application role at all, seeded with the three keys owner ruling D8 named; the two BEFORE INSERT guards fire AFTER 0192''s own authority stamp in the order pg_trigger reports (authority -> firm_eligibility -> firm_evidence), and the SAME wall is closed from the filing side by t_document_filings_firm_knowledge on clara.document_filings so that a document a live firm rule cites can no longer be filed to a client after the fact (CLR10 document_cited_by_firm_default) while a correction or withdrawal carrying the predecessor''s pins verbatim stays admissible, which is what keeps a contaminated rule retractable; the FIRM-DEFAULTABLE census measured off the live catalog is EXACTLY {%}, and the NINE keys refused at firm scope are {%} -- entity_type, msic, sst_regime and financial_year_end_month among them by name; NO existing firm-scope record names an ineligible key, and no LIVE one cites a document carrying a live client filing (counted across N filings, not probed for one) or pins any client''s accounting_work -- live is the invariant the two guards enforce, because a superseded or withdrawn revision reaches no client through any read; clara.list_firm_knowledge and clara.get_knowledge_applicability are viewer-floored STABLE SECURITY DEFINER functions with search_path and plan_cache_mode pinned, PUBLIC revoked, granted to clara_authenticated and to nobody else; and every one of the five 0192 bodies this file was forbidden to recut still resolves at its exact signature with clara.knowledge_records carrying six non-internal triggers (0192''s four plus these two).',
     array_to_string(v_admitted, ', '), array_to_string(v_refused, ', ');
 end
 $w654_tail$;
