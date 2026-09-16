@@ -235,3 +235,84 @@ test("200% zoom: the promote dialog's fields and confirm stay reachable", async 
   expect(overflow, "the dialog must not scroll the page horizontally at the 200%-zoom equivalent")
     .toBeLessThanOrEqual(1);
 });
+
+// ---------------------------------------------------------------------------
+// 8 — reduced motion (appendix C §4; review round 1, SPEC F2)
+// ---------------------------------------------------------------------------
+test("reduced motion: the promote dialog still opens, takes focus and closes", async ({ page }) => {
+  // The dialog family this lane composes (`ArApCounterpartyDoorDialog`) animates its
+  // open/close. A viewer who asked the operating system for less motion must still
+  // get the dialog, its initial focus and its Escape — the state, not the animation,
+  // is the product claim.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await signInTo(page, RACED_RECORD);
+  const trigger = page.getByRole("button", { name: "Promote to firm default" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Why does this apply to the whole firm?")).toBeVisible();
+  await expectAccessible(page, "promote dialog, reduced motion");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+// ---------------------------------------------------------------------------
+// 9 — correcting and withdrawing the firm rule, from the register that owns it
+//     (review round 1, adversarial finding 654-ADV-3). DECISIONS §2/#654 binds
+//     the entrance to "firm register, Promote dialog, Correct/Withdraw, and the
+//     firm-rule-vs-client-exception pair"; a firm record has no client and so no
+//     detail route, which is why these two acts can only live here.
+//
+//     THESE LEGS RUN LAST ON PURPOSE: a withdrawal is terminal and takes the rule
+//     off the register, so every leg that reads the populated register has to have
+//     read it already.
+// ---------------------------------------------------------------------------
+test("a bookkeeper may READ the firm register but is offered neither Correct nor Withdraw, and is told who can", async ({ page }) => {
+  await signInTo(page, FIRM_REGISTER, "bookkeeper@example.test");
+  await expect(page.getByText("default_currency").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Correct" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Withdraw" })).toHaveCount(0);
+  await expect(page.getByText("administrator or owner of this firm can change this rule", { exact: false })).toBeVisible();
+  await expectAccessible(page, "firm knowledge register, acts denied");
+});
+
+test("correct then withdraw: the register is the persistent receipt for both, and the rule leaves it", async ({ page }) => {
+  await signInTo(page, FIRM_REGISTER);
+  await expect(page.getByText("MYR", { exact: false }).first()).toBeVisible();
+
+  // CORRECT — a revision, not an edit: the reason is required and the value opens on
+  // what the rule currently says.
+  await page.getByRole("button", { name: "Correct" }).click();
+  const correct = page.getByRole("dialog");
+  await expect(correct).toBeVisible();
+  await expect(correct.getByLabel("Corrected value")).toHaveValue("MYR");
+  await expect(correct.getByText("Their exception still wins where it applies", { exact: false })).toBeVisible();
+  await expect(correct.getByRole("button", { name: "Record correction" })).toBeDisabled();
+  await expectAccessible(page, "firm rule correct dialog, open");
+  await correct.getByLabel("Why is it being corrected?")
+    .fill("the partners moved the firm's presentation currency to SGD from 1 October");
+  await correct.getByRole("button", { name: "Record correction" }).click();
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("SGD", { exact: false }).first()).toBeVisible();
+
+  // WITHDRAW — terminal, and the register says what it does to the clients it reached.
+  await page.getByRole("button", { name: "Withdraw" }).click();
+  const withdraw = page.getByRole("dialog");
+  await expect(withdraw).toBeVisible();
+  await expect(withdraw.getByText("no work is re-run", { exact: false })).toBeVisible();
+  await expect(withdraw.getByText("hold their own value for this key and are unaffected", { exact: false })).toBeVisible();
+  await expect(withdraw.getByRole("button", { name: "Withdraw rule" })).toBeDisabled();
+  await withdraw.getByLabel("Why is it being withdrawn?")
+    .fill("superseded by the 2027 engagement policy");
+  await withdraw.getByRole("button", { name: "Withdraw rule" }).click();
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // THE PERSISTENT OBJECT carries it: the rule is gone from the register, and the
+  // successful-empty face is what a real read now returns.
+  await expect(page.getByText("has not promoted any knowledge to a firm-wide default yet")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("has not promoted any knowledge to a firm-wide default yet")).toBeVisible();
+  await expectAccessible(page, "firm knowledge register, after withdrawal");
+});

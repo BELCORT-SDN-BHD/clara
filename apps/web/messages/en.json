@@ -2654,7 +2654,6 @@
     "exceptionsNone": "No client holds an exception to this rule.",
     "exceptionsOne": "1 client holds an exception to this rule.",
     "exceptionsMany": "{count} clients hold an exception to this rule.",
-    "exceptionOpen": "Open this client\u2019s record",
     "exceptionValue": "Their value: {value}",
     "liveWorkHeading": "Work still running on this key",
     "liveWorkNone": "No Work is currently running on this key.",
@@ -2689,14 +2688,37 @@
     "exception": {
       "heading": "Firm rule for this key",
       "overridden": "Overridden by this client\u2019s own record.",
-      "inForce": "This firm rule is what applies to this client.",
-      "clientOnly": "No firm rule covers these conditions; this client\u2019s own record stands alone.",
       "firmValue": "Firm rule: {value}",
       "conditions": "Conditions: {conditions}",
       "always": "Always applies",
       "openRegister": "Open Firm knowledge",
       "loading": "Checking the firm rule\u2026",
       "unavailable": "The firm rule for this key could not be read just now. This client\u2019s own record above is unaffected."
+    },
+    "acts": {
+      "correctTrigger": "Correct",
+      "correctTitle": "Correct the firm rule for {key}",
+      "correctDescription": "A correction records a new revision with its reason. The previous value stays in this rule's history.",
+      "correctConfirm": "Record correction",
+      "correctValueLabel": "Corrected value",
+      "correctReasonLabel": "Why is it being corrected?",
+      "reasonRequired": "A change to a firm-wide rule records why it was made.",
+      "exceptionsNote": "Correcting this rule does not touch a client that recorded its own value. Their exception still wins where it applies.",
+      "withdrawTrigger": "Withdraw",
+      "withdrawTitle": "Withdraw the firm rule for {key}",
+      "withdrawDescription": "Withdrawal is final for this rule. The value it retires stays in the history, and recording the rule again starts a new one.",
+      "withdrawConfirm": "Withdraw rule",
+      "withdrawReasonLabel": "Why is it being withdrawn?",
+      "withdrawEffect": "Clients with no record of their own stop receiving this value. Nothing already recorded or posted changes, and no work is re-run.",
+      "withdrawExceptions": "{count} client(s) hold their own value for this key and are unaffected.",
+      "deniedTitle": "Administrator access required",
+      "deniedBody": "Correcting or withdrawing a rule for the whole firm is an administrator act. An administrator or owner of this firm can change this rule.",
+      "valueError": {
+        "empty": "A value is required.",
+        "number": "This key holds a number.",
+        "boolean": "This key holds true or false.",
+        "json": "This key holds an object, written as JSON."
+      }
     }
   },
   "Auth": {

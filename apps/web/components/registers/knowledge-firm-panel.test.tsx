@@ -23,7 +23,7 @@ import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import messages from "../../messages/en.json";
-import { renderComponent } from "../../test/hookHarness";
+import { clickButton, renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 // REQUIRED, not decorative — this surface renders `next/link` (whose prefetch hook
 // reaches for `self`) and Base UI's Select. See knowledge-detail.test.tsx's own note.
 import { enableDomInspection } from "../../test/domInspect";
@@ -127,12 +127,48 @@ async function mount(impl: typeof fetch, assertions: (h: Awaited<ReturnType<type
   });
 }
 
-const okFetch = (records: FirmKnowledgeRow[]) =>
-  (async (url: RequestInfo | URL) => {
+/** `clara.caller_context`, the view the register reads ONCE to decide whether to
+ *  offer Correct and Withdraw at all. Admin (rank 2) unless a cell says otherwise. */
+const CALLER = (rank: number) => [{
+  user_id: "99999999-9999-4999-8999-999999999999",
+  firm_id: "88888888-8888-4888-8888-888888888888",
+  firm_name: "Rig Firm",
+  role: rank >= 3 ? "owner" : rank >= 2 ? "admin" : rank >= 1 ? "bookkeeper" : "viewer",
+  role_rank: rank,
+  is_operator: false,
+}];
+
+type Posted = { url: string; body: Record<string, unknown> };
+
+const okFetch = (
+  records: FirmKnowledgeRow[],
+  opts: { rank?: number; posts?: Posted[]; actStatus?: number; actBody?: unknown } = {},
+) =>
+  (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
+    if (u.includes("/rest/v1/caller_context")) return jsonResponse(CALLER(opts.rank ?? 2));
     if (u.includes("/rpc/list_firm_knowledge")) return jsonResponse(envelope(records));
+    if (u.includes("/rpc/correct_knowledge") || u.includes("/rpc/withdraw_knowledge")) {
+      opts.posts?.push({ url: u, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+      if (opts.actStatus && opts.actStatus >= 400) return jsonResponse(opts.actBody, opts.actStatus);
+      return jsonResponse({ status: u.includes("correct") ? "corrected" : "withdrawn", record_id: "frec-1", revision_n: 2 });
+    }
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
+
+type Stub = { tagName?: string; childNodes?: Stub[] };
+function findIn(root: Stub, predicate: (n: Stub) => boolean): Stub | null {
+  if (predicate(root)) return root;
+  for (const c of root.childNodes ?? []) {
+    const found = findIn(c, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+const attrOf = (n: Stub, key: string): string =>
+  String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.(key) ?? "");
+const bodyOf = () =>
+  (globalThis as unknown as { document: { body: Stub & { appendChild: (c: unknown) => void } } }).document.body;
 
 // =============================================================================
 // 1 — the four faces
@@ -295,6 +331,148 @@ test("kf.08 the register reads its effective dates against the SERVER's Kuala Lu
       assert.match(text, /Not in effect on 2026-09-16/,
         "a rule whose window has not opened says so rather than reading as current");
       assert.match(text, /2026-10-01/, "the exact effective dates stay exact");
+    },
+  );
+});
+
+// =============================================================================
+// 4 — CORRECT AND WITHDRAW (fix round 1, adversarial finding 654-ADV-3).
+//
+// DECISIONS §2/#654 binds the entrance to "firm register, Promote dialog,
+// Correct/Withdraw, and the firm-rule-vs-client-exception pair". The first cut
+// shipped three of the four, and the missing one had no substitute: a firm-scope
+// record has no client, `knowledgeRecordHref` requires one, and the only governed
+// detail route is `/clients/[clientId]/knowledge/[recordId]` — so a promoted rule
+// could never be corrected or withdrawn anywhere in the product.
+// =============================================================================
+
+async function mountForDialog(
+  impl: typeof fetch,
+  assertions: (h: Awaited<ReturnType<typeof renderComponent>>) => Promise<void>,
+) {
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App());
+    // The dialogs PORTAL into document.body, so the container has to be in the
+    // document for the portalled subtree to be reachable at all.
+    bodyOf().appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      await assertions(h);
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+}
+
+async function openDialog(h: Awaited<ReturnType<typeof renderComponent>>, label: string) {
+  const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === label);
+  assert.ok(trigger, label + " must render as a trigger for an admin on a live firm rule");
+  await h.act(() => { void clickButton(trigger as never); });
+  for (let i = 0; i < 6; i++) await h.settle();
+}
+
+test("kf.09 an admin is offered CORRECT on a live firm rule, the reason is required, and the door is called with this rule's record_id", async () => {
+  const posts: Posted[] = [];
+  await mountForDialog(okFetch([firmRow()], { rank: 2, posts }), async (h) => {
+    await openDialog(h, "Correct");
+
+    const valueField = findIn(bodyOf(), (n) => n.tagName === "INPUT" && attrOf(n, "id") === "firm-knowledge-correct-value-frec-1");
+    assert.ok(valueField, "the correction opens on the CURRENT value, in the spelling the catalog types this key as");
+    assert.equal((valueField as unknown as { value: string }).value, "MYR");
+
+    const confirm = findIn(bodyOf(), (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Record correction");
+    assert.ok(confirm, "the dialog's confirm control must render");
+    assert.equal((confirm as unknown as { disabled: boolean }).disabled, true,
+      "with no reason written the act cannot fire — the door refuses a blank one too (CLR10 knowledge_reason_required)");
+    assert.match(textOf(bodyOf() as never), /Their exception still wins where it applies/,
+      "a correction must say what it does NOT do to a client holding its own value");
+
+    const reasonBox = findIn(bodyOf(), (n) => n.tagName === "TEXTAREA" && attrOf(n, "id") === "firm-knowledge-correct-reason-frec-1");
+    assert.ok(reasonBox);
+    await h.act(() => { setFieldValue(reasonBox as never, "the partners moved the firm to SGD presentation"); });
+    for (let i = 0; i < 3; i++) await h.settle();
+    const confirm2 = findIn(bodyOf(), (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Record correction");
+    assert.equal((confirm2 as unknown as { disabled: boolean }).disabled, false, "a written reason enables the act");
+    await h.act(() => { void clickButton(confirm2 as never); });
+    for (let i = 0; i < 8; i++) await h.settle();
+
+    assert.equal(posts.length, 1, "exactly one door call: " + JSON.stringify(posts));
+    const sent = posts[0]!;
+    assert.match(sent.url, /correct_knowledge/);
+    assert.equal(sent.body.p_record, "frec-1", "the correction must name THIS rule's record_id, never its revision id");
+    assert.equal(sent.body.p_reason, "the partners moved the firm to SGD presentation");
+    assert.equal(sent.body.p_value, "MYR");
+    assert.ok(String(sent.body.p_op_key ?? "").length > 0, "every governed act carries an op_key");
+  });
+});
+
+test("kf.10 an admin is offered WITHDRAW, is told what it does to clients, and a CLR refusal renders VERBATIM inside the dialog with the draft intact", async () => {
+  const posts: Posted[] = [];
+  await mountForDialog(
+    okFetch([firmRow({ exception_count: 2 })], {
+      rank: 2,
+      posts,
+      actStatus: 400,
+      actBody: { code: "CLR04", message: "only an administrator may withdraw a firm-wide rule" },
+    }),
+    async (h) => {
+      await openDialog(h, "Withdraw");
+      assert.match(textOf(bodyOf() as never), /no work is re-run/,
+        "withdrawal must state that nothing is re-evaluated by itself (PRD:123's accepted interim)");
+      assert.match(textOf(bodyOf() as never), /2 client\(s\) hold their own value for this key and are unaffected/,
+        "the number comes from the register's own read, not from reassurance");
+
+      const reasonBox = findIn(bodyOf(), (n) => n.tagName === "TEXTAREA" && attrOf(n, "id") === "firm-knowledge-withdraw-reason-frec-1");
+      assert.ok(reasonBox);
+      await h.act(() => { setFieldValue(reasonBox as never, "superseded by the 2027 engagement policy"); });
+      for (let i = 0; i < 3; i++) await h.settle();
+      const confirm = findIn(bodyOf(), (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Withdraw rule");
+      await h.act(() => { void clickButton(confirm as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      assert.equal(posts.length, 1);
+      const sent = posts[0]!;
+      assert.match(sent.url, /withdraw_knowledge/);
+      assert.equal(sent.body.p_record, "frec-1");
+
+      const after = textOf(bodyOf() as never);
+      assert.match(after, /only an administrator may withdraw a firm-wide rule/,
+        "the DB's own words must reach the human verbatim, inside the dialog the page banner sits behind");
+      assert.match(after, /CLR04/, "…with its code");
+      const stillThere = findIn(bodyOf(), (n) => n.tagName === "TEXTAREA" && attrOf(n, "id") === "firm-knowledge-withdraw-reason-frec-1");
+      assert.ok(stillThere, "a refusal must not close the dialog");
+      assert.equal((stillThere as unknown as { value: string }).value, "superseded by the 2027 engagement policy",
+        "…nor destroy what the human typed");
+      assert.match(after, /MYR/, "…nor blank the register behind it");
+    },
+  );
+});
+
+test("kf.11 below the admin floor BOTH controls are absent and a sentence says who can, and a non-correctable revision offers neither", async () => {
+  await mountForDialog(okFetch([firmRow()], { rank: 1 }), async (h) => {
+    assert.equal(h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === "Correct"), null,
+      "a bookkeeper must not be offered a control that can only refuse");
+    assert.equal(h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === "Withdraw"), null);
+    assert.match(h.text(), /Administrator access required/);
+    assert.match(h.text(), /administrator or owner of this firm can change this rule/,
+      "the denial says who CAN, not merely that this person cannot");
+    assert.match(h.text(), /MYR/, "…and the rule itself is still readable by a viewer+");
+  });
+
+  // …and the database's own answer outranks the rank: a withdrawn revision is
+  // terminal and a superseded one immutable, so `correctable=false` offers nothing
+  // even to an owner. The register still SHOWS the rule — a withdrawal is visible
+  // as a withdrawal rather than as an absence.
+  await mountForDialog(
+    okFetch([firmRow({ state: "withdrawn", correctable: false, revision_kind: "withdrawal", revision_reason: "retired" })], { rank: 3 }),
+    async (h) => {
+      assert.equal(h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === "Correct"), null,
+        "a control the door would refuse must not be offered at all");
+      assert.equal(h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === "Withdraw"), null);
+      assert.doesNotMatch(h.text(), /Administrator access required/,
+        "terminality is not a permission problem and must not borrow its words");
+      assert.match(h.text(), /MYR/);
     },
   );
 });

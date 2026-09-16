@@ -288,6 +288,14 @@ function firmRuleRow(key, promoted) {
   };
 }
 
+/** The knowledge key behind a firm register row id, or null when the id is not one of ours. */
+function firmRuleKeyOf(id) {
+  const text = String(id ?? "");
+  if (!text.startsWith("654-firm-")) return null;
+  const key = text.slice("654-firm-".length);
+  return state.firmRules.has(key) ? key : null;
+}
+
 function firmRegister() {
   return {
     firm_id: "654ff654-5555-4777-8777-654ff6540001",
@@ -521,6 +529,18 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   if (verb === "correct_knowledge") {
     const body = await readJson(request);
     const id = body?.p_record ?? null;
+    // #654 fix round 1 — A FIRM RULE IS CORRECTED FROM THE FIRM REGISTER. It has no client and
+    // therefore no `/clients/:id/knowledge/:record` detail route, so `recordById` (which knows
+    // only this lane's CLIENT records) cannot see it; the firm arm is keyed on the register's
+    // own record id and rewrites the persistent rule the next `list_firm_knowledge` returns.
+    const firmKey = firmRuleKeyOf(id);
+    if (firmKey !== null) {
+      const prior = state.firmRules.get(firmKey);
+      state.firmRules.set(firmKey, { ...prior, value: body?.p_value });
+      sendJson(response, 200,
+        { status: "corrected", record_id: id, revision_id: `${id}-rev2`, revision_n: 2 }, cors);
+      return true;
+    }
     if (!recordById(id)) return false;
     if (id === KN.recordInferred) {
       // A REAL GOVERNED REFUSAL, in the DB's own words: this fixture's inferred record is a
@@ -590,6 +610,14 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   if (verb === "withdraw_knowledge") {
     const body = await readJson(request);
     const id = body?.p_record ?? null;
+    // …and withdrawn from the same place. A withdrawal is TERMINAL, so the rule leaves the
+    // register and every client that was reading it stops: the persistent outcome, not a toast.
+    const firmKeyW = firmRuleKeyOf(id);
+    if (firmKeyW !== null) {
+      state.firmRules.delete(firmKeyW);
+      sendJson(response, 200, { status: "withdrawn", record_id: id, revision_n: 2 }, cors);
+      return true;
+    }
     if (!recordById(id)) return false;
     state.withdrawn.set(id, String(body?.p_reason ?? ""));
     sendJson(response, 200, { status: "withdrawn", record_id: id, revision_n: 4 }, cors);

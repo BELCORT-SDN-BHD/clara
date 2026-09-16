@@ -36,13 +36,20 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DataState } from "@/components/firm/data-state";
+import { DataState, ErrorMessage } from "@/components/firm/data-state";
 import { EmptyState, StateBanner } from "@/components/common/state";
-import { useAsyncRead } from "@/lib/firm/use-async-read";
+import { useAsyncRead, type AsyncReadState } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { businessDateTime } from "@/lib/business-date";
 import { knowledgeRecordHref, workDetailHref } from "@/lib/navigation/tree";
-import { loadFirmKnowledge, type FirmKnowledgeRow } from "@/lib/registers/knowledge";
+import { loadCallerContext } from "@/lib/firm/caller-context";
+import { capabilityScopeFromRows } from "@/lib/firm/capabilities";
+import {
+  loadFirmKnowledge,
+  type FirmKnowledgeEnvelope,
+  type FirmKnowledgeRow,
+} from "@/lib/registers/knowledge";
+import { FirmKnowledgeActs } from "./knowledge-firm-acts";
 import {
   KnowledgeApplicability,
   KnowledgeBadges,
@@ -61,6 +68,12 @@ export function KnowledgeFirmPanel() {
   const tKind = useTranslations("ClientKnowledge");
   const [kind, setKind] = useState<string>(ALL);
   const firm = useAsyncRead(() => loadFirmKnowledge({ session: sessionTokenAccessor }));
+  // ONE caller-context read for the whole register, not one per rule: the floor
+  // `clara._knowledge_floor(key, 'firm')` puts on Correct and Withdraw is the same
+  // admin floor for every key (#603 Q22), so the answer does not vary by row.
+  const scope = useAsyncRead(() => loadCallerContext(sessionTokenAccessor));
+  const rank = capabilityScopeFromRows(scope.data)?.role_rank ?? null;
+  const scopeResolved = !(scope.loading && scope.data === null);
 
   const all = firm.data?.records ?? [];
   const shown = kind === ALL ? all : all.filter((row) => row.kind === kind);
@@ -103,9 +116,18 @@ export function KnowledgeFirmPanel() {
         {t("reviewNote")}
       </StateBanner>
 
+      {/* THE STANDING REFUSAL LIVES OUTSIDE THE DIALOGS, so it survives one closing
+          and the re-read that always follows (doors.ts's law) — and the register
+          itself is NOT blanked by it. `loading`/`error` are gated on "nothing is
+          known yet" for the reason knowledge-detail.tsx records at its own
+          DataState: `act()` re-reads after every write, so a plain `firm.loading`
+          unmounted this whole subtree on a REFUSAL, taking the open dialog and the
+          sentence the human had just typed with it. */}
+      {firm.data !== null && firm.error ? <ErrorMessage error={firm.error} /> : null}
+
       <DataState
-        loading={firm.loading}
-        error={firm.error}
+        loading={firm.loading && firm.data === null}
+        error={firm.data === null ? firm.error : null}
         isEmpty={readIsEmpty}
         emptyMessage={t("empty")}
       >
@@ -121,7 +143,14 @@ export function KnowledgeFirmPanel() {
         ) : (
           <ul className="flex flex-col gap-3">
             {shown.map((row) => (
-              <FirmKnowledgeCard key={row.revision_id} row={row} asOf={firm.data?.as_of ?? ""} />
+              <FirmKnowledgeCard
+                key={row.revision_id}
+                row={row}
+                asOf={firm.data?.as_of ?? ""}
+                rank={rank}
+                scopeResolved={scopeResolved}
+                read={firm}
+              />
             ))}
           </ul>
         )}
@@ -130,7 +159,19 @@ export function KnowledgeFirmPanel() {
   );
 }
 
-function FirmKnowledgeCard({ row, asOf }: { row: FirmKnowledgeRow; asOf: string }) {
+function FirmKnowledgeCard({
+  row,
+  asOf,
+  rank,
+  scopeResolved,
+  read,
+}: {
+  row: FirmKnowledgeRow;
+  asOf: string;
+  rank: number | null;
+  scopeResolved: boolean;
+  read: AsyncReadState<FirmKnowledgeEnvelope>;
+}) {
   const t = useTranslations("FirmKnowledge");
   return (
     <li className="enter-content flex flex-col gap-3 rounded-lg border border-border bg-card p-3 text-sm">
@@ -235,6 +276,11 @@ function FirmKnowledgeCard({ row, asOf }: { row: FirmKnowledgeRow; asOf: string 
           </ul>
         )}
       </section>
+
+      {/* #654 fix round 1 — the two governed acts a firm rule can still receive.
+          Withheld below the admin floor with a sentence rather than a blank, and
+          absent altogether on a revision the doors would refuse (`correctable`). */}
+      <FirmKnowledgeActs row={row} rank={rank} scopeResolved={scopeResolved} read={read} />
     </li>
   );
 }
