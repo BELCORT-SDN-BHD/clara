@@ -181,6 +181,54 @@ function refuse(
 }
 
 /**
+ * THE PLAN LANE'S OWN DUE-DATE ARITHMETIC, mirrored for the local half — `clara._plan_due_nth`
+ * (0193:791) and the window walk of `clara._plan_due_events` (0193:845). It is arithmetic, not a
+ * second rule: the database re-asks the same question and is the authority.
+ *
+ * `k` periods after the MONTH of `from`, on that month's last day or on the named day, never past
+ * the month's own last day.
+ */
+function accrualDueNth(
+  from: string,
+  frequency: (typeof ACCRUAL_FREQUENCIES)[number],
+  dayRule: (typeof ACCRUAL_DAY_RULES)[number],
+  dayOfMonth: number | undefined,
+  k: number,
+): string {
+  const step = frequency === "monthly" ? 1 : frequency === "quarterly" ? 3 : 12;
+  const year = Number(from.slice(0, 4));
+  const month = Number(from.slice(5, 7));
+  const total = year * 12 + (month - 1) + k * step;
+  const y = Math.floor(total / 12);
+  const m = total - y * 12 + 1;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const day = dayRule === "last_day_of_month" ? last : Math.min(dayOfMonth ?? 1, last);
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Whether this schedule reaches at least one ACCRUAL date inside `[from, to]` (0207's SEVENTH
+ * MEASUREMENT). A term shorter than one period of its own schedule reaches none — measured on a rig
+ * before the wall existed: a 2026-07-01..2026-07-15 term on a month-end rule was accepted, and its
+ * plan then held zero occurrences for ever.
+ */
+export function accrualScheduleYields(
+  frequency: (typeof ACCRUAL_FREQUENCIES)[number],
+  dayRule: (typeof ACCRUAL_DAY_RULES)[number],
+  dayOfMonth: number | undefined,
+  from: string,
+  to: string,
+): boolean {
+  if (to < from) return false;
+  for (let k = 0; k < 4096; k += 1) {
+    const due = accrualDueNth(from, frequency, dayRule, dayOfMonth, k);
+    if (due > to) return false;
+    if (due >= from) return true;
+  }
+  return false;
+}
+
+/**
  * Every shape refusal a model can act on WITHOUT a database round trip, in the DATABASE's own
  * `field` vocabulary (`accrual.<key>`, migration 0207's own spelling) so one mapper serves both
  * halves of the validation. The database re-checks all of these and is the authority.
@@ -273,6 +321,22 @@ export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusa
       + `ends (${input.service_period_end}).`,
       "End the authority on or before the last day of the service period.",
       { constraint: "within_term", service_period_end: input.service_period_end },
+    );
+  }
+  // …AND IT REACHES A DATE INSIDE THAT WINDOW (0207's SEVENTH MEASUREMENT). A term shorter than one
+  // period of its own schedule was ACCEPTED before this wall and could never post: the accrual was
+  // recorded, the plan went live, and no due date was ever reached. The refusal names the DAY RULE,
+  // because the same term with a rule that falls inside it is configured — this is a wall, not a
+  // ban.
+  if (!accrualScheduleYields(input.frequency, input.day_rule, input.day_of_month,
+        input.effective_from, input.effective_to)) {
+    return refuse(
+      "accrual_schedule_yields_no_occurrence",
+      input.day_rule === "day_of_month" ? "day_of_month" : "day_rule",
+      `This schedule reaches no accrual date between ${input.effective_from} and `
+      + `${input.effective_to}, so the accrual would be recorded and never post.`,
+      "Use a day rule that falls inside the term — a month-end rule needs a term reaching a month end.",
+      { constraint: "yields_occurrence", frequency: input.frequency, day_rule: input.day_rule },
     );
   }
   return null;

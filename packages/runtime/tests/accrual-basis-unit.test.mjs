@@ -144,6 +144,58 @@ test("652.refusal: a schedule that would still be accruing after its term ends i
   assert.equal(r.details.constraint, "within_term");
 });
 
+test("652.refusal: a term too short for its own schedule is refused BY NAME at the day rule", () => {
+  // MEASURED on a rig before this wall existed (review round 2, NB1): term and window both
+  // 2026-07-01..2026-07-15 on a month-end rule were ACCEPTED, and the plan then held ZERO
+  // occurrences for ever — an accrual that can never accrue.
+  const r = mod.localAccrualRefusal(ok({
+    service_period_end: "2026-07-15", effective_to: "2026-07-15",
+  }));
+  assert.equal(r.reason, "accrual_schedule_yields_no_occurrence");
+  assert.equal(r.details.field, "day_rule", "the control that makes this a wall rather than a ban");
+  assert.equal(r.details.constraint, "yields_occurrence");
+
+  // A one-day term is the same shape at the smallest scale.
+  const oneDay = mod.localAccrualRefusal(ok({
+    service_period_start: "2026-07-10", service_period_end: "2026-07-10",
+    effective_from: "2026-07-10", effective_to: "2026-07-10",
+  }));
+  assert.equal(oneDay.reason, "accrual_schedule_yields_no_occurrence");
+
+  // …and under a day-of-month rule the DAY is the number to change, so that is what it names.
+  const wrongDay = mod.localAccrualRefusal(ok({
+    service_period_end: "2026-07-15", effective_to: "2026-07-15",
+    day_rule: "day_of_month", day_of_month: 20,
+  }));
+  assert.equal(wrongDay.details.field, "day_of_month");
+
+  // IT IS A WALL, NOT A BAN: the same half-month term with a rule that reaches inside it passes.
+  assert.equal(mod.localAccrualRefusal(ok({
+    service_period_end: "2026-07-15", effective_to: "2026-07-15",
+    day_rule: "day_of_month", day_of_month: 15,
+  })), null);
+});
+
+test("652.schedule: the mirrored due-date walk answers the plan lane's own question", () => {
+  const yields = mod.accrualScheduleYields;
+  // A month end is reached by a term that reaches a month end, and not by one that stops short.
+  assert.equal(yields("monthly", "last_day_of_month", undefined, "2026-07-01", "2026-07-31"), true);
+  assert.equal(yields("monthly", "last_day_of_month", undefined, "2026-07-01", "2026-07-30"), false);
+  // February's short month is why `day_of_month` stops at 28 — the 28th is always reachable.
+  assert.equal(yields("monthly", "day_of_month", 28, "2026-02-01", "2026-02-28"), true);
+  // THE FIRST PERIOD IS THE MONTH OF `from`, AND A QUARTERLY SCHEDULE STEPS THREE MONTHS FROM
+  // THERE. So a window that opens AFTER its own month's due day waits a whole quarter — which is
+  // exactly the arithmetic `clara._plan_due_nth` does, and I had it wrong until this cell measured
+  // it against the database's own walk.
+  assert.equal(yields("quarterly", "last_day_of_month", undefined, "2026-01-01", "2026-01-31"), true);
+  assert.equal(yields("quarterly", "day_of_month", 10, "2026-01-15", "2026-03-31"), false);
+  assert.equal(yields("quarterly", "day_of_month", 10, "2026-01-15", "2026-04-30"), true);
+  // An annual schedule reaches its own first date, and nothing else inside a short window.
+  assert.equal(yields("annual", "last_day_of_month", undefined, "2026-01-01", "2026-01-31"), true);
+  // A window that ends before it starts reaches nothing (0193's own validator names that one).
+  assert.equal(yields("monthly", "last_day_of_month", undefined, "2026-07-31", "2026-07-01"), false);
+});
+
 test("652.refusal: a term anchored to a document must name the document", () => {
   const r = mod.localAccrualRefusal(ok({ document_service_period_id: "33333333-3333-4333-8333-333333333333" }));
   assert.equal(r.details.field, "accrual.source_document_id");

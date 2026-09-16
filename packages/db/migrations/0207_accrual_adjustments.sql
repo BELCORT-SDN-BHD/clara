@@ -138,6 +138,32 @@
 -- stated here, every period" says on the form and in the method's own label.
 --
 -- =====================================================================================
+-- THE SEVENTH MEASUREMENT: A SCHEDULE THAT REACHES NOTHING IS A REFUSAL, NOT A SILENT NO-OP.
+--
+-- The SIXTH MEASUREMENT makes the authority window sit INSIDE the stated term. That closed a false
+-- ledger line and opened one more shape worth naming: a term SHORTER than one period of its own
+-- schedule. Measured on the rig at review round 2 (NB1), before this wall: term and window both
+-- 2026-07-01..2026-07-15, monthly, `last_day_of_month` -> ACCEPTED. A plan went live, an accrual
+-- row was written, a configuration receipt came back, and `clara.request_plan_catch_up` over the
+-- whole window then answered `{"events":[],"admitted":0}` with ZERO rows in
+-- `clara.accounting_plan_occurrences` -- for ever, because the only date that schedule reaches (the
+-- 31st) is outside the window the SIXTH MEASUREMENT requires. A one-day term behaves the same.
+--
+-- `clara._assert_accrual_schedule_yields` refuses it at the door (CLR10
+-- `accrual_schedule_yields_no_occurrence`), asking the plan lane's OWN date arithmetic
+-- (`clara._plan_due_events`, 0193:845 -- called, never recut) whether one primary due date falls in
+-- `[effective_from, effective_to]`. The refusal names the DAY RULE, or the day number under it,
+-- because that is the control that makes this a wall rather than a ban: the same half-month term
+-- with `day_of_month = 15` reaches 2026-07-15 and configures (measured). The term is the fact a
+-- human stated; the schedule is the thing to change.
+--
+-- WHAT IS NOT CLOSED HERE, AND WHY. The plan lane itself still accepts a plan whose schedule
+-- reaches nothing -- `clara.create_accounting_plan` has always done so, and #640/#653 own those six
+-- bodies, which this file PINS and may not recut. This wall closes the ACCRUAL entrance only. A
+-- plan configured through the plan lane's own door can still be a live plan with no due date, and
+-- that is #653's to rule on, named in #652's report rather than fixed behind their back.
+--
+-- =====================================================================================
 -- THE REFUSAL VOCABULARY THIS FILE OWNS. Every one carries a typed `detail.reason`; the
 -- field-scoped ones carry `field` and, where it helps, `constraint` — on the SAME footing
 -- `invalid_basis` does, so `apps/web/lib/work/accrual-draft.ts`'s `fieldForAccrualPath` maps them
@@ -154,6 +180,11 @@
 --   CLR10 accrual_term_window_mismatch   + field + constraint   the schedule is not bracketed by
 --                                                               the term it names (SIXTH
 --                                                               MEASUREMENT)
+--   CLR10 accrual_schedule_yields_no_occurrence + field + constraint
+--                                                               the schedule reaches no accrual
+--                                                               date inside its own window, so
+--                                                               the accrual could never post
+--                                                               (SEVENTH MEASUREMENT)
 --   CLR10 op_key_conflict                + field                this key already configured a
 --                                                               DIFFERENT accrual (0004's own
 --                                                               reservation conflict, given the
@@ -744,6 +775,66 @@ begin
 end $$;
 revoke all on function clara._assert_accrual_term_window(jsonb,date,date) from public;
 
+-- THE SCHEDULE REACHES A DATE INSIDE THE WINDOW, OR THERE IS NO ACCRUAL (THE SEVENTH MEASUREMENT).
+-- PAYLOAD-HALF like the two walls above -- it reads nothing but its arguments and the plan lane's
+-- own IMMUTABLE date arithmetic (`clara._plan_due_events`, 0193:845, PINNED-adjacent and not recut
+-- here), so a refusal costs not even an `op_receipts` row.
+--
+-- WHAT IT STOPS, MEASURED (review round 2, NB1): a term of 2026-07-01..2026-07-15 under a monthly
+-- `last_day_of_month` schedule was ACCEPTED -- plan live, accrual row written, a configuration
+-- receipt handed back -- and `clara.request_plan_catch_up` over the WHOLE window then answered
+-- `{"events":[],"admitted":0}`, because the only due date the schedule reaches (the 31st) lies
+-- outside the term the SIXTH MEASUREMENT now requires the window to sit inside. The surface said
+-- "No due dates reached yet", which was true and would have stayed true for ever. That is the same
+-- defect as a recorded selection nobody performs (THE FOURTH MEASUREMENT): an accrual that can
+-- never accrue.
+--
+-- IT IS A WALL, NOT A BAN, and the refusal names the control that makes it one: the SAME half-month
+-- term with `day_of_month = 15` reaches 2026-07-15 and is configured. So the field is the DAY RULE
+-- (or the day number under it), never the term -- the term is the fact a human stated, and the
+-- schedule is the thing to change.
+create function clara._accrual_schedule_yields(p_frequency text, p_day_rule text, p_day_of_month int,
+    p_effective_from date, p_effective_to date) returns boolean
+  language sql immutable security definer set search_path = clara, pg_temp as $$
+  select exists (select 1
+                   from clara._plan_due_events(p_effective_from, p_frequency, p_day_rule,
+                          p_day_of_month, false, p_effective_from, p_effective_to, 1) e
+                  where e.leg = 'primary');
+$$;
+revoke all on function clara._accrual_schedule_yields(text,text,int,date,date) from public;
+
+create function clara._assert_accrual_schedule_yields(p_frequency text, p_day_rule text,
+    p_day_of_month int, p_effective_from date, p_effective_to date) returns void
+  language plpgsql immutable security definer set search_path = clara, pg_temp as $$
+begin
+  -- A SCHEDULE 0193's OWN VALIDATOR WILL REFUSE IS NOT THIS WALL'S BUSINESS. `_assert_plan_schedule`
+  -- (pinned in §0, reached later through the plan core) names an unknown frequency, an unknown day
+  -- rule, a day outside 1..28 and a window that ends before it starts, each at its own control --
+  -- and `clara._plan_due_events` answers "no events" for every one of them. Answering it HERE would
+  -- re-spell another lane's refusal in this lane's vocabulary and send the preparer to the wrong
+  -- control, so each of those shapes falls through to the validator that owns it.
+  if p_frequency is null or p_frequency not in ('monthly','quarterly','annual') then return; end if;
+  if p_day_rule is null or p_day_rule not in ('day_of_month','last_day_of_month') then return; end if;
+  if p_day_rule = 'day_of_month'
+     and (p_day_of_month is null or p_day_of_month not between 1 and 28) then return; end if;
+  if p_effective_from is null or p_effective_to is null or p_effective_to < p_effective_from then
+    return;
+  end if;
+  if clara._accrual_schedule_yields(p_frequency, p_day_rule, p_day_of_month, p_effective_from,
+       p_effective_to) then
+    return;
+  end if;
+  raise exception 'this schedule reaches no accrual date between % and %, so the accrual would be recorded and never post',
+    to_char(p_effective_from,'YYYY-MM-DD'), to_char(p_effective_to,'YYYY-MM-DD')
+    using errcode='CLR10',
+      detail=jsonb_build_object('reason','accrual_schedule_yields_no_occurrence',
+        'field', case when p_day_rule = 'day_of_month' then 'day_of_month' else 'day_rule' end,
+        'constraint','yields_occurrence', 'frequency', p_frequency, 'day_rule', p_day_rule,
+        'effective_from', to_char(p_effective_from,'YYYY-MM-DD'),
+        'effective_to', to_char(p_effective_to,'YYYY-MM-DD'))::text;
+end $$;
+revoke all on function clara._assert_accrual_schedule_yields(text,text,int,date,date) from public;
+
 -- ONE ACCOUNT, ONE ROLE. Absent and INACTIVE answer identically, for the reason 0194's own account
 -- wall states: neither is a postable account, and telling them apart would say whether a code the
 -- caller guessed once existed. The CLASS is separate and is named, because "this code exists but
@@ -1088,6 +1179,8 @@ begin
   -- THE PAYLOAD HALF, BEFORE THE RESERVATION.
   perform clara._assert_accrual_particulars(p_accrual);
   perform clara._assert_accrual_term_window(p_accrual, p_effective_from, p_effective_to);
+  perform clara._assert_accrual_schedule_yields(p_frequency, p_day_rule, p_day_of_month,
+    p_effective_from, p_effective_to);
   v_basis := clara._accrual_journal_basis(p_accrual, p_purpose, p_effective_from);
 
   -- THE RESERVATION, WITH THE ONE REFUSAL 0004 RAISES OUT OF IT GIVEN A TYPED REASON. The estate's
@@ -1187,6 +1280,8 @@ begin
 
   perform clara._assert_accrual_particulars(p_accrual);
   perform clara._assert_accrual_term_window(p_accrual, p_effective_from, p_effective_to);
+  perform clara._assert_accrual_schedule_yields(p_frequency, p_day_rule, p_day_of_month,
+    p_effective_from, p_effective_to);
   v_basis := clara._accrual_journal_basis(p_accrual, p_purpose, p_effective_from);
 
   -- The same typed re-raise as the human door's (review round 1, A3): one key, one payload, and a
@@ -1579,6 +1674,29 @@ begin
   perform clara._assert_accrual_term_window(
     '{"service_period_start":"2026-07-01","service_period_end":"2026-09-30"}'::jsonb,
     date '2026-07-01', date '2026-09-30');
+  -- …and so is the YIELD wall (THE SEVENTH MEASUREMENT): a half-month term whose month-end rule
+  -- falls outside it is refused here, and the SAME term with a day rule that reaches inside it
+  -- passes -- which is what makes this a wall rather than a ban.
+  begin
+    perform clara._assert_accrual_schedule_yields('monthly', 'last_day_of_month', null,
+      date '2026-07-01', date '2026-07-15');
+    raise exception '#652 tail: a schedule that reaches NO accrual date inside its own window was ADMITTED'
+      using errcode='CLR10';
+  exception when sqlstate 'CLR10' then
+    get stacked diagnostics v_detail = pg_exception_detail;
+    if coalesce(v_detail,'') not like '%accrual_schedule_yields_no_occurrence%' then
+      raise exception '#652 tail: the yield wall refused, but not as accrual_schedule_yields_no_occurrence (detail %)', v_detail
+        using errcode='CLR10';
+    end if;
+  end;
+  perform clara._assert_accrual_schedule_yields('monthly', 'day_of_month', 15,
+    date '2026-07-01', date '2026-07-15');
+  perform clara._assert_accrual_schedule_yields('monthly', 'last_day_of_month', null,
+    date '2026-07-01', date '2026-09-30');
+  -- A schedule shape 0193's OWN validator owns falls through untouched rather than being re-spelled
+  -- in this lane's vocabulary at the wrong control.
+  perform clara._assert_accrual_schedule_yields('weekly', 'last_day_of_month', null,
+    date '2026-07-01', date '2026-07-15');
   -- …and the term law is LIVE, exercised here rather than left to the battery: a period that is
   -- not a human's, and an accrual of zero, are each refused with the token this lane owns.
   begin
@@ -1609,6 +1727,6 @@ begin
     end if;
   end;
 
-  raise notice '#652 tail: OK -- clara.accrual_adjustments is RLS-forced with no application ACL; the plan-revision FK carries (plan_id, revision, firm_id, client_id) and unique (plan_id, revision) makes the occurrence join single-valued; term_source is a one-member CHECK, method admits exactly the one rule this slice performs, the authority window is bracketed by the stated term and the derived line names one period of it, and amount_cents is strictly positive; three triggers (append-only, no-truncate, term congruence); three human doors on clara_authenticated and the OBO door on clara_runtime alone, with no crossing and nothing PUBLIC; the six pinned 0193 bodies hash byte-identically to the digests taken before this file created anything, so NOTHING was recut; no foreign table was altered; and the derived accrual basis passes 0178''s own validator.';
+  raise notice '#652 tail: OK -- clara.accrual_adjustments is RLS-forced with no application ACL; the plan-revision FK carries (plan_id, revision, firm_id, client_id) and unique (plan_id, revision) makes the occurrence join single-valued; term_source is a one-member CHECK, method admits exactly the one rule this slice performs, the authority window is bracketed by the stated term, the schedule must reach an accrual date inside that window, and the derived line names one period of the term, and amount_cents is strictly positive; three triggers (append-only, no-truncate, term congruence); three human doors on clara_authenticated and the OBO door on clara_runtime alone, with no crossing and nothing PUBLIC; the six pinned 0193 bodies hash byte-identically to the digests taken before this file created anything, so NOTHING was recut; no foreign table was altered; and the derived accrual basis passes 0178''s own validator.';
 end
 $w652_tail$;

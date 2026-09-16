@@ -33,6 +33,7 @@ import {
   ACCRUAL_METHODS,
   ACCRUAL_FREQUENCIES,
   ACCRUAL_DAY_RULES,
+  accrualScheduleYields,
   type AccrualMethod,
 } from "@/lib/accruals/api";
 
@@ -305,6 +306,28 @@ export function validateAccrualDraft(
     }
   } else if (t(draft.dayOfMonth) !== "") {
     issues.push({ field: "dayOfMonth", code: "dayOfMonthAbsent" });
+  }
+
+  // …AND THE SCHEDULE REACHES AN ACCRUAL DATE INSIDE THE WINDOW (0207's SEVENTH MEASUREMENT).
+  // ASKED LAST, and only once everything it depends on stands up: a day number out of range or a
+  // window that ends before it starts is the mistake to fix first, and this issue would otherwise
+  // pile onto a control the preparer has already been sent to. MEASURED before the wall existed
+  // (review round 2, NB1): a half-month term on a month-end rule was accepted, the plan went live
+  // and no due date was ever reached.
+  const dayNumber = Number(t(draft.dayOfMonth));
+  const scheduleStands = !issues.some((i) => i.field === "dayOfMonth")
+    && t(draft.effectiveFrom) !== "" && t(draft.effectiveTo) !== ""
+    && draft.effectiveTo >= draft.effectiveFrom;
+  if (scheduleStands
+      && !accrualScheduleYields(draft.frequency, draft.dayRule,
+           draft.dayRule === "day_of_month" ? dayNumber : null,
+           draft.effectiveFrom, draft.effectiveTo)) {
+    // The DAY RULE, or the day number under it — the control that makes this a wall rather than a
+    // ban. The term is the fact a human stated; the schedule is the thing to change.
+    issues.push({
+      field: draft.dayRule === "day_of_month" ? "dayOfMonth" : "dayRule",
+      code: "scheduleYieldsNone",
+    });
   }
 
   return issues;

@@ -948,6 +948,64 @@ test("p652.term.window — an open-ended authority, a window that starts before 
 });
 
 // ===========================================================================================
+// p652.schedule.yields — A TERM TOO SHORT FOR ITS OWN SCHEDULE (review round 2, NB1).
+// ===========================================================================================
+
+test("p652.schedule.yields — a stated term whose schedule reaches no accrual date inside it is refused BY NAME at the day rule, not configured into a plan that can never post", async (t) => {
+  if (await gateAccruals(t)) return;
+  const client = await freshAccrualClient(ALICE(), "yields");
+  const ref = await instructionRef({ client, author: BOB() });
+  const call = ({ start, end, dayRule = "last_day_of_month", dayOfMonth = null, frequency = "monthly" }) =>
+    createAccrualAdjustment(BOB(), {
+      client, authorityRef: ref, frequency, dayRule, dayOfMonth,
+      accrual: accrual({ servicePeriodStart: start, servicePeriodEnd: end }),
+      effectiveFrom: start, effectiveTo: end, opKey: opk("p652-yields"),
+    });
+
+  // 1 - A HALF-MONTH TERM ON A MONTH-END RULE. MEASURED before this wall existed (review round 2,
+  //     NB1): the configuration was ACCEPTED, the plan went live, and `clara.request_plan_catch_up`
+  //     over the whole window answered `{"events":[],"admitted":0}` — no due date, ever. The list
+  //     read said "No due dates reached yet", which is true and will stay true for ever.
+  const half = await assertPair(CLR.badRequest, ACCRUAL_REASON.scheduleYieldsNone,
+    () => call({ start: "2026-07-01", end: "2026-07-15" }),
+    "a half-month term whose month-end rule falls outside it");
+  assert.equal(half.detail.field, "day_rule", "at the control that holds the mistake");
+  assert.equal(half.detail.constraint, "yields_occurrence");
+
+  // 2 - A ONE-DAY TERM. The same silence, at the smallest possible scale.
+  const oneDay = await assertPair(CLR.badRequest, ACCRUAL_REASON.scheduleYieldsNone,
+    () => call({ start: "2026-07-10", end: "2026-07-10" }),
+    "a one-day term whose month-end rule falls outside it");
+  assert.equal(oneDay.detail.field, "day_rule");
+
+  // 3 - THE SAME MISS UNDER A DAY-OF-MONTH RULE names the DAY, because that is the number the
+  //     preparer would change: the 20th is outside a term that ends on the 15th.
+  const wrongDay = await assertPair(CLR.badRequest, ACCRUAL_REASON.scheduleYieldsNone,
+    () => call({ start: "2026-07-01", end: "2026-07-15", dayRule: "day_of_month", dayOfMonth: 20 }),
+    "a day-of-month rule whose day falls outside the term");
+  assert.equal(wrongDay.detail.field, "day_of_month");
+
+  assert.deepEqual(await footprint(client),
+    { plans: 0, revisions: 0, occurrences: 0, accruals: 0, work: (await workCount(client)) },
+    "nothing at all is written");
+  assert.deepEqual(await opReceiptRows(FIRM_A(), "p652-yields"), [],
+    "and not even a RESERVATION: the yield wall is payload-half, asked before _reserve_op");
+
+  // 4 - THIS IS A WALL, NOT A BAN. The SAME half-month term with the day rule that reaches inside
+  //     it is configured and MATERIALISES its accrual date — which is why the refusal above names
+  //     the day rule rather than the term.
+  const ok = await call({
+    start: "2026-07-01", end: "2026-07-15", dayRule: "day_of_month", dayOfMonth: 15,
+  });
+  assert.ok(ok.accrual_id, "a schedule that reaches inside its own term is configured");
+  const caught = await requestPlanCatchUp(BOB(), { plan: ok.plan_id, from: "2026-07-01", to: "2026-07-15" });
+  const legs = await occurrenceRows(ok.plan_id);
+  assert.ok(legs.some((o) => o.leg === "primary" && String(o.due_date) === "2026-07-15"),
+    `the accrual date inside the term is reached (catch-up admitted ${caught.admitted}, legs `
+    + `${JSON.stringify(legs.map((o) => [String(o.due_date), o.leg]))})`);
+});
+
+// ===========================================================================================
 // p652.basis.period_text — WHAT THE LEDGER SAYS ABOUT A PERIOD IT DID NOT ACCRUE.
 // ===========================================================================================
 

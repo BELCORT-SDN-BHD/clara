@@ -285,7 +285,9 @@ checkable: the amount, the expense account it charges and the non-control liabil
 accrues into, the SERVICE PERIOD it belongs to, the rule that selects each period's amount, the
 window its authority covers, and the instruction that authorised it. Its authority window runs
 INSIDE the service period it names — it starts no earlier and ends no later, and it always ends — so
-every entry it posts falls within the term it claims to accrue for. It rides the accrual-and-
+every entry it posts falls within the term it claims to accrue for, and its schedule must reach at
+least one accrual date inside that window: a term too short for its own day rule is refused at the
+day rule rather than recorded as a schedule that can never post. It rides the accrual-and-
 reversal schedule rather than standing alone, so accepting one records the schedule, its first due
 event and the accounting work for it — and posts nothing.
 _Avoid_: A balanced journal entry wearing a marker; a periodic stock adjustment or a supplied

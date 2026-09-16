@@ -100,6 +100,7 @@ export const ACCRUAL_REASON = {
   accountRelationship: "accrual_account_relationship",
   termDocumentMismatch: "accrual_term_document_mismatch",
   termWindowMismatch: "accrual_term_window_mismatch",
+  scheduleYieldsNone: "accrual_schedule_yields_no_occurrence",
   invalidPurpose: "invalid_purpose",
   clientNotFound: "client_not_found",
   clientInactive: "client_inactive",

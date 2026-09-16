@@ -784,6 +784,7 @@ function issueText(t: Translate, code: string): string {
     dayOfMonthRange: t("issueDayOfMonthRange"),
     dayOfMonthAbsent: t("issueDayOfMonthAbsent"),
     reversalCollides: t("issueReversalCollides"),
+    scheduleYieldsNone: t("issueScheduleYieldsNone"),
   };
   return codes[code] ?? code;
 }

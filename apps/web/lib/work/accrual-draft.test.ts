@@ -315,6 +315,33 @@ test("652.valid: the authority window", () => {
     [{ field: "effectiveTo", code: "effectiveToBeforeFrom" }]);
 });
 
+test("652.valid: a term too short for its own schedule is refused at the DAY RULE, not at the term", () => {
+  // 0207's SEVENTH MEASUREMENT, mirrored at the control. MEASURED on a rig before the wall existed
+  // (review round 2, NB1): a 2026-07-01..2026-07-15 term on a month-end rule was ACCEPTED, the plan
+  // went live, and `clara.request_plan_catch_up` over the whole window answered
+  // `{"events":[],"admitted":0}` — an accrual that can never accrue.
+  const short = { servicePeriodEnd: "2026-07-15", effectiveTo: "2026-07-15" } as const;
+  assert.deepEqual(validateAccrualDraft(goodDraft(short), KNOWN),
+    [{ field: "dayRule", code: "scheduleYieldsNone" }],
+    "the term is the fact a human stated; the day rule is the thing to change");
+  assert.deepEqual(
+    validateAccrualDraft(goodDraft({ servicePeriodStart: "2026-07-10", servicePeriodEnd: "2026-07-10",
+      effectiveFrom: "2026-07-10", effectiveTo: "2026-07-10" }), KNOWN),
+    [{ field: "dayRule", code: "scheduleYieldsNone" }], "a one-day term is the same shape");
+  assert.deepEqual(
+    validateAccrualDraft(goodDraft({ ...short, dayRule: "day_of_month", dayOfMonth: "20" }), KNOWN),
+    [{ field: "dayOfMonth", code: "scheduleYieldsNone" }],
+    "…and under a day-of-month rule the DAY is the number to change");
+  // IT IS A WALL, NOT A BAN: the same half-month term with a day that falls inside it is fine.
+  assert.deepEqual(
+    validateAccrualDraft(goodDraft({ ...short, dayRule: "day_of_month", dayOfMonth: "15" }), KNOWN),
+    []);
+  // AND IT NEVER PILES ONTO A MISTAKE ALREADY NAMED: a day out of range is the one issue raised.
+  assert.deepEqual(
+    validateAccrualDraft(goodDraft({ ...short, dayRule: "day_of_month", dayOfMonth: "31" }), KNOWN),
+    [{ field: "dayOfMonth", code: "dayOfMonthRange" }]);
+});
+
 test("652.valid: the first invalid field is the first control in reading order", () => {
   const issues = validateAccrualDraft(emptyAccrualDraft(), KNOWN);
   assert.equal(firstInvalidAccrualField(issues), "purpose");

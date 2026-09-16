@@ -5013,7 +5013,8 @@
       "issueWindowAfterTerm": "The authority cannot still be accruing after the service period ends.",
       "issueDayOfMonthRange": "Choose a day between 1 and 28. Use the last day of the month for a month end.",
       "issueDayOfMonthAbsent": "A last-day-of-month schedule carries no day number.",
-      "issueReversalCollides": "A monthly accrual on the 1st would have its reversal land on the next accrual's own day. Accrue on the month end, or on a day between 2 and 28."
+      "issueReversalCollides": "A monthly accrual on the 1st would have its reversal land on the next accrual's own day. Accrue on the month end, or on a day between 2 and 28.",
+      "issueScheduleYieldsNone": "This schedule never reaches an accrual date inside the authority window, so nothing would ever post. Choose a day that falls inside the service period."
     },
   "WorkCancel": {
     "cancelWork": "Cancel Work",

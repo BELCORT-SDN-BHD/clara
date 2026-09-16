@@ -108,11 +108,18 @@ outside a slice migration's remit and its tail asserts that relation's constrain
 unchanged against a value its own prestate MEASURED (never a transcribed literal, which would
 assert a property of the chain below it rather than of this file).
 
-Two of its rules are structural and are worth knowing before reading the doors. `effective_to` is
+Three of its rules are worth knowing before reading the doors. `effective_to` is
 NOT NULL and `ck_accrual_adjustments_window_in_term` requires the authority window to sit inside the
 stated service period, so every occurrence posts a date INSIDE the term its own journal line names —
 0193's `_plan_window_ceiling` already lifts an auto-reversing plan's ceiling to the reversal of
-`effective_to`, so an authority ending on its last accrual can still be undone. And the `method`
+`effective_to`, so an authority ending on its last accrual can still be undone. A third rule lives
+in the doors rather than in the relation: `clara._assert_accrual_schedule_yields` asks the plan
+lane's own date arithmetic (`clara._plan_due_events`, called and never recut) whether the schedule
+reaches one accrual date inside `[effective_from, effective_to]`, and refuses
+`accrual_schedule_yields_no_occurrence` when it does not — a term shorter than one period of its own
+schedule was otherwise accepted in full and could never post. It names the day rule, not the term:
+the same term with a day that falls inside it configures. The PLAN lane's own door still accepts a
+plan that reaches nothing; that relation is #640/#653's and this file only pins it. And the `method`
 CHECK admits exactly one selection rule (`stated_amount`), because exactly one is performed: the
 configuration freezes the stated amount into the plan revision's basis and
 `clara._plan_occurrence_basis` only moves the posting date. Three further rules were drafted and

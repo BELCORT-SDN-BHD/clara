@@ -255,6 +255,51 @@ export async function createAccrual(input: CreateAccrualInput, o: Opts = {}): Pr
   );
 }
 
+/**
+ * THE PLAN LANE'S OWN DUE-DATE ARITHMETIC (`clara._plan_due_nth`, 0193:791), mirrored here so the
+ * form can name the mistake beside the control. `k` periods after the MONTH of `from`, on that
+ * month's last day or on the named day, never past the month's own last day.
+ */
+function accrualDueNth(
+  from: string,
+  frequency: (typeof ACCRUAL_FREQUENCIES)[number],
+  dayRule: (typeof ACCRUAL_DAY_RULES)[number],
+  dayOfMonth: number | null,
+  k: number,
+): string {
+  const step = frequency === "monthly" ? 1 : frequency === "quarterly" ? 3 : 12;
+  const total = Number(from.slice(0, 4)) * 12 + (Number(from.slice(5, 7)) - 1) + k * step;
+  const y = Math.floor(total / 12);
+  const m = total - y * 12 + 1;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const day = dayRule === "last_day_of_month" ? last : Math.min(dayOfMonth ?? 1, last);
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Whether this schedule reaches at least one ACCRUAL date inside `[from, to]` — 0207's SEVENTH
+ * MEASUREMENT (`clara._accrual_schedule_yields`), which the door re-asks and is the authority for.
+ *
+ * WHY THE FORM ASKS IT AT ALL: a term shorter than one period of its own schedule was ACCEPTED
+ * before that wall existed and could never post — the accrual was recorded, the plan went live and
+ * the list read said "No due dates reached yet" for ever (review round 2, NB1).
+ */
+export function accrualScheduleYields(
+  frequency: (typeof ACCRUAL_FREQUENCIES)[number],
+  dayRule: (typeof ACCRUAL_DAY_RULES)[number],
+  dayOfMonth: number | null,
+  from: string,
+  to: string,
+): boolean {
+  if (to < from) return false;
+  for (let k = 0; k < 4096; k += 1) {
+    const due = accrualDueNth(from, frequency, dayRule, dayOfMonth, k);
+    if (due > to) return false;
+    if (due >= from) return true;
+  }
+  return false;
+}
+
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It
  *  mirrors `clara._accrual_journal_basis` (0207) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */

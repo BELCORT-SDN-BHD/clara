@@ -275,6 +275,35 @@ test("652.form: a schedule that would post outside its own stated term is refuse
   }
 });
 
+test("652.form: a term too short for its own schedule is refused BEFORE the door, at the day rule", async () => {
+  // 0207's SEVENTH MEASUREMENT. MEASURED on a rig before that wall existed (review round 2, NB1):
+  // a 2026-07-01..2026-07-15 term on a month-end rule was ACCEPTED, the plan went live and no due
+  // date was ever reached — the list read said "No due dates reached yet", for ever.
+  const sent: CreateAccrualInput[] = [];
+  const h = await renderComponent(App({ submit: async (input) => { sent.push(input); return ACCEPTED; } }));
+  try {
+    await fill(h, { servicePeriodEnd: "2026-07-15", effectiveTo: "2026-07-15" });
+    await clickSubmit(h);
+    assert.equal(sent.length, 0, "an accrual that could never post never reaches the door");
+    assert.equal(focusedId(), F("dayRule"),
+      "at the control that makes this a wall rather than a ban — not at the term a human stated");
+    assert.match(h.text(), /never reaches an accrual date inside the authority window/);
+
+    // THE SAME TERM WITH A RULE THAT FALLS INSIDE IT IS SENT, which is why the refusal above names
+    // the schedule rather than the period.
+    await h.fireEvent(byId(h, F("dayRule")), "change", (n) => setFieldValue(n, "day_of_month"));
+    await h.settle();
+    await h.fireEvent(byId(h, F("dayOfMonth")), "change", (n) => setFieldValue(n, "15"));
+    await h.settle();
+    await clickSubmit(h);
+    assert.equal(sent.length, 1, "a schedule that reaches inside its own term is sent");
+    assert.equal(sent[0]?.dayOfMonth, 15);
+    assert.equal(sent[0]?.dayRule, "day_of_month");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("652.form: a SERVER field path becomes a focused control, and the refusal renders verbatim", async () => {
   const h = await renderComponent(App({
     submit: async () => {
