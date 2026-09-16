@@ -50,13 +50,15 @@ posted one; treating an amortisation period's amount as the same as every other 
 
 **Prepayment schedule**:
 The derived amortisation of ONE posted prepayment: the recognition entry that put it on the books,
-the prepaid account read off that entry's own single debited asset leg, the Service period its
-document states, the expense account a person judged with the grounds they stated, and the exact
-allocation across whole calendar months with the remainder wholly in the final period. It is
-DERIVED, not typed: the amount, the period count, the per-period figures, the cadence and the
-authority window all come from the frozen evaluator's reading of rows this database already holds,
-and the only things a person supplies are which prepayment, which expense account, why, and what
-the schedule is for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
+the prepaid account read off that entry's own single debited asset leg — and judged ELIGIBLE by the
+same rule every other lane uses, so a receivable control, a bank account or a reserved role is
+refused rather than amortised — the Service period its document states, the expense account a
+person judged with the grounds they stated, and the exact allocation across whole calendar months
+with the remainder wholly in the final period. It is DERIVED, not typed: the amount, the period
+count, the per-period figures, the cadence and the authority window all come from the frozen
+evaluator's reading of rows this database already holds, and the only things a person supplies are
+which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
+for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
 admits each period.
 _Avoid_: A recurring adjustment template as a synonym; an editable table of period amounts; a
 schedule that pays anything — the money left the bank before the schedule existed; "configured" as
