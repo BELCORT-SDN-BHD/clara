@@ -339,15 +339,25 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
   // aim for, declaring neither list.
   "plans-mock.mjs": { unscopeable: [], debt: [] },
-  // #649's client-creation lane. Its `/rest/v1/clients` handler is id-scoped and its two RPC
-  // verbs gate on `body.p_name` before they answer, falling through for every other name — and
-  // for these two doors the NAME is the request's own subject rather than a label for one:
+  // #649's client-creation lane. Its `/rest/v1/clients` handler is id-scoped, and for its two RPC
+  // verbs the NAME is the request's own subject rather than a label for one:
   // `clara.client_identity_candidates(p_name, p_identifier)` and
-  // `clara.begin_client_onboarding(p_name, p_op_key)` carry no id at all. That is the distinction
-  // `agentic-finish-mock.mjs` draws the other way for the same verb — its walk does not care
-  // which name reached it, so it declares the verb unscopeable; this one's three names ARE its
-  // fixture. Neither column has anything to declare.
-  "client-create-mock.mjs": { unscopeable: [], debt: [] },
+  // `clara.begin_client_onboarding(p_name, p_op_key)` carry no id at all.
+  // `begin_client_onboarding` gates on this lane's three names and falls through for every other,
+  // because a SECOND claimant (`agentic-finish-mock.mjs`) answers it for the rest — that is the
+  // distinction that lane draws the other way, declaring the verb unscopeable because its own walk
+  // does not care which name reached it. `client_identity_candidates` has NO second claimant and
+  // the Add-client control asks it before every dispatch on every walk, so this lane answers every
+  // OTHER name with the honest arity-0 empty rather than falling through into a 501: an unanswered
+  // verb is an outage, and an empty answer carries no fixture a sibling walk could resolve as its
+  // own (`home-board-mock.mjs`'s row states the same posture for its own unscoped reads). That is
+  // what the `unscopeable` entry below records — not "there is no discriminant in the request",
+  // but "scoping this one is what BREAKS a sibling walk", with the reason written in the mock's
+  // own source. It is not debt: a debt is a handler that could scope at no cost and does not.
+  "client-create-mock.mjs": {
+    unscopeable: ["/rest/v1/rpc/client_identity_candidates"],
+    debt: [],
+  },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

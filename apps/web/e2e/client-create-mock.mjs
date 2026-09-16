@@ -12,6 +12,15 @@
 // really births a client and its plan in one transaction.
 // `packages/db/tests/client-onboarding-identity.test.mjs` owns those against a real Postgres.
 //
+// ONE OF THE TWO VERBS IS ANSWERED FOR EVERY NAME, and the asymmetry is deliberate.
+// `clara.client_identity_candidates` has exactly ONE claimant in this suite — this file — and the
+// Add-client control asks it BEFORE every dispatch, on every walk, including walks that own no
+// client_identity fixture at all. A verb nobody answers is an outage, not a fall-through, so this
+// lane answers every other name with the honest arity-0 shape (`{name, arity: 0, candidates: []}`)
+// and keeps its three fixture names for the three arities. `clara.begin_client_onboarding` has a
+// SECOND claimant (`agentic-finish-mock.mjs`, which answers it for every name its own walk mints),
+// so that one still falls through for a name this lane does not own.
+//
 // SCOPED BY THE REQUEST'S OWN SUBJECT, and for this door the subject IS the name.
 // `clara.begin_client_onboarding(p_name, p_op_key)` takes a free-text name and nothing else —
 // there is no id in the request to key on — so the name is not a LABEL for the subject here, it is
@@ -19,6 +28,13 @@
 // does not care WHICH name reached it; this lane's three names are its whole fixture, so it gates
 // on them and falls through for every other name, including that lane's. Both claimants are
 // declared in `e2e-fixture-ownership.test.ts`'s SHARED_RPC_VERBS.
+
+// THE BODY IS READ THROUGH THE SHARED CACHE, never a private loop. A Node request stream drains
+// exactly once, so a lane that parses it privately hands every later lane in `serve-built.mjs`'s
+// chain an empty `{}` — the silent failure `mock-dispatch.mjs`'s own header was written for, and
+// `begin_client_onboarding`'s other claimant (`agentic-finish-mock.mjs`, hooked AFTER this lane)
+// reads its body through the same helper.
+import { matchVerb, readCachedJson } from "./mock-dispatch.mjs";
 
 export const CLIENT_CREATE = {
   /** arity 0 — nothing in the firm answers to it. The face proceeds with no interruption. */
@@ -74,17 +90,6 @@ export function resetClientCreate() {
   bornClients.clear();
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
-
 const EXISTING_CLIENT_ROW = () => ({
   id: CLIENT_CREATE.existingClientId,
   name: CLIENT_CREATE.existingClientName,
@@ -115,15 +120,26 @@ export async function handleClientCreateSupabase(request, response, path, url, s
 
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
-  // The allow-list `readJson`'s call site guards on, so a verb this lane does not own never has
-  // its request stream drained (the #632 finding-10 root cause, stated in full in
-  // `bank-close-registers-mock.mjs`).
-  if (!OWNED_VERBS.has(verb)) return false;
-  const body = await readJson(request);
+  // The allow-list the body read guards on (`matchVerb`, mock-dispatch.mjs), so a verb this lane
+  // does not own is never even parsed — and because the parse is CACHED on the request, a verb it
+  // does own and then declines is still fully re-servable to every later lane, in any order.
+  if (!matchVerb(OWNED_VERBS, verb)) return false;
+  const body = await readCachedJson(request);
   const name = typeof body.p_name === "string" ? body.p_name.trim() : "";
 
   if (verb === "client_identity_candidates") {
-    if (!OWNED_NAMES.has(name)) return false;
+    // THIS LANE IS THE ONLY CLAIMANT OF THIS VERB, so falling through for a name it does not own
+    // is not a fall-through — it is an OUTAGE. `AddClientControl` now asks this read before it
+    // dispatches the birth door at all (client-register-list.tsx), and a read that could not run
+    // correctly blocks the dispatch: no other lane answers it, so P6-5's own H-51 arm (which
+    // types a name outside this fixture) got a 501 and never reached `begin_client_onboarding`.
+    // Every other name therefore gets the HONEST arity-0 shape — the same "answer with the empty,
+    // never with someone else's fixture" posture `home-board-mock.mjs` states for its own
+    // unscoped reads. Nothing in it can resolve as another walk's fixture: it names no party.
+    if (!OWNED_NAMES.has(name)) {
+      sendJson(response, 200, { name, arity: 0, candidates: [] }, cors);
+      return true;
+    }
     if (name === CLIENT_CREATE.freeName) {
       sendJson(response, 200, { name, arity: 0, candidates: [] }, cors);
       return true;
