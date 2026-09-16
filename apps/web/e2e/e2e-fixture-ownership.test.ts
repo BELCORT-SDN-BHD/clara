@@ -55,6 +55,7 @@ const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "counterparty-identity-mock.mjs",
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
@@ -323,6 +324,14 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // id) before it answers, and falls through otherwise; its five rpc verbs read the body only
   // inside their own verb match. Nothing to declare.
   "knowledge-mock.mjs": { unscopeable: [], debt: [] },
+  // #647's C13 identity lane. Every handler names one of this lane's own four client ids or a
+  // counterparty/alias/document id it minted before it answers, and falls through otherwise —
+  // its four PostgREST GETs (clients, coa_accounts, client_identifiers, documents) and its seven
+  // RPC verbs alike. Each of those seven reads the request body INSIDE its own verb match, never
+  // once before the switch, so a POST this lane does not own reaches the next handler with its
+  // stream intact. It answers no verb any other lane answers, so it appears in neither
+  // SHARED_RPC_VERBS nor either list here.
+  "counterparty-identity-mock.mjs": { unscopeable: [], debt: [] },
   // #643 — every handler is scoped to this lane's own client id (`PA.clientId`) and falls through
   // otherwise: the PostgREST reads (clients, coa_accounts, document_filings, list_spoken_for_documents
   // by `p_client`; documents by ids this module minted), the RUNTIME admission route by `body.clientId`,

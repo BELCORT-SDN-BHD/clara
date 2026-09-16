@@ -177,6 +177,45 @@ test("C77.6: CANCEL in the correction dialog fires NO governed call and leaves t
   });
 });
 
+test("a CANCELLED correction leaves no draft behind: reopening starts from the CURRENT pair, not the abandoned one", async () => {
+  // Found by the browser walk, fixed in the component. The door REPLACES registration AND tin
+  // together, so a TIN abandoned by Cancel and silently re-offered on the next visit would be
+  // submitted beside a registration the human did mean to change — a correction nobody asked
+  // for, made by a form that remembered too much. `ArApCounterpartyDoorDialog`'s `onOpened`
+  // re-seeds both fields from the live props every time the dialog opens.
+  const seen: Seen = [];
+  await withMockedEnv(mock(seen), async () => {
+    const { h, body } = await mounted();
+    try {
+      await openCorrectDialog(h, body);
+      await h.act(() => { setFieldValue(findIn(body, (n) => n.id === "cp-identifiers-tin") as never, "C00000000000"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const cancel = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Cancel");
+      await h.act(async () => { await clickButton(cancel as never); });
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      await openCorrectDialog(h, body);
+      const tin = findIn(body, (n) => n.id === "cp-identifiers-tin");
+      assert.ok(tin, "the correction dialog reopens");
+      assert.equal(tin.value, "C123", "the abandoned draft is gone and the CURRENT tin is what the form offers");
+      assert.equal(
+        (findIn(body, (n) => n.id === "cp-identifiers-registration") as Node).value,
+        "201801012345",
+        "and the untouched half is still the current one",
+      );
+      assert.equal(
+        seen.filter((s) => s.fn === "set_counterparty_identifiers").length,
+        0,
+        "nothing was written by either visit",
+      );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});
+
 test("C77.6: CORRECT fires exactly ONE set_counterparty_identifiers carrying BOTH values, and the outcome is re-read rather than painted", async () => {
   const seen: Seen = [];
   await withMockedEnv(mock(seen), async () => {

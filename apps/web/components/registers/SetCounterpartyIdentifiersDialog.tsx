@@ -60,6 +60,15 @@ export function SetCounterpartyIdentifiersDialog({
       confirmDisabled={!changed}
       refusal={refusal}
       onConfirm={() => onSubmit(nextReg, nextTin)}
+      // A CANCELLED CORRECTION LEAVES NO DRAFT BEHIND, and that is a safety rule here rather than
+      // a style choice: the door REPLACES the pair, so a TIN abandoned by Escape and silently
+      // re-offered on the next visit would be submitted beside a registration the human did mean
+      // to change. Re-seeding on open also means a value corrected a moment ago shows as
+      // corrected, without waiting for a reload.
+      onOpened={() => {
+        setRegistration(currentRegistrationNo ?? "");
+        setTin(currentTin ?? "");
+      }}
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">

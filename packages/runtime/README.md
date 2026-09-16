@@ -517,6 +517,31 @@ ceremony the owner schedules; docs/PROGRESS.md carries the exact step order. Hos
 
 [Fly build and deploy behavior](https://www.fly.io/docs/blueprints/working-with-docker/)
 
+### #647 — `lib/counterparty-identity.ts`, a contract carrier that ships no tool
+
+`packages/runtime/lib/counterparty-identity.ts` is the zod input schema, door-argument builder and
+refusal map for a `record_counterparty_alias` chat tool that **does not exist in this image**. The
+owner ruling this wave (`docs/plan/active/refresh-wave-2026-09-15/DECISIONS.md`, D11) is that
+migration `0200` ships identity PROVENANCE only: every identity door is granted to
+`clara_authenticated` and to no machine role, so no workflow class can call one and no successor was
+cut for it. The module exists so the contract was reviewed rather than improvised, and it is covered
+standalone by `tests/counterparty-identity-unit.test.mjs`.
+
+Read its foot before wiring it. The rule it records is the one
+`lib/periodic-adjustment-basis.ts` learned the hard way: **a module is non-frozen only until a
+successor imports it, and then it is hash-locked forever** — `periodic-adjustment-basis.ts` carries
+`deployed: true` in `frozen-workflows.json` by closure alone, because `chatTurn_v19` imports it.
+`lib/counterparty-identity.ts` is outside every closure today (`node
+scripts/check-frozen-workflows.mjs` from the repository root is the check), and the day a successor
+imports it that stops being true.
+
+One thing that wiring will need and that this repository does not have: `clara.add_counterparty_alias`
+is `_human_ctx`-fronted and refuses `origin='agent_proposed'` outright, so an agent lane needs a new
+OBO sibling door in the `clara.capture_knowledge_for` shape (actor-explicit, `clara_runtime`-granted,
+verifying the named human's live membership itself) before the tool can be registered. No
+`clara.wake_fn_allowlist` row is owed or wanted: that allowlist is keyed by BARE NAME, so a row for
+this name would widen wake reach over the human door as well.
+
 ## Evaluation
 
 [Classifier fixtures](tests/fixtures/classify/README.md) explain the recall harness.

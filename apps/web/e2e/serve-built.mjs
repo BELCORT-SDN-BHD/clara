@@ -64,6 +64,10 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // #644's own lane (the C13 Knowledge walk). ID-scoped like its siblings — four client ids, one
 // per read outcome, plus its own record/document ids — hooked in ONE place below.
 import { handleKnowledgeSupabase } from "./knowledge-mock.mjs";
+// #647's counterparty-identity lane — the C13 identity surface and its routed detail. A
+// file-disjoint sibling scoped to its own four client ids and the counterparty ids it minted; it
+// answers no verb any other lane answers (e2e-fixture-ownership.test.ts measures both).
+import { handleCounterpartyIdentitySupabase } from "./counterparty-identity-mock.mjs";
 // #632's own lane (the attributable Activity feed walk). ID-scoped like its siblings; its ONE
 // exception is `ACTIVITY_CLIENTS`, spliced into the shared `clients` array below (APPENDED, never
 // replacing) because the Activity page's client Select is this train's first consumer of the
@@ -577,6 +581,7 @@ async function handleSupabase(request, response, url) {
   // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
   // lane still needs; and every branch is scoped to a #644 id, so it answers for nobody else.
   if (await handleKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleCounterpartyIdentitySupabase(request, response, path, url, sendJson, cors)) return;
   // AHEAD OF THE HOME BOARD (#623, and still true — NOT a body-drain reason):
   // `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers `/rest/v1/coa_accounts` and
   // `/rest/v1/agent_tasks_visible` with an honest `[]` for

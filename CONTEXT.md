@@ -118,7 +118,8 @@ _Avoid_: Chat history.
 **Client knowledge**:
 The client's facts, identities, aliases, durable preferences, policy information and source-linked accounting experience, with their sources and verification state. Explicit information may be saved automatically; an agent's inference is not automatically confirmed knowledge.
 Every governed record carries one of four **kinds** — a *stated fact* (what an identified person supplied), an *extracted fact* (read from a named source version), a *preference* (a durable instruction) or a *policy* (a decision about how the books are prepared) — and one of four **trust levels**, derived from where it came from and never supplied by the caller: *asserted*, *extracted*, *imported unverified* and *inferred*. A policy admits `asserted` alone.
-_Avoid_: An unqualified bag of chat messages; a synonym for authority to post; treating an imported bundle's own "verified" annotation, or a model's own confidence, as a trust level.
+A counterparty's identity is *shown* in the client's knowledge area but is not a governed knowledge record: it is kept in the counterparty relations, with its own provenance, correction history and merge lineage (see **Counterparty identity** below), so there is one identity writer and not two.
+_Avoid_: An unqualified bag of chat messages; a synonym for authority to post; treating an imported bundle's own "verified" annotation, or a model's own confidence, as a trust level; calling a counterparty identity a knowledge record because it is rendered beside them.
 
 **Knowledge revision**:
 One attributable version of a knowledge record. A capture is revision 1; a correction and a withdrawal each append a further revision naming its actor and its reason, and leave the revision they retire readable. A withdrawal is terminal for that record — a later statement of the same thing starts a new record with its own history.
@@ -131,6 +132,22 @@ _Avoid_: An empty pack standing for a failed read; a pack presented as authority
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
 _Avoid_: Automatically sharing one client's private facts or practices with every other client.
+
+**Counterparty identity**:
+Who one supplier or customer of a client *is*, as a durable record: a stable tenant-scoped id that survives every rename and merge, the current name, the registration number and TIN, every alias, and the correction history behind all of it. A vendor and a customer are separate identities even under one name, and two clients of one firm may carry the same registration number or TIN without being linked.
+_Avoid_: The displayed name as the identity; a binding ceremony as a prerequisite for working with a party; linking two clients' parties because an identifier matches.
+
+**Counterparty alias**:
+Another name the same party is known by — a former name, a trade name, a name a person stated or a name read off a named document. Each alias records the lane that wrote it (a person in the app, Clara, client setup, or an unrecorded legacy lane), the stated basis and, where one exists, the source document and extraction it was read from. Retiring an alias stops it matching new activity and keeps it readable as history.
+_Avoid_: Labelling a machine-written alias as a person's; a source claimed with no document behind it; deleting an alias to correct it.
+
+**Identity correction**:
+One attributable, append-only entry in a counterparty's identity history: a rename, an alias added or retired, an identifier change, or a merge. Each names its actor, its lane, its basis and the before and after values, and none is ever edited or removed. Correcting identifiers replaces them and keeps the previous pair in this history rather than only in an operator audit trail.
+_Avoid_: Overwriting an identifier in place; a correction with no stated basis; treating the absence of a history entry as proof nothing changed.
+
+**Merge lineage**:
+The record of what a supported merge actually did — which party absorbed which, by whom, when, and on what reason — kept so that booked rows stay attributable to the party they named while current reads resolve to the surviving one. There is no un-merge anywhere in Clara; a merge recorded before lineage was kept cannot even be *described*, and the surface says which of the two a given merge is.
+_Avoid_: Promising a reversal; presenting a pre-lineage merge as correctable; rewriting historical references to the surviving party.
 
 **Accounting experience**:
 A source-linked lesson from completed work or a correction, including the outcome and conditions in which it is useful. Clara can consult it when deciding how to handle later work.
