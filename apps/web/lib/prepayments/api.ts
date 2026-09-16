@@ -175,6 +175,11 @@ export type PrepaymentAttention = {
   client_id: string;
   refusing: readonly AttentionRefusing[];
   unscheduled: readonly AttentionUnscheduled[];
+  /** Each arm is capped at fifty rows, NEWEST FIRST. These say whether the cap bit, so a band
+   *  showing fifty of many can say so rather than reading as "this is all of it". Optional because
+   *  a database at an earlier frontier answers the envelope without them. */
+  refusing_truncated?: boolean;
+  unscheduled_truncated?: boolean;
 };
 
 export type PrepaymentCreated = {
@@ -233,7 +238,10 @@ export async function loadPrepayment(scheduleId: string, o: Opts = {}): Promise<
 export async function loadPrepaymentAttention(
   clientId: string, o: Opts = {},
 ): Promise<PrepaymentAttention> {
-  const empty: PrepaymentAttention = { client_id: clientId, refusing: [], unscheduled: [] };
+  const empty: PrepaymentAttention = {
+    client_id: clientId, refusing: [], unscheduled: [],
+    refusing_truncated: false, unscheduled_truncated: false,
+  };
   if (!isUuidShape(clientId)) return empty;
   const answer = await callDoor<PrepaymentAttention | null>(
     "list_prepayment_attention", { p_client: clientId }, opts(o));

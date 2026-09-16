@@ -47,13 +47,19 @@ export const PREPAYMENT_FREQUENCY = "monthly";
 export const PREPAYMENT_DAY_RULE = "last_day_of_month";
 export const PREPAYMENT_TIMEZONE = "Asia/Kuala_Lumpur";
 
-export type PrepaymentFieldId = "sourceEntry" | "expenseAccount" | "expenseBasis" | "purpose";
+export type PrepaymentFieldId =
+  "sourceEntry" | "authority" | "expenseAccount" | "expenseBasis" | "purpose";
 
 export type PrepaymentIssue = { field: PrepaymentFieldId; code: string };
 
 export type PrepaymentDraft = {
   /** The POSTED recognition entry this schedule amortises. */
   sourceEntryId: string;
+  /** The INSTRUCTION this schedule cites: a `clara.accounting_work` row of THIS client.
+   *  `clara.create_accounting_plan` RESOLVES the reference and refuses `authority_ref_unresolved`
+   *  when it names nothing, so this is a field a person answers — never a value the form derives
+   *  from the recognition it is about. */
+  authorityWorkId: string;
   /** The judged expense account each period's charge is booked to. */
   expenseAccountCode: string;
   /** WHY that account. Required — a classification with no stated grounds is refused. */
@@ -63,6 +69,7 @@ export type PrepaymentDraft = {
 
 export const EMPTY_PREPAYMENT_DRAFT: PrepaymentDraft = {
   sourceEntryId: "",
+  authorityWorkId: "",
   expenseAccountCode: "",
   expenseAccountBasis: "",
   purpose: "",
@@ -76,7 +83,7 @@ export function prepaymentFieldElementId(field: PrepaymentFieldId): string {
 
 /** The order a failed submit walks, which is the order the form reads. */
 const FIELD_ORDER: readonly PrepaymentFieldId[] = [
-  "sourceEntry", "expenseAccount", "expenseBasis", "purpose",
+  "sourceEntry", "authority", "expenseAccount", "expenseBasis", "purpose",
 ];
 
 export function firstInvalidPrepaymentField(issues: readonly PrepaymentIssue[]): PrepaymentFieldId {
@@ -101,6 +108,13 @@ export function validatePrepaymentDraft(
   const issues: PrepaymentIssue[] = [];
   if (draft.sourceEntryId.trim() === "") {
     issues.push({ field: "sourceEntry", code: "sourceRequired" });
+  }
+  // THE AUTHORITY IS REQUIRED HERE BECAUSE IT IS REQUIRED THERE. The door resolves
+  // `p_authority_ref` against this client's own Work; a blocked submit is the honest answer, and a
+  // fabricated id (the recognition entry's own, say) is worse than one — it is an authority claim
+  // nobody made, and it could only ever be refused.
+  if (draft.authorityWorkId.trim() === "") {
+    issues.push({ field: "authority", code: "authorityRequired" });
   }
   const account = draft.expenseAccountCode.trim();
   if (account === "") {
@@ -161,6 +175,7 @@ export function prepaymentRefusalKey(reason: string | null | undefined): string 
     case PREPAYMENT_REFUSAL.belowGranularity: return "refusalBelowGranularity";
     case PREPAYMENT_REFUSAL.scheduleExists: return "refusalScheduleExists";
     case PREPAYMENT_REFUSAL.periodLineMissing: return "refusalPeriodLineMissing";
+    case PREPAYMENT_REFUSAL.authorityRefUnresolved: return "refusalAuthorityUnresolved";
     case PREPAYMENT_REFUSAL.operationInFlight: return "refusalOperationInFlight";
     default: return "unknown";
   }

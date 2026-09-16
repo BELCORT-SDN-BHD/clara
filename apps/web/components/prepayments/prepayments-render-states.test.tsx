@@ -312,6 +312,38 @@ test("prepayments.list — the two attention arms render DISTINCTLY: arm A names
   });
 });
 
+test("prepayments.list — a TRUNCATED attention read says so, because fifty of many read as 'nothing else is failing'", async () => {
+  // Each arm is capped at fifty rows, newest first (migration 0208 §E). On a client with more
+  // candidates than the cap, a band that showed fifty silently would be telling a person that
+  // nothing else is waiting — the exact misreading this whole surface exists to prevent.
+  await withMockedEnv(rpcRouter({
+    list_prepayment_schedules: { client_id: CLIENT, schedules: [] },
+    list_prepayment_attention: {
+      client_id: CLIENT, refusing: [], unscheduled: [UNSCHEDULED_NO_TERM],
+      refusing_truncated: false, unscheduled_truncated: true,
+    },
+  }), async () => {
+    await drive(createElement(PrepaymentsList, { clientId: CLIENT }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-attention-truncated").length, 1);
+      assert.match(h.text(), /There are more than this/);
+    });
+  });
+});
+
+test("prepayments.list — an UNtruncated read says nothing about a cap, so the notice means what it says", async () => {
+  await withMockedEnv(rpcRouter({
+    list_prepayment_schedules: { client_id: CLIENT, schedules: [] },
+    list_prepayment_attention: {
+      client_id: CLIENT, refusing: [], unscheduled: [UNSCHEDULED_NO_TERM],
+      refusing_truncated: false, unscheduled_truncated: false,
+    },
+  }), async () => {
+    await drive(createElement(PrepaymentsList, { clientId: CLIENT }), (h) => {
+      assert.equal(byTestId(h.container, "prepayment-attention-truncated").length, 0);
+    });
+  });
+});
+
 test("prepayments.list — arm B offers the FORM once the document states a term, and the link carries the recognition so the form is prefilled", async () => {
   await withMockedEnv(rpcRouter({
     list_prepayment_schedules: { client_id: CLIENT, schedules: [] },

@@ -122,6 +122,10 @@ test("prepayments.walk.refusal: a refused configure keeps every field, prints th
 
   const basis = "the invoice narrates a three-month software subscription";
   await page.getByLabel("Recognised prepayment").selectOption(PREPAY.unscheduledEntryId);
+  // THE INSTRUCTION IS CHOSEN, never derived. The mock's own door refuses any other reference with
+  // `authority_ref_unresolved`, exactly as 0193 does — so a walk that skipped this control could
+  // not reach the term refusal below at all.
+  await page.getByLabel("The instruction that authorises this schedule").selectOption(PREPAY.workId);
   await page.getByLabel("Expense account").selectOption("59000001");
   await page.getByLabel("Why that account").fill(basis);
   await page.getByLabel("Purpose", { exact: true }).fill("Annual software subscription");
@@ -135,6 +139,7 @@ test("prepayments.walk.refusal: a refused configure keeps every field, prints th
   await expect(page.getByLabel("Why that account")).toHaveValue(basis);
   await expect(page.getByLabel("Purpose", { exact: true })).toHaveValue("Annual software subscription");
   await expect(page.getByLabel("Expense account")).toHaveValue("59000001");
+  await expect(page.getByLabel("The instruction that authorises this schedule")).toHaveValue(PREPAY.workId);
   await scan(page, "prepayments form after a refusal");
 
   // THE RETRY, once the term exists. The derived allocation appears as a DISABLED preview.

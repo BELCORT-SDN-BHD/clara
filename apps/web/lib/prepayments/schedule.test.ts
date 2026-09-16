@@ -25,6 +25,7 @@ import {
 
 const VALID: PrepaymentDraft = {
   sourceEntryId: "9f1d8e2c-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+  authorityWorkId: "2b7c6d5e-4f3a-4b2c-8d1e-0f9a8b7c6d5e",
   expenseAccountCode: "59000001",
   expenseAccountBasis: "the invoice narrates a twelve-month subscription",
   purpose: "Prepaid subscription amortisation",
@@ -59,7 +60,7 @@ test("tokens.database — every token this surface can render a message for is o
   ]);
 });
 
-test("tokens.messages — the seven refusals this build enumerates map to their own key, and ANYTHING else answers `unknown` so the database's own words are what reach the screen", () => {
+test("tokens.messages — the eight refusals this build enumerates map to their own key, and ANYTHING else answers `unknown` so the database's own words are what reach the screen", () => {
   assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.sourceUnfit), "refusalSourceUnfit");
   assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.termUnderivable), "refusalTermUnderivable");
   assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.targetIneligible), "refusalTargetIneligible");
@@ -67,6 +68,10 @@ test("tokens.messages — the seven refusals this build enumerates map to their 
   assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.belowGranularity), "refusalBelowGranularity");
   assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.scheduleExists), "refusalScheduleExists");
   assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.periodLineMissing), "refusalPeriodLineMissing");
+  // THE FORM CAN PRODUCE THIS ONE ITSELF, so it needs a next act rather than the raw sentence: the
+  // door RESOLVES `p_authority_ref` against this client's own Work and refuses when it names none.
+  assert.equal(prepaymentRefusalKey(PREPAYMENT_REFUSAL.authorityRefUnresolved),
+    "refusalAuthorityUnresolved");
   // A refusal this build has not enumerated must still be LEGIBLE, never reduced to a key path.
   assert.equal(prepaymentRefusalKey("something_a_later_migration_adds"), "unknown");
   assert.equal(prepaymentRefusalKey(null), "unknown");
@@ -83,9 +88,14 @@ test("mirror.accepts — a well-formed draft passes, and passes WITHOUT a chart 
     "when the chart could not be read the check is SKIPPED rather than guessed");
 });
 
-test("mirror.refuses — each of the four fields is refused when blank, with the code the form renders", () => {
+test("mirror.refuses — each of the five fields is refused when blank, with the code the form renders", () => {
   const cases: [Partial<PrepaymentDraft>, string, string][] = [
     [{ sourceEntryId: "  " }, "sourceEntry", "sourceRequired"],
+    // THE AUTHORITY IS A FIELD, not a fallback. `clara.create_accounting_plan` RESOLVES the
+    // reference against this client's own `clara.accounting_work`; a form that invented one from
+    // the recognition entry's id could only ever be refused, and a blocked submit beats a
+    // fabricated authority.
+    [{ authorityWorkId: "  " }, "authority", "authorityRequired"],
     [{ expenseAccountCode: "  " }, "expenseAccount", "accountRequired"],
     [{ expenseAccountBasis: "  " }, "expenseBasis", "basisRequired"],
     [{ purpose: "  " }, "purpose", "purposeRequired"],
@@ -123,12 +133,16 @@ test("mirror.focus_order — a failed submit focuses the FIRST invalid control i
   assert.equal(
     firstInvalidPrepaymentField(validatePrepaymentDraft({ ...VALID, expenseAccountBasis: "", purpose: "" }, CHART)),
     "expenseBasis", "the earlier field wins, so the walk is the reading order");
+  assert.equal(
+    firstInvalidPrepaymentField(validatePrepaymentDraft({ ...VALID, authorityWorkId: "", expenseAccountCode: "" }, CHART)),
+    "authority", "the instruction is read before the account it charges");
   assert.equal(firstInvalidPrepaymentField([]), "sourceEntry",
     "an empty issue list still answers a field rather than undefined");
 });
 
 test("mirror.element_ids — each field's control id is stable, so a failed submit's focus target and its aria-describedby cannot drift apart", () => {
   assert.equal(prepaymentFieldElementId("sourceEntry"), "prepayment-sourceEntry");
+  assert.equal(prepaymentFieldElementId("authority"), "prepayment-authority");
   assert.equal(prepaymentFieldElementId("expenseAccount"), "prepayment-expenseAccount");
   assert.equal(prepaymentFieldElementId("expenseBasis"), "prepayment-expenseBasis");
   assert.equal(prepaymentFieldElementId("purpose"), "prepayment-purpose");
@@ -142,9 +156,11 @@ test("derived.cadence — the cadence is a CONSTANT this module states rather th
   assert.equal(PREPAYMENT_FREQUENCY, "monthly");
   assert.equal(PREPAYMENT_DAY_RULE, "last_day_of_month");
   assert.equal(PREPAYMENT_TIMEZONE, "Asia/Kuala_Lumpur");
-  // And the draft carries NO cadence field at all — an absence this cell makes checkable.
+  // And the draft carries NO cadence field at all — an absence this cell makes checkable. The
+  // five it DOES carry are the five human judgements: which recognition, under whose instruction,
+  // to which expense account, on what grounds, and what for.
   assert.deepEqual(Object.keys(EMPTY_PREPAYMENT_DRAFT).sort(), [
-    "expenseAccountBasis", "expenseAccountCode", "purpose", "sourceEntryId",
+    "authorityWorkId", "expenseAccountBasis", "expenseAccountCode", "purpose", "sourceEntryId",
   ]);
 });
 

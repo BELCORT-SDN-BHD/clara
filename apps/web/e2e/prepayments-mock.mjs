@@ -287,6 +287,29 @@ const CREATED = () => ({
   configuration_only: true,
 });
 
+/** THE ONE INSTRUCTION this client has recorded — the authority picker's candidates. The door
+ *  RESOLVES `p_authority_ref` against `clara.accounting_work`, so the walk must pick a real one. */
+const AUTHORITIES = () => ([{
+  id: PREPAY.workId,
+  intent_key: "instruction:annual-subscription",
+  created_at: "2026-01-10T02:00:00.000Z",
+  basis: { memo: "the client instructed us to amortise the annual subscription over its term" },
+}]);
+
+/** The door's own refusal when the reference resolves to nothing — 0193's `authority_ref_unresolved`
+ *  carried through `clara.create_prepayment_schedule`. The walk must be able to reach it, because a
+ *  surface that fabricated an authority (the recognition entry's own id, say) would meet exactly
+ *  this and nothing else. */
+const AUTHORITY_REFUSAL = {
+  code: "CLR10",
+  message: "the instruction this plan cites does not exist for this client",
+  details: JSON.stringify({
+    reason: "authority_ref_unresolved",
+    reason_text: "the instruction this plan cites does not exist for this client",
+  }),
+  hint: null,
+};
+
 /** The DATABASE's own refusal envelope, in PostgREST's shape — the walk must see the real thing
  *  rather than a message this fixture wrote. */
 const TERM_REFUSAL = {
@@ -327,6 +350,17 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
     return false;
   }
 
+  // The instruction the authority Select reads (`lib/plans/api.ts`'s `listAuthorityCandidates`),
+  // scoped to this lane's own client exactly as `journal-work-mock.mjs` and `work-list-mock.mjs`
+  // scope their own copies of this route.
+  if (request.method === "GET" && path === "/rest/v1/accounting_work") {
+    if (clientFilter === `eq.${PREPAY.clientId}`) {
+      sendJson(response, 200, AUTHORITIES(), cors);
+      return true;
+    }
+    return false;
+  }
+
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
   if (!matchVerb(PREPAY_RPC_VERBS, verb)) return false;
@@ -357,6 +391,14 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
 
   if (verb === "create_prepayment_schedule") {
     if (body.p_client !== PREPAY.clientId) return false;
+    // THE DOOR RESOLVES THE AUTHORITY FIRST, so this fixture does too: a payload citing anything
+    // but this client's own instruction Work is answered `authority_ref_unresolved`, which is what
+    // the real door answers and the only thing a fabricated authority could ever get.
+    if (body.p_authority_ref?.id !== PREPAY.workId
+        || body.p_authority_ref?.kind !== "accounting_work") {
+      sendJson(response, 400, AUTHORITY_REFUSAL, cors);
+      return true;
+    }
     // THE CREATE-TIME RESIDUE, ONCE. The recognition has posted; the schedule has not. The form
     // must keep the draft, print the database's own words and say the prepayment still needs one.
     if (!state.refusedOnce) {

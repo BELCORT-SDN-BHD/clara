@@ -36,6 +36,7 @@ const SCHEDULE = "44444444-5555-4666-8777-888888888888";
 const PLAN = "22222222-3333-4444-8555-666666666666";
 const ENTRY = "55555555-6666-4777-8888-999999999999";
 const DOC = "66666666-7777-4888-8999-aaaaaaaaaaaa";
+const WORK = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
 
 type Node = {
   tagName?: string; childNodes?: Node[];
@@ -91,6 +92,11 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
 const ACCOUNTS = [
   { client_id: CLIENT, account_code: "59000001", name: "Subscriptions", account_type: "expense", is_active: true },
   { client_id: CLIENT, account_code: "19000001", name: "Prepayments", account_type: "asset", is_active: true },
+];
+
+const AUTHORITIES = [
+  { id: WORK, intent_key: "instruction:2026-01", created_at: "2026-01-10T00:00:00Z",
+    basis: { memo: "the client instructed us to amortise the annual subscription" } },
 ];
 
 const ATTENTION = {
@@ -159,7 +165,9 @@ function router(answers: Record<string, unknown>, post?: (verb: string) => Respo
       }
     }
     if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(ACCOUNTS);
-    if (url.includes("/rest/v1/accounting_work")) return jsonResponse([]);
+    // THE INSTRUCTION THIS SCHEDULE WILL CITE. The door RESOLVES `p_authority_ref` against this
+    // client's own `clara.accounting_work`, so the picker has to have something to pick.
+    if (url.includes("/rest/v1/accounting_work")) return jsonResponse(AUTHORITIES);
     return jsonResponse({ message: `unmocked ${url}` }, 404);
   }) as typeof fetch;
 }
@@ -192,7 +200,7 @@ test("prepayments.keyboard — the configure form's whole control set is reachab
         .map((n) => (n as unknown as Node).getAttribute?.("id") ?? "")
         .filter((x) => x.startsWith("prepayment-"));
       assert.deepEqual(ids, [
-        "prepayment-sourceEntry", "prepayment-expenseAccount",
+        "prepayment-sourceEntry", "prepayment-authority", "prepayment-expenseAccount",
         "prepayment-expenseBasis", "prepayment-purpose",
       ], "every field this form asks for is reachable, in the order it reads");
     } finally {
@@ -250,6 +258,7 @@ test("prepayments.keyboard — the DERIVED PREVIEW is not in the tab order: a di
         for (let i = 0; i < 8; i++) await h.settle();
         await h.act(() => {
           setFieldValue(byId(h.container, "prepayment-sourceEntry") as never, ENTRY);
+          setFieldValue(byId(h.container, "prepayment-authority") as never, WORK);
           setFieldValue(byId(h.container, "prepayment-expenseAccount") as never, "59000001");
           setFieldValue(byId(h.container, "prepayment-expenseBasis") as never, "the invoice narrates a subscription");
           setFieldValue(byId(h.container, "prepayment-purpose") as never, "Prepaid subscription amortisation");
@@ -277,6 +286,70 @@ test("prepayments.keyboard — the DERIVED PREVIEW is not in the tab order: a di
       }
     },
   );
+});
+
+test("prepayments.authority — the instruction the schedule cites is CHOSEN from this client's own Work, and is never the recognition entry's own id", async () => {
+  // THE DEFECT THIS CELL EXISTS FOR. A form that sent `{kind:"accounting_work", id: <the journal
+  // entry>}` can never succeed: `clara.create_accounting_plan` RESOLVES the reference against
+  // `clara.accounting_work` and refuses CLR10 `authority_ref_unresolved`, and no entry id is ever
+  // a Work id (measured at the door by `p653.schedule.authority_ref_unresolved`). So the payload
+  // is what this cell reads — not the screen.
+  const sent: unknown[] = [];
+  const capture = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (url.includes("/rpc/create_prepayment_schedule") && init?.method === "POST") {
+      sent.push(JSON.parse(String(init.body)));
+      return jsonResponse(CREATED);
+    }
+    if (url.includes("/rpc/list_prepayment_attention")) return jsonResponse(ATTENTION);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(ACCOUNTS);
+    if (url.includes("/rest/v1/accounting_work")) return jsonResponse(AUTHORITIES);
+    return jsonResponse({ message: `unmocked ${url}` }, 404);
+  }) as typeof fetch;
+
+  await withMockedEnv(capture, async () => {
+    const h = await renderComponent(app(createElement(PrepaymentForm, { clientId: CLIENT })));
+    try {
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      // FIRST: a submit with NO instruction chosen never reaches the door at all.
+      await h.act(() => {
+        setFieldValue(byId(h.container, "prepayment-sourceEntry") as never, ENTRY);
+        setFieldValue(byId(h.container, "prepayment-expenseAccount") as never, "59000001");
+        setFieldValue(byId(h.container, "prepayment-expenseBasis") as never, "the invoice narrates a subscription");
+        setFieldValue(byId(h.container, "prepayment-purpose") as never, "Prepaid subscription amortisation");
+      });
+      for (let i = 0; i < 3; i++) await h.settle();
+      await h.act(async () => {
+        await clickButton(buttonWith(h.container, "Configure the schedule") as never);
+      });
+      for (let i = 0; i < 4; i++) await h.settle();
+      assert.deepEqual(sent, [], "a missing instruction blocks the submit rather than fabricating one");
+      assert.equal((activeElement() as unknown as Node | null)?.getAttribute?.("id"), "prepayment-authority",
+        "…and focus lands on the control that is missing");
+
+      // THEN: with one chosen, the payload carries THAT id.
+      await h.act(() => {
+        setFieldValue(byId(h.container, "prepayment-authority") as never, WORK);
+      });
+      for (let i = 0; i < 3; i++) await h.settle();
+      await h.act(async () => {
+        await clickButton(buttonWith(h.container, "Configure the schedule") as never);
+      });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      assert.equal(sent.length, 1, "the door was called exactly once");
+      const body = sent[0] as unknown as
+        { p_authority_ref?: { kind?: string; id?: string }; p_source_entry?: string };
+      assert.equal(body.p_authority_ref?.kind, "accounting_work");
+      assert.equal(body.p_authority_ref?.id, WORK, "the instruction a person chose is the one cited");
+      assert.notEqual(body.p_authority_ref?.id, body.p_source_entry,
+        "a recognition entry is never its own authority");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
 });
 
 test("prepayments.keyboard — the detail's lifecycle doors are reachable, focusable and openable, and the pause dialog announces its Title and says pause is not cancel", async () => {

@@ -55,6 +55,10 @@ export function PrepaymentAttentionBand({
   const t = useTranslations("Prepayments");
   const refusing = attention?.refusing ?? [];
   const unscheduled = attention?.unscheduled ?? [];
+  // EACH ARM IS CAPPED AT FIFTY, NEWEST FIRST, and the read SAYS when the cap bit. A band that
+  // showed fifty of nine hundred without saying so would read as "this is all of it" — which on
+  // this surface is the difference between "nothing else is failing" and "I cannot see what is".
+  const truncated = Boolean(attention?.refusing_truncated) || Boolean(attention?.unscheduled_truncated);
 
   return (
     <section className="flex flex-col gap-2" aria-labelledby="prepayment-attention-heading">
@@ -74,6 +78,11 @@ export function PrepaymentAttentionBand({
             <UnscheduledRow key={row.entry_id} clientId={clientId} row={row} />
           ))}
         </ul>
+        {truncated ? (
+          <p className="max-w-prose text-xs text-muted-foreground" data-testid="prepayment-attention-truncated">
+            {t("attentionTruncated", { shown: refusing.length + unscheduled.length })}
+          </p>
+        ) : null}
       </DataState>
     </section>
   );

@@ -6,6 +6,11 @@
 //   · WHICH posted prepayment — chosen from `clara.list_prepayment_attention`'s ARM B, which is
 //     the evaluator's OWN predicate (approved, document-bound, exactly one debited asset line). A
 //     free-text entry id would be a control whose only likely outcome is `prepayment_source_unfit`.
+//   · WHICH INSTRUCTION authorises it — a Select over this client's own `clara.accounting_work`,
+//     the plans form's own control (`plan-form.tsx`). `clara.create_accounting_plan` RESOLVES the
+//     reference and refuses `authority_ref_unresolved` when it names nothing, so this cannot be
+//     derived from the recognition: an entry id is never a Work id, and a form that sent one could
+//     only ever be refused. A blocked submit beats a fabricated authority.
 //   · WHICH expense account — a Select over the client's OWN chart (appendix D row 49; a Combobox
 //     would be right for a large chart and the control degrades to one honestly by listing only
 //     ACTIVE expense accounts).
@@ -47,6 +52,11 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Money } from "@/components/journals/money";
 import { PrepaymentBoundaryStatement, PrepaymentConfigurationStatement } from "./prepayment-statement";
 import { listCoaAccounts } from "@/lib/journals/api";
+// THE INSTRUCTION PICKER'S OWN READ, reused rather than re-cut. `lib/plans/api.ts` owns it, its
+// header says why it lives there rather than in `lib/work/reads.ts`, and the amortisation plan this
+// form configures cites authority through the SAME `clara.accounting_work` reference the plans form
+// does — a second reader would be a second answer to one question.
+import { listAuthorityCandidates } from "@/lib/plans/api";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
@@ -68,19 +78,16 @@ export function PrepaymentForm({
   /** The recognition prefilled from an attention row, so arm B's "configure the schedule" lands on
    *  a form that already knows which prepayment it is about. */
   entryId = null,
-  /** The instruction this schedule cites. The door RESOLVES it against this client's own Work, so
-   *  a saved preference cannot supply authority. */
-  authorityWorkId = null,
 }: {
   clientId: string;
   entryId?: string | null;
-  authorityWorkId?: string | null;
 }) {
   const t = useTranslations("Prepayments");
   const router = useRouter();
 
   const accounts = useAsyncRead(() => listCoaAccounts(sessionTokenAccessor, clientId));
   const attention = useAsyncRead(() => loadPrepaymentAttention(clientId));
+  const instructions = useAsyncRead(() => listAuthorityCandidates(clientId));
 
   const [draft, setDraft] = useState<PrepaymentDraft>({
     ...EMPTY_PREPAYMENT_DRAFT,
@@ -135,6 +142,7 @@ export function PrepaymentForm({
     if (issue === undefined) return null;
     const codes: Record<string, string> = {
       sourceRequired: t("issueSourceRequired"),
+      authorityRequired: t("issueAuthorityRequired"),
       accountRequired: t("issueAccountRequired"),
       accountUnknown: t("issueAccountUnknown"),
       basisRequired: t("issueBasisRequired"),
@@ -164,9 +172,9 @@ export function PrepaymentForm({
         expenseAccountCode: draft.expenseAccountCode.trim(),
         expenseAccountBasis: draft.expenseAccountBasis.trim(),
         purpose: draft.purpose.trim(),
-        // The instruction is a Work of THIS client. Where the page did not supply one, the door's
-        // own `authority_ref_unresolved` is the honest answer rather than a fabricated id.
-        authorityRef: { kind: "accounting_work", id: authorityWorkId ?? draft.sourceEntryId },
+        // The instruction is a Work of THIS client, CHOSEN above. There is no fallback: the door
+        // resolves this reference, and the recognition entry's own id would resolve to nothing.
+        authorityRef: { kind: "accounting_work", id: draft.authorityWorkId },
         opKey: opKey(),
       });
       setCreated(answer);
@@ -262,6 +270,42 @@ export function PrepaymentForm({
           ) : null}
           <FieldError id={`${prepaymentFieldElementId("sourceEntry")}-error`}>
             {message("sourceEntry")}
+          </FieldError>
+        </div>
+
+        {/* THE INSTRUCTION, and it is a field rather than a derivation. The door resolves it
+            against this client's own Work; when the client has none, the empty state says so
+            instead of offering a control whose every value would be refused. */}
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium" htmlFor={prepaymentFieldElementId("authority")}>
+            {t("fieldAuthority")}
+          </label>
+          <p className="max-w-prose text-xs text-muted-foreground">{t("authorityNote")}</p>
+          <DataState
+            loading={instructions.loading}
+            error={instructions.error}
+            isEmpty={(instructions.data?.rows ?? []).length === 0}
+            emptyMessage={t("authorityEmpty")}
+          >
+            <NativeSelect
+              id={prepaymentFieldElementId("authority")}
+              ref={(node) => register("authority", node)}
+              value={draft.authorityWorkId}
+              disabled={busy}
+              aria-invalid={message("authority") === null ? undefined : true}
+              aria-describedby={`${prepaymentFieldElementId("authority")}-error`}
+              onChange={(e) => patch({ authorityWorkId: e.target.value })}
+            >
+              <option value="">{t("authorityChoose")}</option>
+              {(instructions.data?.rows ?? []).map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.basis?.memo ?? w.intent_key} — {String(w.created_at ?? "").slice(0, 10)}
+                </option>
+              ))}
+            </NativeSelect>
+          </DataState>
+          <FieldError id={`${prepaymentFieldElementId("authority")}-error`}>
+            {message("authority")}
           </FieldError>
         </div>
 
