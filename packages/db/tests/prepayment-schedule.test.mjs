@@ -29,12 +29,12 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   assertPrepaymentCohortPresent, endPool, printLaneNotes, printSkipCount,
-  opk, rootQuery, CLR, assertPair, assertRaises,
+  opk, rootQuery, CLR, assertPair, assertRaises, namedCall, getPool, ROLES,
   prepaymentScene, createPrepaymentSchedule, getPrepaymentSchedule, listPrepaymentSchedules,
   createAccountingPlan, reviseAccountingPlan, previewAccountingPlan,
   scheduleRow, scheduleRowsFor, relationPosture, functionGrants, evaluatorFreezeMatches,
-  unapprovedEntry, ambiguousAssetEntry, nowhere,
-  AMORTISATION_KIND, PREPAY_REASON, TZ,
+  unapprovedEntry, ambiguousAssetEntry, ineligibleAssetEntry, nowhere,
+  AMORTISATION_KIND, CONTROL_ASSET_CODE, PREPAY_REASON, TARGET_BASIS, TZ,
 } from "./prepayment-schedule-fixtures.mjs";
 
 after(async () => {
@@ -49,6 +49,44 @@ const DOOR_SIG =
 /** The period line amounts, in emitted order, as integers. The stored lines are jsonb and their
  *  cents arrive as JSON numbers; a cell about EXACT cents reads them as integers deliberately. */
 const amounts = (lines) => lines.map((l) => Number(l.credit_cents));
+
+/** The door's seven named arguments, spelled once for the race cell — which cannot go through
+ *  `createPrepaymentSchedule` because it needs the call to stay inside an OPEN transaction. */
+const DOOR_ARGS = [
+  { name: "p_client", cast: "uuid" }, { name: "p_source_entry", cast: "uuid" },
+  { name: "p_expense_account", cast: "text" }, { name: "p_expense_basis", cast: "text" },
+  { name: "p_purpose", cast: "text" }, { name: "p_authority_ref", cast: "jsonb" },
+  { name: "p_op_key", cast: "text" },
+];
+
+// RAW HUMAN CONNECTIONS — the `prepayment-occurrences.test.mjs` / `work-cancel.test.mjs` idiom.
+// The pooled `humanQuery` helper commits and resets, which is exactly what a race cell cannot
+// have: the winner must sit UNCOMMITTED while the loser queues behind its row.
+async function rawHuman(sub) {
+  const c = await getPool().connect();
+  await c.query(`set role ${ROLES.authenticated}`);
+  await c.query("select set_config('request.jwt.claims', $1, false)",
+    [JSON.stringify({ sub, role: "authenticated" })]);
+  return c;
+}
+async function releaseRaw(c) {
+  if (!c) return;
+  await c.query("rollback").catch(() => {});
+  await c.query("reset role").catch(() => {});
+  await c.query("reset all").catch(() => {});
+  c.release();
+}
+const backendPid = async (c) => (await c.query("select pg_backend_pid() as p")).rows[0].p;
+/** The estate's own witness that a transaction is queued behind a lock — never a sleep. */
+async function waitingOnLock(pid, ms = 8000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const r = await rootQuery("select wait_event_type as w from pg_stat_activity where pid=$1", [pid]);
+    if (r.rows[0]?.w === "Lock") return true;
+    await new Promise((x) => setTimeout(x, 25));
+  }
+  return false;
+}
 
 // ===========================================================================================
 // p653.schedule — THE ARITHMETIC AND THE CADENCE, AT THE NEW DOOR.
@@ -208,7 +246,7 @@ test("p653.schedule.granularity — the same proposal's typed payload names the 
   assert.deepEqual(await scheduleRowsFor(scene.client), [], "nothing was written");
 });
 
-test("p653.schedule.target_ineligible — a balance-sheet target, an unknown code and a control/bank account each refuse prepayment_target_ineligible and NAME the axis", async (t) => {
+test("p653.schedule.target_ineligible — a balance-sheet target, an unknown code and the receivable CONTROL account each refuse prepayment_target_ineligible and NAME the axis", async (t) => {
   if (await assertPrepaymentCohortPresent(t)) return;
   const scene = await prepaymentScene("tgtelig", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
 
@@ -229,7 +267,114 @@ test("p653.schedule.target_ineligible — a balance-sheet target, an unknown cod
     "an amortisation charged to a code this chart does not hold");
   assert.equal(unknown.detail.axis, "account_unknown");
 
-  assert.deepEqual(await scheduleRowsFor(scene.client), [], "neither refusal wrote anything");
+  // THE CONTROL ACCOUNT, which the title promised and no leg measured. MEASURED HERE: it answers
+  // `not_expense_class`, because every control class this estate carries is an asset or a
+  // liability and the expense-class wall fires FIRST — so `_adj_line_eligibility_breach`'s own
+  // `control_account` arm is structurally unreachable from the EXPENSE side. It is reachable from
+  // the PREPAID side, which is what the next cell measures. The assertion admits either axis
+  // rather than pinning the one that happens to fire, because both are refusals and which one
+  // wins is 0042's precedence, not this door's claim.
+  const control = await assertPair(CLR.badRequest, PREPAY_REASON.targetIneligible,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.entry, expenseAccount: CONTROL_ASSET_CODE,
+      authorityRef: scene.authorityRef,
+    }),
+    "an amortisation charged to the receivable CONTROL account");
+  assert.ok(["not_expense_class", "control_account"].includes(String(control.detail.axis)),
+    `a control account is refused by an axis, not admitted: ${JSON.stringify(control.detail)}`);
+
+  assert.deepEqual(await scheduleRowsFor(scene.client), [], "no refusal wrote anything");
+});
+
+test("p653.schedule.prepaid_leg_ineligible — an APPROVED, document-bound entry whose ONE debited asset is the receivable CONTROL account (an ordinary sales invoice) is refused at the door: the estate's line-eligibility wall is applied to the PREPAID leg, not only to the judged expense target", async (t) => {
+  if (await assertPrepaymentCohortPresent(t)) return;
+  // THE EVALUATOR'S OWN PREDICATE IS NOT A JUDGEMENT OF THE ACCOUNT. `prepayment_schedule_v1`
+  // takes "the one debited asset leg" verbatim (0140:1046-1064) and never asks WHICH asset — so a
+  // sales invoice, a documented bank receipt and a fixed-asset purchase all satisfy it. Without
+  // this wall the door would post Dr expense / Cr <receivable> every month for a whole term.
+  const scene = await prepaymentScene("prepaidelig", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const invoice = await ineligibleAssetEntry(scene, { cents: 77000 });
+
+  const refused = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: invoice.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef,
+    }),
+    "a schedule whose prepaid leg is a receivable control account");
+  assert.equal(refused.detail.axis, "prepaid_account_ineligible",
+    "the refusal names the AXIS, so the surface can say which leg is wrong");
+  assert.equal(refused.detail.prepaid_account_code, CONTROL_ASSET_CODE);
+  assert.equal(refused.detail.breach?.axis, "control_account",
+    `the breach is the SHARED helper's own answer, carried through: ${JSON.stringify(refused.detail)}`);
+
+  assert.deepEqual(await scheduleRowsFor(scene.client), [], "the refusal wrote nothing");
+});
+
+test("p653.schedule.authority_ref_unresolved — an authority_ref naming the RECOGNITION ENTRY rather than an instruction Work is refused CLR10 authority_ref_unresolved and writes nothing; the same call with a real accounting_work id is accepted", async (t) => {
+  if (await assertPrepaymentCohortPresent(t)) return;
+  // THE REGRESSION GUARD FOR THE WEB FORM'S OWN PAYLOAD. A surface that filled
+  // `{kind:'accounting_work', id: <the journal entry>}` could never succeed against this door, and
+  // an entry id is NEVER a Work id: `create_accounting_plan` RESOLVES the reference (0193) and
+  // refuses by name. This cell calls the door with exactly the object such a form builds.
+  const scene = await prepaymentScene("authref", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+
+  const fabricated = await assertPair(CLR.badRequest, PREPAY_REASON.authorityRefUnresolved,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+      authorityRef: { kind: "accounting_work", id: scene.entry },
+    }),
+    "an authority_ref carrying the recognition entry's own id");
+  assert.ok(fabricated.detail, "the refusal is typed rather than a bare message");
+  assert.deepEqual(await scheduleRowsFor(scene.client), [], "no plan and no schedule row");
+
+  const ok = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+    authorityRef: scene.authorityRef,
+  });
+  assert.ok(ok.schedule_id, "the SAME call with a real instruction Work is accepted");
+});
+
+test("p653.schedule.duplicate_race — two humans configuring the SAME recognition concurrently: the loser is answered the TYPED prepayment_schedule_exists, never a bare unique-violation naming an index", async (t) => {
+  if (await assertPrepaymentCohortPresent(t)) return;
+  // THE TYPED PRE-CHECK CANNOT SEE AN UNCOMMITTED WINNER, so the structural backstop
+  // (`uq_prepayment_schedules_source`) is what actually answers the loser. A bare 23505 reaches the
+  // surface as `duplicate key value violates unique constraint "…"` — a sentence with no next act.
+  // The BARRIER here is the unique index itself: B's insert queues on A's uncommitted row.
+  const scene = await prepaymentScene("race", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+
+  const a = await rawHuman(scene.bob);
+  const b = await rawHuman(scene.bob);
+  let loser = null;
+  try {
+    const call = (key) => a.query(namedCall("create_prepayment_schedule", DOOR_ARGS),
+      [scene.client, scene.entry, scene.target, TARGET_BASIS, "Prepaid subscription amortisation",
+        JSON.stringify(scene.authorityRef), key]);
+    await a.query("begin");
+    await call(opk("p653-raceA"));
+    await b.query("begin");
+    const pidB = await backendPid(b);
+    const pb = b.query(namedCall("create_prepayment_schedule", DOOR_ARGS),
+      [scene.client, scene.entry, scene.target, TARGET_BASIS, "Prepaid subscription amortisation",
+        JSON.stringify(scene.authorityRef), opk("p653-raceB")])
+      .then(() => null, (e) => e);
+    assert.ok(await waitingOnLock(pidB),
+      "B must be queued behind A's uncommitted row — otherwise this cell proves nothing about a race");
+    await a.query("commit");
+    loser = await pb;
+  } finally {
+    await releaseRaw(a);
+    await releaseRaw(b);
+  }
+
+  assert.ok(loser, "the second configuration of one recognition does not succeed");
+  assert.notEqual(loser.code, "23505",
+    `the loser is answered by the lane's own vocabulary, not by an index name: ${loser.message}`);
+  assert.equal(loser.code, CLR.conflict);
+  const detail = JSON.parse(loser.detail ?? "{}");
+  assert.equal(detail.reason, PREPAY_REASON.scheduleExists);
+  assert.equal(detail.source_entry, scene.entry);
+  assert.ok(detail.schedule_id, "…and it NAMES the schedule that already exists, so the surface can open it");
+  assert.equal((await scheduleRowsFor(scene.client)).length, 1, "exactly one schedule survives the race");
 });
 
 test("p653.schedule.target_underivable — a target proposed with NO stated grounds, and no target at all, both refuse prepayment_target_underivable", async (t) => {

@@ -1119,6 +1119,44 @@ begin
   v_n       := (v_sched ->> 'period_count')::int;
   v_total   := (v_sched ->> 'total_cents')::bigint;
   v_prepaid := v_sched ->> 'prepaid_account_code';
+
+  -- ---- THE PREPAID LEG IS JUDGED TOO, BY THE ESTATE'S OWN RULE. ----
+  --
+  -- WHY THIS WALL EXISTS AT ALL, and it is the finding a review measured rather than a precaution.
+  -- `clara.prepayment_schedule_v1` takes "the one debited asset leg" VERBATIM (0140:1046-1064) and
+  -- never asks WHICH asset. Its whole predicate -- approved, binds a document, debits exactly one
+  -- asset line -- is satisfied by every ordinary sales invoice (Dr trade receivables), every
+  -- documented bank receipt and every fixed-asset purchase. Without this the door would accept a
+  -- RECEIVABLE as a prepayment and post Dr expense / Cr receivable every month for the whole
+  -- stated term, and §E's arm B would ADVERTISE those entries as "posted, not yet amortised" with
+  -- a "configure the schedule" action beside them. Measured on the rig: a document-bound
+  -- Dr-374-C56 invoice was accepted and its schedule credited the control account.
+  --
+  -- IT IS THE SAME HELPER THE EXPENSE HALF ALREADY USES (0042:643) -- `account_class is not null`
+  -- (a control account), `is_bank_account` / `clara.bank_accounts`, `is_active`, and the FA
+  -- role-reservation census -- so this is the estate's OWN existing eligibility rule applied to a
+  -- second leg, never a second rule written here. The line is shaped as a CREDIT because that is
+  -- the side every period will actually post against this account.
+  --
+  -- THE TOKEN IS 0140'S OWN `prepayment_source_unfit`, because that is exactly what this says: the
+  -- SOURCE entry is not fit to be amortised. No new vocabulary; the web mirror and the chat-lane
+  -- mirror already carry it, and `axis` says which leg so a surface can name it.
+  --
+  -- WHAT THIS DOES NOT CLOSE, stated rather than implied: an ordinary asset account with no class,
+  -- no bank stamp and no reserved role still passes -- the wall is NEGATIVE (is this leg
+  -- ineligible?) and not a POSITIVE prepayment-class roster. A roster would need a chart-level
+  -- classification this estate does not carry; it is named as a follow-up rather than invented.
+  v_breach := clara._adj_line_eligibility_breach(p_client,
+    jsonb_build_array(jsonb_build_object('account_code', v_prepaid,
+      'debit_cents', 0, 'credit_cents', 1)));
+  if v_breach is not null then
+    raise exception 'account % holds this entry''s debited asset, and it cannot carry a prepayment', v_prepaid
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_source_unfit',
+          'axis','prepaid_account_ineligible', 'prepaid_account_code', v_prepaid,
+          'source_entry', p_source_entry, 'breach', v_breach)::text;
+  end if;
+
   -- THE SIX DERIVED SCHEDULE FIELDS, every one read off the evaluator's own output: the cadence is
   -- monthly / last-day-of-month because the evaluator emits whole calendar months, the window opens
   -- on the FIRST line's `period_end` and closes on the LAST line's, `day_of_month` and
@@ -1259,17 +1297,38 @@ begin
      and e.entrypoint_signature = 'clara.prepayment_schedule_v1(uuid,uuid)'
    order by e.version desc limit 1;
 
-  insert into clara.prepayment_schedules(firm_id, client_id, plan_id, plan_kind, revision,
-      source_entry_id, prepaid_account_code, expense_account_code, expense_account_basis,
-      service_period_id, document_id, term_start, term_end, basis_kind, period_lines,
-      total_cents, period_count, remainder_placement, schedule_version, evaluator_version_id,
-      created_by)
-    values (v_firm, p_client, v_plan_id, 'amortisation_schedule',
-      (v_plan ->> 'revision')::int, p_source_entry, v_prepaid, v_acct.account_code, v_basis_text,
-      v_period.id, v_doc, v_period.period_start, v_period.period_end, v_period.basis_kind,
-      v_paired, v_total, v_n, coalesce(v_sched ->> 'remainder_placement', 'final_period'),
-      coalesce(v_sched ->> 'schedule_version', 'v1'), v_eval, v_actor)
-    returning id into v_sid;
+  -- THE STRUCTURAL BACKSTOP ANSWERS IN THE LANE'S OWN WORDS. The typed duplicate check above
+  -- cannot see a WINNER THAT HAS NOT COMMITTED: two people configuring the same recognition at
+  -- once both pass it, and the loser queues on `uq_prepayment_schedules_source` until the winner
+  -- commits. Before this block that loser was answered a bare 23505 -- `duplicate key value
+  -- violates unique constraint "uq_prepayment_schedules_source"` -- a sentence with no next act,
+  -- which no surface has a case for. MEASURED by `p653.schedule.duplicate_race` behind a real lock
+  -- barrier. The index is still the authority; this only re-reads the winning row and re-raises the
+  -- SAME CLR13 payload the pre-check raises, so both paths are one answer.
+  begin
+    insert into clara.prepayment_schedules(firm_id, client_id, plan_id, plan_kind, revision,
+        source_entry_id, prepaid_account_code, expense_account_code, expense_account_basis,
+        service_period_id, document_id, term_start, term_end, basis_kind, period_lines,
+        total_cents, period_count, remainder_placement, schedule_version, evaluator_version_id,
+        created_by)
+      values (v_firm, p_client, v_plan_id, 'amortisation_schedule',
+        (v_plan ->> 'revision')::int, p_source_entry, v_prepaid, v_acct.account_code, v_basis_text,
+        v_period.id, v_doc, v_period.period_start, v_period.period_end, v_period.basis_kind,
+        v_paired, v_total, v_n, coalesce(v_sched ->> 'remainder_placement', 'final_period'),
+        coalesce(v_sched ->> 'schedule_version', 'v1'), v_eval, v_actor)
+      returning id into v_sid;
+  exception when unique_violation then
+    -- The read runs in the OUTER transaction, after the failed subtransaction rolled back, so the
+    -- winner is visible by now. `v_existing` may still be null if some OTHER unique index fired --
+    -- in which case the payload says so by carrying a null schedule_id rather than pretending.
+    select s.id into v_existing from clara.prepayment_schedules s
+     where s.source_entry_id = p_source_entry and s.firm_id = v_firm;
+    raise exception 'this prepayment is already amortised by an existing schedule'
+      using errcode='CLR13',
+        detail=jsonb_build_object('reason','prepayment_schedule_exists',
+          'schedule_id', v_existing, 'source_entry', p_source_entry,
+          'raced', true)::text;
+  end;
 
   perform clara._audit(v_firm, v_actor, null, null, 'create_prepayment_schedule', null,
     jsonb_build_object('client', p_client, 'schedule', v_sid, 'plan', v_plan_id,
@@ -1476,13 +1535,25 @@ end $$;
 --   failure this lane has.
 --
 --   ARM B — "recognised, not yet amortised". An APPROVED entry that binds a document and debits
---   EXACTLY ONE asset line, that no `clara.prepayment_schedules` row names as its source. The
---   predicate is the EVALUATOR'S OWN (0140:1046-1086): no new judgement is made here, and an
---   ordinary expense coding — which debits no asset — never appears. It is the ONLY durable trace
---   of a create-time refusal, because such a refusal writes no plan and no schedule row and
---   therefore no schedule-scoped read can ever reach it. Each row says whether a live
+--   EXACTLY ONE asset line, that no `clara.prepayment_schedules` row names as its source, AND
+--   whose debited asset passes the estate's own line-eligibility wall (`clara.
+--   _adj_line_eligibility_breach`, 0042:643). The first three clauses are the EVALUATOR'S OWN
+--   predicate (0140:1046-1086); the fourth is the DOOR'S (§D), and it is here because the
+--   evaluator's predicate makes no judgement of WHICH asset: without it every ordinary sales
+--   invoice (Dr trade receivables), every documented bank receipt and every fixed-asset purchase
+--   is advertised as a prepayment waiting for a schedule. A review MEASURED exactly that. Neither
+--   clause is a judgement invented here: both are predicates the estate already owns, and the band
+--   and the door therefore cannot drift apart. An ordinary expense coding — which debits no asset —
+--   never appears, by the same evaluator clause. It is the ONLY durable trace of a create-time
+--   refusal, because such a refusal writes no plan and no schedule row and therefore no
+--   schedule-scoped read can ever reach it. Each row says whether a live
 --   `clara.document_service_periods` row exists, so the surface names the NEXT ACT: record the
 --   term, or configure the schedule.
+--
+-- EACH ARM IS CAPPED AT FIFTY ROWS, NEWEST FIRST, AND THE ENVELOPE SAYS WHEN THE CAP BIT
+-- (`refusing_truncated` / `unscheduled_truncated`, with `cap`). The ordering is INSIDE the cut,
+-- never after it: a `limit` over an unordered select is an arbitrary fifty, and the row this read
+-- exists to surface is precisely the newest one.
 --
 -- WHAT NEITHER ARM REACHES, stated rather than implied: a MEMO-ONLY recognition binds no document,
 -- so the evaluator refuses it outright (0140:1070-1075) and arm B's own predicate excludes it. A
@@ -1490,6 +1561,7 @@ end $$;
 create function clara.list_prepayment_attention(p_client uuid) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare v_actor uuid; v_firm uuid; v_a jsonb; v_b jsonb;
+        v_a_trunc boolean := false; v_b_trunc boolean := false;
 begin
   select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('viewer')) a;
   if not exists (select 1 from clara.clients c where c.id = p_client and c.firm_id = v_firm) then
@@ -1497,8 +1569,12 @@ begin
       detail='{"reason":"client_not_found"}';
   end if;
 
-  select coalesce(jsonb_agg(x order by x ->> 'due_date' desc), '[]'::jsonb) into v_a
-    from (
+  -- THE PAGE IS ORDERED BEFORE IT IS CUT, and the envelope says when the cut bit. A `limit 50`
+  -- inside a select with NO ORDER BY hands back an ARBITRARY fifty and the ordering applied
+  -- afterwards only sorts the survivors -- so on a client with more candidates than the cap the
+  -- NEWEST refusal, which is the one this read exists to surface, could simply be absent with
+  -- nothing saying so. Measured by `p653.attention.window`.
+  with cand_a as (
       select jsonb_build_object(
         'arm', 'refusing', 'schedule_id', s.id, 'plan_id', s.plan_id, 'purpose', p.purpose,
         'status', p.status, 'occurrence_id', o.id,
@@ -1520,7 +1596,8 @@ begin
         -- The catch-up window this period would need, so the surface can offer the EXISTING
         -- window-only door rather than inventing a recovery of its own.
         'catch_up_from', to_char(o.due_date,'YYYY-MM-DD'),
-        'catch_up_to', to_char(o.due_date,'YYYY-MM-DD')) as x
+        'catch_up_to', to_char(o.due_date,'YYYY-MM-DD')) as x,
+        o.due_date as sk
         from clara.prepayment_schedules s
         join clara.accounting_plans p on p.id = s.plan_id
         cross join lateral (
@@ -1535,11 +1612,13 @@ begin
                and w.status in ('failed','refused','cancelled','expired')
                and not exists (select 1 from clara.operation_receipts rc
                                 where rc.work_id = o.work_id and rc.outcome = 'committed')))
-       limit 50
-    ) t;
+    )
+  select coalesce(jsonb_agg(p.x order by p.sk desc, p.x ->> 'occurrence_id'), '[]'::jsonb),
+         (select count(*) from cand_a) > 50
+    into v_a, v_a_trunc
+    from (select c.x, c.sk from cand_a c order by c.sk desc, c.x ->> 'occurrence_id' limit 50) p;
 
-  select coalesce(jsonb_agg(y order by y ->> 'posting_date' desc), '[]'::jsonb) into v_b
-    from (
+  with cand_b as (
       select jsonb_build_object(
         'arm', 'unscheduled', 'entry_id', je.id,
         'posting_date', to_char(je.posting_date,'YYYY-MM-DD'), 'memo', je.memo,
@@ -1547,7 +1626,8 @@ begin
         'prepaid_account_code', x.account_code, 'amount_cents', x.debit_cents,
         'has_live_term', exists (select 1 from clara.document_service_periods sp
                                   where sp.document_id = je.document_id
-                                    and sp.superseded_at is null)) as y
+                                    and sp.superseded_at is null)) as y,
+        je.posting_date as sk
         from clara.journal_entries je
         cross join lateral (
           select jl.account_code, jl.debit_cents, count(*) over () as legs
@@ -1560,10 +1640,24 @@ begin
          and x.legs = 1
          and not exists (select 1 from clara.prepayment_schedules s
                           where s.source_entry_id = je.id)
-       limit 50
-    ) u;
+         -- THE SAME ELIGIBILITY WALL THE DOOR APPLIES to the prepaid leg (§D), so the band cannot
+         -- advertise a recognition the door would refuse. Without it arm B lists every ordinary
+         -- sales invoice, documented bank receipt and fixed-asset purchase as "posted, not yet
+         -- amortised" with a "configure the schedule" action -- measured on the rig.
+         and clara._adj_line_eligibility_breach(p_client,
+               jsonb_build_array(jsonb_build_object('account_code', x.account_code,
+                 'debit_cents', 0, 'credit_cents', 1))) is null
+    )
+  select coalesce(jsonb_agg(q.y order by q.sk desc, q.y ->> 'entry_id'), '[]'::jsonb),
+         (select count(*) from cand_b) > 50
+    into v_b, v_b_trunc
+    from (select c.y, c.sk from cand_b c order by c.sk desc, c.y ->> 'entry_id' limit 50) q;
 
   return jsonb_build_object('client_id', p_client, 'refusing', v_a, 'unscheduled', v_b,
+    -- THE CAP, SAID OUT LOUD. A band showing fifty of nine hundred without this reads as "nothing
+    -- else is failing", which is the exact misreading the whole read exists to prevent.
+    'refusing_truncated', v_a_trunc, 'unscheduled_truncated', v_b_trunc,
+    'cap', 50,
     'attention', v_a || v_b);
 end $$;
 
@@ -1594,10 +1688,12 @@ comment on function clara.list_prepayment_attention(uuid) is
   '#653: the refusal-visibility read. ARM A = live amortisation plans whose most recent occurrence '
   'put no money on the books, at ADMISSION (typed outcome.reason) or at POSTING (typed '
   'work.error.reason -- a locked period is the posting core''s refusal, not the plan''s). ARM B = '
-  'approved entries that bind a document and debit exactly one asset line with no schedule naming '
-  'them, each saying whether a live document_service_periods row exists. Arm B is the ONLY durable '
-  'trace of a create-time refusal, which writes no plan and no schedule row. A MEMO-ONLY '
-  'recognition binds no document and is reachable by neither arm.';
+  'approved entries that bind a document and debit exactly one ELIGIBLE asset line '
+  '(clara._adj_line_eligibility_breach, the same wall the door applies to the prepaid leg) with no '
+  'schedule naming them, each saying whether a live document_service_periods row exists. Arm B is '
+  'the ONLY durable trace of a create-time refusal, which writes no plan and no schedule row. Each '
+  'arm is ordered NEWEST FIRST and then cut at 50; refusing_truncated / unscheduled_truncated say '
+  'when the cut bit. A MEMO-ONLY recognition binds no document and is reachable by neither arm.';
 
 reset role;
 

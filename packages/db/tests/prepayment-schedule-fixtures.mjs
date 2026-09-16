@@ -38,6 +38,10 @@ import {
 } from "./accounting-plans-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 import { prepaidScene, recordPeriod, account } from "./f-a4-pr2a-fixtures.mjs";
+// The document half, for the scenes that need a SECOND document-bound recognition of their own
+// (the ineligible-prepaid-leg cells and the arm-B paging cell). `f-a4-pr2a-fixtures.mjs` reaches
+// for the same two writers to build `prepaidScene`'s one document; these build the others.
+import { seedVerifiedDocument, fileDocument } from "./rig-docs-fixtures.mjs";
 import { openDefaultFY } from "./x56-fixtures.mjs";
 import { acceptPublishedLegal } from "./work-journal-fixtures.mjs";
 // The raw pool, for the ONE cell that needs two scans genuinely in flight behind a lock barrier.
@@ -379,6 +383,95 @@ export async function ambiguousAssetEntry(scene, { cents = 60000, secondAsset = 
   await approveEntry(scene.bob, {
     entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p653-twoa") });
   return d.entry_id;
+}
+
+/**
+ * THE ESTATE'S OWN RECEIVABLE CONTROL ACCOUNT, seeded on every client's chart by the standard COA
+ * (`account_class = 'receivable'`) and MEASURED on the rig rather than minted here — a hand-made
+ * "13000001 Trade receivables" carries a NULL `account_class` and is therefore NOT a control
+ * account by `clara._adj_line_eligibility_breach`'s own rule (`0042:643`). A cell that built its
+ * own code would measure a different estate.
+ */
+export const CONTROL_ASSET_CODE = "374-C56";
+
+/**
+ * A SECOND document for this scene's client, FILED through the governed door — every extra
+ * recognition needs its own, because `journal_entries.document_id` is what arm B keys on.
+ */
+export async function extraDocument(scene, { tag = "extra" } = {}) {
+  const u = randomUUID().slice(0, 8);
+  const doc = await seedVerifiedDocument({
+    firm: scene.firm, client: null, filename: `p653-${tag}-${u}.pdf` });
+  await fileDocument(scene.alice, {
+    document: doc.documentId, client: scene.client, opKey: opk("p653-file") });
+  return doc;
+}
+
+/**
+ * AN APPROVED, DOCUMENT-BOUND ENTRY WHOSE ONE DEBITED ASSET LEG IS NOT A PREPAYMENT — by default
+ * the estate's own receivable CONTROL account, i.e. the shape of every ordinary sales invoice.
+ *
+ * It satisfies the frozen evaluator's whole predicate (approved, binds a document, debits exactly
+ * ONE asset line), which is precisely why it is the cell that matters: without a wall on the
+ * PREPAID leg the lane would amortise a receivable into an expense, monthly, for a whole stated
+ * term. `recordTerm` puts a live service period on its document, so the refusal under test is the
+ * eligibility wall rather than the absent-term one.
+ */
+export async function ineligibleAssetEntry(scene, {
+  cents = 77000, code = CONTROL_ASSET_CODE, recordTerm = true, tag = "ctl",
+} = {}) {
+  const { draftEntryV3, approveEntry, freshResolution } = await entryWriters();
+  const doc = await extraDocument(scene, { tag });
+  const d = await draftEntryV3(scene.alice, {
+    client: scene.client,
+    resolution: await freshResolution(scene.alice, scene.client,
+      { subjectKind: "document", subjectId: doc.documentId }),
+    memo: `#653 ordinary invoice ${randomUUID().slice(0, 8)}`,
+    postingDate: scene.postingDate,
+    document: doc.documentId, sha256: doc.sha256,
+    lines: [
+      { account_code: code, debit_cents: cents, credit_cents: 0, description: "receivable" },
+      { account_code: "684-C56", debit_cents: 0, credit_cents: cents, description: "sale" },
+    ],
+    // A CONTROL-CLASS LINE REQUIRES A COUNTERPARTY (CLR23, measured on this rig), which is the
+    // estate saying the same thing this cell is about: a receivable is somebody's, and a
+    // prepayment is nobody's. Born at approve, the x56/x37 idiom.
+    vendor: { kind: "customer", new: { name: `p653 customer ${randomUUID().slice(0, 8)}` } },
+    opKey: opk("p653-ctl"),
+  });
+  await approveEntry(scene.bob, {
+    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p653-ctla") });
+  if (recordTerm) {
+    await recordPeriod(scene.bob, {
+      document: doc.documentId, start: scene.termStart, end: scene.termEnd });
+  }
+  return { entry: d.entry_id, document: doc.documentId, code, cents };
+}
+
+/**
+ * ANOTHER ELIGIBLE RECOGNITION on this scene's client: approved, document-bound, debiting the
+ * scene's own prepaid asset — an arm-B row. `postingDate` is the caller's, so the paging cell can
+ * order them by a date it chose.
+ */
+export async function extraRecognition(scene, { cents = 12000, postingDate, tag = "many" } = {}) {
+  const { draftEntryV3, approveEntry, freshResolution } = await entryWriters();
+  const doc = await extraDocument(scene, { tag });
+  const d = await draftEntryV3(scene.alice, {
+    client: scene.client,
+    resolution: await freshResolution(scene.alice, scene.client,
+      { subjectKind: "document", subjectId: doc.documentId }),
+    memo: `#653 recognition ${postingDate}`,
+    postingDate: postingDate ?? scene.postingDate,
+    document: doc.documentId, sha256: doc.sha256,
+    lines: [
+      { account_code: scene.prepaid, debit_cents: cents, credit_cents: 0, description: "prepaid" },
+      { account_code: "170-C56", debit_cents: 0, credit_cents: cents, description: "paid" },
+    ],
+    opKey: opk("p653-many"),
+  });
+  await approveEntry(scene.bob, {
+    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p653-manya") });
+  return { entry: d.entry_id, document: doc.documentId, postingDate };
 }
 
 /** CLOSE the fiscal year that contains `day` for `client`, walking the estate's own lifecycle

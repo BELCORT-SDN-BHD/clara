@@ -214,13 +214,27 @@ bound to the 0045 template lane behind a registered-and-disabled wake source. Th
 uses 0140's OWN three tokens and 0042's own eligibility helper; a second vocabulary for one rule is
 how two lanes start disagreeing about what is eligible.
 
+The door applies that same 0042 eligibility helper to the PREPAID leg as well as to the judged
+expense account, and that is not symmetry for its own sake. `clara.prepayment_schedule_v1` takes
+"the one debited asset leg" verbatim and never asks which asset, so its whole predicate is
+satisfied by every ordinary sales invoice, every documented bank receipt and every fixed-asset
+purchase; without the wall the door would amortise a receivable into an expense for a whole stated
+term. The refusal is 0140's own `prepayment_source_unfit` with `axis: prepaid_account_ineligible`
+— no new vocabulary. The wall is NEGATIVE (is this leg ineligible?) rather than a positive
+prepayment-class roster, so an ordinary unclassified asset still passes; that residual is named.
+
 The three reads sit at the viewer floor. `clara.list_prepayment_attention` is the lane's
 refusal-visibility read and has TWO arms because one cannot reach both residues: arm A is a live
 amortisation plan whose most recent occurrence put no money on the books (at admission, or at the
 posting core — a locked period is the posting core's refusal, not the plan's), and arm B is an
-approved, document-bound, single-asset-debit entry that no schedule names, which is the only
-durable trace of a create-time refusal. A memo-only recognition binds no document and is reachable
-by neither arm; that residual is named rather than closed.
+approved, document-bound, single-asset-debit entry **whose debited asset passes the same
+eligibility wall the door applies** and that no schedule names, which is the only durable trace of
+a create-time refusal. The band and the door therefore cannot advertise and refuse the same entry.
+Each arm is ORDERED NEWEST FIRST AND THEN CUT at fifty, and the envelope carries
+`refusing_truncated` / `unscheduled_truncated` / `cap`: a cut applied to an unordered select is an
+arbitrary fifty, and the row this read exists to surface is precisely the newest one. A memo-only
+recognition binds no document and is reachable by neither arm; that residual is named rather than
+closed.
 
 ## Frozen evaluator deployment
 

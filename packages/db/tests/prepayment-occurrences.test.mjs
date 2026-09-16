@@ -27,7 +27,7 @@ import {
   reviseAccountingPlan, requestPlanCatchUp, wakeDuePlanOccurrences, occurrenceRows,
   occurrenceCount, recordPeriod, workRow, claimWorkRun, settleWorkRun, mintClientObo,
   wakeRecordJournalEntry, receiptsForWork, deactivateMember, monthEndAfter,
-  closeFiscalYearOf, unapprovedEntry, scheduleRow,
+  closeFiscalYearOf, unapprovedEntry, ineligibleAssetEntry, extraRecognition, scheduleRow,
   PREPAY_REASON, PLAN_MODEL,
 } from "./prepayment-schedule-fixtures.mjs";
 import { EGRESS_REASON } from "./work-egress-fixtures.mjs";
@@ -286,7 +286,7 @@ test("p653.attention.arm_a — a deactivated authoriser stops a live schedule at
   assert.equal(mine[0].purpose, "Prepaid subscription amortisation");
 });
 
-test("p653.attention.arm_b — a posted recognition whose schedule REFUSED appears as unscheduled with has_live_term:false; recording the term flips it true; creating the schedule removes it; and an ordinary expense coding never appears at all", async (t) => {
+test("p653.attention.arm_b — a posted recognition whose schedule REFUSED appears as unscheduled with has_live_term:false; recording the term flips it true; creating the schedule removes it; and an entry that has NOT POSTED is not a recognised prepayment", async (t) => {
   if (await assertPrepaymentCohortPresent(t)) return;
   // The create-time residue (Q8's (a)): the recognition has POSTED and the schedule refused, so no
   // plan and no schedule row exists — and therefore NO schedule-scoped read can ever reach it.
@@ -326,13 +326,70 @@ test("p653.attention.arm_b — a posted recognition whose schedule REFUSED appea
   assert.equal(attention.unscheduled.filter((r) => r.entry_id === scene.entry).length, 0,
     "a scheduled prepayment is no longer waiting for one");
 
-  // AN ORDINARY EXPENSE CODING NEVER APPEARS. Arm B's predicate is the EVALUATOR'S OWN — approved,
-  // document-bound, exactly one DEBITED ASSET line — so it makes no judgement of its own and
-  // produces no expense-coding false positives.
+  // AN ENTRY THAT HAS NOT POSTED IS NOT A RECOGNISED PREPAYMENT. This leg measures the
+  // `status = 'approved'` filter and nothing else — `unapprovedEntry` is a DRAFT that debits the
+  // scene's own prepaid asset and binds no document, so it is excluded by two clauses at once. The
+  // ACCOUNT-CLASS negative that arm B's own comment used to claim here is a separate cell below;
+  // conflating them is how an untested claim survived a review.
   const draft = await unapprovedEntry(scene);
   attention = await listPrepaymentAttention(scene.bob, scene.client);
   assert.equal(attention.unscheduled.filter((r) => r.entry_id === draft).length, 0,
     "an entry that has not posted is not a recognised prepayment");
+});
+
+test("p653.attention.arm_b_ineligible — an APPROVED, document-bound entry whose one debited asset is the receivable CONTROL account is NOT advertised as 'recognised, not yet amortised': arm B carries the same eligibility wall the door does", async (t) => {
+  if (await assertPrepaymentCohortPresent(t)) return;
+  // THE CELL THE OLD TITLE PROMISED AND NEVER MEASURED. Arm B's predicate is the evaluator's own —
+  // approved, document-bound, exactly ONE debited asset line — and that predicate makes no
+  // judgement of WHICH asset. Every sales invoice, every documented bank receipt and every
+  // fixed-asset purchase satisfies it, and the band labels them "Posted, not yet amortised" with a
+  // "Configure the schedule" action. This is the regression guard for that.
+  const scene = await prepaymentScene("armbelig", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const invoice = await ineligibleAssetEntry(scene, { cents: 77000 });
+
+  const attention = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(attention.unscheduled.filter((r) => r.entry_id === invoice.entry).length, 0,
+    "an ordinary sales invoice is never offered as a prepayment waiting for a schedule");
+  // …and the scene's OWN recognition is still there, so the arm was not emptied by the fix.
+  assert.equal(attention.unscheduled.filter((r) => r.entry_id === scene.entry).length, 1,
+    "the genuine prepaid recognition is still advertised");
+
+  await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: invoice.entry, expenseAccount: scene.target,
+      authorityRef: scene.authorityRef,
+    }),
+    "…and the door refuses it too, so the two answers cannot drift apart");
+});
+
+test("p653.attention.window — arm B pages the NEWEST fifty by posting date and SAYS it truncated, so the row a person is looking for cannot be dropped by an arbitrary cut", async (t) => {
+  if (await assertPrepaymentCohortPresent(t)) return;
+  // A `limit 50` INSIDE a select with no ORDER BY hands back an ARBITRARY fifty; the ordering
+  // applied afterwards only sorts whatever survived. On a client with more candidates than the cap
+  // the newest row — the one the read exists to surface — can simply be absent, and nothing in the
+  // envelope says so.
+  const scene = await prepaymentScene("window", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const dates = [];
+  for (let i = 0; i < 51; i++) {
+    const d = await rootQuery("select ($1::date + $2::int)::text as d", [scene.termStart, i]);
+    dates.push(d.rows[0].d);
+  }
+  // Oldest first, so the NEWEST is created last and any "insertion order" accident is visible.
+  for (const postingDate of dates) {
+    await extraRecognition(scene, { cents: 12000, postingDate, tag: "win" });
+  }
+  const newest = dates[dates.length - 1];
+  const oldest = dates[0];
+
+  const attention = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(attention.unscheduled.length, 50, "the cap is still fifty rows");
+  const got = attention.unscheduled.map((r) => r.posting_date);
+  assert.ok(got.includes(newest), `the NEWEST recognition (${newest}) is in the page: ${got[0]}..${got[got.length - 1]}`);
+  assert.equal(got[0], newest, "…and it is first, because the page is ordered before it is cut");
+  assert.ok(!got.includes(oldest), "the page is the newest fifty, not an arbitrary fifty");
+  assert.equal(attention.unscheduled_truncated, true,
+    "…and the envelope SAYS it truncated, so a band showing fifty of many can say so");
+  assert.equal(attention.refusing_truncated, false, "arm A is not truncated on this client");
 });
 
 test("p653.attention.egress — an occurrence whose run holds no consumed model-egress authorisation refuses CLR13 at the POSTING core, and arm A reaches that too: the standing precondition every period of a multi-year schedule depends on", async (t) => {

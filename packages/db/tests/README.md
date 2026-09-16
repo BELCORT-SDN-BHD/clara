@@ -58,5 +58,12 @@ every occurrence (0195), so a scene that skipped it measures `egress_not_authori
 to measure something else. Both were measured, not assumed — the locked-period cell answered CLR13
 instead of CLR19 before the acceptance was added.
 
+A THIRD thing, added in the fix round: the ineligible-asset cells post to the estate's OWN
+receivable CONTROL account, `374-C56` (`account_class = 'receivable'`, measured on the rig), never
+to a hand-made "trade receivables" code — a minted account carries a NULL `account_class` and is
+therefore not a control account by `clara._adj_line_eligibility_breach`'s own rule, so a fixture
+that built its own code would measure a different estate. Posting to a control account needs a
+counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37 way.
+
 `prepayment-0208-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.
