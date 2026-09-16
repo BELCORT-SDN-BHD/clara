@@ -245,6 +245,18 @@ overrides the firm row carrying that condition and leaves an unconditional firm 
   client's document or Work is still refused. The invariant, stated once: *no live firm-scope
   knowledge record may cite a document carrying a live client filing, or any accounting_work at
   all.* A superseded or withdrawn revision reaches no client and blocks no filing.
+- **And the wall decides the concurrent case, not only the sequential one** — two BEFORE-row
+  triggers that each read the other's table do not give that for free: under READ COMMITTED neither
+  sees the other transaction's uncommitted row, so a capture and a filing naming the same document
+  could both commit. Measured on the rig before the lock: three of the four arrival orders left one
+  live firm-scope record citing a live client filing, and the fourth was safe only because
+  `clara._file_document_write` happens to take `clara.documents ... for update`. Both halves now
+  take one shared **advisory transaction lock** keyed on the document
+  (`clara.firm_knowledge_evidence:<document_id>`), and `_tf_knowledge_firm_evidence` takes the
+  `clara.documents` FOR KEY SHARE row lock first — the same lock its own FK check takes moments
+  later — so both lanes acquire in the order the filing lane already uses and the pair cannot
+  deadlock. Cell: `p654.evidence.race_capture_vs_filing`, all four arrival orders, with and without
+  the filing door's own row lock.
 - **Two viewer-floored reads, `clara_authenticated` only** — `clara.list_firm_knowledge()` returns
   this firm's rules with the authority each promotion recorded, the live client exceptions at the
   same key and applicability, and the non-terminal Work citing the key;

@@ -21,7 +21,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  assertRaises, endPool, getPool, humanQuery, roleQuery, rootQuery, opk, ROLES,
+  assertRaises, endPool, freshResolution, getPool, humanQuery, roleQuery, rootQuery, opk, ROLES,
 } from "./rig-fixtures.mjs";
 import { knowledgeWorld, committedPlan } from "./knowledge-fixtures.mjs";
 import {
@@ -29,7 +29,7 @@ import {
   knowledgeFirmCohortApplied, liveWork, retireFiling,
 } from "./knowledge-firm-fixtures.mjs";
 
-const EXPECTED_CELLS = 20;
+const EXPECTED_CELLS = 21;
 let live = false;
 let executed = 0;
 
@@ -418,6 +418,134 @@ cell("p654.evidence.refuses_client_work — a firm-wide default may not pin a cl
   });
   assert.equal(ok.status, "captured");
   assert.deepEqual(await evidenceViolators(w.firm), { documents: 0, works: 0 });
+});
+
+// ---------------------------------------------------------------------------------------------
+// FIX ROUND 2 — 654-RC1. The two halves of the evidence wall are BEFORE-row triggers that each
+// read the OTHER table, so a sequential act is refused by whichever half runs second — but two
+// CONCURRENT transactions under READ COMMITTED each take a snapshot in which the other's row does
+// not exist yet, and both commit. That is exactly the state 0205 §0(8) refuses to apply against
+// and §E T.4 asserts is zero, reached with both guards installed. This cell stages the race in
+// BOTH arrival orders and through BOTH filing paths.
+//
+// WHY BOTH FILING PATHS. `clara._file_document_write` takes `select ... from clara.documents
+// where id = p_document for update` before it inserts the filing (measured off pg_proc on the
+// rig), which INCIDENTALLY serialised one of the two orders before this round — the capture's own
+// FK check on `(source_document_id, firm_id)` takes FOR KEY SHARE on the same row and conflicts.
+// An invariant that holds only because another lane's body happens to take a row lock is an
+// invariant nobody can state, so the raw-INSERT arms remove that row lock and prove the wall
+// serialises on its OWN lock. (Both are real: the trigger is on the TABLE, and 0205's header says
+// out loud that a guard on the table cannot be bypassed by a writer nobody has written yet.)
+// ---------------------------------------------------------------------------------------------
+
+const FILE_DOOR = `select clara.file_document(
+  p_document => $1, p_client => $2, p_resolution => $3, p_op_key => $4) as r`;
+const FILE_RAW = `insert into clara.document_filings(firm_id, document_id, client_id, filed_by, basis)
+  values ($1,$2,$3,$4,'legacy-0007') returning id`;
+
+/** ONE arrival order of the capture-vs-filing race, genuinely overlapping rather than serialised
+ *  by luck: the leader's statement runs and is HELD UNCOMMITTED while the follower's statement is
+ *  issued, and the follower is watched in `pg_stat_activity` until it is provably queued on a
+ *  lock. The pooled helpers commit per call, so they cannot express a race at all
+ *  (`p654.promote.race`'s own reason). */
+async function evidenceRace(w, { first, filing }) {
+  const tag = `${first}_${filing}`;
+  const doc = await firmDocument(w.firm, w.admin, `p654r_${tag}`);
+  const resolution = filing === "door"
+    ? await freshResolution(w.admin, w.clientA, { subjectKind: "document", subjectId: doc })
+    : null;
+  const capConn = await getPool().connect();
+  const fileConn = await getPool().connect();
+  const out = { doc, waitedOn: null, followerSettledWhileLeaderOpen: null };
+  try {
+    const asAdmin = async (c) => {
+      await c.query("set role clara_authenticated");
+      await c.query("select set_config('request.jwt.claims', $1, false)",
+        [JSON.stringify({ sub: w.admin, role: "authenticated" })]);
+    };
+    await asAdmin(capConn);
+    // The RAW arm deliberately keeps the root role: it is the SAME table write with the filing
+    // lane's own row lock removed, not a second door.
+    if (filing === "door") await asAdmin(fileConn);
+
+    const captureAct = () => capConn.query(CAPTURE, [
+      "accounting_basis",
+      JSON.stringify({ accounting_basis: "accrual", accounting_basis_label: "Accrual" }),
+      `the firm's own manual (${tag})`, opk("p654race"), "firm", null, "user_statement",
+      "{}", null, null, JSON.stringify({ document_id: doc }),
+    ]);
+    const fileAct = () => (filing === "door"
+      ? fileConn.query(FILE_DOOR, [doc, w.clientA, resolution, opk("p654racefile")])
+      : fileConn.query(FILE_RAW, [w.firm, doc, w.clientA, w.admin]));
+
+    const leaderConn = first === "capture" ? capConn : fileConn;
+    const followerConn = first === "capture" ? fileConn : capConn;
+    const leadAct = first === "capture" ? captureAct : fileAct;
+    const followAct = first === "capture" ? fileAct : captureAct;
+
+    await capConn.query("begin");
+    await fileConn.query("begin");
+    out.leader = await leadAct().then(() => ({ ok: true }),
+      (e) => ({ ok: false, code: e.code, detail: e.detail, message: e.message }));
+
+    const pid = (await followerConn.query("select pg_backend_pid() as p")).rows[0].p;
+    let settled = false;
+    const pending = followAct().then(() => { settled = true; return { ok: true }; },
+      (e) => { settled = true; return { ok: false, code: e.code, detail: e.detail, message: e.message }; });
+    for (let i = 0; i < 400 && !settled && out.waitedOn === null; i += 1) {
+      const s = await rootQuery(
+        "select wait_event_type as wt, wait_event as we from pg_stat_activity where pid = $1", [pid]);
+      if (s.rows[0]?.wt === "Lock") out.waitedOn = `${s.rows[0].wt}/${s.rows[0].we}`;
+      if (out.waitedOn === null) await new Promise((x) => setTimeout(x, 25));
+    }
+    out.followerSettledWhileLeaderOpen = settled;
+    await leaderConn.query("commit");
+    out.follower = await pending;
+    await followerConn.query("commit").catch(() => {});
+  } finally {
+    for (const c of [capConn, fileConn]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+  out.violators = await evidenceViolators(w.firm);
+  return out;
+}
+
+cell("p654.evidence.race_capture_vs_filing — the two halves of the wall serialise on the document, in BOTH arrival orders and with or without the filing lane's own row lock", async () => {
+  // The refusal the LOSER must carry depends only on which act arrives second — the wall is
+  // symmetrical, so each order is answered by its own half, by name.
+  const expected = { capture: "document_cited_by_firm_default", file: "firm_scope_client_evidence" };
+  const seen = {};
+
+  for (const first of ["capture", "file"]) {
+    for (const filing of ["door", "raw"]) {
+      const where = `${first}-first / filing via ${filing}`;
+      const w = await knowledgeWorld(`p654rc_${first}_${filing}`);
+      const r = await evidenceRace(w, { first, filing });
+      seen[where] = { waitedOn: r.waitedOn, follower: r.follower.code ?? "committed" };
+
+      assert.equal(r.leader.ok, true,
+        `${where}: the LEADER must succeed for the race to mean anything -- ${r.leader.message}`);
+      assert.equal(r.followerSettledWhileLeaderOpen, false,
+        `${where}: the second act resolved while the first was still OPEN -- nothing serialises the two guards, so both commit and the invariant "no LIVE firm-scope record may cite a document carrying a live client filing" is violable by two concurrent transactions`);
+      assert.match(String(r.waitedOn), /^Lock\//,
+        `${where}: the second act never queued on a lock (${r.waitedOn}) -- this arm would prove nothing about a race`);
+
+      assert.equal(r.follower.ok, false, `${where}: BOTH acts committed -- the race produced the contamination`);
+      assert.notEqual(r.follower.code, "40P01", `${where}: a deadlock is not a refusal -- ${r.follower.message}`);
+      assert.equal(r.follower.code, "CLR10",
+        `${where}: the loser must carry the wall's own refusal, got ${r.follower.code}: ${r.follower.message}`);
+      assert.equal(reasonOf(r.follower), expected[first],
+        `${where}: the loser must be refused BY NAME -- ${r.follower.message}`);
+
+      assert.deepEqual(r.violators, { documents: 0, works: 0 },
+        `${where}: the runtime form of 0205 §0(8)/§E T.4 is violated after the race`);
+    }
+  }
+  console.log("      race arms:", JSON.stringify(seen));
 });
 
 // =============================================================================================

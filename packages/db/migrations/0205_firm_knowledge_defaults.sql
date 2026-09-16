@@ -111,6 +111,20 @@
 --     be retracted. The INVARIANT, stated once: no LIVE firm-scope knowledge record may cite a
 --     document carrying a live client filing, or any accounting_work at all.
 --
+--     AND IT HOLDS UNDER CONCURRENCY, which two BEFORE-row triggers reading each other's table
+--     do NOT give for free. Each half reads the OTHER relation, and under READ COMMITTED neither
+--     sees the other transaction's uncommitted row, so two transactions in flight — this capture
+--     and `clara.file_document` naming the same document — could both commit and reach exactly
+--     the state §0(8) refuses to apply against. Measured on the rig before the fix, in all four
+--     arrival orders: THREE of the four left one live firm-scope record citing a live client
+--     filing, and the fourth was safe only incidentally, because `_file_document_write` takes
+--     `clara.documents ... for update` and the capture's own FK check takes FOR KEY SHARE on the
+--     same row. Both halves therefore take ONE advisory transaction lock keyed on the document
+--     (`clara.firm_knowledge_evidence:<document_id>`) before they read, and the knowledge half
+--     takes the documents row lock FIRST so both lanes acquire in the same order. The wall is
+--     now serialised by a lock this file owns, not by another body's row lock; the cell that
+--     proves it in all four orders is `p654.evidence.race_capture_vs_filing`.
+--
 -- C · WHY TRIGGERS, AND WHY THESE NAMES. PostgreSQL fires same-event BEFORE triggers in NAME
 --     order, so `t_knowledge_records_firm_eligibility` and `t_knowledge_records_firm_evidence`
 --     both sort AFTER 0192's `t_knowledge_records_authority` — which is required, not incidental:
@@ -144,11 +158,28 @@
 --     0016:477 idiom) and returned as `as_of`, so the web form's default effective date is the
 --     firm's legal date rather than whatever the browser's clock says.
 --
--- F · LOCK ORDER. This file adds no door that takes a row lock. Both reads are `stable` and the
---     two triggers only SELECT, so the knowledge cohort stays OUTSIDE the
+-- F · LOCK ORDER. This file adds no door at all, and both reads are `stable` and lock nothing,
+--     so the knowledge cohort stays OUTSIDE the
 --     `accounting_plans -> accounting_work -> agent_tasks -> agent_interruptions` chain, exactly
 --     as 0192 left it (its only `accounting_work` touch is an unlocked congruence probe,
 --     0192:799-802; this file adds one more unlocked read, for the live-Work affordance).
+--
+--     THE EVIDENCE WALL DOES TAKE TWO LOCKS, both on the DOCUMENT and both only when a document
+--     is actually in play, and they are stated here so the next reader inherits the order rather
+--     than rediscovering it:
+--       1. `clara.documents` FOR KEY SHARE on the pinned row — the same lock this statement's own
+--          FK check (`fk_knowledge_records_source_document`) takes a moment later, so it is an
+--          earlier acquisition of a lock the transaction already holds by the end, never a new
+--          one. Taken ONLY by `_tf_knowledge_firm_evidence`; the filing lane already holds the
+--          stronger FOR UPDATE on that row from `_file_document_write` before its own trigger
+--          fires.
+--       2. `pg_advisory_xact_lock(hashtextextended('clara.firm_knowledge_evidence:' || <document
+--          id>, 0))` — taken by BOTH halves of the wall, released at commit or abort.
+--     Every lane acquires (1) then (2), so the pair cannot deadlock against each other. Neither
+--     lock is ever held across a wait on a third resource that the other lane holds. The advisory
+--     key is per-document, so it serialises only transactions naming the SAME document; a
+--     transaction filing N documents at once accumulates N transaction-scoped advisory entries,
+--     which is the one cost worth knowing about (`max_locks_per_transaction`).
 -- =====================================================================================
 
 -- =====================================================================================
@@ -444,6 +475,34 @@ begin
   -- ARM 1 — THE DOCUMENT PIN (and, transitively, the extraction/region/field pins that cannot
   -- exist without it — 0192:461-470).
   if new.source_document_id is null then return new; end if;
+
+  -- SERIALISE AGAINST THE FILING LANE BEFORE READING IT. Both halves of this wall are BEFORE-row
+  -- triggers that read the OTHER table, and under READ COMMITTED neither sees the other's
+  -- uncommitted row — so without these two lines two CONCURRENT transactions (this capture, and
+  -- clara.file_document naming the same document) both commit and leave exactly the state §0(8)
+  -- refuses to apply against. MEASURED, not reasoned: on the rig, three of the four arrival
+  -- orders left one live firm-scope record citing a live client filing.
+  --
+  -- THE ORDER OF THE TWO LOCKS IS THE POINT. `clara._file_document_write` takes
+  -- `select firm_id from clara.documents where id = p_document for update` BEFORE it inserts the
+  -- filing (measured off pg_proc), so the filing lane's order is: documents row, then this
+  -- advisory key. Taking them in the SAME order here makes the pair deadlock-free by
+  -- construction rather than by luck; FOR KEY SHARE is both the weakest mode that conflicts with
+  -- the filing lane's FOR UPDATE and EXACTLY the lock this statement's own FK check
+  -- (fk_knowledge_records_source_document) takes microseconds later anyway, so the transaction
+  -- acquires no lock it was not already going to hold.
+  --
+  -- AND THE ADVISORY KEY IS WHY THE ROW LOCK IS NOT ENOUGH. The row lock only serialises because
+  -- ANOTHER migration's body happens to take FOR UPDATE; an invariant that rests on a body this
+  -- file does not own is one nobody can state. The advisory key is taken by BOTH halves of THIS
+  -- wall, so the serialisation survives a filing writer that never touches the document row at
+  -- all (the raw-INSERT arms of p654.evidence.race_capture_vs_filing are that proof). It is
+  -- transaction-scoped, so it is released at commit or abort with no cleanup path to get wrong,
+  -- and it is keyed on the DOCUMENT, so two transactions naming different documents never meet.
+  perform 1 from clara.documents d where d.id = new.source_document_id for key share;
+  perform pg_advisory_xact_lock(
+    hashtextextended('clara.firm_knowledge_evidence:' || new.source_document_id::text, 0));
+
   select count(*)::int into v_n
     from clara.document_filings f
    where f.document_id = new.source_document_id
@@ -492,6 +551,16 @@ begin
   if tg_op = 'UPDATE' and not (old.retired_at is not null and new.retired_at is null) then
     return new;
   end if;
+
+  -- THE SAME ADVISORY KEY THE OTHER HALF TAKES, and taken here for the same reason: a firm-scope
+  -- knowledge INSERT committing between this read and this transaction's commit would leave the
+  -- contamination in place with both guards installed. `_file_document_write` has already taken
+  -- `clara.documents ... for update` for this document by the time this trigger fires, so the
+  -- acquisition order on this side is documents row -> advisory key, which is the order
+  -- clara._tf_knowledge_firm_evidence deliberately copies.
+  perform pg_advisory_xact_lock(
+    hashtextextended('clara.firm_knowledge_evidence:' || new.document_id::text, 0));
+
   select k.record_id, k.knowledge_key into r
     from clara.knowledge_records k
    where k.scope_kind = 'firm' and k.state = 'live'
@@ -817,6 +886,24 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- …AND THE TWO HALVES SERIALISE ON ONE KEY. Attached in both directions is still not the
+  -- invariant: each half reads the other's table, so under READ COMMITTED two overlapping
+  -- transactions see neither other's row and BOTH commit. What closes that is the single advisory
+  -- key both bodies take, and a typo in either would leave a wall that is attached, refuses every
+  -- sequential act, and refuses nothing at all when two transactions overlap — which no census
+  -- over ROWS can see. Pinned here as a shared literal because a migration tail cannot race
+  -- itself; the behavioural proof, in all four arrival orders, is
+  -- `p654.evidence.race_capture_vs_filing`.
+  select count(*)::int into v_n from pg_proc p
+   where p.oid in ('clara._tf_knowledge_firm_evidence()'::regprocedure,
+                   'clara._tf_document_filing_firm_knowledge()'::regprocedure)
+     and position('pg_advisory_xact_lock(' in p.prosrc) > 0
+     and position('clara.firm_knowledge_evidence:' in p.prosrc) > 0;
+  if v_n <> 2 then
+    raise exception '#654 tail: % of the two evidence guards take the shared advisory lock clara.firm_knowledge_evidence:<document_id>, not both -- the wall would not survive two concurrent transactions', v_n
+      using errcode='CLR10';
+  end if;
+
   -- (T.2) THE ELIGIBILITY RELATION: forced RLS, both belts, ZERO DML to every application role,
   -- SELECT to clara_authenticated ALONE, and no PUBLIC entry anywhere in its ACL.
   if not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -1002,7 +1089,7 @@ begin
     end if;
   end loop;
 
-  raise notice '#654 tail: OK -- clara.knowledge_key_firm_eligibility exists under FORCED row level security owned by clara_fn_owner, append-only and no-truncate belted, readable by clara_authenticated ALONE (no runtime, agent or wake role) and writable by no application role at all, seeded with the three keys owner ruling D8 named; the two BEFORE INSERT guards fire AFTER 0192''s own authority stamp in the order pg_trigger reports (authority -> firm_eligibility -> firm_evidence), and the SAME wall is closed from the filing side by t_document_filings_firm_knowledge on clara.document_filings so that a document a live firm rule cites can no longer be filed to a client after the fact (CLR10 document_cited_by_firm_default) while a correction or withdrawal carrying the predecessor''s pins verbatim stays admissible, which is what keeps a contaminated rule retractable; the FIRM-DEFAULTABLE census measured off the live catalog is EXACTLY {%}, and the NINE keys refused at firm scope are {%} -- entity_type, msic, sst_regime and financial_year_end_month among them by name; NO existing firm-scope record names an ineligible key, and no LIVE one cites a document carrying a live client filing (counted across N filings, not probed for one) or pins any client''s accounting_work -- live is the invariant the two guards enforce, because a superseded or withdrawn revision reaches no client through any read; clara.list_firm_knowledge and clara.get_knowledge_applicability are viewer-floored STABLE SECURITY DEFINER functions with search_path and plan_cache_mode pinned, PUBLIC revoked, granted to clara_authenticated and to nobody else; and every one of the five 0192 bodies this file was forbidden to recut still resolves at its exact signature with clara.knowledge_records carrying six non-internal triggers (0192''s four plus these two).',
+  raise notice '#654 tail: OK -- clara.knowledge_key_firm_eligibility exists under FORCED row level security owned by clara_fn_owner, append-only and no-truncate belted, readable by clara_authenticated ALONE (no runtime, agent or wake role) and writable by no application role at all, seeded with the three keys owner ruling D8 named; the two BEFORE INSERT guards fire AFTER 0192''s own authority stamp in the order pg_trigger reports (authority -> firm_eligibility -> firm_evidence), and the SAME wall is closed from the filing side by t_document_filings_firm_knowledge on clara.document_filings so that a document a live firm rule cites can no longer be filed to a client after the fact (CLR10 document_cited_by_firm_default) while a correction or withdrawal carrying the predecessor''s pins verbatim stays admissible, which is what keeps a contaminated rule retractable, and BOTH halves take one shared advisory transaction lock keyed on the document (clara.firm_knowledge_evidence:<document_id>, after the documents row lock the filing lane already holds) so the wall decides the case where the two acts are IN FLIGHT AT ONCE rather than one after the other; the FIRM-DEFAULTABLE census measured off the live catalog is EXACTLY {%}, and the NINE keys refused at firm scope are {%} -- entity_type, msic, sst_regime and financial_year_end_month among them by name; NO existing firm-scope record names an ineligible key, and no LIVE one cites a document carrying a live client filing (counted across N filings, not probed for one) or pins any client''s accounting_work -- live is the invariant the two guards enforce, because a superseded or withdrawn revision reaches no client through any read; clara.list_firm_knowledge and clara.get_knowledge_applicability are viewer-floored STABLE SECURITY DEFINER functions with search_path and plan_cache_mode pinned, PUBLIC revoked, granted to clara_authenticated and to nobody else; and every one of the five 0192 bodies this file was forbidden to recut still resolves at its exact signature with clara.knowledge_records carrying six non-internal triggers (0192''s four plus these two).',
     array_to_string(v_admitted, ', '), array_to_string(v_refused, ', ');
 end
 $w654_tail$;
