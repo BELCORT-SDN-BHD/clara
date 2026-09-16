@@ -35,6 +35,7 @@
 components/accounting/journal-composer.test.tsx
 components/accounting/periodic-adjustment-form.test.tsx
 components/accruals/accrual-form.test.tsx
+components/accruals/accruals-list.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx

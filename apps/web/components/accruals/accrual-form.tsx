@@ -66,7 +66,8 @@ import {
   type AccrualDraft, type AccrualFieldId, type AccrualIssue, type StoredAccrualDraft,
 } from "@/lib/work/accrual-draft";
 import { defaultDraftStorage, type DraftStorage, type JournalDraftScope } from "@/lib/work/journal-draft";
-import { accrualDetailHref, accrualsHref, canOpenClientLeaf } from "@/lib/navigation/tree";
+import { accrualDetailHref, accrualsHref } from "@/lib/navigation/tree";
+import { hasNavigationAccess } from "@/lib/firm/navigation";
 import type { NavigationScope } from "@/lib/navigation/tree";
 
 /** Everything the surface can be, as ONE value — so two states can never be painted at once. */
@@ -99,6 +100,12 @@ export function AccrualForm({ clientId }: { clientId: string }) {
 }
 
 /** Exported for the cells; production reads scope from context and navigates with the router. */
+/** The role this lane's WRITE door holds inside its own body (`clara.create_accrual_adjustment`,
+ *  `_human_ctx(role_rank('bookkeeper'))`), stated once here and judged by the registry's own
+ *  predicate. The database is the authority; this is what stops the surface offering a control
+ *  that could only ever refuse. */
+const ACCRUAL_WRITE_FLOOR = { minimumRole: "bookkeeper" } as const;
+
 export function AccrualFormView({
   clientId,
   scope,
@@ -316,9 +323,14 @@ export function AccrualFormView({
   // THE VIEWER ARM. The route still renders — an address a human typed deserves an explanation —
   // but it renders the DENIED state and no form at all. `clara.create_accrual_adjustment` is
   // bookkeeper+ inside its own body, so offering the form to a viewer would be offering a control
-  // whose only possible outcome is a refusal (裁-187). The floor lives in the one navigation
-  // registry beside every other floor, and the server refuses regardless.
-  if (!canOpenClientLeaf(scope, "accrualNew")) {
+  // whose only possible outcome is a refusal (裁-187).
+  //
+  // THE FLOOR IS JUDGED BY THE ONE PREDICATE `lib/navigation/tree.ts` calls on every registry row
+  // (`hasNavigationAccess`), against this lane's own floor rather than a registry LEAF: `accruals`
+  // is a top-level `ACCOUNTING_ITEMS` segment, so `resolveActive` can never produce a leaf under it
+  // and a `CLIENT_LEAVES` row minted to carry this floor would be a row nothing resolves to
+  // (`tree.test.ts`'s reachability cell). The server refuses regardless.
+  if (!hasNavigationAccess(scope, ACCRUAL_WRITE_FLOOR)) {
     return (
       <div className="flex flex-col gap-6">
         <AccrualBoundaryStatement />

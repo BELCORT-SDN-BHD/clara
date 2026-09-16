@@ -78,9 +78,7 @@
       "journalComposer": "Record journal entry",
       "periodicAdjustment": "Record periodic adjustment",
       "workDetail": "Journal entry",
-      "knowledgeRecord": "Knowledge record",
-      "accrualNew": "Record an accrual",
-      "accrualDetail": "Accrual"
+      "knowledgeRecord": "Knowledge record"
     },
     "accounting": {
       "journals": "Journals",

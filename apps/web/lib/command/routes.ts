@@ -142,11 +142,11 @@ const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
   bank: { id: "bank", keywords: ["bank", "reconciliation", "statement", "matching"] },
   receivables: { id: "registersAging", keywords: ["receivables", "payables", "aging", "ar", "ap", "registers"] },
   assets: { id: "registersAssets", keywords: ["fixed assets", "depreciation", "nbv", "registers"] },
-  plans: { id: "registersPlans", keywords: ["plans", "adjustments", "registers"] },
+  plans: { id: "registersPlans", keywords: ["plans", "adjustments", "accruals", "registers"] },
   // #652 — the words a preparer reaches for when a cost belongs to a period they have no invoice
-  // for. "accruals" MOVES here from the `plans` row above, deliberately: a plan is the schedule and
-  // an accrual is the thing scheduled, and the row that answers the word should be the one that
-  // shows the service term, the amount and the reversal binding.
+  // for. "accruals" is ADDED here and LEFT on the `plans` row above: a plan is the schedule and an
+  // accrual is the thing scheduled, so both rows honestly answer the word, and keywords are not a
+  // unique index in this registry ("work", "queue", "members" each sit on two rows already).
   accruals: {
     id: "accruals",
     keywords: ["accruals", "accrual", "accrued", "accrue", "reversal", "reversing", "service period"],

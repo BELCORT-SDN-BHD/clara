@@ -410,6 +410,23 @@ test("REGISTRY-BUILT destinations are real pages whose builder is exported from 
   }
 });
 
+test("#652's accruals row is ADDITIVE — the shipped Plans row still answers the word it always answered", () => {
+  // A new row REGISTERS; it does not take a word off a row that already shipped with it. ⌘K
+  // keywords are not a unique index anywhere in this registry ("work", "queue", "approvals" and
+  // "members" each sit on two rows today), so both rows can answer "accruals" and the ranking
+  // decides — which is the honest answer, because a plan IS the accrual's schedule.
+  const accruals = CLIENT_ROUTES.find((route) => route.id === "accruals");
+  assert.ok(accruals, "#652's accrual list must have its own ⌘K row");
+  assert.equal(accruals.keywords?.includes("accruals"), true);
+
+  const plans = CLIENT_ROUTES.find((route) => route.id === "registersPlans");
+  assert.ok(plans);
+  assert.equal(
+    plans.keywords?.includes("accruals"), true,
+    "the Plans row shipped answering 'accruals'; #652 adds a row, it does not silently narrow that one",
+  );
+});
+
 test("/settings/members is present in ⌘K by its own stable row", () => {
   // #614 moved the RBAC page from /admin/members to /settings/members. The claim
   // is unchanged: the flagship roster surface has its OWN row, so a search for

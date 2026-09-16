@@ -110,17 +110,7 @@ export type AccountingItemId =
  * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
  * a page that is only ever reached with an intent.
  */
-export type ClientLeafId =
-  | "journalComposer"
-  | "periodicAdjustment"
-  | "workDetail"
-  | "knowledgeRecord"
-  // #652 — /…/accruals/:accrualId names ONE accrual record, and /…/accruals/new is the ACT that
-  // creates one. Leaves for the two reasons this block states: a durable record cannot be a static
-  // menu row, and a multi-section accounting form is arrived at with an intent rather than browsed
-  // to.
-  | "accrualNew"
-  | "accrualDetail";
+export type ClientLeafId = "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -403,13 +393,11 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
   // name it rather than stopping at Knowledge and claiming the reader is on the register.
   { id: "knowledgeRecord", parent: "knowledge", labelKey: "clientLeaf.knowledgeRecord", minimumRole: "viewer" },
-  // #652 — BOOKKEEPER for the form, for `journalComposer`'s own reason: the write door behind it
-  // (`clara.create_accrual_adjustment`, bookkeeper+ inside its own body) can only ever refuse a
-  // viewer, and offering a control that can only refuse is 裁-187's rule. The route still renders
-  // for a viewer as the DENIED state rather than as a form. The DETAIL leaf is viewer, because
-  // reading the client's own accruals is the same class of act as reading their journals.
-  { id: "accrualNew", parent: "accounting", labelKey: "clientLeaf.accrualNew", minimumRole: "bookkeeper" },
-  { id: "accrualDetail", parent: "accounting", labelKey: "clientLeaf.accrualDetail", minimumRole: "viewer" },
+  // #652's `/accruals/new` and `/accruals/:accrualId` register NO leaf, for the reason `plans` —
+  // the precedent this route was cut beside — registers none: `accruals` is a TOP-LEVEL
+  // `ACCOUNTING_ITEMS` segment, and `resolveActive` answers that list on `rest[0]` alone and
+  // returns before `CLIENT_NAV.find` / `leafFor` are reached. A row here would be a promise the
+  // resolver cannot keep — and `tree.test.ts`'s reachability cell now refuses one.
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -620,10 +608,6 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
   if (parent === "accounting" && rest.length === 3 && rest[1] === "adjustments" && rest[2] === "new") {
     return "periodicAdjustment";
   }
-  if (parent === "accounting" && rest.length === 2 && rest[0] === "accruals" && rest[1] === "new") {
-    return "accrualNew";
-  }
-  if (parent === "accounting" && rest.length === 2 && rest[0] === "accruals") return "accrualDetail";
   if (parent === "work" && rest.length === 2) return "workDetail";
   if (parent === "knowledge" && rest.length === 2) return "knowledgeRecord";
   return null;

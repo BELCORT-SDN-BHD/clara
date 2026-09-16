@@ -44,6 +44,7 @@ import {
   visibleFirmNav,
   visibleSettingsSections,
   workDetailHref,
+  type ClientLeafId,
   type NavigationScope,
 } from "./tree";
 
@@ -245,6 +246,40 @@ test("a LEAF keeps its PARENT current and names itself — the sidebar mark does
   // A bare parent has no leaf.
   assert.equal(resolveActive(`/clients/${A}/work`).clientLeaf, null);
   assert.equal(resolveActive(`/clients/${A}/accounting`).clientLeaf, null);
+});
+
+/**
+ * EVERY REGISTERED LEAF IS ONE `resolveActive` CAN ACTUALLY PRODUCE.
+ *
+ * A `CLIENT_LEAVES` row is not a declaration — it is a promise that some URL resolves to it, and
+ * the breadcrumb is the only surface that reads it. A leaf nothing resolves to is dead code that
+ * LOOKS like a shipped behaviour: the row, its label key and its role floor all read as though the
+ * crumb deepens on that page, and it never does.
+ *
+ * THE SAMPLE PATH TABLE IS TYPED `Record<ClientLeafId, string>` deliberately: a new leaf cannot be
+ * added to the registry without naming, here, the URL that reaches it — and if no such URL exists,
+ * this cell says so instead of the reviewer having to execute the resolver by hand.
+ *
+ * A leaf under a TOP-LEVEL `ACCOUNTING_ITEMS` segment is the shape that cannot work:
+ * `resolveActive` matches that list on `rest[0]` alone and returns before `CLIENT_NAV.find` /
+ * `leafFor` are ever reached. That is why `plans` — a top-level accounting segment with `/new`,
+ * `/:planId` and `/:planId/revise` below it — carries no leaf at all.
+ */
+const LEAF_SAMPLE_PATH = {
+  journalComposer: `/clients/${A}/accounting/journal/new`,
+  periodicAdjustment: `/clients/${A}/accounting/adjustments/new`,
+  workDetail: `/clients/${A}/work/work-1`,
+  knowledgeRecord: `/clients/${A}/knowledge/record-1`,
+} satisfies Record<ClientLeafId, string>;
+
+test("every registered client LEAF is reachable — a leaf no URL resolves to is dead code", () => {
+  const unreachable = CLIENT_LEAVES.map((leaf) => ({
+    id: leaf.id,
+    path: LEAF_SAMPLE_PATH[leaf.id],
+    got: resolveActive(LEAF_SAMPLE_PATH[leaf.id], params()).clientLeaf,
+  })).filter((row) => row.got !== row.id);
+  assert.deepEqual(unreachable, [],
+    "every CLIENT_LEAVES row must be produced by resolveActive for its own sample path");
 });
 
 test("a DEEPER path than a leaf resolves to the PARENT with no leaf — no crumb for a route nobody serves", () => {
