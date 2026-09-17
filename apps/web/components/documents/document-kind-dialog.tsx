@@ -33,6 +33,7 @@ import { setDocumentKind } from "@/lib/documents/doors";
 import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import type { DialogRefusal } from "@/components/common/dialog-refusal";
 import { DOCUMENT_KINDS } from "@/lib/documents/types";
+import { renderKindLabel } from "@/lib/documents/kind-label";
 
 export function DocumentKindDialog({
   documentId, currentKind, busy, act, refusal, onChanged,
@@ -73,15 +74,27 @@ export function DocumentKindDialog({
       })}
     >
       <div className="flex flex-col gap-2">
+        {/* #633 AC2, grafted here at integration because #646 MOVED this control out of
+            `document-admin.tsx`: the current kind is a PHRASE. The line used to interpolate
+            `document_kind` raw ("Current: ssm_company_doc") and a null kind read "Current:
+            unclassified" — an absence rather than the actionable "Needs classification" state
+            AC3(a) names. `renderKindLabel` answers both from the one key set
+            (`lib/documents/kind-label.ts`). */}
         <p className="text-sm text-muted-foreground" data-testid="kind-dialog-current">
-          {t("kindCurrent", { kind: currentKind ?? t("kindUnclassified") })}
+          {t("kindCurrent", { kind: renderKindLabel(currentKind, t) })}
         </p>
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
             <SelectValue placeholder={t("kindPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+            {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB enum,
+                because that value is exactly what `set_document_kind` is called with. The
+                ROSTER is deliberately the full one here: `document-kind-control.tsx` (#633's
+                list/receipt entrance) excludes `consent_evidence` because that door always
+                refuses it, and #633 recorded this detail surface's full roster as an
+                observation it would not change. */}
+            {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Textarea

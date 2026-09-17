@@ -2,9 +2,14 @@
 //
 // `lib/documents/kind-label.test.ts` pins the key set and the message file. This file
 // pins the three surfaces that were rendering the enum token itself before #633:
-//   * `document-admin.tsx:77` — every SelectItem was `{k}`, so the classify control
-//     offered "ssm_company_doc" and "e_invoice_xml" as choices;
-//   * the same file's `kindCurrent` line, interpolating `doc.document_kind` raw;
+//   * the detail surface's classify control — every SelectItem was `{k}`, so it offered
+//     "ssm_company_doc" and "e_invoice_xml" as choices. AT WAVE INTEGRATION that control
+//     MOVED: #646 lifted it out of `document-admin.tsx` into its own exported
+//     `document-kind-dialog.tsx` (so #633's list/receipt entrance can mount the same
+//     component), and #633's phrase graft moved with it. The two cells below therefore
+//     drive `DocumentKindDialog`, which is where that Select and that `kindCurrent` line
+//     live today — same properties, same surface, new file;
+//   * the same control's `kindCurrent` line, interpolating `doc.document_kind` raw;
 //   * `document-metadata.tsx`'s `documentKind` badge, via `copy.ts`'s own
 //     `badgeLabel` arm that returned `badge.value` verbatim — the arm whose comment
 //     (`copy.ts:115-119`) is the WRITTEN DECISION this ticket overturns by name.
@@ -22,7 +27,7 @@ import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
-import { DocumentAdmin } from "./document-admin";
+import { DocumentKindDialog } from "./document-kind-dialog";
 import { DocumentMetadata } from "./document-metadata";
 import { DOCUMENT_KINDS } from "../../lib/documents/types";
 import messages from "../../messages/en.json";
@@ -65,18 +70,48 @@ function assertNoRawKind(text: string, where: string): void {
   }
 }
 
-test("DocumentAdmin's classify Select offers 20 PHRASES, never the DB enum tokens", async () => {
-  const h = await renderComponent(wrap(createElement(DocumentAdmin, {
-    document: DOC, busy: false, act: async () => true, onCorrect: () => {},
+type Node_ = { tagName?: string; childNodes?: Node_[]; getAttribute?: (k: string) => string | null };
+
+function body(): Node_ {
+  return (globalThis as unknown as { document: { body: Node_ } }).document.body;
+}
+
+/** Mount `DocumentKindDialog` for one document and OPEN it. The dialog PORTALS, so its
+ *  contents live under `document.body` rather than the render container — the idiom
+ *  `document-revision-dialog.test.tsx` established for the same primitive. */
+async function openKindDialog(currentKind: string | null): Promise<{
+  h: Awaited<ReturnType<typeof renderComponent>>; b: Node_; text: () => string; close: () => Promise<void>;
+}> {
+  const h = await renderComponent(wrap(createElement(DocumentKindDialog, {
+    documentId: DOC.id, currentKind, busy: false, act: async () => true,
   })));
+  const b = body();
+  (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+  const trigger = h.find((n) => n.tagName === "BUTTON" && /^Set kind$/.test(textOf(n)));
+  assert.ok(trigger, "the kind-change trigger must render");
+  await h.fireEvent(trigger!, "click");
+  for (let i = 0; i < 6; i++) await h.settle();
+  return {
+    h, b,
+    text: () => textOf(b as never),
+    close: async () => {
+      await h.unmount();
+      const el = b as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+      if (el.childNodes?.includes(h.container)) el.removeChild(h.container);
+    },
+  };
+}
+
+test("the detail surface's classify Select offers 20 PHRASES, never the DB enum tokens", async () => {
+  const d = await openKindDialog("ssm_company_doc");
   try {
-    const text = h.text();
-    assertNoRawKind(text, "DocumentAdmin");
-    // Non-vacuity: the control really did render its options. `@base-ui` renders the
-    // list lazily, so assert on the ONE kind the trigger/current line always shows.
+    const text = d.text();
+    assertNoRawKind(text, "DocumentKindDialog");
+    // Non-vacuity: the control really did render. `@base-ui` renders the option list
+    // lazily, so assert on the ONE kind the current line always shows.
     assert.match(text, /SSM company document/, "the current kind must render as its phrase");
   } finally {
-    await h.unmount();
+    await d.close();
   }
 });
 
@@ -105,15 +140,13 @@ test("DocumentMetadata's kind badge renders the phrase, not the enum (copy.ts:11
 });
 
 test("an UNCLASSIFIED document names that state on the detail surface — never a blank badge", async () => {
-  const h = await renderComponent(wrap(createElement(DocumentAdmin, {
-    document: { ...DOC, document_kind: null }, busy: false, act: async () => true, onCorrect: () => {},
-  })));
+  const d = await openKindDialog(null);
   try {
-    const text = h.text();
+    const text = d.text();
     assert.match(text, /Needs classification/, "a null kind must render as the NAMED state");
-    assert.equal(textOf(h.container).includes("unclassified"), false, "the raw word 'unclassified' is not a phrase");
+    assert.equal(text.includes("unclassified"), false, "the raw word 'unclassified' is not a phrase");
   } finally {
-    await h.unmount();
+    await d.close();
   }
 });
 
@@ -124,9 +157,9 @@ test("[633] fix round: the list/receipt classify control never offers a kind the
   // produce an honest-but-useless refusal. The audited path is
   // `classifyConsentEvidenceDocument` (`lib/documents/doors.ts:189`), owner-floored.
   //
-  // `DocumentAdmin`'s own classify Select (the #624/#646 detail surface) still offers the
-  // full roster; that surface is not this ticket's to change and is recorded as an
-  // observation, not edited here.
+  // The DETAIL surface's own classify Select (`document-kind-dialog.tsx` since #646 moved it
+  // out of `DocumentAdmin`) still offers the full roster; that surface is not this ticket's to
+  // change and is recorded as an observation, not edited here.
   const { CLASSIFIABLE_DOCUMENT_KINDS } = await import("./document-kind-control");
   assert.equal(CLASSIFIABLE_DOCUMENT_KINDS.includes("consent_evidence" as never), false,
     "a kind the door always refuses must not be offered");
