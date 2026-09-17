@@ -1019,11 +1019,17 @@ settle-door convention, with a regression cell proving the new order under concu
 
 ---
 
-**Total: 56 issues** (9 cross-cutting + 47 ticket-specific, after merging duplicate/related rows from
-WAVE-DIGEST §3 — the `merge_counterparties` pair, the 0203 firm-setup polish trio, the client-creation
-name-collision pair, and the needs-you/review-queue pair each became one issue instead of two or
-three — and adding the `approve_wrong_client_correction` follow-up the #649 round-2 re-check named
-but the digest did not carry as its own row). This runs slightly past the "roughly 40-55" target;
-the four merges above already fold nine digest rows into four issues, and further merging would
-start combining genuinely unrelated fixes under one title, which makes an issue harder for an agent
-or human to pick up and close.
+**Total: 54 issues** (10 cross-cutting + 44 ticket-specific), against 61 rows in WAVE-DIGEST §3
+(10 cross-cutting + 51 ticket-specific) plus one follow-up from DECISIONS §3.1 that the digest did
+not carry as its own row. The count moves from 61+1=62 candidate rows to 54 through six merges of
+duplicate/related rows, each declared inside the merged issue's own Evidence line: the fixed-asset
+CLR40 pair (#639, 2→1), the `merge_counterparties` pair (#647, 2→1), the 0203 firm-setup polish trio
+(#648, 3→1), the client-creation name-collision pair (#649, 2→1), the prepayment term-lifecycle trio
+(#653, 3→1), and the needs-you/review-queue pair (#650, 2→1) — the last of these bundles two small,
+independently-fixable polish items under one title as an editorial judgment call, not because they
+are the same underlying defect; split it back into two issues if that reads as overreach. One issue
+(`approve_wrong_client_correction`'s lock order) is new, sourced from DECISIONS §3.1's final row
+rather than from WAVE-DIGEST §3. No cross-cutting row was merged. This lands inside the "roughly
+40-55" target; no further merging was attempted, since combining any of the remaining rows would
+start joining genuinely unrelated fixes under one title, making the issue harder for an agent or
+human to pick up and close.

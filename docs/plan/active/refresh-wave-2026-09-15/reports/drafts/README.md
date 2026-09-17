@@ -14,9 +14,11 @@ that the orchestrator fills in with the actual merge/CI evidence after the integ
 backlog: 54 issues (10 cross-cutting infrastructure findings, 44 ticket-specific), each with a title,
 a `labels:` line, and a Context/What-is-wrong/Done-when/Evidence body, in the order they should be
 filed. Every issue carries `needs-triage` plus exactly one of `ready-for-agent`/`ready-for-human`
-(27 of each); none use `idea` — these are engineering follow-ups, not product ideas. It merges eight
+(27 of each); none use `idea` — these are engineering follow-ups, not product ideas. It merges six
 sets of near-duplicate rows from `reports/WAVE-DIGEST.md` §3 into single issues (declared explicitly
-inside each merged issue's Evidence line) and adds one follow-up
+inside each merged issue's Evidence line — one of the six, the needs-you/review-queue pair, bundles
+two independently-fixable polish items as an editorial call rather than a true duplicate; split it
+back into two if that reads as overreach) and adds one follow-up
 (`clara.approve_wrong_client_correction`'s lock ordering) that DECISIONS.md §3.1 named but the
 digest did not carry as its own row.
 
