@@ -1,0 +1,33 @@
+Landed on `impl/653-prepayment-amortisation` via 12 commits (40 files, +8727/-16 vs `origin/main`).
+
+Migration 0208 extends 0193 with the amortisation-schedule kind (sole widener of `accounting_plans.kind`), a per-period basis (`_plan_occurrence_basis` recut), and measured-pin recuts of `_plan_admit_occurrence` / `create_accounting_plan` / `_assert_plan_schedule`. New relation `clara.prepayment_schedules` carries the recognition entry, the term (from a `document_service_periods` row — document-bound only this wave), exact-cent allocation with a final-period residual, and per-occurrence links. `prepayment_schedule_v1` is reused verbatim; the expense-side pairing and its three walls are re-derived in the new door, not by calling the 0045 lane. Occurrence purpose stays `journal_entry`; atomicity is entry+receipt+occurrence in one commit. Route `/clients/[clientId]/prepayments`; preview/revision/pause/end retain prior runs.
+
+Two integration notes for the merge worker: the CI edit to `db-live-gates/action.yml` briefly lost the `#640` sibling block's per-line `\` continuation (fixed); and `plans-mock.mjs`, owned by the **already-merged #640**, had an uncached body reader that broke once #653 legitimately shared `pause_accounting_plan` — both mocks now use the shared `readCachedJson`, and #640's own `plans-walk` was re-run green (9/9). This touches a file outside #653's scope since it affects an already-shipped ticket.
+
+Local evidence (round-1 recheck, independently re-driven against the doors, not just the fix round's cells): `prepayment-schedule` 18/18, `prepayment-occurrences` 10/10 (28/28 from scratch on a fresh cluster), runtime basis unit 11/11, runtime occurrence e2e PASS 1–5, apps/web unit 3752/3750 pass, one real-harness run with `prepayments-walk` (6/6) and `plans-walk` (9/9) both green. One review round (two blockers, three shoulds, six notes), all fixed and independently re-verified. Hosted evidence pending.
+
+| AC / Row | State | Evidence |
+|---|---|---|
+| AC1 required set + zero-value refusal | Done | Door requires posted recognition, judged expense account + grounds, purpose, resolved authority, term from document. Round-1 fix added: prepaid leg judged by `_adj_line_eligibility_breach` (closes 653-B2); web form now asks for the cited instruction instead of fabricating one (closes 653-B1). |
+| AC2 exact-cent allocation, final-period residual | Done | `p653.schedule.exact_cents` (8333×11 + 8337 = 100,000); per-period basis drives belt and catch-up. |
+| AC3 one occurrence under repetition/lost-response/restart | Done | Lock-barrier race converges to one occurrence; World e2e PASS 1–5. |
+| AC4 atomic occurrence; configuration ≠ posted | Partial, as briefed | Per-occurrence atomicity proven; recognition+configuration in one commit is unbuildable (evaluator refuses a non-approved source entry) — stated in the door's own answer and the UI copy. |
+| AC5 park / locked-period catch-up / no historical authority | Partial, as briefed | Locked-period and no-historical-authority closed; the term park is **not claimed** — `claraWork_v4` contract only. |
+| AC6 register kind; preview/revision/pause/end retain prior runs | Done | Additive kind widening; revision refuses a cadence change; pause/end reuse #640's doors. |
+| AC7 real journey, 320px/zoom/keyboard/SR/motion/URL/drafts | Done | Round-1 fix closed the earlier host-contention caveat: a clean whole-file run (6/6, 34.8s, exit 0) plus the recheck's independent 6/6 run. |
+| AC8 production read/command, least-privileged, real World | Done (local) | Every door cell runs as bookkeeper `bob` via `humanQuery`; viewer floor proven refused on write |
+| C08.1 adjustment UI reframe | Partial | New surface renders schedule/authority/allocation/feedback; `adjustment_templates.schedule` (0045 register) stays unrendered. |
+| C08.2 zero-value proposal | Verify-only + finding | Door routes through `_assert_journal_basis`; the arm that actually answers is `exactly_one_side`, not `nonzero_total` — see follow-up below (shared with #652). |
+| C55.13 re-read then ask a bounded question | Not claimed | `claraWork_v4` term-park contract only. |
+| C83.7 duplicate of C55.13 | Not done | Closes with C55.13's verdict. |
+| C88.13 synthetic + real-environment | Partial | Synthetic extended to amortisation (trigger, effect, crash-retry, catch-up); real-environment evidence separately owed. |
+
+**Review summary.** One round, three lenses: two blockers (653-B1 the web form sent a journal-entry id as its authority, unusable against the real database; 653-B2 any single-debited-asset entry, including a receivable or bank account, could be amortised), three shoulds (unordered `limit 50` with no truncation flag; a raced duplicate surfaced a bare `23505` instead of the lane's refusal vocabulary; a cell title claimed an untested negative), six notes (CI formatting, the `plans-mock.mjs` cross-lane edit, rig handling, evidence gaps since closed). All fixed and red-celled first; the recheck independently re-drove every finding against the doors directly and closed all ten with no new blockers.
+
+**Ratifications applied.** None. DECISIONS §3.1 has no row naming #653; the two #652 rows on the accrual authority window and the "no reachable due date" refusal reference #653 only as the owner of the plan-lane recuts a follow-up asks it to share.
+
+**Residuals / follow-ups.** Blueprint drift (§3.2, not fixed this wave): `docs/PRD.md:69` still describes an "existing authorisation rule" as accepted plan authority, but `authority_kind` admits only `explicit_instruction`, unchanged by 0208; and PRD:69's prepayment chat entrance is a contract only, not shipped. Named residuals: the prepaid-leg wall is negative-only, not a positive prepayment roster (product decision); a memo-only recognition (no document) has no amortisation path; overlap detection stays advisory/one-sided, `_assert_journal_basis`'s `nonzero_total` arm is structurally unreachable, and `rig-isolation` T10b reds under WDK-world contamination (all three shared with #652); the 0154 role census is a cluster-global literal (shared with #646/#654); no read flags a superseded term row; `packages/runtime/README.md`'s "five standalone e2es" line is stale.
+
+**Successor contracts (not cut).** `chatTurn_v20`'s `start_prepayment_schedule_work` (no migration, no `WORK_ACCEPTED_PURPOSES` widening). `claraWork_v4`'s term park (roster addition `read_prepayment_source`, read-only; the settled answer applies through the human door `clara.record_document_service_period`, never the run itself).
+
+**Integration evidence:** <INTEGRATION_PLACEHOLDER>
