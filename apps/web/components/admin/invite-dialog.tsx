@@ -40,21 +40,37 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/common/native-select";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { refusalForThisDialog } from "@/lib/parts/door-dialog-outcome";
+import { DoorDialogRefusal, type DialogRefusal } from "@/components/common/dialog-refusal";
 import { ROLE_LADDER, type MemberRole } from "@/lib/members/reads";
 
 export function InviteDialog({
   open,
   onOpenChange,
   busy,
+  refusal,
+  addressInvalid = false,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   busy: boolean;
+  /** #625 AC3 — the panel's standing failure, rendered VERBATIM inside this modal. Until this
+   *  existed, a refused invitation painted in the page-level StateBanner BEHIND the backdrop:
+   *  the dialog correctly stayed open holding the typed address, and the sentence explaining why
+   *  was unreadable without throwing that address away. Same paint, same law and same
+   *  `refusalForThisDialog` guard the confirm dialog uses. */
+  refusal?: DialogRefusal;
+  /** #625 AC6 — is the SERVER's verdict specifically about this ADDRESS? The panel decides, from
+   *  typed courier codes only (see its own comment). This component never judges an address: the
+   *  header below records why a second client-side gate would be worse than none, and that is
+   *  unchanged. All this flag does is put a server verdict beside the control it concerns. */
+  addressInvalid?: boolean;
   /** Performs exactly one courier round trip. The dialog does not inspect the
    *  outcome — the panel decides whether to close (it stays open on a governed
    *  refusal so the admin can correct the email or the role and try again). */
@@ -64,10 +80,15 @@ export function InviteDialog({
   const tRoles = useTranslations("Members.roleOptions");
   const tDialog = useTranslations("Members.dialog");
   const emailId = useId();
+  const emailErrorId = useId();
   const roleId = useId();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<MemberRole>("bookkeeper");
   const guardRef = useRef(createSingleFireGuard());
+  // CB-AE2E-004's counter, in this dialog too: bumped on every SETTLED submit so a repeated,
+  // byte-identical refusal still re-announces and re-takes focus, and so a refusal raised before
+  // this dialog ever submitted is somebody else's news and is not painted here.
+  const [attempt, setAttempt] = useState(0);
 
   // A closed dialog forgets what was typed. Without this, re-opening after a
   // successful invite would present the address that was just invited — one
@@ -78,6 +99,9 @@ export function InviteDialog({
       setEmail("");
       setRole("bookkeeper");
     }
+    // A fresh visit starts with no settled attempt of its own, so an older refusal cannot paint
+    // on it — the same reset `MembersConfirmDialog` performs for the same reason.
+    setAttempt(0);
   }, [open]);
 
   return (
@@ -88,17 +112,25 @@ export function InviteDialog({
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={emailId}>{t("emailLabel")}</Label>
+          {/* #625 — the address moves into a Field (appendix D row 28) so a SERVER verdict about
+              it can sit beside the control, carrying `data-invalid` and `aria-invalid` rather
+              than only a paragraph somewhere else on the screen. The input keeps every property
+              it had: `type="email"` for the keyboard and autofill, and NO `required`, NO pattern
+              and NO submit gate — the courier and the door remain the only judges. */}
+          <Field data-invalid={addressInvalid || undefined}>
+            <FieldLabel htmlFor={emailId}>{t("emailLabel")}</FieldLabel>
             <Input
               id={emailId}
               type="email"
               autoComplete="off"
               placeholder={t("emailPlaceholder")}
+              aria-invalid={addressInvalid || undefined}
+              aria-describedby={addressInvalid ? emailErrorId : undefined}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
+            {addressInvalid ? <FieldError id={emailErrorId}>{t("addressInvalid")}</FieldError> : null}
+          </Field>
           <div className="flex flex-col gap-1">
             <Label htmlFor={roleId}>{t("roleLabel")}</Label>
             <NativeSelect
@@ -119,6 +151,10 @@ export function InviteDialog({
             <p className="max-w-prose text-xs text-muted-foreground">{t("ceilingNote")}</p>
           </div>
         </div>
+        {/* The FORM-LEVEL half, distinct from the field's own message above: whatever the server
+            refused, in its own words, with its own code chip. A governed refusal about the ROLE
+            lands here and nowhere near the address. */}
+        <DoorDialogRefusal refusal={refusalForThisDialog(refusal, attempt)} attempt={attempt} />
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{tDialog("cancel")}</DialogClose>
           <Button
@@ -128,9 +164,12 @@ export function InviteDialog({
               // stays retryable from this same open dialog once the admin edits
               // the address — the guard closes the double-click window, it does
               // not close the dialog for good.
-              await runOnce(guardRef.current, async () => {
+              const outcome = await runOnce(guardRef.current, async () => {
                 await onSubmit(email, role);
               });
+              // Only a submit that actually RAN counts: a click the single-fire guard dropped
+              // changed nothing, so it must not license painting a refusal either.
+              if (outcome.ran) setAttempt((n) => n + 1);
             }}
           >
             {busy ? tDialog("working") : t("confirm")}

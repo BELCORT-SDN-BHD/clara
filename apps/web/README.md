@@ -139,6 +139,73 @@ deriving it would invent an accounting fact on a professional's record. Leaving 
 a real choice: the settle door is then not called at all, and the dialog says so, rather than
 manufacturing a `fy_end_day_required` refusal for a value nobody gave.
 
+## Membership: invitation, joining, role change and removal
+
+Two floors, both enforced by the database and only SHAPED by the interface. The roster
+(`clara.firm_members_visible`) is published from **bookkeeper** upward, with the email column
+nulled below admin; the invitation list (`clara.firm_invites_visible`) is published from **admin**
+upward, so it correctly reads empty for a bookkeeper. `/settings/members` renders them as two
+stacked sections, each stating its own floor, rather than one merged table — a merged table would
+show a bookkeeper a list whose invite rows are structurally absent with nothing saying so.
+
+A control a caller's rank cannot use is **not rendered** (裁-187). That is affordance shaping, not
+a wall: `clara._human_ctx(clara.role_rank('admin'))` still refuses CLR04 for anyone reaching a door
+another way, and the last-owner trigger (`clara._tf_guard_last_owner`) is never pre-empted — the
+click happens and the database's own sentence renders verbatim. Every act re-reads the roster, the
+invitations **and** the caller's own context, so a caller demoted mid-session loses the role menu
+and the Invite entry on the next authoritative response, refused acts included.
+
+**Issuing an invitation goes through `POST /api/invite`, not the browser.**
+`clara.invite_member` hands its caller the plaintext token exactly once, above persistence, and
+sending the mail needs a service-role key; neither may reach a browser. The route calls the door as
+the caller — so the authority check runs against the real person — and the plaintext goes into the
+mail body and nowhere else. Its failures are TEN typed courier codes, rendered under their own
+title so they are never mistaken for the database's words: `no_session`, `cross_origin`,
+`invalid_request`, `unsupported_address`, `not_permitted`, `mail_not_configured`,
+`recipient_has_account`, `mail_unavailable`, `mail_failed`, `transport` — plus a governed
+`DoorRefusal` relayed verbatim when the door itself refused. `mail_failed` is the one that creates
+something: the invitation exists and its link is unrecoverable, so the copy sends the admin to
+revoke it.
+
+**There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
+be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
+(CLR10, `0147:399`). Revoke, then invite again — the old link stops working immediately, and the
+UI says so. A compound "revoke and re-invite" control is deliberately absent too: it would be three
+steps across two transactions and one external mail provider, with no compensation, and a half
+failure would leave an admin with neither a pending invitation nor a working link.
+
+**There is no per-firm seat limit, by design.** The estate's only capacity is the estate-wide
+Admission capacity on new FIRMS, which the in-firm invitation path never reaches; per-firm seats
+are deferred product scope (`docs/PRD.md:126`). No capacity control appears anywhere on this
+surface, and the absence is stated in the copy rather than left as a silence.
+
+**Accepting an invitation** (`/invite/:token`) runs Supabase's `verifyOtp` with a hard-coded
+`type: "invite"`, reads the result fail-closed, then — **before the password fields render** —
+calls `clara.preview_invite` so the invited person can see which firm and which role they are
+about to join. The rule that step follows: **a definite negative blocks; an indefinite read
+degrades.** A revoked, expired or already-accepted invitation gets its own face and no password
+form; the door's single refusal gets ONE face worded to name neither an unknown token nor a wrong
+address, because the database deliberately cannot tell those apart (no existence oracle); a
+transport failure or an unreadable answer renders the password form with the preview block absent
+and one honest line, because `clara.accept_invite` re-checks every one of those facts inside its
+own transaction and a reader that could not read is not a verdict. A settled acceptance ends on a
+JOINED stage naming the firm and the accepted role, with an explicit control to enter the
+workspace — the journey never navigates on its own.
+
+Pre-authentication preview is a NAMED RESIDUAL: `clara.preview_invite` is granted to
+`clara_authenticated` only and this estate declares no `anon` role, so showing an invitation to a
+signed-out visitor needs a server route holding a service key, which is a separate ticket.
+
+A SECOND NAMED RESIDUAL, in the other direction: the preview reproduces two of `clara.accept_invite`'s
+three walls, not three. The acceptance door also re-checks the ISSUER's *current* rank, so an
+invitation whose issuer has since been demoted — or who has left the firm at all — previews as
+pending, the password form renders, and the refusal arrives at the last step in the database's own
+words ("re-issue by an owner"), relayed verbatim. The admin roster is blind in exactly the same
+place, because `clara.firm_invites_visible` does not carry the issuer's rank either; closing it means
+a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0209
+note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
+(`p625.preview.issuer_rank`).
+
 ## Close and bank operating order
 
 Prepare and reconcile the books before beginning a financial-year close. For an ongoing client with brought-forward balances, record an evidenced opening position in this order:

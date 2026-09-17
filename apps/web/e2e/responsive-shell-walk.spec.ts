@@ -134,6 +134,42 @@ test("at 640 CSS px the workbench keeps 320px and the page never scrolls sideway
 
   await page.goto(`/clients/${CLIENT_A}/journals`);
   await expectReflows(page, "client journals");
+
+  // #625 — THE ROSTER FACE, which this loop had never measured. It carries the widest table on a
+  // settings destination (five columns plus a per-row menu) and two dialogs, and until now nobody
+  // had asked whether it fits the 320 CSS px workbench floor.
+  await page.goto("/settings/members");
+  await expect(page.getByRole("heading", { name: "Everyone with access", level: 2 })).toBeVisible();
+  await expectReflows(page, "settings members");
+});
+
+/**
+ * #625 — THE INVITE-ACCEPTANCE FACE at 640 and at 320 CSS px.
+ *
+ * It gets its own cell rather than a row in the loop above because it is an (entry)-group page
+ * with no firm shell at all: `expectReflows` asks for `[data-firm-workbench]`, which this face
+ * correctly does not have. What it OWES is the other half of the same acceptance — the document
+ * must not scroll sideways, and the card's own primary action must stay reachable.
+ */
+test("#625: the invite-acceptance card reflows at 640 and at 320 CSS px", async ({ page }) => {
+  // A token-shaped URL. Nothing is consumed on mount (`invite-accept-form.tsx`'s click gate), so
+  // this face renders without any fixture behind it — which is exactly the state an invited person
+  // meets before they press anything.
+  const invite = `/invite/e2e-supabase-token-hash?ct=${"c".repeat(64)}`;
+  for (const size of [NARROW, { width: 320, height: 720 }] as const) {
+    await page.setViewportSize(size);
+    await page.goto(invite);
+    await expect(page.getByRole("heading", { name: "Accept your invitation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Accept invitation" })).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(
+      overflow.scrollWidth,
+      `invite acceptance at ${size.width}px: the document scrolls sideways (${overflow.scrollWidth} > ${overflow.clientWidth})`,
+    ).toBeLessThanOrEqual(overflow.clientWidth + 1);
+  }
 });
 
 test("the client route carries exactly one h1 — identity now lives in the shell, not a second heading", async ({ page }) => {
@@ -622,6 +658,11 @@ test("裁-13: target-size is clean at the NARROW viewport too, where the new con
   for (const [face, url] of [
     ["firm home", "/"],
     ["client workspace", `/clients/${CLIENT_A}`],
+    // #625 — the two membership faces. The roster's row menu, its two confirmations and the
+    // invite card's single button are controls this scan had never seen at a narrow width, which
+    // is exactly where a 24px target is easiest to ship by accident.
+    ["settings members", "/settings/members"],
+    ["invite acceptance", `/invite/e2e-supabase-token-hash?ct=${"c".repeat(64)}`],
   ] as const) {
     await page.goto(url);
     await page.waitForLoadState("networkidle");

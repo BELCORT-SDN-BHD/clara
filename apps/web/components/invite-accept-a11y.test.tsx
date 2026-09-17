@@ -49,9 +49,23 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
   });
 }
 
-function estate(refusal?: { code: string; message: string }, contextRows: unknown[] = []) {
+/** #625 — what `clara.preview_invite` (0209) answers. The password step now renders a preview
+ *  block above its fields, so every a11y scan below walks that block too. */
+const PREVIEW_ROW = {
+  firm_name: "ROME PROPERTIES",
+  role: "bookkeeper",
+  status: "pending",
+  masked_email: "a***@example.test",
+};
+
+function estate(
+  refusal?: { code: string; message: string },
+  contextRows: unknown[] = [],
+  preview: unknown = PREVIEW_ROW,
+) {
   return (async (u: RequestInfo | URL) => {
     const url = String(u);
+    if (url.includes("/rpc/preview_invite")) return jsonResponse(preview);
     if (url.includes("/rpc/accept_invite")) {
       return refusal ? jsonResponse(refusal, 400) : jsonResponse({ membership_id: "m1" });
     }
@@ -204,7 +218,7 @@ test("the verification-error state has zero a11y violations", async () => {
       const gate = findIn(h.container as never, byButtonText(/Accept invitation/));
       await h.act(async () => { await clickButton(gate as never); });
       for (let i = 0; i < 4; i++) await h.settle();
-      assert.match(textOf(h.container as never), /didn't work/, "the error state must have rendered");
+      assert.match(textOf(h.container as never), /verified nobody/, "the P2 verification face must have rendered");
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();
@@ -218,6 +232,68 @@ test("the incomplete-link state has zero a11y violations", async () => {
     try {
       for (let i = 0; i < 3; i++) await h.settle();
       assert.match(textOf(h.container as never), /This invite link is incomplete/);
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ===========================================================================
+// #625 — THE THREE STAGES THIS TICKET ADDS, each scanned in its own right.
+// ===========================================================================
+
+/** The `caller_context` row the joined stage renders. Well formed on every one of the six
+ *  columns `readCallerContextForSubject` validates — a placeholder would be denied as malformed
+ *  and the stage would never appear. */
+const P625_CONTEXT_ROW = {
+  user_id: SUB,
+  firm_id: "33333333-3333-3333-3333-333333333333",
+  firm_name: "ROME PROPERTIES",
+  role: "bookkeeper",
+  role_rank: 1,
+  is_operator: false,
+};
+
+test("p625.a11y: the preview block above the password fields has zero a11y violations", async () => {
+  await withMockedEnv(estate(), async () => {
+    const h = await mounted({ inviteToken: CLARA_TOKEN });
+    try {
+      await toPasswordStep(h);
+      const text = textOf(h.container as never);
+      assert.match(text, /ROME PROPERTIES/, "the preview block must have rendered — otherwise this scan proves nothing");
+      assert.match(text, /a\*\*\*@example\.test/, "…including the masked address");
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.a11y: a blocked invitation face (revoked) has zero a11y violations and offers no password field", async () => {
+  await withMockedEnv(estate(undefined, [], { ...PREVIEW_ROW, status: "revoked" }), async () => {
+    const h = await mounted({ inviteToken: CLARA_TOKEN });
+    try {
+      const gate = findIn(h.container as never, byButtonText(/Accept invitation/));
+      assert.ok(gate);
+      await h.act(async () => { await clickButton(gate as never); });
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.match(textOf(h.container as never), /was revoked/, "the revoked face must have rendered");
+      assert.equal(findIn(h.container as never, byLabelledInput(/Password/)), null);
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p625.a11y: the joined stage has zero a11y violations", async () => {
+  await withMockedEnv(estate(undefined, [P625_CONTEXT_ROW]), async () => {
+    const h = await mounted({ inviteToken: CLARA_TOKEN });
+    try {
+      await toPasswordStep(h);
+      await submit(h);
+      assert.match(textOf(h.container as never), /You've joined/, "the joined stage must have rendered");
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

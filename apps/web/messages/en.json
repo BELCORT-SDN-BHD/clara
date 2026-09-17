@@ -677,7 +677,8 @@
       "statusRevoked": "Revoked",
       "revoke": "Revoke",
       "issue": "Invite someone",
-      "issued": "The invitation to {email} was sent."
+      "issued": "The invitation to {email} was sent.",
+      "noResendNote": "There is no resend and no seat limit. An invitation's link cannot be recovered once it is sent, so to give someone a fresh one, revoke the invitation below and invite them again — the old link stops working immediately."
     },
     "inviteDialog": {
       "title": "Invite someone to this firm",
@@ -686,15 +687,18 @@
       "emailPlaceholder": "name@example.com",
       "roleLabel": "Role",
       "confirm": "Send invitation",
-      "ceilingNote": "You can invite someone at your own rank or below. The firm refuses anything higher."
+      "ceilingNote": "You can invite someone at your own rank or below. The firm refuses anything higher.",
+      "addressInvalid": "This address was refused. Correct it and send again."
     },
     "removeDialog": {
       "title": "Remove {name} from this firm?",
+      "titleInFirm": "Remove {name} from {firm}?",
       "description": "They lose access immediately and any agent credentials they hold for this firm are revoked. There is no undo verb: inviting them again creates a fresh membership.",
       "confirm": "Remove"
     },
     "revokeDialog": {
       "title": "Revoke the invitation for {email}?",
+      "titleInFirm": "Revoke {firm}'s invitation for {email}?",
       "description": "The link stops working. Revoking is also how you free this address for a fresh invitation before the current one expires.",
       "confirm": "Revoke"
     },
@@ -3541,7 +3545,45 @@
     "linkIncompleteSignIn": "Go to sign in",
     "unconfirmedTitle": "Your account is set up",
     "unconfirmedDescription": "Your invitation went through, but we couldn't confirm your access to the firm just now. Check again, or sign in from the login page.",
-    "unconfirmedRetry": "Check again"
+    "unconfirmedRetry": "Check again",
+    "preview": {
+      "checkingTitle": "Checking your invitation",
+      "checkingDescription": "Reading which firm invited you, and at which role.",
+      "heading": "Your invitation",
+      "firmLabel": "Firm",
+      "roleLabel": "Role",
+      "emailLabel": "Invited address",
+      "roleNote": "Your role decides what you can do in this firm. An admin there can change it later.",
+      "indefiniteNote": "We couldn't show which firm this invitation is for just now. You can still continue: the firm checks the invitation itself when you finish.",
+      "expiredTitle": "This invitation has expired",
+      "expiredDescription": "The invitation to {firm} was open for a limited time and that time has passed. There is no resend: ask an admin there to revoke it and invite you again, which issues a fresh link.",
+      "revokedTitle": "This invitation was revoked",
+      "revokedDescription": "Someone at {firm} withdrew it, so the link no longer works. If that was not intended, ask them to invite you again.",
+      "acceptedTitle": "This invitation was already accepted",
+      "acceptedDescription": "Your membership of {firm} already exists, so there is nothing left to accept here. Sign in with the address the invitation was sent to.",
+      "mismatchTitle": "This link is not valid for the address you are signed in as",
+      "mismatchDescription": "Open it while signed in as the person it was sent to, or sign out of this browser and follow the link again. We deliberately say no more than that: the firm does not tell a signed-in stranger anything about an invitation that is not theirs.",
+      "signIn": "Go to sign in"
+    },
+    "failure": {
+      "reasonLabel": "Reference: {reason}",
+      "providerLabel": "The sign-in service said:",
+      "signIn": "Go to sign in",
+      "rejectedTitle": "This invite link didn't work",
+      "rejectedDescription": "The sign-in service rejected it. A link that has already been used and a link that has expired are indistinguishable at this point, so this page will not guess which it was. Ask whoever invited you to revoke the invitation and send a new one.",
+      "noSessionTitle": "This link verified nobody",
+      "noSessionDescription": "The invitation could not be confirmed: the link completed without signing anyone in, which is what a link meant for a different purpose does. Sign out of this browser, then open your invitation link again.",
+      "partialTitle": "Your invitation was only half confirmed",
+      "partialDescription": "The sign-in service answered without finishing the session. Open the link once more; if the same thing happens again, ask whoever invited you for a new invitation.",
+      "subjectTitle": "This link belongs to a different sign-in",
+      "subjectDescription": "This browser is signed in as a different account. Sign out completely first, then open your invitation link again."
+    },
+    "joined": {
+      "title": "You've joined {firm}",
+      "description": "Your membership is active. Everything you do from here belongs to this firm.",
+      "roleLabel": "Your role",
+      "enter": "Enter workspace"
+    }
   },
   "CloseLifecycle": {},
   "OpeningCarryDown": {

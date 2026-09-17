@@ -112,7 +112,7 @@ test("members: the remove dialog traps into its own controls and ESCAPES back to
         for (let i = 0; i < 4; i++) await h.settle();
 
         const text = textOf(body as never);
-        assert.match(text, /Remove Tao Lim from this firm\?/, "the dialog must be open before its walk means anything");
+        assert.match(text, /Remove Tao Lim from ROME PROPERTIES\?/, "the dialog must be open before its walk means anything");
         assert.match(text, /Cancel/, "…and its Cancel path must exist");
         assert.deepEqual(checkKeyboardWalk(body as never), [], "no violations while the confirm dialog is open");
 

@@ -303,6 +303,7 @@ lib/firm-admin/vendor-bindings.test.ts
 lib/firm/activity.test.ts
 lib/firm/capabilities.test.ts
 lib/firm/home-facts.test.ts
+lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts

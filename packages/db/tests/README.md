@@ -52,6 +52,23 @@ gate stops gating the moment a file is renumbered. `tests/fixed-asset-acquisitio
 Every assertion under test in that battery runs through a `humanQuery` / `roleQuery` persona
 (least-privileged role) or a real wake credential; `rootQuery` appears only as a readback.
 
+## Named suite families
+
+`p4t1-*` (`p4t1-invite`, `p4t1-identity`, `p4t1-reads`, `p4t1-add-member-regression`) drive the
+invitation and identity doors — `invite_member`, `accept_invite`, `revoke_invite`,
+`claim_identity` — through `p4t1-fixtures.mjs`, whose `asHumanEmail` sets a real
+`request.jwt.claims` blob carrying **both** `sub` and `email`, because those doors read the address
+from the claim and never from an argument.
+
+`mdrw-*` (`mdrw-rank-walls`) drive the member doors' rank walls: the target-rank wall, the self-act
+refusal, the authz-before-lifecycle ordering, the replay contract and a two-session lock race.
+
+`preview-invite.test.mjs` drives `clara.preview_invite` (0209): the recipient's own read, the
+byte-identical no-oracle refusal, the three non-pending effective statuses, the grant posture, and
+the six non-regression `prosrc` pins that prove 0209 recut nothing. Its gate is
+`preview-invite-preintegration-gate.mjs`; a focused run leaves `CLARA_ALLOW_MISSING_PREVIEW_INVITE`
+unset and must count zero skips.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator
