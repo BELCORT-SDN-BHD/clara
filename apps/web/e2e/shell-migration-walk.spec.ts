@@ -729,16 +729,27 @@ test("D5/D6: plain /work also renders the durable Work list and the agent-task p
   await page.route("**/e2e-supabase/rest/v1/rpc/list_review_queue", jsonRoute(EMPTY_QUEUE));
   await page.route("**/e2e-supabase/rest/v1/agent_tasks_visible**", jsonRoute([]));
   await page.route("**/e2e-supabase/rest/v1/agent_receipts_visible**", jsonRoute([]));
+  // THE DURABLE LIST'S OWN READ, ROUTED HERE — the fourth read this cell owns, for the same reason
+  // as the three above and by the same idiom this file's header names. It is not routed for
+  // convenience: `/work` is FIRM-WIDE, and the firm-wide `list_accounting_work` call is ANSWERED by
+  // #641's lane, which returns its nine fixture rows for a read that names no client (that is its
+  // deliberate design — `work-list-mock.mjs`'s `answerWorkListPage`, and `work-list-walk.spec.ts`'s
+  // own first cell asserts exactly those rows on this very address). So the state this cell wants —
+  // a firm with no durable Work — is not a state the shared server is in, and the sentence below
+  // was unreachable from the day it was written. A walk that wants a state of its own asks for it.
+  await page.route(
+    "**/e2e-supabase/rest/v1/rpc/list_accounting_work",
+    jsonRoute({ rows: [], next_cursor: null, truncated: false }),
+  );
   await signInTo(page, "/");
   await page.goto("/work");
 
   await expect(page.getByRole("heading", { name: "Work", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Running agent tasks", level: 2 })).toBeVisible();
   // #641 — the not-built note this cell used to pin is gone, because the thing it named is built:
-  // the durable Work list is now the page's own first section. This lane's fixtures answer
-  // `list_accounting_work` with serve-built's honest generic EMPTY (it owns no Work of its own),
-  // so what renders here is the FIRST-USE Empty — which is the right state for a firm with none,
-  // and is distinct from the filtered no-results copy (proved in work-list-walk.spec.ts).
+  // the durable Work list is now the page's own first section. Against the empty page routed
+  // above, what renders is the FIRST-USE Empty — the right state for a firm with no durable Work,
+  // and distinct from the filtered no-results copy (both proved in work-list-walk.spec.ts).
   await expect(page.getByRole("heading", { name: "Durable work", level: 2 })).toBeVisible();
   await expect(page.getByText("No work yet")).toBeVisible();
 
