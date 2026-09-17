@@ -280,8 +280,15 @@ test("a LEAF keeps its PARENT current and names itself — the sidebar mark does
 const LEAF_SAMPLE_PATH = {
   journalComposer: `/clients/${A}/accounting/journal/new`,
   periodicAdjustment: `/clients/${A}/accounting/adjustments/new`,
+  // #638 and #647 joined this table at WAVE INTEGRATION — the first moment their leaves and this
+  // wall were in one tree. #647's resolved already; #638's did not (its branch registered the leaf
+  // and its label but no `leafFor` arm) and #639's `fixedAsset` could not, because its path sits
+  // under the top-level `registers` accounting segment. #638 gained the arm; #639's row was
+  // retired with its reason, in `tree.ts`.
+  staffExpenseClaim: `/clients/${A}/accounting/claims/new`,
   workDetail: `/clients/${A}/work/work-1`,
   knowledgeRecord: `/clients/${A}/knowledge/record-1`,
+  counterpartyIdentity: `/clients/${A}/knowledge/parties/cp-1`,
 } satisfies Record<ClientLeafId, string>;
 
 test("every registered client LEAF is reachable — a leaf no URL resolves to is dead code", () => {

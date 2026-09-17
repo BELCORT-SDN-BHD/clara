@@ -119,7 +119,7 @@ export type AccountingItemId =
  */
 export type ClientLeafId =
   | "journalComposer" | "periodicAdjustment" | "staffExpenseClaim" | "workDetail"
-  | "knowledgeRecord" | "counterpartyIdentity" | "fixedAsset";
+  | "knowledgeRecord" | "counterpartyIdentity";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -466,14 +466,18 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // reading the client's other knowledge; every write behind it is bookkeeper+ or admin+ and
   // refuses a viewer at the door rather than being hidden here.
   { id: "counterpartyIdentity", parent: "knowledge", labelKey: "clientLeaf.counterpartyIdentity", minimumRole: "viewer" },
-  // #639 — /…/registers/assets/:assetId names ONE fixed asset. A leaf for the same reason
-  // workDetail and knowledgeRecord are: a durable record cannot be a static menu row, and the
-  // breadcrumb has to name the asset rather than stopping at Fixed assets and claiming the reader
-  // is on the register. Parented on `accounting` — the CLIENT-NAV row, the only altitude a leaf's
-  // parent may name (the sidebar's "Fixed assets" entry is an ACCOUNTING ITEM under it, and
-  // `periodicAdjustment` is parented the same way for the same reason). The LIST stays exactly
-  // where it is: `registers?tab=fixedAssets`.
-  { id: "fixedAsset", parent: "accounting", labelKey: "clientLeaf.fixedAsset", minimumRole: "viewer" },
+  // #639's `/registers/assets/:assetId` REGISTERS NO LEAF, and the reason is the one #652 wrote
+  // two rows below for its own `/accruals`. The branch shipped a `fixedAsset` row here parented on
+  // `accounting`, but the path's FIRST segment is `registers` — a top-level `ACCOUNTING_ITEMS`
+  // segment — so `resolveActive` answers that list on `rest[0]` alone and returns before
+  // `CLIENT_NAV.find` / `leafFor` are ever reached. Measured at wave integration by #652's own
+  // reachability wall (`tree.test.ts`), which is the first place the two branches met: the row
+  // was a promise the resolver could not keep. The ROUTE and `fixedAssetHref` below are untouched
+  // — the asset detail page is real and linked from the register row, the needs-you inbox and
+  // the Work identity block; what it does not get today is its own crumb, and giving it one is a
+  // nav change (the crumb builder reads a leaf only under `clientItem`, never under
+  // `accountingItem`), not an integration repair. `AppShell.clientLeaf.fixedAsset` is left in
+  // `messages/en.json` for that follow-up.
   // #652's `/accruals/new` and `/accruals/:accrualId` register NO leaf, for the reason `plans` —
   // the precedent this route was cut beside — registers none: `accruals` is a TOP-LEVEL
   // `ACCOUNTING_ITEMS` segment, and `resolveActive` answers that list on `rest[0]` alone and
@@ -747,6 +751,15 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
   }
   if (parent === "accounting" && rest.length === 3 && rest[1] === "adjustments" && rest[2] === "new") {
     return "periodicAdjustment";
+  }
+  // #638 — the claim FORM, the third member of the `accounting/<lane>/new` family above. The
+  // branch registered the `staffExpenseClaim` leaf and its "Record staff expense claim" label but
+  // never this arm, so the leaf resolved nowhere; #652's reachability wall caught it the first
+  // time the two branches met, at wave integration. The claim LIST (`accounting/claims`) stays an
+  // `ACCOUNTING_ITEMS` row and is matched two segments deep by `segment2`, exactly as
+  // `accounting/adjustments` is.
+  if (parent === "accounting" && rest.length === 3 && rest[1] === "claims" && rest[2] === "new") {
+    return "staffExpenseClaim";
   }
   if (parent === "work" && rest.length === 2) return "workDetail";
   // #647 — the three-segment arm sorts BEFORE the two-segment one only in reading order; the
