@@ -48,7 +48,7 @@ async function withFetch(impl: typeof fetch, run: () => Promise<void>): Promise<
 
 // ── wire pins ──────────────────────────────────────────────────────────────────
 
-test("listActivity: posts exactly 0181's six named parameters — since is that day's inclusive start, until is the NEXT day's exclusive start", async () => {
+test("listActivity: posts exactly the door's SEVEN named parameters (#770 added p_work) — since is that day's inclusive start, until is the NEXT day's exclusive start", async () => {
   let seenUrl = "";
   let seenBody: Record<string, unknown> = {};
   await withFetch(
@@ -59,12 +59,16 @@ test("listActivity: posts exactly 0181's six named parameters — since is that 
     },
     async () => {
       await listActivity(
-        { client: "c1", kinds: ["journal", "close"], since: "2026-01-01", until: "2026-01-31" },
+        { client: "c1", work: "w1", kinds: ["journal", "close"], since: "2026-01-01", until: "2026-01-31" },
         { session: fixedTokenAccessor("tok"), cursor: "abc", limit: 10 },
       );
       assert.match(seenUrl, /\/rest\/v1\/rpc\/list_activity$/);
-      assert.deepEqual(Object.keys(seenBody).sort(), ["p_client", "p_cursor", "p_kinds", "p_limit", "p_since", "p_until"]);
+      assert.deepEqual(Object.keys(seenBody).sort(),
+        ["p_client", "p_cursor", "p_kinds", "p_limit", "p_since", "p_until", "p_work"]);
       assert.equal(seenBody.p_client, "c1");
+      // #770 — migration 0202 DROPPED the six-argument signature, so a body that omitted p_work
+      // would not merely lose the filter: PostgREST would have no candidate to resolve at all.
+      assert.equal(seenBody.p_work, "w1");
       assert.equal(seenBody.p_cursor, "abc");
       assert.equal(seenBody.p_limit, 10);
       assert.deepEqual(seenBody.p_kinds, ["journal", "close"]);
@@ -102,6 +106,7 @@ test("listActivity: an absent filter posts null, never a missing key or an empty
       await listActivity({}, { session: fixedTokenAccessor("tok") });
       assert.deepEqual(seenBody, {
         p_cursor: null, p_limit: 25, p_client: null, p_kinds: null, p_since: null, p_until: null,
+        p_work: null,
       });
     },
   );

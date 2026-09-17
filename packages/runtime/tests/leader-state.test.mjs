@@ -47,8 +47,14 @@ import {
   assertCloneIsPopulated,
 } from "../../db/tests/migrate-harness.mjs";
 import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
+import { pgToolsSkipForThisHost } from "./pg-tools-fixture.mjs";
 
 const DBNAME = disposableDatabaseName("clara_leader_state");
+
+// #806 — probed before admin.connect()/createDisposableDatabase()/cloneAmbientDatabase() ever
+// run, so a host missing pg_dump/psql reports SKIPPED rather than the module-load failure this
+// file's own catch below otherwise turns it into, and creates no private database at all.
+const PG_TOOLS_SKIP = pgToolsSkipForThisHost();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -82,8 +88,11 @@ async function until(probe, { timeoutMs = LEADER_TRANSITION_BUDGET_MS, stepMs = 
   }
 }
 
-const admin = new pg.Client(connectionConfig());
-await admin.connect();
+let admin = null;
+if (!PG_TOOLS_SKIP) {
+  admin = new pg.Client(connectionConfig());
+  await admin.connect();
+}
 
 let restoreEnv = () => {};
 let cleaned = false;
@@ -93,6 +102,7 @@ let cleaned = false;
 async function cleanupPrivateDb() {
   if (cleaned) return;
   cleaned = true;
+  if (!admin) return; // #806 — pg_dump/psql were missing; nothing was ever created
   const teardownErrors = [];
   try {
     const mod = await import("./relay-fixtures.mjs");
@@ -128,6 +138,7 @@ async function cleanupPrivateDb() {
 after(cleanupPrivateDb);
 
 let startLeaderLoop, leaderStateHealth, recordLeaderHalt, _resetLeaderStateForTest, checkReadiness, fx, priv;
+if (!PG_TOOLS_SKIP) {
 try {
   await createDisposableDatabase(admin, DBNAME);
   const sourceEnv = childEnvForExternalTools();
@@ -162,6 +173,7 @@ try {
   await cleanupPrivateDb();
   throw err;
 }
+}
 
 /** The pid of the session holding the 'router' advisory lock — i.e. the leader's own dedicated
  *  backend, identified by the lock it actually HOLDS rather than by pattern-matching a query
@@ -186,7 +198,7 @@ const quietDeps = {
   getRun: async () => null,
 };
 
-test("#617 leader state: acquire -> a real backend kill -> RE-acquire, with reconnects moving", async () => {
+test("#617 leader state: acquire -> a real backend kill -> RE-acquire, with reconnects moving", { skip: PG_TOOLS_SKIP }, async () => {
   _resetLeaderStateForTest();
   const cold = leaderStateHealth();
   assert.deepEqual(
@@ -231,7 +243,7 @@ test("#617 leader state: acquire -> a real backend kill -> RE-acquire, with reco
   assert.equal(stopped.reconnects, 1, "and it does not rewrite the history of what happened");
 });
 
-test("#617 leader state: a taxonomy HALT is recorded BEFORE onHalt runs, and reads ok:false", async () => {
+test("#617 leader state: a taxonomy HALT is recorded BEFORE onHalt runs, and reads ok:false", { skip: PG_TOOLS_SKIP }, async () => {
   _resetLeaderStateForTest();
   // Pending work is mandatory setup: with nothing to route, runRelayCycle never resolves the
   // taxonomy and never halts, and the cell would pass by doing nothing.
@@ -278,7 +290,7 @@ test("#617 leader state: a taxonomy HALT is recorded BEFORE onHalt runs, and rea
   );
 });
 
-test("#617: a consumer health query that THROWS yields an explicit unavailable ENTRY, never a missing key", async () => {
+test("#617: a consumer health query that THROWS yields an explicit unavailable ENTRY, never a missing key", { skip: PG_TOOLS_SKIP }, async () => {
   // WHY THIS CELL LIVES IN THIS FILE. It REVOKES an estate-global grant to make the consumer
   // health queries fail for real (rather than stubbing a client, which would prove nothing about
   // lib/health.mjs's own catch). That revoke is exactly the kind of committed, cluster-visible
@@ -323,7 +335,7 @@ test("#617: a consumer health query that THROWS yields an explicit unavailable E
   assert.equal(restored, true, "the grant is restored — this cell must not leave the estate degraded");
 });
 
-test("#617 leader state: /ready reports the halt as a WARNING and never as a new 503", async () => {
+test("#617 leader state: /ready reports the halt as a WARNING and never as a new 503", { skip: PG_TOOLS_SKIP }, async () => {
   // The wiring half. The /ready contract fails on "nothing works"; a leader halt is handled by
   // the supervisor's own fail-fast (the process exits), so this must be a WARN — #617 adds a
   // reading, not a failure condition. World OFF so the assertion is about `checks.leader` alone.

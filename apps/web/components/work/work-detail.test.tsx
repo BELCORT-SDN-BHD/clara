@@ -19,7 +19,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { clickButton, renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { ReadError } from "../../lib/read";
-import { WORK_HEADING_ID, WorkDetailView } from "./work-detail";
+import { UNKNOWN_ACCOUNT_LINE_SENTENCE, WORK_HEADING_ID, WorkDetailView } from "./work-detail";
 import { WORK_STALE_AFTER_MS } from "../../lib/work/use-work-detail";
 import { journalDraftKey, type DraftStorage } from "../../lib/work/journal-draft";
 import type { CancelWorkResult, RetryWorkResult, TakeOverWorkResult } from "../../lib/work/api";
@@ -413,6 +413,173 @@ test("a REFUSED work renders the DB's own typed reason, with a retry and an edit
     assert.match(retried[0]!.opKey, /^[0-9a-f-]{36}$/i, "a fresh op key per press");
   } finally {
     await h.unmount();
+  }
+});
+
+// #799 — a commit-time `unknown_account` refusal on a periodic-adjustment Work names only a bare
+// line ordinal ("line 2 codes to an account…"); the page resolves that ordinal, together with the
+// Work's own purpose and basis lines, back to the adjustment field that produced it, and renders
+// that field's label BESIDE the database's own sentence — never instead of it.
+//
+// THE SENTENCE IS SPELLED ONCE, by the component's exported `UNKNOWN_ACCOUNT_LINE_SENTENCE`. The
+// fixtures below are BUILT from it rather than re-typed, so a reworded regex cannot leave these
+// cells green against prose the page can no longer parse. The other half of the pin is db-side:
+// `w799.post.unknown-account-sentence` (packages/db/tests/work-journal-post.test.mjs) reads the
+// installed `_record_journal_entry_core` body and asserts it still raises this exact prefix, so a
+// migration that rewords it reds a db cell instead of silently turning this affordance off.
+const dbUnknownAccountMessage = (line: number, code: string) =>
+  `line ${line} codes to an account this client does not have active: ${code}`;
+
+test("799: the fixture prose the cells below use is exactly what the page's own matcher accepts", () => {
+  const m = UNKNOWN_ACCOUNT_LINE_SENTENCE.exec(dbUnknownAccountMessage(2, "9999"));
+  assert.ok(m, "the component's exported sentence matcher must accept the database's own wording");
+  assert.equal(m?.[1], "2", "…and must capture the line ordinal");
+  assert.equal(
+    UNKNOWN_ACCOUNT_LINE_SENTENCE.exec("some other refusal entirely"),
+    null,
+    "…and must not claim an unrelated refusal",
+  );
+});
+
+test("799: a refused stock-adjustment Work names the resolved field beside the DB's unchanged message", async () => {
+  const h = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "periodic_stock_adjustment",
+            status: "refused",
+            basis: {
+              posting_date: "2026-09-01",
+              memo: "Periodic stock adjustment",
+              currency: "MYR",
+              lines: [
+                { account_code: "1200", debit_cents: 250_000, credit_cents: 0, description: "stock movement" },
+                { account_code: "9999", debit_cents: 0, credit_cents: 250_000, description: "cost of sales" },
+              ],
+            },
+            error: {
+              code: "CLR10",
+              reason: "unknown_account",
+              message: dbUnknownAccountMessage(2, "9999"),
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(
+      text,
+      /line 2 codes to an account this client does not have active: 9999/,
+      "the database's own sentence, unchanged",
+    );
+    assert.match(text, /Cost of sales account/, "the resolved field's own form label");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("799: the generic line reference is the fallback for a journal_entry Work, another reason, and an ordinal past the basis", async () => {
+  // A journal_entry Work: no adjustment fields to translate into, so no label at all.
+  const journalWork = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "journal_entry",
+            status: "refused",
+            error: {
+              code: "CLR10",
+              reason: "unknown_account",
+              message: dbUnknownAccountMessage(2, "9999"),
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await journalWork.settle();
+    const text = journalWork.text();
+    assert.match(text, /line 2 codes to an account this client does not have active: 9999/);
+    assert.doesNotMatch(text, /Cost of sales account|Inventory account/, "no adjustment-field label on a journal entry");
+  } finally {
+    await journalWork.unmount();
+  }
+
+  // The SAME purpose and basis, but a DIFFERENT refusal reason: no label.
+  const otherReason = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "periodic_stock_adjustment",
+            status: "refused",
+            basis: {
+              posting_date: "2026-09-01",
+              memo: "Periodic stock adjustment",
+              currency: "MYR",
+              lines: [
+                { account_code: "1200", debit_cents: 250_000, credit_cents: 0, description: "stock movement" },
+                { account_code: "5040", debit_cents: 0, credit_cents: 250_000, description: "cost of sales" },
+              ],
+            },
+            error: {
+              code: "CLR10",
+              reason: "write_into_closed_period",
+              message: "September 2026 is closed for this client.",
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await otherReason.settle();
+    const text = otherReason.text();
+    assert.match(text, /September 2026 is closed for this client\./);
+    assert.doesNotMatch(text, /Cost of sales account|Inventory account/, "no label for a non-unknown_account reason");
+  } finally {
+    await otherReason.unmount();
+  }
+
+  // An ordinal PAST the basis (only two legs on a stock adjustment): no label.
+  const pastBasis = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            purpose: "periodic_stock_adjustment",
+            status: "refused",
+            basis: {
+              posting_date: "2026-09-01",
+              memo: "Periodic stock adjustment",
+              currency: "MYR",
+              lines: [
+                { account_code: "1200", debit_cents: 250_000, credit_cents: 0, description: "stock movement" },
+                { account_code: "5040", debit_cents: 0, credit_cents: 250_000, description: "cost of sales" },
+              ],
+            },
+            error: {
+              code: "CLR10",
+              reason: "unknown_account",
+              message: dbUnknownAccountMessage(3, "9999"),
+              recoverable: true,
+            },
+          }),
+        }),
+    }),
+  );
+  try {
+    await pastBasis.settle();
+    const text = pastBasis.text();
+    assert.match(text, /line 3 codes to an account this client does not have active: 9999/);
+    assert.doesNotMatch(text, /Cost of sales account|Inventory account/, "ordinal 3 does not exist on a two-leg stock basis");
+  } finally {
+    await pastBasis.unmount();
   }
 });
 
@@ -911,6 +1078,109 @@ test("630 a CANCELLED work shows the run's superseded outcome when the settle tr
     await h.unmount();
   }
 });
+
+// #750 -----------------------------------------------------------------------------------------
+test("750 a CANCELLED work NAMES who pressed Cancel and when; a run that carries neither says nothing extra", async () => {
+  const cancelled = (task: Record<string, unknown> | null) =>
+    data({
+      work: workRow({ status: "cancelled", current_task_id: TASK }),
+      task: task as never,
+    });
+
+  // THE RUN CARRIES THE PRESS. `clara.cancel_accounting_work` records the author on
+  // `clara.agent_tasks.cancelled_by/cancelled_at` (0184 §G) and the masked view republishes both.
+  const named = await renderComponent(
+    App({
+      load: async () =>
+        cancelled({
+          id: TASK, status: "cancelled", error_code: null,
+          created_at: "2026-09-01T01:00:00.000Z", updated_at: "2026-09-12T06:14:00.000Z",
+          cancelled_by: USER, cancelled_at: "2026-09-12T06:14:00.000Z",
+        }),
+    }),
+  );
+  try {
+    await named.settle();
+    assert.match(named.text(), /Cancelled by/, "750 the banner says a person did this");
+    // The roster read is not mocked here, so `MemberName` falls through to its honest raw-id
+    // rendering — which is the CONTRACT (lib/members/use-member-names.ts), not a shortcoming: a
+    // name it cannot resolve is never guessed. The cell asserts the id it actually printed.
+    assert.match(named.text(), new RegExp(USER.slice(0, 8)), "750 …and names them");
+    assert.match(named.text(), /12 Sept 2026/, "750 …and when, in the firm's business timezone");
+  } finally {
+    await named.unmount();
+  }
+
+  // NEITHER HALF, NO LINE. A "Cancelled by" with nothing after it is worse than the plain banner.
+  const bare = await renderComponent(App({ load: async () => cancelled(null) }));
+  try {
+    await bare.settle();
+    assert.match(bare.text(), /Cancelled/, "750 the banner itself is unchanged");
+    assert.equal(/Cancelled by/.test(bare.text()), false,
+      "750 …and claims no author when the run carries none");
+  } finally {
+    await bare.unmount();
+  }
+});
+// #750 -----------------------------------------------------------------------------------------
+
+// #721 -----------------------------------------------------------------------------------------
+test("721 B3 links a restated Work BOTH WAYS, and offers the restatement beside a pending question", async () => {
+  const OTHER = "99999999-9999-4999-8999-999999999999";
+
+  // THE SUCCESSOR, pointing back.
+  const forward = await renderComponent(
+    App({ load: async () => data({ work: workRow({ supersedes: OTHER }) }) }),
+  );
+  try {
+    await forward.settle();
+    assert.match(forward.text(), /Supersedes/, "721 the successor says what it replaced");
+    assert.ok(hrefs(forward.container).some((h) => h.includes(OTHER)),
+      "721 …and links to it, so a refusal can be read against the basis that was admitted");
+  } finally {
+    await forward.unmount();
+  }
+
+  // THE PREDECESSOR, pointing forward.
+  const back = await renderComponent(
+    App({ load: async () => data({ work: workRow({ status: "cancelled", superseded_by: OTHER }) }) }),
+  );
+  try {
+    await back.settle();
+    assert.match(back.text(), /Superseded by/, "721 the retired Work says what replaced it");
+    assert.ok(hrefs(back.container).some((h) => h.includes(OTHER)), "721 …and links to it");
+  } finally {
+    await back.unmount();
+  }
+
+  // NEITHER HALF, NEITHER ROW. Almost every Work was never restated.
+  const plain = await renderComponent(App({ load: async () => data() }));
+  try {
+    await plain.settle();
+    assert.equal(/Supersedes|Superseded by/.test(plain.text()), false,
+      "721 a Work that was never restated shows no supersession row at all");
+  } finally {
+    await plain.unmount();
+  }
+
+  // THE AFFORDANCE, beside the question a person may disagree with rather than merely answer.
+  const parked = await renderComponent(
+    App({
+      load: async () => data({
+        work: workRow({ status: "awaiting_input", current_task_id: TASK }),
+        interruption: parkedQuestion(),
+      }),
+    }),
+  );
+  try {
+    await parked.settle();
+    assert.match(parked.text(), /Restate as a new instruction/,
+      "721 a parked Work offers the other answer: a new instruction");
+  } finally {
+    await parked.unmount();
+  }
+});
+// #721 -----------------------------------------------------------------------------------------
 
 test("630 an authority_lost refusal offers Take responsibility; a plain failure does not", async () => {
   const taken: Array<{ workId: string; basisDigest?: string | null }> = [];

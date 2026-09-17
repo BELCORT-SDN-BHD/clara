@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DoorError, DoorRefusal } from "@/lib/doors";
+import { configureSessionTokenSource, resetSessionTokenSource } from "@/lib/session-accessor";
 import {
   SUPPORT_CASE_KINDS,
   applyOperatorUrlState,
@@ -29,8 +30,11 @@ import {
   formatCaseParam,
   isPermissionShaped,
   isSupportCaseKind,
+  getOperatorSupportCase,
+  listOperatorSupportQueue,
   operatorQueueOutcome,
   parseCaseParam,
+  resolveOperatorSupportApplicants,
   parseOperatorUrlState,
   supportCaseState,
   supportedActionFor,
@@ -64,6 +68,8 @@ function row(overrides: Partial<SupportQueueRow> = {}): SupportQueueRow {
     decided_at: null,
     decided_reason: null,
     settled: false,
+    // #776 — this module's OWN field, merged onto the door's answer rather than returned by it.
+    applicant_name: null,
     ...overrides,
   };
 }
@@ -140,6 +146,135 @@ test("isPermissionShaped recognises all four spellings of a permission loss, and
   assert.equal(isPermissionShaped(new DoorError("x", { status: 502, kind: "server_error" })), false);
   assert.equal(isPermissionShaped(new Error("plain")), false);
   assert.equal(isPermissionShaped(null), false);
+});
+
+// ── #776 · THE APPLICANT'S NAME ──────────────────────────────────────────────
+//
+// THE ONE CLAIM THESE CELLS EXIST FOR: **a name that did not resolve is an ABSENCE, and a name
+// read that did not answer is not a failure of the queue.** `clara.list_operator_support_queue` is
+// the authority on what the operator may see; `clara.resolve_operator_support_applicants` is a
+// label on top of it, and letting the label's failure turn a good queue into "denied" or "failed
+// read" would be this seam inventing a state the database never reported.
+//
+// The fetch is mocked at the WIRE, not at `callDoor`, so the argument names these cells assert
+// (`p_applicants`) are the ones that would really reach PostgREST — the same names
+// `packages/db/tests/operation-census.test.mjs` checks against the function's declaration.
+
+const APPLICANT_A = "3f2504e0-4f89-41d3-9a0c-0305e82c33a1";
+const APPLICANT_B = "3f2504e0-4f89-41d3-9a0c-0305e82c33b2";
+
+type Call = { fn: string; body: Record<string, unknown> };
+
+async function withWire(
+  handler: (fn: string, body: Record<string, unknown>) => unknown,
+  run: (calls: Call[]) => Promise<void>,
+): Promise<void> {
+  const calls: Call[] = [];
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  configureSessionTokenSource(async () => "tok");
+  globalThis.fetch = (async (u: unknown, init?: { body?: string }) => {
+    const url = String(u);
+    const fn = url.slice(url.lastIndexOf("/rpc/") + 5);
+    const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+    calls.push({ fn, body });
+    const answer = handler(fn, body);
+    if (answer instanceof Error) throw answer;
+    return new Response(JSON.stringify(answer), {
+      status: 200, headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  try {
+    await run(calls);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    resetSessionTokenSource();
+  }
+}
+
+test("#776 — the queue's rows carry the resolved applicant name, and an unresolved one is null", async () => {
+  await withWire(
+    (fn) => {
+      if (fn === "list_operator_support_queue") {
+        return [
+          { ...row({ applicant: APPLICANT_A }), applicant_name: undefined },
+          { ...row({ case_id: REGISTRATION_ID, applicant: APPLICANT_B }), applicant_name: undefined },
+          { ...row({ case_id: CASE_ID, case_kind: "problem", applicant: null }), applicant_name: undefined },
+        ];
+      }
+      // The door answers ONLY what it resolved — B is nobody it can name, so B is simply absent.
+      if (fn === "resolve_operator_support_applicants") {
+        return [{ applicant: APPLICANT_A, display_name: "Farid bin Ismail" }];
+      }
+      return new Error(`unexpected door ${fn}`);
+    },
+    async (calls) => {
+      const rows = await listOperatorSupportQueue();
+      assert.deepEqual(rows.map((r) => r.applicant_name),
+        ["Farid bin Ismail", null, null],
+        "resolved, unresolved and null-applicant rows, in that order");
+      // THE ARGUMENT IS DEDUPED AND NULL-FREE, and it is named `p_applicants` exactly as the
+      // function declares it — a mismatch here is a `named_arg_mismatch` in the DB census.
+      const nameCall = calls.find((c) => c.fn === "resolve_operator_support_applicants");
+      assert.ok(nameCall, "the name door was called");
+      assert.deepEqual(nameCall.body, { p_applicants: [APPLICANT_A, APPLICANT_B] });
+    },
+  );
+});
+
+test("#776 — a page whose applicants are all null costs NO name call at all", async () => {
+  await withWire(
+    (fn) => {
+      if (fn === "list_operator_support_queue") return [row({ applicant: null })];
+      return new Error(`unexpected door ${fn}`);
+    },
+    async (calls) => {
+      const rows = await listOperatorSupportQueue();
+      assert.deepEqual(rows.map((r) => r.applicant_name), [null]);
+      assert.equal(calls.filter((c) => c.fn === "resolve_operator_support_applicants").length, 0,
+        "no ids, no question");
+    },
+  );
+  // …and the resolver says the same thing when called directly with nothing to resolve.
+  assert.deepEqual([...(await resolveOperatorSupportApplicants([null, undefined, ""]))], []);
+});
+
+test("#776 — a name read that FAILS leaves the queue intact, with every name absent", async () => {
+  await withWire(
+    (fn) => {
+      if (fn === "list_operator_support_queue") return [row({ applicant: APPLICANT_A })];
+      return new Error("the name door is unavailable");
+    },
+    async () => {
+      const rows = await listOperatorSupportQueue();
+      assert.equal(rows.length, 1, "the queue the operator asked for is still the answer");
+      assert.equal(rows[0]!.applicant_name, null, "…with the name absent rather than invented");
+    },
+  );
+});
+
+test("#776 — the case detail carries the same resolved name", async () => {
+  await withWire(
+    (fn) => {
+      if (fn === "get_operator_support_case") {
+        return { ...row({ applicant: APPLICANT_A }), note: null, intent_id: null,
+          stripe_session_id: null, stripe_event_id: null, event_type: null };
+      }
+      if (fn === "resolve_operator_support_applicants") {
+        return [{ applicant: APPLICANT_A, display_name: "Farid bin Ismail" }];
+      }
+      return new Error(`unexpected door ${fn}`);
+    },
+    async (calls) => {
+      const detail = await getOperatorSupportCase("registration", CASE_ID);
+      assert.equal(detail.applicant_name, "Farid bin Ismail");
+      assert.deepEqual(calls.find((c) => c.fn === "resolve_operator_support_applicants")?.body,
+        { p_applicants: [APPLICANT_A] });
+    },
+  );
 });
 
 // ── AN ACT'S FAILURE, TOLD APART BY CODE (#615 AC3/AC4) ──────────────────────

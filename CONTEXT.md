@@ -20,6 +20,12 @@ _Avoid_: Chat session, chat message, journal entry as synonyms for the whole job
 Stopping the remaining work while retaining outcomes already completed. Reversing or correcting a posted outcome is a separate accounting action.
 _Avoid_: Rollback, reversal as synonyms for cancellation.
 
+<!-- #721 -->
+**Restated work / supersedes**:
+A reply that changes the admitted basis does not edit that work; it becomes a new work carrying the revised instruction, while the original is cancelled with the outcome *superseded*. The two are linked in both directions: the new work *supersedes* the old, the old is *superseded by* the new.
+_Avoid_: Edit, amend, correction as synonyms — a correction acts on a posted outcome, a restatement replaces an instruction that never posted.
+<!-- #721 -->
+
 **Accounting plan**:
 An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
 follows, the calendar days that schedule produces in a named timezone, the window its authority
@@ -299,7 +305,7 @@ One persistent question a running Accounting work is parked on: the missing fact
 _Avoid_: A chat message; an approval gate; a separate question per surface; a way to change what the Work already recorded.
 
 **Chat clarification**:
-One question Clara asks inside a conversation while a turn is still running, answered in that same conversation. It lives only on the run's live stream — settling the turn cancels it in the same statement sequence that writes the assistant message — so it is answerable during the turn or, after a reload, from the row the run is parked on; its 14-day deadline is enforced by the runtime's expiry sweep, which moves a past-due clarification to expired so the parked turn settles and the conversation is usable again (#720 Half 1); what remains open is that an unreachable chat resume is still recorded as delivered (#764).
+One question Clara asks inside a conversation while a turn is still running, answered in that same conversation. It lives only on the run's live stream — settling the turn cancels it in the same statement sequence that writes the assistant message — so it is answerable during the turn or, after a reload, from the row the run is parked on; its 14-day deadline is enforced by the runtime's expiry sweep, which moves a past-due clarification to expired so the parked turn settles and the conversation is usable again (#720 Half 1); <!-- #764 -->a clarification whose resume hook cannot be reached is no longer recorded as delivered — it rests at `hook_missing` with a timestamp, and the chat-clarify reconciler re-probes it after a grace: a hook that has become reachable resumes the turn, and a hook the engine can no longer account for settles the turn `expired` with a clarification-closed part, releasing the session's live-turn slot (#764).<!-- /#764 -->
 _Avoid_: A Work question as a synonym; an approval gate; a chat message that merely mentions a question.
 
 **Delivery state**:
@@ -479,7 +485,7 @@ _Avoid_: A rate, a proration or an allocation the product performs; a formula; a
 form that no lane applies; anything a caller can extend without a new named rule.
 
 **Supplied obligation particulars**:
-The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
 **Fixed asset acquisition**:

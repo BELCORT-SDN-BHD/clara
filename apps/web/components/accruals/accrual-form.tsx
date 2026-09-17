@@ -50,7 +50,7 @@ import { useFirmScope } from "@/components/firm-scope-provider";
 import { AccrualBoundaryStatement } from "./accrual-statement";
 import { listCoaAccounts } from "@/lib/journals/api";
 import type { CoaAccountRow } from "@/lib/journals/types";
-import { listAuthorityCandidates, type AuthorityCandidates } from "@/lib/plans/api";
+import { listPlanAuthorityWork, type PlanAuthorityWork } from "@/lib/plans/api";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
@@ -124,7 +124,7 @@ export function AccrualFormView({
   storage?: DraftStorage | null;
   session?: SessionTokenAccessor;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
-  loadAuthorities?: () => Promise<AuthorityCandidates>;
+  loadAuthorities?: () => Promise<PlanAuthorityWork>;
   newOpKey?: () => string;
 }) {
   const t = useTranslations("Accruals");
@@ -156,8 +156,8 @@ export function AccrualFormView({
 
   const accountsRead = useAsyncRead<CoaAccountRow[]>(() =>
     loadAccounts ? loadAccounts() : listCoaAccounts(session, clientId));
-  const authorities = useAsyncRead<AuthorityCandidates>(() =>
-    loadAuthorities ? loadAuthorities() : listAuthorityCandidates(clientId, { session }));
+  const authorities = useAsyncRead<PlanAuthorityWork>(() =>
+    loadAuthorities ? loadAuthorities() : listPlanAuthorityWork(clientId, { session }));
   const evidence = useEvidenceReads(clientId, { session });
 
   const accounts = accountsRead.data ?? [];
@@ -426,7 +426,7 @@ export function AccrualFormView({
               <option value="">{t("authorityChoose")}</option>
               {(authorities.data?.rows ?? []).map((w) => (
                 <option key={w.id} value={w.id}>
-                  {w.basis?.memo ?? w.intent_key} — {String(w.created_at).slice(0, 10)}
+                  {w.memo ?? w.intent_key} — {String(w.created_at).slice(0, 10)}
                 </option>
               ))}
             </NativeSelect>

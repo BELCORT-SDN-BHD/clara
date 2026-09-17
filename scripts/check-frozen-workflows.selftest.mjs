@@ -23,8 +23,11 @@ import {
   checkEnqueueSites,
   parseRegistrySource,
 } from "./freeze-lint-checks.mjs";
+import { computeFrozenClosures, scannedSourceFiles } from "./freeze-lint-closure.mjs";
+import { compareFrozenManifestText } from "./frozen-manifest-compare.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(HERE, "..");
 const FIXTURES = join(HERE, "freeze-lint-fixtures");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
 
@@ -341,6 +344,136 @@ testCase("C77.2 POSITIVE CONTROL: a valid production registration is clean — t
 testCase("C77.2 POSITIVE CONTROL: the REAL frozen manifest's every key passes (canary)", () => {
   const manifest = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
   expectClean(checkManifestPaths(Object.keys(manifest.workflows ?? {})));
+});
+
+// --- (#810) THE RETIREMENT PATH ---------------------------------------------
+// Owner ruling 2026-09-15 (#810): during beta a superseded body may leave the tree without a
+// drain proof. The manifest stays append-only IN SPIRIT rather than in letter — an entry is MOVED
+// to a `retired` record (path, last hash, ruling reference), never deleted — so the ledger still
+// answers "what was this file's last frozen hash, and under whose ruling did it go". The two
+// rules that gate a removal, MISSING (check-frozen-workflows.mjs) and REMOVED-VS-BASE /
+// REMOVED-ENTRY (here), accept a retired entry and nothing else.
+console.log("frozen-entry retirement (#810):");
+
+const RETIRED_PATH = "packages/runtime/workflows/chatTurn.v1.ts";
+const RETIRED_SHA = "a".repeat(64);
+const RULING = "#810 owner ruling 2026-09-15";
+const manifestText = (workflows, retired) =>
+  JSON.stringify({ version: 1, workflows, ...(retired ? { retired } : {}) }, null, 2) + "\n";
+const BASE_WITH_ENTRY = manifestText({ [RETIRED_PATH]: { sha256: RETIRED_SHA, note: "", deployed: true } });
+
+testCase("#810 an entry MOVED to a `retired` record (same last hash, ruling cited) -> OK, never REMOVED-ENTRY", () => {
+  const current = manifestText({}, { [RETIRED_PATH]: { sha256: RETIRED_SHA, ruling: RULING } });
+  expectClean(compareFrozenManifestText(BASE_WITH_ENTRY, current, "base", "current").violations);
+});
+
+testCase("#810 an entry simply DROPPED with no retired record -> still REMOVED-ENTRY (the rule is relaxed for a recorded retirement, not abolished)", () => {
+  expectCodes(compareFrozenManifestText(BASE_WITH_ENTRY, manifestText({}), "base", "current").violations, [
+    "REMOVED-ENTRY",
+  ]);
+});
+
+testCase("#810 a retired record whose sha256 is NOT the entry's last frozen hash -> REJECT (RETIRED-HASH-MISMATCH) — a retirement records history, it never rewrites it", () => {
+  const current = manifestText({}, { [RETIRED_PATH]: { sha256: "b".repeat(64), ruling: RULING } });
+  expectCodes(compareFrozenManifestText(BASE_WITH_ENTRY, current, "base", "current").violations, [
+    "RETIRED-HASH-MISMATCH",
+  ]);
+});
+
+testCase("#810 a retired record with no ruling reference -> REJECT (RETIRED-NO-RULING) — the citation is the whole authority for the removal", () => {
+  const current = manifestText({}, { [RETIRED_PATH]: { sha256: RETIRED_SHA } });
+  expectCodes(compareFrozenManifestText(BASE_WITH_ENTRY, current, "base", "current").violations, [
+    "RETIRED-NO-RULING",
+  ]);
+});
+
+testCase("#810 a retirement is MONOTONIC: an entry retired on the base cannot return to `workflows` -> REJECT (UNRETIRED-ENTRY)", () => {
+  const base = manifestText({}, { [RETIRED_PATH]: { sha256: RETIRED_SHA, ruling: RULING } });
+  const current = manifestText({ [RETIRED_PATH]: { sha256: RETIRED_SHA, note: "", deployed: true } });
+  expectCodes(compareFrozenManifestText(base, current, "base", "current").violations, ["UNRETIRED-ENTRY"]);
+});
+
+testCase("#810 POSITIVE CONTROL: the REAL manifest's retired records each cite a ruling and carry a 64-hex last hash (canary)", () => {
+  const real = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
+  for (const [path, record] of Object.entries(real.retired ?? {})) {
+    if (!/^[0-9a-f]{64}$/.test(String(record.sha256))) throw new Error(`${path}: retired record has no 64-hex last hash`);
+    if (!String(record.ruling ?? "").trim()) throw new Error(`${path}: retired record cites no ruling`);
+    if (Object.hasOwn(real.workflows ?? {}, path)) throw new Error(`${path}: present in BOTH workflows and retired`);
+  }
+});
+
+// --- (#815) PER-ENTRY CLOSURE ATTRIBUTION -----------------------------------
+// The manifest is a FLAT set: it says a module is frozen, never which frozen entry reaches it.
+// Four modules newly reached by chatTurn_v19 / claraWork_v3 carry hand-written `note` prose
+// naming their reaching version, which is maintained by hand for four entries and can drift from
+// the real import graph. `--print-closure` computes the attribution instead; these cells are its
+// canary, run against the REAL repository tree (no fixtures — the property under test is the
+// actual import graph, and a fixture of it would be the same prose by another name).
+console.log("per-entry closure attribution (#815):");
+
+const closureFiles = scannedSourceFiles(REPO_ROOT);
+const closure = computeFrozenClosures(REPO_ROOT, closureFiles);
+/** Entry files (sorted) whose own closure locks `rel`. */
+const reachedBy = (rel) =>
+  [...closure.byEntry.entries()].filter(([, mods]) => mods.includes(rel)).map(([entry]) => entry).sort();
+
+const W = "packages/runtime/workflows/";
+// THESE ROSTERS GROW WHEN A SUCCESSOR IS CUT, and that is the point of the cell rather than a
+// nuisance: the wave 2026-09-15 cut (chatTurn_v20, claraWork_v4, clientOnboarding_v5) re-reached
+// all four modules and this canary is what said so out loud. Every name below was MEASURED with
+// `computeFrozenClosures` on the merged tree, not inferred from the successor's imports.
+const ATTRIBUTION = [
+  // #815 acceptance: knowledge.mjs under the 4 reaching chatTurn_v19 entry files — and, since the
+  // wave 2026-09-15 cut, chatTurn_v20's four, claraWork_v4's two (its knowledge-context step) and
+  // clientOnboarding_v5's two (interview.v4.known.ts's pre-read of the same pack). 12.
+  ["packages/runtime/lib/knowledge.mjs", [
+    `${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`,
+    `${W}chatTurn.v20.impl.ts`, `${W}chatTurn.v20.prompt.ts`, `${W}chatTurn.v20.tools.ts`, `${W}chatTurn.v20.ts`,
+    `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
+    `${W}clientOnboarding.v5.ts`, `${W}interview.v4.known.ts`,
+  ]],
+  // ... periodic-adjustment-basis.ts under the 5 reaching chatTurn_v19 entry files plus
+  // chatTurn_v20's four. v20 carries v19's tool map forward, so it reaches this module too; it has
+  // no `parts.ts` of its own (v19 stays the declarer), which is why this roster is 9 and not 10.
+  ["packages/runtime/lib/periodic-adjustment-basis.ts", [
+    `${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.parts.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`,
+    `${W}chatTurn.v20.impl.ts`, `${W}chatTurn.v20.prompt.ts`, `${W}chatTurn.v20.tools.ts`, `${W}chatTurn.v20.ts`,
+  ]],
+  // ... capability-registry.mjs (reached ONLY transitively, through work-trace.mjs) and
+  // work-trace.mjs (reached ONLY through a DYNAMIC import) under claraWork_v3's 2 entry files and
+  // claraWork_v4's 2. `lib/capability-registry.mjs:30` still says it is reached from the FROZEN
+  // claraWork_v3 body; v4 reaches it too, and that file is deploy-locked, so the sentence cannot be
+  // corrected in place — this roster is where the true attribution is recorded.
+  ["packages/runtime/lib/capability-registry.mjs", [`${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`, `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`]],
+  ["packages/runtime/lib/work-trace.mjs", [`${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`, `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`]],
+];
+
+for (const [rel, expected] of ATTRIBUTION) {
+  testCase(`#815 ${rel} is attributed to exactly its ${expected.length} reaching frozen entr(ies)`, () => {
+    const actual = reachedBy(rel);
+    if (actual.join("\n") !== expected.join("\n")) {
+      throw new Error(`expected:\n  ${expected.join("\n  ")}\ngot:\n  ${actual.join("\n  ") || "(none)"}`);
+    }
+  });
+}
+
+testCase("#815 the UNION of every per-entry closure equals the flat set the tool freezes (the report re-partitions, it never changes what is frozen)", () => {
+  const union = new Set();
+  for (const mods of closure.byEntry.values()) for (const m of mods) union.add(m);
+  const flat = [...union].sort();
+  if (flat.join("\n") !== closure.frozenRel.join("\n")) {
+    const missing = closure.frozenRel.filter((r) => !union.has(r));
+    const extra = flat.filter((r) => !closure.frozenRel.includes(r));
+    throw new Error(`union != flat set; missing from union: ${missing.join(", ") || "(none)"}; extra: ${extra.join(", ") || "(none)"}`);
+  }
+});
+
+testCase("#815 the flat set matches the manifest's registered entry count (the union is the manifest)", () => {
+  const manifest = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
+  const registered = Object.keys(manifest.workflows ?? {}).length;
+  if (closure.frozenRel.length !== registered) {
+    throw new Error(`closure locks ${closure.frozenRel.length} module(s) but the manifest registers ${registered}`);
+  }
 });
 
 // --- (e) enqueue-site provenance --------------------------------------------

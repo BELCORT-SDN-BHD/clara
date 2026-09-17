@@ -39,7 +39,7 @@ import {
   derivedBasis, lawfulBasis, evidenceDocuments, foreignRegion,
   supersedeInvoiceFactsKeepingRegions, seedVendorNoRegistration, mergeAway,
   seedWindow, seedUniqueFamilyVendor, DATES_OK, withMutant, withoutConstraint,
-  plantRegistrationRegion, twoSessions, asHumanSession, asWakeSession,
+  plantRegistrationRegion, siblingFactsExtraction, twoSessions, asHumanSession, asWakeSession,
   waitBlockedByOrThrow, ageOutPriorDepartures,
 } from "./binding-proposal-pr-1-helpers.mjs";
 
@@ -1522,28 +1522,45 @@ test("bp1.W16d M-12 — an entry approved under a duplicate_override cannot be c
   assert.equal(row?.reason, "binding_corpus_duplicate_override", "the read verb agrees (G3)");
 });
 
-test("bp1.W16e N-8 — a document carrying TWO printed invoice ids gets its OWN word", async () => {
+test("bp1.W16e — #778 REPLACES N-8's arm: a SECOND printed invoice id on one generation is refused AT THE KEY", async () => {
   failBp1(live);
-  // `<> 3` refuses four as well as two, and those are different facts: three scans of one invoice
-  // is the poisoning signature, while a page whose extraction found two candidate invoice ids is
-  // merely ambiguous. Reported separately so the card can explain itself.
+  // #778 — THIS CELL REPLACES "N-8 — a document carrying TWO printed invoice ids gets its OWN
+  // word" (corpus_invoice_id_ambiguous, 0154:1686-1693). That arm is DEAD BY CONSTRUCTION since
+  // 0201_document_regions_unique_field_path.sql, and this cell now measures why rather than
+  // pretending to measure the arm.
+  //
+  // N-8 counts `f2_evidence` entries, and f2_evidence is built by
+  // clara._derive_vendor_binding_basis from ONE chosen extraction per document
+  // (`r.extraction_id = fx.extraction_id`, 0154:1478-1483 — fx is `order by version_n desc,
+  // id desc limit 1`). So `v_n_prints > 3` over a three-document corpus requires TWO
+  // `invoice.invoice_id` rows on THAT ONE extraction — which is exactly what
+  // uq_document_regions_extraction_field_path now forbids. Note the asymmetry with W18/W18c,
+  // whose cells above still stand: those range over the whole current generation
+  // (0154:1750-1774, 1825-1842), so a sibling extraction still reaches them; this read does not.
+  //
+  // The insert below is the ORIGINAL fixture, unchanged, at the same point in the sequence.
   const cp = await seedWindow(w, "W16e", { dates: DATES_OK });
   const doc = (await evidenceDocuments(w.firms.A, w.clients.A1, cp.id))[0];
-  await rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
-            'invoice.invoice_id', 'W16E-EXTRA-0009', 1.0
-       from clara.document_extractions x
-      where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
-      order by x.version_n desc, x.id desc limit 1`,
-    [w.firms.A, doc]);
-  const err = await assertRaises("CLR36",
-    async () => proposeAsAgent(await filingActor(),
-      { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
-    "a document printing two invoice ids");
-  assert.match(err.message, /corpus_invoice_id_ambiguous/);
-  assert.doesNotMatch(err.message, /binding_corpus_not_distinct/,
-    "…and NOT under the three-scans word, which means something else");
+  const err = await assertRaises(PG.uniqueViolation,
+    () => rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+       select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+              'invoice.invoice_id', 'W16E-EXTRA-0009', 1.0
+         from clara.document_extractions x
+        where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
+        order by x.version_n desc, x.id desc limit 1`,
+      [w.firms.A, doc]),
+    "a second printed invoice id on the chosen generation");
+  assert.match(err.message, /uq_document_regions_extraction_field_path/,
+    "…refused by the region key itself, not by some other constraint");
+
+  // …and the refusal wrote nothing: the generation still prints exactly ONE invoice id.
+  const n = (await rootQuery(
+    `select count(*)::int c from clara.document_regions r
+       join clara.document_extractions x on x.id = r.extraction_id
+      where x.document_id=$1 and x.engine_kind='invoice_facts' and x.status='done'
+        and r.field_path='invoice.invoice_id'`, [doc])).rows[0].c;
+  assert.equal(n, 1, "exactly one printed invoice id stands — N-8's precondition cannot be built");
 });
 
 test("bp1.A3m MUTANT — without W18 the mismatched-registration corpus is ADMITTED", async () => {
@@ -2728,30 +2745,44 @@ test("bp1.W16dm MUTANT — without the override conjunct the waved-past entry co
     });
 });
 
-test("bp1.W16em MUTANT — without N-8's own word the ambiguous corpus hides under the other one", async () => {
+test("bp1.W16em — #778 REPLACES N-8's mutant: the rung is unreachable because the derivation reads ONE extraction", async () => {
   failBp1(live);
+  // #778 — THIS CELL REPLACES "W16em MUTANT — without N-8's own word the ambiguous corpus hides
+  // under the other one". With N-8's precondition dead (see bp1.W16e above), mutating the rung out
+  // changes nothing observable, so the mutant can no longer say anything true. What IS worth
+  // guarding is the reason the rung died — and that reason is a property of the derivation, which
+  // a later recut could reverse without anyone noticing. So this cell pins it from BOTH ends.
   const cp = await seedWindow(w, "W16em", { dates: DATES_OK });
   const doc = (await evidenceDocuments(w.firms.A, w.clients.A1, cp.id))[0];
+
+  // (1) A SECOND printed invoice id IS representable — on a sibling extraction of the same
+  //     generation, which is how the W18 cells above keep their subject.
+  const sib = await siblingFactsExtraction(w.firms.A, doc);
   await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
-            'invoice.invoice_id', 'W16EM-EXTRA-0009', 1.0
-       from clara.document_extractions x
-      where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
-      order by x.version_n desc, x.id desc limit 1`,
-    [w.firms.A, doc]);
-  // Without its own rung, four printed ids fall through to the three-scans word — which is a
-  // DIFFERENT fact, and a card that says "this looks like one invoice three times" about a
-  // document whose extraction simply found two candidates is telling the reader something false.
-  await withMutant(BLOCKER_SIG, [["  if coalesce(v_n_prints,0) > 3 then", "  if false then"]],
-    async () => {
-      const err = await assertRaises("CLR36",
-        async () => proposeAsAgent(await filingActor(),
-          { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
-        "four printed ids with the ambiguity rung removed");
-      assert.match(err.message, /binding_corpus_not_distinct/,
-        "without N-8's rung the ambiguous corpus is reported as three scans of one invoice");
-    });
+     values ($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.invoice_id','W16EM-EXTRA-0009',1.0)`,
+    [w.firms.A, sib]);
+  const printed = (await rootQuery(
+    `select count(*)::int c from clara.document_regions r
+       join clara.document_extractions x on x.id = r.extraction_id
+      where x.document_id=$1 and x.engine_kind='invoice_facts' and x.status='done'
+        and r.field_path='invoice.invoice_id'`, [doc])).rows[0].c;
+  assert.equal(printed, 2, "the document's current generation really does print two invoice ids");
+
+  // (2) …and the DERIVATION still does not see the second one, because it reads ONE extraction.
+  //     f2_evidence therefore carries three entries for a three-document corpus, and N-8's
+  //     `v_n_prints > 3` cannot trip. If a later recut widened this read to the whole generation,
+  //     the count below would move and this cell would fail — which is the point of pinning it.
+  const basis = await derivedBasis(w.firms.A, w.clients.A1, cp.id);
+  assert.equal((basis.f2_evidence ?? []).length, 3,
+    `the derivation reads one extraction per document, so a sibling's extra print is invisible (got ${JSON.stringify(basis.f2_evidence)})`);
+
+  // (3) …read off the installed body as well, so the claim is about the code and not only about
+  //     one fixture's luck.
+  const src = (await rootQuery(
+    "select prosrc from pg_proc where oid='clara._derive_vendor_binding_basis(uuid,uuid,uuid)'::regprocedure")).rows[0].prosrc;
+  assert.ok(src.includes("on r.extraction_id = fx.extraction_id"),
+    "the basis derivation must still read ONE extraction per document — if it does not, N-8's rung is live again and its original cells must come back");
 });
 
 test("bp1.E7m MUTANT — with the stale row counted as open, the read reports a loop brake that is not there", async () => {

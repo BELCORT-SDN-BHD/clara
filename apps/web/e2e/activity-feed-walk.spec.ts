@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ACTIVITY } from "./activity-mock.mjs";
-import { settleForScan } from "./helpers";
+import { settleForScan, signIn } from "./helpers";
 
 /**
  * #632 (refresh spec #612, journey B5) — the attributable Activity feed's real content:
@@ -21,13 +21,6 @@ import { settleForScan } from "./helpers";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
-}
 
 const documentRowButton = (page: Page) =>
   page.getByRole("button", { name: "A document was actively filed to a client." });

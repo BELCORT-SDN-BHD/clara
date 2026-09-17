@@ -12,7 +12,7 @@
 //
 // No dependencies — Node built-ins only.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,14 @@ function write(root, relPath, content) {
 function freshFixture() {
   return mkdtempSync(join(tmpdir(), "check-dead-citations-selftest-"));
 }
+/** The first path in frozen-workflows.json’s `workflows` map — a file that IS frozen right
+ *  now, which is exactly what the #795 frozen-manifest exemption covers. */
+function firstFrozenManifestPath() {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "frozen-workflows.json"), "utf8"));
+  const [first] = Object.keys(manifest.workflows ?? {});
+  if (!first) throw new Error("frozen-workflows.json has no `workflows` entries");
+  return first;
+}
 function rm(root) {
   rmSync(root, { recursive: true, force: true });
 }
@@ -60,7 +68,11 @@ console.log("findDeadNameCitations — positive controls:");
   try {
     write(dir, "packages/db/tests/fixture-a.mjs", "// see apps/web/AGENTS.md for the rule\n");
     write(dir, "apps/web/lib/fixture-b.ts", "// db-tests.md: some rule\n");
-    const hits = findDeadNameCitations(["packages/db/tests/fixture-a.mjs", "apps/web/lib/fixture-b.ts"], dir);
+    write(dir, "packages/runtime/tests/fixture-e.test.mjs", "// see ARCHITECTURE Appendix A policy (c)\n");
+    const hits = findDeadNameCitations(
+      ["packages/db/tests/fixture-a.mjs", "apps/web/lib/fixture-b.ts", "packages/runtime/tests/fixture-e.test.mjs"],
+      dir,
+    );
     testCase("flags a planted apps/web/AGENTS.md citation under packages/", () => {
       assertDeepEqual(
         hits.filter((h) => h.file === "packages/db/tests/fixture-a.mjs"),
@@ -73,6 +85,13 @@ console.log("findDeadNameCitations — positive controls:");
         hits.filter((h) => h.file === "apps/web/lib/fixture-b.ts"),
         [{ file: "apps/web/lib/fixture-b.ts", name: "db-tests.md" }],
         "must flag the fixture citing db-tests.md",
+      );
+    });
+    testCase("#795: flags a planted ARCHITECTURE Appendix A citation in editable, non-exempt code", () => {
+      assertDeepEqual(
+        hits.filter((h) => h.file === "packages/runtime/tests/fixture-e.test.mjs"),
+        [{ file: "packages/runtime/tests/fixture-e.test.mjs", name: "ARCHITECTURE Appendix A" }],
+        "must flag the fixture citing ARCHITECTURE Appendix A — it is not in the frozen manifest or the allowlist",
       );
     });
   } finally {
@@ -91,9 +110,54 @@ console.log("findDeadNameCitations — negative controls:");
   try {
     write(dir, "packages/db/tests/fixture-c.mjs", "// see AGENTS.md at the repo root for the rule\n");
     write(dir, "apps/web/lib/fixture-d.ts", "// see packages/db/README.md instead\n");
-    const hits = findDeadNameCitations(["packages/db/tests/fixture-c.mjs", "apps/web/lib/fixture-d.ts"], dir);
+    const hits = findDeadNameCitations(
+      ["packages/db/tests/fixture-c.mjs", "apps/web/lib/fixture-d.ts"],
+      dir,
+    );
     testCase("a citation of the repo-root AGENTS.md (which exists) is not flagged", () => {
       assertDeepEqual(hits, [], "must not flag a fixture that cites a file that actually exists");
+    });
+    testCase("#795: a document with an Appendix A OF ITS OWN is not flagged — the dead name is \"ARCHITECTURE Appendix A\"", () => {
+      // THE FALSE POSITIVE THIS ENTRY USED TO CARRY. A bare /appendix a/i matched any tracked
+      // file naming any appendix, and reported it under a phrase that file never used. The
+      // entry is scoped per LINE to `Appendix A` BESIDE `ARCHITECTURE`; a document numbering
+      // its own appendices is none of this guard's business. Both shapes are fixtured: an
+      // appendix heading, and a cross-reference to it.
+      write(dir, "docs/plan/fixture-own-appendix.md",
+        "## Appendix A — the sampling method\n\nThe rates in Appendix A were re-derived in 2026.\n");
+      // …while a file naming BOTH on one line is still caught, so the narrowing did not
+      // disarm the entry.
+      write(dir, "docs/plan/fixture-cross-ref.md",
+        "See docs/ARCHITECTURE.md's Appendix A for the closure rule.\n");
+      const scoped = findDeadNameCitations(
+        ["docs/plan/fixture-own-appendix.md", "docs/plan/fixture-cross-ref.md"],
+        dir,
+      );
+      assertDeepEqual(
+        scoped,
+        [{ file: "docs/plan/fixture-cross-ref.md", name: "ARCHITECTURE Appendix A" }],
+        "only the file naming ARCHITECTURE beside Appendix A may be flagged",
+      );
+    });
+    testCase("#795: an exempt allowlisted path citing ARCHITECTURE Appendix A is not flagged", () => {
+      // Read the fixture's own content, but ask findDeadNameCitations to treat it as if it lived
+      // at the real allowlisted path "docs/ARCHITECTURE.md" — the file this repo's real
+      // ARCHITECTURE.md exemption covers.
+      mkdirSync(join(dir, "docs"), { recursive: true });
+      writeFileSync(join(dir, "docs/ARCHITECTURE.md"), "// ARCHITECTURE Appendix A — historical citation, deliberately kept\n", "utf8");
+      const allowlistHits = findDeadNameCitations(["docs/ARCHITECTURE.md"], dir);
+      assertDeepEqual(allowlistHits, [], "docs/ARCHITECTURE.md is on the explicit APPENDIX_A_ALLOWLIST and must not be flagged");
+    });
+    testCase("#795: an exempt frozen-manifest path citing ARCHITECTURE Appendix A is not flagged", () => {
+      // The exemption is read from frozen-workflows.json, so this case takes its path from the
+      // manifest too rather than naming one by hand: #810 retired chatTurn_v1 (the path this case
+      // used to hardcode), and a retirement deletes the file AND drops it from `workflows` — a
+      // hand-written path here goes stale the next time an entry is retired.
+      const livePath = firstFrozenManifestPath();
+      mkdirSync(join(dir, dirname(livePath)), { recursive: true });
+      writeFileSync(join(dir, livePath), "// ARCHITECTURE Appendix A policy (c)\n", "utf8");
+      const frozenHits = findDeadNameCitations([livePath], dir);
+      assertDeepEqual(frozenHits, [], `a real frozen-manifest path (${livePath}) must not be flagged for citing ARCHITECTURE Appendix A`);
     });
   } finally {
     rm(dir);

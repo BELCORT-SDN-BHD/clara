@@ -139,11 +139,11 @@ import { handleFirmSetupSupabase } from "./firm-setup-mock.mjs";
 // #652's C8 accrual lane — the three accrual doors plus the four reads its create form makes.
 // Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb allow-list, so it
 // drains no other lane's request stream and can run anywhere in the chain below.
-import { handleAccrualSupabase } from "./accrual-mock.mjs";
+import { accrualWorkListPage, handleAccrualSupabase } from "./accrual-mock.mjs";
 // #653's C8/C9 lane — the prepayment-amortisation doors plus the plan lifecycle doors that lane
 // reuses. Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb
 // allow-list, so it drains no other lane's request stream and can run anywhere in the chain below.
-import { handlePrepaymentsSupabase } from "./prepayments-mock.mjs";
+import { handlePrepaymentsSupabase, prepaymentWorkListPage } from "./prepayments-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -631,6 +631,12 @@ async function handleSupabase(request, response, url) {
     const body = await readJson(request);
     const answer = answerWorkListPage(body)
       ?? journalWorkListPage(body)
+      // #809 — the plan authority picker reads THIS door now (migration 0203 gave it `intent_key`,
+      // the last field the deleted direct read was kept for), so the two lanes whose forms carry
+      // that picker answer it for their own client, by the same pure-answerer contract as the two
+      // above: null means "not mine".
+      ?? accrualWorkListPage(body)
+      ?? prepaymentWorkListPage(body)
       ?? { status: 200, body: { rows: [], next_cursor: null, truncated: false } };
     sendJson(response, answer.status, answer.body, cors);
     return;

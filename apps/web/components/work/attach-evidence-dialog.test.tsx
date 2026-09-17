@@ -19,6 +19,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, clickButton, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
+import { settleUntil } from "../../test/settleUntil";
 import { AttachEvidenceDialog } from "./attach-evidence-dialog";
 import type { AttachEvidenceResult, EvidenceDocument, SpokenForDocumentRow } from "../../lib/work/evidence";
 import messages from "../../messages/en.json";
@@ -102,8 +103,41 @@ function bodyText(): string {
   return textOf(bodyNode() as never);
 }
 
-async function drain(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
+// #798 — bounded on WORK: 200 settle passes comfortably outlasts this dialog's mocked reads
+// and its write-then-reread chain under whole-suite load, the same budget already justified
+// for the onboarding-checklist trio (16cb8c85).
+const SETTLE_PASSES = 200;
+
+/** No condition to wait for here — post-unmount teardown (or an absence assertion that
+ *  follows) has nothing to poll, so unlike the arrival waits below this stays a FIXED pass
+ *  count on purpose, mirroring the onboarding-checklist trio's own "post-unmount drains keep
+ *  fixed counts" note (16cb8c85). */
+async function absenceSettle(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
   for (let i = 0; i < 6; i++) await h.settle();
+}
+
+function selectNode(): Stub | null {
+  return findIn(
+    bodyNode(),
+    (n) => n.tagName === "SELECT" && (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") === "attach-evidence-document",
+  );
+}
+
+function optionsCount(): number {
+  const select = selectNode();
+  if (!select) return 0;
+  return ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION").length;
+}
+
+function hasLinkTo(entryId: string): boolean {
+  return findIn(
+    bodyNode(),
+    (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(entryId),
+  ) !== null;
+}
+
+function whatWasRecordedHeading(): Stub | null {
+  return findIn(bodyNode(), (n) => n.tagName === "H2" && textOf(n as never) === "What was recorded");
 }
 
 async function openDialog(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
@@ -117,14 +151,23 @@ async function openDialog(h: Awaited<ReturnType<typeof renderComponent>>): Promi
   await h.act(async () => {
     await clickButton(trigger as never);
   });
-  await drain(h);
+  // The documents (and, in the same macrotask flush, the spoken-for) read is a mocked
+  // promise with no artificial delay, so it settles into exactly one of three shapes: options
+  // beyond the placeholder, the empty-client paragraph, or the unavailable banner. Polling
+  // for whichever one arrives — instead of a fixed six-pass drain — is the one wait every test
+  // that opens this dialog actually needs, and survives a mock given a real await inside.
+  await settleUntil(
+    h,
+    () => optionsCount() > 1
+      || /no filed documents to attach/.test(bodyText())
+      || /could not read this client's documents/.test(bodyText()),
+    "the dialog's initial documents read",
+    SETTLE_PASSES,
+  );
 }
 
 function selectIn(): Stub {
-  const node = findIn(
-    bodyNode(),
-    (n) => n.tagName === "SELECT" && (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") === "attach-evidence-document",
-  );
+  const node = selectNode();
   assert.ok(node, "the document chooser must render inside the dialog");
   return node!;
 }
@@ -146,7 +189,6 @@ async function pressAttach(h: Awaited<ReturnType<typeof renderComponent>>): Prom
   await h.act(async () => {
     await clickButton(confirmIn() as never);
   });
-  await drain(h);
 }
 
 // THE `t634` PREFIX IS NOT A TYPO. A string literal containing `#634` is a valid
@@ -177,6 +219,7 @@ test("t634: confirm sends the chosen document with the entry's revision and ONE 
     assert.equal((confirmIn() as { disabled?: unknown }).disabled, true);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => reReads === 1, "the caller's re-read after a successful attach", SETTLE_PASSES);
     assert.equal(attempts.length, 1);
     assert.equal(attempts[0]!.entryId, ENTRY);
     assert.equal(attempts[0]!.documentId, DOCUMENTS[0]!.documentId);
@@ -185,7 +228,7 @@ test("t634: confirm sends the chosen document with the entry's revision and ONE 
     assert.equal(reReads, 1, "hydrate-never-trust: the caller re-reads after the act");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -204,6 +247,8 @@ test("t634: a SOURCE CONFLICT stays open, keeps the choice, and links to the ent
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => reReads === 1 && hasLinkTo(OTHER_ENTRY),
+      "the re-read and the claimant's link for a source conflict", SETTLE_PASSES);
     assert.match(bodyText(), /already backs another posted entry/);
     // THE CHOICE SURVIVES: a refusal must not throw away the state the human
     // just produced.
@@ -219,7 +264,7 @@ test("t634: a SOURCE CONFLICT stays open, keeps the choice, and links to the ent
     assert.equal(reReads, 1, "a refusal is re-read too");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -229,11 +274,13 @@ test("t634: a STALE revision renders inline and does not close the dialog", asyn
     await openDialog(h);
     await choose(h, DOCUMENTS[1]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => /changed since you opened it/.test(bodyText()),
+      "the stale-revision refusal", SETTLE_PASSES);
     assert.match(bodyText(), /changed since you opened it/);
     assert.equal((selectIn() as { value?: unknown }).value, DOCUMENTS[1]!.documentId, "the choice is preserved");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -247,12 +294,15 @@ test("t634: the SAME document already attached reads as the state it is, not as 
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    // No condition to wait for: this proves nothing duplicated after the accepted-but-
+    // already-attached answer, not that some new text arrived — a bounded settle, not a poll.
+    await absenceSettle(h);
     // The dialog closes on an accepted answer, and the durable proof is the
     // caller's own re-read — not a line inside a dialog that is no longer open.
     assert.doesNotMatch(bodyText(), /Nothing changed\. Nothing changed\./);
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -264,7 +314,7 @@ test("t634: a client with NO filed documents says so instead of offering an empt
     assert.equal((confirmIn() as { disabled?: unknown }).disabled, true);
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -296,15 +346,19 @@ test("t634: an UNOBSERVED outcome keeps the op key, so the retry replays instead
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => /could not reach the server/.test(bodyText()),
+      "the unobserved-outcome refusal", SETTLE_PASSES);
     assert.match(bodyText(), /could not reach the server/, "the lost answer is reported as unknown, not as a refusal");
     await pressAttach(h);
+    await settleUntil(h, () => attempts.length === 2 && selectNode() === null,
+      "the second attempt's re-read and the dialog closing on the settled attach", SETTLE_PASSES);
     assert.equal(attempts.length, 2);
     assert.equal(attempts[1]!.opKey, attempts[0]!.opKey,
       "a retry after an UNOBSERVED outcome must ride the SAME key — the database decides whether "
       + "it already happened, not the browser");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -327,14 +381,18 @@ test("t634: a SETTLED outcome DOES rotate the key — a second decision is not a
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => /not an active filed document/.test(bodyText()),
+      "the invalid-document refusal before choosing again", SETTLE_PASSES);
     await choose(h, DOCUMENTS[1]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => attempts.length === 2 && selectNode() === null,
+      "the second attempt's re-read and the dialog closing on the settled attach", SETTLE_PASSES);
     assert.equal(attempts.length, 2);
     assert.notEqual(attempts[1]!.opKey, attempts[0]!.opKey,
       "a new decision under the old key would replay the refusal the database already stored");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -348,7 +406,7 @@ test("t634: an UNREADABLE documents list is not the sentence 'this client has no
       "a failed read must never assert a fact about the client's records");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -358,12 +416,14 @@ test("t634: a REVERSED entry's refusal is named, not folded into the generic one
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => /has been reversed/.test(bodyText()),
+      "the reversed-entry refusal", SETTLE_PASSES);
     assert.match(bodyText(), /has been reversed/, "the one next action is on the entry that replaced it");
     assert.equal((selectIn() as { value?: unknown }).value, DOCUMENTS[0]!.documentId,
       "the choice survives the refusal");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -381,11 +441,13 @@ test("t728: a SUCCESSFUL attach moves focus to the 'What was recorded' landmark,
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
-    // Two extra settle passes: the fix awaits `nextPaint()` (a frame + a macrotask) before moving
-    // focus, on purpose — see attach-evidence-dialog.tsx's own comment on `confirm`.
-    for (let i = 0; i < 4; i++) await h.settle();
+    // The fix awaits `nextPaint()` (a frame + a macrotask) before moving focus, on purpose — see
+    // attach-evidence-dialog.tsx's own comment on `confirm` — so poll for the landing rather than
+    // guessing how many settle hops that costs.
+    await settleUntil(h, () => activeElement() === whatWasRecordedHeading(),
+      "focus landing on the 'What was recorded' heading after a successful attach", SETTLE_PASSES);
 
-    const heading = findIn(bodyNode(), (n) => n.tagName === "H2" && textOf(n as never) === "What was recorded");
+    const heading = whatWasRecordedHeading();
     assert.ok(heading, "the section heading must render");
     // `assert.ok(a === b)`, never `assert.equal` — two stub-DOM nodes handed to node:assert's
     // deep-equality path HANG the runner on this harness (LANE-RECIPE's own measured note).
@@ -394,7 +456,7 @@ test("t728: a SUCCESSFUL attach moves focus to the 'What was recorded' landmark,
       "a heading is not natively focusable — the fix must give it tabIndex=-1 to be a real target");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -404,7 +466,8 @@ test("t728: a REFUSED attach keeps the dialog open and puts focus on the control
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
-    for (let i = 0; i < 4; i++) await h.settle();
+    await settleUntil(h, () => activeElement() === selectNode(),
+      "focus returning to the document chooser after a refusal", SETTLE_PASSES);
 
     // A POSITIVE TARGET, not "not the landmark" (review round, N13): `busy` disables the select,
     // Cancel AND Attach for the duration of the write, so the button focus was on is disabled
@@ -420,7 +483,7 @@ test("t728: a REFUSED attach keeps the dialog open and puts focus on the control
     assert.match(bodyText(), /not an active filed document/);
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -472,7 +535,7 @@ test("t728: a document already spoken for renders DISABLED with a reason and a l
     assert.ok(entryLink, "the selected document's own reason links to the entry it already backs");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -495,7 +558,7 @@ test("t728: a FAILED spoken-for read disables nothing and says the check was una
     assert.match(bodyText(), /could not check which documents already back a posted entry/);
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -514,6 +577,8 @@ test("t728: a door REFUSAL whose entry belongs to a sibling client links into TH
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => hasLinkTo(OTHER_ENTRY),
+      "the claimant's link for a sibling-client source conflict", SETTLE_PASSES);
     const href = String(
       (findIn(bodyNode(), (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)) as
         { getAttribute?: (k: string) => string | null } | null)?.getAttribute?.("href") ?? "",
@@ -524,7 +589,7 @@ test("t728: a door REFUSAL whose entry belongs to a sibling client links into TH
       "…and not the asking client's, whose journal never contains that entry");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -552,14 +617,17 @@ test("t728: a REFUSED attach does NOT steal focus the person placed somewhere th
       "…and it is NOT disabled by `busy` — the premise of this cell, and of the guard");
     (closeX as { focus?: () => void }).focus?.();
     release();
-    for (let i = 0; i < 6; i++) await h.settle();
+    // Focus is already ON closeX before release() — the claim under test is that it STAYS there,
+    // an absence (never yanked away), not an arrival, so this waits out the refusal's full landing
+    // on a fixed bound rather than returning the instant the (already-true) condition is checked.
+    await absenceSettle(h);
     assert.ok(activeElement() === closeX,
       "focus stays where the person put it — the post-refusal move is guarded, not unconditional");
     assert.match(bodyText(), /not an active filed document/, "…and the refusal still rendered");
   } finally {
     release();
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -587,7 +655,7 @@ test("t728: a SIBLING client's entry holding the document is named, and the link
     assert.equal(href.includes(CLIENT), false, "…and not this dialog's own client");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -605,13 +673,15 @@ test("t728f: the dialog's refusal NAMES the sibling client its link leads to, an
     await openDialog(named);
     await choose(named, DOCUMENTS[0]!.documentId);
     await pressAttach(named);
+    await settleUntil(named, () => /belongs to Beta Sdn Bhd/.test(textOf(bodyNode())),
+      "the claimant name for a sibling-client source conflict", SETTLE_PASSES);
     assert.match(textOf(bodyNode()), /belongs to Beta Sdn Bhd/,
       "the refusal names the claimant before offering the door out of this client");
     assert.match(textOf(bodyNode()), /leaves this client/,
       "…and says plainly that following the link leaves these books");
   } finally {
     await named.unmount();
-    await drain(named);
+    await absenceSettle(named);
   }
 
   // …and the claimant that IS this client keeps the plain sentence: nothing is being left.
@@ -625,6 +695,8 @@ test("t728f: the dialog's refusal NAMES the sibling client its link leads to, an
     await openDialog(own);
     await choose(own, DOCUMENTS[0]!.documentId);
     await pressAttach(own);
+    await settleUntil(own, () => /already backs another posted entry/.test(textOf(bodyNode())),
+      "the plain source-conflict refusal for this client's own entry", SETTLE_PASSES);
     assert.match(textOf(bodyNode()), /already backs another posted entry/,
       "this client's own entry keeps the plain refusal");
     assert.doesNotMatch(textOf(bodyNode()), /leaves this client/,
@@ -633,7 +705,7 @@ test("t728f: the dialog's refusal NAMES the sibling client its link leads to, an
       "…and no claimant is named, because the claimant is these very books");
   } finally {
     await own.unmount();
-    await drain(own);
+    await absenceSettle(own);
   }
 });
 
@@ -694,6 +766,8 @@ test("t728g: a claimant read that never answers does not hold the refusal's focu
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => /already backs another posted entry/.test(bodyText()) && activeElement() === selectNode(),
+      "the source-conflict refusal and the focus recovery it does not owe the still-outstanding claimant read", SETTLE_PASSES);
 
     // The refusal is on screen and the controls are live, with the claimant read still outstanding.
     assert.match(bodyText(), /already backs another posted entry/,
@@ -715,7 +789,7 @@ test("t728g: a claimant read that never answers does not hold the refusal's focu
       "the link waits for the claimant; the person's place in the dialog does not");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -735,6 +809,8 @@ test("t728g: the dialog's source_conflict refusal is ONE alert, and its text doe
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => liveRegionsIn(bodyNode()).length === 1,
+      "the source-conflict refusal's own live-region announcement", SETTLE_PASSES);
 
     const before = liveRegionsIn(bodyNode());
     assert.equal(before.length, 1,
@@ -745,7 +821,10 @@ test("t728g: the dialog's source_conflict refusal is ONE alert, and its text doe
       "…and it is the refusal that is announced (vacuity control)");
 
     await h.act(() => { release!({ entryId: OTHER_ENTRY, clientId: OTHER_CLIENT, clientName: "Beta Sdn Bhd" }); });
-    await drain(h);
+    // The claimant effect runs after the commit that painted the refusal, so its own name and
+    // link land some renders later — poll for that arrival rather than guessing the hop count.
+    await settleUntil(h, () => /Beta Sdn Bhd/.test(bodyText()) && hasLinkTo(OTHER_ENTRY),
+      "the claimant's name and link after the source-conflict refusal", SETTLE_PASSES);
 
     const after = liveRegionsIn(bodyNode());
     assert.equal(after.length, 1,
@@ -765,7 +844,7 @@ test("t728g: the dialog's source_conflict refusal is ONE alert, and its text doe
       "the late link sits OUTSIDE the alert: inserting a node into an assertive region re-announces it");
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -799,6 +878,10 @@ test("t728g: the claimant read is abandoned by its own TIMEOUT, not only by clos
       await openDialog(h);
       await choose(h, DOCUMENTS[0]!.documentId);
       await pressAttach(h);
+      // The claimant effect (which arms the 5000 ms abort timer) runs after the commit that
+      // paints the refusal, so both arrive some renders later than the click.
+      await settleUntil(h, () => timers.length === 1 && armed !== null,
+        "the claimant read's own 5000 ms abort timer arming", SETTLE_PASSES);
 
       assert.equal(timers.length, 1,
         `the claimant read arms exactly one 5000 ms abort timer — found ${timers.length}`);
@@ -806,7 +889,10 @@ test("t728g: the claimant read is abandoned by its own TIMEOUT, not only by clos
       assert.equal((armed as AbortSignal).aborted, false, "…which is live while the read is outstanding");
 
       await h.act(() => { timers[0]!(); });
-      await drain(h);
+      // No condition to wait for: `controller.abort()` runs synchronously inside the timer
+      // callback above, so `armed.aborted` is already true — this only lets the aborted read's
+      // rejected promise settle without a dangling unhandled-rejection warning.
+      await absenceSettle(h);
 
       assert.equal((armed as AbortSignal).aborted, true,
         "the timeout ABORTS the read — without it the fetch outlives the dialog and the banner waits "
@@ -822,7 +908,7 @@ test("t728g: the claimant read is abandoned by its own TIMEOUT, not only by clos
         "…and focus was never the timeout's hostage: it was restored when the refusal painted");
     } finally {
       await h.unmount();
-      await drain(h);
+      await absenceSettle(h);
     }
   } finally {
     (globalThis as { setTimeout: unknown }).setTimeout = realSetTimeout;
@@ -850,6 +936,8 @@ test("t728g: a re-read that never answers does not hold the refusal's focus reco
     await openDialog(h);
     await choose(h, DOCUMENTS[0]!.documentId);
     await pressAttach(h);
+    await settleUntil(h, () => /already backs another posted entry/.test(bodyText()) && activeElement() === selectNode(),
+      "the source-conflict refusal and the focus recovery it does not owe the still-outstanding re-read", SETTLE_PASSES);
 
     assert.match(bodyText(), /already backs another posted entry/,
       "the refusal paints while the re-read is still in flight");
@@ -859,7 +947,7 @@ test("t728g: a re-read that never answers does not hold the refusal's focus reco
       + `${String((activeElement() as { tagName?: string } | null)?.tagName ?? "none")})`);
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });
 
@@ -890,6 +978,8 @@ test("t728h: a SECOND source_conflict on the SAME document still re-reads and re
     await choose(h, DOCUMENTS[0]!.documentId);
 
     await pressAttach(h);
+    await settleUntil(h, () => hasLinkTo(OTHER_ENTRY),
+      "the first refusal's claimant link", SETTLE_PASSES);
     assert.match(bodyText(), /already backs another posted entry/, "the first refusal renders");
     assert.ok(
       findIn(bodyNode(), (n) => n.tagName === "A"
@@ -901,6 +991,8 @@ test("t728h: a SECOND source_conflict on the SAME document still re-reads and re
     // `source_conflict`, so `conflictDocumentId` computes to the identical string both times —
     // exactly the two-press flow t634's op-key cells already exercise for the reservation rule.
     await pressAttach(h);
+    await settleUntil(h, () => hasLinkTo(SECOND_CLAIM_ENTRY),
+      "the second refusal's fresh claimant link", SETTLE_PASSES);
     assert.equal(findCalls, 2,
       "the claimant is re-read on the second refusal, not served from the first answer");
     assert.match(bodyText(), /already backs another posted entry/, "the second refusal renders");
@@ -911,6 +1003,6 @@ test("t728h: a SECOND source_conflict on the SAME document still re-reads and re
     );
   } finally {
     await h.unmount();
-    await drain(h);
+    await absenceSettle(h);
   }
 });

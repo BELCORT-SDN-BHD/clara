@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, settleForScan } from "./helpers";
+import { ensureRealFocus, settleForScan, signInTo } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -32,13 +32,6 @@ const CLIENT = JOURNAL_WORK.clientId;
 const COMPOSER_URL = `/clients/${CLIENT}/accounting/journal/new`;
 const WORK_LIST_URL = `/clients/${CLIENT}/work`;
 
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /** Drive the fixture's Work state machine through the app's OWN proxy — the
  *  same instrument `journal-work-walk.spec.ts` uses, and for the same reason:

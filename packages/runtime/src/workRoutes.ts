@@ -300,7 +300,14 @@ const ADJUSTMENT_CENTS: Record<string, ReadonlyArray<[string, string, boolean]>>
     ["closingCents", "closing_cents", false],
     ["adjustmentCents", "adjustment_cents", true],
   ],
-  payroll_obligation: [["amountCents", "amount_cents", true]],
+  // #797 · `settledCents` is OPTIONAL and unsigned: migration 0212 made the settlement split a
+  // real particular, so the key has to reach the database or the web control could never be
+  // server-refusable. Absent means absent — an explicit 0 is a different fact (0212 refuses it
+  // beside a named payment account by name), so it is carried rather than dropped as falsy.
+  payroll_obligation: [
+    ["amountCents", "amount_cents", true],
+    ["settledCents", "settled_cents", false],
+  ],
 };
 
 function adjustmentInvalid(key: string, reason: string): InvalidBasis {
@@ -812,6 +819,23 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // renders "this Work is not available to take over" beside the status that made it so.
       return { status: 409, body: { error: "not_takeable", status: detailField(err, "status") } };
     }
+    // #721
+    if (reason === "not_restatable" || reason === "already_superseded") {
+      // #721 · the restate door's own 409s, in the same shape `not_retryable` and `not_takeable`
+      // use: the machine-readable token AND the operable fact beside it — the status that made the
+      // restatement illegal, or the successor that already exists. `reason` rides beside `error`
+      // because the browser's one reader keys on it for every other refusal on this lane.
+      return {
+        status: 409,
+        body: {
+          error: reason,
+          reason,
+          status: detailField(err, "status"),
+          superseded_by: detailField(err, "superseded_by"),
+        },
+      };
+    }
+    // #721
     if (reason === "work_cancelled" || reason === "work_settled") {
       // #630 · the BOUNDARY's own refusals, reachable here only through a door that calls the
       // posting core. The status is the operable fact: the surface converges on the Work's own row.
@@ -1195,6 +1219,76 @@ export function workRoutes(): express.Router {
       sendAdmissionError(res, err, "work cancel");
     }
   });
+
+  // #721 ----------------------------------------------------------------------
+  // ---- B3 restate: A REPLY THAT CHANGES THE BASIS BECOMES A NEW WORK -------
+  //
+  // NOT a second admission route, and not a cancel followed by an admission from the browser. The
+  // owner's ruling of 2026-09-12 makes the two halves ONE act: the successor is admitted with
+  // `supersedes` and the predecessor is cancelled with `superseded_by`, in one transaction, so no
+  // state exists in which a firm has two live Works for one instruction — which is exactly what a
+  // browser doing it in two calls would produce the moment the second one failed.
+  //
+  // 202 like admission, and for the identical reason: the answer acknowledges a NEW RUN, which is
+  // enqueued below. The basis and evidence are validated HERE in the same vocabulary the journal
+  // admission route uses (`toDbBasis` / `toDbSourceRefs`), so a preparer reads one set of field
+  // paths whichever door they came through, and the database re-validates everything anyway.
+  router.post("/api/work/:workId/restate", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const workId = req.params.workId;
+    if (!UUID_RE.test(workId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    const body = (req.body ?? {}) as { intentKey?: unknown; basis?: unknown; sourceRefs?: unknown; opKey?: unknown };
+    if (typeof body.opKey !== "string" || body.opKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_op_key" });
+      return;
+    }
+    if (typeof body.intentKey !== "string" || body.intentKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_intent_key" });
+      return;
+    }
+    const translated = toDbBasis(body.basis);
+    if (!translated.ok) {
+      res.status(400).json(translated.error);
+      return;
+    }
+    const refs = toDbSourceRefs(body.sourceRefs);
+    if (!refs.ok) {
+      res.status(400).json(refs.error);
+      return;
+    }
+    try {
+      const restated = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query(
+          "select clara.restate_accounting_work($1::uuid, $2::uuid, $3::text, $4::jsonb, $5::text, $6::jsonb, $7::text, $8::text) as receipt",
+          [
+            workId, p.sub, body.intentKey, JSON.stringify(translated.basis), "user_direct",
+            JSON.stringify(refs.sourceRefs), DEFAULT_MODEL, body.opKey,
+          ],
+        );
+        return (r.rows[0]?.receipt ?? null) as (Record<string, unknown> & {
+          task_id?: string;
+          replayed?: boolean;
+        }) | null;
+      });
+      if (!restated) {
+        res.status(404).json({ error: "not_found", message: "not found" });
+        return;
+      }
+      if (restated.replayed !== true && typeof restated.task_id === "string") await enqueueWork(restated.task_id);
+      res.status(202).json(restated);
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      sendAdmissionError(res, err, "work restate");
+    }
+  });
+  // #721 ----------------------------------------------------------------------
 
   // ---- B3 take-over: a colleague picks up an orphaned Work ---------------
   //

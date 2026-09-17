@@ -73,11 +73,20 @@ import {
   assertCloneIsPopulated,
 } from "../../db/tests/migrate-harness.mjs";
 import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
+import { pgToolsSkipForThisHost } from "./pg-tools-fixture.mjs";
 
 const DBNAME = disposableDatabaseName("clara_relay_taxonomy");
 
-const admin = new pg.Client(connectionConfig());
-await admin.connect();
+// #806 — probed before admin.connect()/createDisposableDatabase()/cloneAmbientDatabase() ever
+// run, so a host missing pg_dump/psql reports SKIPPED rather than the module-load failure this
+// file's own catch below otherwise turns it into, and creates no private database at all.
+const PG_TOOLS_SKIP = pgToolsSkipForThisHost();
+
+let admin = null;
+if (!PG_TOOLS_SKIP) {
+  admin = new pg.Client(connectionConfig());
+  await admin.connect();
+}
 
 let restoreEnv = () => {};
 let cleaned = false;
@@ -97,6 +106,7 @@ let cleaned = false;
 async function cleanupPrivateDb() {
   if (cleaned) return;
   cleaned = true;
+  if (!admin) return; // #806 — pg_dump/psql were missing; nothing was ever created
   const teardownErrors = [];
   try {
     const mod = await import("./relay-fixtures.mjs"); // side-effect-free at import time
@@ -142,6 +152,12 @@ after(cleanupPrivateDb);
 // statement, or a target split (the M2 class itself) all reject there exactly as a
 // createDisposableDatabase()/cloneAmbientDatabase()/setDatabaseEnv() throw does.
 let redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER, fx, skip, drainInProcess, assertExactlyOnce, runRedriveCli;
+if (PG_TOOLS_SKIP) {
+  // #806 — every cell below is registered with { skip }, so this reason is what node:test
+  // reports; nothing past this branch (createDisposableDatabase, cloneAmbientDatabase, the
+  // dynamic relay imports) ever runs.
+  skip = PG_TOOLS_SKIP;
+} else {
 try {
   // FOLD 2026-09-02: CREATE DATABASE moved INSIDE this try (previously ran before the
   // try/after() were registered). createDisposableDatabase() is GUARDED
@@ -177,6 +193,7 @@ try {
   // statement in this try, and nothing past it — instead of relying on after() alone.
   await cleanupPrivateDb();
   throw err;
+}
 }
 
 // ===========================================================================

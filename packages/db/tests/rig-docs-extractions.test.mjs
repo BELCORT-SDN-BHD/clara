@@ -108,8 +108,10 @@ test("§3.3 a region persists for every locator_kind with a matching locator sha
     row_col: { row: 3, col: 2 },
     paragraph_run: { paragraph: 4, run: 1 },
   };
-  for (const kind of LOCATOR_KINDS) {
-    const id = await seedRegion({ firm, extraction, locatorKind: kind, locator: locators[kind], fieldPath: `f.${kind}`, textContent: "100.00", engineConfidence: 0.91 });
+  for (const [i, kind] of LOCATOR_KINDS.entries()) {
+    // #777 the path is fixture labelling only — nothing reads it — so it takes the conforming
+    // `pages.1.lines.<i>` shape, distinct per region within this one extraction (#778).
+    const id = await seedRegion({ firm, extraction, locatorKind: kind, locator: locators[kind], fieldPath: `pages.1.lines.${i}`, textContent: "100.00", engineConfidence: 0.91 });
     assert.ok(id, `a ${kind} region persisted`);
   }
   noteLane(`regions exercised across all locator kinds: ${LOCATOR_KINDS.join(", ")}`);

@@ -198,8 +198,8 @@ test("readExtractionText returns the NEWEST extraction's text when two engines t
        values($1,$2,'clara-structured:v1','structured_parse',1,'done',1, now()) returning id`,
     [firm, document],
   )).rows[0].id;
-  await seedRegion({ firm, extraction: olderOcr, fieldPath: "body", textContent: "OLDER OCR EXTRACTION TEXT" });
-  await seedRegion({ firm, extraction: newerParse, fieldPath: "body", textContent: "NEWER STRUCTURED PARSE TEXT" });
+  await seedRegion({ firm, extraction: olderOcr, fieldPath: "pages.1.lines.0", textContent: "OLDER OCR EXTRACTION TEXT" });
+  await seedRegion({ firm, extraction: newerParse, fieldPath: "pages.1.lines.0", textContent: "NEWER STRUCTURED PARSE TEXT" });
 
   const text = await asRuntime((c) => readExtractionText(c, { documentId: document, firmId: firm }));
   assert.match(text, /NEWER STRUCTURED PARSE TEXT/, "the newest extraction's text wins the tie");

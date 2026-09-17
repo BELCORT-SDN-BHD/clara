@@ -2,18 +2,20 @@
 
 // #641 — the Work detail's ACTIVITY view: this Work's own attributable history.
 //
-// WHAT IT READS, AND THE LIMIT THAT COMES WITH IT. `clara.list_activity` (0181) is the estate's
-// ONE attributable feed, and every row it emits carries a `work_id`. This view calls that SAME
-// door, scoped to this Work's client, and keeps the rows whose `work_id` is this one. It does not
-// recut the door to add a `p_work` parameter: two other lanes have already spliced that body
-// (#728's 0183, #630's 0184) and a third recut for a filter the browser can apply is not worth
-// the frontier it would create.
+// WHAT IT READS. `clara.list_activity` is the estate's ONE attributable feed, and every row it
+// emits carries a `work_id`. This view calls that SAME door, scoped to this Work's client AND to
+// this Work: migration 0202 (#770) gave the door a `p_work` parameter whose predicate sits inside
+// each of its three union arms, ahead of that arm's own `limit`.
 //
-// THE COST IS STATED RATHER THAN HIDDEN, because it is real. The feed is paged newest-first over
-// the whole CLIENT, so a Work whose events are far down the client's history needs more than one
-// page to reach. This view therefore says how far it has looked ("no activity in the most recent
-// N events") and offers "Look further back" rather than claiming an empty result is an absence.
-// A door-side `p_work` filter is the honest fix and is left as a follow-up.
+// THE FOLLOW-UP #641 LEFT IS CLOSED, and with it the cost this header used to state. The view
+// used to read the whole CLIENT feed and keep the rows whose `work_id` matched in the browser —
+// so a Work whose events sat far down the client's history needed several over-fetched pages
+// before any surfaced, and a page boundary between two of its events read as "no activity" while
+// older matching rows went unread. NOTHING IS FILTERED HERE ANY MORE: whatever a `p_work` page
+// returns is this Work's history, and a browser that second-guessed the door would be re-opening
+// the very gap the door filter closed. "Load older activity" now pages THIS Work's own history
+// rather than scanning the client's, and the empty state is an absence rather than a report on
+// how far a browser looked.
 //
 // AND ONE THING IT IS HONEST ABOUT UP FRONT: a Work only enters that feed once it has produced a
 // COMMITTED operation receipt or touched a journal entry (0181's own three arms). A refused or
@@ -41,7 +43,7 @@ import { businessDateTime } from "@/lib/business-date";
 import { listActivity, type ActivityPage, type ActivityRow } from "@/lib/firm/activity";
 
 /** One page at the door's own ceiling: the fewer round trips a Work's history needs, the fewer
- *  "look further back" presses a person makes to find it. */
+ *  "load older" presses a person makes to see all of it. */
 const PAGE = 100;
 
 export function WorkActivityView({
@@ -56,7 +58,6 @@ export function WorkActivityView({
 }) {
   const t = useTranslations("WorkDetail");
   const [rows, setRows] = useState<ActivityRow[]>([]);
-  const [scanned, setScanned] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -79,11 +80,11 @@ export function WorkActivityView({
       const loader = loadRef.current;
       const page = loader
         ? await loader(cursorRef.current)
-        : await listActivity({ client: clientId }, { cursor: cursorRef.current, limit: PAGE });
+        : await listActivity({ client: clientId, work: workId }, { cursor: cursorRef.current, limit: PAGE });
       if (epoch !== epochRef.current) return;
-      const mine = (page.rows ?? []).filter((r) => r.work_id === workId);
+      // #770: NO CLIENT-SIDE NARROWING. The door answered for this Work.
+      const mine = page.rows ?? [];
       setRows((prev) => (first ? mine : [...prev, ...mine]));
-      setScanned((prev) => (first ? (page.rows?.length ?? 0) : prev + (page.rows?.length ?? 0)));
       cursorRef.current = page.next_cursor ?? null;
       setCursor(page.next_cursor ?? null);
       setError(null);
@@ -136,7 +137,7 @@ export function WorkActivityView({
         <Empty className="border">
           <EmptyHeader>
             <EmptyTitle>{t("activityEmptyTitle")}</EmptyTitle>
-            <EmptyDescription>{t("activityEmptyBody", { scanned })}</EmptyDescription>
+            <EmptyDescription>{t("activityEmptyBody")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
@@ -167,7 +168,7 @@ export function WorkActivityView({
             {busy ? t("activityLookingFurther") : t("activityLookFurther")}
           </Button>
         ) : (
-          <p className="text-xs text-muted-foreground">{t("activityScannedAll", { scanned })}</p>
+          <p className="text-xs text-muted-foreground">{t("activityScannedAll")}</p>
         )}
         <Link
           href={`/activity?client=${encodeURIComponent(clientId)}`}

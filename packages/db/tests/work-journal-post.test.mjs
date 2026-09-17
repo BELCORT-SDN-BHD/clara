@@ -547,6 +547,43 @@ test("w623.post.unknown-account an absent and an INACTIVE account are both refus
     "post.inactive-account: a DEACTIVATED account is not a postable account");
 });
 
+// #799 — THE SENTENCE THE WEB PARSES IS PINNED HERE, because the payload cannot carry the ordinal.
+// `_record_journal_entry_core`'s step 6 raises `line % codes to an account this client does not
+// have active: %`, and `detail` deliberately carries only `reason` + `account_code` — the payload
+// is frozen, so the LINE ORDINAL exists nowhere but in that English prose. The Work detail page
+// therefore regex-parses it (`apps/web/components/work/work-detail.tsx`'s exported
+// `UNKNOWN_ACCOUNT_LINE_SENTENCE`) to resolve the refused leg back to the adjustment field that
+// produced it. That is a rule living in two places, and this cell is the pin between them: it
+// reads the INSTALLED body out of pg_proc, so a migration that rewords the sentence REDS HERE
+// rather than silently switching the affordance off with every web test still green.
+test("w799.post.unknown-account-sentence the installed body still raises the exact prefix the web parses", async (t) => {
+  if (await gateWork(t)) return;
+  const bodies = await rootQuery(
+    `select p.prosrc from pg_proc p
+      where p.pronamespace='clara'::regnamespace and p.proname='_record_journal_entry_core'`,
+  );
+  assert.equal(bodies.rowCount, 1,
+    "w799.post.unknown-account-sentence: exactly one _record_journal_entry_core body must be installed");
+  const src = bodies.rows[0].prosrc;
+  assert.ok(
+    src.includes("'line % codes to an account this client does not have active: %'"),
+    "w799.post.unknown-account-sentence: the installed body no longer raises the exact sentence "
+    + "apps/web/components/work/work-detail.tsx's UNKNOWN_ACCOUNT_LINE_SENTENCE parses. If this "
+    + "reword is deliberate, change the web constant and its tests in the SAME change — the line "
+    + "ordinal is carried by the prose alone, so a reword turns the resolved-field affordance off "
+    + "with no other signal.",
+  );
+  // …and the ordinal really is the FIRST substitution, which is what `^line\s+(\d+)` depends on.
+  assert.match(src, /raise exception 'line % codes to an account this client does not have active: %',\s*v_bad_idx\s*,\s*v_bad_code/,
+    "w799.post.unknown-account-sentence: the first substitution must still be the line ordinal");
+  // BEHAVIOURAL CORROBORATION — the catalog text above is what the door actually says.
+  const a = await armed({ b: basis({ debitAccount: "9999-nope" }) });
+  const g = await refuses(A1(), CLR.badRequest, REASON.unknownAccount, () => post(a),
+    "w799.post.unknown-account-sentence");
+  assert.match(g.err.message ?? "", /^line \d+ codes to an account this client does not have active: /,
+    "w799.post.unknown-account-sentence: the raised message opens with the parsed prefix");
+});
+
 test("w623.post.control-leg a generic journal may not carry an AR/AP control leg", async (t) => {
   if (await gateWork(t)) return;
   const a = await armed({ b: basis({ debitAccount: WCHART.receivable }) });

@@ -102,7 +102,7 @@ export async function seedExtraction({ firm, document, status = "done", versionN
   return r.rows[0].id;
 }
 
-export async function seedRegion({ firm, extraction, fieldPath = "tin", textContent = "100.00" }) {
+export async function seedRegion({ firm, extraction, fieldPath = "invoice.vendor_tin", textContent = "100.00" }) {
   const r = await fx.rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
        values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}',$3,$4,0.99) returning id`,
@@ -146,7 +146,7 @@ export async function emitExtractionCompleted({ firm, document, extraction }) {
 export async function seedMatchableDocument({ firm, owner, client, tin }) {
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
   const extraction = await seedExtraction({ firm, document });
-  await seedRegion({ firm, extraction, fieldPath: "tin", textContent: tin });
+  await seedRegion({ firm, extraction, fieldPath: "invoice.vendor_tin", textContent: tin });
   await addClientIdentifier(owner, { client, kind: "tin", value: tin });
   const ev = await emitExtractionCompleted({ firm, document, extraction });
   return { document, extraction, ...ev };

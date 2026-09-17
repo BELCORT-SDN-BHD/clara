@@ -6,11 +6,16 @@
 //   1. LEASED interruption delivery (S4-D2). A clarify that has reached a terminal
 //      status (answered / expired / cancelled) but is not yet delivered is LEASED
 //      (claim_lease_until = now()+60s) and its WDK hook is resumed. delivered_at is
-//      stamped on resume success OR on HookNotFoundError (the engine hook is
-//      SINGLE-SHOT — a NotFound after a crashed prior attempt means it was already
-//      delivered, S4-P1d). A crashed lease simply expires and is retried, so
-//      delivery is exactly-once-or-provably-already-done. The resume happens
-//      OUTSIDE any DB transaction (a world call), between two autocommit writes.
+//      stamped on resume success, or on a HookNotFoundError that the ENGINE confirms
+//      was a prior delivery (a terminal/forgotten run, or a task that has left
+//      `awaiting_input`). A HookNotFound the engine does NOT confirm rests the row at
+//      `delivery_state='hook_missing'` instead — in BOTH lanes since #764, each with its
+//      own reconciler behind it (reconciler-work.mjs, reconciler-chat-clarify.mjs). The
+//      bare S4-P1d assumption ("single-shot, so a NotFound means already delivered")
+//      survives only on a pre-0180 database, which has nowhere to rest the fact. A
+//      crashed lease simply expires and is retried, so delivery is
+//      exactly-once-or-provably-already-done. The resume happens OUTSIDE any DB
+//      transaction (a world call), between two autocommit writes.
 //
 //   2. cancel_requested settlement. A human cancel of an engine-active task moves
 //      it to cancel_requested (§3.2); the runtime then ABORTS the engine run and
@@ -171,8 +176,10 @@ export async function deliverInterruptions(client, deps) {
   //
   // THE MODERN PREDICATE EXCLUDES `delivery_state = 'hook_missing'`. Such a row has already been
   // reconciled against real run state and found unreachable: re-leasing it every poll would spend
-  // an attempt for ever on a hook that can never fire, and hide the fact from the Work reconciler,
-  // which is the belt that settles such a Work `expired` (recoverable).
+  // an attempt for ever on a hook that can never fire, and hide the fact from the reconciler that
+  // owns it — reconciler-work.mjs for a Work (settled `expired`, recoverable), and since #764
+  // reconciler-chat-clarify.mjs for a chat turn (re-probed, then settled `expired` with a
+  // `clarify_closed` part so the session's live-turn slot is released).
   const leased = modern
     ? await client.query(
         `update clara.agent_interruptions
@@ -280,19 +287,25 @@ export async function deliverInterruptions(client, deps) {
       continue;
     }
     // ------------------------------------------------------------------
-    // HookNotFound. For a WORK question this is NOT delivery — it is a question about the RUN.
+    // HookNotFound is NOT delivery. It is a question about the RUN — and since #764 that is true
+    // in BOTH LANES, asked by ONE body.
     //
-    // FOR A CHAT CLARIFY IT STAYS EXACTLY WHAT IT WAS (S4-P1d: the engine hook is single-shot, so
-    // a NotFound after a crashed attempt means it was already delivered). That is not deference to
-    // a passing test: a chat turn has no Work reconciler, so a `hook_missing` resting state would
-    // strand it FOR EVER with nothing to settle it — strictly worse than the assumption. #629
-    // retires the assumption exactly where it has a belt to fall back on, and says so rather than
-    // pretending the whole estate moved.
+    // WHAT THIS LANE-AGNOSTIC BRANCH REPLACES, and why the replacement was owed rather than merely
+    // tidy. A CHAT clarify used to return right here with `stampDelivered` (S4-P1d: the engine hook
+    // is single-shot, so a NotFound after a crashed attempt means it was already delivered). #629
+    // kept that for chat on an honest argument — a chat turn had no reconciler, so a `hook_missing`
+    // resting state would have stranded it FOR EVER with nothing to settle it, which is strictly
+    // worse than the assumption. THE ARGUMENT'S PREMISE IS WHAT #764 ENDS:
+    // `reconciler-chat-clarify.mjs` is that belt, and it ships in the SAME change as this branch —
+    // never separately. The cost the assumption carried is the one 0198 §R measured: a turn stamped
+    // delivered with no resume having happened never leaves `awaiting_input`, so its session's
+    // live-turn slot (`uq_agent_task_one_live_turn`, 0006:165) stays held and every further message
+    // in that conversation is refused CLR13 — while the books say the answer was delivered.
+    //
+    // NOTHING BELOW IS LANE-SPECIFIC, and nothing had to become so: `resumeAlreadyLanded` reads the
+    // TASK and the RUN, which both lanes have, and a chat row that reaches `hook_missing` is
+    // excluded from the delivery scan for exactly the same reason a Work row is.
     // ------------------------------------------------------------------
-    if (!row.work_id) {
-      await stampDelivered(row);
-      continue;
-    }
     const landed = await resumeAlreadyLanded(client, row, { getRun, log });
     if (landed === true) {
       await stampDelivered(row);
@@ -322,7 +335,7 @@ export async function deliverInterruptions(client, deps) {
       continue;
     }
     hookMissing += 1;
-    log(`[control] hook unreachable and the run never moved on interruption=${row.id} work=${row.work_id ?? "-"} — resting at hook_missing for the Work reconciler`);
+    log(`[control] hook unreachable and the run never moved on interruption=${row.id} work=${row.work_id ?? "-"} — resting at hook_missing for the ${row.work_id ? "Work" : "chat-clarify"} reconciler`);
   }
   return { leased: leased.rowCount, delivered, leaseLost, hookMissing, leaseRenewals, attemptAbandoned };
 }
@@ -434,9 +447,13 @@ async function withLeaseRenewal(client, row, { listenerId, leaseSeconds, maxLeas
  * STILL A CLEAN NO-OP on a database without 0180: the verb does not exist there, and the probe says
  * so before any statement naming it is parsed.
  *
- * WHAT THIS DOES NOT DO (#764, Half 2): a swept CHAT row whose engine hook turns out to be gone is
- * still stamped DELIVERED by `deliverInterruptions` rather than rested at `hook_missing` — the chat
- * lane has no reconciler to pick such a row back up, so resting it there would strand it for ever.
+ * WHAT #764 (Half 2) CHANGED ABOUT THE ROW THIS SWEEP HANDS ON. A swept CHAT row whose engine hook
+ * turns out to be gone is no longer stamped DELIVERED by `deliverInterruptions`: it RESTS at
+ * `delivery_state='hook_missing'` like its Work-lane twin, and `reconciler-chat-clarify.mjs`
+ * re-probes it after a grace — resuming a hook that has become reachable, and otherwise settling
+ * the parked turn `expired` with a `clarify_closed` part so the session's live-turn slot is
+ * released. The paragraph this replaces said the opposite, and said it for a reason that no longer
+ * holds: the chat lane now has the reconciler it lacked.
  */
 export async function expirePastDueInterruptions(client, deps = {}) {
   const { batchSize = 50, onlyFirm = null, log = () => {} } = deps;

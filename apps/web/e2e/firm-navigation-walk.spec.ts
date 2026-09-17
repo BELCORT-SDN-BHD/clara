@@ -1,11 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ACTIVITY_CLIENTS } from "./activity-mock.mjs";
-import { CELL_BUDGET, grantCellBudget } from "./helpers";
+import { signIn } from "./helpers";
 import { WORK_LIST_CLIENTS } from "./work-list-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -20,6 +20,9 @@ const E2E_DIR = dirname(fileURLToPath(import.meta.url));
  * #633 appended one, so the literal was stale by three before this wave and by four after it —
  * red on `origin/main` for reasons nowhere in any of those diffs (#625's own report and its
  * adversarial review both recorded it and both correctly ruled it out of their scope).
+ * `origin/main` has since re-typed that literal as SEVEN (#816); this derivation supersedes it,
+ * and it is the ONE population assertion this cell carries — a second literal beside it would go
+ * stale again on the next lane that appends.
  *
  * A HARD-CODED COUNT CANNOT PROVE THIS CELL'S OWN TITLE. "Exactly this firm's own clients" is a
  * claim about the register, so the expectation is derived from the register: the literal rows in
@@ -49,22 +52,6 @@ function sharedRegisterNames(): string[] {
     names.push(...rows.map((row) => row.name));
   }
   return names;
-}
-
-async function signIn(page: Page, email: string): Promise<void> {
-  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
-  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
-  // and one that never signs in gets none.
-  grantCellBudget(CELL_BUDGET.signIn);
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
-  // #614: the sidebar's ONE navigation landmark, over the one registry
-  // (lib/navigation/tree.ts) — "Firm navigation" retired with the bespoke
-  // `<aside>` it named.
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 }
 
 test("operator owner sees the full sidebar and reaches Members in two navigation clicks", async ({ page }) => {

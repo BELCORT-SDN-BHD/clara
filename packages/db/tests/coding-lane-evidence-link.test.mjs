@@ -29,6 +29,8 @@ import {
   // #718
   gateCodingLink, codedDraftOnDocument, approveCodedEntry, approveCodedEntryOn,
   postedEntriesOnDocument, entryStatus, wallCatalog, humanHoldThenContend,
+  // #821
+  openingWallReady,
 } from "./coding-lane-evidence-link-fixtures.mjs";
 
 let world = null;
@@ -104,20 +106,47 @@ test("cle.wall the two walls exist, are trigger-only, and are reachable by no ap
     "wall: every wall is a BEFORE ROW trigger — AFTER, the evidence wall's own row would mask "
     + "the coded entry it exists to find (rank 0 beats rank 1 under `order by rank limit 1`)");
 
-  // THE OPENING-LANE CARVE-OUT, structurally. Wave-B's opening seed binds MANY opening items to
-  // ONE tie document by design (clara._approve_opening_entry, 0037), so the CODING wall excludes
-  // `is_opening_balance` rows — and the EVIDENCE wall does not, because a carve-out there would
-  // weaken 0182 rather than preserve it. The behavioural proof that the carve-out is load-bearing
-  // is packages/db/tests/x42-s5-residuals.test.mjs cell x42.s5.2c, which reds without it.
+  // THE OPENING-LANE CARVE-OUT, structurally — AND WHERE IT LIVES, which #821 moved.
+  //
+  // Wave-B's opening seed binds MANY opening items to ONE tie document by design
+  // (clara._approve_opening_entry, 0037), so an opening approval must never be refused for a
+  // SIBLING opening item. 0197 bought that by excluding `is_opening_balance` rows in the CODING
+  // wall's two WHEN clauses; #821 (0213) admits them and branches inside the body instead, so the
+  // opening arm can refuse the one case that IS a conflict — a live evidence link. The EVIDENCE
+  // wall carries no carve-out in either era, because one there would weaken 0182 rather than
+  // preserve it. The behavioural proofs are packages/db/tests/x42-s5-residuals.test.mjs cell
+  // x42.s5.2c (the carve-out is load-bearing) and this battery's sibling file
+  // opening-balance-evidence-link.test.mjs (the opening arm refuses a live link and nothing else).
   const defs = await rootQuery(
     `select t.tgname, pg_get_triggerdef(t.oid) as def from pg_trigger t
       where not t.tgisinternal and t.tgname in
         ('t_source_binding_wall_ins','t_source_binding_wall_upd','t_entry_evidence_links_binding_wall')`);
+  // #821
+  const openingWall = await openingWallReady();
+  const codingBody = fns.find((f) => f.proname === "_tf_source_binding_wall")?.prosrc ?? "";
   for (const row of defs.rows) {
     const coding = row.tgname.startsWith("t_source_binding_wall");
-    assert.equal(row.def.includes("is_opening_balance"), coding,
-      `wall: ${row.tgname} ${coding ? "carves out" : "must NOT carve out"} the opening-balance lane`);
+    // Post-0213 NO trigger names the column: the coding wall's two WHEN clauses admit opening
+    // rows and the body discriminates. Pre-0213 the two coding triggers exclude them.
+    assert.equal(row.def.includes("is_opening_balance"), coding && !openingWall,
+      `wall: ${row.tgname} ${coding && !openingWall ? "carves out" : "must NOT carve out"} `
+      + "the opening-balance lane at the TRIGGER");
   }
+  assert.equal(codingBody.includes("is_opening_balance"), openingWall,
+    "wall: post-0213 the coding wall BODY branches on is_opening_balance (an arm without the "
+    + "widened WHEN clauses would be dead code, and widened WHEN clauses without the arm would "
+    + "refuse the second item of every seed); pre-0213 it knows nothing of the column");
+  assert.equal(codingBody.includes("entry_evidence_links"), openingWall,
+    "wall: post-0213 the opening arm probes clara.entry_evidence_links directly — a LIVE link is "
+    + "the only conflict for an opening approval, which is a NARROWER question than "
+    + "clara._document_posting_entry's ranking, and the non-opening arm still asks that ranking");
+  assert.ok(codingBody.includes("clara._document_posting_entry"),
+    "wall: the NON-opening arm still reuses 0182's one probe, in both eras");
+  const evidenceBody = fns.find((f) => f.proname === "_tf_evidence_link_binding_wall")?.prosrc ?? "";
+  assert.equal(evidenceBody.includes("is_opening_balance"), false,
+    "wall: the evidence wall carries no carve-out in its body either — it refuses whatever "
+    + "clara._document_posting_entry already answers");
+  // #821
 });
 
 // ===========================================================================================

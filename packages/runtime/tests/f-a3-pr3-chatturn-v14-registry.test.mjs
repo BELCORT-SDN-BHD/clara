@@ -2,7 +2,7 @@
 // import/shape assertions.
 //
 // Proves: v13 stays exported and IS the same function the registry used to point `chatTurn:` at
-// (no parked run stranded, ARCHITECTURE Appendix A policy (c)); the registry now repoints
+// (no parked run stranded, ARCHITECTURE #workflow-versioning-and-rollback policy (c)); the registry now repoints
 // `chatTurn:` to chatTurn_v14; and v14's tool set is v13's own tool set UNION the thirteen bank
 // tools -- no v13 tool dropped, renamed, or shadowed by this closure.
 

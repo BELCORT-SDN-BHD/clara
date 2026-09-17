@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInTo } from "./helpers";
 import { JOURNALS } from "./journals-table-mock.mjs";
 
 /**
@@ -25,13 +26,6 @@ import { JOURNALS } from "./journals-table-mock.mjs";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const JOURNALS_URL = `/clients/${JOURNALS.clientId}/journals`;
 
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /** The memo text of the table's first BODY row — the one read that
  *  discriminates one ordering from the other. */

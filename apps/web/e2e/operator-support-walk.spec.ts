@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signIn } from "./helpers";
 import { OPERATOR } from "./operator-support-mock.mjs";
 
 /**
@@ -57,21 +58,10 @@ test.beforeEach(async ({ page }) => {
     `the operator lane's control endpoint did not answer in 3 attempts: ${String(lastError)}`);
 });
 
-async function signIn(page: Page, email: string): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // RAISES THE WAIT, NEVER THE BAR — the same treatment, for the same measured reason, that
-  // `checkout-gate-walk.spec.ts`'s own header records for this host: this assertion waits on a REAL
-  // full-page navigation (a form POST, a door call over the mock transport, a 303 and the next
-  // render), and on 2026-09-14 the FIRST cell of this file lost that race once while the other
-  // twelve signed in fine — the page was still on `/login` with nothing refused, so the round trip
-  // simply had not landed against a server that had just started. The assertion still demands the
-  // exact destination; it only allows longer for it to arrive.
-  await expect(page).toHaveURL(/\/$/, { timeout: 20_000 });
-}
-
+// #804 — the per-file 20 s bump this comment used to justify (a real full-page navigation racing
+// a server that had just started) is now the SHARED `signIn` helper's own measured, explicit
+// `navigation[name=Main]` timeout (helpers.ts) — one recorded measurement instead of this file's
+// own guess.
 const asOperator = (page: Page) => signIn(page, "owner@example.test");
 const asBookkeeper = (page: Page) => signIn(page, "bookkeeper@example.test");
 

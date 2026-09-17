@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInTo } from "./helpers";
+
 // L7's 裁-86 browser leg. Three journeys on the BUILT app, one per defect whose
 // evidence a node cell cannot fully carry — a modal's real focus trap, a real
 // backdrop, and what a human can actually READ after a door refuses.
@@ -13,14 +15,6 @@ import { expect, test, type Page } from "@playwright/test";
 
 const CLIENT = "77c7c7c7-7777-4777-8777-777777777777";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();

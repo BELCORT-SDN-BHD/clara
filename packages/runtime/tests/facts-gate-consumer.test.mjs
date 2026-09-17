@@ -156,7 +156,7 @@ test("0177 ordering: filing waits for successful extraction; stale and duplicate
   assert.equal((await factsTasks(document, "classify")).length, 0, "a failed extraction never creates a classify task");
 
   const extraction = await seedExtraction({ firm, document, status: "done", versionN: 2 });
-  await seedRegion({ firm, extraction, fieldPath: "body", textContent: "TAX INVOICE INV-177 TOTAL RM 100" });
+  await seedRegion({ firm, extraction, fieldPath: "pages.1.lines.0", textContent: "TAX INVOICE INV-177 TOTAL RM 100" });
   await emitDocumentEvent(firm, document, owner, "document.extraction_completed");
   await emitDocumentEvent(firm, document, owner, "document.extraction_completed");
   await drainFactsGate(firm);

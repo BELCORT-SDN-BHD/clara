@@ -28,7 +28,7 @@ import { startFactsGateLoop } from "../lib/facts-gate.mjs";
 import { startClassifyLoop } from "../lib/classify.mjs";
 import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
-import { start, getRun } from "workflow/api";
+import { start, getRun, resumeHook } from "workflow/api";
 import { workflows, workflowsByName, workflowBodies, workflowPins } from "../workflows/registry.js";
 // #637 (C88.8 / C-70) — the ONE provenance line and the stranded-body census. Both live HERE
 // because this is the only module that is both (a) TypeScript, so it can import the registry's
@@ -377,6 +377,11 @@ export default definePlugin(() => {
             log: (m: string) => console.log(m),
           }),
         getRun,
+        // #764 — the chat-clarify reconciler's re-probe IS a resume, so the leader needs the same
+        // world call the control listener uses (productionControlDeps above passes it the same
+        // way). Without this dep `reconcileChatClarifies` is a clean no-op that issues no
+        // statement at all, rather than half a probe that settles conversations on a guess.
+        resumeHook,
         log: (m: string) => console.log(m),
       } as Parameters<typeof startLeaderLoop>[0],
     );

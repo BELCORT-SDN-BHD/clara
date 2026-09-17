@@ -1,7 +1,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from "lucide-react"
 
 function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
@@ -33,31 +33,45 @@ function PaginationItem({ ...props }: React.ComponentProps<"li">) {
   return <li data-slot="pagination-item" {...props} />
 }
 
-type PaginationLinkProps = {
+type PaginationLinkOwnProps = {
   isActive?: boolean
-} & Pick<React.ComponentProps<typeof Button>, "size"> &
-  React.ComponentProps<"a">
+} & Pick<React.ComponentProps<typeof Button>, "size">
 
+type PaginationLinkProps =
+  | (PaginationLinkOwnProps & React.ComponentProps<"a">)
+  | (PaginationLinkOwnProps & { href?: undefined } & React.ComponentProps<"button">)
+
+// PaginationLink BRANCHES ON `href` rather than routing every render through Base UI's `Button`
+// (#771). With an `href` it renders a plain `<a href>`: no `role`, no `type`, no Base UI keyboard
+// layer — Enter activates it the way a browser activates a link, and Space no longer does, which
+// is correct native link semantics, not a regression to "fix". `buttonVariants` (exported
+// alongside `Button`) keeps the styling byte-identical without going through `useButton`, whose
+// `nativeButton={false}` path used to stamp `role="button"` onto the anchor (a name/role mismatch:
+// assistive tech announced a real, middle-click-able, open-in-new-tab-able link as a button).
+// Without an `href` it renders a genuine `<button>` — native button semantics, Enter and Space
+// both activate, no anchor, no added role.
 function PaginationLink({
   className,
   isActive,
   size = "icon",
   ...props
 }: PaginationLinkProps) {
+  const sharedProps = {
+    "aria-current": isActive ? ("page" as const) : undefined,
+    "data-slot": "pagination-link",
+    "data-active": isActive,
+    className: cn(buttonVariants({ variant: isActive ? "outline" : "ghost", size, className })),
+  }
+
+  if (props.href !== undefined) {
+    return <a {...sharedProps} {...(props as React.ComponentProps<"a">)} />
+  }
+
   return (
-    <Button
-      variant={isActive ? "outline" : "ghost"}
-      size={size}
-      className={cn(className)}
-      nativeButton={false}
-      render={
-        <a
-          aria-current={isActive ? "page" : undefined}
-          data-slot="pagination-link"
-          data-active={isActive}
-          {...props}
-        />
-      }
+    <button
+      type="button"
+      {...sharedProps}
+      {...(props as React.ComponentProps<"button">)}
     />
   )
 }

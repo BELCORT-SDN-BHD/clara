@@ -255,13 +255,18 @@ cell("several later identity regions in ONE transaction append ONE revision, not
   // own — and the "history" would be an artefact of trigger order rather than of what Clara
   // believed. It holds because a deferred trigger's SELECT sees rows an earlier deferred trigger
   // wrote in the same transaction, so the second and third find the verdict already current.
-  const s = await seedFactsExtraction();
+  // #778: the three later regions must be three paths this extraction does not ALREADY carry.
+  // clara.document_regions is now UNIQUE on (extraction_id, field_path), so a "later" region at a
+  // path the fixture already seeded is not a later region at all — it is a second row claiming one
+  // field, which is exactly what 0201 forbids. The extraction is therefore seeded with the two
+  // terms the identity needs least, and the transaction supplies the other three.
+  const s = await seedFactsExtraction(CLOSING.slice(0, 2));
   const before = await recorded(s.extraction);
 
   const err = await caught(() => withActor({ transaction: true }, async (c) => {
-    await c.query(REGION_INSERT, [s.firm, s.extraction, "invoice.discount", "50.00", "50.00", 5_000]);
-    await c.query(REGION_INSERT, [s.firm, s.extraction, "invoice.delivery", "10.00", "10.00", 1_000]);
-    await c.query(REGION_INSERT, [s.firm, s.extraction, "invoice.service_charge", "1.00", "1.00", 100]);
+    await c.query(REGION_INSERT, [s.firm, s.extraction, "invoice.tax_total", "5.66", "5.66", 566]);
+    await c.query(REGION_INSERT, [s.firm, s.extraction, "invoice.service_charge", "3.77", "3.77", 377]);
+    await c.query(REGION_INSERT, [s.firm, s.extraction, "invoice.rounding", "0.02", "0.02", 2]);
   }));
   assert.equal(err, null, `a multi-region back-fill was refused: ${err?.code} ${err?.message}`);
 

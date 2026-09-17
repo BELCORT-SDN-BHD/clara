@@ -72,6 +72,41 @@ async function gateSweep(t) {
   return true;
 }
 
+// #770 — the `p_work` door filter lives in ITS OWN migration (0202), a THIRD frontier past
+// 0181's and 0183's above. That migration DROPs the six-argument signature and creates a
+// seven-argument one, so the wrapper below must address whichever arity the database under test
+// actually carries: a slice-frontier leg pinned at 0181 or 0184 must keep every 0181/0183/0184
+// cell green, and only the p_work cells skip.
+const PWORK_STEM = "list_activity_p_work$";
+let _pWorkReady = null;
+async function pWorkReady() {
+  if (_pWorkReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [PWORK_STEM]);
+      _pWorkReady = r.rows[0].n > 0;
+    } catch {
+      _pWorkReady = false;
+    }
+  }
+  return _pWorkReady;
+}
+
+async function gatePWork(t) {
+  if (await pWorkReady()) return false;
+  t.skip(`#770 list_activity p_work lane absent (no ${PWORK_STEM} migration applied)`);
+  return true;
+}
+
+/** The door's regprocedure address at whatever arity this database carries — every catalog probe
+ *  below reads the body through this rather than through a literal signature, so the arity change
+ *  0202 makes is stated in ONE place. */
+async function listActivitySignature() {
+  return (await pWorkReady())
+    ? "clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz,uuid)"
+    : "clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)";
+}
+
 let world = null;
 before(async () => {
   world = await buildWorkWorld();
@@ -92,7 +127,18 @@ const FIRM_B = () => world.firms.B;
 // Wrappers over the two new doors, positional (the order this migration declares them in).
 // ===========================================================================================
 
-async function listActivity(sub, { cursor = null, limit = 50, client = null, kinds = null, since = null, until = null } = {}) {
+async function listActivity(sub, { cursor = null, limit = 50, client = null, kinds = null, since = null, until = null, work = null } = {}) {
+  // #770: the door gained a SEVENTH parameter and lost its six-argument signature in the same
+  // migration (0202), so this wrapper picks the arity the database under test actually has.
+  if (await pWorkReady()) {
+    const r = await humanQuery(sub,
+      "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz,$7::uuid) as result",
+      [cursor, limit, client, kinds, since, until, work]);
+    return r.rows[0].result;
+  }
+  assert.equal(work, null,
+    "a p_work-scoped read was attempted on a database whose list_activity has no p_work parameter — "
+    + "the cell that asked for it must be gated on gatePWork");
   const r = await humanQuery(sub,
     "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result",
     [cursor, limit, client, kinds, since, until]);
@@ -867,6 +913,7 @@ test("af.20a the extractor slices at the STATEMENT'S OWN terminator, not the bod
 
 test("af.20 BOUNDED COST: ten consecutive calls of each caller on ONE connection stay flat across the plpgsql plan-cache boundary, and the plan they run reads the KEPT set rather than the firm's history", async (t) => {
   if (await gateSweep(t)) return;
+  const pWork = await pWorkReady();
   const firm = FIRM_A();
   const claims = JSON.stringify({ sub: BOB(), role: "authenticated" });
 
@@ -958,7 +1005,20 @@ test("af.20 BOUNDED COST: ten consecutive calls of each caller on ONE connection
       detail.push((await timed(c,
         "select clara.get_activity_event('event', $1) is not null as got", [kept])).ms);
     }
-    return { helper, feed, detail, feedPlan, helperConfig };
+    // #770 — THE SAME SERIES WITH p_work BOUND. The `ev` arm's work_id is a coalesce of an
+    // operation-receipt left join and a correlated domain_events payload lookup, so the p_work
+    // predicate there is NOT index-backed and the door's measured cost bound is the only guard on
+    // it. This firm's history is `RECEIPTS` sweep events, none of which belongs to any Work, so
+    // the page is empty and every millisecond measured is the predicate's own.
+    const feedWork = [];
+    if (pWork) {
+      for (let i = 0; i < CALLS; i += 1) {
+        feedWork.push((await timed(c,
+          "select jsonb_array_length(clara.list_activity(null,25,null,null,null,null,"
+          + "'afaa0000-0000-4000-8000-000000000001'::uuid)->'rows') as n")).ms);
+      }
+    }
+    return { helper, feed, detail, feedPlan, helperConfig, feedWork };
   });
 
   const fmt = (a) => a.map((n) => n.toFixed(1)).join(" / ");
@@ -972,7 +1032,12 @@ test("af.20 BOUNDED COST: ten consecutive calls of each caller on ONE connection
     + `cheapest of calls ${HEAD + 1}-${CALLS} ${tail.toFixed(1)} ms — series ${fmt(report.helper)}`);
 
   // (2) THE ABSOLUTE BUDGET on both doors, which is what a person actually waits for.
-  for (const [label, series] of [["list_activity", report.feed], ["get_activity_event", report.detail]]) {
+  // #770 joins `list_activity (p_work)` to the pair, under the SAME budget and the SAME flatness
+  // rule: an un-indexed predicate that reintroduced the cost the plan-cache pin was added to
+  // remove would show here first.
+  const series20 = [["list_activity", report.feed], ["get_activity_event", report.detail]];
+  if (pWork) series20.push(["list_activity (p_work)", report.feedWork]);
+  for (const [label, series] of series20) {
     for (const [i, ms] of series.entries()) {
       assert.ok(ms < CALL_BUDGET_MS,
         `af.20 ${label} call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(series)}`);
@@ -1024,7 +1089,7 @@ test("af.21 the exclusion is SET-BASED in the feed and HOISTED in the detail doo
   // one thing a cost cell on a small rig can miss: the correlated per-row form creeping back.
   // Read from the INSTALLED body, the same way this migration's own prestate sha-pins read it.
   const body = (await rootQuery(
-    "select p.prosrc from pg_proc p where p.oid = 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)'::regprocedure",
+    `select p.prosrc from pg_proc p where p.oid = '${await listActivitySignature()}'::regprocedure`,
   )).rows[0].prosrc;
   const calls = body.split("clara._sweep_events_with_effect(").length - 1;
   assert.equal(calls, 1,
@@ -1157,6 +1222,7 @@ const ORX_RECEIPTS = 30000;
 
 test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls on ONE connection stay flat across the plpgsql plan-cache boundary, and the door pins the custom plan that makes it true", async (t) => {
   if (await gateSweep(t)) return;
+  const pWork = await pWorkReady();
   const firm = FIRM_A();
   const claims = JSON.stringify({ sub: BOB(), role: "authenticated" });
 
@@ -1255,7 +1321,19 @@ test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls 
       feed.push((await timed(c,
         "select jsonb_array_length(clara.list_activity(null,25,null,null,null,null)->'rows') as n")).ms);
     }
-    return { feed, doorConfig, planted };
+    // #770 — THE SAME SERIES, SCOPED TO THE TARGET WORK, over the same ORX_RECEIPTS-row history:
+    // the `orx` arm's p_work predicate sits inside that arm's own `where`, ahead of its
+    // `limit v_limit + 1`, and this is the measurement that says it did not cost the firm's
+    // history to apply it.
+    const feedWork = [];
+    if (pWork) {
+      for (let i = 0; i < CALLS; i += 1) {
+        feedWork.push((await timed(c,
+          "select jsonb_array_length(clara.list_activity(null,25,null,null,null,null,"
+          + "'af23e000-0000-4000-8000-000000000001'::uuid)->'rows') as n")).ms);
+      }
+    }
+    return { feed, doorConfig, planted, feedWork };
   });
 
   const fmt = (a) => a.map((n) => n.toFixed(1)).join(" / ");
@@ -1270,6 +1348,21 @@ test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls 
     `af.23 clara.list_activity STEPPED UP at the plan-cache boundary: calls 1-${HEAD} median ${head.toFixed(1)} ms, `
     + `cheapest of calls ${HEAD + 1}-${CALLS} ${tail.toFixed(1)} ms — series ${fmt(report.feed)}. `
     + "A pooled PostgREST connection serves every Activity read after the fifth from that plan.");
+
+  // (1b) #770 — THE SAME STEP AND THE SAME ABSOLUTE BUDGET with p_work bound. The target Work owns
+  // every one of the firm's ORX_RECEIPTS committed receipts, so this is the WORST case for the
+  // new predicate rather than a trivially empty page.
+  if (pWork) {
+    for (const [i, ms] of report.feedWork.entries()) {
+      assert.ok(ms < CALL_BUDGET_MS,
+        `af.23 clara.list_activity(p_work) call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(report.feedWork)}`);
+    }
+    const headW = median(report.feedWork.slice(0, HEAD));
+    const tailW = Math.min(...report.feedWork.slice(HEAD));
+    assert.ok(tailW <= Math.max(FLIP_FACTOR * headW, FLIP_FLOOR_MS),
+      `af.23 clara.list_activity(p_work) STEPPED UP at the plan-cache boundary: calls 1-${HEAD} median ${headW.toFixed(1)} ms, `
+      + `cheapest of calls ${HEAD + 1}-${CALLS} ${tailW.toFixed(1)} ms — series ${fmt(report.feedWork)}`);
+  }
 
   // (2) THE CATALOG CLAUSE. Asserted for ALL THREE doors (final review, SHOULD-FIX [1] joined
   // `list_spoken_for_documents` to the `get_activity_event`/`list_activity` pair this cell already
@@ -1352,4 +1445,225 @@ test("af.24 the two clocks: exactly ONE function body sets clara.sweep_runs.fina
     "af.24: the temporary second writer must not survive the rollback");
   assert.deepEqual(after.appenders, ["reconcile_sweep_runs"],
     "af.24: the temporary second appender must not survive the rollback");
+});
+
+// ===========================================================================================
+// #770 — THE `p_work` DOOR FILTER (migration 0202).
+//
+// The Work detail's Activity tab used to read the whole CLIENT feed and keep the rows whose
+// `work_id` matched in the browser. Because every union arm carries its OWN
+// `order by occurred_at desc, id desc` and `limit v_limit + 1` BEFORE the union, that page was
+// the client's newest rows regardless of Work — so a Work whose events sit far back needed
+// several over-fetched pages before any of them surfaced, and a page boundary between two of its
+// events read as "no activity" while older matching rows went unread.
+//
+// These cells prove the narrowing happens IN SQL, inside each arm's own `where`, rather than
+// anywhere a client could have done it.
+// ===========================================================================================
+
+/** A committed `clara.operation_receipts` row for a named Work, constructed directly (as root)
+ *  so a cell can force an EXACT `created_at` — a tie no product path can build — and so a
+ *  cross-firm fixture needs no second firm's whole Work lane. The shape is af.23's own insert. */
+async function mkWorkReceipt({ firm, client, work, task, createdAt = null, tag }) {
+  const r = await rootQuery(
+    `insert into clara.operation_receipts(firm_id, client_id, work_id, purpose, logical_op_id,
+        payload_digest, acting_actor, on_behalf_of, via_wake_kind, bundle_digest, run_id, task_id,
+        outcome, effects, created_at)
+     values ($1,$2,$3,'journal_entry',$4, repeat('b',64), $5, $5, 'human', repeat('c',64), $6, $7,
+        'committed', jsonb_build_object('entry_id', gen_random_uuid()::text),
+        coalesce($8::timestamptz, now()))
+     returning id::text as id, created_at`,
+    [firm, client, work, `af770_${tag}_${opk("af770-lop")}`, AGENT_USER_ID, `af770_run_${tag}_${opk("af770-run")}`,
+      task, createdAt]);
+  return { id: r.rows[0].id, occurredAt: r.rows[0].created_at };
+}
+
+/** An `accounting_work` row plus the `agent_tasks` row its receipts cite, both as root: enough
+ *  for the `orx` arm, without driving admit/claim/wake for a Work whose RUN is not the subject. */
+async function mkWorkRow({ firm, client, author, tag }) {
+  const task = (await rootQuery(
+    `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot, created_by)
+     values ($1,$2,'autodraft','queued','clara-test-model',$3) returning id`,
+    [firm, client, author])).rows[0].id;
+  const work = (await rootQuery(
+    `insert into clara.accounting_work(firm_id, client_id, purpose, status, initiator,
+        initiator_role, intent_key, logical_op_id, basis, basis_digest, basis_origin)
+     values ($1,$2,'journal_entry','completed',$3,'bookkeeper',$4,$5,'{}'::jsonb, repeat('a',64),
+        'user_direct') returning id`,
+    [firm, client, author, `af770_intent_${tag}_${opk("af770-i")}`, `af770_logical_${tag}_${opk("af770-l")}`]
+  )).rows[0].id;
+  return { work, task };
+}
+
+test("af.25 p_work narrows IN SQL: a second Work's rows in the SAME client never reach a p_work page, and neither does a work_id-less agent-receipt row", async (t) => {
+  if (await gatePWork(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af770a");
+  const a = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: "a" });
+  const b = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: "b" });
+  const rowA = await mkWorkReceipt({ firm: FIRM_A(), client: cli, work: a.work, task: a.task, tag: "a" });
+  const rowB = await mkWorkReceipt({ firm: FIRM_A(), client: cli, work: b.work, task: b.task, tag: "b" });
+  // …and an agent-act receipt, whose arm projects `null::uuid as work_id` unconditionally.
+  await mkAgentAct({ firm: FIRM_A(), client: cli });
+
+  const bothVisible = rowsOf(await listActivity(BOB(), { client: cli, limit: 100 })).map((r) => r.id);
+  assert.ok(bothVisible.includes(rowA.id) && bothVisible.includes(rowB.id),
+    "af.25 vacuity control: without p_work the client feed carries BOTH Works' receipts");
+
+  const onlyA = rowsOf(await listActivity(BOB(), { client: cli, work: a.work, limit: 100 }));
+  assert.ok(onlyA.length > 0, "af.25 the p_work page is not empty (the YES)");
+  assert.ok(onlyA.every((r) => r.work_id === a.work),
+    `af.25 EVERY row of a p_work page belongs to that Work — got ${JSON.stringify(onlyA.map((r) => r.work_id))}`);
+  assert.equal(onlyA.some((r) => r.id === rowB.id), false, "af.25 the second Work's receipt is absent");
+  assert.equal(onlyA.some((r) => r.source === "agent_receipt"), false,
+    "af.25 the agent-receipt arm — which projects work_id null unconditionally — contributes nothing under p_work");
+
+  // THE PROOF THAT IT IS SQL AND NOT A CLIENT PASS. `limit 1` with p_work=A: the newest row of
+  // the CLIENT is B's, so a door that filtered after its per-arm limit would answer an EMPTY page
+  // here. This is the reported bug, asserted server-side.
+  const oneA = rowsOf(await listActivity(BOB(), { client: cli, work: a.work, limit: 1 }));
+  assert.equal(oneA.length, 1, "af.25 a one-row p_work page still finds this Work's newest row");
+  assert.equal(oneA[0].work_id, a.work, "af.25 …and it is this Work's row, not the client's newest");
+});
+
+test("af.26 a Work whose events are OLDER than a full client page is on the FIRST p_work page", async (t) => {
+  if (await gatePWork(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af770b");
+  const old = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: "old" });
+  const oldRow = await mkWorkReceipt({
+    firm: FIRM_A(), client: cli, work: old.work, task: old.task, tag: "old",
+    createdAt: "2021-01-01T00:00:00Z",
+  });
+  // …buried under MORE THAN A FULL ARM PAGE of NEWER receipts belonging to other Works of the
+  // same client. STRICTLY MORE than `PAGE + 1`, and that is the whole force of this cell: each
+  // arm's own fetch is `limit v_limit + 1`, so a door that applied p_work AFTER the union would
+  // still find the old row if only `PAGE` newer ones sat above it. `NEWER` is `PAGE + 3`, so the
+  // old row is outside every arm's pre-filter window and ONLY an arm-level predicate reaches it.
+  const PAGE = 5;
+  const NEWER = PAGE + 3;
+  for (let i = 0; i < NEWER; i += 1) {
+    const w = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: `new${i}` });
+    await mkWorkReceipt({
+      firm: FIRM_A(), client: cli, work: w.work, task: w.task, tag: `new${i}`,
+      createdAt: `2030-01-0${i + 1}T00:00:00Z`,
+    });
+  }
+
+  const unfiltered = rowsOf(await listActivity(BOB(), { client: cli, limit: PAGE }));
+  assert.equal(unfiltered.some((r) => r.id === oldRow.id), false,
+    "af.26 vacuity control: the old Work's row is NOT on the first unfiltered client page — this is the bug");
+
+  const scoped = rowsOf(await listActivity(BOB(), { client: cli, work: old.work, limit: PAGE }));
+  assert.ok(scoped.some((r) => r.id === oldRow.id),
+    "af.26 …and it IS on the first p_work page, with no pages to walk — the predicate sits inside each arm's own where, ahead of its own limit");
+});
+
+test("af.27 a p_work naming ANOTHER firm's Work answers an EMPTY page — not an error and not an existence signal", async (t) => {
+  if (await gatePWork(t)) return;
+  const theirClient = await freshWorkClient(DAVE(), "af770c");
+  const theirs = await mkWorkRow({ firm: FIRM_B(), client: theirClient, author: DAVE(), tag: "b" });
+  const theirRow = await mkWorkReceipt({
+    firm: FIRM_B(), client: theirClient, work: theirs.work, task: theirs.task, tag: "b" });
+
+  const dave = rowsOf(await listActivity(DAVE(), { work: theirs.work, limit: 100 }));
+  assert.ok(dave.some((r) => r.id === theirRow.id),
+    "af.27 vacuity control: the Work's OWN firm reads the row through p_work");
+
+  const bob = await listActivity(BOB(), { work: theirs.work, limit: 100 });
+  assert.deepEqual(rowsOf(bob), [], "af.27 firm A reads an empty page for firm B's Work id");
+  assert.equal(bob.truncated, false, "af.27 …a well-formed empty page, not a refusal");
+
+  // A GENUINELY ABSENT id is the SAME answer — no oracle: a caller cannot tell "another firm's
+  // Work" from "no such Work" by the shape of the reply.
+  const absent = await listActivity(BOB(), { work: "00000000-0000-4000-8000-000000000000", limit: 100 });
+  assert.deepEqual(rowsOf(absent), [], "af.27 an absent Work id answers the same empty page");
+  assert.equal(absent.truncated, bob.truncated, "af.27 …and is indistinguishable from the cross-firm one");
+});
+
+test("af.28 keyset pagination holds with p_work set: pages strictly older, ties deterministic, no row served twice or dropped", async (t) => {
+  if (await gatePWork(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af770d");
+  const mine = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: "keyset" });
+  const other = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: "noise" });
+  // THREE rows of THIS Work sharing an IDENTICAL occurred_at — the tie the (occurred_at, id)
+  // break exists for — plus one row of another Work at the SAME instant, which must never appear.
+  const tie = "2028-03-09T11:22:33.456789Z";
+  const made = [];
+  for (let i = 0; i < 3; i += 1) {
+    made.push((await mkWorkReceipt({
+      firm: FIRM_A(), client: cli, work: mine.work, task: mine.task, createdAt: tie, tag: `k${i}` })).id);
+  }
+  const noise = await mkWorkReceipt({
+    firm: FIRM_A(), client: cli, work: other.work, task: other.task, createdAt: tie, tag: "noise" });
+
+  const seen = [];
+  let cursor = null;
+  let guard = 0;
+  for (;;) {
+    guard += 1;
+    assert.ok(guard <= 10, "af.28 pagination did not terminate — a cursor bug would loop forever");
+    const page = await listActivity(BOB(), { client: cli, work: mine.work, limit: 1, cursor });
+    const pageRows = rowsOf(page);
+    if (pageRows.length === 0) break;
+    for (const r of pageRows) seen.push(r.id);
+    if (!page.truncated) break;
+    assert.ok(page.next_cursor, "af.28 a truncated page always carries a next_cursor");
+    cursor = page.next_cursor;
+  }
+
+  assert.equal(seen.length, 3, `af.28 exactly this Work's three tied rows — got ${seen.length}`);
+  assert.equal(new Set(seen).size, 3, "af.28 dedupe-free paging — no id repeats across pages");
+  assert.deepEqual([...seen].sort(), [...made].sort(), "af.28 the exact three ids, page-walked one at a time");
+  assert.equal(seen.includes(noise.id), false, "af.28 the other Work's row at the SAME instant never enters the walk");
+});
+
+test("af.29 the six-argument signature does not survive as a resolvable overload, and the seven-argument door keeps all five catalog properties", async (t) => {
+  if (await gatePWork(t)) return;
+  const r = (await rootQuery(
+    `select to_regprocedure('clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)') is null as six_gone,
+            to_regprocedure('clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz,uuid)') is not null as seven,
+            (select count(*)::int from pg_proc p
+              where p.pronamespace = 'clara'::regnamespace and p.proname = 'list_activity') as bodies`)).rows[0];
+  assert.equal(r.six_gone, true,
+    "af.29 clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz) no longer resolves — an overload that still resolves is an overload a later caller can reach (af.22's own words), and PostgREST would have two candidates");
+  assert.equal(r.seven, true, "af.29 the seven-argument door is the one that resolves");
+  assert.equal(r.bodies, 1, `af.29 EXACTLY ONE body of this name survives — got ${r.bodies}`);
+
+  // The five properties a DROP + CREATE does NOT preserve, read from the catalog rather than from
+  // the migration's own text: PUBLIC revoked, clara_authenticated granted, SECURITY INVOKER, the
+  // pinned search_path and the pinned plan_cache_mode. 0184's recut section stated the assumption
+  // that dies here verbatim — "Grants are NOT re-issued: create or replace preserves them."
+  const posture = (await rootQuery(
+    `select pg_get_userbyid(p.proowner) as owner, p.prosecdef as secdef,
+            coalesce(array_to_string(p.proconfig, ','), '<none>') as cfg,
+            coalesce(array_to_string(p.proacl, ','), '<null>') as acl,
+            obj_description(p.oid, 'pg_proc') as cmt
+       from pg_proc p
+      where p.oid = 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz,uuid)'::regprocedure`
+  )).rows[0];
+  assert.equal(posture.owner, "clara_fn_owner", "af.29 the recut door is still clara_fn_owner's");
+  assert.equal(posture.secdef, false, "af.29 …and still SECURITY INVOKER");
+  assert.equal(posture.cfg, "search_path=clara, pg_temp,plan_cache_mode=force_custom_plan",
+    `af.29 …with BOTH pinned settings restated — got ${posture.cfg}`);
+  assert.equal(posture.acl, "clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner",
+    `af.29 …and EXACTLY the literal ACL {owner, clara_authenticated}: PUBLIC revoked, re-granted by hand after the drop — got ${posture.acl}`);
+  assert.ok((posture.cmt ?? "").includes("p_work"),
+    "af.29 …and the comment a DROP took with it is re-issued and names the new parameter");
+});
+
+test("af.30 omitting p_work reproduces the six-argument door exactly — same rows, same order, same cursor", async (t) => {
+  if (await gatePWork(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af770e");
+  const w = await mkWorkRow({ firm: FIRM_A(), client: cli, author: BOB(), tag: "same" });
+  for (let i = 0; i < 3; i += 1) {
+    await mkWorkReceipt({ firm: FIRM_A(), client: cli, work: w.work, task: w.task, tag: `s${i}` });
+  }
+  await mkAgentAct({ firm: FIRM_A(), client: cli });
+
+  const withNull = await listActivity(BOB(), { client: cli, limit: 2, work: null });
+  const plain = (await humanQuery(BOB(),
+    "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result",
+    [null, 2, cli, null, null, null])).rows[0].result;
+  assert.deepEqual(plain, withNull,
+    "af.30 the DEFAULT for p_work is null and a six-argument call reaches the same page, cursor included");
+  assert.equal(typeof plain.next_cursor, "string", "af.30 vacuity control: this page is truncated and carries a cursor");
 });

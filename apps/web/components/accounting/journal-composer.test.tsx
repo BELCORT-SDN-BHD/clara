@@ -19,6 +19,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
+import { settleUntil } from "../../test/settleUntil";
 import { JournalComposerView } from "./journal-composer";
 import { journalDraftKey, type DraftStorage } from "../../lib/work/journal-draft";
 import type { SubmitJournalWorkResult } from "../../lib/work/api";
@@ -129,6 +130,15 @@ async function submitForm(h: Awaited<ReturnType<typeof renderComponent>>): Promi
   assert.ok(form, "no form");
   await h.fireEvent(form, "submit");
   await h.settle();
+}
+
+// #798 — bounded on WORK: 200 settle passes comfortably outlasts the composer's mocked reads and
+// the claimant-resolving effect's own microtask chain under whole-suite load, the same budget
+// already justified for the onboarding-checklist trio (16cb8c85).
+const SETTLE_PASSES = 200;
+
+function hasLinkTo(h: { find: (p: (n: Stub) => boolean) => Stub | null }, needle: string): boolean {
+  return h.find((n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(needle)) !== null;
 }
 
 /** The cap a control actually carries.
@@ -730,6 +740,11 @@ test("t634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit 
     await submitForm(h);
     assert.equal(sent.length, 1);
     assert.match(h.text(), /already backs a posted entry/);
+    // The default fixture's advisory rows do not already name the claimant, so the link depends
+    // on the SEPARATE claimant-resolving effect that fires after the refusal's own commit — poll
+    // for its arrival rather than assuming one settle hop is enough.
+    await settleUntil(h, () => hasLinkTo(h, "entry=e5555555-5555-4555-8555-555555555555"),
+      "the claimant's link for a source conflict with no advisory answer", SETTLE_PASSES);
     // THE LINK GOES SOMEWHERE REAL - the journals table, opened on that entry.
     const link = h.find(
       (n) =>
@@ -1150,6 +1165,10 @@ test("t728f: a claimant read that NEVER settles does not withhold the refusal, a
     await fillGoodEntry(h);
     await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
     await submitForm(h);
+    // The claimant-resolving effect (which arms the read and sets `armed`) fires after the commit
+    // that paints the refusal — poll for its own arrival rather than assuming it lands within the
+    // one settle hop `submitForm` already spent.
+    await settleUntil(h, () => armed !== null, "the claimant read arming its AbortSignal", SETTLE_PASSES);
 
     assert.match(h.text(), /already backs a posted entry/,
       "the refusal is on screen although the claimant read has not settled");
@@ -1220,6 +1239,10 @@ test("t728f: the claimant read is abandoned by its own TIMEOUT, not only by unmo
       await fillGoodEntry(h);
       await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
       await submitForm(h);
+      // The claimant effect (which arms the 5000 ms abort timer) fires after the commit that
+      // paints the refusal, so both arrive some renders later than the click.
+      await settleUntil(h, () => timers.length === 1 && armed !== null,
+        "the claimant read's own 5000 ms abort timer arming", SETTLE_PASSES);
 
       assert.match(h.text(), /already backs a posted entry/,
         "the refusal is on screen although the claimant read has not settled");
@@ -1345,7 +1368,8 @@ test("t728f: a claimant the advisory read did not name is resolved AFTER the ban
     await fillGoodEntry(h);
     await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
     await submitForm(h);
-    await h.settle();
+    await settleUntil(h, () => hasLinkTo(h, `entry=${LATE_ENTRY}`),
+      "the late-resolved claimant's own link", SETTLE_PASSES);
     const link = h.find((n) => n.tagName === "A"
       && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(`entry=${LATE_ENTRY}`));
     assert.ok(link, "the late-resolved claimant still produces the link");
@@ -1427,9 +1451,11 @@ test("t728g: the source_conflict refusal is ONE alert, and its text does not cha
     assert.match(spoken, /One document backs at most one posted journal entry/,
       "…and it is the refusal that is announced (vacuity control)");
 
-    // The claimant arrives a tick later, exactly as a PostgREST read does.
+    // The claimant arrives a tick later, exactly as a PostgREST read does — poll for its own
+    // arrival (the sentence and the link) rather than assuming one settle hop is enough.
     await h.act(() => { release!({ clientId: LATE_CLIENT, clientName: "Beta Sdn Bhd" }); });
-    await h.settle();
+    await settleUntil(h, () => /belongs to Beta Sdn Bhd/.test(h.text()) && hasLinkTo(h, LATE_ENTRY),
+      "the claimant's name and link after the source-conflict refusal", SETTLE_PASSES);
 
     const after = liveRegions(h);
     assert.equal(after.length, 1,

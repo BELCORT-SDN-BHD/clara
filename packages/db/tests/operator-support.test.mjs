@@ -34,17 +34,21 @@ import {
   operatorFirmBookkeeper, operatorSupportLaneReady, opk, ordinaryFirm, paidUnclaimed, paymentRow,
   problemRow, registrationRow, rejectRegistration, releaseCapacity, resolveProblemWithKey,
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,
+  forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor, stampSession,
+  EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
 const CASE_SIG = "clara.get_operator_support_case(text,text)";
+/** #776 — the applicant-name door, on its own frontier. */
+const NAMES_SIG = "clara.resolve_operator_support_applicants(uuid[])";
 /** The ONE query both doors delegate to (0188 §1) — granted to nobody, so it is asserted about
  *  rather than called. */
 const SHARED_SIG = "clara._operator_support_cases(boolean,text,uuid)";
 
 let operator = null;
 let executed = 0;
-const EXPECTED_CELLS = 13;
+const EXPECTED_CELLS = 18;
 
 before(async () => {
   if (!(await operatorSupportLaneReady())) return;
@@ -59,6 +63,18 @@ after(async () => {
 function cell(name, fn) {
   test(name, async (t) => {
     if (await gateOperatorSupport(t)) return;
+    executed += 1;
+    await fn(t);
+  });
+}
+
+/** #776's cells ride a SECOND frontier — 0188's stem AND the applicant-name migration's — so a
+ *  database between the two skips them cleanly instead of reporting a missing function as a
+ *  finding. They count toward the same vacuity control, which is why this is a wrapper rather than
+ *  a bare `test()`. */
+function nameCell(name, fn) {
+  test(name, async (t) => {
+    if (await gateApplicantNames(t)) return;
     executed += 1;
     await fn(t);
   });
@@ -612,23 +628,63 @@ cell("os.13 audit trace -- every support act the console offers is attributably 
   const before = await rootQuery(
     "select count(*)::int as n from clara.audit_log where firm_id = $1", [operator.firm]);
 
+  const resolveKey = opk("os13-r");
   await rejectRegistration(operator.owner, reg.registration, "#615 os.13 out of scope");
-  await resolveProblemWithKey(operator.owner, world.problem, "#615 os.13 refunded", opk("os13-r"));
+  await resolveProblemWithKey(operator.owner, world.problem, "#615 os.13 refunded", resolveKey);
   await setCapacity(operator.owner, { maxFirms: 99, reason: "#615 os.13", opKey: opk("os13-cap") });
 
   const rows = await rootQuery(
     `select fn, actor from clara.audit_log where firm_id = $1 order by at desc limit 30`,
     [operator.firm]);
   const stamped = rows.rows.map((r) => r.fn);
-  // `resolve_stripe_event_problem` writes NO clara._audit row today (0160 §5 stops at its
-  // op_receipts receipt) — stated here rather than asserted, so this cell does not claim an audit
-  // line that does not exist. The two that DO write one are asserted.
-  for (const fn of ["reject_firm_registration", "set_admission_capacity"]) {
+  // #775: `resolve_stripe_event_problem` now writes its own clara._audit row, so all THREE support
+  // acts the console offers are asserted here. 0160 §5 stopped at the op_receipts receipt; the
+  // recut (stem `resolve_stripe_event_problem_audit$`) added the one `clara._audit` call the two
+  // siblings already carried, which is why the audited-act roster below is closed at three.
+  const AUDITED_ACTS = ["reject_firm_registration", "resolve_stripe_event_problem",
+    "set_admission_capacity"];
+  for (const fn of AUDITED_ACTS) {
     assert.ok(stamped.includes(fn), `clara.audit_log carries ${fn} (saw ${stamped.join(", ")})`);
   }
-  for (const row of rows.rows.filter((r) => ["reject_firm_registration", "set_admission_capacity"].includes(r.fn))) {
+  for (const row of rows.rows.filter((r) => AUDITED_ACTS.includes(r.fn))) {
     assert.equal(row.actor, operator.owner, `${row.fn} is attributed to the deciding operator`);
   }
+
+  // #775 — THE RESOLUTION'S OWN ROW, read as root and asserted field by field. EXACTLY ONE row
+  // exists for this problem: a `count` rather than a `limit 1`, because the defect this cell now
+  // covers would also be invisible if the door wrote two.
+  const audited = await rootQuery(
+    `select firm_id, actor, on_behalf_of, via_wake_kind, entry_id, args, at
+       from clara.audit_log
+      where fn = 'resolve_stripe_event_problem' and args->>'problem' = $1`, [world.problem]);
+  assert.equal(audited.rowCount, 1,
+    "resolving a provider problem left exactly one clara.audit_log row");
+  const auditRow = audited.rows[0];
+  const problemTruth = await problemRow(world.problem);
+  assert.deepEqual({
+    firm_id: auditRow.firm_id, actor: auditRow.actor, on_behalf_of: auditRow.on_behalf_of,
+    via_wake_kind: auditRow.via_wake_kind, entry_id: auditRow.entry_id, args: auditRow.args,
+  }, {
+    firm_id: operator.firm, actor: operator.owner, on_behalf_of: null, via_wake_kind: null,
+    entry_id: null,
+    args: { problem: world.problem, event: problemTruth.event_id, resolution: "#615 os.13 refunded" },
+  }, "the audit row names the operator firm, the resolving operator and the case it decided");
+  // The timestamp is the TABLE's own default rather than anything this door computes, so it is
+  // asserted as "stamped at all, and at the instant the problem row was stamped or after it".
+  assert.ok(auditRow.at instanceof Date, "the audit row carries the table's own timestamp");
+  assert.ok(auditRow.at.getTime() >= problemTruth.resolved_at.getTime() - 1000,
+    "the audit row is stamped with the decision, not before it");
+
+  // …AND THE REPLAY WRITES NO SECOND ROW. The audit call sits INSIDE the operation receipt, so a
+  // lost-response retry under the same op_key returns the original receipt and touches nothing —
+  // the one arm an audit write placed before `_reserve_op` would break silently.
+  const replayed = await resolveProblemWithKey(operator.owner, world.problem,
+    "#615 os.13 refunded", resolveKey);
+  assert.equal(replayed.problem_id, world.problem, "the replay returned the original receipt");
+  const afterReplay = await rootQuery(
+    `select count(*)::int as n from clara.audit_log
+      where fn = 'resolve_stripe_event_problem' and args->>'problem' = $1`, [world.problem]);
+  assert.equal(afterReplay.rows[0].n, 1, "the replay wrote no second clara.audit_log row");
   const after = await rootQuery(
     "select count(*)::int as n from clara.audit_log where firm_id = $1", [operator.firm]);
   assert.ok(after.rows[0].n > before.rows[0].n, "the support acts left audit rows behind");
@@ -645,6 +701,270 @@ cell("os.13 audit trace -- every support act the console offers is attributably 
     "the operator's own clara.audit_log read carries no other firm's row");
   assert.ok(visible.rows[0].n > 0, "…and it does carry this firm's own acts");
   await setCapacity(operator.owner, { maxFirms: null, reason: "#615 os.13 release" });
+});
+
+// ===========================================================================================
+// 6 · ARM 1's INTENT TIE-BREAK. #774.
+// ===========================================================================================
+
+cell("os.14 arm 1 tie-break -- a registration carrying a PAID intent and a LATER cancelled one "
+  + "reports the PAID intent's state: the money-carrying key beats `opened_at desc`", async () => {
+  // THE WORLD THIS CELL NEEDS, and the only world in which arm 1's status key is observable at
+  // all: ONE registration with TWO intents. Every other cell in this file gives a registration at
+  // most one, so a lateral ordered on `opened_at desc` alone would answer identically in all of
+  // them — which is exactly why this clause was shipped proven only by code inspection
+  // (docs/plan/active/refresh-wave-2026-09-14/reports/615-fixround.md).
+  const world = await openedCheckout(operator.owner, { tag: "os14" });
+
+  // THE EARLIER INTENT REACHES `paid` ALONG LAWFUL TRANSITIONS: born `open`, stamped once with a
+  // session (`open -> session_created`, the ONLY move the insert trigger admits for a first
+  // session stamp), then `session_created -> paid`.
+  await stampSession(world.intent);
+  await forceStatus(world.intent, "paid", "#774 os.14 this attempt carried the money");
+
+  // …AND THE LATER ONE IS CANCELLED. `clara.open_checkout_intent` reuses only an UNSTAMPED intent
+  // (0163's own money-surface rule), so the stamp above is what makes this call mint a SECOND row
+  // rather than hand back the first — the door's own behaviour, not a root insert behind it.
+  const second = await openIntent(world.sub, world.email, world.registration);
+  const later = second.intent_id;
+  assert.notEqual(later, world.intent, "the second call minted a NEW intent, it did not reuse");
+  await forceStatus(later, "cancelled", "#774 os.14 superseded attempt");
+
+  // THE TIE-BREAK IS ONLY MEASURED IF `opened_at desc` WOULD PICK THE WRONG ONE. `opened_at` is
+  // frozen at insert, so this is a fact about the fixture rather than a hope about timing.
+  const intents = await intentsOf(world.registration);
+  assert.equal(intents.length, 2, "the registration carries exactly two checkout intents");
+  const paidState = await intentState(world.intent);
+  const laterState = await intentState(later);
+  const openedAt = await rootQuery(
+    "select id, opened_at from clara.checkout_intents where id = any($1::uuid[])",
+    [[world.intent, later]]);
+  const openedOf = (id) => openedAt.rows.find((r) => r.id === id).opened_at;
+  assert.ok(openedOf(later).getTime() > openedOf(world.intent).getTime(),
+    "the CANCELLED intent was opened strictly later, so a bare `opened_at desc` would select it");
+  assert.equal(paidState.status, "paid");
+  assert.equal(laterState.status, "cancelled");
+
+  // THE TWO LOAD-BEARING PRECONDITIONS OF ARM 1, asserted rather than assumed: a registration that
+  // carried a payment row would be an ARM 2 case instead (os.04 pins that), and a decided one
+  // would leave the default queue.
+  assert.equal((await paymentsFor(world.registration)).length, 0,
+    "the registration carries NO clara.firm_registration_payments row");
+  assert.equal((await registrationRow(world.registration)).status, "open",
+    "the registration is still undecided");
+
+  // THE DOOR'S OWN ANSWER — never the migration body, never the shared body (granted to nobody).
+  const rows = await supportQueue(operator.owner);
+  const row = caseOf(rows, CASE_KIND.registration, world.registration);
+  assert.ok(row, "the undecided, unpaid registration is an arm-1 registration case");
+  assert.equal(row.payment_recorded_at, null, "…and it is arm 1, not arm 2");
+  assert.deepEqual({
+    intent_status: row.intent_status,
+    intent_status_at: row.intent_status_at?.getTime() ?? null,
+    intent_status_reason: row.intent_status_reason,
+  }, {
+    intent_status: "paid",
+    intent_status_at: paidState.status_at.getTime(),
+    intent_status_reason: "#774 os.14 this attempt carried the money",
+  }, "arm 1 reports the PAID intent's own state, corroborated against the intent row read as root");
+  // …and says so negatively too, because "it is the paid one" and "it is not the cancelled one"
+  // are the same fact only while exactly these two intents exist.
+  assert.notEqual(row.intent_status, laterState.status,
+    "the later cancelled attempt's status is NOT what the operator reads");
+});
+
+// ===========================================================================================
+// 7 · THE APPLICANT'S NAME. #776.
+//
+// The console showed the applicant as a truncated uuid because `clara.users_visible` admits only a
+// target who shares the CALLER's firm, and an unapproved applicant holds no membership anywhere.
+// The answer is a NARROWER door, not a widened one: operator-firm owner only, scoped to the
+// applicants of support cases, `display_name` and nothing else.
+// ===========================================================================================
+
+/** The user row read as ROOT — the instrument every name assertion below is checked against, so no
+ *  cell verifies the door with the door. */
+async function displayNameOf(id) {
+  const r = await rootQuery("select display_name from clara.users where id = $1", [id]);
+  return r.rows[0]?.display_name ?? null;
+}
+
+nameCell("os.15 the applicant's name resolves on ALL THREE arms -- a registration case, a "
+  + "payment case and a problem case whose event names a real applicant", async () => {
+  const reg = await undecidedRegistration("os15");
+  const paid = await paidUnclaimed(operator, "os15");
+  const problem = await openProblem(operator, "os15");
+
+  // THE CASES ARE REAL CASES, read off the door rather than assumed from the fixture: this cell is
+  // about the applicants OF SUPPORT CASES, so a world whose rows never reached the queue would
+  // make every assertion below vacuous.
+  const rows = await supportQueue(operator.owner);
+  const regRow = caseOf(rows, CASE_KIND.registration, reg.registration);
+  const payRow = caseOf(rows, CASE_KIND.payment, paid.payment);
+  const probRow = caseOf(rows, CASE_KIND.problem, problem.problem);
+  assert.ok(regRow && payRow && probRow, "all three arms carry a live case");
+  assert.deepEqual([regRow.applicant, payRow.applicant, probRow.applicant],
+    [reg.sub, paid.sub, problem.sub], "each arm reports its own applicant's uuid");
+
+  // ONE CALL, the page's own shape: every applicant id on screen, resolved together.
+  const ids = [reg.sub, paid.sub, problem.sub];
+  const answer = await resolveApplicantNames(operator.owner, ids);
+  const byId = new Map(answer.map((r) => [r.applicant, r.display_name]));
+  for (const [label, id] of [["registration", reg.sub], ["payment", paid.sub], ["problem", problem.sub]]) {
+    assert.equal(byId.get(id), await displayNameOf(id),
+      `the ${label} arm's applicant resolves to their clara.users display_name`);
+    assert.ok(byId.get(id), `…and the ${label} arm's name is a real, non-empty string`);
+  }
+  assert.equal(answer.length, 3, "exactly one row per resolvable id, no fan-out");
+
+  // THE PROJECTION IS display_name AND NOTHING ELSE — 0137's ruling that "a name-resolution need
+  // never justifies an email read" still stands, and this door does not widen past it. Asserted
+  // over the ANSWER's own shape rather than over the migration text.
+  assert.deepEqual(Object.keys(answer[0]).sort(), ["applicant", "display_name"],
+    "the door projects the applicant id and the display name, and no third column");
+  const emails = await rootQuery(
+    "select email from clara.users where id = any($1::uuid[]) and email is not null", [ids]);
+  for (const row of emails.rows) {
+    assert.ok(!JSON.stringify(answer).includes(row.email),
+      "no applicant's email appears anywhere in the answer");
+  }
+
+  // A DUPLICATED id is one row, not two — the page hands over whatever its rows carry, and the
+  // same applicant legitimately owns several cases (this world's payment and problem arms share
+  // one).
+  const dup = await resolveApplicantNames(operator.owner, [problem.sub, problem.sub]);
+  assert.equal(dup.length, 1, "a repeated id answers once");
+});
+
+nameCell("os.16 the name door refuses CLR04 to the operator firm's BOOKKEEPER, an ordinary "
+  + "firm's OWNER and a caller with no membership -- never an empty list, never a null name", async () => {
+  const world = await undecidedRegistration("os16");
+  // THE POSITIVE CONTROL FIRST: a wall nobody can pass is not a wall, it is a broken door.
+  const allowed = await resolveApplicantNames(operator.owner, [world.sub]);
+  assert.equal(allowed.length, 1, "the operator firm's owner resolves the name");
+
+  const bookkeeper = await operatorFirmBookkeeper(operator, "os16");
+  const outsiderOwner = await insertUser("w615", "os16-outside");
+  await ordinaryFirm(outsiderOwner, "owner");
+  const stranger = await insertUser("w615", "os16-stranger"); // no membership anywhere
+
+  for (const [label, sub] of [["operator-firm bookkeeper", bookkeeper],
+    ["ordinary-firm owner", outsiderOwner], ["no-membership caller", stranger]]) {
+    await assertRaises(CLR.authz, () => resolveApplicantNames(sub, [world.sub]),
+      `${label} at the name door`);
+    // …and the refusal is the SAME for an id that resolves to nothing, so a refused caller cannot
+    // read the estate's shape off the difference between "denied" and "empty".
+    await assertRaises(CLR.authz, () => resolveApplicantNames(sub, [randomUUID()]),
+      `${label} at the name door, unknown id`);
+    await assertRaises(CLR.authz, () => resolveApplicantNames(sub, []),
+      `${label} at the name door, empty list`);
+  }
+});
+
+nameCell("os.17 the unresolvable shapes answer WITHOUT error and WITHOUT a name -- a null "
+  + "applicant, an id naming no user, and a real user who is nobody's support applicant", async () => {
+  // (a) A PROBLEM CASE WHOSE APPLICANT IS NULL. `clara.stripe_events.applicant` is provider
+  //     metadata with no foreign key, and an event the applier cannot resolve carries whatever the
+  //     provider sent — here, nothing at all.
+  const nullApplicant = await deliver({
+    type: EVENT.completed, intent: randomUUID(), registration: randomUUID(), applicant: null,
+    session: stripeSessionId("os17n"),
+    projection: { payment_status: "paid", mode: "payment", session_status: "complete" },
+  });
+  // (b) AN ID THAT NAMES NO clara.users ROW, on the same arm and for the same structural reason.
+  const ghost = randomUUID();
+  const ghostApplicant = await deliver({
+    type: EVENT.completed, intent: randomUUID(), registration: randomUUID(), applicant: ghost,
+    session: stripeSessionId("os17g"),
+    projection: { payment_status: "paid", mode: "payment", session_status: "complete" },
+  });
+  const nullProblem = (await rootQuery(
+    "select id from clara.stripe_event_problems where event_id = $1", [nullApplicant.event])).rows[0];
+  const ghostProblem = (await rootQuery(
+    "select id from clara.stripe_event_problems where event_id = $1", [ghostApplicant.event])).rows[0];
+  assert.ok(nullProblem && ghostProblem, "both unresolvable events filed a problem");
+
+  const rows = await supportQueue(operator.owner);
+  const nullRow = caseOf(rows, CASE_KIND.problem, nullProblem.id);
+  const ghostRow = caseOf(rows, CASE_KIND.problem, ghostProblem.id);
+  assert.ok(nullRow && ghostRow, "both problems are live problem cases");
+  assert.equal(nullRow.applicant, null, "the null-applicant case carries no applicant id at all");
+  assert.equal(ghostRow.applicant, ghost, "the ghost case carries an id that names no user");
+
+  // THE PAGE'S OWN CALL, with exactly what those two rows carry. A null id is simply not sent; an
+  // id that resolves to nothing comes back ABSENT rather than as a row with a null name, so the
+  // surface keeps the honest absence it shows today.
+  const answer = await resolveApplicantNames(operator.owner, [ghost]);
+  assert.deepEqual(answer, [], "an applicant id that names no user answers with NO row");
+  const withNull = await resolveApplicantNames(operator.owner, [ghost, null]);
+  assert.deepEqual(withNull, [], "a NULL element is not an error and resolves to nothing");
+  assert.deepEqual(await resolveApplicantNames(operator.owner, []), [],
+    "an empty list is an empty answer, not a refusal");
+  assert.deepEqual(await resolveApplicantNames(operator.owner, null), [],
+    "a null array is an empty answer, not an error");
+
+  // (c) NO USER-EXISTENCE ORACLE. A REAL clara.users row that is nobody's support-case applicant
+  //     answers EXACTLY the way the ghost does. This is the one arm that distinguishes a
+  //     purpose-built read from a lookup over clara.users, so it is asserted against a positive
+  //     control in the same breath: the operator themselves exists, and is not resolvable here.
+  const present = await rootQuery("select count(*)::int as n from clara.users where id = $1",
+    [operator.owner]);
+  assert.equal(present.rows[0].n, 1, "the operator's own clara.users row genuinely exists");
+  const isApplicant = await rootQuery(
+    `select (exists (select 1 from clara.firm_registration_requests r where r.applicant = $1)
+             or exists (select 1 from clara.stripe_events e where e.applicant = $1)) as is_applicant`,
+    [operator.owner]);
+  assert.equal(isApplicant.rows[0].is_applicant, false,
+    "…and they are nobody's support-case applicant");
+  assert.deepEqual(await resolveApplicantNames(operator.owner, [operator.owner]), [],
+    "a real user who is not a support case's applicant answers exactly like an unknown id");
+});
+
+nameCell("os.18 the name door's posture -- clara_fn_owner-owned SECURITY DEFINER with "
+  + "search_path and plan_cache_mode pinned, PUBLIC revoked, clara_authenticated alone", async () => {
+  const acl = await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.prosecdef, p.provolatile,
+            pg_get_userbyid(p.proowner) as owner,
+            coalesce(array_to_string(p.proconfig, ' | '), '(null)') as config,
+            coalesce(array_to_string(p.proacl, ' | '), '(null)') as acl
+       from pg_proc p where p.oid = $1::regprocedure`, [NAMES_SIG]);
+  assert.equal(acl.rowCount, 1, "the door resolves at its EXACT signature -- no overload");
+  const row = acl.rows[0];
+  const config = row.config.replace(/\s+/g, "");
+  assert.equal(row.prosecdef, true, "SECURITY DEFINER");
+  assert.equal(row.owner, "clara_fn_owner", "owned by clara_fn_owner");
+  assert.ok(config.includes("search_path=clara,pg_temp"), `search_path is pinned (${row.config})`);
+  assert.ok(config.includes("plan_cache_mode=force_custom_plan"),
+    `plan_cache_mode is pinned (${row.config})`);
+  assert.ok(!/(^|\s|\|)=X\//.test(row.acl), `PUBLIC holds no EXECUTE (${row.acl})`);
+  assert.ok(row.acl.includes("clara_authenticated=X/clara_fn_owner"),
+    `clara_authenticated holds EXECUTE (${row.acl})`);
+
+  const holders = await rootQuery(
+    `select r.rolname, has_function_privilege(r.rolname, $1::regprocedure, 'execute') as x
+       from pg_roles r where r.rolname like 'clara\\_%' order by r.rolname`, [NAMES_SIG]);
+  assert.deepEqual(holders.rows.filter((r) => r.x).map((r) => r.rolname),
+    ["clara_authenticated", "clara_fn_owner"], "EXECUTE holders");
+  for (const role of [ROLES.agentRo, ROLES.runtime, ROLES.wakeInteractive, ROLES.wakeProactive,
+    "clara_stripe_webhook"]) {
+    await assertRaises(PG.insufficientPrivilege,
+      () => roleQuery(role, "select * from clara.resolve_operator_support_applicants(null)"),
+      `${role} at the name door`);
+  }
+
+  // THE BYTE-COPIED AUTHORITY, the same instrument os.03 applies to the two 0188 doors: the
+  // operator-firm fragment is approve_firm_registration's own, and the owner-rank floor is stated
+  // EXACTLY once (a second, decorative occurrence would mask a downgrade of the real one).
+  const fragment = "exists(select1fromclara.firmsfwheref.id=clara.jwt_firm()andf.is_operator)";
+  const reference = await normalizedBody("clara.approve_firm_registration(uuid,text)");
+  assert.ok(reference.includes(fragment), "the reference body still carries the shared fragment");
+  const body = await normalizedBody(NAMES_SIG);
+  assert.ok(body.includes(fragment), "the name door carries the byte-copied operator fragment");
+  assert.equal(body.split("clara.role_rank('owner'").length - 1, 1,
+    "the owner-rank floor is stated exactly once");
+  // …and it reads clara.users_visible NOWHERE: this door is deliberately narrower than that view,
+  // and reusing it would have re-imported the same-firm requirement the ticket exists to avoid.
+  assert.ok(!body.includes("users_visible"), "the name door does not reach clara.users_visible");
 });
 
 test("os.VACUITY CONTROL -- every declared #615 cell executed", async (t) => {

@@ -35,6 +35,11 @@ export const OPERATOR = {
   settledProblem: "0f615a00-1111-4777-8777-0f615a000004",
   deniedCase: "0f615a00-1111-4777-8777-0f615a00ffff",
   applicant: "0f615a00-2222-4777-8777-0f615a000010",
+  // #776 — the name the operator-only applicant-name read resolves `applicant` to, and a SECOND
+  // applicant id (on the settled problem) that resolves to NOTHING, so the walk sees both halves
+  // of the field: a real name, and the honest truncated-id absence.
+  applicantName: "Farid bin Ismail",
+  unresolvableApplicant: "0f615a00-2222-4777-8777-0f615a0000ff",
   firmName: "Rome Public Advisory",
   paidFirmName: "Kuala Lumpur Bookkeepers",
   problemFirmName: "Penang Advisory",
@@ -110,6 +115,7 @@ const PROBLEM_ROW = base({
 const SETTLED_PROBLEM_ROW = base({
   case_kind: "problem",
   case_id: OPERATOR.settledProblem,
+  applicant: OPERATOR.unresolvableApplicant,
   firm_name: OPERATOR.settledFirmName,
   occurred_at: "2026-09-09T02:00:00+00:00",
   problem_kind: "intent_mismatch",
@@ -207,6 +213,28 @@ export async function handleOperatorSupportSupabase(request, response, path, url
       return true;
     }
     sendJson(response, 200, rowsFor(body.p_include_settled === true), cors);
+    return true;
+  }
+
+  // #776 — THE APPLICANT-NAME READ. Scoped to the ids this lane minted, and it answers ONLY what it
+  // resolves: `unresolvableApplicant` is a real id on a real case that names no user, so it is
+  // ABSENT from the answer rather than present with a null name — the shape 0206 §1 ships and the
+  // one that makes the console's fallback a real state in the walk rather than dead code.
+  if (request.method === "POST" && path === "/rest/v1/rpc/resolve_operator_support_applicants") {
+    const body = await readJson(request);
+    const asked = Array.isArray(body.p_applicants) ? body.p_applicants : [];
+    if (!asked.some((id) => id === OPERATOR.applicant || id === OPERATOR.unresolvableApplicant)) {
+      return false;
+    }
+    if (isBookkeeper(request)) {
+      sendJson(response, 400, clr("CLR04", "insufficient role", "not_operator_firm"), cors);
+      return true;
+    }
+    sendJson(response, 200,
+      asked.includes(OPERATOR.applicant)
+        ? [{ applicant: OPERATOR.applicant, display_name: OPERATOR.applicantName }]
+        : [],
+      cors);
     return true;
   }
 

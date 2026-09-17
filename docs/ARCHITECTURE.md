@@ -59,6 +59,18 @@ flowchart LR
 Web 的请求生命周期与会计工作的生命周期分开——关闭页面不会终止后台执行。
 尚未加入事务所的申请人处于独立准入域，不能假设其已具有 firm 身份。
 
+<!-- #775 #776 -->
+**准入域上的 operator 支持面（本地已验证，hosted evidence pending）。** operator 的三项受治理决定现在都留下审计行：
+`clara.resolve_stripe_event_problem` 与 `clara.reject_firm_registration`、`clara.set_admission_capacity` 一样写入一条
+`clara.audit_log`（operator 事务所、决定人、`{problem, event, resolution}`），且该写入位于操作回执之内，重放不会写第二行
+（migration `0205_resolve_stripe_event_problem_audit.sql`；`packages/db/tests/operator-support.test.mjs` os.13）。
+申请人的姓名由一扇专用的 operator-only 读门 `clara.resolve_operator_support_applicants(uuid[]) -> (applicant, display_name)`
+解析（migration `0206_operator_support_applicant_name.sql`）：权限是 `clara.approve_firm_registration` 逐字节复制的
+owner + operator-firm 判定，范围限定为支持案件的申请人（经 `firm_registration_requests.applicant` 与
+`stripe_events.applicant`），因此它不是 `clara.users` 的存在性探针；解析不到的 id 不出现在结果里，界面继续显示截断的 uuid；
+只返回 `display_name`，不返回邮箱（0137 的裁定不变），也不扩大 `clara.users_visible`。
+<!-- #775 #776 END -->
+
 **四个部署单元的形态。** 状态逐行标注，当前线上版本见 `docs/PROGRESS.md`：
 
 | 单元 | 形态 | 关键约束 | 状态 |
@@ -187,6 +199,33 @@ OCR／结构化抽取对发票与月结单走文本 + 图像双 witness，保留
 （custody / byte_extraction / typed_facts / business_operation 四个正交轴，全局而非按租户，
 未知方向取诚实默认而不是乐观默认）。[已实现，覆盖面见 §7]
 
+<!-- #778 -->
+同一次抽取内一个 `field_path` 只允许一条 region：`clara.document_regions` 在 `(extraction_id, field_path)` 上唯一，
+第二次写入被吸收（`on conflict … do nothing`，保留第一条证据——该表只追加，UPDATE 会被 append-only belt 拒绝），
+而不是静默留下两行争同一个字段。该键是**部分唯一索引**：`field_path` 为空的 region 不受约束，另有两个按字面排除的路径。
+`opening_tb.line`——0017 的 `ck_document_regions_opening_fact_0017` 把每一条期初余额事实都钉在这一个字面量上，
+而真实 producer（`opening-tb-cells.mjs`）对试算表的**每一行**各产出一条该路径的 region；
+`prior_gl.line`——目前尚无 producer，但已上线的 reader（`seeding-parse.mjs` 的 `SELECT_PRIOR_GL_REGIONS_SQL`
+与 `regionsToEntries`）会读取同一次抽取下的**全部**该路径 region，每条各生成一条 GL 分录。
+所以一张四十行的试算表、一本多行的前期总账，本就是同一个键上的多条合法记录；若用全表唯一键则会静默吞掉其余各行。
+[已实现，hosted evidence pending]
+<!-- /#778 -->
+
+<!-- #779 -->
+能力目录的 `registry_version` 单调性由数据库强制，不再只是约定：0207 的 BEFORE UPDATE 触发器
+`clara._tf_document_capabilities_version_monotone` 拒绝任何把同一 (format, document_kind) 行版本号
+调低的更新（CLR08，`detail.reason = registry_version_monotone`），调高或保持不变仍照常通过；
+先删后插到更低版本、以及"整批同号发布"的跨行一致性仍是约定（#779 明确不在范围内）。[已实现，本地验证]
+<!-- /#779 -->
+
+<!-- #780 -->
+`clara.document_fact_validations` 的 firm 边界由 0208 的 migration tail 直接**读行**证明，而不再只靠
+0191 的"策略条数为三"：tail 用 0191 自己的 deferred recorder 写出 firm A 的一行校验记录，先做正向对照
+（firm A 的 human 与 agent 会话各读到该行），再断言 firm B 的 human 与 agent 各读到零、且把 firm A 的
+wake secret 放进 firm B 的 human 会话仍读到零（两条 lane 不会退回彼此的 accessor）；探针无法运行时报
+CLR10 中止而不是静默跳过，所有 fixture 通过 sentinel 回滚。[已实现，本地验证]
+<!-- /#780 -->
+
 金额一律是**整数最小货币单位**（DB 侧 bigint `*_cents`），余额、舍入、期间与关联对象检查都在这个单位上执行；
 大整数穿过 JSON 与前端时必须保留精度——freeform 读路径已知的精度缺口仍未修（§7）。[已实现]
 
@@ -195,6 +234,53 @@ run 在冻结 bundle 下执行，调用受控领域 operation，**在同一事�
 `clara.operation_receipts` + outbox。"完整影响是事务边界"是核心约束：确认一张发票需要相应总账与 open item，
 收款分配必须维护余额，购置资产要同时保留资产记录。已入账历史不可原地改写——更正是有来源关联的
 冲销／替代操作。同 key 同 payload 重放取回原回执，同 key 不同 payload 是类型化 conflict。[已实现]
+
+<!-- #750 / #721 -->
+Work 的**取消**与**改述**：`clara.cancel_accounting_work` 取消尚未过账的 Work（已持有 committed
+回执的 Work 永远答 `already_completed`，不冲销已入账结果），并在真正取消的两条分支上追加**恰好一条**
+`work.cancelled` 领域事件（payload `{work, from_status, author, outcome, superseded_by}`），
+Activity feed 的 `work.%` 分支因此有了第二个生产者；B3 的 Cancelled 横幅从 run 行的
+`cancelled_by`／`cancelled_at` 读出"由谁、何时"。Work 问答的回答**只补齐被问到的事**：
+`clara.answer_work_question` 对声称改动已准入 basis 要素的回答答 `basis_change_not_allowed`
+（detail 指名要素）；真正要改指令的回复走新门 `clara.restate_accounting_work`——在同一事务里
+以同一扇准入门 `clara.admit_journal_work` 准入带 `supersedes` 的新 Work，并以
+`superseded_by` 取消旧 Work，两列都是**一次性写入**（`t_accounting_work_immutable` 只允许
+null→值一次，且只落在仍可取消或已取消的 Work 上）。没有 `work.superseded` 兄弟事件类型：
+一个生产者，一个类型。[已实现，本地验证；hosted evidence pending]
+<!-- #750 / #721 -->
+
+<!-- #784 -->
+**遗留 Client Knowledge 事实：一个表达式，一个答案。** 五个 legacy carried key
+（`entity_type`、`msic`、`trade_nature`、`banking_arrangement`、`customer_identity_policy`）仍然存放在
+`clara.client_facts`，写入的唯一门仍是 `clara.record_client_fact`（0055 签名不变）；0192 在它旁边建立了
+知识登记簿，但不双写，所以对这五个 key，**整个系统实际据以行动的值仍是遗留行**。读取侧现在只有一个表达式：
+`clara._knowledge_legacy_rows(firm, client)`——人读登记簿 `clara.list_client_knowledge`、runtime 知识包
+`clara.get_knowledge_pack`（两者把每条遗留行标记为 `authoritative: true`），以及 0209 重接的三个消费点
+`clara.get_context_pack`、`clara._close_gate_closing_stock`、`clara._bank_registry_ledger_state`，全部经由它。
+三个重接点传入的是**客户自己的 firm**（从 `clara.clients` 查得，绝不是会话 firm）；因为
+`clara.client_facts` 带有 `(client_id, firm_id) → clara.clients(id, firm_id)` 的外键，加上 firm 过滤不会
+少读任何一行。该表达式从不查询 `clara.knowledge_records`，因此"知识记录不遮蔽遗留事实"是结构性的，而不是靠自觉。
+[已实现，0209_knowledge_legacy_readers_converge.sql；本地证据 `packages/db/tests/knowledge-legacy-readers-converge.test.mjs` 8/8 通过；hosted evidence pending]
+
+**唯一刻意保留直读的站点，及其理由。** `clara._tf_counterparty_name_only_guard()`（0062）是 counterparty
+写路径上的**逐行触发器**，它读 `customer_identity_policy` 用的是 `uq_client_fact_live`
+`(client_id, fact_key) WHERE superseded_at is null` 上的一次 `exists` 索引探测。实测（EXPLAIN ANALYZE，
+PostgreSQL 17.6，2026-09-15，客户仅有五条 live 事实）：直读 0.011 ms；改走共享表达式则是对
+per-client jsonb 聚合（每条事实还各带一次 `clara.users` 与 `clara.knowledge_keys` join）的 Function Scan，
+2.027 ms——相差约 180 倍，且这已是可能最小的客户。为一次写路径探测支付整客户聚合的代价不划算，故该站点
+**刻意保留直读**；0209 的 prestate 用 `sha256(prosrc)` 钉住了它的函数体，tail 也断言它仍然读
+`clara.client_facts` 与 `uq_client_fact_live`，使"刻意未改"可审计、且这段理由不会比它所描述的代码活得更久。
+它读的行与共享表达式读的行完全相同（同表、同 live 谓词），convergence 电池对这个 key 同样做了断言。
+<!-- #784 -->
+
+<!-- #821 -->
+**一份凭证只背书一笔在账分录**，且三条通道互相看得见：工作／证据通道（`clara.entry_evidence_links`）
+与文件编码通道（`clara.journal_entries.document_id` 上的审核过账）彼此互看；开账通道按设计允许
+"一份 tie 凭证、多条开账明细"，因此兄弟开账明细不构成冲突，只有该凭证上已有**活的**证据链接
+（`released_at is null`）时开账审核才被拒。三道墙的拒绝口径完全一致：`CLR13` +
+`source_already_posted`，并指名冲突分录与凭证，不新增错误码或线上词汇；提问之前先锁 `clara.documents`
+的同一行，读-改-写竞争因此串行化。[已实现，本地验证；hosted evidence pending]
+<!-- #821 -->
 
 <a id="close-reporting-and-tax"></a>关账按年度顺序串行，carry-forward 幂等，beginning-close 冻结期间内银行结算须先完成。
 报表走 open → evaluate → seal → render：确定性计算、封存快照、独立渲染服务出文件，模型不重打金额。
@@ -215,6 +301,20 @@ run 在冻结 bundle 下执行，调用受控领域 operation，**在同一事�
 共享问题有稳定身份与问题／依据版本：一个 Work 同时至多一个待答问题，数据库只接受当前获准的第一份答案，
 重复提交回放同一结果；期限到期后问题失效而不是 Work 静默完成。
 Work 详情、Needs you 与 chat rail 展示并回答**同一个**问题记录。[已实现]
+
+<!-- #764 -->
+**澄清送达在两条车道上语义一致**：控制监听器遇到 `HookNotFound` 时不再按车道分叉——它先向引擎求证
+（run 已终态／已被遗忘，或 task 已离开 `awaiting_input`，都证明这次 resume 其实已经落地），
+无法求证的行**停在** `delivery_state='hook_missing'` 并带上时刻，绝不被盖成 `delivered`。
+chat 车道随之有了自己的 reconciler（`packages/runtime/lib/reconciler-chat-clarify.mjs`）：过了宽限期后
+**以一次 resume 重新探测**——钩子重新可达就让该轮继续；钩子确认消失则把该 chat turn 结算为 `expired`，
+写入 `clarify_closed` part，并释放会话唯一的 live-turn 槽位（`uq_agent_task_one_live_turn`）。
+结算是**先看回执**的：turn 已经 checkpoint 的 parts 会被带进 assistant message，而不是被一条收尾 part 覆盖。
+该 belt 同时覆盖 0198 §R 记下的历史状态（`status='expired'` + `delivery_state='delivered'` 而 task 仍 `awaiting_input`；
+发布会话计数为 0，因为当时 chat 积压为 0，而非因为该缺口被验证过）。它在 leader 循环里**先于**
+`runReconcilerSweep` 运行，因为 `reconcileTasks` 的通用引擎镜像会把同一行结算成 `cancelled/engine_lost`，
+那不是这条 turn 应得的终态。[已实现，hosted evidence pending]
+<!-- /#764 -->
 
 **模型侧的修复与预算合同**由每个 successor 重新实现，不随冻结正文自动继承：错误按 (errcode, reason)
 名册分为 invalid_input／state_changed／conflict／transient／refusal／cancelled／invariant 七档；
@@ -246,6 +346,15 @@ Knowledge 偏好、计算政策与"观察到的重复扣款"都解析不到，�
 runtime 皮带不自行推导任何日期，也不读任何 operator 开关——**不存在"全局开启自动执行"开关**，
 迁移尾部的普查对在世函数体断言了这一点。[已实现]
 
+<!-- #787 -->
+转回的"该分录仍在世"在**入账时再查一次**（不只在接收时）：由计划 reversal leg 发起的 Work 到达
+`clara._record_journal_entry_core` 时，核心重新调用接收侧同一个在世判定（`clara._plan_primary_entry`：
+已批准且自身未被冲销）；该分录已不在世（例如人类在接收与入账之间调用 `clara.reverse_entry` 冲销了计提）
+即按 CLR10 `reversal_before_primary`（`primary_state = entry_not_live`）拒绝入账，账上只留人类那一笔冲销。
+该臂与本函数体其余拒绝臂一样，只在该 Work **尚无已提交 operation receipt** 时生效，重放仍返回原结果。
+[已实现（本地验证：migration 0204 + `p640.occ.reversal_post_liveness`）；hosted evidence pending]
+<!-- #787 -->
+
 ### E. 模型外发（按用途授权 + 执行轨迹）
 
 外发是类型化的 client 用途家族：prepare／consume 两阶段、单次使用、短 TTL、多项重绑定检查。
@@ -264,6 +373,49 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 对 `work-trace.mjs` 脱敏逻辑的任何加固只能随下一个冻结版本（`claraWork_v4`）交付，不做原地修改
 （owner 2026-09-15 裁定，#815）。[已实现]
 
+<!-- #811 #812 -->
+**文法校验的边界，说准确（#811）。** 上一段"每列有文法校验"这句，在 0195 之后对两个字段只在**长度**上
+成立、在**形状**上不成立：`observed_revisions` 的 number 值没有任何位数或量级测试，`run` 文法也没有
+`id`／`model`／`token`／`rev` 都带的长数字排除。迁移 `0210_work_trace_shape_bounds.sql` 在**门（door）**
+这一侧补齐：number 值受 `abs < 1e12` 且 `scale <= 6` 约束（指数写法 `1e30` 与 `1.5e-20` 同样被拒），
+`run` 文法拒绝 13 位以上连续数字——除非该 id 正是 WDK 铸造的形状（`wrun_` + 26 位 Crockford base32
+ULID，`@workflow/core` 4.8.4 `dist/runtime/start.js:121`），该豁免使这条子句**可证明**不会误伤真实
+run id。两个谓词同时被关系的 CHECK 与写入动词调用，因此墙与诊断（CLR10 `invalid_trace`，点名
+`p_observed_revisions`／`p_run`）一起收紧。**写入方仍未收紧**：`work-trace.mjs` 的 `traceRevisionOf`
+仍接受任意有限数，`traceRunOf` 根本没有作用在 `recordTrace` 发送的值上；该模块在冻结闭包内，按 #815
+的裁定只能随 `claraWork_v4` 交付，相应要求记在 `packages/runtime/README.md`。因此准确的说法是：
+**门对这两个字段做形状约束，写入方没有，门就是那道墙**；已存储的行不回溯校验、不重写。
+[已实现，本地已验证；hosted evidence pending]（artifacts：迁移 `packages/db/migrations/0210_work_trace_shape_bounds.sql`；cells `w811.trace.revision_bounds`／`w811.trace.run_grammar`，见 `packages/db/tests/work-egress-authority.test.mjs:800,839`）
+
+**"撤销可逆"说准确：哪一种撤回，由哪一道门回来（#812）。** 上面"撤销可逆，且对已消耗的 dispatch
+是追溯的"这句，现在按撤回的种类展开：
+
+- `revoke_client_egress_purpose` 撤的是 **consent** → 由 `restore_client_egress_purpose` 回来
+  （重新推导基础，铸一对**全新**的 consent+activation，被撤的那行留作历史）；
+- `deactivate_client_egress_purpose` 撤的是 **activation**，consent 仍在世 → 由 #812 的
+  `reactivate_client_egress_purpose` 回来（迁移 `0211_accounting_work_egress_recovery.sql`；
+  owner floor，仅 `accounting_work`，仅 `clara_authenticated`）。它在库内解析**幸存的** consent
+  再委托给 0195 的 `activate_client_egress_purpose`，因为 `client_egress_purpose_consents`
+  是 FORCE RLS、对任何应用角色都没有表权限（0020），consent id 根本到不了浏览器。已测得该往返成立：
+  deactivate → prepare 得 `unknown` → 用幸存 consent 激活 → prepare 重新 `granted`，consent 计数
+  始终为 1（`w812.reactivate.round_trip`）；
+- 法条发布了新版本而事务所尚未接受、或 client 不在世 → 只能去接受新版本／恢复 client，没有任何
+  egress 门能恢复事务所当下并不持有的授权。
+
+三种恢复都**只恢复未来的 dispatch**：在撤回之前就已消耗的授权，之后仍被账务核心拒绝
+（`w631.write.withdrawn_after_consume`、`w812.reactivate.retroactive`）。
+
+**live-at-write 由重算后的账务核心里的两个 join 实现**——在该 run 已消耗的 dispatch authorization
+背后，再读一次 consent 的 `revoked_at is null` 与 activation 的 `deactivated_at is null`——而**不是**
+把已消耗的那行作废：0020 的 `ck_egress_dispatch_authorizations_one_terminal`
+（`consumed_at is null or invalidated_at is null`）使"已消耗又被作废"根本无法表示。这是**已接受的
+做法**，0020 那条 CHECK **有意保持原样、不重切**（#812 裁定；0211 的 §0／§T 各测量它一次，所以
+"有意保持"是可核查的说法而不是假设）。控制台侧：Work 详情的 `egress_not_authorized` 面孔对
+**owner** 多出一个动作"Re-activate AI processing for this client"，文案同时说明它恢复的是新工作、
+当前这条记录仍为 refused。
+[已实现，本地已验证；hosted evidence pending]（artifacts：迁移 `packages/db/migrations/0211_accounting_work_egress_recovery.sql`；cells `w812.reactivate.round_trip`／`w812.reactivate.retroactive`／`w812.reactivate.door`，见 `packages/db/tests/work-egress-authority.test.mjs`）
+<!-- #811 #812 -->
+
 ### F. 发布与回退
 
 迁移运行器用会话连接 + 会话级 advisory lock + 每迁移一事务；已应用字节不可变，只能追加后继迁移；
@@ -279,6 +431,19 @@ runtime 皮带不自行推导任何日期，也不读任何 operator 开关—�
 那些文件是冻结的，**其引用永远不能被修改**，所以取代它的不是一次改名，而是本小节这个锚点
 `#workflow-versioning-and-rollback`：任何读到该引用的人应当读这里（freeze-lint 失败时打印给人看的也是这一行）。[已实现]
 
+<!-- #791 -->
+**下一个冻结版本的清单摘要覆盖面（binding on `claraWork_v4`）。** `claraWork.v2.bundle.ts` 与
+`claraWork.v3.bundle.ts` 的清单摘要哈希的形状是 `{id, instructions, skills, tools{id,names}, budgets}`——
+`tools` 成员只带一个版本 id 与三个工具名的裸名单，从不带每个工具自己的 JSON schema，也不带它声明的
+依赖。`ask_question` 的 schema 在 v1→v2 之间改过，靠的只是手工把 `tools.id` 递增来标记，摘要本身
+测不出这个变化（#791）。这条口子无法对 v2 或 v3 收口：两者都是 `@frozen` 且在冻结清单中标记
+`deployed: true`，本小节上面的法条 (a) 已经说得很清楚——已部署的 body 不可变，行为变更只能以新的
+`_vN` 导出发布，从不原地编辑；freeze-lint 对任何一次改动都会拒绝（`BODY CHANGED` 或
+`REHASHED-VS-BASE`），哪怕只是给 body 加一行注释。因此这条要求记在这里，binding 在下一个被铸造的
+`claraWork_v4` 上：**`claraWork_v4` 的清单摘要必须同时覆盖每个工具的 JSON schema 与其声明的依赖，
+不能只是工具集 id 加名单**——一次只改 schema、不改名单的工具变更必须被摘要测出来，而不是像
+`ask_question` 那次一样只能靠人工递增 id 才留下痕迹。[已记录，未实现——铸造 `claraWork_v4` 时执行]
+
 回退预检 `packages/runtime/lib/rollback-preflight.mjs` 回答三问：(1) 非终态 run 的 body 普查；
 (2) 绑不到 run 的在世任务普查（未知 kind fail-closed）；(3) 数据库自身对目标镜像的 body 要求
 （某些迁移之后，目标镜像必须携带指定 body，且这一条不能靠 drain 清除）。该 frontier 规则与 0195 的
@@ -287,6 +452,7 @@ pre-v3 grandfather arm 已实现并上线；owner 于 2026-09-15 裁定（#826�
 下一次 wall-raising 迁移采用 grandfather 还是 drain 届时再裁。同一天的第二条裁定（#810）：beta 期间被取代的
 body 可以从代码树退役而**不要求 drain 证明**——停在其上的 run 先在托管清理（#820）中取消，否则下面的
 stranded-body 闸门会拒绝启动；冻结清单为此保留一条 retired 记录而不是删除条目，法条 (c) 不变。
+工具里这条记录就是 `frozen-workflows.json` 顶层的 `retired`（路径 → 该条目最后一次冻结的 `sha256` + 裁定出处），是 `MISSING`／`REMOVED-VS-BASE` 唯一接受的缺席；其余条目的 deploy-lock 语义不变，反向的 `RETIRED-PRESENT`（已退役却仍在树里）同样是 finding。[已实现，`scripts/check-frozen-workflows.mjs`；首批退役 `chatTurn_v1` 闭包三文件]
 World 启动前另有一道 stranded-body 普查闸门：
 发现缺口即拒绝启动 durable world（HTTP 仍服务，`/ready` 503），只能由显式操作者覆盖。该拒绝是
 **database-wide** 的——同一个库上任何 lane 停泊的未导出 body 都会拒绝之后每一个 runtime 进程——owner 于
@@ -362,4 +528,4 @@ World 启动前另有一道 stranded-body 普查闸门：
 | 异地备份的首次真实部署与恢复演练 | 脚本、age 加密与清单已实现，镜像未部署，restore 从未被证明（`packages/backup/README.md` 自己写明这一点） |
 | 渲染器首次真实部署的验收门槛 | 镜像已统一 Node 22 并有确定性 drill，但"真实排队任务完成、内容哈希一致、manifest 记录实际镜像、替换前保留前一镜像"仍是待兑现义务 |
 | 多机部署、spool 转移与恢复演练 | 当前明确是单机 + 本地 spool；数据库持久化能支持恢复，但流程未被证明可用 |
-| 若干已知的单向缺口（期初余额车道的凭据绑定方向、chat 车道 `HookNotFound` 的投递语义） | 两处的主路径都已串行化或已覆盖，各剩一个方向／一个状态未收口，由 GitHub 票承接 |
+| 若干已知的单向缺口（期初余额车道的凭据绑定方向） | <!-- #764 -->主路径已串行化或已覆盖，仍剩一个方向未收口，由 GitHub 票承接。chat 车道 `HookNotFound` 的投递语义**已收口**（#764：`hook_missing` 停靠态 + chat reconciler 重探测，见 §5.B）——本地已验证，hosted evidence pending<!-- /#764 --> |

@@ -237,6 +237,12 @@ export type ActivityPage = {
 
 export type ActivityFilters = {
   client?: string | null;
+  /** #770 — ONE Work's own history, narrowed by the door itself (migration 0202's `p_work`).
+   *  The predicate sits inside each of the door's three union arms, ahead of that arm's own
+   *  `limit`, so a Work whose events sit far back in the client's history is on the FIRST page
+   *  rather than several over-fetched pages down. Omit it (or pass null) and the feed behaves
+   *  exactly as it did before 0202 — same rows, same order, same cursors. */
+  work?: string | null;
   kinds?: readonly ActivityKind[] | null;
   /** `YYYY-MM-DD`, in the business timezone — never a bare Date or a browser-local day.
    *  `since` is INCLUSIVE (that calendar day's own start); `until` is its own EXCLUSIVE upper
@@ -322,6 +328,7 @@ export async function listActivity(
       p_kinds: filters.kinds && filters.kinds.length > 0 ? [...filters.kinds] : null,
       p_since: filters.since ? businessDayStart(filters.since) : null,
       p_until: filters.until ? businessDayEnd(filters.until) : null,
+      p_work: filters.work ?? null,
     },
     { session: opts.session, signal: opts.signal },
   );

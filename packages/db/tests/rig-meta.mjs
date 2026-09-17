@@ -1376,6 +1376,27 @@ const OPERATOR_SUPPORT_0188_HUMAN_FNS = [
 ];
 export const OPERATOR_SUPPORT_0188_COHORT = [...OPERATOR_SUPPORT_0188_HUMAN_FNS];
 
+// #776
+// #776 [0206, the operator support console's applicant-name read] — ONE granted name, its own
+// frontier-tolerant cohort for the same "wholly present or wholly absent" reason every cohort here
+// carries: the db-slice-frontiers matrix runs this package against databases pinned BETWEEN 0188
+// and 0206, and folding this name into 0188's roster above would red every one of those legs.
+//
+//   resolve_operator_support_applicants — turns the applicant ids a support case already carries
+//     into clara.users.display_name, for the OPERATOR FIRM'S OWNER and nobody else. Authority is
+//     clara.approve_firm_registration's own predicate, byte-copied and body-enforced, so the grant
+//     is the same clara_authenticated every other operator door holds — and, like them, agent,
+//     both wake roles, clara_runtime and clara_stripe_webhook gain ZERO. It is not an agent act and
+//     is not reachable from any lane that executes model output.
+//
+// NO UNGRANTED SIBLING. 0206 adds no internal and no trigger function, so this cohort is the whole
+// of the file's capability surface.
+const OPERATOR_APPLICANT_NAME_0206_HUMAN_FNS = [
+  "resolve_operator_support_applicants",
+];
+export const OPERATOR_APPLICANT_NAME_0206_COHORT = [...OPERATOR_APPLICANT_NAME_0206_HUMAN_FNS];
+// #776 END
+
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
 // wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
@@ -1729,6 +1750,36 @@ export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];
 
+// #721 -----------------------------------------------------------------------------------------
+// #721 [0200, a reply that changes the basis becomes a new Work] — the RESTATE lane, its OWN
+// frontier-tolerant cohort for the same "wholly present or wholly absent" reason 0178's and 0184's
+// carry: folding these names into an older roster would red every database between the two
+// frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the ONE door — clara_runtime ONLY, the exact lane clara.cancel_accounting_work sits in, and
+//   for the identical reason: a restatement IS an admission plus a cancel, both of which are
+//   reached by a human THROUGH the runtime's authenticated route (`POST /api/work/:id/restate`),
+//   never by PostgREST. The wake roles, clara_agent_ro and clara_authenticated gain ZERO — a lane
+//   that could retire the Work it is executing and admit its replacement would be an agent
+//   rewriting the instruction it was given.
+const WORK_RESTATE_0200_RUNTIME_FNS = ["restate_accounting_work"];
+//   …and the UNGRANTED closure: the basis-change discriminator the answer gate calls. Listed so
+//   `cohortFailures` reports a half-applied 0200 rather than a silently narrower boundary, and so
+//   an accidental grant on it FAILS instead of passing quietly.
+//
+//   NOT LISTED, deliberately: `clara.answer_work_question` and `clara._tf_accounting_work_immutable`.
+//   0200 recuts both BODIES and touches neither NAME, signature nor grant —
+//   `answer_work_question` is already on WORK_QUESTIONS_0180_HUMAN_FNS and the trigger body is
+//   already reached through its own cohort — and a second listing of a name that exists at an
+//   EARLIER frontier would make this cohort resolve on databases 0200 has not touched, which is
+//   exactly the partial-cohort condition the gate exists to catch (0198's block states the same
+//   rule for the same reason).
+const WORK_RESTATE_0200_UNGRANTED_FNS = ["_assert_answer_changes_no_basis"];
+export const WORK_RESTATE_0200_COHORT = [
+  ...WORK_RESTATE_0200_RUNTIME_FNS, ...WORK_RESTATE_0200_UNGRANTED_FNS,
+];
+// #721 -----------------------------------------------------------------------------------------
+
 // #624 [0191, the document capability registry] — the four READERS this slice publishes, one
 // cohort for the same "wholly present or wholly absent" reason 0178's roster carries: folding these
 // names into an older cohort would red every database between the two frontiers, and
@@ -1854,6 +1905,28 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
   ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
 ];
 
+// #797 [0212, the payroll settlement split as a stored particular] — NO COHORT, NO NEW NAME, NO
+// GRANT CHANGE, measured rather than assumed. 0212 creates no function: it RECUTS three bodies
+// that are already on PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS above and STAY there —
+// `_assert_adjustment_basis`, `_assert_adjustment_relationships` and `_adjustment_basis_canonical`,
+// same signatures, same owner, same SECURITY DEFINER, same pinned search_path, same ungranted ACL
+// (0212's §T re-reads the exact ACL text, grantor included, plus each body's 0194 volatility). A
+// cohort of its own would be WRONG rather than redundant, for 0198's stated reason: cohortFailures()
+// fails a HALF-present cohort, and these three names are present on every database from 0194 onward
+// whether or not 0212 has been applied.
+// #797 END
+
+// #779 [0207, document_capabilities.registry_version monotonicity] — NO COHORT, and here is why,
+// stated rather than left to inference (the same courtesy the #797 block above pays). 0207 mints
+// exactly ONE new name, the trigger body `clara._tf_document_capabilities_version_monotone()`. It
+// is granted to NOBODY — revoked from PUBLIC, no role grant at all — so there is no grant-matrix
+// row for `grantMatrixFailures()` to claim, and a cohort of one would only assert a name's
+// presence, which the trigger's own attachment already proves inside 0207's §C TAIL. It is NOT
+// unswept: `definerHygieneFailures()` (below) derives every clara SECURITY DEFINER body from the
+// LIVE CATALOG rather than from a roster, so it checks this one's owner, pinned search_path and
+// ungranted ACL on every run, at every frontier, without being told it exists. 0207 changes no
+// existing name, signature or grant.
+// #779 END
 // #639 [0201, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
@@ -2043,6 +2116,20 @@ export const WORK_EGRESS_0195_COHORT = [
   ...WORK_EGRESS_0195_RUNTIME_FNS, ...WORK_EGRESS_0195_HUMAN_FNS,
   ...WORK_EGRESS_0195_UNGRANTED_FNS,
 ];
+// #812
+// #812 [0211, the way back on after a DEACTIVATION] — its OWN cohort for the same "wholly present
+// or wholly absent" reason 0195's carries: folding this name into WORK_EGRESS_0195_COHORT would
+// make every database at 0195 but below 0211 report a PARTIAL cohort, a false failure one
+// migration early.
+//
+//   clara_authenticated ONLY, owner-floored in its own body. NO runtime, agent or wake variant:
+//   a human took the authority away, only a human gives it back. It resolves the consent that
+//   survived the deactivation (no lawful read exposes that id) and delegates to 0195's own
+//   clara.activate_client_egress_purpose, which keeps the audit row, the domain event and the
+//   op_key idempotency.
+const EGRESS_RECOVERY_0211_HUMAN_FNS = ["reactivate_client_egress_purpose"];
+export const EGRESS_RECOVERY_0211_COHORT = [...EGRESS_RECOVERY_0211_HUMAN_FNS];
+// #812
 // #718 [0197, the document-coding lane's evidence-link lookback] — its own cohort for the same
 // "wholly present or wholly absent" reason 0182's carries, and a cohort of THREE UNGRANTED names
 // only: this file adds no door and changes no grant, so it earns no row in ALLOWED below.
@@ -2361,6 +2448,11 @@ export const ALLOWED = {
     // clara_authenticated ONLY; agent, both wake roles, clara_runtime and the Stripe webhook
     // role gain ZERO.
     ...OPERATOR_SUPPORT_0188_HUMAN_FNS,
+    // #776
+    // #776 (0206): the operator support console's applicant-name read — see the block above.
+    // clara_authenticated ONLY, on the same wall as the two reads above it.
+    ...OPERATOR_APPLICANT_NAME_0206_HUMAN_FNS,
+    // #776 END
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -2415,6 +2507,11 @@ export const ALLOWED = {
     // ONLY; the agent role and both wake roles gain ZERO, and there is no new runtime verb at all.
     ...PREPAYMENT_0208_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
+    // #812
+    // 0211 [#812] the accounting_work re-activation door — owner floor in its own body,
+    // clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain ZERO.
+    ...EGRESS_RECOVERY_0211_HUMAN_FNS,
+    // #812
     // #650 0199 the client home's Work attention band — see the block above. clara_authenticated
     // ONLY, bookkeeper-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
@@ -2580,6 +2677,10 @@ export const ALLOWED = {
     // clara.retry_accounting_work sits in. Both are reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...WORK_CANCEL_0184_RUNTIME_FNS,
+    // #721
+    // [#721, 0200] the restate door — clara_runtime ONLY, the same lane the cancel door sits in.
+    ...WORK_RESTATE_0200_RUNTIME_FNS,
+    // #721
     // [#644, 0192] the runtime knowledge lane: a capture attributed to a named, verified human
     // and the context pack. Plus the shared promotion door (also clara_authenticated above).
     ...KNOWLEDGE_0192_RUNTIME_FNS,
@@ -2835,6 +2936,9 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
+  // #721
+  failures.push(...cohortFailures("#721 0200 work-restate/supersede lane", WORK_RESTATE_0200_COHORT, liveNames));
+  // #721
   failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
@@ -2852,6 +2956,9 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("#653 0208 prepayment-amortisation lane", PREPAYMENT_0208_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
+  // #812
+  failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
+  // #812
   failures.push(...cohortFailures("#650 0199 client work-pack read lane", CLIENT_WORK_PACK_0199_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
@@ -2863,6 +2970,10 @@ export async function grantMatrixFailures() {
     failures.push(...cohortFailures("#646 0202 document source-revision lane", DOCUMENT_SOURCE_REVISION_0202_COHORT, liveNames));
   }
   // #718 END
+  // #776
+  failures.push(...cohortFailures("#776 0206 operator applicant-name read",
+    OPERATOR_APPLICANT_NAME_0206_COHORT, liveNames));
+  // #776 END
   failures.push(...cohortFailures("#647 0200 counterparty-identity provenance lane", COUNTERPARTY_IDENTITY_0200_COHORT, liveNames));
   // #649 [0204] — the identity read, the settle door and the ungranted month helper ship as one
   // lane; half of them is a settle door with no way to ask about duplicates first, which is a

@@ -10,7 +10,6 @@
 // in-flight runs — a rename strands parked runs, policy (c)).
 
 import { closeExampleV1 } from "./closeExample.v1.js";
-import { chatTurn_v1 } from "./chatTurn.v1.js";
 import { chatTurn_v2 } from "./chatTurn.v2.js";
 import { chatTurn_v3 } from "./chatTurn.v3.js";
 import { chatTurn_v4 } from "./chatTurn.v4.js";
@@ -774,7 +773,6 @@ export { clientOnboarding_v3 };
 // OQ-6 bank chat parity, owner ruling 2026-08-25): it is no longer the pinned version, so it
 // needs the explicit export a directly-importing consumer (and the rollback preflight,
 // packages/runtime/README.md) relies on.
-export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
 export { chatTurn_v4 };
@@ -929,7 +927,6 @@ export const workflowNames: string[] = Object.keys(workflows);
 // below, and its `workflowPins.<className>` entry.
 export const workflowBodies: readonly string[] = Object.freeze([
   "closeExampleV1",
-  "chatTurn_v1",
   "chatTurn_v2",
   "chatTurn_v3",
   "chatTurn_v4",

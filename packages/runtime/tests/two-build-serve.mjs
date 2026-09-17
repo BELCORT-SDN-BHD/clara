@@ -23,6 +23,18 @@
 // to it, so the answer cannot CHANGE what is posted in this lane — it unblocks the model. Same
 // constraint work-question-serve.mjs states, unchanged.
 
+// #794 — AND IT NOW DRIVES THE CHAT LANE TOO, under the SAME discipline. The drill's chatTurn leg
+// needs a turn PARKED ON A CLARIFICATION (chatTurn has no Work row to resume through), so the chat
+// half can no longer only narrate. It emits the frozen `clarify` tool call — the AI SDK
+// human-in-the-loop stop primitive every chatTurn version from v1 on carries, with no `execute`, so
+// the runtime parks the run on it.
+//
+// IT BRANCHES ON THE TURN'S OWN TEXT, never on a call counter, for the reason this file's header
+// already gives — and here that choice buys a second thing: a shared rig carries OTHER lanes'
+// leftover `chat_turn` tasks, and a chat half that clarified unconditionally would park somebody
+// else's turn on a question no one will answer. Only a turn carrying this drill's own marker is
+// clarified; every other turn gets the narration this file always sent.
+
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
 const serveTarget = process.env.CLARA_TWO_BUILD_SERVE;
@@ -73,6 +85,22 @@ function answerArrived(prompt) {
     if (typeof message?.content === "string") continue;
     for (const part of message?.content ?? []) {
       if (part?.type === "tool-result" && part.toolName === "ask_question") return true;
+    }
+  }
+  return false;
+}
+
+/** #794 — TRUE once the human's answer to the CHAT clarification has come back as a tool result.
+ *  Structurally identical to `answerArrived` above and deliberately a separate function: the two
+ *  lanes' doors are different tools, and one predicate serving both would make a Work answer look
+ *  like a chat answer to a process running both lanes at once. Every chatTurn version feeds the
+ *  answer back as a `tool-result` for `clarify` (chatTurn.vNN.ts's resume arm), so its presence IS
+ *  the resume, structurally — the same property the Work half relies on. */
+function clarifyAnswered(prompt) {
+  for (const message of prompt ?? []) {
+    if (typeof message?.content === "string") continue;
+    for (const part of message?.content ?? []) {
+      if (part?.type === "tool-result" && part.toolName === "clarify") return true;
     }
   }
   return false;
@@ -136,26 +164,59 @@ const TYPED_FIELDS = [
   { key: "amount_cents", label: "Amount", kind: "money", required: true, unit: "MYR cents" },
 ];
 
+/** #794 — THE MARKER THE DRILL'S OWN TURN CARRIES. Spelled here and in
+ *  tests/two-build-cutover-e2e.mjs, never imported across: importing THIS file boots a server, so
+ *  the two cannot share a module, and the duplicated literal is asserted from both sides (the
+ *  chat-turn-v19-e2e/serve pair's own precedent for the same constraint). */
+const CHAT_DRILL_MARKER = "TWO-BUILD CHAT CUTOVER DRILL";
+const CHAT_QUESTION = "Which period should I book this against?";
+const CHAT_CONTEXT = "The two-build cutover drill parks this turn on purpose.";
+
+function chatUsage() {
+  return { inputTokens: { total: 4, noCache: 4 }, outputTokens: { total: 6 }, raw: undefined };
+}
+
+function narrationChunks(text) {
+  return [
+    { type: "stream-start", warnings: [] },
+    { type: "text-start", id: "t1" },
+    { type: "text-delta", id: "t1", delta: text },
+    { type: "text-end", id: "t1" },
+    { type: "finish", usage: chatUsage(), finishReason: { unified: "stop", raw: "stop" } },
+  ];
+}
+
+/** The frozen `clarify` call, in the streaming shape `streamText` consumes. `clarify` has NO
+ *  `execute` in any chatTurn version, so `hasToolCall("clarify")` stops the segment and the body
+ *  parks the run on `clara.open_interruption`. */
+function clarifyChunks() {
+  const input = JSON.stringify({ question: CHAT_QUESTION, context: CHAT_CONTEXT });
+  return [
+    { type: "stream-start", warnings: [] },
+    { type: "tool-input-start", id: "tb-clarify", toolName: "clarify" },
+    { type: "tool-input-delta", id: "tb-clarify", delta: input },
+    { type: "tool-input-end", id: "tb-clarify" },
+    { type: "tool-call", toolCallId: "tb-clarify", toolName: "clarify", input },
+    { type: "finish", usage: chatUsage(), finishReason: { unified: "tool-calls", raw: "tool_use" } },
+  ];
+}
+
 const model = new MockLanguageModelV4({
-  // The CHAT half narrates and stops. This e2e drives no chat turn, but a shared database carries
-  // other lanes' leftover `chat_turn` tasks and a world that boots here will pick them up. A
-  // throwing model would turn somebody else's leftover into a failure this file did not cause.
-  doStream: async () => ({
-    stream: simulateReadableStream({
-      chunks: [
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "t1" },
-        { type: "text-delta", id: "t1", delta: "This process is running the two-build cutover e2e." },
-        { type: "text-end", id: "t1" },
-        {
-          type: "finish",
-          usage: { inputTokens: { total: 4, noCache: 4 }, outputTokens: { total: 6 }, raw: undefined },
-          finishReason: { unified: "stop", raw: "stop" },
-        },
-      ],
-      chunkDelayInMs: 2,
-    }),
-  }),
+  // The CHAT half. A turn carrying this drill's marker and not yet answered gets the `clarify` call
+  // the chatTurn leg parks on; a turn whose clarification HAS been answered gets the closing
+  // narration, so the resumed segment settles the turn. EVERY OTHER TURN narrates and stops, which
+  // is what this half always did and still has to do: a shared database carries other lanes'
+  // leftover `chat_turn` tasks and a world that boots here will pick them up. A throwing — or
+  // unconditionally clarifying — model would turn somebody else's leftover into a failure this
+  // file did not cause.
+  doStream: async (options) => {
+    const prompt = options?.prompt ?? [];
+    if (promptText(prompt).includes(CHAT_DRILL_MARKER)) {
+      if (!clarifyAnswered(prompt)) return { stream: simulateReadableStream({ chunks: clarifyChunks(), chunkDelayInMs: 2 }) };
+      return { stream: simulateReadableStream({ chunks: narrationChunks("Thank you — I have what I need for the two-build cutover drill."), chunkDelayInMs: 2 }) };
+    }
+    return { stream: simulateReadableStream({ chunks: narrationChunks("This process is running the two-build cutover e2e."), chunkDelayInMs: 2 }) };
+  },
   doGenerate: async (options) => {
     const prompt = options?.prompt ?? [];
     const text = promptText(prompt);

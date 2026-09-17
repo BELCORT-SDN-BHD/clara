@@ -39,10 +39,70 @@ const REPO_ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encodi
 
 const EXCLUDE_DIR_SEGMENTS = new Set(["node_modules", ".next", ".open-next", ".wrangler", ".git"]);
 
-/** The two dead names this guard refuses. Each `test` runs against a file's raw text. */
+/** #795 — every frozen file (the ~120 workflow bodies + their relative import closure) is
+ *  permanently exempt from the "ARCHITECTURE Appendix A" entry below: those bodies are
+ *  byte-immutable (check-frozen-workflows.mjs), so a citation baked into one of them can
+ *  never be repointed in place. Read from frozen-workflows.json rather than hand-listed —
+ *  the manifest is the single source of truth for what is frozen, and re-baselining it
+ *  already keeps this set current. */
+function frozenManifestPaths(repoRoot) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, "frozen-workflows.json"), "utf8"));
+    return new Set(Object.keys(manifest.workflows ?? {}));
+  } catch {
+    return new Set();
+  }
+}
+
+/** #795 — the explicit, deliberate allowlist for "ARCHITECTURE Appendix A": files that are
+ *  not frozen (not in frozen-workflows.json) but still legitimately name the dead phrase —
+ *  an immutable applied migration, the historical plan record, ARCHITECTURE.md's own
+ *  supersession sentence (which names the dead phrase on purpose), and the editable
+ *  freeze-lint / registry modules whose mentions this ticket does not repoint. */
+const APPENDIX_A_ALLOWLIST = new Set([
+  "packages/db/migrations/0006_runtime_core.sql",
+  "docs/ARCHITECTURE.md",
+  "docs/plan/active/refresh-wave-2026-09-14/brief-637.md",
+  "docs/plan/active/refresh-wave-2026-09-14/reports/637-review-closure.md",
+  "docs/plan/active/refresh-wave-2026-09-14/reports/followups-filed.md",
+  "packages/runtime/workflows/registry.ts",
+  "packages/runtime/nitro.config.ts",
+  "scripts/freeze-lint-checks.mjs",
+  "scripts/freeze-lint-enqueue.mjs",
+]);
+
+const FROZEN_MANIFEST_PATHS = frozenManifestPaths(REPO_ROOT);
+
+/** The three dead names this guard refuses. Each `test` runs against a file's raw text and
+ *  its repo-relative path — the path is needed so the third entry (#795) can exempt the
+ *  frozen manifest and its explicit allowlist above; the first two entries ignore it. */
+/** #795 — the two halves of the dead name, matched per LINE (see the entry below). Neither
+ *  carries the `g` flag: a sticky `lastIndex` across calls would make this guard's answer
+ *  depend on how many files it had already read. */
+const APPENDIX_A = /appendix[^\S\n]+a\b/i;
+const NAMES_ARCHITECTURE = /architecture/i;
+
 const DEAD_NAMES = [
   { id: "apps/web/AGENTS.md", test: (text) => text.includes("apps/web/AGENTS.md") },
   { id: "db-tests.md", test: (text) => /db-tests\.md/.test(text) },
+  {
+    // #795 — THE DEAD NAME IS "ARCHITECTURE Appendix A", not "Appendix A". A bare
+    // /appendix a/i anywhere in any tracked file would red a future document that
+    // legitimately has an Appendix A of ITS OWN — and would red it with a message naming a
+    // phrase that document never used, which is the worst kind of false positive: one whose
+    // diagnosis is also wrong. So this entry is scoped to the NAME, the way the two entries
+    // above are: a LINE that names `Appendix A` AND names ARCHITECTURE. That admits the
+    // anchored phrase ("ARCHITECTURE Appendix A"), every citation shape around it
+    // ("docs/ARCHITECTURE.md's Appendix A", "see ARCHITECTURE, Appendix A", "ARCHITECTURE.md
+    // 的 Appendix A"), and nothing else. Somebody else's appendix is none of this guard's
+    // business.
+    id: "ARCHITECTURE Appendix A",
+    test: (text, relPath) => {
+      if (!APPENDIX_A.test(text)) return false;   // cheap whole-file reject before the line walk
+      if (FROZEN_MANIFEST_PATHS.has(relPath) || APPENDIX_A_ALLOWLIST.has(relPath)) return false;
+      return text.split("\n").some((line) => APPENDIX_A.test(line) && NAMES_ARCHITECTURE.test(line));
+    },
+  },
 ];
 
 /** The guard's own two files name both dead names by necessity; they are the ONLY paths
@@ -88,7 +148,7 @@ export function findDeadNameCitations(relFiles, rootDir) {
       continue; // deleted between listing and read, or not a text file — not this guard's concern
     }
     for (const { id, test } of DEAD_NAMES) {
-      if (test(text)) hits.push({ file: rel, name: id });
+      if (test(text, rel)) hits.push({ file: rel, name: id });
     }
   }
   return hits;
@@ -98,14 +158,14 @@ export function main() {
   const hits = findDeadNameCitations(trackedFiles(REPO_ROOT), REPO_ROOT);
 
   if (hits.length === 0) {
-    console.log("[check-dead-citations] clean — no citation of apps/web/AGENTS.md or db-tests.md anywhere in the repository.");
+    console.log("[check-dead-citations] clean — no citation of apps/web/AGENTS.md, db-tests.md or ARCHITECTURE Appendix A anywhere in the repository (outside the frozen manifest and its explicit allowlist).");
     return 0;
   }
 
-  console.log(`[check-dead-citations] ${hits.length} dead-name citation(s) found — neither file exists in this repository:`);
+  console.log(`[check-dead-citations] ${hits.length} dead-name citation(s) found — none of these exist in this repository:`);
   for (const { file, name } of hits) console.log(`  - ${file}: cites "${name}"`);
   console.log("");
-  console.log("[check-dead-citations] failing the build. State the rule inline (recovered from the citing comment's own wording), never cite a file that does not exist (#755, #690).");
+  console.log("[check-dead-citations] failing the build. State the rule inline (recovered from the citing comment's own wording), never cite a file that does not exist (#755, #690, #795).");
   return 1;
 }
 

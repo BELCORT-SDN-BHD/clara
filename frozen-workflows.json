@@ -447,21 +447,6 @@
       "note": "",
       "deployed": true
     },
-    "packages/runtime/workflows/chatTurn.impl.ts": {
-      "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
-      "note": "",
-      "deployed": true
-    },
-    "packages/runtime/workflows/chatTurn.prompt.ts": {
-      "sha256": "91ba3170c052ac0e10bba78be08d5c9a27f72d74b6903eebbfe640a057ee77da",
-      "note": "",
-      "deployed": true
-    },
-    "packages/runtime/workflows/chatTurn.v1.ts": {
-      "sha256": "77d58318e113af64f11ee7320aa8fc47727cf2104f233870dfe27df15df48e29",
-      "note": "",
-      "deployed": true
-    },
     "packages/runtime/workflows/chatTurn.v10.errors.ts": {
       "sha256": "5048caa9539a0049ab8139df1aef3fb8da69b448fcd94a964fc009b8efe68707",
       "note": "",
@@ -1477,6 +1462,20 @@
       "sha256": "75dc1b90912657ec5f37a8acefebcffa92e85f847645091dc75d909915ba8602",
       "note": "debt/prompts-v3 — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v2's (and v1's), unchanged; everything that moved is inside the closure. No coupled DB migration. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
+    }
+  },
+  "retired": {
+    "packages/runtime/workflows/chatTurn.impl.ts": {
+      "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
+      "ruling": "#810 owner ruling 2026-09-15"
+    },
+    "packages/runtime/workflows/chatTurn.prompt.ts": {
+      "sha256": "91ba3170c052ac0e10bba78be08d5c9a27f72d74b6903eebbfe640a057ee77da",
+      "ruling": "#810 owner ruling 2026-09-15"
+    },
+    "packages/runtime/workflows/chatTurn.v1.ts": {
+      "sha256": "77d58318e113af64f11ee7320aa8fc47727cf2104f233870dfe27df15df48e29",
+      "ruling": "#810 owner ruling 2026-09-15"
     }
   }
 }

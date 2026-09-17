@@ -402,6 +402,107 @@ test("plans.detail — an occurrence row links its Work and its entry; a REFUSED
   );
 });
 
+// #789 — attempts/reverses_entry_id reach the web types but nothing rendered them (the #640
+// fixround's own named gap). These two cells prove the plan's occurrence history now shows a
+// period's prior (superseded) attempts, the current attempt number, and a reversal's own entry.
+
+const WORK_2 = "44444444-5555-4666-8777-888888888888";
+const ENTRY_ACCRUAL = "99999999-aaaa-4bbb-8ccc-dddddddddddd";
+
+test("plans.detail — a multi-attempt occurrence shows every PRIOR attempt with its own Work link and the current attempt number, and does not repeat the current Work", async () => {
+  await withMockedEnv(
+    rpcRouter({
+      get_accounting_plan: PLAN_DETAIL,
+      preview_accounting_plan: { plan_id: PLAN, status: "active", admitting: true, occurrences: [] },
+      list_accounting_plan_occurrences: {
+        plan_id: PLAN,
+        occurrences: [
+          {
+            occurrence_id: "o1", due_date: "2026-09-01", leg: "primary", period_key: "2026-09-01",
+            attempt: 2, revision: 1,
+            intent_key: `plan:${PLAN}:r1:2026-09-01`, work_id: WORK_2, admitted_at: "2026-09-02T00:10:00Z",
+            outcome: { state: "admitted" }, created_at: "2026-09-01T00:10:00Z",
+            work_status: "completed", work_error: null, receipt_id: "r1", entry_id: "e1",
+            reverses_entry_id: null,
+            attempts: [
+              { attempt: 1, work_id: WORK, intent_key: `plan:${PLAN}:r1:2026-09-01`, revision: 1, admitted_at: "2026-09-01T00:10:00Z" },
+              { attempt: 2, work_id: WORK_2, intent_key: `plan:${PLAN}:r1:2026-09-01`, revision: 1, admitted_at: "2026-09-02T00:10:00Z" },
+            ],
+          },
+        ],
+      },
+    }),
+    async () => {
+      const h = await renderComponent(app(createElement(PlanDetail, { clientId: CLIENT, planId: PLAN })));
+      try {
+        for (let i = 0; i < 8; i++) await h.settle();
+        const text = h.text();
+        // The current attempt number renders.
+        assert.match(text, /Attempt 2/);
+        // The PRIOR attempt (attempt 1, whose work_id differs from the row's current work_id) is on
+        // screen with its own attempt number — and only ONE such prior attempt, not the current one
+        // repeated as its own predecessor.
+        assert.match(text, /Attempt 1 \(superseded\)/);
+        const priorMatches = text.match(/Attempt 1 \(superseded\)/g) ?? [];
+        assert.equal(priorMatches.length, 1, "the current Work is not rendered as a second prior attempt");
+        // The prior attempt's Work is linked through the same helper the current work_id uses.
+        const links = hrefs(h.container);
+        assert.ok(links.some((href) => href.includes(`/work/${WORK}`)), `the prior attempt's Work is linked (saw ${JSON.stringify(links)})`);
+        assert.ok(links.some((href) => href.includes(`/work/${WORK_2}`)), "the current Work is still linked too");
+        // ONE row per occurrence — a prior attempt is not a second row carrying the due date.
+        const dueDateRows = (function collect(n: { tagName?: string; childNodes?: unknown[] }, out: typeof n[]): typeof n[] {
+          if (n.tagName === "TR" && textOf(n as never).includes("2026-09-01")) out.push(n);
+          for (const c of (n.childNodes as (typeof n)[] | undefined) ?? []) collect(c, out);
+          return out;
+        })(h.container as never, []);
+        assert.equal(dueDateRows.length, 1, "the due date appears in exactly one <tr> — one row per occurrence");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+test("plans.detail — a reversal occurrence links the entry it undoes under a label distinct from the entry it produced", async () => {
+  await withMockedEnv(
+    rpcRouter({
+      get_accounting_plan: PLAN_DETAIL,
+      preview_accounting_plan: { plan_id: PLAN, status: "active", admitting: true, occurrences: [] },
+      list_accounting_plan_occurrences: {
+        plan_id: PLAN,
+        occurrences: [
+          {
+            occurrence_id: "o-rev", due_date: "2026-10-01", leg: "reversal", period_key: "2026-09-01",
+            attempt: 1, revision: 1,
+            intent_key: `plan:${PLAN}:r1:2026-10-01`, work_id: WORK, admitted_at: "2026-10-01T00:10:00Z",
+            outcome: { state: "admitted" }, created_at: "2026-10-01T00:10:00Z",
+            work_status: "completed", work_error: null, receipt_id: "r2", entry_id: "e2",
+            reverses_entry_id: ENTRY_ACCRUAL,
+            attempts: [
+              { attempt: 1, work_id: WORK, intent_key: `plan:${PLAN}:r1:2026-10-01`, revision: 1, admitted_at: "2026-10-01T00:10:00Z" },
+            ],
+          },
+        ],
+      },
+    }),
+    async () => {
+      const h = await renderComponent(app(createElement(PlanDetail, { clientId: CLIENT, planId: PLAN })));
+      try {
+        for (let i = 0; i < 8; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /Reverses entry/, "a label distinct from \"Open entry\"");
+        const links = hrefs(h.container);
+        assert.ok(links.some((href) => href.includes(`entry=${ENTRY_ACCRUAL}`)), `the reversed entry is linked (saw ${JSON.stringify(links)})`);
+        assert.ok(links.some((href) => href.includes("entry=e2")), "the entry this occurrence PRODUCED is still linked, under its own label");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
 test("plans.detail — a plan that is not in this client's books renders the scoped not-found sentence, never a blank page", async () => {
   await withMockedEnv(
     rpcRouter({

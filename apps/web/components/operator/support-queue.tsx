@@ -317,6 +317,11 @@ function QueueTable({
           <TableHead>{t("columnCase")}</TableHead>
           <TableHead>{t("columnFirm")}</TableHead>
           <TableHead>{t("columnApplicant")}</TableHead>
+          {/* #776 — the applicant's own name, BESIDE the truncated id rather than instead of it:
+              the id is what every other surface and every support conversation addresses, and the
+              name is what makes the row readable. A case whose applicant did not resolve keeps the
+              same honest absence it always showed. */}
+          <TableHead>{t("columnApplicantName")}</TableHead>
           <TableHead>{t("columnState")}</TableHead>
           <TableHead>{t("columnOccurred")}</TableHead>
           <TableHead className="text-right">{t("columnActions")}</TableHead>
@@ -336,6 +341,9 @@ function QueueTable({
               </TableCell>
               <TableCell className="font-mono text-xs text-muted-foreground">
                 {shortId(row.applicant)}
+              </TableCell>
+              <TableCell className="text-card-foreground">
+                {row.applicant_name ?? t("unavailable")}
               </TableCell>
               <TableCell className="text-muted-foreground">{t(`state.${supportCaseState(row)}`)}</TableCell>
               <TableCell className="text-muted-foreground">{businessDateTime(row.occurred_at)}</TableCell>

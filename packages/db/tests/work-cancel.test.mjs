@@ -15,7 +15,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gateCancel, buildWorkWorld, endPool, printLaneNotes, printSkipCount, noteLane,
+  gateCancel, gateCancelledEvent, gateRestate, restateAccountingWork, supersessionOf,
+  buildWorkWorld, endPool, printLaneNotes, printSkipCount, noteLane,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   settleWorkRun, cancelAgentTask, taskRow, workRow, receiptsForWork, entriesForClient,
   entryCount, tasksForWork,
@@ -1562,10 +1563,29 @@ test("wc.35 the cancel door says WHICH arm answered: a stop that killed a queued
 // Called as a HUMAN: both are SECURITY INVOKER with a bookkeeper floor of their own.
 // -------------------------------------------------------------------------------------------
 
+// #770 [0202] gave the door a SEVENTH parameter (p_work) and DROPPED its six-argument signature
+// in the same migration, so this wrapper addresses whichever arity the database under test
+// carries — a slice-frontier leg pinned before 0202 must keep every cell below green.
+let _pWork770 = null;
+async function pWork770() {
+  if (_pWork770 === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        ["list_activity_p_work$"]);
+      _pWork770 = r.rows[0].n > 0;
+    } catch {
+      _pWork770 = false;
+    }
+  }
+  return _pWork770;
+}
+
 async function listActivity(sub, { cursor = null, limit = 50, client = null, kinds = null, since = null, until = null } = {}) {
-  const r = await humanQuery(sub,
-    "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result",
-    [cursor, limit, client, kinds, since, until]);
+  const sql = (await pWork770())
+    ? "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz,null::uuid) as result"
+    : "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result";
+  const r = await humanQuery(sub, sql, [cursor, limit, client, kinds, since, until]);
   return r.rows[0].result;
 }
 
@@ -1649,3 +1669,232 @@ test("wc.36 a handover is `work` on the firm's Activity feed, and its detail rec
   assert.notEqual(opDetail.initiated_by, opDetail.responsible,
     "wc.36 vacuity control: the two people really are different on this Work");
 });
+
+
+// #750 ========================================================================================
+// §A12 — A CANCELLED WORK LEAVES AN ATTRIBUTABLE ROW ON THE FEED (0199).
+//
+// 0184 §G wrote its audit trail and appended NO domain event, so the feed's `work` kind arm had
+// exactly one producer (`work.taken_over`) and a human cancelling a Work left the firm's only
+// firm-wide history surface silent — measured hosted on 2026-09-12 (#750's body). These cells
+// assert the ONE row, its attribution, its deep link, and — just as load-bearing — the arms that
+// must stay silent.
+// ============================================================================================
+
+test("wc.37 cancelling a Work yields EXACTLY ONE work.cancelled row on the Activity feed, attributed and deep-linked", async (t) => {
+  if (await gateCancelledEvent(t)) return;
+  const w = await admitted();
+
+  const before = await timelineEvents(FIRM_A(), "work.cancelled");
+  const out = await cancelAccountingWork({ work: w.work_id, author: BOB() });
+  assert.equal(out.cancelled, true, "wc.37 precondition: the cancel actually cancelled");
+  assert.equal(out.status, "cancelled");
+
+  // THE EVENT ITSELF, read off the durable table.
+  const after = await timelineEvents(FIRM_A(), "work.cancelled");
+  const mine = after.filter((e) => e.payload?.work === w.work_id);
+  assert.equal(mine.length, 1, "wc.37 exactly one work.cancelled event for this Work");
+  assert.equal(after.length, before.length + 1,
+    "wc.37 …and exactly one new row in the firm, so no arm emitted a second");
+  assert.equal(mine[0].actor, BOB(), "wc.37 …attributed to the human who pressed Cancel");
+  assert.equal(mine[0].client_id, w.client, "wc.37 …and client-scoped, so a client feed carries it");
+  assert.equal(mine[0].payload.author, BOB(), "wc.37 the payload names the author too");
+  assert.equal(mine[0].payload.from_status, "queued",
+    "wc.37 …and the status the press FOUND, not the one the cancel wrote");
+  assert.equal(mine[0].payload.outcome, "cancelled",
+    "wc.37 a plain cancellation's outcome is `cancelled` (#721 writes `superseded`)");
+  assert.equal(mine[0].payload.superseded_by, null,
+    "wc.37 …and it supersedes nothing");
+
+  // THE FEED'S OWN DOORS. `work.%` is matched on the prefix (0184 §I2), so this needed no recut —
+  // which is exactly the claim worth checking rather than assuming.
+  const asWork = await listActivity(ALICE(), { kinds: ["work"], limit: 100 });
+  const found = asWork.rows.filter((r) => r.event_type === "work.cancelled" && r.work_id === w.work_id);
+  assert.equal(found.length, 1, "wc.37 the cancellation lists under the `work` filter");
+  assert.equal(found[0].kind, "work", "wc.37 …carrying `work` as its own kind, not the `documents` fallback");
+  assert.equal(found[0].work_id, w.work_id,
+    "wc.37 …and it deep-links to the Work it is about (the payload's `work` key)");
+
+  const asDocs = await listActivity(ALICE(), { kinds: ["documents"], limit: 100 });
+  assert.equal(asDocs.rows.some((r) => r.id === found[0].id), false,
+    "wc.37 …and never under `documents`");
+
+  const detail = await getActivityEvent(ALICE(), "event", found[0].id);
+  assert.equal(detail.kind, "work", "wc.37 get_activity_event maps the same event to the same kind");
+  assert.equal(detail.work_id, w.work_id, "wc.37 …and to the same Work");
+});
+
+test("wc.38 a RUNNING Work's cancel emits on the cancel_requested arm, and no arm that changes nothing emits at all", async (t) => {
+  if (await gateCancelledEvent(t)) return;
+
+  // ARM 6 — a live run. The Work reads `stopping`; the event is written on the PRESS, not on the
+  // settle, because the press is the attributable human act.
+  const live = await running();
+  const asked = await cancelAccountingWork({ work: live.work_id, author: BOB() });
+  assert.equal(asked.status, "stopping", "wc.38 precondition: the live run was ASKED to abort");
+  let mine = (await timelineEvents(FIRM_A(), "work.cancelled")).filter((e) => e.payload?.work === live.work_id);
+  assert.equal(mine.length, 1, "wc.38 the cancel_requested arm emits exactly one event");
+  assert.equal(mine[0].payload.from_status, "running", "wc.38 …naming the status the press found");
+
+  // ARM 4 — already stopping. A second press changes nothing and must not write a second row.
+  const again = await cancelAccountingWork({ work: live.work_id, author: BOB(), opKey: opk("w750-2nd") });
+  assert.equal(again.reason, CANCEL_ANSWER.alreadyStopping, "wc.38 precondition: already_stopping");
+  mine = (await timelineEvents(FIRM_A(), "work.cancelled")).filter((e) => e.payload?.work === live.work_id);
+  assert.equal(mine.length, 1, "wc.38 …and the feed still carries exactly one row for this Work");
+
+  // THE OP-KEY REPLAY. The same key returns the original receipt and appends nothing.
+  const queued = await admitted();
+  const key = opk("w750-replay");
+  await cancelAccountingWork({ work: queued.work_id, author: BOB(), opKey: key });
+  const replay = await cancelAccountingWork({ work: queued.work_id, author: BOB(), opKey: key });
+  assert.equal(replay.replayed, true, "wc.38 precondition: the duplicate press REPLAYED");
+  mine = (await timelineEvents(FIRM_A(), "work.cancelled")).filter((e) => e.payload?.work === queued.work_id);
+  assert.equal(mine.length, 1, "wc.38 a replayed press appends nothing");
+
+  // ARM 2 — already terminal under a DIFFERENT key. Still nothing.
+  await cancelAccountingWork({ work: queued.work_id, author: BOB(), opKey: opk("w750-3rd") });
+  mine = (await timelineEvents(FIRM_A(), "work.cancelled")).filter((e) => e.payload?.work === queued.work_id);
+  assert.equal(mine.length, 1, "wc.38 …and an already_terminal answer appends nothing either");
+
+  // ARM 1 — the operation already WON. A Work holding a committed receipt is never cancelled, so
+  // the feed must not claim it was.
+  const posted = await running();
+  const receipt = await post(posted);
+  assert.equal(receipt.posted, true, "wc.38 precondition: the entry is on the books");
+  const won = await cancelAccountingWork({ work: posted.work_id, author: BOB() });
+  assert.equal(won.reason, CANCEL_ANSWER.alreadyCompleted, "wc.38 precondition: already_completed");
+  mine = (await timelineEvents(FIRM_A(), "work.cancelled")).filter((e) => e.payload?.work === posted.work_id);
+  assert.equal(mine.length, 0, "wc.38 a Work that POSTED leaves no work.cancelled row at all");
+});
+// #750 ========================================================================================
+
+
+
+// #721 ========================================================================================
+// §A13 — A REPLY THAT CHANGES THE BASIS BECOMES A NEW WORK (0200).
+//
+// The owner's ruling of 2026-09-12, points 2–4: submitting a restatement admits a NEW Work with
+// `supersedes = <old>`, cancels the old one with `superseded_by = <new>`, and the link rides the
+// SINGLE `work.cancelled` event #750 registered — no sibling `work.superseded` type.
+// ============================================================================================
+
+test("wc.39 restating admits a new Work, cancels the old one, links both ways and puts the link on the ONE event", async (t) => {
+  if (await gateRestate(t)) return;
+  const old = await admitted();
+  const revised = basis({ memo: "Office rent, September — corrected date" });
+
+  const out = await restateAccountingWork({ work: old.work_id, author: BOB(), basis: revised });
+  assert.ok(out.work_id, "wc.39 a new Work comes back");
+  assert.notEqual(out.work_id, old.work_id, "wc.39 …and it is a DIFFERENT Work");
+  assert.equal(out.status, "queued", "wc.39 the successor is admitted queued, like any admission");
+  assert.equal(out.supersedes, old.work_id, "wc.39 the answer names what it replaced");
+  assert.equal(out.superseded.work_id, old.work_id);
+  assert.equal(out.superseded.cancelled, true, "wc.39 …and says the predecessor was cancelled");
+
+  // THE ROWS THEMSELVES, BOTH WAYS.
+  const newer = await supersessionOf(out.work_id);
+  const older = await supersessionOf(old.work_id);
+  assert.equal(newer.supersedes, old.work_id, "wc.39 the new Work points back");
+  assert.equal(newer.superseded_by, null, "wc.39 …and is not itself superseded");
+  assert.equal(older.superseded_by, out.work_id, "wc.39 the old Work points forward");
+  assert.equal(older.supersedes, null);
+  assert.equal((await workRow(old.work_id)).status, "cancelled",
+    "wc.39 the predecessor is CANCELLED, not left running beside its successor");
+  assert.equal((await workRow(out.work_id)).status, "queued");
+  assert.equal((await receiptsForWork(old.work_id)).length, 0,
+    "wc.39 the retired Work posted nothing");
+  assert.equal((await receiptsForWork(out.work_id)).length, 0,
+    "wc.39 …and neither has its successor yet — a restatement admits, it does not post");
+
+  // THE ONE EVENT, CARRYING THE LINK. No sibling type: `work.cancelled` is the producer.
+  const events = (await timelineEvents(FIRM_A(), "work.cancelled"))
+    .filter((e) => e.payload?.work === old.work_id);
+  assert.equal(events.length, 1, "wc.39 exactly one work.cancelled row for the retired Work");
+  assert.equal(events[0].payload.superseded_by, out.work_id,
+    "wc.39 …and it carries the successor, which is the whole reason the stamp precedes the cancel");
+  assert.equal(events[0].payload.outcome, "superseded",
+    "wc.39 …under the outcome the ruling names");
+  assert.equal(events[0].actor, BOB(), "wc.39 …attributed to the human who restated it");
+  const supersededType = await timelineEvents(FIRM_A(), "work.superseded");
+  assert.equal(supersededType.length, 0, "wc.39 there is no sibling work.superseded event");
+});
+
+test("wc.40 a restatement REPLAYS under the same op key, and a second restatement of the same Work is refused", async (t) => {
+  if (await gateRestate(t)) return;
+  const old = await admitted();
+  const key = opk("w721-replay");
+  const intent = opk("w721-intent-replay");
+  const first = await restateAccountingWork({ work: old.work_id, author: BOB(), opKey: key, intentKey: intent });
+  const again = await restateAccountingWork({ work: old.work_id, author: BOB(), opKey: key, intentKey: intent });
+  assert.equal(again.replayed, true, "wc.40 the same op key REPLAYS rather than restating twice");
+  assert.equal(again.work_id, first.work_id, "wc.40 …and returns the original successor");
+
+  const rows = await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where supersedes=$1", [old.work_id]);
+  assert.equal(rows.rows[0].n, 1, "wc.40 exactly one successor exists for this Work");
+
+  await assertPair(CLR.conflict, "already_superseded",
+    () => restateAccountingWork({ work: old.work_id, author: BOB() }),
+    "wc.40 a Work that already has a successor is not restated again");
+});
+
+test("wc.41 a Work that POSTED, or that already settled, is never restated", async (t) => {
+  if (await gateRestate(t)) return;
+  const posted = await running();
+  const receipt = await post(posted);
+  assert.equal(receipt.posted, true, "wc.41 precondition: the entry is on the books");
+  await assertPair(CLR.conflict, "not_restatable",
+    () => restateAccountingWork({ work: posted.work_id, author: BOB() }),
+    "wc.41 a Work holding a committed receipt is never retired in favour of a successor");
+  assert.equal((await supersessionOf(posted.work_id)).superseded_by, null,
+    "wc.41 …and nothing was stamped on it");
+
+  const gone = await admitted();
+  await cancelAccountingWork({ work: gone.work_id, author: BOB() });
+  await assertPair(CLR.conflict, "not_restatable",
+    () => restateAccountingWork({ work: gone.work_id, author: BOB() }),
+    "wc.41 …nor is an already-cancelled one");
+});
+
+test("wc.42 the supersession pair is SET ONCE and nothing else on the row became mutable", async (t) => {
+  if (await gateRestate(t)) return;
+  const old = await admitted();
+  const out = await restateAccountingWork({ work: old.work_id, author: BOB() });
+  const other = await admitted();
+
+  await assertPair(CLR.immutable, "accounting_work_immutable",
+    () => rootQuery("update clara.accounting_work set superseded_by=$2 where id=$1", [old.work_id, other.work_id]),
+    "wc.42 a set link is never re-pointed");
+  await assertPair(CLR.immutable, "accounting_work_immutable",
+    () => rootQuery("update clara.accounting_work set superseded_by=null where id=$1", [old.work_id]),
+    "wc.42 …nor erased");
+  await assertPair(CLR.immutable, "accounting_work_immutable",
+    () => rootQuery("update clara.accounting_work set supersedes=$2 where id=$1", [out.work_id, other.work_id]),
+    "wc.42 …and neither is `supersedes`");
+  await assertPair(CLR.immutable, "supersedes_self",
+    () => rootQuery("update clara.accounting_work set superseded_by=id where id=$1", [other.work_id]),
+    "wc.42 a Work never supersedes itself");
+
+  // THE CANCEL GATE. A Work that SETTLED can never be linked, whatever writes the column: its
+  // outcome already stands, and a successor link would be a second, contradicting story about the
+  // same operation.
+  const done = await admitted();
+  await settleWorkRun({ task: done.task_id, outcome: "failed", errorCode: "internal",
+    error: { code: "CLR10", reason: "internal", message: "boom", recoverable: false } });
+  assert.equal((await workRow(done.work_id)).status, "failed", "wc.42 precondition: the Work settled");
+  await assertPair(CLR.immutable, "superseded_by_requires_cancel",
+    () => rootQuery("update clara.accounting_work set superseded_by=$2 where id=$1", [done.work_id, other.work_id]),
+    "wc.42 a settled Work is never superseded, even by a direct write");
+
+  // AND EVERYTHING 0184/0194 FROZE IS STILL FROZEN — the recut added arms, it removed none.
+  await assertPair(CLR.immutable, "accounting_work_immutable",
+    () => rootQuery("update clara.accounting_work set initiated_by=$2 where id=$1", [other.work_id, CAROL()]),
+    "wc.42 who ASKED is still immutable");
+  await assertPair(CLR.immutable, "accounting_work_immutable",
+    () => rootQuery("update clara.accounting_work set basis_digest='x' where id=$1", [other.work_id]),
+    "wc.42 …and so is the basis digest");
+  await assertPair(CLR.authz, "responsible_not_authorised",
+    () => rootQuery("update clara.accounting_work set initiator=$2 where id=$1", [other.work_id, CAROL()]),
+    "wc.42 …and the initiator wall still stands");
+});
+// #721 ========================================================================================

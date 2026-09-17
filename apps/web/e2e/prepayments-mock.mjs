@@ -309,6 +309,52 @@ const AUTHORITIES = () => ([{
   basis: { memo: "the client instructed us to amortise the annual subscription over its term" },
 }]);
 
+/** #809 MOVED THE PICKER'S READ. `lib/plans/api.ts`'s `listAuthorityCandidates` (a direct
+ *  `/rest/v1/accounting_work` GET) is deleted: migration 0203 widened `clara.list_accounting_work`
+ *  with `intent_key`, the last field that direct read was kept for, and `listPlanAuthorityWork`
+ *  walks the DOOR now. So this lane answers the door for its own client — the SAME single
+ *  instruction above, in the door's own row shape, one fixture fact in two projections — and keeps
+ *  the table handler below for the detail read (`getAccountingWork`), which has no door.
+ *  Returning null means "not this lane's client", so the next lane answers. */
+export function prepaymentWorkListPage(body) {
+  const client = body.p_client ?? null;
+  if (client !== PREPAY.clientId) return null;
+  return {
+    status: 200,
+    body: {
+      rows: AUTHORITIES().map((w) => ({
+        id: w.id,
+        client_id: PREPAY.clientId,
+        client_name: "C8 PREPAYMENTS FIXTURE",
+        purpose: "journal_entry",
+        status: "completed",
+        initiator: "11111111-1111-1111-1111-111111111111",
+        initiated_by: "11111111-1111-1111-1111-111111111111",
+        initiator_role: "bookkeeper",
+        basis_origin: "user_direct",
+        intent_key: w.intent_key,
+        memo: w.basis.memo,
+        posting_date: null,
+        currency: "MYR",
+        source_ref_count: 0,
+        current_task_id: null,
+        entry_id: null,
+        receipt_id: null,
+        error_code: null,
+        error_reason: null,
+        attempts: 1,
+        current_run_status: null,
+        pending_question_id: null,
+        pending_question_version: null,
+        created_at: w.created_at,
+        updated_at: w.created_at,
+      })),
+      next_cursor: null,
+      truncated: false,
+    },
+  };
+}
+
 /** The door's own refusal when the reference resolves to nothing — 0193's `authority_ref_unresolved`
  *  carried through `clara.create_prepayment_schedule`. The walk must be able to reach it, because a
  *  surface that fabricated an authority (the recognition entry's own id, say) would meet exactly
@@ -363,9 +409,9 @@ export async function handlePrepaymentsSupabase(request, response, path, url, se
     return false;
   }
 
-  // The instruction the authority Select reads (`lib/plans/api.ts`'s `listAuthorityCandidates`),
-  // scoped to this lane's own client exactly as `journal-work-mock.mjs` and `work-list-mock.mjs`
-  // scope their own copies of this route.
+  // The DETAIL read's own route, scoped to this lane's own client exactly as
+  // `journal-work-mock.mjs` and `work-list-mock.mjs` scope their own copies of it. The authority
+  // Select no longer arrives here (#809 — see `prepaymentWorkListPage` above).
   if (request.method === "GET" && path === "/rest/v1/accounting_work") {
     if (clientFilter === `eq.${PREPAY.clientId}`) {
       sendJson(response, 200, AUTHORITIES(), cors);

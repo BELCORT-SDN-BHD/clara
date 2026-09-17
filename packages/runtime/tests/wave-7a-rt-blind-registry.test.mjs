@@ -2,7 +2,7 @@
 // test-7a-rt-blind). Drives the exported registry.ts surface and the exported
 // SYSTEM_PROMPT_V9/SYSTEM_PROMPT_V8 constants — never any impl.ts orchestration.
 //
-// registry.ts's own header (Appendix A policy) — "enqueue sites import from HERE so
+// registry.ts's own header (ARCHITECTURE #workflow-versioning-and-rollback policy) — "enqueue sites import from HERE so
 // they always target the newest version ... keep the old export until zero
 // non-terminal runs reference it (never rename/delete an export with in-flight
 // runs)". The registry.ts §7-A comment states: "chatTurn v9 carries ONE prompt-only
@@ -82,77 +82,77 @@ test("registry pins chatTurn to its newest export, and v19 stays reachable", () 
   assert.equal(registry.chatTurn_v19, entryChatTurnV19.chatTurn_v19, "policy (c): v19 is still its module's own function");
 });
 
-test("registry still EXPORTS chatTurn_v18 so no parked v18 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v18 so no parked v18 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v18, "function");
   assert.equal(registry.chatTurn_v18, entryChatTurnV18.chatTurn_v18);
 });
 
-test("registry still EXPORTS chatTurn_v17 so no parked v17 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v17 so no parked v17 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v17, "function");
   assert.equal(registry.chatTurn_v17, entryChatTurnV17.chatTurn_v17);
 });
 
-test("registry still EXPORTS chatTurn_v16 so no parked v16 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v16 so no parked v16 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v16, "function");
   assert.equal(registry.chatTurn_v16, entryChatTurnV16.chatTurn_v16);
 });
 
-test("registry still EXPORTS chatTurn_v15 so no parked v15 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v15 so no parked v15 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v15, "function");
   assert.equal(registry.chatTurn_v15, entryChatTurnV15.chatTurn_v15);
 });
 
-test("registry still EXPORTS chatTurn_v14 so no parked v14 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v14 so no parked v14 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v14, "function");
   assert.equal(registry.chatTurn_v14, entryChatTurnV14.chatTurn_v14);
 });
 
-test("registry still EXPORTS chatTurn_v13 so no parked v13 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v13 so no parked v13 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v13, "function");
   assert.equal(registry.chatTurn_v13, entryChatTurnV13.chatTurn_v13);
 });
 
-test("registry still EXPORTS autoDraft_v8 so no parked v8 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS autoDraft_v8 so no parked v8 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.autoDraft_v8, "function");
   assert.equal(registry.autoDraft_v8, entryAutoDraftV8.autoDraft_v8);
 });
 
-test("registry still EXPORTS chatTurn_v12 so no parked v12 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v12 so no parked v12 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v12, "function");
   assert.equal(registry.chatTurn_v12, entryChatTurnV12.chatTurn_v12);
 });
 
-test("registry still EXPORTS autoDraft_v7 so no parked v7 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS autoDraft_v7 so no parked v7 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.autoDraft_v7, "function");
   assert.equal(registry.autoDraft_v7, entryAutoDraftV7.autoDraft_v7);
 });
 
-test("registry still EXPORTS chatTurn_v11 so no parked v11 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v11 so no parked v11 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v11, "function");
   assert.equal(registry.chatTurn_v11, entryChatTurnV11.chatTurn_v11);
 });
 
-test("registry still EXPORTS chatTurn_v10 so no parked v10 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v10 so no parked v10 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v10, "function");
   assert.equal(registry.chatTurn_v10, entryChatTurnV10.chatTurn_v10);
 });
 
-test("registry still EXPORTS autoDraft_v6 so no parked v6 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS autoDraft_v6 so no parked v6 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.autoDraft_v6, "function");
   assert.equal(registry.autoDraft_v6, entryAutoDraftV6.autoDraft_v6);
 });
 
-test("registry still EXPORTS chatTurn_v9 so no parked v9 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v9 so no parked v9 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v9, "function");
   assert.equal(registry.chatTurn_v9, entryChatTurnV9.chatTurn_v9);
 });
 
-test("registry still EXPORTS autoDraft_v5 so no parked v5 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS autoDraft_v5 so no parked v5 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.autoDraft_v5, "function");
   assert.equal(registry.autoDraft_v5, entryAutoDraftV5.autoDraft_v5);
 });
 
-test("registry still EXPORTS chatTurn_v8 so no parked v8 run is stranded (Appendix A policy (c))", () => {
+test("registry still EXPORTS chatTurn_v8 so no parked v8 run is stranded (ARCHITECTURE #workflow-versioning-and-rollback policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v8, "function");
   assert.equal(registry.chatTurn_v8, entryChatTurnV8.chatTurn_v8);
 });

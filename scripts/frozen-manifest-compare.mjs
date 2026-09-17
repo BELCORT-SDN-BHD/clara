@@ -101,11 +101,35 @@ export function parseFrozenManifest(text, label) {
     if (!parsed.workflows || typeof parsed.workflows !== "object" || Array.isArray(parsed.workflows)) {
       throw new SyntaxError("workflows must be an object");
     }
+    // #810 — OPTIONAL, and an object when present. A retirement is recorded, never inferred.
+    if (Object.hasOwn(parsed, "retired") && (!parsed.retired || typeof parsed.retired !== "object" || Array.isArray(parsed.retired))) {
+      throw new SyntaxError("retired must be an object");
+    }
     return parsed;
   } catch (error) {
     const prefix = error instanceof DuplicateJsonKeyError ? "" : "MALFORMED-MANIFEST ";
     throw new Error(`${prefix}${label}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * #810 — the ONE way a base entry may be absent from the current manifest: a `retired` record
+ * that quotes the entry's LAST frozen hash and cites the ruling that authorised the removal.
+ * Anything else is the append-only violation it has always been.
+ */
+function retirementViolations(path, prior, currentRetired) {
+  const record = currentRetired[path];
+  if (!record || typeof record !== "object") return [`REMOVED-ENTRY ${path}`];
+  const out = [];
+  if (record.sha256 !== prior?.sha256) {
+    out.push(
+      `RETIRED-HASH-MISMATCH ${path} (retired record says ${String(record.sha256)}; the entry's last frozen hash is ${String(prior?.sha256)} — a retirement records history, it never rewrites it).`,
+    );
+  }
+  if (!String(record.ruling ?? "").trim()) {
+    out.push(`RETIRED-NO-RULING ${path} (a retired record must cite the ruling that authorised the removal).`);
+  }
+  return out;
 }
 
 function deployedFlag(entry) {
@@ -118,10 +142,28 @@ function deployedFlag(entry) {
 export function compareFrozenManifestText(baseText, currentText, baseLabel = "base", currentLabel = "current") {
   const base = parseFrozenManifest(baseText, baseLabel);
   const current = parseFrozenManifest(currentText, currentLabel);
+  const baseRetired = base.retired ?? {};
+  const currentRetired = current.retired ?? {};
   const violations = [];
+  // #810 — a RETIREMENT is monotonic in the same way the deploy-lock is: once the ledger records
+  // that a body left the tree under a ruling, the record cannot be quietly dropped or the entry
+  // resurrected into `workflows` (which would re-lock a file the image no longer carries).
+  for (const [path, prior] of Object.entries(baseRetired)) {
+    if (!Object.hasOwn(currentRetired, path)) {
+      violations.push(
+        `UNRETIRED-ENTRY ${path} (retired on ${baseLabel} but absent from the current \`retired\` record — a retirement is append-only, exactly like the entry it replaced).`,
+      );
+      continue;
+    }
+    if (currentRetired[path]?.sha256 !== prior?.sha256) {
+      violations.push(
+        `RETIRED-HASH-MISMATCH ${path} (retired last hash moved ${String(prior?.sha256)} -> ${String(currentRetired[path]?.sha256)}).`,
+      );
+    }
+  }
   for (const [path, prior] of Object.entries(base.workflows)) {
     if (!Object.hasOwn(current.workflows, path)) {
-      violations.push(`REMOVED-ENTRY ${path}`);
+      violations.push(...retirementViolations(path, prior, currentRetired));
       continue;
     }
     const next = current.workflows[path];
@@ -142,7 +184,8 @@ export function compareFrozenManifestText(baseText, currentText, baseLabel = "ba
     }
   }
   const additions = Object.keys(current.workflows).filter((path) => !Object.hasOwn(base.workflows, path));
-  return { violations, existing: Object.keys(base.workflows).length, additions };
+  const retirements = Object.keys(currentRetired);
+  return { violations, existing: Object.keys(base.workflows).length, additions, retirements };
 }
 
 export function runFrozenManifestCompareCli(args) {
@@ -168,7 +211,7 @@ export function runFrozenManifestCompareCli(args) {
     }
     console.log(
       `freeze-lint compare-base: OK — ${result.existing} existing entr(ies) retain the same hash and deployed flag; ` +
-        `${result.additions.length} addition(s).`,
+        `${result.additions.length} addition(s); ${result.retirements.length} recorded retirement(s).`,
     );
     return 0;
   } catch (error) {

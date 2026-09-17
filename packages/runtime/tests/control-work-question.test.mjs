@@ -124,8 +124,16 @@ async function parkedWorkQuestion(label) {
   return { owner, firm, client, runId, token, taskId: admitted.task_id, workId: admitted.work_id, questionId: opened.question_id };
 }
 
-/** Accept the answer through the REAL human door, so the row carries what a real answer carries. */
-async function answer(owner, questionId, answerObj = { posting_date: "2026-09-05", amount_cents: 98765 }) {
+/** Accept the answer through the REAL human door, so the row carries what a real answer carries.
+ *  THE DATE CONFIRMS, IT DOES NOT MOVE (#721, migration 0200). `posting_date` is DECLARED by this
+ *  question's FIELDS and is also carried by the admitted basis, so `clara.answer_work_question`
+ *  now refuses (CLR10, `basis_change_not_allowed`) any answer that states a DIFFERENT date — a
+ *  reply that changes the basis is a restatement, and `clara.restate_accounting_work` is where it
+ *  goes. This fixture answers the date the basis already admitted (the confirm case, which still
+ *  lands) and completes `amount_cents`, which the basis carries nowhere at the top level. Nothing
+ *  below this line is about the answer's CONTENT: these cells prove delivery, leasing and
+ *  reconciliation. */
+async function answer(owner, questionId, answerObj = { posting_date: "2026-09-01", amount_cents: 98765 }) {
   await rig.humanQuery(owner,
     "select clara.answer_work_question($1::uuid,$2::int,$3::jsonb,$4::text)",
     [questionId, 1, JSON.stringify(answerObj), `k-${randomUUID()}`]);
@@ -174,7 +182,7 @@ test("deliver: an answered work question is leased, resumed and stamped delivere
   assert.equal(calls[0].pl.question_id, p.questionId, "deliver: the payload names the question");
   assert.equal(calls[0].pl.question_version, 1);
   assert.equal(calls[0].pl.answered_role, "owner", "deliver: …and the role whose authority accepted it");
-  assert.deepEqual(calls[0].pl.answer, { posting_date: "2026-09-05", amount_cents: 98765 });
+  assert.deepEqual(calls[0].pl.answer, { posting_date: "2026-09-01", amount_cents: 98765 });
 
   const row = await rig.readInterruption(p.questionId);
   assert.ok(row.delivered_at, "deliver: delivered_at stamped");
@@ -429,25 +437,36 @@ test("expire.chat: a parked turn's past-due clarification is swept, resumed `exp
     "expire.chat: the live-turn slot is released — a new message in the same conversation is accepted");
 });
 
+// #764 REPLACED THIS CELL'S SECOND HALF. It used to assert that HookNotFound on a CHAT row is
+// still DELIVERY — "the chat lane has no reconciler to pick a hook_missing row up" — which was
+// true of #629/#720 Half 1 and is false of #764. What survives unchanged is the half that was
+// never about the asymmetry: a TERMINAL run really does prove the resume already landed, in both
+// lanes, and a delivered row is never leased again. The hook_missing half of the story now lives
+// in its own battery, `control-chat-clarify.test.mjs`.
 test("expire.chat: a swept chat row whose engine run is already gone is stamped DELIVERED, not resumed for ever", { skip: SKIP_CHAT }, async () => {
   const { owner, firm, client } = await rig.buildFirm("cc720b");
   const session = await rig.createChatSession({ author: owner, client });
   const { task_id } = await rig.beginChatTurn({ session, author: owner, turnKey: `t-${randomUUID()}` });
-  await rig.driveTask(task_id, ["running", "awaiting_input"]);
+  // AN ENGINE RUN IS BOUND, which is what a real parked turn always has (the workflow's claim step
+  // CAS-binds itself long before `open_interruption` can move the task to `awaiting_input`). Since
+  // #764 the chat row's HookNotFound is decided against that run, so a fixture without one would be
+  // asking the listener to decide from nothing.
+  await rig.bindRun(task_id, `run-cc720b-${randomUUID()}`);
+  await rig.driveTask(task_id, ["awaiting_input"]);
   const chatId = await rig.insertInterruption({ task: task_id, expiresInDays: -1 });
   await rig.asRuntime((c) => expirePastDueInterruptions(c, { onlyFirm: firm }));
 
   // THE FIXTURE MATCHES THE TITLE: a TERMINAL run status is what "the engine run is already gone"
-  // looks like to `getRun`. Behaviour here is unchanged either way — `deliverInterruptions` returns
-  // at `if (!row.work_id) { stampDelivered; }` (lib/control.mjs:292-295) BEFORE it ever calls
-  // `resumeAlreadyLanded`, so a CHAT row never consults getRun at all — which is precisely why the
-  // fixture must not quietly say the opposite of the sentence above it.
+  // looks like to `getRun`. Since #764 a CHAT row consults getRun exactly like a Work row does —
+  // `deliverInterruptions` no longer returns early at `if (!row.work_id)` — so the fixture is now
+  // load-bearing rather than decorative: it is the witness `resumeAlreadyLanded` reads.
   const cycle1 = await rig.asRuntime((c) =>
     deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("completed"), onlyFirm: firm }));
   assert.equal(cycle1.leased, 1);
-  assert.equal(cycle1.delivered, 1, "expire.chat: HookNotFound on a CHAT row is still delivery (the pre-0180 assumption)");
+  assert.equal(cycle1.delivered, 1,
+    "expire.chat: a completed run consumed its hook — that IS delivery, and #764 did not change it");
   assert.equal(cycle1.hookMissing, 0,
-    "expire.chat: …and it is NOT rested at hook_missing — the chat lane has no reconciler to pick it up (#764)");
+    "expire.chat: …so nothing rests at hook_missing here; the resting state is for a hook the ENGINE cannot account for");
   const row = await rig.readInterruption(chatId);
   assert.notEqual(row.delivered_at, null);
   assert.equal(row.delivery_state, "delivered");

@@ -170,6 +170,12 @@ function x31WitnessEnvelope(channel, stated, refs = {}) {
  *  this cell exists to test reads through clara._invoice_fact_state, PR-1's cross-regime
  *  dispatcher (0092/0093), which is regime-agnostic by design -- so landing on the witness
  *  lane rather than the legacy one changes nothing the assertions below actually check. */
+// #778/#777: the re-extraction's own OCR line paths. They must CONFORM to 0191's grammar and be
+// DISTINCT within their extraction — this battery drives several re-reads against one pinned OCR
+// extraction, and (extraction_id, field_path) is unique from 0201 onwards.
+let x31ReextractionLine = 200;
+const nextReextractionPath = () => `pages.1.lines.${x31ReextractionLine += 1}`;
+
 async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendorRegistration }) {
   const { requestReextraction } = await import("./x1-helpers.mjs");
   const receipt = await requestReextraction(w.users.alice, { document: documentId, reason: "x31 drifted re-read" });
@@ -184,6 +190,16 @@ async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendo
     [documentId])).rows[0].id;
   // document_regions is append-only (0007's _tf_append_only) -- a drifted re-read cites NEW
   // regions on the SAME pinned OCR extraction, never an UPDATE of the original quote.
+  //
+  // #778 (0201): those NEW regions must carry their own OCR-LINE paths. clara.document_regions is
+  // UNIQUE on (extraction_id, field_path) from 0201 onwards, and the cited OCR extraction already
+  // carries one region per belt path from seedCitedDocument -- so re-spelling the belt paths here
+  // is not a second reading of the same page, it is a second row claiming one field, which 0201
+  // forbids. The region's own field_path was never the thing under test: the WITNESS belt is
+  // carried by the envelope, and the citation below names the belt path it answers, exactly as
+  // x1-supersede.test.mjs's settleReextraction does (`nextReextractionPath()` there). What lands
+  // on the new witness extraction -- the rows _invoice_fact_state actually reads -- is written by
+  // clara.persist_witness_facts from `citations[].field_path`, unchanged by this.
   //
   // THE STATED BELT, and it is the witness-regime TWIN of what this fixture used to send
   // through the legacy lane: `statedIdentityFields(amount)` (net = total, tax = 0) under
@@ -222,7 +238,7 @@ async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendo
       `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
        values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)
        returning id`,
-      [firm, ocrExtraction, f.field_path, f.text_content]);
+      [firm, ocrExtraction, nextReextractionPath(), f.text_content]);
     inserted.push({ field_path: f.field_path, id: r.rows[0].id });
   }
   const idxRows = (await rootQuery(

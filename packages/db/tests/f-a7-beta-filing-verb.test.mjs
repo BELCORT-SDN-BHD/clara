@@ -590,10 +590,13 @@ test("wake_file_document: FULL END-TO-END SUCCESS -- a live authorization + a we
   const { secret } = await mintFiling();
   const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   // B3, the owner-ruling delta (2026-08-24): unattended filing now requires a corroborated
-  // anchor. This test's OWN citation region (below, field_path='party_name') is deliberately
-  // NOT one of B1/B3's allowlisted identifier field_paths, so it does not confirm the client by
-  // itself -- the hard-identifier anchor is seeded explicitly, exactly like a real filing would
-  // carry one, making v_confirms_client true and satisfying B3 arm (a).
+  // anchor. This test's OWN citation region (below, field_path='pages.1.lines.5') is deliberately
+  // NOT one of B1/B3's allowlisted identifier field_paths -- it contains none of `tin`, `ssm`,
+  // `brn` or `account`, which is what the hard-identifier match keys on, and it is neutral over
+  // `invoice.*` -- so it does not confirm the client by itself; the hard-identifier anchor is
+  // seeded explicitly, exactly like a real filing would carry one, making v_confirms_client true
+  // and satisfying B3 arm (a). #777 moved it off the bare literal `party_name`, which 0191's
+  // field_path grammar refuses, onto the OCR-line namespace a real producer already emits.
   await seedHardIdentifierAnchor(doc, world.clients.A1);
   const region = await rootQuery(
     `insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind, version_n, status, page_count, envelope)
@@ -603,7 +606,7 @@ test("wake_file_document: FULL END-TO-END SUCCESS -- a live authorization + a we
   const extractionId = region.rows[0].id;
   const regionRow = await rootQuery(
     `insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
-       values ($1,$2,'page_polygon','{"page":1}'::jsonb,'party_name','ROME PROPERTIES',0.97) returning id`,
+       values ($1,$2,'page_polygon','{"page":1}'::jsonb,'pages.1.lines.5','ROME PROPERTIES',0.97) returning id`,
     [world.firms.A, extractionId],
   );
   const authorization = await freshAuthorization(doc.sha256);

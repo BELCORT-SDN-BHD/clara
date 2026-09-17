@@ -23,6 +23,7 @@ import {
   defaultMemo,
   derivedLines,
   emptyAdjustmentDraft,
+  fieldForAdjustmentLineOrdinal,
   fieldForAdjustmentPath,
   firstInvalidAdjustmentField,
   isCalendarDate,
@@ -194,8 +195,9 @@ test("643.web: choosing an advance account derives its leg — the gap named, no
   const wire = toAdjustmentWire(payrollDraft({ advanceAccountCode: "1185", advanceCents: 40_000 }), CHART);
   assert.equal(wire?.advanceAccountCode, "1185", "the particular itself is recorded");
   assert.equal("advanceCents" in (wire ?? {}), false,
-    "advanceCents is a DERIVATION INPUT ONLY, exactly settledCents's own N3 rule — no server "
-    + "particular can ever carry it, so the wire body never does either");
+    "advanceCents is a DERIVATION INPUT ONLY — the staff-advance register stays the authority on "
+    + "what a movement on its accounts requires, so no server particular carries it and neither "
+    + "does the wire body (#797 deliberately left this asymmetric with settledCents)");
 
   // ADVANCE, SETTLEMENT AND PAYMENT TOGETHER — all four legs, in the chat lane's own order.
   const both = derivedLines(payrollDraft({
@@ -244,6 +246,20 @@ test("643.web: the wire body carries only the ACTIVE half, and only the optional
   const payroll = toAdjustmentWire(payrollDraft(), CHART);
   assert.equal("advanceAccountCode" in (payroll ?? {}), false);
   assert.equal("inventoryAccountCode" in (payroll ?? {}), false, "the purpose decides which keys are sent at all");
+  // #797 · AND `settledCents` IS OMITTED WHEN NOTHING WAS SETTLED, exactly as an unfilled payment
+  // account is. 0212 refuses an explicit `0` beside a named payment account by name, and a draft
+  // with neither has nothing to state — sending `0` would be asking the database to refuse
+  // something the form could have caught.
+  assert.equal("settledCents" in (payroll ?? {}), false);
+});
+
+test("797.web: a stated settlement rides the wire as settledCents, the casing this function uses", () => {
+  const wire = toAdjustmentWire(payrollDraft({ paymentAccountCode: "1150", settledCents: 30_000 }), CHART);
+  assert.equal(wire?.settledCents, 30_000,
+    "the split is a particular now — the history states it rather than leaving it to be re-read "
+    + "off the posted entry's lines");
+  assert.equal(wire?.paymentAccountCode, "1150");
+  assert.equal("settled_cents" in (wire ?? {}), false, "camelCase on the wire; the route re-spells it");
 });
 
 test("643.web: an invalid draft produces NO wire body", () => {
@@ -272,16 +288,15 @@ test("643.web: a server field path lands on a control in BOTH spellings of one p
   assert.equal(fieldForAdjustmentPath("adjustment.advance_account_code"), "advanceAccountCode");
   assert.equal(fieldForAdjustmentPath("adjustment.corrects_adjustment_id"), null,
     "a path with no control of its own renders as a form-level message, never a focused guess");
-  // `settledCents` IS NOT A SERVER PATH (adversarial migration-safety review, N3). It is a
-  // client-side derivation input: neither `packages/runtime/src/workRoutes.ts`'s `ADJUSTMENT_CENTS`
-  // table nor migration 0194's `clara._assert_adjustment_basis` has a `settled_cents` particular, so
-  // no refusal can ever carry that path — and a mapper that claimed it would be promising to focus a
-  // control for something that cannot arrive. Its LOCAL validation still names it, which is a
-  // different thing and is pinned by the issue table above.
-  assert.equal(fieldForAdjustmentPath("adjustment.settled_cents"), null,
-    "no DB particular, no server path — the roster claims only what the server can name");
-  assert.equal(fieldForAdjustmentPath("adjustment.settledCents"), null);
-  // `advanceCents` IS THE SAME SHAPE OF ABSENCE, for the chat lane's own stated reason
+  // #797 · `settledCents` IS NOW A SERVER PATH, in BOTH spellings. Migration 0212 made the
+  // settlement split an optional particular of `clara._assert_adjustment_basis` and the route's
+  // `ADJUSTMENT_CENTS` table carries the key, so a refusal really can arrive on it — `over_settled`
+  // and `payment_leg_unused` on this path, `settlement_needs_account` on the account's. Listing it
+  // is therefore a claim with something behind it, which is exactly the test the roster applies.
+  assert.equal(fieldForAdjustmentPath("adjustment.settled_cents"), "settledCents",
+    "0212 made it a particular — a refusal naming it must land on the control");
+  assert.equal(fieldForAdjustmentPath("adjustment.settledCents"), "settledCents");
+  // `advanceCents` IS STILL ABSENT, for the chat lane's own stated reason
   // (`packages/runtime/lib/periodic-adjustment-basis.ts`'s `advance_cents` never enters
   // `p_adjustment`): a derivation input, never a wire path, so no refusal can ever name it.
   // `advanceAccountCode` stays mapped above — it IS a 0194 particular.
@@ -295,4 +310,54 @@ test("643.web: a server field path lands on a control in BOTH spellings of one p
 test("643.web: the default memo names the period it is about", () => {
   assert.equal(defaultMemo(stockDraft()), "Periodic stock adjustment 2026-01-01 to 2026-12-31");
   assert.equal(defaultMemo(payrollDraft()), "epf obligation 2026-08-01 to 2026-08-31");
+});
+
+test("799: a stock-adjustment commit-time ordinal resolves 1 to inventory, 2 to cost, anything else to null", () => {
+  assert.equal(fieldForAdjustmentLineOrdinal(1, "periodic_stock_adjustment", null), "inventoryAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(2, "periodic_stock_adjustment", null), "costAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "periodic_stock_adjustment", null), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(0, "periodic_stock_adjustment", null), null, "lines[0] never occurs");
+  assert.equal(fieldForAdjustmentLineOrdinal(-1, "periodic_stock_adjustment", null), null);
+});
+
+test("799: the obligation legs resolve in order, and the third leg reads the basis to tell advance from settlement", () => {
+  assert.equal(fieldForAdjustmentLineOrdinal(1, "payroll_obligation", []), "expenseAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(2, "payroll_obligation", []), "liabilityAccountCode");
+
+  // A basis with ONLY the advance leg (no settlement): ordinal 3 is the advance leg, and there is
+  // no ordinal 4 at all.
+  const advanceOnly = [
+    { description: "epf" },
+    { description: "obligation" },
+    { description: "staff advance" },
+  ];
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", advanceOnly), "advanceAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(4, "payroll_obligation", advanceOnly), null);
+
+  // A basis with ONLY the settlement leg (no advance): ordinal 3 is the settlement leg.
+  const settlementOnly = [
+    { description: "epf" },
+    { description: "obligation" },
+    { description: "settled" },
+  ];
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", settlementOnly), "paymentAccountCode");
+
+  // A basis with BOTH conditional legs: advance before settlement, matching `derivedLines`'s own
+  // order — ordinal 3 is the advance leg, ordinal 4 is the settlement leg.
+  const both = [
+    { description: "epf" },
+    { description: "obligation" },
+    { description: "staff advance" },
+    { description: "settled" },
+  ];
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", both), "advanceAccountCode");
+  assert.equal(fieldForAdjustmentLineOrdinal(4, "payroll_obligation", both), "paymentAccountCode");
+});
+
+test("799: no mapping for a journal_entry Work, an absent basis, or an ordinal the basis does not reach", () => {
+  assert.equal(fieldForAdjustmentLineOrdinal(1, "journal_entry", null), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(2, "journal_entry", [{ description: "epf" }, { description: "obligation" }]), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", null), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", undefined), null);
+  assert.equal(fieldForAdjustmentLineOrdinal(3, "payroll_obligation", []), null);
 });

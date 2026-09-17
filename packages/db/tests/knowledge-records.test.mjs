@@ -384,13 +384,13 @@ cell("kn.16 an extracted fact is LINKED, not copied: the pins are real FKs and a
      values ($1,$2,'rig','ocr',1,'done') returning id`, [w.firm, doc])).rows[0].id;
   const reg = (await rootQuery(
     `insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content)
-     values ($1,$2,'paragraph_run','{}'::jsonb,'entity.msic','46900') returning id`,
+     values ($1,$2,'paragraph_run','{}'::jsonb,'paragraphs.0.entity_msic','46900') returning id`,
     [w.firm, ext])).rows[0].id;
 
   const r = await capture(w.admin, {
     key: "msic", client: w.clientA, value: "46900", sourceKind: "document_extraction",
     basis: "read from the SSM profile the firm holds",
-    source: { document_id: doc, extraction_id: ext, region_id: reg, field_path: "entity.msic" },
+    source: { document_id: doc, extraction_id: ext, region_id: reg, field_path: "paragraphs.0.entity_msic" },
   });
   assert.equal(r.trust, "extracted", "a document extraction is extracted, never asserted");
   const row = await rootQuery(
@@ -399,7 +399,7 @@ cell("kn.16 an extracted fact is LINKED, not copied: the pins are real FKs and a
   assert.deepEqual(
     [row.rows[0].source_document_id, row.rows[0].source_extraction_id, row.rows[0].source_region_id,
       row.rows[0].source_field_path],
-    [doc, ext, reg, "entity.msic"], "the four source pins were not stored");
+    [doc, ext, reg, "paragraphs.0.entity_msic"], "the four source pins were not stored");
   // A source from ANOTHER firm answers with the same refusal as an absent one (no existence oracle).
   const foreignDoc = (await rootQuery(
     `insert into clara.documents(firm_id, sha256, original_filename, mime_type, byte_size,

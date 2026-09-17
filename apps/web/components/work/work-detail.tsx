@@ -42,12 +42,16 @@ import {
 } from "@/components/work/work-cancel-dialog";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
+// #812
+import { EgressReactivateAction } from "@/components/work/egress-reactivate-action";
+// #812
 import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { WorkPlanOriginRow } from "@/components/plans/work-plan-origin";
 import { WorkAssetRow } from "@/components/registers/work-asset-row";
+import { fieldForAdjustmentLineOrdinal } from "@/lib/work/periodic-adjustment";
 import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,7 +60,9 @@ import { businessDateTime } from "@/lib/business-date";
 import { isUuidShape } from "@/lib/client-id";
 import { readClarifyQuestion } from "@/lib/journals/governance-doors";
 import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
-import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navigation/tree";
+import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref, workDetailHref } from "@/lib/navigation/tree";
+// #721 — the shortened-id treatment the product already uses for ids.
+import { shortId } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
   cancelWork,
@@ -89,7 +95,11 @@ import {
   isTakeOverable,
   wasTakenOver,
   type AccountingWorkRow,
+  type WorkTaskRow,
 } from "@/lib/work/types";
+// #721
+import { RestateWorkPanel } from "@/components/work/work-restate";
+// #721
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { WORK_HEADING_ID } from "@/lib/navigation/heading-ids";
@@ -348,6 +358,10 @@ export function WorkDetailView({
   // posture `canRetry` states above). `stopping` is deliberately NOT cancellable — an admitted
   // operation is settling and a second press could only answer `already_stopping`.
   const bookkeeperPlus = typeof scope?.roleRank === "number" && scope.roleRank >= roleRankOf("bookkeeper");
+  // #812 — the recovery action on the egress face is an OWNER act, and the rank is the
+  // DATABASE's own `role_rank` (never re-derived from the role's spelling). Absent rank fails
+  // closed, exactly as `bookkeeperPlus` does.
+  const ownerHere = typeof scope?.roleRank === "number" && scope.roleRank >= roleRankOf("owner");
   const canCancel = bookkeeperPlus && isCancellableWorkStatus(work.status);
   const canTakeOver = bookkeeperPlus && isTakeOverable(work);
 
@@ -416,7 +430,7 @@ export function WorkDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} />
+      <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} clientId={clientId} />
 
       {/* DELAYED IS ABOUT THE READ, not about the Work. It says the page has not
           managed a successful read since a named time, which is a fact about the
@@ -454,9 +468,13 @@ export function WorkDetailView({
 
       <WorkOutcome
         work={work}
+        // #750 — the run row and the roster, so the Cancelled banner can NAME who pressed Cancel.
+        task={task}
+        members={memberNames}
         clientId={clientId}
         canRetry={canRetry}
         canTakeOver={canTakeOver}
+        canReactivateEgress={ownerHere} /* #812 */
         retrying={retrying}
         retryState={retryState}
         onRetry={() => void runRetry()}
@@ -776,14 +794,19 @@ function WorkFacts({
   work,
   taskStatus,
   members,
+  clientId,
 }: {
   work: AccountingWorkRow;
   taskStatus: string | null;
   members: MemberNameResolver;
+  /** #721 — the scope both supersession links are built in. */
+  clientId: string;
 }) {
   const t = useTranslations("WorkDetail");
   /** #630 — the handover row's own word. */
   const tc = useTranslations("WorkCancel");
+  /** #721 — the restatement's own words, in the namespace the panel reads them from. */
+  const tr = useTranslations("WorkRestate");
   /** #643 — the purpose's own noun, read from the SAME namespace the result block reads it from
    *  so one page cannot label one row two ways. */
   const tm = useTranslations("ManualJournal");
@@ -838,6 +861,32 @@ function WorkFacts({
             <dt className="text-muted-foreground">{tc("responsibleNow")}</dt>
             <dd className="text-foreground">
               <MemberName userId={work.initiator} resolver={members} showRole={false} />
+            </dd>
+          </>
+        ) : null}
+        {/* #721 — BOTH WAYS, and only when there is something to point at. A restatement makes two
+            Works one story: the retired instruction and the one that replaced it. A reader who
+            lands on either half must be able to reach the other, because a refusal or a receipt is
+            only readable against the basis that was actually admitted. */}
+        {typeof work.supersedes === "string" && work.supersedes !== "" ? (
+          <>
+            <dt className="text-muted-foreground">{tr("supersedesLabel")}</dt>
+            <dd className="text-foreground">
+              <Link href={workDetailHref(clientId, work.supersedes)}
+                    className="font-medium text-primary underline underline-offset-2">
+                {tr("supersedesLink", { id: shortId(work.supersedes) })}
+              </Link>
+            </dd>
+          </>
+        ) : null}
+        {typeof work.superseded_by === "string" && work.superseded_by !== "" ? (
+          <>
+            <dt className="text-muted-foreground">{tr("supersededByLabel")}</dt>
+            <dd className="text-foreground">
+              <Link href={workDetailHref(clientId, work.superseded_by)}
+                    className="font-medium text-primary underline underline-offset-2">
+                {tr("supersededByLink", { id: shortId(work.superseded_by) })}
+              </Link>
             </dd>
           </>
         ) : null}
@@ -906,12 +955,45 @@ function WorkFacts({
   );
 }
 
+/** #799 — THE COMMIT-TIME `unknown_account` REFUSAL'S SENTENCE SHAPE, as one exported constant.
+ *
+ *  THE COUPLING THIS NAMES. The refusal's payload is frozen (`detail` carries the reason and the
+ *  account code, never the line ordinal), so the ordinal exists only inside the database's own
+ *  English prose. That is a design decision, not an oversight — but it makes this regex a SECOND
+ *  place a rule lives, and the first place is SQL: `_record_journal_entry_core` step 6,
+ *  `raise exception 'line % codes to an account this client does not have active: %'`
+ *  (`packages/db/migrations/0204_record_journal_entry_core_reversal_liveness.sql:545`, carried
+ *  verbatim from 0178/0182/0184/0194/0195).
+ *
+ *  SO THE TWO ARE PINNED TOGETHER RATHER THAN LEFT TO AGREE BY LUCK. The db cell
+ *  `w799.post.unknown-account-sentence` (`packages/db/tests/work-journal-post.test.mjs`) reads the
+ *  INSTALLED body out of `pg_proc` and asserts it still raises exactly this prefix. A future
+ *  migration that rewords the sentence therefore REDS THAT CELL instead of silently turning this
+ *  affordance off with every web test still green — which is the failure mode the review named.
+ *  Exported so the web tests spell it once, here, rather than re-typing the prose a third time. */
+export const UNKNOWN_ACCOUNT_LINE_SENTENCE = /^line\s+(\d+)\s+codes to an account/i;
+
+/** The ordinal itself. `fieldForAdjustmentLineOrdinal` takes it from here, together with the
+ *  Work's own `purpose`/`basis.lines`, and resolves the leg; the sentence is never rewritten,
+ *  reordered or replaced by this parse — the database's words are always rendered whole. `null`
+ *  for anything that does not open with "line N codes to an account". */
+function unknownAccountLineOrdinal(message: string | null | undefined): number | null {
+  if (typeof message !== "string") return null;
+  const match = UNKNOWN_ACCOUNT_LINE_SENTENCE.exec(message.trim());
+  if (!match) return null;
+  const ordinal = Number(match[1]);
+  return Number.isInteger(ordinal) && ordinal >= 1 ? ordinal : null;
+}
+
 /** The state-specific band: what is happening, and what a human may do next. */
 function WorkOutcome({
   work,
   clientId,
   canRetry,
   canTakeOver,
+  // #812
+  canReactivateEgress,
+  // #812
   retrying,
   retryState,
   onRetry,
@@ -922,12 +1004,20 @@ function WorkOutcome({
   interruption,
   accountNames,
   onEditAsNewDraft,
+  task,
+  members,
 }: {
   work: AccountingWorkRow;
   clientId: string;
   canRetry: boolean;
   /** #630 — whether "Take responsibility" is worth offering for this refusal. */
   canTakeOver: boolean;
+  // #812
+  /** #812 — whether the OWNER-only "Re-activate AI processing for this client" action is offered
+   *  on the `egress_not_authorized` face. The door floors at owner; anyone else would only ever
+   *  read its CLR04. */
+  canReactivateEgress: boolean;
+  // #812
   retrying: boolean;
   retryState: RetryWorkResult | null;
   onRetry: () => void;
@@ -945,9 +1035,16 @@ function WorkOutcome({
   accountNames: ReadonlyMap<string, string>;
   /** Writes the composer's draft from this basis, before the link navigates. */
   onEditAsNewDraft: () => void;
+  // #750 — THE CANCELLING AUTHOR REACHES THIS COMPONENT THROUGH THE RUN, and no further. The
+  // database records the press on `clara.agent_tasks.cancelled_by/cancelled_at` (0184 §G), which
+  // the masked view this page already reads republishes; the Work row carries no such column. So
+  // the banner names the person from the row the page HAD, rather than through a new door.
+  task: WorkTaskRow | null;
+  members: MemberNameResolver;
 }) {
   const t = useTranslations("WorkDetail");
   const tc = useTranslations("WorkCancel");
+  const tAdj = useTranslations("PeriodicAdjustment");
 
   // #630 (review) — "Cancel Work" IS NOT RENDERED HERE, deliberately. It lives in the detail view's
   // own action bar, at one position that no status change moves, because a control mounted inside a
@@ -1011,6 +1108,21 @@ function WorkOutcome({
     // THE DATABASE'S MESSAGE IS STILL SHOWN, underneath, because a refusal is a receipt and this
     // lane never replaces one with a paraphrase. What the face adds is WHO can fix it.
     const egressRefused = error.reason === "egress_not_authorized";
+    // #799 — A COMMIT-TIME `unknown_account` REFUSAL NAMES ONLY A BARE LINE ORDINAL
+    // ("line 2 codes to an account…"), because the chart-of-accounts check that raises it runs
+    // against the Work's already-admitted `basis.lines`, not against the periodic-adjustment
+    // form. `fieldForAdjustmentLineOrdinal` resolves that ordinal, together with this Work's own
+    // `purpose` and `basis.lines`, back to the adjustment field that produced it — `null` for a
+    // `journal_entry` Work, a different refusal reason, an ordinal past the basis, or any other
+    // shape, in which case the generic line reference stays the whole, honest disclosure.
+    const unknownAccountField =
+      error.reason === "unknown_account"
+        ? fieldForAdjustmentLineOrdinal(
+            unknownAccountLineOrdinal(error.message) ?? -1,
+            work.purpose,
+            work.basis?.lines ?? null,
+          )
+        : null;
     return (
       <div className="flex flex-col gap-2">
         {/* #630 — THE ONE REFUSAL A COLLEAGUE CAN RESCUE. Above the refusal rather than inside it:
@@ -1049,6 +1161,19 @@ function WorkOutcome({
             <span className="block">{t("egressNotAuthorized.body")}</span>
           ) : null}
           {error.message ?? t("refused.body")}
+          {/* #799 — the resolved field's own form label, BESIDE the database's sentence, never
+              instead of it: the sentence above is unchanged, and this only adds who can act on
+              it. */}
+          {unknownAccountField ? (
+            <span className="block text-muted-foreground">{tAdj(unknownAccountField)}</span>
+          ) : null}
+          {/* #812 — …and for an OWNER, the one recovery the sentence above could not offer before:
+              a paused (DEACTIVATED) purpose activation, re-activated through
+              clara.reactivate_client_egress_purpose. It restores FUTURE dispatches; "Try again"
+              above is what starts the new run. */}
+          {egressRefused && canReactivateEgress ? (
+            <EgressReactivateAction clientId={clientId} onReactivated={onConverge} />
+          ) : null}
         </StateBanner>
         {retryNotice}
       </div>
@@ -1125,6 +1250,11 @@ function WorkOutcome({
           workId={work.id}
           fallbackQuestion={clarify === null ? null : { question: clarify.question, context: clarify.context }}
         />
+        {/* #721 — AND THE OTHER ANSWER. A reply that CHANGES the instruction is not an answer to
+            this question (the door refuses it `basis_change_not_allowed`); it is a new Work. The
+            control sits beside the answer form because that is where a person discovers they
+            disagree with the basis rather than merely lacking a fact. */}
+        <RestateWorkPanel work={work} clientId={clientId} session={session} onRestated={onConverge} />
       </div>
     );
   }
@@ -1135,13 +1265,28 @@ function WorkOutcome({
     // what it asked for under `error.superseded`, so nothing the run believed is lost. Shown as a
     // CODE rather than prose: it is the run's own vocabulary, not a sentence for a human.
     const superseded = supersededOutcome(work.error);
+    // #750 — AND WHO PRESSED IT. Until this, the page was the only place that said a Work had been
+    // cancelled and it did not say by whom: `cancel_accounting_work` records the author on the RUN
+    // (`cancelled_by`/`cancelled_at`), and nothing rendered it. Both halves must be present — a
+    // "Cancelled by" line with no name, or a name with no time, is worse than the plain banner.
+    const cancelledBy = task?.cancelled_by ?? null;
+    const cancelledAt = task?.cancelled_at ?? null;
     return (
       <StateBanner
         tone="neutral"
         title={t("cancelled.title")}
         code={superseded === null ? undefined : tc("cancelledSuperseded", { outcome: superseded })}
       >
-        {t("cancelled.body")}
+        <span className="flex flex-col gap-1">
+          <span>{t("cancelled.body")}</span>
+          {cancelledBy !== null && cancelledAt !== null ? (
+            <span className="inline-flex flex-wrap items-baseline gap-1">
+              <span>{tc("cancelledByLabel")}</span>
+              <MemberName userId={cancelledBy} resolver={members} showRole={false} />
+              <span>{tc("cancelledAt", { at: businessDateTime(new Date(cancelledAt)) })}</span>
+            </span>
+          ) : null}
+        </span>
       </StateBanner>
     );
   }

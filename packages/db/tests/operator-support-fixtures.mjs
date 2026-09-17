@@ -29,7 +29,8 @@ import { randomUUID } from "node:crypto";
 import {
   CLR, EVENT, PG, PROBLEM, ROLES, applyEvents, assertPair, assertRaises, claimPaidFirm,
   clearOperator, deliver, detailOf, endPool, ensureOperatorOwner, getCapacity, getPool,
-  humanQuery, insertRegistration, insertUser, liveCheckout, namedCall, openedCheckout,
+  forceStatus, humanQuery, insertRegistration, insertUser, intentState, intentsOf, liveCheckout,
+  namedCall, openIntent, openedCheckout,
   opk, ordinaryFirm, paymentsFor, problemsFor, releaseCapacity, resolveProblem, roleQuery,
   rootQuery, setCapacity, sha256Hex, stampSession, stripeSessionId, userEmail, withActor,
 } from "./checkout-convergence-fixtures.mjs";
@@ -38,7 +39,8 @@ import { markSkip } from "./wave-a-helpers.mjs";
 export {
   CLR, EVENT, PG, PROBLEM, ROLES, applyEvents, assertPair, assertRaises, claimPaidFirm,
   clearOperator, deliver, detailOf, endPool, ensureOperatorOwner, getCapacity, getPool,
-  humanQuery, insertRegistration, insertUser, liveCheckout, namedCall, openedCheckout,
+  forceStatus, humanQuery, insertRegistration, insertUser, intentState, intentsOf, liveCheckout,
+  namedCall, openIntent, openedCheckout,
   opk, ordinaryFirm, paymentsFor, problemsFor, releaseCapacity, resolveProblem, roleQuery,
   rootQuery, setCapacity, sha256Hex, stampSession, stripeSessionId, userEmail, withActor,
 };
@@ -73,6 +75,51 @@ export async function gateOperatorSupport(t) {
   markSkip();
   t.skip(`#615 operator-support lane absent (no ${OPERATOR_SUPPORT_STEM} migration applied)`);
   return true;
+}
+
+// #776 — the APPLICANT-NAME lane's own frontier gate. A SECOND stem rather than a widening of the
+// one above, for the reason every cohort in rig-meta.mjs is frontier-tolerant: the
+// `db-slice-frontiers` matrix runs this package against databases pinned between 0188 and this
+// file's own migration, where the two support reads exist and the name door does not. Gating the
+// new cells on 0188's stem would red every one of those legs while saying nothing about the thing
+// under test.
+
+/** The applicant-name migration's STABLE STEM — never its number (numbers are claimed at MERGE). */
+export const APPLICANT_NAME_STEM = "operator_support_applicant_name$";
+
+let _namesReady = null;
+export async function applicantNameLaneReady() {
+  if (_namesReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [APPLICANT_NAME_STEM]);
+      _namesReady = r.rows[0].n > 0;
+    } catch {
+      _namesReady = false;
+    }
+  }
+  return _namesReady;
+}
+
+/** BOTH lanes, because every #776 cell builds its world through the #615 fixtures above and then
+ *  reads the new door: a database carrying one and not the other cannot run these cells at all. */
+export async function gateApplicantNames(t) {
+  if (await operatorSupportLaneReady() && await applicantNameLaneReady()) return false;
+  markSkip();
+  t.skip(`#776 applicant-name lane absent (no ${APPLICANT_NAME_STEM} migration applied)`);
+  return true;
+}
+
+/** `clara.resolve_operator_support_applicants`, as a named-argument call — the census asserts the
+ *  web call site names `p_applicants` exactly as declared, and this wrapper holds the same shape so
+ *  the battery and the app cannot drift apart. Returns `{ applicant -> display_name }`. */
+export async function resolveApplicantNames(sub, applicants) {
+  const r = await humanQuery(
+    sub,
+    "select * from clara.resolve_operator_support_applicants(p_applicants => $1::uuid[])",
+    [applicants]);
+  return r.rows;
 }
 
 // ===========================================================================================

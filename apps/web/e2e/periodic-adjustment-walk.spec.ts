@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInTo } from "./helpers";
 import { PA } from "./periodic-adjustment-mock.mjs";
 
 // #643 — "会计师提供期间、金额和依据后，Clara 或直接会计操作可完成定期存货及工资相关费用/负债调整".
@@ -27,13 +28,6 @@ const CLIENT = PA.clientId;
 const FORM_URL = `/clients/${CLIENT}/accounting/adjustments/new`;
 const HISTORY_URL = `/clients/${CLIENT}/accounting/adjustments`;
 
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /** Drive the fixture through the app's OWN proxy — the same instrument the journal walks use, and
  *  for the same reason: it carries the real session through the real firm-scope guard.
@@ -216,8 +210,9 @@ test("t643 an advance account derives its leg — the SAME lines the chat lane w
   const sent = received.received[0]!;
   expect(sent.purpose).toBe("payroll_obligation");
   // THE PARTICULAR CROSSED THE WIRE; THE DERIVATION INPUT DID NOT — `advanceCents` is a
-  // client-side figure only, exactly `settledCents`'s own N3 rule, so no `p_adjustment` key can
-  // ever carry it.
+  // client-side figure only (the staff-advance register owns the allocation, #797 Out of scope),
+  // so no `p_adjustment` key can ever carry it. `settledCents` is the CONTRAST since #797: it IS
+  // a particular now, and the payroll walk above sends it.
   expect(sent.adjustment.advanceAccountCode).toBe(PA.bank);
   expect("advanceCents" in sent.adjustment).toBe(false);
   expect(sent.basis.lines).toHaveLength(3);

@@ -506,5 +506,9 @@ test("f-a2.pr2.registry: chatTurn and autoDraft are repointed, and v8/v9/v12/v13
   assert.equal(typeof registry.chatTurn_v19, "function", "policy (c): #643 + #644's body remains exported after the wave 2026-09-15 cut");
   assert.equal(registry[registry.workflowPins.chatTurn], registry.workflows.chatTurn, "the pinned body is directly addressable by workflow id too");
   for (let n = 1; n <= 9; n += 1) assert.equal(typeof registry[`autoDraft_v${n}`], "function");
-  for (let n = 1; n <= 11; n += 1) assert.equal(typeof registry[`chatTurn_v${n}`], "function");
+  // #810 — chatTurn_v1 was RETIRED (owner ruling 2026-09-15, hosted non-terminal count 0):
+  // its closure left the tree and the registry no longer exports it, so the ladder starts at v2.
+  // Versioning law (c) is unchanged for every body below — an export WITH in-flight runs still
+  // may never be renamed or deleted; this one had none.
+  for (let n = 2; n <= 11; n += 1) assert.equal(typeof registry[`chatTurn_v${n}`], "function");
 });

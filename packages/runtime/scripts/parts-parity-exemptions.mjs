@@ -325,8 +325,6 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
 ];
 
 const REVIEWED_NON_PART_LITERAL_SITES = [
-  ["packages/runtime/workflows/chatTurn.v1.ts","chatTurn_v1","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
-  ["packages/runtime/workflows/chatTurn.v1.ts","chatTurn_v1","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v10.ts","chatTurn_v10","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v10.ts","chatTurn_v10","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v10.ts","chatTurn_v10","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],

@@ -460,9 +460,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // #653's C8/C9 lane. Every handler names this lane's own client id, schedule id or plan id
   // before it answers and falls through otherwise — the three PostgREST reads (`clients` by `id`,
   // `coa_accounts` and `accounting_work` by `client_id`) and all eight RPC verbs. The
-  // `accounting_work` read is the authority picker's own (`lib/plans/api.ts`'s
-  // `listAuthorityCandidates`); `journal-work-mock.mjs` and `work-list-mock.mjs` answer the same
-  // route for THEIR clients and each falls through on a foreign one. Four of those verbs are the PLAN
+  // `accounting_work` read is the Work DETAIL read's (`lib/work/reads.ts`'s `getAccountingWork`);
+  // `journal-work-mock.mjs` and `work-list-mock.mjs` answer the same route for THEIR clients and
+  // each falls through on a foreign one. The authority PICKER reads `clara.list_accounting_work`
+  // since #809, which this lane answers through `prepaymentWorkListPage`, spliced into
+  // `serve-built.mjs`'s single reader for that verb beside the two lanes already there. Four of those verbs are the PLAN
   // lifecycle doors this lane REUSES rather than re-cuts, so they are a declared share with
   // `plans-mock.mjs` below, each side gated on its own plan id.
   "prepayments-mock.mjs": { unscopeable: [], debt: [] },

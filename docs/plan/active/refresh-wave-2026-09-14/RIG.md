@@ -31,6 +31,10 @@ From your worktree root: `pnpm db:migrate` then `pnpm db:seed`. A from-scratch c
 
 Known Windows-only pre-existing reds you may ignore and must NOT "fix": #707 (x56-rest-c shells out to grep), #693 (intake scanner EICAR fixture quarantined by Defender).
 
+`pg_dump`/`psql` on Windows (#806): `packages/runtime/tests/fs7-v17-chatturn-db.test.mjs`, `relay-taxonomy.test.mjs` and `leader-state.test.mjs` each clone the ambient database via `pg_dump | psql` (`cloneAmbientDatabase()`, packages/db/tests/migrate-harness.mjs). Line 15 above already says no `psql` exists on Windows out of the box — these three files now **detect that and report skipped**, with the shared reason `pg_dump/psql not found on PATH` (`packages/runtime/tests/pg-tools-fixture.mjs`), never a red or a hook failure; no disposable database is created or orphaned on a host that skips. To make them RUN instead of skip, install the PostgreSQL 17 command-line tools:
+- EDB installer route: run the PostgreSQL 17 Windows installer from https://www.postgresql.org/download/windows/ and select the "Command Line Tools" component (you do not need the server component if you only need `pg_dump`/`psql` and already have a WSL cluster) — then add its `bin` directory to PATH, or set `PG_DUMP`/`PSQL` to the full exe paths.
+- winget route: `winget install --id PostgreSQL.PostgreSQL.17 --exact --version 17.10-2` (verified package id, PostgreSQL Global Development Group) also installs the command-line tools alongside the server; same PATH/`PG_DUMP`/`PSQL` step afterward.
+
 ## House rules that bite
 - Frozen workflow bodies (see frozen-workflows.json, scripts/check-frozen-workflows.mjs) are never edited; a behaviour change ships as a new frozen version or in non-frozen infrastructure.
 - Migrations are append-only; never edit a merged migration. New SQL goes in ONE new file with the number your order assigns.

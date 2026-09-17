@@ -62,6 +62,31 @@ async function gate(t) {
   return true;
 }
 
+// #809 — the `intent_key` projection widen lives in ITS OWN migration (0203), a separate
+// frontier from 0189's above: a slice-frontier CI leg can be pinned AT 0189, before 0203 lands,
+// and the cell below must skip cleanly there rather than red on a projection that has not yet
+// gained the field.
+const INTENT_KEY_STEM = "list_accounting_work_intent_key$";
+let _intentKeyReady = null;
+async function intentKeyReady() {
+  if (_intentKeyReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [INTENT_KEY_STEM]);
+      _intentKeyReady = r.rows[0].n > 0;
+    } catch {
+      _intentKeyReady = false;
+    }
+  }
+  return _intentKeyReady;
+}
+
+async function gateIntentKey(t) {
+  if (await intentKeyReady()) return false;
+  t.skip(`#809 intent_key projection absent (no ${INTENT_KEY_STEM} migration applied)`);
+  return true;
+}
+
 let world = null;
 before(async () => {
   world = await buildWorkWorld();
@@ -839,4 +864,49 @@ test("wl.27 the firm-wide keyset has an index over its own ORDER BY tuple, and t
     `…bound by the caller's own firm, not by the table; plan was ${rendered}`);
   assert.doesNotMatch(rendered, /"Node Type":"Sort"/,
     `…and with no sort node at all; plan was ${rendered}`);
+});
+
+// ===========================================================================================
+// wl.28 — #809: THE PROJECTION CARRIES intent_key, ON BOTH DOORS.
+//
+// The plan authority picker labels a candidate by its basis memo falling back to its intent key.
+// Until 0203 this door carried neither `basis` nor `intent_key`, which is the whole reason a
+// SECOND, direct-table reader of clara.accounting_work existed beside it. The field is NOT NULL
+// on the table (0178), so a row that reached a caller without it would be a type lie rather than
+// an absent value — asserted here as a non-empty string, on the list row AND on the addressed
+// row 0189 calls "the SAME projection".
+// ===========================================================================================
+test("wl.28 every list row carries a non-empty intent_key, and the addressed-row door carries the same field", async (t) => {
+  if (await gate(t)) return;
+  if (await gateIntentKey(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl28");
+  const admitted = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "intent key" }) });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  assert.ok(page.rows.length > 0, "wl.28 vacuity control: the client has at least one Work");
+  for (const r of page.rows) {
+    assert.equal(typeof r.intent_key, "string",
+      `wl.28 intent_key must be a string on every row — got ${JSON.stringify(r.intent_key)}`);
+    assert.ok(r.intent_key.length > 0, "wl.28 …and never an empty one: the column is NOT NULL");
+  }
+
+  // IT IS THE COLUMN, not a re-derivation. Read the row's own intent_key as root and compare.
+  const canonical = (await rootQuery(
+    "select intent_key from clara.accounting_work where id = $1", [admitted.work_id])).rows[0].intent_key;
+  const listed = page.rows.find((r) => r.id === admitted.work_id);
+  assert.ok(listed, "wl.28 the admitted Work is on the page");
+  assert.equal(listed.intent_key, canonical, "wl.28 the projected value IS clara.accounting_work.intent_key");
+
+  // …AND THE ADDRESSED ROW AGREES. 0189's own comment calls this door "the SAME projection
+  // clara.list_accounting_work emits" and wl.13 asserts it; a widen that moved one and not the
+  // other would have made both statements false on the first field either one gained, and would
+  // have typed a non-nullable field on a row that lacks it (apps/web/lib/work/work-list.ts types
+  // BOTH doors' answers as one WorkListRow).
+  const addressed = await getWorkRow(BOB(), admitted.work_id);
+  assert.equal(addressed.intent_key, canonical, "wl.28 the addressed-row door carries the same intent_key");
+
+  // The BASIS OBJECT is still not projected by either: #809 is a one-field widen, and 0189's
+  // "a list of operations is not a ledger" stands.
+  assert.equal("basis" in listed, false, "wl.28 no basis object joined the list row");
+  assert.equal("basis" in addressed, false, "wl.28 …nor the addressed row");
 });

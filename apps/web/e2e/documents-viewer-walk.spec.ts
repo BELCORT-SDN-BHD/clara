@@ -23,7 +23,7 @@
 import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { DOCS } from "./documents-viewer-mock.mjs";
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${DOCS.clientId}/documents`;
 
@@ -38,19 +38,6 @@ function selectDocument(page: Page, filename: RegExp) {
   return page.getByRole("button", { name: filename }).click();
 }
 
-/** The same sign-in every other walk uses (firm-navigation-walk.spec.ts:3-10) —
- *  the app's OWN login, not a side channel: `serve-built.mjs` keys
- *  `caller_context` on the email, so the persona is chosen by signing in as
- *  them. */
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // #614: "Firm navigation" retired with the bespoke `<aside>` it named —
-  // the sidebar's one landmark is now "Main" (lib/navigation/tree.ts).
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
-}
 
 test.describe("documents viewer — the MIME gate, the page overlay and the CSP", () => {
   test("C-07: an XML document is never OFFERED a tab — the reason stands, and no browsing context appears", async ({ page, context }) => {

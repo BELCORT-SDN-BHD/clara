@@ -635,16 +635,12 @@ function AddressedWorkCallout({
  *  a keyset pager knows whether there is a next page and nothing about how many there are, and
  *  appendix D row 42 is explicit — "Never infer a total from the current page".
  *
- *  MEASURED LIMIT OF THE VENDORED PRIMITIVE, recorded rather than hidden: `PaginationLink`
- *  (components/ui/pagination.tsx, shipped by the shadcn CLI for `base-nova`) renders its anchor
- *  through Base UI's Button with `nativeButton={false}`, which stamps `role="button"` onto the
- *  `<a href>`. So these controls navigate like links — the href is real, middle-click and
- *  open-in-new-tab work, and `onClick`'s `preventDefault` only upgrades that to a client-side
- *  push — while assistive tech announces them as buttons. That name/role mismatch belongs to the
- *  registry file, not to this composition, so it is FILED AS A FOLLOW-UP ISSUE against
- *  `components/ui/pagination.tsx` at integration rather than patched here into a primitive other
- *  tickets also install; `e2e/work-list-walk.spec.ts` asserts the role as it actually is so the
- *  gap stays visible instead of being asserted away. */
+ *  CORRECTED SEMANTICS (#771): `PaginationLink` (components/ui/pagination.tsx) now branches on
+ *  `href` — with one it renders a plain `<a href>` (no `role`, no `type`, no Base UI keyboard
+ *  layer), so these controls are real links: middle-click and open-in-new-tab work, Enter
+ *  activates them the way a browser activates a link, and `onClick`'s `preventDefault` upgrades
+ *  an ordinary click to a client-side push. Assistive tech announces them as links, matching how
+ *  they behave. `e2e/work-list-walk.spec.ts` asserts the link role directly. */
 function WorkListPager({
   hasPrevious,
   nextCursor,

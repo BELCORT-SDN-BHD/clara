@@ -55,6 +55,37 @@ export async function gateCodingLink(t) {
   return true;
 }
 
+// #821
+// THE OPENING LANE'S OWN FRONTIER. #821 widens the SAME two triggers to admit opening rows and
+// branches inside `clara._tf_source_binding_wall`, so a database carrying 0197 but not this
+// migration answers the OLD way — its cells and the structural census's new half must SKIP there
+// rather than red, exactly as the #718 cells skip below 0197.
+export const OPENING_WALL_STEM = "opening_balance_evidence_link_wall$";
+
+let _openingReady = null;
+export async function openingWallReady() {
+  if (_openingReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [OPENING_WALL_STEM]);
+      _openingReady = r.rows[0].n > 0;
+    } catch {
+      _openingReady = false;
+    }
+  }
+  return _openingReady;
+}
+
+/** `if (await gateOpeningWall(t)) return;` — the per-cell frontier gate, counted skip. */
+export async function gateOpeningWall(t) {
+  if (await openingWallReady()) return false;
+  markSkip();
+  t.skip(`#821 opening-lane evidence-link wall absent (no ${OPENING_WALL_STEM} migration applied)`);
+  return true;
+}
+// #821
+
 // ===========================================================================================
 // 2 · The DOCUMENT-CODING lane, driven through its own two human doors.
 //
@@ -135,9 +166,15 @@ export async function entryStatus(entry) {
 }
 
 /** The #718 objects, read off the catalog. */
+// #821 · `prosrc` joins the projection because the opening carve-out MOVED: 0197 excluded opening
+// rows in the trigger WHEN clauses, #821 admits them and branches inside the body, so the census
+// cell can only describe the live inventory if it can read both. The NAME LISTS are unchanged —
+// #821 mints no function and no trigger, and recreates the two coding-wall triggers under their
+// existing names so their precedence over t_je_immutable / t_period_wall is untouched.
+// #821
 export async function wallCatalog() {
   const fns = await rootQuery(
-    `select p.proname, r.rolname as owner, p.prosecdef,
+    `select p.proname, r.rolname as owner, p.prosecdef, p.prosrc,
             has_function_privilege('public', p.oid, 'execute') as public_exec
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        join pg_roles r on r.oid = p.proowner

@@ -189,6 +189,21 @@ test("631.bundle: the clara-work/v3 digest is pinned to a literal", () => {
     "a successor whose digest equalled its predecessor's would make a receipt unable to say which contract ran");
 });
 
+// #791 — the v2 digest had no literal pin of its own; only a not-equal check against v3. That
+// catches a collision with its successor, not a drift of v2's own value. Mirrors the v1/v3 shape:
+// regenerate ONLY as a deliberate act, beside a new _vN closure.
+const PINNED_DIGEST_V2 = "c8fd7670182dac5147f33b34e84e964b7a6d8c117e28eeda65533cd5047c6b9b";
+
+test("791.bundle: the clara-work/v2 digest is pinned to a literal", () => {
+  assert.equal(
+    v2bundle.CLARA_WORK_BUNDLE_V2_DIGEST,
+    PINNED_DIGEST_V2,
+    "the clara-work/v2 bundle digest moved — a bundle change ships as claraWork_v4, never as an edit",
+  );
+  const reference = createHash("sha256").update(v2bundle.CLARA_WORK_BUNDLE_V2_CANONICAL, "utf8").digest("hex");
+  assert.equal(v2bundle.CLARA_WORK_BUNDLE_V2_DIGEST, reference, "the module's own sha256 must equal Node's");
+});
+
 test("631.bundle: the v3 envelope names v3 ids, v3 text and the SAME finite budgets", () => {
   const parsed = JSON.parse(v3.CLARA_WORK_BUNDLE_V3_CANONICAL);
   assert.deepEqual(Object.keys(parsed), ["budgets", "id", "instructions", "skills", "tools"], "canonicalJson key-sorts");

@@ -110,7 +110,15 @@ const ACCOUNTS = [
 ];
 
 /** The authority picker's rows — `clara.accounting_work` of THIS client, which is what
- *  `listAuthorityCandidates` reads and what `clara.create_accrual_adjustment` resolves. */
+ *  `clara.create_accrual_adjustment` resolves `p_authority_ref` against.
+ *
+ *  #809 MOVED THIS READ. The picker used to be a direct `/rest/v1/accounting_work` GET
+ *  (`lib/plans/api.ts`'s deleted `listAuthorityCandidates`); migration 0203 widened
+ *  `clara.list_accounting_work`'s projection with `intent_key`, the last field the direct read was
+ *  kept for, and `listPlanAuthorityWork` now walks the DOOR. So this lane answers the door for its
+ *  own client (`accrualWorkListPage` below, spliced into `serve-built.mjs`'s single
+ *  `list_accounting_work` reader) and keeps the table handler for the DETAIL read
+ *  (`lib/work/reads.ts`'s `getAccountingWork`), which has no door. */
 const AUTHORITY_WORK = [
   {
     id: ACC.authorityWorkId,
@@ -119,6 +127,48 @@ const AUTHORITY_WORK = [
     basis: { memo: "Standing instruction: accrue the monthly office rent" },
   },
 ];
+
+/** The SAME instruction, in the door's own row shape — one fixture fact, two projections, exactly
+ *  as the database has it. `answerWorkListPage`'s contract: null means "not this lane's client",
+ *  so the next lane (and finally the honest empty page) answers. */
+export function accrualWorkListPage(body) {
+  const client = body.p_client ?? null;
+  if (client !== ACC.clientId) return null;
+  return {
+    status: 200,
+    body: {
+      rows: AUTHORITY_WORK.map((w) => ({
+        id: w.id,
+        client_id: ACC.clientId,
+        client_name: "C8 ACCRUALS FIXTURE",
+        purpose: "journal_entry",
+        status: "completed",
+        initiator: "11111111-1111-1111-1111-111111111111",
+        initiated_by: "11111111-1111-1111-1111-111111111111",
+        initiator_role: "bookkeeper",
+        basis_origin: "user_direct",
+        intent_key: w.intent_key,
+        memo: w.basis.memo,
+        posting_date: null,
+        currency: "MYR",
+        source_ref_count: 0,
+        current_task_id: null,
+        entry_id: null,
+        receipt_id: null,
+        error_code: null,
+        error_reason: null,
+        attempts: 1,
+        current_run_status: null,
+        pending_question_id: null,
+        pending_question_version: null,
+        created_at: w.created_at,
+        updated_at: w.created_at,
+      })),
+      next_cursor: null,
+      truncated: false,
+    },
+  };
+}
 
 const PLAN = () => ({
   plan_id: ACC.planId,
@@ -330,8 +380,10 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
     return true;
   }
 
-  // The authority picker's own read — `clara.accounting_work` of this client. Scoped by
-  // `client_id` and falls through otherwise, so the Work-list lane's own rows are untouched.
+  // The DETAIL read's own route — `clara.accounting_work` of this client. Scoped by `client_id`
+  // and falls through otherwise, so the Work-list lane's own rows are untouched. The authority
+  // PICKER no longer arrives here (#809, see AUTHORITY_WORK's header); this stays for
+  // `getAccountingWork`, which has no door.
   if (request.method === "GET" && path === "/rest/v1/accounting_work") {
     if (clientFilter === `eq.${ACC.otherClientId}`) {
       sendJson(response, 200, [], cors);

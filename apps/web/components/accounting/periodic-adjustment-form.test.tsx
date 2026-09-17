@@ -463,7 +463,8 @@ test("choosing an advance account derives its leg, and BOTH particulars reach th
     const body = sent[0]!;
     assert.equal(body.adjustment.advanceAccountCode, "1150", "the particular is recorded");
     assert.equal("advanceCents" in body.adjustment, false,
-      "a derivation input only, exactly settledCents's own N3 rule — never a wire key");
+      "a derivation input only — the staff-advance register owns the allocation (issue 797, Out "
+      + "of scope), so unlike settledCents it never becomes a wire key");
     // THE THREE DERIVED LINES — expense Dr the whole amount, liability Cr the remainder, the
     // advance account Cr what is carried on it. The SAME split the chat lane's own
     // `basisFromAdjustment` produces for the same particulars.

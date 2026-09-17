@@ -2175,6 +2175,21 @@ cell("c3.53 folded set equality -- the money-store body roster is closed; open_c
     "get_own_checkout_progress",
     "list_unconsumed_registration_payments",
     "open_checkout_intent", "record_stripe_event",
+    // #776 WIDENED BY 0206_operator_support_applicant_name.sql, deliberately and with the reason
+    // recorded here — the same reviewed act `_operator_support_cases` and
+    // `get_own_checkout_progress` above were. `clara.resolve_operator_support_applicants(uuid[])`
+    // is the operator console's applicant-NAME read. It mentions `clara.stripe_events` in ONE
+    // place only: the scope predicate that decides whether a given uuid is a support-case
+    // applicant at all (`0206:176-177`, `exists (select 1 from clara.stripe_events e where
+    // e.applicant = u.id)`) — an EXISTS over the applicant column; no amount, no payment row, and
+    // no `firm_registration_payments` reference at all (`0206:146-149` states why that table needs
+    // no arm of its own: a payment's applicant is its registration's). It projects `display_name`
+    // and nothing else, writes nothing, consumes no payment, is STABLE SECURITY DEFINER behind the
+    // CLR04 operator-firm floor byte-copied from `approve_firm_registration`, is revoked from
+    // PUBLIC and granted to `clara_authenticated` alone (`0206 §T` re-reads all of that). So it
+    // widens the ROSTER without widening the money surface — and naming it here is the reviewed
+    // act this census exists to force, exactly as 0163's comment demands.
+    "resolve_operator_support_applicants",
   ], "this text census only answers whether a NEW function started mentioning the money tables "
     + "-- it is not the anti-regression guard for open_checkout_intent (the SHA pin above is)");
   const retired = await rootQuery(

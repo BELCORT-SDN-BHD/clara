@@ -1,4 +1,6 @@
-import { test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+import { SIDEBAR_BREAKPOINT } from "../hooks/use-mobile";
 
 /**
  * Shared e2e instrument: the ONE spelling of "this page can be trusted to
@@ -187,4 +189,78 @@ export function cellBudgetMs(work: { polls?: number; scans?: number; signIns?: n
  */
 export function grantCellBudget(ms: number): void {
   test.setTimeout(test.info().timeout + ms);
+}
+
+/**
+ * THE ONE SPELLING OF "sign in", covering the four call shapes twenty-four spec files and one
+ * inline copy used to each define for themselves (#804).
+ *
+ * WHY ONE HELPER. Every copy waited on the same post-login landmark
+ * (`navigation[name=Main]`) but most fell through to Playwright's own default `expect` timeout
+ * (5 s, `playwright.config.ts` sets no override) rather than naming a bound of their own — a few
+ * files had independently bumped it to 20 s or 30 s after being burned by exactly this wait
+ * timing out on a freshly started server (`operator-support-walk.spec.ts`, `plans-walk.spec.ts`,
+ * `work-question-walk.spec.ts`'s own comments record the same measured cause). Tuning that one
+ * wait from one recorded measurement, in one place, replaces twenty-five independent guesses.
+ *
+ * THE MEASUREMENT (README.md's own `CELL_BUDGET` table carries the full note): a genuinely cold
+ * sign-in (`reuseExistingServer: false`, the very first cell of a fresh run, after #804's own
+ * readiness gate in `global-setup.ts` has already absorbed the server's boot cost) measured
+ * ~960 ms round trip against ~500 ms once warm — comfortably inside `CELL_BUDGET.signIn`'s
+ * existing 20 s, which this wait's own timeout below matches rather than replaces with a new
+ * number. The measurement CONFIRMS the 20 s figure; it does not correct it.
+ *
+ * FOUR SHAPES, ONE IMPLEMENTATION. `signIn(page)` and `signIn(page, email)` sign in and land on
+ * `/` (no `next` param); `signInTo(page, destination)` and `signInTo(page, destination, email)`
+ * carry the `next` query param home-board-walk's, shell-migration-walk's and the rest's own copies
+ * used, and assert the caller's destination rather than a bare `/`.
+ *
+ * THE LANDMARK WAIT IS NOT UNCONDITIONAL, AND IT IS NOT ON `signInTo` AT ALL. Of the twenty-five
+ * retired copies only three waited on the post-login `navigation[name=Main]` landmark; the other
+ * twenty-two asserted the destination URL and stopped there. Making it unconditional was measured
+ * to be WRONG, not stronger: the sidebar that owns that landmark renders as a CLOSED Sheet below
+ * `SIDEBAR_BREAKPOINT` (`hooks/use-mobile.ts`, 768 — imported here rather than respelled so the two
+ * cannot drift), so every cell that sets a narrow viewport before signing in waited the full 20 s
+ * for an element that is absent by design — nine cells across `operator-support-walk`,
+ * `personal-settings-walk` and `work-list-walk` went red exactly that way on the 2026-09-16 full
+ * local browser suite, plus `responsive-shell-walk`'s and `shell-migration-walk`'s narrow
+ * `signInTo` cells before them.
+ *
+ * So: `signIn` keeps the landmark proof (its callers' own cells are overwhelmingly desktop-width,
+ * and it is a strictly stronger assertion there than a bare URL match) but SKIPS it when the
+ * viewport the caller set is narrower than the breakpoint, where the landmark is not part of the
+ * rendered shell; `signInTo` asserts the caller's destination only, exactly as its retired copies
+ * did. A cell that wants the narrow shell's own navigation asserts the Sheet it actually opens —
+ * `responsive-shell-walk.spec.ts` already does.
+ */
+const SIGN_IN_PASSWORD = "Clara-e2e-password-1!";
+const DEFAULT_SIGN_IN_EMAIL = "owner@example.test";
+/** Matches `CELL_BUDGET.signIn` — see this function's own header for the measurement that
+ *  confirms rather than corrects it. */
+const POST_LOGIN_NAV_TIMEOUT_MS = CELL_BUDGET.signIn;
+
+export async function signInTo(page: Page, destination: string, email: string = DEFAULT_SIGN_IN_EMAIL): Promise<void> {
+  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
+  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
+  // and one that never signs in gets none.
+  grantCellBudget(CELL_BUDGET.signIn);
+  await page.goto(destination === "/" ? "/login" : `/login?next=${encodeURIComponent(destination)}`);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(SIGN_IN_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+    { timeout: POST_LOGIN_NAV_TIMEOUT_MS },
+  );
+}
+
+export async function signIn(page: Page, email: string = DEFAULT_SIGN_IN_EMAIL): Promise<void> {
+  await signInTo(page, "/", email);
+  // #614: the sidebar's ONE navigation landmark, over the one registry (lib/navigation/tree.ts)
+  // — "Firm navigation" retired with the bespoke `<aside>` it named. Below the breakpoint that
+  // landmark lives inside a CLOSED Sheet and is absent by design, so waiting on it there is a
+  // wrong assertion rather than a stronger one — see this function's own header.
+  const viewportWidth = page.viewportSize()?.width;
+  if (viewportWidth !== undefined && viewportWidth < SIDEBAR_BREAKPOINT) return;
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: POST_LOGIN_NAV_TIMEOUT_MS });
 }

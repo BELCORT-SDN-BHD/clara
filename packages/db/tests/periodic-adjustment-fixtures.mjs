@@ -56,6 +56,38 @@ export async function gatePa(t) {
   return true;
 }
 
+// ---- #797 ------------------------------------------------------------------------------
+/** #797's OWN frontier, keyed on ITS migration's stable stem. Separate from `PA_STEM` because the
+ *  settlement particular is a LATER file: a database pinned at 0194 must run every #643 cell and
+ *  skip only the ones below. */
+export const PA_SETTLED_STEM = "payroll_settled_cents$";
+
+let _settledReady = null;
+export async function paSettledLaneReady() {
+  if (_settledReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [PA_SETTLED_STEM]);
+      _settledReady = r.rows[0].n > 0;
+    } catch {
+      _settledReady = false;
+    }
+  }
+  return _settledReady;
+}
+
+/** `if (await gatePaSettled(t)) return;` — the same house shape, with a COUNTED skip. */
+export async function gatePaSettled(t) {
+  if (!(await paLaneReady()) || !(await paSettledLaneReady())) {
+    markSkip();
+    t.skip(`#797 settled_cents particular absent (no ${PA_SETTLED_STEM} migration applied)`);
+    return true;
+  }
+  return false;
+}
+// ---- #797 ends -------------------------------------------------------------------------
+
 // ===========================================================================================
 // 2 · The closed vocabulary. Every assertion in this battery uses THESE strings.
 // ===========================================================================================
@@ -203,6 +235,7 @@ export function payrollObligation({
   advanceAccountCode = null,
   paymentAccountCode = null,
   amountCents = 130000,
+  settledCents = null,                                                        // #797
   currency = "MYR",
   particularsSource = "Payroll summary for August 2026 supplied by the client's HR officer",
   instruction = "Book the employer EPF contribution for August 2026 as an accrued liability.",
@@ -222,6 +255,10 @@ export function payrollObligation({
   };
   if (advanceAccountCode !== null) out.advance_account_code = advanceAccountCode;
   if (paymentAccountCode !== null) out.payment_account_code = paymentAccountCode;
+  // #797 · the OPTIONAL settlement split. `null` means the key is ABSENT — the shape the frozen
+  // chat closure produces — which is a different fact from an explicit `0` and is why this is a
+  // presence flag rather than a defaulted figure.
+  if (settledCents !== null) out.settled_cents = settledCents;
   if (correctsAdjustmentId !== null) out.corrects_adjustment_id = correctsAdjustmentId;
   for (const key of omit) delete out[key];
   return out;

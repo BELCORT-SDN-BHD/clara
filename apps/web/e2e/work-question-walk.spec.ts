@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan } from "./helpers";
+import { settleForScan, signInTo } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -29,18 +29,6 @@ import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CLIENT = JOURNAL_WORK.clientId;
 const COMPOSER_URL = `/clients/${CLIENT}/accounting/journal/new`;
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // 20s, not the 5s default: sign-in is a real round trip through the mock auth server plus a
-  // server-rendered redirect, and on a loaded box (this lane runs beside a Postgres migration
-  // chain and a Node test suite) the default is a stopwatch on the machine rather than a claim
-  // about the product. Every ASSERTION below keeps its own tighter bound.
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 20_000 });
-}
 
 /** Drive the fixture's state machine through the app's OWN proxy — the only door the browser has
  *  to the runtime, so the call carries the real session and passes the real firm-scope guard. */

@@ -510,7 +510,7 @@ export function PeriodicAdjustmentFormView({
 
   // `hasHint` FOR THE SAME REASON `textProps` TAKES IT: a control whose hint is not in its
   // `aria-describedby` has a hint only sighted readers get. Three money controls on this form carry
-  // one (the explicit movement, the supplied amount, and the settled figure's derivation note).
+  // one (the explicit movement, the supplied amount, and the settled figure's note).
   const moneyProps = (field: AdjustmentFieldId, hasHint = false) => ({
     id: adjustmentFieldId(field),
     ref: (node: FieldNode | null) => registerField(field, node),
@@ -652,12 +652,13 @@ export function PeriodicAdjustmentFormView({
                 accounts={accounts} props={textProps("paymentAccountCode", true)} onPick={(v) => set("paymentAccountCode", v)}
                 placeholder={t("accountNone")} />
             </Field>
-            {/* LABELLED AS A DERIVATION, because that is what it is (adversarial migration-safety
-                review, N3). 0194 has no `settled_cents` particular and the route has no such key:
-                this figure exists to shape the third and fourth DERIVED lines, and the split is
-                recoverable from the posted entry rather than from the record of the particulars.
-                Saying so on the control is the honest alternative to letting a preparer assume the
-                history will state it back. */}
+            {/* #797 · LABELLED AS A RECORDED PARTICULAR, because that is what it now is. Migration
+                0212 made `settled_cents` an optional typed particular: the basis check shapes it,
+                the relationship check holds the posted payment leg to exactly this figure, and the
+                canonical builder emits it, so `clara.periodic_adjustments.basis` — and therefore
+                the history row — STATES the split instead of leaving a reader to recover it from
+                the posted entry's lines. The control says so, and a server refusal naming
+                `adjustment.settled_cents` now lands here (`fieldForAdjustmentPath`). */}
             <Field field="settledCents" errorText={errorFor("settledCents")} label={t("settledCents")}
               hint={t("settledCentsHelp")}>
               <MoneyInput {...moneyProps("settledCents", true)} cents={draft.settledCents} mode="unsigned"
@@ -673,9 +674,10 @@ export function PeriodicAdjustmentFormView({
               out loud rather than discovered at approve.
 
               THE AMOUNT CARRIED ON IT IS NOT the same kind of gap: `advanceCents` shapes the
-              derived advance leg below exactly as `settledCents` shapes the payment leg, so a
-              preparer who names this account sees the split it produces instead of meeting 0194's
-              `advance_leg` refusal at admission. The control is offered only once an account is
+              derived advance leg below, so a preparer who names this account sees the split it
+              produces instead of meeting 0194's `advance_leg` refusal at admission. It stays a
+              DERIVATION INPUT rather than a particular — the asymmetry with `settledCents` that
+              #797 drew deliberately, because the register above owns the allocation. The control is offered only once an account is
               chosen — an amount with no account to carry it could never be posted. */}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field field="advanceAccountCode" errorText={errorFor("advanceAccountCode")} label={t("advanceAccountCode")} hint={t("advanceAccountHelp")}>

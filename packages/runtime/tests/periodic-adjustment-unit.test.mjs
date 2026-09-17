@@ -87,6 +87,34 @@ test("643.route: a payroll payload keeps its optional legs only when they are gi
   assert.equal(withLegs.ok, true);
   assert.equal(withLegs.adjustment.advance_account_code, "1185");
   assert.equal(withLegs.adjustment.payment_account_code, "1150");
+  // #797 · THE SETTLEMENT SPLIT IS NOW A PARTICULAR, so the route must carry it: a web control
+  // cannot be server-refusable while the door that talks to the database drops the key. It is
+  // OPTIONAL in the same sense the account codes are — absent means absent, which is the shape
+  // migration 0212 keeps admitting for the frozen chat closure's sake.
+  assert.equal("settled_cents" in withLegs.adjustment, false,
+    "settledCents not supplied stays ABSENT — never defaulted to 0, which is a different fact");
+});
+
+test("797.route: settledCents maps to settled_cents, unsigned, and is omitted when not supplied", () => {
+  const out = toDbAdjustment("payroll_obligation", {
+    ...PAYROLL, paymentAccountCode: "1150", settledCents: 30000,
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.adjustment.settled_cents, 30000);
+  assert.equal("settledCents" in out.adjustment, false, "the DATABASE's spelling, and only that one");
+
+  // An explicit 0 is a REAL value (0212 refuses it beside a named payment account by name), so it
+  // must reach the database rather than be dropped as falsy.
+  const zero = toDbAdjustment("payroll_obligation", {
+    ...PAYROLL, paymentAccountCode: "1150", settledCents: 0,
+  });
+  assert.equal(zero.ok, true);
+  assert.equal(zero.adjustment.settled_cents, 0);
+
+  // A stock payload has no such key at all — the purpose decides the shape.
+  const stock = toDbAdjustment("periodic_stock_adjustment", { ...STOCK, settledCents: 30000 });
+  assert.equal(stock.ok, true);
+  assert.equal("settled_cents" in stock.adjustment, false);
 });
 
 test("643.route: every refusal names its field under the ONE `adjustment.` prefix, in the DB's spelling", () => {
@@ -107,6 +135,11 @@ test("643.route: every refusal names its field under the ONE `adjustment.` prefi
     [["periodic_stock_adjustment", { ...STOCK, openingCents: "400000" }], "adjustment.opening_cents", "integer_cents"],
     [["periodic_stock_adjustment", { ...STOCK, openingCents: -1 }], "adjustment.opening_cents", "nonnegative_integer_cents"],
     [["payroll_obligation", { ...PAYROLL, amountCents: -100 }], "adjustment.amount_cents", "nonnegative_integer_cents"],
+    // #797 — the settlement split is unsigned like every other non-stock figure, and a value that
+    // is not an integer JSON number is refused here rather than coerced into a figure nobody typed.
+    [["payroll_obligation", { ...PAYROLL, settledCents: -1 }], "adjustment.settled_cents", "nonnegative_integer_cents"],
+    [["payroll_obligation", { ...PAYROLL, settledCents: 300.5 }], "adjustment.settled_cents", "integer_cents"],
+    [["payroll_obligation", { ...PAYROLL, settledCents: "30000" }], "adjustment.settled_cents", "integer_cents"],
     [["payroll_obligation", { ...PAYROLL, particularsSource: "" }], "adjustment.particulars_source", "present"],
     [["periodic_stock_adjustment", { ...STOCK, correctsAdjustmentId: "not-a-uuid" }], "adjustment.corrects_adjustment_id", "uuid"],
   ];

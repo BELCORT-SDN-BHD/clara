@@ -28,8 +28,10 @@ import {
   occurrenceExtras, primaryEntryFor, postPlanWork,
   todayInPlanZone, todayDayOfMonth, shiftMonths, requestPlanCatchUp,
   CLR, PLAN_REASON, PLAN_KIND, TZ, PLAN_MODEL,
+  humanQuery, assertPair,   // #787 — the human correction door, and the (code, reason) pair assertion
 } from "./accounting-plans-fixtures.mjs";
 import { getPool } from "./rig-helpers.mjs";
+import { markSkip } from "./wave-a-helpers.mjs";   // #787 — a counted skip for the new cell's two gates
 
 let world = null;
 let today = null;
@@ -881,3 +883,145 @@ test("p640.occ.history — list_accounting_plan_occurrences links the Work and i
     "a paused plan still SHOWS its schedule and says it is not being admitted — an empty preview would read as 'nothing is scheduled', a different fact");
   assert.equal(paused.occurrences.length, 3);
 });
+
+// #787 ---------------------------------------------------------------------------------------
+// ===========================================================================================
+// p640.occ.reversal_post_liveness — THE POST-TIME WALL (#787).
+//
+// The residual #640 measured and accepted: the admission wall re-reads the accrual's liveness,
+// and NOTHING reads it again between that admission and the reversal's posting. A human who
+// reverses the accrual inside that gap used to leave the plan's reversal free to post a SECOND
+// reversal of one accrual — balances standing for nothing.
+//
+// Migration 0204's fifth recut of `clara._record_journal_entry_core` re-asks 0193's OWN question
+// (`clara._plan_primary_entry`, approved AND not reversed) at the write, under the same
+// "no committed receipt for this Work" condition every other refusal arm in that body carries.
+//
+// THREE LEGS IN ONE CELL, because they are one claim about one door:
+//   1 · the reviewer's exact sequence REFUSES, and the ledger keeps exactly one reversal;
+//   2 · the CONTROL leg — a reversal whose entry is still live posts through the same door;
+//   3 · the REPLAY leg — a reversal Work that already holds a committed receipt gets its stored
+//       result back even after the accrual is reversed, because a replay is not a new post.
+// ===========================================================================================
+
+/** 0204's STABLE STEM. The cell asserts a wall that only exists from that migration on, so on a
+ *  database pinned earlier it SKIPS (counted) rather than failing. */
+const REVERSAL_LIVENESS_STEM = "record_journal_entry_core_reversal_liveness$";
+let _revLiveReady = null;
+async function reversalLivenessReady() {
+  if (_revLiveReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [REVERSAL_LIVENESS_STEM]);
+      _revLiveReady = r.rows[0].n > 0;
+    } catch {
+      _revLiveReady = false;
+    }
+  }
+  return _revLiveReady;
+}
+async function gateReversalLiveness(t) {
+  if (await reversalLivenessReady()) return false;
+  markSkip();
+  t.skip(`#787 post-time reversal-liveness wall absent (no ${REVERSAL_LIVENESS_STEM} migration applied)`);
+  return true;
+}
+
+/** Post a plan occurrence's Work by hand, returning the wake verb's own answer (or letting it
+ *  raise) — `postPlanWork` settles the Work and swallows the answer, and these legs assert on
+ *  the REFUSAL and on the `replayed` flag. */
+async function attemptPost({ work, client, author }) {
+  const w = await workRow(work);
+  if (w.status === "queued") await claimWorkRun({ task: w.current_task_id, runId: opk("p787-post") });
+  const obo = await mintClientObo({ firm: FIRM_A(), obo: author, client });
+  return wakeRecordJournalEntry(obo.secret, {
+    client, work, logicalOpId: w.logical_op_id, basis: w.basis,
+  });
+}
+
+/** The human's own correction door (0009), which is what opens the gap this cell closes. */
+async function humanReverse(entry, tag) {
+  const r = await humanQuery(ALICE(),
+    "select clara.reverse_entry(p_entry => $1::uuid, p_reason => $2::text,"
+    + " p_op_key => $3::text) as result",
+    [entry, `#787 ${tag}: posted in error`, opk(`p787-${tag}`)]);
+  return r.rows[0].result;
+}
+
+/** A reversing plan whose accrual has POSTED and whose reversal is ADMITTED — the state the
+ *  reviewer's sequence starts from. Returns the accrual entry and the reversal occurrence. */
+async function admittedReversal(tag) {
+  const p = await plan({
+    tag, kind: PLAN_KIND.reversing, monthsBack: 2,
+    dayRule: "last_day_of_month", dayOfMonth: null, purpose: `#787 ${tag} accrual`,
+  });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const accrual = (await occurrenceRows(p.plan_id))[0];
+  assert.equal(accrual.leg, "primary", `${tag}: the accrual goes first`);
+  const entry = await postPlanWork({
+    work: accrual.work_id, client: p.client, author: p.author, firm: FIRM_A() });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const reversal = (await occurrenceRows(p.plan_id)).find((x) => x.leg === "reversal");
+  assert.ok(reversal?.work_id, `${tag}: the reversal is admitted once its accrual has posted`);
+  assert.equal(
+    (await occurrenceExtras(p.plan_id)).find((x) => x.leg === "reversal").reverses_entry_id, entry,
+    `${tag}: and it NAMES the entry it undoes`);
+  return { p, accrual, entry, reversal };
+}
+
+test("p640.occ.reversal_post_liveness — a human reversing the accrual between admission and posting makes the plan's reversal REFUSE at the write (one reversal on the books, no receipt), while a live accrual still posts and a committed replay is unaffected", async (t) => {
+  if (await gatePlans(t)) return;
+  if (await gateReversalLiveness(t)) return;
+  if (await isMonthEnd()) {
+    markSkip();
+    t.skip("p640.occ.reversal_post_liveness needs a day that is not the month end, so this month's accrual is still in the future");
+    return;
+  }
+
+  // ---- LEG 1 · THE REVIEWER'S SEQUENCE -----------------------------------------------------
+  const a = await admittedReversal("occrevpost");
+  const mirror = await humanReverse(a.entry, "gap");
+  assert.equal(mirror.status, "approved",
+    `the rig's accrual is below the firm's high-stakes ceiling, so the human's mirror is auto-approved and the accrual is marked reversed (got ${JSON.stringify(mirror)})`);
+  assert.equal(await primaryEntryFor(a.p.plan_id, a.accrual.due_date), null,
+    "the accrual is no longer a live entry to reverse — which is the fact the admission wall read and nothing re-read");
+
+  const { detail } = await assertPair(CLR.badRequest, PLAN_REASON.reversalBeforePrimary,
+    () => attemptPost({ work: a.reversal.work_id, client: a.p.client, author: a.p.author }),
+    "p640.occ.reversal_post_liveness");
+  assert.equal(detail.primary_state, "entry_not_live",
+    "the admission side's own words for this fact, not a second name for it");
+  assert.equal(detail.entry_id, a.entry, "and the detail names the entry that is no longer live");
+
+  const receipts = await receiptsForWork(a.reversal.work_id);
+  assert.equal(receipts.filter((r) => r.outcome === "committed").length, 0,
+    "the plan's reversal Work holds NO committed operation receipt: it posted nothing");
+  const reversing = await rootQuery(
+    "select count(*)::int as n from clara.journal_entries where reversal_of=$1", [a.entry]);
+  assert.equal(reversing.rows[0].n, 1,
+    "exactly ONE reversing entry stands against the accrual — the human's mirror, and no phantom beside it");
+  const ledger = await rootQuery(
+    "select count(*)::int as n from clara.journal_entries where client_id=$1", [a.p.client]);
+  assert.equal(ledger.rows[0].n, 2,
+    "the client's ledger holds the accrual and the human's reversal, and nothing else");
+
+  // ---- LEG 2 · THE CONTROL LEG, and ---- LEG 3 · THE REPLAY ---------------------------------
+  const b = await admittedReversal("occrevlive");
+  const posted = await attemptPost({ work: b.reversal.work_id, client: b.p.client, author: b.p.author });
+  assert.equal(posted.replayed, false, "a reversal whose named entry is STILL live posts through the same door");
+  assert.ok(posted.entry_id, "…and names the entry it wrote");
+  assert.equal((await receiptsForWork(b.reversal.work_id)).filter((r) => r.outcome === "committed").length, 1,
+    "with exactly one committed receipt");
+
+  // The accrual is reversed by a human AFTER the plan's reversal committed. A replay of that
+  // committed step must still answer with the stored result: the new arm sits under the same
+  // no-committed-receipt condition every other refusal arm in this body carries.
+  const late = await humanReverse(b.entry, "late");
+  assert.equal(late.status, "approved");
+  const replay = await attemptPost({ work: b.reversal.work_id, client: b.p.client, author: b.p.author });
+  assert.equal(replay.replayed, true,
+    "a run that committed and died re-executes its step and gets its ORIGINAL receipt back, never the new refusal");
+  assert.equal(replay.entry_id, posted.entry_id, "…the same entry, not a second one");
+});
+// #787 ---------------------------------------------------------------------------------------

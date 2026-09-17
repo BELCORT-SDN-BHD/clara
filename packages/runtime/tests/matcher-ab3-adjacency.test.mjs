@@ -82,7 +82,7 @@ test(
     // The document has a clean OCR hard-identifier hit for client[0].
     const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
     const ocrExt = await seedExtraction({ firm, document }); // engine_kind='ocr'
-    await seedRegion({ firm, extraction: ocrExt, fieldPath: "tin", textContent: tinOcr });
+    await seedRegion({ firm, extraction: ocrExt, fieldPath: "invoice.vendor_tin", textContent: tinOcr });
     await addClientIdentifier(owner, { client: clients[0], kind: "tin", value: tinOcr });
 
     // ADVERSARIAL PLANT: an invoice_facts extraction carrying a DIFFERENT client's
@@ -90,7 +90,7 @@ test(
     // hard-identifier set ambiguous (two clients) and force an abstain; the AB-3
     // pin must exclude it so lane-1 still sees a single, clean client.
     const factsExt = await seedInvoiceFactsExtraction({ firm, document });
-    await seedRegion({ firm, extraction: factsExt, fieldPath: "tin", textContent: tinFacts });
+    await seedRegion({ firm, extraction: factsExt, fieldPath: "invoice.vendor_tin", textContent: tinFacts });
     await addClientIdentifier(owner, { client: clients[1], kind: "tin", value: tinFacts });
 
     const res = await asMatcherLogin((c) =>

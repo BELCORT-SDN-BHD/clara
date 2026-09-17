@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 
 /**
  * FS-2's 裁-86 e2e leg for #461 — the entry group's pre-auth faces, walked in
@@ -144,10 +144,9 @@ test("login keyboard pass: tab order is Email -> Password -> Sign in, with a vis
 // see — a real sign-in submission, through the real proxy redirect, back
 // through `login-form.tsx`'s `resolveSameOriginPath` read.
 test("sign in from a `next=` with a query string lands on that exact destination, with its saved view selected (#698)", async ({ page }) => {
-  await page.goto("/login?next=%2Fwork%3Fview%3Dneeds-you");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  // #804 — the shared helper (helpers.ts) replaces this file's own one-shot copy; it builds the
+  // SAME `/login?next=` URL and asserts the SAME exact destination, plus the post-login landmark.
+  await signInTo(page, "/work?view=needs-you");
 
   // THE EXACT DESTINATION — proving the round trip, not merely "somewhere
   // under /work".

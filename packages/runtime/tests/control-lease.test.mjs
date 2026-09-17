@@ -17,12 +17,20 @@ after(async () => {
 });
 
 /** A chat task parked (awaiting_input) with a pending clarify. Generates a UNIQUE
- *  hook token (the column is globally unique) and returns it for assertions. */
-async function parkedClarify(label) {
+ *  hook token (the column is globally unique) and returns it for assertions.
+ *
+ *  `runId` BINDS AN ENGINE RUN onto the task, which is what a real parked turn always has (the
+ *  workflow's own claim step CAS-binds itself before it can ever reach `open_interruption`). It is
+ *  opt-in rather than default because binding one also arms `processCancellations`' abort path, and
+ *  the cancel cells below are deliberately written against a task with no run to abort. #764 is why
+ *  it exists at all: `deliverInterruptions` now asks the ENGINE before it treats a HookNotFound on a
+ *  CHAT row as delivery, and a fixture with no run gives it nothing to ask. */
+async function parkedClarify(label, { runId = null } = {}) {
   const { owner, firm, client } = await rig.buildFirm(label);
   const session = await rig.createChatSession({ author: owner, client });
   const { task_id } = await rig.beginChatTurn({ session, author: owner, turnKey: "t" });
-  await rig.driveTask(task_id, ["running", "awaiting_input"]);
+  if (runId) await rig.bindRun(task_id, runId);
+  await rig.driveTask(task_id, runId ? ["awaiting_input"] : ["running", "awaiting_input"]);
   const hookTok = `clarify:${label}-${randomUUID()}`;
   const interId = await rig.insertInterruption({ task: task_id, hookToken: hookTok });
   return { task_id, interId, firm, hookTok };
@@ -75,8 +83,17 @@ test("deliver: claim_crash_before_resume retries only AFTER the lease expires", 
   assert.ok((await rig.readInterruption(interId)).delivered_at, "delivered_at now set");
 });
 
+// #764 NARROWED WHAT THIS CELL PROVES, AND THE NARROWING IS THE POINT. S4-P1d's bare inference —
+// "the hook is single-shot, so a NotFound must mean a prior attempt delivered it" — is true after a
+// crashed resume and FALSE for a hook that was simply lost, and the chat lane can no longer tell
+// the two apart by assumption. So the crash this cell models now names its WITNESS: the run that
+// consumed the answer went on to finish, which is what `resumeAlreadyLanded` reads. The property
+// under test is unchanged (exactly-once-or-provably-already-done); what changed is that "provably"
+// is now proved. A chat row with NO such witness rests at `hook_missing` instead —
+// `control-chat-clarify.test.mjs` owns that half.
 test("deliver: resume-success-then-crash, retry gets HookNotFound → marked delivered (single-shot, S4-P1d)", { skip }, async () => {
-  const { interId, firm } = await parkedClarify("ctl3");
+  const runId = `run-ctl3-${randomUUID()}`;
+  const { interId, firm } = await parkedClarify("ctl3", { runId });
   await markAnswered(interId, { text: "x" });
 
   // Stateful single-shot fake: the FIRST resume succeeds (the engine hook is consumed);
@@ -104,8 +121,9 @@ test("deliver: resume-success-then-crash, retry gets HookNotFound → marked del
   );
 
   // The retry re-leases it; the single-shot hook is gone → HookNotFound → marked delivered.
-  const retry = await rig.asRuntime((c) => deliverInterruptions(c, { resumeHook: statefulResume, onlyFirm: firm }));
-  assert.equal(retry.delivered, 1, "retry marked delivered on HookNotFound");
+  const retry = await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: statefulResume, getRun: () => ({ status: Promise.resolve("completed") }), onlyFirm: firm }));
+  assert.equal(retry.delivered, 1, "retry marked delivered on HookNotFound the ENGINE accounts for");
   assert.equal(resumed.length, 1, "the hook was NEVER resumed twice (exactly-once-or-provably-done)");
   assert.ok((await rig.readInterruption(interId)).delivered_at, "delivered_at stamped after the retry");
 });

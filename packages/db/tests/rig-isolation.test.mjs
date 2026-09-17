@@ -646,9 +646,28 @@ test("T19 poison-role: reset + re-migrate normalizes a poisoned clara role", asy
   }
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
-  await rootQuery("alter role clara_agent_ro bypassrls");
-  await reset({ log: () => {} });
-  await migrate({ log: () => {} });
+  // #773
+  // THE BARE ENV FLAG IS NOT ENOUGH. `reset()` delegates to lib/guard.mjs's
+  // assertDestructiveAllowed(), whose targetIsEphemeral() authorises ANY loopback host
+  // REGARDLESS of database name (its own doc comment says so) — so `clara_631`-shaped shared
+  // rigs were wiped by workers who set the flags out of habit. guardedReset() applies the
+  // database-NAME allowlist dropDatabase() already applies one file over, reusing the guard
+  // module's exported EPHEMERAL_DB by import, and REFUSES before reset() is ever entered.
+  // The shared guard module itself is untouched. Proof: tests/rig-reset-guard.test.mjs.
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
+  // /#773
+  // #773 — POISON ONLY WHAT WE CAN UNPOISON. The guard above is allowed to REFUSE, and on a
+  // non-disposable database it does; poisoning the role first would then leave a BYPASSRLS
+  // clara_agent_ro behind on a shared cluster, which is a worse state than the one this cell
+  // exists to prove recoverable. So the flag is set inside a try whose finally restores it, and
+  // the restore is a no-op on the passing path (the reset+re-migrate has already normalized it).
+  try {
+    await rootQuery("alter role clara_agent_ro bypassrls");
+    await guardedReset(reset, { log: () => {} });
+    await migrate({ log: () => {} });
+  } finally {
+    await rootQuery("alter role clara_agent_ro nobypassrls");
+  }
   const r = await rootQuery("select rolbypassrls, rolsuper, rolcanlogin from pg_roles where rolname = 'clara_agent_ro'");
   assert.equal(r.rows[0].rolbypassrls, false, "re-migrate normalized NOBYPASSRLS");
   assert.equal(r.rows[0].rolsuper, false, "clara_agent_ro is NOSUPERUSER");

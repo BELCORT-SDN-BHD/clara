@@ -90,10 +90,12 @@ export type AdjustmentDraft = {
   expenseAccountCode: string;
   liabilityAccountCode: string;
   advanceAccountCode: string;
-  // THE ADVANCE LEG'S OWN `settled_cents`. A DERIVATION INPUT ONLY, never a stored particular —
-  // this module's N3 rule, restated: it shapes the derived advance leg (`derivedLines`) and
-  // nothing else, and it is deliberately absent from `ADJUSTMENT_FIELDS` below for the identical
-  // reason `settledCents` is.
+  // THE ADVANCE LEG'S OWN ALLOCATION. A DERIVATION INPUT ONLY, never a stored particular: it
+  // shapes the derived advance leg (`derivedLines`) and nothing else, and it is deliberately
+  // absent from `ADJUSTMENT_FIELDS` below. #797 made `settledCents` a real particular and left
+  // this one alone ON PURPOSE — the staff-advance register (`clara.staff_advance_accounts`,
+  // `book_staff_advance_application`) stays the authority on what a movement on its accounts
+  // requires, so an allocation this form invented would be a settlement fact nobody stated.
   advanceCents: number;
   paymentAccountCode: string;
   amountCents: number;
@@ -481,6 +483,11 @@ export function toAdjustmentWire(
   };
   if (draft.advanceAccountCode.trim() !== "") out.advanceAccountCode = draft.advanceAccountCode.trim();
   if (draft.paymentAccountCode.trim() !== "") out.paymentAccountCode = draft.paymentAccountCode.trim();
+  // #797 · THE STATED SETTLEMENT SPLIT, omitted when nothing was settled — exactly as an unfilled
+  // payment account is. Migration 0212 refuses an explicit `0` beside a named payment account by
+  // name, and a draft with neither has nothing to state, so sending `0` would be asking the
+  // database to refuse something this module already caught.
+  if (draft.settledCents > 0) out.settledCents = draft.settledCents;
   return out;
 }
 
@@ -513,28 +520,30 @@ export function toAdjustmentWire(
  * `_assert_adjustment_relationships` field paths — measured, both halves, rather than mirrored from
  * this form's own control list.
  *
- * `settledCents` AND `advanceCents` ARE BOTH DELIBERATELY ABSENT (adversarial migration-safety
- * review, N3 — the second pair closes #643's own named gap: the chat lane's
- * `packages/runtime/lib/periodic-adjustment-basis.ts` keeps `advance_cents` out of the stored
- * `p_adjustment` for the identical reason). Each is a CLIENT-SIDE DERIVATION INPUT and nothing
- * else: `settledCents` shapes the third line, `advanceCents` the third or fourth
- * (`derivedLines`), and neither the route nor 0194 has a `settled_cents` or `advance_cents`
- * particular, so no server refusal can ever carry either path. Listing either would be a claim
- * with nothing behind it, and `fieldForAdjustmentPath` would be promising to focus a control for a
- * refusal that cannot arrive. Their LOCAL validation still names them — `validateAdjustmentDraft`
- * raises `settlementNeedsAccount` / `paymentLegUnused` / `overSettled` against `settledCents` and
- * `advanceLegUnused` / `overAdvanced` against `advanceCents`, and `firstInvalidAdjustmentField`
- * focuses whichever fires — because that is this form's own rule about its own control, which is a
- * different thing from a wire path. `advanceAccountCode` stays IN this Set: unlike the cents, it
- * IS a 0194 particular (`_assert_adjustment_basis` reads it, `_assert_adjustment_relationships`
- * checks the staff-advance enrolment), so a server refusal naming it must still land on this
- * control.
+ * `settledCents` IS IN THIS SET SINCE #797, and `advanceCents` is still out — an asymmetry that is
+ * deliberate rather than an oversight. Migration 0212 made `settled_cents` an OPTIONAL typed
+ * particular of `clara._assert_adjustment_basis` and the route's `ADJUSTMENT_CENTS` table carries
+ * the key, so refusals really do arrive on this path (`over_settled` and `payment_leg_unused` on
+ * the figure, `settlement_needs_account` on the account) and a mapper that dropped them would leave
+ * a server refusal landing on nothing. `advanceCents` has no such particular in either half: the
+ * staff-advance allocation stays a client-side derivation input, because
+ * `clara.staff_advance_accounts` and `book_staff_advance_application` are the authority on what a
+ * movement on those accounts requires and a split this form invented would be a settlement fact
+ * nobody stated (#797, Out of scope). Its LOCAL validation still names it — `validateAdjustmentDraft`
+ * raises `advanceLegUnused` / `overAdvanced` against `advanceCents` and `firstInvalidAdjustmentField`
+ * focuses it — because that is this form's own rule about its own control, which is a different
+ * thing from a wire path. `advanceAccountCode` stays IN this Set for the original reason: it IS a
+ * 0194 particular (`_assert_adjustment_basis` reads it, `_assert_adjustment_relationships` checks
+ * the staff-advance enrolment), so a server refusal naming it must still land on this control.
  */
 const ADJUSTMENT_FIELDS = new Set<string>([
   "periodStart", "periodEnd", "instruction", "method", "openingCents", "closingCents",
   "adjustmentCents", "countedAt", "countReference", "inventoryAccountCode", "costAccountCode",
   "obligationKind", "expenseAccountCode", "liabilityAccountCode", "advanceAccountCode",
   "paymentAccountCode", "amountCents", "particularsSource",
+  // #797
+  "settledCents",
+  // #797 ends
 ]);
 
 export function fieldForAdjustmentPath(path: string | null): AdjustmentFieldId | null {
@@ -542,4 +551,58 @@ export function fieldForAdjustmentPath(path: string | null): AdjustmentFieldId |
   const key = path.slice("adjustment.".length);
   const camel = key.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
   return ADJUSTMENT_FIELDS.has(camel) ? (camel as AdjustmentFieldId) : null;
+}
+
+/**
+ * #799 — A COMMIT-TIME REFUSAL'S OWN 1-BASED LINE ORDINAL, mapped onto the adjustment field that
+ * produced it. Sibling to `fieldForAdjustmentPath` above, not a replacement for it: that function
+ * resolves an ADMISSION-TIME wire path (`adjustment.<key>`) straight to a control; this one
+ * resolves a COMMIT-TIME refusal, which — because it is raised by the shared chart-of-accounts
+ * check at `clara._record_journal_entry_core` step 6, against the Work's already-admitted
+ * `basis.lines`, not against the form — names only the bare ordinal (`lines[N].account_code`).
+ *
+ * THE ORDINAL IS 1-BASED, migration 0178's own indexing (`with ordinality`, `lines[i + 1]` in the
+ * runtime, pinned by `journal-basis.test.ts`'s `lines[1]` as the FIRST row) — `lines[0]` never
+ * occurs, so ordinal `0` and anything below it resolve to `null` here exactly like an ordinal past
+ * the basis.
+ *
+ * THE LEG ORDER IS THE ONE `derivedLines` ABOVE AND THE CHAT LANE'S `basisFromAdjustment`
+ * (`packages/runtime/lib/periodic-adjustment-basis.ts`) BOTH PRODUCE: stock adjustment is
+ * inventory (1) then cost (2) — always exactly two legs, so any other ordinal is `null`. Obligation
+ * is expense (1), liability (2), then the advance leg, then the settlement leg — BOTH CONDITIONAL,
+ * appended only when their amount is positive and their account is named, so an ordinal alone
+ * cannot tell a third leg apart from a fourth. `basisLines` — the Work's OWN `basis.lines`, already
+ * admitted — is the discriminator instead of re-deriving anything: `derivedLines`'s own
+ * `description`s for those two legs ("staff advance", "settled") are read straight off the line at
+ * that ordinal, so a basis carrying only the advance leg, only the settlement leg, or both all
+ * resolve correctly with no guessing about which one is missing.
+ *
+ * `null` for a `journal_entry` Work (no adjustment fields to translate into), for an ordinal the
+ * basis does not reach, for an absent/empty `basisLines`, or for any shape this function does not
+ * recognise — the generic line reference is the correct, honest fallback in every one of those
+ * cases, exactly as `fieldForAdjustmentPath`'s own `null` case documents.
+ */
+export function fieldForAdjustmentLineOrdinal(
+  ordinal: number,
+  purpose: string,
+  basisLines: ReadonlyArray<{ description?: string | null }> | null | undefined,
+): AdjustmentFieldId | null {
+  if (!Number.isInteger(ordinal) || ordinal < 1) return null;
+
+  if (purpose === "periodic_stock_adjustment") {
+    if (ordinal === 1) return "inventoryAccountCode";
+    if (ordinal === 2) return "costAccountCode";
+    return null;
+  }
+
+  if (purpose === "payroll_obligation") {
+    if (ordinal === 1) return "expenseAccountCode";
+    if (ordinal === 2) return "liabilityAccountCode";
+    const line = basisLines?.[ordinal - 1];
+    if (line?.description === "staff advance") return "advanceAccountCode";
+    if (line?.description === "settled") return "paymentAccountCode";
+    return null;
+  }
+
+  return null;
 }

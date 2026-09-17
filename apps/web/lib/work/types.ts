@@ -157,6 +157,13 @@ export type AccountingWorkRow = {
   error: WorkError | null;
   created_at: string | null;
   updated_at: string | null;
+  // #721 — THE SUPERSESSION PAIR. `supersedes` is the Work this one was restated FROM;
+  // `superseded_by` is the Work that replaced this one. Both are set once by
+  // `clara.restate_accounting_work` and are null on every Work that was never restated — which is
+  // almost all of them. Optional for the same reason `initiated_by` is: a database below the 0200
+  // frontier does not have the columns.
+  supersedes?: string | null;
+  superseded_by?: string | null;
 };
 
 // `initiated_by` IS in this projection, and it carries a DEPLOY-ORDER OBLIGATION with it: PostgREST
@@ -168,7 +175,10 @@ export type AccountingWorkRow = {
 // a read that fails loudly.
 export const ACCOUNTING_WORK_SELECT =
   "id,firm_id,client_id,purpose,status,initiator,initiated_by,initiator_role,intent_key,logical_op_id," +
-  "basis,basis_digest,basis_origin,source_refs,current_task_id,bundle,result,error,created_at,updated_at";
+  "basis,basis_digest,basis_origin,source_refs,current_task_id,bundle,result,error,created_at," +
+  // #721 — the supersession pair carries the SAME deploy-order obligation the note above states
+  // for `initiated_by`: PostgREST refuses the whole select when one named column does not exist.
+  "updated_at,supersedes,superseded_by";
 
 /** #630 — WHO ENTERED THE FIGURES, for display. `initiated_by` until a takeover moves `initiator`
  *  away from it; falls back to `initiator` for a row read from a database below the 0184 frontier,
@@ -220,9 +230,17 @@ export type WorkTaskRow = {
   error_code: string | null;
   created_at: string | null;
   updated_at: string | null;
+  // #750 — WHO PRESSED CANCEL, AND WHEN. `clara.cancel_accounting_work` (0184 §G) records the
+  // author on the RUN rather than on the Work (`agent_tasks.cancelled_by/cancelled_at`), and the
+  // masked view this page already reads republishes both columns, so the Cancelled banner names
+  // the person without a new door and without a second read. Optional, for the same reason
+  // `initiated_by` is: a database below the frontier that published them would otherwise take
+  // the WHOLE PostgREST select down.
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
 };
 
-export const WORK_TASK_SELECT = "id,status,error_code,created_at,updated_at";
+export const WORK_TASK_SELECT = "id,status,error_code,created_at,updated_at,cancelled_by,cancelled_at";
 
 export function isTerminalWorkStatus(status: string): boolean {
   return TERMINAL_WORK_STATUSES.has(status);

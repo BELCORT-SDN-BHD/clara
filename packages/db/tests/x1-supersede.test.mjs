@@ -78,6 +78,12 @@ function witnessEnvelope(channel, totalRaw) {
 
 /** Claim + settle the llm_witness task the verb just queued, with a CHANGED total, and
  *  return the id. */
+// #777/#778: the re-extraction's own OCR line region. The path must CONFORM to 0191's grammar
+// and be DISTINCT within its extraction — a cell may settle two re-extractions against one OCR
+// extraction, and (extraction_id, field_path) is unique from 0201 onwards.
+let reextractionLine = 100;
+const nextReextractionPath = () => `pages.1.lines.${reextractionLine += 1}`;
+
 async function settleReextraction(document, cents) {
   const witnessTasks = await laneTasks(document, "llm_witness");
   const queued = witnessTasks.filter((t) => t.status === "queued").sort((a, b) => b.version_n - a.version_n)[0];
@@ -94,9 +100,9 @@ async function settleReextraction(document, cents) {
   // NEW region on the SAME pinned OCR extraction, never an UPDATE of the original quote.
   const newRegion = (await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'reextraction_total',$3,1.0)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$4,$3,1.0)
      returning id`,
-    [firm, ocrExtraction, raw])).rows[0];
+    [firm, ocrExtraction, raw, nextReextractionPath()])).rows[0];
   const idx = (await rootQuery(
     `select idx from (select id, (row_number() over (order by id))::int as idx
        from clara.document_regions where extraction_id=$1) q where q.id=$2`,
@@ -262,9 +268,9 @@ test("[F-A1 PR-3 B1, cross-model review] persist_witness_facts' facts_rotated bl
   const raw = rm(153000);
   const newRegion = (await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'reextraction_total',$3,1.0)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$4,$3,1.0)
      returning id`,
-    [firmId, ocrExtraction, raw])).rows[0];
+    [firmId, ocrExtraction, raw, nextReextractionPath()])).rows[0];
   const idx = (await rootQuery(
     `select idx from (select id, (row_number() over (order by id))::int as idx
        from clara.document_regions where extraction_id=$1) q where q.id=$2`,

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 
 /**
  * P6-3 · THE BROWSER LEG (裁-86). Every claim below needs the three things the
@@ -31,13 +31,6 @@ const FACES = [
   ["client work", `/clients/${CLIENT_A}/work`],
 ] as const;
 
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 /**
  * Navigate, then WAIT FOR THE ENTRANCE TRANSITION TO FINISH before measuring.

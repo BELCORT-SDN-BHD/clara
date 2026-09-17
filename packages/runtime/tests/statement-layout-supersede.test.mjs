@@ -56,8 +56,8 @@ test("a doc_classify verdict does NOT starve reader-1: since 0089 it never super
   const ocr = await seedExtraction({
     firm, document, engineId: "azure-di:prebuilt-layout:2024-11-30", engineKind: "ocr",
   });
-  await seedRegion({ firm, extraction: ocr, fieldPath: "line", textContent: "BEGINNING BALANCE 0.00" });
-  await seedRegion({ firm, extraction: ocr, fieldPath: "line", textContent: "ENDING BALANCE 0.00" });
+  await seedRegion({ firm, extraction: ocr, fieldPath: "pages.1.lines.0", textContent: "BEGINNING BALANCE 0.00" });
+  await seedRegion({ firm, extraction: ocr, fieldPath: "pages.1.lines.1", textContent: "ENDING BALANCE 0.00" });
 
   // 2. Then the classifier verdicts land — the REAL trigger fires on each insert. Since
   //    0089 (kind-scoped supersede) a doc_classify verdict touches ONLY its own kind:
@@ -82,14 +82,14 @@ test("a genuine later re-OCR DOES replace the geometry: newest ocr wins, the old
   const ocr1 = await seedExtraction({
     firm, document, engineId: "azure-di:prebuilt-layout:2024-11-30", engineKind: "ocr", versionN: 1,
   });
-  await seedRegion({ firm, extraction: ocr1, fieldPath: "line", textContent: "OLD READ" });
+  await seedRegion({ firm, extraction: ocr1, fieldPath: "pages.1.lines.0", textContent: "OLD READ" });
   // A classify lands between the two reads (the realistic order for a re-OCR after a
   // mis-read) — it must not confuse the kind-honest pick either way.
   await seedExtraction({ firm, document, engineId: "clara-classify-llm:v1", engineKind: "doc_classify" });
   const ocr2 = await seedExtraction({
     firm, document, engineId: "azure-di:prebuilt-layout:2024-11-30", engineKind: "ocr", versionN: 2,
   });
-  await seedRegion({ firm, extraction: ocr2, fieldPath: "line", textContent: "NEW READ" });
+  await seedRegion({ firm, extraction: ocr2, fieldPath: "pages.1.lines.0", textContent: "NEW READ" });
 
   const regions = await rig.asRoot((client) => readStatementLayoutRegions(client, { documentId: document, firmId: firm }));
   assert.equal(regions.length, 1, "exactly the newest ocr read's regions");

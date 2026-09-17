@@ -56,7 +56,7 @@ import { listCoaAccounts } from "@/lib/journals/api";
 // header says why it lives there rather than in `lib/work/reads.ts`, and the amortisation plan this
 // form configures cites authority through the SAME `clara.accounting_work` reference the plans form
 // does — a second reader would be a second answer to one question.
-import { listAuthorityCandidates } from "@/lib/plans/api";
+import { listPlanAuthorityWork } from "@/lib/plans/api";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
@@ -87,7 +87,7 @@ export function PrepaymentForm({
 
   const accounts = useAsyncRead(() => listCoaAccounts(sessionTokenAccessor, clientId));
   const attention = useAsyncRead(() => loadPrepaymentAttention(clientId));
-  const instructions = useAsyncRead(() => listAuthorityCandidates(clientId));
+  const instructions = useAsyncRead(() => listPlanAuthorityWork(clientId));
 
   const [draft, setDraft] = useState<PrepaymentDraft>({
     ...EMPTY_PREPAYMENT_DRAFT,
@@ -299,7 +299,7 @@ export function PrepaymentForm({
               <option value="">{t("authorityChoose")}</option>
               {(instructions.data?.rows ?? []).map((w) => (
                 <option key={w.id} value={w.id}>
-                  {w.basis?.memo ?? w.intent_key} — {String(w.created_at ?? "").slice(0, 10)}
+                  {w.memo ?? w.intent_key} — {String(w.created_at ?? "").slice(0, 10)}
                 </option>
               ))}
             </NativeSelect>

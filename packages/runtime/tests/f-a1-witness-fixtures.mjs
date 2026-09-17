@@ -416,8 +416,11 @@ export async function liveWitnessConsent(ownerSub, { firm, client }) {
   return { evidence, consentId, activation: activated.rows[0].r };
 }
 
-/** The whole situation in one call. `regions` is a list of {label, text} — the labels become
- *  `ocr_<label>` field paths so a cell can look an idx up by name. */
+/** The whole situation in one call. `regions` is a list of {label, text} — the labels stay the
+ *  keys of `regionIds` / `idxOf` / `spatialOrder`, so a cell still looks an idx up by name, while
+ *  the STORED field_path is `pages.1.lines.<i>` (#777): a conforming path under 0191's grammar
+ *  (clara._assert_field_path), one distinct line index per seeded region, so nothing this fixture
+ *  writes can leave an out-of-grammar row behind or collide at (extraction_id, field_path). */
 export async function buildWitnessSituation(label, {
   consent = true, mime = "application/pdf", pageCount = 1,
   regions = [], ocr = true, engineId = rigEngineId(),
@@ -437,7 +440,9 @@ export async function buildWitnessSituation(label, {
     // random with respect to this layout — which is the whole point: a cell can then tell
     // READING ORDER (this) apart from IDX ORDER (the DB's) instead of watching them coincide.
     ids[r.label] = await seedOcrRegion({
-      firm, extraction: ocrId, fieldPath: `ocr_${r.label}`, textContent: r.text,
+      // #777: the LABEL keys the returned maps; the stored path is the producer's own
+      // `pages.1.lines.<i>` shape, distinct per region within this extraction.
+      firm, extraction: ocrId, fieldPath: `pages.1.lines.${i}`, textContent: r.text,
       locator: { page: 1, polygon: [0, i * 10, 5, i * 10, 5, i * 10 + 5, 0, i * 10 + 5] },
     });
     spatialOrder.push(r.label);

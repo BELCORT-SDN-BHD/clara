@@ -59,6 +59,33 @@ export async function gateQuestion(t) {
   return true;
 }
 
+// #721 ---------------------------------------------------------------------------------------
+/** The #721 migration's STABLE STEM — its OWN frontier-tolerant cohort, one frontier above #629. */
+export const RESTATE_STEM = "work_restate_supersede$";
+
+let _restateReady = null;
+export async function restateLaneReady() {
+  if (_restateReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [RESTATE_STEM]);
+      _restateReady = r.rows[0].n > 0;
+    } catch {
+      _restateReady = false;
+    }
+  }
+  return _restateReady;
+}
+
+/** `if (await gateRestate(t)) return;` */
+export async function gateRestate(t) {
+  if (await restateLaneReady()) return false;
+  markSkip();
+  t.skip(`#721 restate lane absent (no ${RESTATE_STEM} migration applied)`);
+  return true;
+}
+// #721 ---------------------------------------------------------------------------------------
+
 // ===========================================================================================
 // 2 · The closed vocabulary. Every assertion in this battery uses THESE strings.
 // ===========================================================================================

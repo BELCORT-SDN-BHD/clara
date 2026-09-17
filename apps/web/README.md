@@ -50,6 +50,8 @@ The browser reads allowed tables and views through [`lib/read.ts`](lib/read.ts) 
 
 The interface uses `next-intl` with a static English locale, semantic tokens from [`app/globals.css`](app/globals.css), local Source Sans 3 and Source Serif 4 assets, and shadcn/Base UI primitives. The beta is light-theme only.
 
+Some of those primitives carry owner-ruled fixes that a plain `shadcn add` would silently overwrite; add components through `pnpm ui:add` and read the review step in [`components/ui/README.md`](components/ui/README.md) before changing what it protects (#772).
+
 Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
 ## The document detail's three routed views (#646)

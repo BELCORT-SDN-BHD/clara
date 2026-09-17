@@ -419,7 +419,7 @@ test("the tool set wires the gate: read_document RECORDS the snapshot it showed,
 // as it was. Only the pin assertion moves, and v7 joins the policy (c) roster.
 // F-A2 PR-2 moved the pin to autoDraft_v9 (the agentic posting lane). This cell's CLAIM was
 // never "v8 is the newest" — it is "the pin is the newest, and every superseded body is still
-// exported" (Appendix A policy (c)). v8 therefore JOINS the policy-(c) list rather than the
+// exported" (ARCHITECTURE #workflow-versioning-and-rollback policy (c)). v8 therefore JOINS the policy-(c) list rather than the
 // assertion being deleted, which is the same trueing v7 and v6 got before it.
 // H-17 moved the pin to autoDraft_v10 (the exact native-unique constraint map). Same trueing as
 // before: v9 JOINS the policy-(c) list rather than the assertion being deleted.

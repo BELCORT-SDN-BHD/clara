@@ -325,7 +325,16 @@ async function seedEvidence(firm, document, cp, invoiceId,
   // ...and any ADDITIONAL registration regions the cell wants on the same document. The wall now
   // judges EVERY current-generation region rather than min(text_content), so the order these are
   // written in must not matter — the H-4 cells drive both sort orders through this one knob.
-  for (const extra of extraRegistrations) await region("invoice.vendor_registration", extra);
+  // #778: each EXTRA registration goes on its own sibling extraction of the same generation —
+  // two rows at one (extraction_id, field_path) are refused since 0201, while W18/W18c still judge
+  // every registration region of the current generation across extractions. Same law, same cells.
+  for (const extra of extraRegistrations) {
+    const sib = await siblingFactsExtraction(firm, document);
+    await rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,monetary_cents,engine_confidence)
+       values ($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.vendor_registration',$3,null,1.0)`,
+      [firm, sib, extra]);
+  }
   // C2's economic facts. A SHARED `economics` object across a window's three documents is
   // exactly "one invoice, three scans" — the A2d attack.
   const econ = economics ?? deriveEconomics(invoiceId);
@@ -410,19 +419,55 @@ export async function seedWindow(w, tag, {
  *  facts_extraction_id, which is inside the frozen derivation's content_hash, so the signer would
  *  refuse `proposal_drifted` and the cell would be measuring drift instead of the identity wall.
  *  Adding a region to the SAME generation changes exactly one fact — what the page claims to be. */
+/** #778 — A SECOND invoice_facts extraction of `document` IN THE SAME GENERATION (the same
+ *  version_n as the current one), carrying a distinct engine_id. Returns its id.
+ *
+ *  WHY IT EXISTS. clara.document_regions is UNIQUE on (extraction_id, field_path) since 0201, so a
+ *  document can no longer carry two `invoice.vendor_registration` rows on ONE extraction. The arms
+ *  that judge "every printed identifier" do NOT read one extraction: W18 (0154:1750-1774) and W18c
+ *  (0154:1825-1842) range over EVERY invoice_facts extraction of the document at max(version_n).
+ *  A sibling at the same version_n is therefore inside the "current generation" those arms judge,
+ *  which is exactly what the cells mean by "a document printing two identifiers" — the fixture
+ *  moves, the arm under test does not.
+ *
+ *  THE ID IS FORCED BELOW the current extraction's, and that is load-bearing.
+ *  clara._derive_vendor_binding_basis picks its ONE fx with `order by version_n desc, id desc
+ *  limit 1` (0154:1470-1476), so a sibling carrying a HIGHER uuid would become the derivation's
+ *  chosen extraction and move facts_extraction_id — the drift the S5b cell is written to avoid.
+ *  uuid btree order is byte order, which the canonical lowercase text form compares identically
+ *  under `<`. `extracted_at` is copied from the current row so nothing that reasons about the
+ *  generation's clock moves either. */
+export async function siblingFactsExtraction(firm, document) {
+  const cur = (await rootQuery(
+    `select id, version_n from clara.document_extractions
+      where document_id=$1 and engine_kind='invoice_facts' and status='done'
+      order by version_n desc, id desc limit 1`, [document])).rows[0];
+  if (!cur) {
+    throw new Error("siblingFactsExtraction: no current invoice_facts generation — fixture construction FAILED");
+  }
+  let id = randomUUID();
+  while (id >= cur.id) id = randomUUID();
+  await rootQuery(
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,
+        status,page_count,envelope,extracted_at)
+     select $1::uuid,$2::uuid,$3::uuid,$4::text,'invoice_facts',$5::int,'done',1,'{}'::jsonb,x.extracted_at
+       from clara.document_extractions x where x.id=$6::uuid`,
+    [id, firm, document, `clara-fixture:v1-sib-${id}`, cur.version_n, cur.id]);
+  return id;
+}
+
 export async function plantRegistrationRegion(firm, document, text) {
+  // #778: the planted region lands on a SIBLING extraction of the CURRENT generation rather than
+  // on the current extraction itself — one region per (extraction_id, field_path) since 0201, and
+  // the document already prints its own registration. Still the current generation, so W18's
+  // sign-time re-run sees it and facts_extraction_id does not move (see siblingFactsExtraction).
+  const extraction = await siblingFactsExtraction(firm, document);
   const r = await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
-            'invoice.vendor_registration', $3, 1.0
-       from clara.document_extractions x
-      where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
-      order by x.version_n desc, x.id desc limit 1
+     values ($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+             'invoice.vendor_registration',$3,1.0)
      returning id`,
-    [firm, document, text]);
-  if (r.rowCount === 0) {
-    throw new Error("plantRegistrationRegion: no current invoice_facts generation — fixture construction FAILED");
-  }
+    [firm, extraction, text]);
   return r.rows[0].id;
 }
 
