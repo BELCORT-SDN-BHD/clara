@@ -65,15 +65,19 @@ schedule that pays anything — the money left the bank before the schedule exis
 a synonym for "posted", which is a different fact and a different count.
 
 **Service period**:
-The stretch of calendar a prepayment buys, as stated on the DOCUMENT that evidences it, recorded by
-a named person with the grounds they gave. It is supersede-never-mutate at document grain — one
-live period per document — and it is human-stated by law: no agent path to it exists, because a
-period read off a document by a model is a model-generated value. A schedule derived from it keeps
-naming the exact row it rode, so a later correction supersedes that row without silently moving an
-allocation that has already begun posting.
-_Avoid_: An effective date range on a plan; a fiscal period; a term the product inferred from an
-invoice's own dates; treating a corrected term as something a revision re-derives — a re-derived
-allocation is a new schedule.
+The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a
+prepayment, the stretch of calendar the payment buys, as stated on the DOCUMENT that evidences it and
+recorded with the grounds the person gave. Where it was anchored to a filed document it is bound to
+that document's own term record rather than restated, and a disagreement between the two is refused
+rather than resolved. At document grain it is supersede-never-mutate — one live period per document
+— and it is human-stated by law: no agent path to it exists, because a period a model read off a
+document is a model-generated value and never enters the durable record. A schedule derived from it
+keeps naming the exact row it rode, so a later correction supersedes that row without silently moving
+an allocation that has already begun posting.
+_Avoid_: The posting date; the authority window; an effective date range on a plan; a fiscal period;
+an extracted or inferred period; a term the product derived from an invoice's own dates, a filename,
+a date range it saw, or a conversation it summarised; treating a corrected term as something a
+revision re-derives — a re-derived allocation is a new schedule.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
@@ -464,14 +468,6 @@ because that accrual was admitted — and a reversal the lane reached before the
 refused, with which of the three ways the accrual failed to stand behind it.
 _Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
 as a posted one.
-
-**Service period**:
-The span of time an accrued or prepaid cost belongs to, stated by an identified person. Where it was
-anchored to a filed document it is bound to that document's own term record rather than restated, and
-a disagreement between the two is refused rather than resolved. A period a model read off a document
-is NOT an anchored fact and never enters the durable record.
-_Avoid_: The posting date; the authority window; an extracted or inferred period; a term the product
-derived from a filename, a date range it saw, or a conversation it summarised.
 
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a

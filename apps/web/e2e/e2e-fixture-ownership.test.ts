@@ -72,8 +72,8 @@ const LANE_MOCKS = [
   "operator-support-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
-  "staff-expense-claim-mock.mjs",
   "prepayments-mock.mjs",
+  "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
@@ -1136,7 +1136,12 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // it as an opaque handle. If chat-parity's debt is ever paid by scoping that handler, #646's
   // own arm takes over and the walk is unchanged; that is why the correct move here was to
   // declare the share rather than delete either arm.
-  record_client_resolution: ["chat-parity-mock.mjs", "document-correction-mock.mjs"],
+  // WAVE INTEGRATION: #633 is the THIRD claimant of this same verb — its own comment block
+  // below says why — so the three arms are declared here as ONE row rather than as two
+  // rows one of which TypeScript would silently drop (TS1117).
+  record_client_resolution: [
+    "chat-parity-mock.mjs", "document-correction-mock.mjs", "documents-intake-mock.mjs",
+  ],
   // #643 x #634/#728 — `clara.list_spoken_for_documents` is the EVIDENCE CHOOSER's advisory read,
   // and #643's whole AC3 is that the periodic-adjustment form mounts the composer's own chooser
   // component, so of course the two lanes both answer it. Declared at WAVE-2 INTEGRATION rather
@@ -1164,7 +1169,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // — and returns false for anything that is not one of its own two documents, so it cannot
   // answer for the composer's walk. Declared as a share rather than left to collide: two lanes
   // on one verb is a fact this census exists to record.
-  record_client_resolution: ["chat-parity-mock.mjs", "documents-intake-mock.mjs"],
+  // (declared once, above, with all three claimants.)
   file_document: ["chat-parity-mock.mjs", "documents-intake-mock.mjs"],
   // #640 x #631 — `clara.get_work_plan_origin` is read by `<WorkPlanOriginRow>`, which #640 mounts
   // on the SHARED Work detail page, so every lane whose walk opens a Work detail now issues it.
