@@ -12,7 +12,7 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 ## In Progress
 
 - **Wave 2026-09-15 — DONE** (session `11d28f2d…`): landed (PR #860), delivery comments posted, 55 follow-ups filed (#861–#915), hosted release executed and recorded, hosted-evidence comments posted and the 29 tickets closed (twelve wave + seventeen of PR #838's riders batch incl. #764 and the already-closed #787; `awaiting-release` removed everywhere). One more follow-up filed from the ceremony itself: `dsn-pipe.mjs` pins the CA with a Windows path a WSL child cannot open (backup ran under a scratchpad wrapper). Every `rig*` cluster is dropped; `clara-wt\int` is the one worktree directory still on disk (file-locked by another process — delete by hand).
-- **Open smoke item:** the owner's first signed-in walk on the released combination — `/operator`, a Work's Activity tab (`p_work`), `/clients/<id>` work-pack tiles, `/clients/<id>/accruals`, `/clients/<id>/prepayments`, `/settings/knowledge`, `/settings/setup`, `/api/build-info` `git_sha` = `a296765c…`. Also watch the first hosted reconciler sweeps for #764's legacy arm (never met a real backlog row).
+- **Signed-in smoke walk DONE** 2026-09-17 15:42–15:50Z through the owner's Chrome (runbook § RESULTS step 8): build-info `git_sha` pairs, `/operator`, a Work's Activity tab, `/clients/<id>` work-pack tiles, accruals, prepayments, `/settings/knowledge`, `/settings/setup` all render. Watch the first hosted reconciler sweeps for #764's legacy arm (never met a real backlog row).
 
 ## Known Issues
 
@@ -23,7 +23,7 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 
 ## Next Steps
 
-1. The owner's signed-in smoke walk (above); then triage the 56 `needs-triage` follow-ups (#861–#915 + the dsn-pipe one).
+1. Triage the 56 `needs-triage` follow-ups (#861–#915 + #917).
 2. The owner returns to the #597 map: **#682** (verify the real accounting journey and runtime recovery on the released combination, incl. #820's cleanup, #810's census, #813's provider eval) → **#683** (final acceptance + blueprint sync, then close #612 and #597).
 4. When the lawyer-reviewed Terms/DPA wording arrives: publish v2 through `clara.publish_legal_document` (BELCORT owner) or a seed migration.
 5. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
