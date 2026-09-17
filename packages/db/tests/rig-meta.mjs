@@ -1954,6 +1954,36 @@ export const ACCOUNTING_PLANS_0193_COHORT = [
   ...ACCOUNTING_PLANS_0193_UNGRANTED_FNS,
 ];
 
+// #652 [0207, evidenced accrual and reversal adjustments] — its own cohort for the same "wholly
+// present or wholly absent" reason 0193's and 0194's carry.
+//
+//   the THREE human doors — clara_authenticated ONLY. The write is bookkeeper+ inside its own
+//   body and both reads are viewer+ and firm-predicated; clara_runtime, the agent role and both
+//   wake roles gain ZERO on any of them, because a human configuring an accrual has their own
+//   door with their own JWT.
+const ACCRUAL_ADJUSTMENTS_0207_HUMAN_FNS = [
+  "create_accrual_adjustment", "list_accrual_adjustments", "get_accrual_adjustment",
+];
+//   …and the ONE runtime verb: the OBO twin, clara_runtime ONLY — the same lane
+//   clara.admit_periodic_adjustment_work sits in (0194:1298-1314). It resolves its actor from an
+//   ARGUMENT, never from a JWT, so a chat-lane successor needs no migration of its own.
+const ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS = ["create_accrual_adjustment_for"];
+//   …and the UNGRANTED closure: the actor-explicit plan writer, the shared configuration tail, the
+//   particulars predicates, the derived-basis and canonical projections, the occurrence read and
+//   the two triggers. Listed so cohortFailures reports a half-applied 0207 rather than a silently
+//   narrower boundary.
+const ACCRUAL_ADJUSTMENTS_0207_UNGRANTED_FNS = [
+  "_accrual_plan_core", "_accrual_finish", "_accrual_occurrences", "_accrual_methods",
+  "_accrual_date", "_accrual_journal_basis", "_accrual_canonical",
+  "_assert_accrual_particulars", "_assert_accrual_term_window", "_assert_accrual_account",
+  "_assert_accrual_world",
+  "_tf_accrual_adjustment_append_only", "_tf_accrual_adjustment_term_congruent",
+];
+export const ACCRUAL_ADJUSTMENTS_0207_COHORT = [
+  ...ACCRUAL_ADJUSTMENTS_0207_HUMAN_FNS, ...ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS,
+  ...ACCRUAL_ADJUSTMENTS_0207_UNGRANTED_FNS,
+];
+
 // #631 [0195, model egress obeys current purpose authorisation + the redacted execution trace] —
 // the WORK-EGRESS lane, its own cohort for the same "wholly present or wholly absent" reason
 // 0178's and 0194's carry.
@@ -2335,6 +2365,10 @@ export const ALLOWED = {
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
+    // #652 [0207] the accrual configuration door and its two reads — see the block above.
+    // clara_authenticated ONLY; clara_runtime holds only the OBO twin, and the agent role and
+    // both wake roles gain ZERO.
+    ...ACCRUAL_ADJUSTMENTS_0207_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
     // #650 0199 the client home's Work attention band — see the block above. clara_authenticated
     // ONLY, bookkeeper-floored in its own body; clara_runtime, the agent role and both wake roles
@@ -2568,6 +2602,10 @@ export const ALLOWED = {
     // [#640, 0193] the leader's every-cycle plan due scan — clara_runtime ONLY, the same lane
     // clara.admit_journal_work sits in. The browser lane holds none of it.
     ...ACCOUNTING_PLANS_0193_RUNTIME_FNS,
+    // [#652, 0207] the accrual configuration door ON BEHALF OF a named human — clara_runtime
+    // ONLY, the clara.admit_periodic_adjustment_work shape. It takes its actor from an argument
+    // because a runtime connection carries no human JWT; the browser lane holds none of it.
+    ...ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -2758,6 +2796,12 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#638 0206 staff-expense-claim lane", STAFF_EXPENSE_CLAIMS_0206_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#639 0201 fixed-asset acquisition lane", FA_ACQUISITION_0201_COHORT, liveNames));
+  // #652 [0207] — bimodal like F-A6's: wholly present once 0207 applies, wholly absent before it,
+  // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
+  const accrualLive = ACCRUAL_ADJUSTMENTS_0207_COHORT.filter((n) => liveNames.has(n));
+  if (accrualLive.length !== 0) {
+    failures.push(...cohortFailures("#652 0207 accrual-adjustment lane", ACCRUAL_ADJUSTMENTS_0207_COHORT, liveNames));
+  }
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   failures.push(...cohortFailures("#650 0199 client work-pack read lane", CLIENT_WORK_PACK_0199_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened

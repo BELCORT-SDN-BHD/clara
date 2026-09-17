@@ -123,6 +123,10 @@ import { handleFixedAssetSupabase } from "./fixed-asset-mock.mjs";
 // argument at all (the firm comes from the caller's JWT) and the firm-home tile calls it on every
 // signed-in firm home. See that module's own header.
 import { handleFirmSetupSupabase } from "./firm-setup-mock.mjs";
+// #652's C8 accrual lane — the three accrual doors plus the four reads its create form makes.
+// Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb allow-list, so it
+// drains no other lane's request stream and can run anywhere in the chain below.
+import { handleAccrualSupabase } from "./accrual-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -672,6 +676,10 @@ async function handleSupabase(request, response, url) {
   // reason the two lanes above are — it answers `/rest/v1/clients` with an id-scoped row of
   // its own and must reach it.
   if (await handleFixedAssetSupabase(request, response, path, url, sendJson, cors)) return;
+  // #652's C8 lane. Position is not load-bearing for the same reason the C9 lane's is not: every
+  // branch is scoped to this lane's own client or accrual ids and falls through otherwise. It sits
+  // beside the plan lane because it answers `/rest/v1/clients` the same honest id-scoped way.
+  if (await handleAccrualSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {

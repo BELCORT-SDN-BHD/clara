@@ -129,6 +129,40 @@ listed and not counted (the second is the population the door already names thro
 `uncounted_completions`); a Work admitted and posted in the same week is in both. The board
 discloses this beside the number rather than implying the list is the tile's own population.
 
+[0207_accrual_adjustments.sql](migrations/0207_accrual_adjustments.sql) (#652) owes no
+consumer-first obligation and states why in its header: every object it adds is new, it recuts
+nothing, and it re-hashes the six 0193 plan-lane bodies it depends on in its own tail so a stray
+`create or replace` reds the migration rather than shipping. It rides `kind='reversing_journal'`
+rather than minting a plan kind or an `accounting_work` purpose — an accrual occurrence is admitted
+by `clara._plan_admit_occurrence` exactly as every other occurrence is, with `adjustment_basis`
+NULL, and its typed particulars live in `clara.accrual_adjustments`, keyed by `(plan_id, revision)`
+so the durable record behind a due event is the same one whether the configuration door or the
+runtime scan admitted it. Its one foreign reference without a composite key —
+`document_service_period_id` into 0140's `clara.document_service_periods`, which carries no
+`(id, firm_id)` unique — has its tenant and its document proven by
+`t_accrual_adjustments_term_congruent` instead, because adding a unique to a foreign table is
+outside a slice migration's remit and its tail asserts that relation's constraint count is
+unchanged against a value its own prestate MEASURED (never a transcribed literal, which would
+assert a property of the chain below it rather than of this file).
+
+Three of its rules are worth knowing before reading the doors. `effective_to` is
+NOT NULL and `ck_accrual_adjustments_window_in_term` requires the authority window to sit inside the
+stated service period, so every occurrence posts a date INSIDE the term its own journal line names —
+0193's `_plan_window_ceiling` already lifts an auto-reversing plan's ceiling to the reversal of
+`effective_to`, so an authority ending on its last accrual can still be undone. A third rule lives
+in the doors rather than in the relation: `clara._assert_accrual_schedule_yields` asks the plan
+lane's own date arithmetic (`clara._plan_due_events`, called and never recut) whether the schedule
+reaches one accrual date inside `[effective_from, effective_to]`, and refuses
+`accrual_schedule_yields_no_occurrence` when it does not — a term shorter than one period of its own
+schedule was otherwise accepted in full and could never post. It names the day rule, not the term:
+the same term with a day that falls inside it configures. The PLAN lane's own door still accepts a
+plan that reaches nothing; that relation is #640/#653's and this file only pins it. And the `method`
+CHECK admits exactly one selection rule (`stated_amount`), because exactly one is performed: the
+configuration freezes the stated amount into the plan revision's basis and
+`clara._plan_occurrence_basis` only moves the posting date. Three further rules were drafted and
+would each have posted the same cents; they are a successor residual, and widening that CHECK is the
+migration that must arrive with the lane that honours them.
+
 Rebuilding a target from the migration chain and restoring a dump are different operations.
 A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials
 afterward and probe every configured runtime lane. Existing platform roles can also collide
@@ -326,6 +360,13 @@ promotion loop joins one global `item_key` namespace with no scope discriminator
 `uq_onboarding_plans_one_open_firm` — a partial unique index on `(firm_id) where state='open' and
 scope_kind='firm'`, which is what makes `clara.claim_paid_firm`'s bare `select … into` replay arm
 single-row rather than silently first-row.
+
+At frontier 0207 the accrual lane adds four public names to that boundary:
+`create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
+`clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are
+attributed by `ACCRUAL_ADJUSTMENTS_0207_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs), whose
+cohort check is bimodal (wholly present once 0207 applies, wholly absent before it) because the
+`db-slice-frontiers` matrix runs this package against earlier frontiers.
 
 The census audits the public operation boundary, so a trigger below it is invisible to every
 label above. Read [#692](https://github.com/BELCORT-SDN-BHD/clara/issues/692) before adding the

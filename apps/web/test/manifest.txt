@@ -35,6 +35,8 @@
 components/accounting/journal-composer.test.tsx
 components/accounting/periodic-adjustment-form.test.tsx
 components/accounting/staff-expense-claim-form.test.tsx
+components/accruals/accrual-form.test.tsx
+components/accruals/accruals-list.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -367,6 +369,7 @@ lib/settings/motion-preference.test.ts
 lib/settings/preference-state.test.ts
 lib/settings/preferences.test.ts
 lib/wire.test.ts
+lib/work/accrual-draft.test.ts
 lib/work/api.test.ts
 lib/work/client-work-pack.test.ts
 lib/work/diagnostics.test.ts

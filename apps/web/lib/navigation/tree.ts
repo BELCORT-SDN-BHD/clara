@@ -93,6 +93,7 @@ export type AccountingItemId =
   | "receivables"
   | "assets"
   | "plans"
+  | "accruals"
   | "accounts"
   | "close"
   | "tax";
@@ -385,6 +386,14 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   // workbench's own SectionTabs — this row simply stops being the sidebar's name for it, which
   // is why the two tabs the sidebar already does not name keep working the same way.
   { id: "plans", segment: "plans", labelKey: "accounting.plans", icon: "route", minimumRole: "viewer" },
+  // #652 — the client's evidenced accruals, with their service terms, their authority and their
+  // reversal bindings. Its OWN top-level client segment beside `plans`, deliberately NOT under
+  // `accounting/`: an accrual RIDES a `reversing_journal` plan (it accrues on a due date and
+  // reverses on the first of the following month), which is a schedule and not a period-fact
+  // adjustment. `accounting/adjustments` is #643's lane — a stock count or a supplied payroll
+  // obligation, no schedule and no future occurrence — and one prefix for two unrelated lanes makes
+  // every later reader guess which one a row belongs to.
+  { id: "accruals", segment: "accruals", labelKey: "accounting.accruals", icon: "route", minimumRole: "viewer" },
   { id: "accounts", segment: "registers", tab: "accounts", labelKey: "accounting.accounts", icon: "list", minimumRole: "viewer" },
   { id: "close", segment: "close", labelKey: "accounting.close", icon: "lock", minimumRole: "viewer" },
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
@@ -458,6 +467,11 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // `periodicAdjustment` is parented the same way for the same reason). The LIST stays exactly
   // where it is: `registers?tab=fixedAssets`.
   { id: "fixedAsset", parent: "accounting", labelKey: "clientLeaf.fixedAsset", minimumRole: "viewer" },
+  // #652's `/accruals/new` and `/accruals/:accrualId` register NO leaf, for the reason `plans` —
+  // the precedent this route was cut beside — registers none: `accruals` is a TOP-LEVEL
+  // `ACCOUNTING_ITEMS` segment, and `resolveActive` answers that list on `rest[0]` alone and
+  // returns before `CLIENT_NAV.find` / `leafFor` are reached. A row here would be a promise the
+  // resolver cannot keep — and `tree.test.ts`'s reachability cell now refuses one.
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -570,6 +584,26 @@ export function planReviseHref(clientId: string, planId: string): string {
  *  percent-encoded for the reason `workDetailHref` states. */
 export function planDetailHref(clientId: string, planId: string): string {
   return `${clientBase(clientId)}/plans/${encodeURIComponent(planId)}`;
+}
+
+/** `/clients/:clientId/accruals` — the C08.1 accrual list (#652). */
+export function accrualsHref(clientId: string): string {
+  return `${clientBase(clientId)}/accruals`;
+}
+
+/** `/clients/:clientId/accruals/new` — the configuration form. A ROUTE rather than a Dialog because
+ *  an accrual carries a term, a method, an authority and two account legs, and appendix C §4 sends
+ *  a multi-section accounting form to a detail destination rather than an overlay. */
+export function accrualCreateHref(clientId: string): string {
+  return `${clientBase(clientId)}/accruals/new`;
+}
+
+/** `/clients/:clientId/accruals/:accrualId` — one accrual's own address (#652). Its particulars,
+ *  its authority, its plan and its occurrence lineage are durable detail, so it is a ROUTE rather
+ *  than a Sheet: Back works, and a reload lands on the same accrual. The id is percent-encoded for
+ *  the reason `workDetailHref` states. */
+export function accrualDetailHref(clientId: string, accrualId: string): string {
+  return `${clientBase(clientId)}/accruals/${encodeURIComponent(accrualId)}`;
 }
 
 export function accountingHref(clientId: string, item: AccountingItem): string {

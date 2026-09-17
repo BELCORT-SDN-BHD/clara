@@ -307,6 +307,22 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/plan-occurrence-e2e.mjs
+        # #652 — the ACCRUAL e2e, immediately after the plan leg it extends and on the same rig.
+        # It drives the four things only a real world can show about an evidenced accrual:
+        # configuring one writes plan + revision + accrual record + occurrence + Work in ONE commit
+        # with no engine running and NOTHING posted (a configuration receipt is not an executed
+        # occurrence); a crash between the posting commit and its checkpoint replays onto the same
+        # logical identity and still leaves ONE accrual record; the reversal waits for the accrual's
+        # committed entry, names it and posts; and a cancel followed by the human's explicitly
+        # scoped catch-up produces a re-attempt under the SAME occurrence identity with one accrual
+        # record throughout (C88.13's trigger / one effect / retry / cancellation). It SKIPS CLEANLY
+        # (exit 0, printed reason) when migration 0207 is absent, so it is safe to merge before the
+        # DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/accrual-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate

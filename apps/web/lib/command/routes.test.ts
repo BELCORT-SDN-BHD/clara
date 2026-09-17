@@ -261,6 +261,12 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   { pattern: "/clients/[clientId]/plans/new", builder: "planCreateHref" },
   { pattern: "/clients/[clientId]/plans/[planId]", builder: "planDetailHref" },
   { pattern: "/clients/[clientId]/plans/[planId]/revise", builder: "planReviseHref" },
+  // #652's two accrual destinations, for the same reason the plan rows above are here. The LIST
+  // (`/clients/[clientId]/accruals`) IS a ⌘K row of its own; the form is the primary ACT reached
+  // from it, and one accrual's detail is reached from a surface that HOLDS the accrual (the list
+  // row), so both hrefs are built from an id at render time and there is no literal to find.
+  { pattern: "/clients/[clientId]/accruals/new", builder: "accrualCreateHref" },
+  { pattern: "/clients/[clientId]/accruals/[accrualId]", builder: "accrualDetailHref" },
 ];
 
 function orphanedFirmPages(
@@ -420,6 +426,23 @@ test("REGISTRY-BUILT destinations are real pages whose builder is exported from 
       `${builder} is called nowhere under app/ or components/ — ${pattern} is unreachable`,
     );
   }
+});
+
+test("#652's accruals row is ADDITIVE — the shipped Plans row still answers the word it always answered", () => {
+  // A new row REGISTERS; it does not take a word off a row that already shipped with it. ⌘K
+  // keywords are not a unique index anywhere in this registry ("work", "queue", "approvals" and
+  // "members" each sit on two rows today), so both rows can answer "accruals" and the ranking
+  // decides — which is the honest answer, because a plan IS the accrual's schedule.
+  const accruals = CLIENT_ROUTES.find((route) => route.id === "accruals");
+  assert.ok(accruals, "#652's accrual list must have its own ⌘K row");
+  assert.equal(accruals.keywords?.includes("accruals"), true);
+
+  const plans = CLIENT_ROUTES.find((route) => route.id === "registersPlans");
+  assert.ok(plans);
+  assert.equal(
+    plans.keywords?.includes("accruals"), true,
+    "the Plans row shipped answering 'accruals'; #652 adds a row, it does not silently narrow that one",
+  );
 });
 
 test("/settings/members is present in ⌘K by its own stable row", () => {

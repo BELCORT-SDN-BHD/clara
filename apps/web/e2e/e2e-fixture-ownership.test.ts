@@ -51,6 +51,7 @@ const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
  * so `derivedLaneMocks()` reads that, and the assertion below is what actually fires.
  */
 const LANE_MOCKS = [
+  "accrual-mock.mjs",
   "activity-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
@@ -448,6 +449,12 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // are read by surfaces other lanes drive, and a lane that claimed them would replace their
   // fixtures.
   "staff-expense-claim-mock.mjs": { unscopeable: [], debt: [] },
+  // #652's C8 accrual lane, built to that same shape: every branch names this lane's own client id
+  // or accrual id before it answers. `list_spoken_for_documents` is SHARED with
+  // `periodic-adjustment-mock.mjs` — both lanes mount the same `EvidenceChooser`, which makes the
+  // same advisory read — and both scope it by their own `p_client`, so neither can answer for the
+  // other. Declared here rather than left implicit, which is what this census is for.
+  "accrual-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -1116,7 +1123,14 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // #633 joins them: the document detail's file-to-Work panel reads the SAME advisory door
   // for the claimant half of an evidence link. It gates on its own client id before
   // answering and falls through otherwise, exactly as the other two do.
-  list_spoken_for_documents: ["documents-intake-mock.mjs", "journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
+  // #652 joins the same share at WAVE-4 INTEGRATION and for the identical reason: the accrual form
+  // mounts the SAME `EvidenceChooser` component (an accrual may cite the invoice its term was read
+  // from), so it makes the same advisory read. `accrual-mock.mjs` gates on `ACC.clientId` before
+  // answering and falls through otherwise, so it can answer for neither of the other two.
+  list_spoken_for_documents: [
+    "accrual-mock.mjs", "documents-intake-mock.mjs", "journal-work-mock.mjs",
+    "periodic-adjustment-mock.mjs",
+  ],
   // #633 x the chat-parity train — THE ATTRIBUTION PAIR, answered by two lanes because two
   // surfaces perform the same act: the chat composer files what it just attached, and the
   // documents tab / firm leaf file what a person just chose. `chat-parity-mock.mjs` answers

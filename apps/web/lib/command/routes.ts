@@ -175,6 +175,14 @@ const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
   receivables: { id: "registersAging", keywords: ["receivables", "payables", "aging", "ar", "ap", "registers"] },
   assets: { id: "registersAssets", keywords: ["fixed assets", "depreciation", "nbv", "registers"] },
   plans: { id: "registersPlans", keywords: ["plans", "adjustments", "accruals", "registers"] },
+  // #652 — the words a preparer reaches for when a cost belongs to a period they have no invoice
+  // for. "accruals" is ADDED here and LEFT on the `plans` row above: a plan is the schedule and an
+  // accrual is the thing scheduled, so both rows honestly answer the word, and keywords are not a
+  // unique index in this registry ("work", "queue", "members" each sit on two rows already).
+  accruals: {
+    id: "accruals",
+    keywords: ["accruals", "accrual", "accrued", "accrue", "reversal", "reversing", "service period"],
+  },
   accounts: { id: "registersAccounts", keywords: ["accounts", "chart of accounts", "coa", "registers"] },
   close: { id: "close", keywords: ["close", "period", "fiscal year"] },
   tax: { id: "clientTax", keywords: ["tax", "sst", "cp204", "income tax", "computation"] },
