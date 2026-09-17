@@ -88,6 +88,54 @@ test("f-a2.c5.new-trigger the receipt wall joins journal_entries as a DEFERRED c
   assert.match(r.rows[0].def, /update/i, "c5.new-trigger: it fires on the UPDATE that carries draft->approved");
 });
 
+test("f-a2.c5.wave-births the three triggers wave 2026-09-15 added to journal_entries carry the tier the census claims — measured on the live bodies, not read off the pin", async (t) => {
+  if (await gateCore(t)) return;
+  // WHY THIS CELL EXISTS. `c5.census` above compares NAMES and the two deferrability booleans.
+  // The `tier` string beside each pin is prose, and prose is what a census widening hides behind.
+  // #639's `t_je_fa_acquisition_birth` and #638's two triggers were added to the pinned table at
+  // wave integration because they really are on the relation; this cell is the half that makes the
+  // DISPOSITION each pin claims a measurement — a later edit that gives the silent pair a refusal,
+  // or takes the advance birth's refusals away, fails here by name.
+  //
+  // FRONTIER-GATED on the same two stems `jeTriggerPins` uses, so a leg pinned below either
+  // migration skips the arm rather than reporting a body that does not exist.
+  const has = async (stem) => (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [stem])).rows[0].n > 0;
+  const RAISES = /raise\s+exception/i;
+
+  if (await has("fixed_asset_acquisition$")) {
+    const { src } = await bodyOfName("_tf_fa_acquisition_birth");
+    assert.ok(src, "c5.wave-births: #639's birth trigger function resolves");
+    assert.equal(RAISES.test(src), false,
+      "c5.wave-births: `t_je_fa_acquisition_birth` is pinned as raising NO token of its own — it is idempotent against _fa_on_approve arm 4 through the same `on conflict (acquisition_line_id) do nothing`, so a `raise` here would be a new commit-time abort nobody filed under a tier");
+    assert.match(src, /on conflict \(acquisition_line_id\) do nothing/i,
+      "c5.wave-births: …and that is only safe because it carries arm 4's own conflict target");
+  }
+
+  if (await has("staff_expense_claims$")) {
+    const birth = (await bodyOfName("_tf_adv_claim_application_birth")).src;
+    assert.ok(birth, "c5.wave-births: #638's advance-birth trigger function resolves");
+    assert.ok(RAISES.test(birth),
+      "c5.wave-births: `t_je_adv_claim_application_birth` is pinned as REFUSAL-BEARING — a body that stopped refusing would be minting advance applications past the cap at COMMIT with nothing to say");
+    for (const [code, reason] of [["CLR40", "advance_allocation_mismatch"], ["CLR39", "advance_over_application"]]) {
+      assert.ok(birth.includes(code) && birth.includes(reason),
+        `c5.wave-births: …and it still names ${code}/${reason}, the two reasons the pin's tier string files under Tier D`);
+    }
+    // The pin says these two reasons are deliberately NOT in TIER_D_TOKENS (that set is the BELT
+    // vocabulary, pinned at six by f-a2-ladder-3's c3.D-vocab). Asserted so the exclusion is a
+    // decision on the record rather than an omission.
+    for (const reason of ["advance_allocation_mismatch", "advance_over_application"]) {
+      assert.equal(TIER_D_TOKENS.includes(reason), false,
+        `c5.wave-births: ${reason} is deliberately OUTSIDE the six belt tokens — if it is added, c3.D-vocab's count pin moves with it and this exclusion must be re-argued, not silently inherited`);
+    }
+    const rev = (await bodyOfName("_tf_staff_expense_claim_reversed")).src;
+    assert.ok(rev, "c5.wave-births: #638's reversal-status trigger function resolves");
+    assert.equal(RAISES.test(rev), false,
+      "c5.wave-births: `t_je_staff_expense_claim_reversed` is pinned as NOT refusal-bearing — a plain non-deferred trigger that raised would refuse inside the statement, which is a Tier-C disposition nobody wrote");
+    noteLane("c5.wave-births: the three wave-2026-09-15 journal_entries triggers are measured, not merely listed — #639's birth and #638's reversal stamp raise nothing, #638's advance birth raises CLR40/CLR39 at COMMIT and those two reasons stay outside the six-token belt vocabulary");
+  }
+});
+
 // ===========================================================================
 // The two structural walls at commit time.
 // ===========================================================================

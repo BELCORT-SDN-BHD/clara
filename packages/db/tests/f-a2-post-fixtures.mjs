@@ -548,6 +548,59 @@ export const CODING_LINK_JE_TRIGGERS = [
 ];
 
 /**
+ * #639 [0201] — the ONE trigger the fixed-asset acquisition lane adds to `journal_entries`.
+ *
+ * TIER D, and it is a DEFERRED CONSTRAINT trigger for the reason DECISIONS §1.4 gives: the Work
+ * lane never calls `clara._subledger_on_approve`, so the acquisition birth had to be made
+ * lane-agnostic without a sixth recut of the posting core. It performs `clara._fa_on_approve`
+ * arm 4's insert with arm 4's own `on conflict (acquisition_line_id) do nothing`, so on the four
+ * lanes that already birth it writes nothing.
+ *
+ * IT RAISES NOTHING OF ITS OWN — measured on the live body (no `raise exception` anywhere in
+ * `clara._tf_fa_acquisition_birth`), so it carries no Tier-D token. It is still TIER D and not
+ * "not refusal-bearing", because it is a CONSTRAINT trigger: any abort it does produce (a
+ * constraint violation on the row it inserts) arrives at COMMIT, outside every exception block,
+ * which is exactly the Tier-D property this file's header defines.
+ */
+export const FA_ACQUISITION_JE_TRIGGER = {
+  tgname: "t_je_fa_acquisition_birth", deferrable: true, initdeferred: true,
+  tier: "D — the lane-agnostic acquisition birth; raises no token of its own, aborts only through a constraint at COMMIT",
+};
+
+/**
+ * #638 [0206] — the TWO triggers the staff-expense-claim lane adds to `journal_entries`, and they
+ * sit in DIFFERENT tiers, which is why they are pinned separately rather than as a pair.
+ *
+ * `t_je_adv_claim_application_birth` is the advance half of the same DECISIONS §1.4 ruling: a
+ * DEFERRED CONSTRAINT trigger that mints the `clara.staff_advance_applications` row the Work lane
+ * would otherwise never get. Unlike #639's, it is GENUINELY REFUSAL-BEARING — measured on the live
+ * body: CLR40 `advance_allocation_mismatch` and CLR39 `advance_over_application`. Both are raised
+ * at COMMIT, so both are Tier-D ABORTS, never convertible refusals.
+ *
+ * NEITHER REASON IS ADDED TO `TIER_D_TOKENS`, deliberately. That set is pinned at exactly six by
+ * `f-a2-ladder-3.test.mjs` (`c3.D-vocab`) and its membership rule is "the belt tokens that left
+ * Tier B when B12/B13 were cut" — a BELT vocabulary, not a roster of every deferred trigger's
+ * reasons. Widening it to carry a subledger-registration reason would change what that cell
+ * asserts. Named here instead, and left as a follow-up for whoever decides whether the F-A2 ladder
+ * should own a commit-time vocabulary beyond the belts.
+ *
+ * `t_je_staff_expense_claim_reversed` is a PLAIN, NON-deferred AFTER UPDATE trigger, in the same
+ * class as `t_entry_evidence_release` above: its whole body appends a `reversed` row to
+ * `clara.staff_expense_claim_status` with `on conflict (claim_id, state) do nothing` and raises
+ * nothing, so there is no refusal path to file under a tier.
+ */
+export const STAFF_EXPENSE_CLAIM_JE_TRIGGERS = [
+  {
+    tgname: "t_je_adv_claim_application_birth", deferrable: true, initdeferred: true,
+    tier: "D — the lane-agnostic advance-application birth (CLR40 advance_allocation_mismatch, CLR39 advance_over_application), both raised at COMMIT",
+  },
+  {
+    tgname: "t_je_staff_expense_claim_reversed", deferrable: false, initdeferred: false,
+    tier: "— not refusal-bearing (it appends the claim's `reversed` status row and raises nothing)",
+  },
+];
+
+/**
  * The pinned census for THIS database's frontier.
  *
  * FRONTIER-GATED, for the reason the 0042 clock roster's own header gives: `db-slice-frontiers`
@@ -568,5 +621,16 @@ export async function jeTriggerPins() {
     "select count(*)::int as n from clara.schema_migrations where version ~ 'coding_lane_evidence_link$'");
   if (w.rows[0].n > 0) pins.push(...CODING_LINK_JE_TRIGGERS);
   // #718 END
+  // #639 [0201] / #638 [0206] — the wave-2026-09-15 birth triggers, each gated on ITS OWN stem for
+  // the same reason 0182's and 0197's are gated on theirs: `db-slice-frontiers` runs this battery
+  // against databases pinned below these migrations, where the triggers do not exist, and an
+  // unconditional pin would report them MISSING on every one of those legs.
+  const fa = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'fixed_asset_acquisition$'");
+  if (fa.rows[0].n > 0) pins.push(FA_ACQUISITION_JE_TRIGGER);
+  const sec = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'staff_expense_claims$'");
+  if (sec.rows[0].n > 0) pins.push(...STAFF_EXPENSE_CLAIM_JE_TRIGGERS);
+  // wave-2026-09-15 END
   return pins;
 }

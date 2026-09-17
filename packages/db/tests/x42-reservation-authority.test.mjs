@@ -344,8 +344,26 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   // with no spaces, and it and clara.approve_opening_correction both write
   // `update clara.fixed_assets fa set ...` with an ALIAS — three shapes a naive
   // single-space, INSERT-only regex cannot see.
+  //
+  // [wave 2026-09-15 integration] THREE NAMES JOINED, AND EACH CARRIES ITS CLASSIFICATION HERE
+  // rather than being absorbed into the list. 0042 S5.14 (6a) is a MIGRATION-TIME gate: it ran at
+  // 0042 and cannot see a door a later migration adds, so this replay is the only thing standing
+  // between a new writer and an unclassified claim.
+  //   * `_tf_fa_acquisition_birth` (#639 [0201]) — INSERT side. An INHERITOR of the same shape as
+  //     clara._fa_on_approve, whose arm-4 insert it duplicates: it reads its three codes off an
+  //     ACTIVE clara.fa_account_profiles row joined to the journal line, never out of caller input.
+  //     Measured in the inheritor arm at the bottom of this cell, which it JOINS.
+  //   * `_fa_complete_particulars_core` (#639 [0201]) — UPDATE side, and NOT a widener: it is the
+  //     shared core clara.complete_fixed_asset_particulars_for calls, writing the same depreciation
+  //     particulars clara.complete_fixed_asset_particulars (already on this roster) writes. Its SET
+  //     clause assigns no account code and no live status, measured by the (6c) replay below.
+  //   * `_claim_resolve_claimant` (#638 [0206]) — INSERT side, and a GENUINE claiming door: it
+  //     auto-enrols a staff-advance account from a code the caller supplies. It consults the shared
+  //     union through clara._adv_enrolment_admission, the ONE delegate 0042 S5.14 (6b) accepts, and
+  //     that reach is measured below rather than taken on the body's word.
   const EXPECT_DOORS = [
-    "_adv_on_approve", "_draft_opening_item_core", "_fa_on_approve",
+    "_adv_on_approve", "_claim_resolve_claimant", "_draft_opening_item_core",
+    "_fa_complete_particulars_core", "_fa_on_approve", "_tf_fa_acquisition_birth",
     "approve_opening_correction", "approve_opening_seed", "complete_fixed_asset_particulars",
     "complete_staff_advance_particulars", "enrol_staff_advance_account",
     "retire_fa_account_profile", "retire_staff_advance_account",
@@ -358,10 +376,58 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
       order by p.proname collate "C"`);
   assert.deepEqual(doors.map((d) => d.proname), EXPECT_DOORS,
     "the set of bodies that WRITE role-claiming state is exact — an UPDATE-side door re-points a code or re-activates an enrolment with no INSERT anywhere, and an INSERT-only census never sees it");
-  const updOnly = doors.map((d) => d.proname)
-    .filter((n) => !["_draft_opening_item_core", "enrol_staff_advance_account"].includes(n));
+  const INSERT_ONLY = ["_claim_resolve_claimant", "_draft_opening_item_core",
+    "_tf_fa_acquisition_birth", "enrol_staff_advance_account"];
+  const updOnly = doors.map((d) => d.proname).filter((n) => !INSERT_ONLY.includes(n));
   assert.ok(updOnly.length >= 8,
     `…and the UPDATE side is most of it (${updOnly.length} bodies), which is why leaving it unexamined was the largest of the three blind spots`);
+
+  // (c.ii-b) EVERY INSERT-SIDE DOOR STILL REACHES THE UNION — 0042 S5.14 (6b), replayed from
+  // outside the migration for the same reason (6a) is: the gate is migration-time and cannot see a
+  // door added later. #638's auto-enrolment is exactly such a door. The four union names and the
+  // three inheritor exclusions are the migration's own; the FOURTH inheritor is this wave's, and it
+  // earns the exclusion in the discriminator arm at the bottom of this cell, not here.
+  const INHERITORS = ["_fa_on_approve", "revise_fixed_asset_particulars", "_adv_on_approve",
+    "_tf_fa_acquisition_birth"];
+  const UNION_NAMES = ["clara._acct_role_reserved", "clara._fa_role_claim_conflict",
+    "clara._fa_assert_code_unreserved", "clara._adv_enrolment_admission"];
+  const { rows: inserters } = await rootQuery(
+    `select p.proname, ${NORM} as src from pg_proc p
+      where p.pronamespace = 'clara'::regnamespace
+        and ${NORM} ~ 'insert into clara\\.(fa_account_profiles|fixed_assets|staff_advance_accounts|staff_advances)\\M'
+      order by p.proname collate "C"`);
+  const unguarded = inserters
+    .filter((r) => !INHERITORS.includes(r.proname))
+    .filter((r) => !UNION_NAMES.some((n) => r.src.includes(n)))
+    .map((r) => r.proname);
+  assert.deepEqual(unguarded, [],
+    `every INSERT-side claiming door CALLS the shared reservation authority (unguarded: ${unguarded.join(", ") || "none"}) — a comment naming the union is not a consult, which is why this reads comment-stripped source`);
+  // …and the ONE delegate that stands in for a direct call is itself pinned to the union, so
+  // accepting it is not a loophole: it cannot stop consulting without this line failing.
+  const { rows: adm } = await rootQuery(
+    `select ${NORM} like '%clara._acct_role_reserved%' as direct from pg_proc p
+      where p.pronamespace = 'clara'::regnamespace and p.proname = '_adv_enrolment_admission'`);
+  assert.equal(adm[0]?.direct, true,
+    "clara._adv_enrolment_admission is accepted as the enrolment delegate ONLY because it asks clara._acct_role_reserved itself — and #638's clara._claim_resolve_claimant reaches the union through exactly this body");
+
+  // (c.ii-c) THE UPDATE SIDE OF THE NEW NAME CANNOT WIDEN A CLAIM — 0042 S5.14 (6c)'s own probe,
+  // replayed on this wave's one new UPDATE-side body. An UPDATE claims a code when it ASSIGNS one,
+  // or brings a row back to a state that holds one; the fragment is trimmed to its SET clause for
+  // (6c)'s measured reason (a retirement's `where … asset_account_code = …` is not a re-claim).
+  const { rows: newUpd } = await rootQuery(
+    `select p.proname,
+       (select coalesce(string_agg(
+          regexp_replace(m.f[1], ' (from|where|returning) .*$', ''), ' | '), '')
+        from regexp_matches(${NORM},
+          '(update clara\\.(?:fa_account_profiles|fixed_assets|staff_advance_accounts|staff_advances)\\M[^;]*)',
+          'g') as m(f)) as sets
+       from pg_proc p where p.pronamespace = 'clara'::regnamespace
+        and p.proname = '_fa_complete_particulars_core'`);
+  assert.equal(newUpd.length, 1, "the new UPDATE-side body is present to be measured");
+  assert.ok(newUpd[0].sets !== "", "…and its UPDATE fragment was actually captured, so the test below is not vacuous");
+  assert.equal(/account_code *=/.test(newUpd[0].sets) || /active *= *true/.test(newUpd[0].sets)
+    || newUpd[0].sets.includes("'active'") || newUpd[0].sets.includes("'pending'"), false,
+  `clara._fa_complete_particulars_core assigns a claim-bearing column (${newUpd[0].sets.slice(0, 200)}) — it is classified on this roster as a particulars writer that cannot widen a claim, and that classification has stopped being true`);
 
   // (c.iii) THE RULE HAS EXACTLY ONE EXPRESSION. Three doors hand-wrote the discriminator and
   // one wrote it without the role. Nothing outside clara._fa_role_claim_conflict may state it.
@@ -388,20 +454,25 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   assert.equal(/role *(=|<>|!=|is distinct from|in) */.test(gl[0].src), false,
     "…and it never tests a ROLE, which is exactly what the hand-written copy that broke a register row had dropped");
 
-  // …and the THREE bodies excluded from the consult requirement are excluded because they
+  // …and the FOUR bodies excluded from the consult requirement are excluded because they
   // INHERIT their codes rather than choosing them — measured, not asserted: a door that
   // chooses reads the code out of caller input, and none of these has such a read.
   // clara._adv_on_approve joined this list in round 4: it passed the OLD census only on a
   // comment match, and reading code alone exposed that it never called the union at all.
+  // clara._tf_fa_acquisition_birth (#639 [0201]) joined at wave-2026-09-15 integration: it makes
+  // clara._fa_on_approve arm 4's insert from a deferred constraint trigger so the Work lane births
+  // too, and takes its three codes from the SAME join onto an ACTIVE clara.fa_account_profiles row.
+  // Its discriminator is measured in the same shape as the other three — the exclusion is not
+  // inherited from the body it duplicates.
   const { rows: inherit } = await rootQuery(
     `select p.proname, (p.prosrc like '%>>''asset_account_code''%'
                         or p.prosrc like '%>>''accum_depr_account_code''%'
                         or p.prosrc like '%>>''depr_expense_account_code''%'
                         or p.prosrc ~ '->> *''account_code''') as chooses
        from pg_proc p where p.pronamespace = 'clara'::regnamespace
-        and p.proname in ('_fa_on_approve', 'revise_fixed_asset_particulars', '_adv_on_approve')
-      order by p.proname collate "C"`);
-  assert.equal(inherit.length, 3, "all three excluded bodies are present to be checked");
+        and p.proname = any($1::text[])
+      order by p.proname collate "C"`, [INHERITORS]);
+  assert.equal(inherit.length, INHERITORS.length, "all four excluded bodies are present to be checked");
   for (const b of inherit) {
     assert.equal(b.chooses, false,
       `clara.${b.proname} is excluded from the claiming-door census ONLY because it inherits its account codes — it now reads one from caller input, so it is a claiming door`);

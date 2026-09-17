@@ -224,9 +224,19 @@ test("x42v.g3 the remedy the refusal names is executable: reversing the repaymen
 // the catalog, not of anybody's memory of it — so it is asserted, and a future
 // migration that adds a second writer turns this cell red instead of quietly
 // re-opening the class.
+//
+// [wave 2026-09-15 integration] THAT PREDICTION CAME TRUE, ON THE APPLICATION SIDE ONLY.
+// #638 [0206] added a second application minter, and this cell went red exactly as
+// `0043:1418` said it would. The VOID stamp and the soft-birth are still single-writer —
+// those two arms are unchanged below — so the chokepoint the file's law rests on (the
+// reversal re-ask at `clara._adv_on_approve`) is intact. What the application arm now
+// asserts is the PROPERTY the one-writer pin was standing in for: every minter re-asks
+// the SS3.2 outstanding equation at the moment it mints, under the advance row lock.
+// A roster widened without that arm would have been the silent re-opening this header
+// warns about.
 // ===========================================================================
 
-test("x42v.g4 the register has exactly ONE writer: clara._adv_on_approve is the only body that stamps a void or mints an application row, so the re-ask at that body is a chokepoint and not one door of many", async (t) => {
+test("x42v.g4 the register's void stamp and soft-birth still have exactly ONE writer, clara._adv_on_approve — and both bodies that mint an application row re-ask the outstanding cap at the mint, so the re-ask is a chokepoint and not one door of many", async (t) => {
   if (skipHere(t)) return;
   const writers = async (pattern) => (await rootQuery(
     `select p.proname from pg_proc p
@@ -238,9 +248,71 @@ test("x42v.g4 the register has exactly ONE writer: clara._adv_on_approve is the 
   assert.deepEqual(voidWriters, ["_adv_on_approve"],
     `exactly one body stamps the void columns (found: ${voidWriters.join(", ") || "none"})`);
 
+  // THE APPLICATION SIDE GAINED A SECOND MINTER, AND THAT IS WHAT THIS ARM WAS BUILT TO CATCH.
+  // #638 [0206] added `clara._tf_adv_claim_application_birth` under DECISIONS §1.4: the Work lane
+  // never calls `clara._subledger_on_approve`, so `_adv_on_approve` arm (2) never runs there and a
+  // staff expense claim settled against an advance registered nothing. `0043:1418` predicted
+  // exactly this cell going red on "a future second writer" — so the roster is widened WITH the
+  // classification, never silently, and the arm below is what earns the widening.
+  const APP_MINTERS = ["_adv_on_approve", "_tf_adv_claim_application_birth"];
   const appWriters = await writers("insert[[:space:]]+into[[:space:]]+clara\\.staff_advance_applications");
-  assert.deepEqual(appWriters, ["_adv_on_approve"],
-    `exactly one body mints application rows (found: ${appWriters.join(", ") || "none"})`);
+  assert.deepEqual(appWriters, APP_MINTERS,
+    `the bodies that mint application rows are exact (found: ${appWriters.join(", ") || "none"}) — a THIRD minter has not been classified against the maker-checker-gap law, and a missing one has taken its classification with it`);
+
+  // …AND EVERY MINTER RE-ASKS THE OUTSTANDING EQUATION AT THE MOMENT IT MINTS. This is the
+  // property the old one-writer pin was standing in for, stated directly so two writers cannot
+  // dilute it. `clara._adv_over_application` (0043:1220) is the ONE body that knows whether an
+  // allocation drives design SS3.2 outstanding negative at its own date or at any later boundary;
+  // a minter that does not reach it is a value-read-before-the-decision by construction.
+  //
+  // READ ON COMMENT-STRIPPED SOURCE, for 0042 S5.14 (6b)'s measured reason: these sections carry
+  // long comments naming the cap by hand, and a raw substring match would let a comment stand in
+  // for a call. ONE DELEGATE IS ACCEPTED — `clara._adv_assert_proposal`, the hook's own
+  // authoritative guard — and only because its DIRECT consult is asserted below, so the delegate
+  // cannot stop consulting without this arm failing.
+  const NORM = `lower(regexp_replace(regexp_replace(regexp_replace(
+                  p.prosrc, '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g'), '\\s+', ' ', 'g'))`;
+  const LOCKS = `'clara\\.staff_advances [a-z]* *where [^;]*for update'`;
+  const { rows: reach } = await rootQuery(
+    `select p.proname,
+            ${NORM} ~ 'clara\\._adv_over_application *\\(' as direct,
+            ${NORM} ~ 'clara\\._adv_assert_proposal *\\(' as delegate,
+            ${NORM} ~ ${LOCKS} as locks_self
+       from pg_proc p
+      where p.pronamespace = 'clara'::regnamespace and p.proname = any($1::text[])
+      order by p.proname collate "C"`, [APP_MINTERS]);
+  assert.equal(reach.length, APP_MINTERS.length, "every minter is present to be measured");
+  for (const b of reach) {
+    assert.ok(b.direct || b.delegate,
+      `clara.${b.proname} mints application rows but never reaches clara._adv_over_application — directly or through clara._adv_assert_proposal. A minter that does not re-ask the cap AT the mint is the maker-checker-gap class this file is about`);
+    assert.ok(b.locks_self || b.delegate,
+      `clara.${b.proname} re-asks the cap but reaches no FOR UPDATE on clara.staff_advances — two concurrent claims against one advance would both pass the cap and both commit`);
+  }
+  // THE DELEGATE IS NOT A LOOPHOLE, AND THE LOCK CREDIT IS NOT MIS-ASSIGNED. `_adv_assert_proposal`
+  // is accepted in place of a direct call only because it carries BOTH properties itself — it asks
+  // the cap AND locks the proposed advance ids in `sa.id` order. This matters for
+  // `clara._adv_on_approve` specifically: the `for update` in its own text belongs to ARM 1 (the
+  // reversal arm, which locks the advances behind the entry being reversed) and does not run on the
+  // arm-2 path that mints applications; the lock arm 2 actually holds is the delegate's. Measured
+  // here rather than credited from the body's own text.
+  const { rows: del } = await rootQuery(
+    `select ${NORM} ~ 'clara\\._adv_over_application *\\(' as direct, ${NORM} ~ ${LOCKS} as locks
+       from pg_proc p
+      where p.pronamespace = 'clara'::regnamespace and p.proname = '_adv_assert_proposal'`);
+  assert.equal(del[0]?.direct, true,
+    "clara._adv_assert_proposal is accepted as a delegate ONLY because it asks clara._adv_over_application itself — an unpinned delegate is how a census stops measuring anything");
+  assert.equal(del[0]?.locks, true,
+    "…and because it takes the advance row lock itself, which is the lock clara._adv_on_approve arm 2 is actually holding when it mints");
+  // …and the SECOND minter fires at COMMIT, inside the very transaction that approves the entry,
+  // so it has no draft window to read across in the first place. Measured from pg_trigger, not
+  // from the body: deferrability is a catalog fact.
+  const { rows: defr } = await rootQuery(
+    `select t.tgdeferrable, t.tginitdeferred from pg_trigger t
+      where t.tgrelid = 'clara.journal_entries'::regclass
+        and t.tgname = 't_je_adv_claim_application_birth'`);
+  assert.equal(defr.length, 1, "the claim-application birth trigger is on clara.journal_entries");
+  assert.ok(defr[0].tgdeferrable && defr[0].tginitdeferred,
+    "…as a DEFERRED constraint trigger, so its cap read and its insert are the same instant — the two-moment gap this file is about cannot open inside it");
 
   const births = await writers("insert[[:space:]]+into[[:space:]]+clara\\.staff_advances[^_]");
   assert.deepEqual(births, ["_adv_on_approve"],
@@ -254,5 +326,5 @@ test("x42v.g4 the register has exactly ONE writer: clara._adv_on_approve is the 
         and u.ln ~ 'perform clara\\._adv_on_approve\\(' order by 1`)).rows.map((r) => r.proname);
   assert.deepEqual(hookCallers, ["_subledger_on_approve"],
     `the advance hook has exactly one caller (found: ${hookCallers.join(", ") || "none"})`);
-  noteLane("x42v.g4: one writer, one caller — the reversal re-ask sits on the only path every mirror of every producer takes");
+  noteLane("x42v.g4: one void writer, one soft-birth writer, one hook caller — the reversal re-ask sits on the only path every mirror of every producer takes. TWO application minters since #638 [0206]: clara._adv_on_approve (cap via clara._adv_assert_proposal) and clara._tf_adv_claim_application_birth (cap directly, at COMMIT, under the advance row lock)");
 });
