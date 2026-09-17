@@ -205,6 +205,9 @@ components/registers/fixed-asset-detail.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
 components/registers/knowledge-detail.test.tsx
+components/registers/knowledge-exception.test.tsx
+components/registers/knowledge-firm-panel.test.tsx
+components/registers/knowledge-promote-dialog.test.tsx
 components/registers/opening-a11y.test.tsx
 components/registers/opening-approve-guarantees.test.tsx
 components/registers/opening-i18n-keys.test.tsx

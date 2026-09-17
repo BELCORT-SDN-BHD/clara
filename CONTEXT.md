@@ -182,6 +182,14 @@ _Avoid_: A progress bar with no required items behind it; an onboarding approval
 A firm-scope knowledge record about the accounting firm's own circumstances, carrying its source, its actor and its revision history like any other knowledge record. Distinct from a client fact, which belongs to one client, and from a **Firm knowledge default**, which is a cross-client instruction rather than a statement about the firm. The firm's registration identity — its registered name, registration number, tax identifier, registered address and professional-body number — is recorded on the firm's setup record with its author rather than as a knowledge record.
 _Avoid_: Recording a firm fact as a client fact; reading a firm profile fact as authority to post.
 
+**Knowledge promotion**:
+The explicit, authorised act of making one client's recorded practice apply firm-wide: who promoted it, on the authority that act required, for what reason they wrote at the time, to what applicability and from when. Only a key the firm may hold on its own behalf can be promoted, and the rule cites no evidence belonging to a single client.
+_Avoid_: Copying the client record's own basis across as the firm's reason; promoting a fact about one business; a rule that reaches other clients without a named person having said it should.
+
+**Client knowledge exception**:
+An established client-scope record that keeps governing that client after a firm default is recorded for the same key and the same applicable conditions. It is a decided outcome, not an unresolved contradiction, and the client's own register says which of the two applies and why.
+_Avoid_: Presenting an exception as a conflict; treating a narrower client condition as overriding a firm rule that covers different conditions.
+
 **Accounting experience**:
 A source-linked lesson from completed work or a correction, including the outcome and conditions in which it is useful. Clara can consult it when deciding how to handle later work.
 _Avoid_: A confirmed policy merely because an action succeeded or was repeated; authority for a future posting plan.

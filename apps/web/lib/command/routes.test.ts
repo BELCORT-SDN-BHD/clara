@@ -532,13 +532,13 @@ test("the join RAN — every row carries a floor, and none was dropped instead o
   // a future refactor that used `.flatMap(... [])` instead of a throw would drop
   // an unjoinable row silently, and a Go row that quietly disappears is exactly
   // as wrong as one that quietly appears.
-  // #614: five firm destinations + the Needs-you saved view + six settings
-  // sections. #633 adds a SIXTH firm destination (the unassigned-sources leaf), so the
-  // literal is 13. The rows are BUILT from the registry now rather than joined to it,
-  // so this count is what catches a construction that silently drops one.
-  // #648 added the `setup` settings section, so the literal is 13.
+  // #614: the firm destinations + the Needs-you saved view + the settings sections. The rows
+  // are BUILT from the registry now rather than joined to it, so this count is what catches a
+  // construction that silently drops one. FIRM_NAV gained #633's unassigned-sources leaf and
+  // SETTINGS_SECTIONS gained #648's `setup` and #654's `knowledge`, so the literal is 15
+  // (7 + 1 + 7) — three more than the 12 this cell carried before the wave.
   assert.equal(FIRM_ROUTES.length, FIRM_NAV.length + 1 + SETTINGS_SECTIONS.length);
-  assert.equal(FIRM_ROUTES.length, 13);
+  assert.equal(FIRM_ROUTES.length, 15);
   for (const route of FIRM_ROUTES) {
     assert.equal(typeof route.minimumRole, "string", `${route.id} has no floor`);
   }

@@ -117,6 +117,14 @@ const SETTINGS_PRESENTATION: Record<SettingsSectionId, Presentation> = {
   account: { id: "settingsAccount", keywords: ["account", "profile", "sign out", "log out"] },
   firm: { id: "settingsFirm", keywords: ["firm settings", "approvals", "capabilities", "owner"] },
   members: { id: "settingsMembers", keywords: ["members", "roles", "rbac", "invites", "access"] },
+  // #654 — the FIRM knowledge register. "knowledge" alone belongs to the CLIENT
+  // destination below, which is where a person typing it almost always means to go,
+  // so this row is reachable by the words that distinguish it: whose rule it is and
+  // what it does.
+  knowledge: {
+    id: "settingsKnowledge",
+    keywords: ["firm knowledge", "firm default", "default", "policy", "preference", "promote", "exception"],
+  },
   // #648 (journey A5). "onboarding" is among the keywords deliberately: it is what a person types
   // when they are looking for the list of facts their firm still owes, even though nothing here
   // is an onboarding approval ritual.

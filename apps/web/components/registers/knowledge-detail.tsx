@@ -37,6 +37,7 @@ import {
 } from "@/lib/registers/knowledge";
 import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { ArApCounterpartyDoorDialog } from "./ArApCounterpartyDoorDialog";
+import { KnowledgePromoteDialog } from "./knowledge-promote-dialog";
 import {
   KnowledgeApplicability,
   KnowledgeBadges,
@@ -183,6 +184,25 @@ export function KnowledgeDetail({ clientId, recordId }: { clientId: string; reco
                 a withdrawal is terminal. */}
             {record.correctable === false ? null : (
               <div className="flex flex-wrap gap-2">
+                {/* #654 — PROMOTE THIS RECORD TO A FIRM-WIDE DEFAULT. Beside Correct
+                    and Withdraw because it is the third thing a person can do with a
+                    live governed record, and gated by the SAME fact the other two are:
+                    `correctable`, which the database derives (state = 'live'). The
+                    dialog withholds itself below the admin floor, for an ineligible
+                    key, and where a firm rule already covers the applicability — each
+                    with its own sentence rather than a blank. Firm-scope records have
+                    no client of their own, so it is mounted for a CLIENT record only:
+                    a firm rule is corrected and withdrawn from /settings/knowledge. */}
+                {record.scope_kind === "client" && record.client_id ? (
+                  <KnowledgePromoteDialog
+                    clientId={record.client_id}
+                    record={record}
+                    onPromoted={async () => {
+                      await detail.reload();
+                      await history.reload();
+                    }}
+                  />
+                ) : null}
                 <ArApCounterpartyDoorDialog
                   triggerLabel={t("correctTrigger")}
                   title={t("correctTitle", { key: record.knowledge_key })}

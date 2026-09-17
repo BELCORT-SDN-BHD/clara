@@ -31,6 +31,10 @@ import { checkAccessibility } from "../../test/a11yRules";
 import { checkKeyboardWalk, focusableElements } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { SettingsHubView } from "../settings/settings-hub";
+// #654 — the hub's card count is COUNTED off the one navigation registry rather than
+// re-typed, so a new settings section moves this cell by adding a card, not by editing a
+// number somebody has to remember to edit.
+import { SETTINGS_SECTIONS } from "../../lib/navigation/tree";
 import { PageHeader, PageShell } from "../common/page-shell";
 import { ComplianceRegisterPanel } from "./compliance-register-panel";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
@@ -104,10 +108,16 @@ test("Settings hub keyboard walk reaches every visible card link in DOM order", 
     const links = focusableElements(h.container as never).filter(
       (node) => (node as { tagName?: string }).tagName === "A",
     );
-    // FIVE since #615: the registration queue moved out of settings, so an operator owner's hub is
-    // now exactly any other owner's hub. SIX since #648, which added the firm setup section at
-    // the admin floor — an owner sees it, so the hub carries one more card.
-    assert.equal(links.length, 6, "the operator owner hub exposes all six built settings destinations");
+    // FIVE since #615 (the registration queue moved out of settings, so an operator owner's hub
+    // is now exactly any other owner's hub); SEVEN after this wave, which added #648's firm
+    // setup section and #654's firm-knowledge register.
+    // Counted off the registry rather than re-typed, so the next section to land moves this cell
+    // by adding a card, not by editing a number.
+    assert.equal(
+      links.length,
+      SETTINGS_SECTIONS.length,
+      `the operator owner hub exposes all ${SETTINGS_SECTIONS.length} built settings destinations`,
+    );
     assert.deepEqual(checkKeyboardWalk(h.container as never), []);
     for (const link of links) {
       (link as { focus: () => void }).focus();

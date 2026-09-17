@@ -1800,6 +1800,29 @@ export const KNOWLEDGE_0192_COHORT = [
   ...KNOWLEDGE_0192_UNGRANTED_FNS,
 ];
 
+// #654 [0205, firm knowledge defaults + preserved client exceptions] — the FIRM-DEFAULT lane, its
+// own cohort above 0192's for the same "wholly present or wholly absent" reason: it adds no write
+// door at all (a promotion rides the shipped clara.capture_knowledge at firm scope), so what it
+// contributes is TWO reads and TWO guard trigger bodies.
+//
+//   the TWO human reads — clara_authenticated ONLY. The firm register is floored at VIEWER, the
+//   same floor clara.list_client_knowledge takes (0192:1316): a firm default is the firm's own
+//   standing rule and hiding it from a viewer would grant and revoke nothing. The runtime and
+//   agent roles gain ZERO — a _human_ctx-gated read granted to a role that carries no JWT is a
+//   DARK grant (0057's ruling, restated 0192:1742-1745), and a run reads knowledge through
+//   clara.get_knowledge_pack, which already carries firm defaults.
+const KNOWLEDGE_FIRM_0205_HUMAN_FNS = ["list_firm_knowledge", "get_knowledge_applicability"];
+//   …and the TWO UNGRANTED guard bodies: the eligibility wall (a key the catalog does not mark
+//   firm-defaultable is refused at firm scope) and the cross-client evidence wall (a firm-scope
+//   record may not pin a document carrying ANY live client filing). Both are BEFORE INSERT
+//   triggers on clara.knowledge_records, named so they fire AFTER 0192's own authority stamp.
+const KNOWLEDGE_FIRM_0205_UNGRANTED_FNS = [
+  "_tf_knowledge_firm_eligibility", "_tf_knowledge_firm_evidence",
+];
+export const KNOWLEDGE_FIRM_0205_COHORT = [
+  ...KNOWLEDGE_FIRM_0205_HUMAN_FNS, ...KNOWLEDGE_FIRM_0205_UNGRANTED_FNS,
+];
+
 // #643 [0194, periodic stock adjustments + supplied payroll obligations] — the PERIODIC-ADJUSTMENT
 // lane, its own cohort for the same "wholly present or wholly absent" reason 0178's carries:
 // folding these names into an older roster would red every database between the two frontiers, and
@@ -2146,6 +2169,8 @@ export const ALLOWED = {
     // (viewer-floored, firm-predicated); agent/wake/runtime gain ZERO — D11, see the block above
     ...FIRM_SETUP_0203_HUMAN_FNS, // #648 [0203] the four firm setup doors + the one A5 read
     // (admin-floored; agent/wake/runtime gain ZERO — see the block above)
+    ...KNOWLEDGE_FIRM_0205_HUMAN_FNS, // #654 [0205] the firm register + the applicability read
+    // (viewer floor, human lane only; runtime/agent/wake gain ZERO — see the block above)
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
     // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
@@ -2689,6 +2714,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
   failures.push(...cohortFailures("#648 0203 firm setup lane", FIRM_SETUP_0203_COHORT, liveNames));
+  failures.push(...cohortFailures("#654 0205 firm knowledge defaults", KNOWLEDGE_FIRM_0205_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#639 0201 fixed-asset acquisition lane", FA_ACQUISITION_0201_COHORT, liveNames));

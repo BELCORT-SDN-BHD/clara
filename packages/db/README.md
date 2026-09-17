@@ -398,6 +398,86 @@ same observation and its own `'kind'` revision row. **D1 write-quiesce is owed**
 (see the Deploy contract above). #646 mints no `clara.accounting_work` row and widens no purpose
 CHECK; the posted-effect integration is #676.
 
+## Knowledge scope, firm defaults and exceptions
+
+A governed knowledge record (`0192_client_knowledge_records.sql`) carries one of two scopes.
+`client` is the default; `firm` is an explicit act that `clara._knowledge_floor` floors at admin+
+no matter what the key's own floor says (#603 Q22). Both reads — `clara.list_client_knowledge` for
+the register and `clara.get_knowledge_pack` for a run — shadow a firm row behind a client row only
+at the **same key AND the same `applies_when_digest`**. That is what makes a client exception a
+first-class fact rather than a race: `uq_knowledge_live` already treats two live rows of one key as
+independent whenever their applicability differs, so a client row scoped to one narrow condition
+overrides the firm row carrying that condition and leaves an unconditional firm default standing.
+
+`0205_firm_knowledge_defaults.sql` adds what that model was missing, and no write door:
+
+- **Which keys may be defaulted** — `clara.knowledge_key_firm_eligibility`, an append-only,
+  code-populated, FORCE-RLS catalog seeded with `default_currency`, `reporting_framework` and
+  `accounting_basis` (owner ruling D8). `clara._tf_knowledge_firm_eligibility`, a BEFORE INSERT
+  trigger on `clara.knowledge_records`, refuses any other key at firm scope with CLR10
+  `knowledge_scope_not_firm_defaultable` — unless the catalog types it a `preference` or a
+  `policy`, the two kinds a firm can hold on its own behalf. On the 13-key catalog that admits four
+  keys in all (the three seeds plus `coa_seed_decision`) and refuses nine, `entity_type`, `msic`,
+  `sst_regime` and `financial_year_end_month` among them: a client-identity fact is never a firm
+  default. `knowledge_keys.scope_default` is deliberately NOT the mechanism — that table is
+  append-only on UPDATE, so its already-seeded rows can never be re-defaulted.
+- **What a firm default may cite** — `clara._tf_knowledge_firm_evidence`, the second BEFORE INSERT
+  trigger, refuses a firm-scope record pinning a document that carries **any** live
+  `clara.document_filings` row (CLR10 `firm_scope_client_evidence`) and a firm-scope record pinning
+  **any** `clara.accounting_work` at all (CLR10 `firm_scope_client_work`; `accounting_work.client_id`
+  is NOT NULL, so every Work is one client's). Those are the only two client-bearing pins — the
+  extraction / region / field pins cannot exist without `source_document_id` and are covered
+  transitively. `uq_document_filing_active` is over `(document_id, client_id) where retired_at is
+  null`, so one document may hold N live filings and the wall counts rather than probes for one. An
+  **unfiled firm document stays admissible** — the case 0192 reserves in its own voice — and
+  retiring the last filing makes a document admissible again. This is not an RLS disclosure fix
+  (`clara.documents` is already firm-readable); it stops one client's evidence travelling as the
+  stated basis of a rule applied to every other client, first of all inside a model's knowledge pack.
+- **The same wall from the filing side** — `clara._tf_document_filing_firm_knowledge`, a BEFORE
+  INSERT OR UPDATE trigger on `clara.document_filings`, refuses filing a document that a **live**
+  firm-scope record cites (CLR10 `document_cited_by_firm_default`, naming the record and the key).
+  Without it the wall was one-way: filing the document *after* the rule cited it produced the same
+  contamination, and the INSERT wall then refused the retraction too, because a withdrawal carries
+  the predecessor's pins verbatim. So `_tf_knowledge_firm_evidence` also **admits a correction or
+  withdrawal that introduces no new pin** — narrowly: a correction that re-aims a firm rule onto a
+  client's document or Work is still refused. The invariant, stated once: *no live firm-scope
+  knowledge record may cite a document carrying a live client filing, or any accounting_work at
+  all.* A superseded or withdrawn revision reaches no client and blocks no filing.
+- **And the wall decides the concurrent case, not only the sequential one** — two BEFORE-row
+  triggers that each read the other's table do not give that for free: under READ COMMITTED neither
+  sees the other transaction's uncommitted row, so a capture and a filing naming the same document
+  could both commit. Measured on the rig before the lock: three of the four arrival orders left one
+  live firm-scope record citing a live client filing, and the fourth was safe only because
+  `clara._file_document_write` happens to take `clara.documents ... for update`. Both halves now
+  take one shared **advisory transaction lock** keyed on the document
+  (`clara.firm_knowledge_evidence:<document_id>`), and `_tf_knowledge_firm_evidence` takes the
+  `clara.documents` FOR KEY SHARE row lock first — the same lock its own FK check takes moments
+  later — so both lanes acquire in the order the filing lane already uses and the pair cannot
+  deadlock. Cell: `p654.evidence.race_capture_vs_filing`, all four arrival orders, with and without
+  the filing door's own row lock.
+- **Two viewer-floored reads, `clara_authenticated` only** — `clara.list_firm_knowledge()` returns
+  this firm's rules with the authority each promotion recorded, the live client exceptions at the
+  same key and applicability, and the non-terminal Work citing the key;
+  `clara.get_knowledge_applicability(p_client, p_knowledge_key)` answers, per applicability, which
+  of the firm rule and the client exception is in force and why. Nothing is granted to
+  `clara_runtime`, `clara_agent_ro` or either wake role (0057's dark-grant rule). "Today" in both
+  reads is resolved server-side in `Asia/Kuala_Lumpur` and returned as `as_of`.
+
+Both `knowledge_records` guards fire only for `scope_kind = 'firm'`; the client lane is
+byte-unaffected. They are named so they sort AFTER 0192's own `t_knowledge_records_authority`, which
+stamps `applies_when_digest` and refuses an unknown key first — `0205`'s tail asserts that order off
+`pg_trigger` rather than trusting the alphabet, and asserts the filing-side guard's attachment
+beside it. 0205 recuts no 0192 body and therefore pins none.
+
+A promotion is `clara.capture_knowledge(p_scope_kind => 'firm')` with an **authored** reason, never
+the client row's own basis, and no source pins; a correction or withdrawal of a firm rule rides the
+shipped `correct_knowledge` / `withdraw_knowledge` at the same floor, from `/settings/knowledge`. Automatic re-evaluation of
+affected work is NOT built here — `docs/PRD.md:123` defers it to #658/#663 — so the register ships
+the human-review affordance instead.
+
+Battery: [tests/knowledge-firm-defaults.test.mjs](tests/knowledge-firm-defaults.test.mjs), gated by
+`knowledge-firm-defaults-preintegration-gate.mjs`.
+
 ## Frozen evaluator deployment
 
 An evaluator registered as undeployed remains unavailable until deliberately activated.

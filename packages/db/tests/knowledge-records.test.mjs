@@ -511,50 +511,66 @@ cell("kn.18 the runtime pack answers status ok with the version it used, and rea
 // per-condition, so the shadow is too.
 // =============================================================================================
 
+// #654 (0205) CHANGED THE KEY THIS CELL USES, and nothing else about it. `sst_regime` is a
+// CLIENT-IDENTITY fact — one business's own SST registration status — and owner ruling D8 made
+// it un-promotable at firm scope (`clara._tf_knowledge_firm_eligibility`, CLR10
+// `knowledge_scope_not_firm_defaultable`). The SUBJECT of this cell is the per-applicability
+// shadow, not the key it demonstrates on, so it now demonstrates on `coa_seed_decision`: a
+// `preference`, firm-defaultable by kind, and exactly the sort of rule ("the firm seeds the
+// LHDN/MPERS chart unless a client asks otherwise") a narrow client exception should override
+// without erasing. The values are objects, so the assertions compare them by value rather than by
+// a sortable scalar.
 cell("kn.19 a client row scoped to ONE condition shadows only the firm row with the SAME condition", async () => {
   const w = await knowledgeWorld("t19");
+  const KEY = "coa_seed_decision";
+  const FIRM_VALUE = { seed: "lhdn_mpers_standard" };
+  const NARROW_VALUE = { seed: "manual" };
+  const CLIENT_VALUE = { seed: "manual", note: "the client's own unconditional position" };
   // An UNCONDITIONAL firm default…
   await capture(w.admin, {
-    key: "sst_regime", scope: "firm", client: null, value: "service_tax",
+    key: KEY, scope: "firm", client: null, value: FIRM_VALUE,
     basis: "the firm's standing treatment where nothing else is recorded",
   });
   // …and a client row that applies to ONE segment only.
   await capture(w.bookkeeper, {
-    key: "sst_regime", client: w.clientA, value: "not_registered",
+    key: KEY, client: w.clientA, value: NARROW_VALUE,
     appliesWhen: { segment: "digital" }, basis: "the digital-services segment alone",
   });
 
   const a = await listClientKnowledge(w.bookkeeper, w.clientA);
-  const rows = a.records.filter((r) => r.knowledge_key === "sst_regime");
+  const rows = a.records.filter((r) => r.knowledge_key === KEY);
   assert.equal(rows.length, 2,
     `a client row scoped to one condition must not hide the unconditional firm default -- got ${JSON.stringify(rows.map((r) => [r.scope_kind, r.applies_when]))}`);
   const clientRow = rows.find((r) => r.scope_kind === "client");
   const firmRow = rows.find((r) => r.scope_kind === "firm");
   assert.deepEqual(clientRow.applies_when, { segment: "digital" });
   assert.deepEqual(firmRow.applies_when, {});
-  assert.equal(firmRow.value, "service_tax", "the firm default must survive verbatim");
+  assert.deepEqual(firmRow.value, FIRM_VALUE, "the firm default must survive verbatim");
 
   // The RUNTIME pack reads the same way — a run must not lose the default either.
   const pack = await packAs(w.firm, w.clientA);
-  const packRows = pack.records.filter((r) => r.knowledge_key === "sst_regime");
+  const packRows = pack.records.filter((r) => r.knowledge_key === KEY);
   assert.equal(packRows.length, 2,
     `the knowledge pack must carry both -- got ${JSON.stringify(packRows.map((r) => [r.scope_kind, r.applies_when]))}`);
 
   // …AND THE SAME-DIGEST PAIR STILL SHADOWS, which is the half that makes this a shadow at all:
   // the client's own UNCONDITIONAL row hides the firm's unconditional one, and only that one.
   await capture(w.bookkeeper, {
-    key: "sst_regime", client: w.clientA, value: "both",
+    key: KEY, client: w.clientA, value: CLIENT_VALUE,
     basis: "the client's own unconditional position",
   });
   const b = await listClientKnowledge(w.bookkeeper, w.clientA);
-  const after = b.records.filter((r) => r.knowledge_key === "sst_regime");
+  const after = b.records.filter((r) => r.knowledge_key === KEY);
   assert.equal(after.length, 2,
     `the client's unconditional row must shadow the firm's unconditional one -- got ${JSON.stringify(after.map((r) => [r.scope_kind, r.applies_when]))}`);
   assert.equal(after.every((r) => r.scope_kind === "client"), true,
     "both remaining rows are the client's own: the firm default is now genuinely overridden");
+  // Compared as OBJECTS, never as JSON text: jsonb normalises key order on storage, so a string
+  // comparison would assert something about Postgres's sort rather than about the two values.
   assert.deepEqual(
-    after.map((r) => r.value).sort(),
-    ["both", "not_registered"],
+    [...after].sort((x, y) => String(x.value.note ?? "").localeCompare(String(y.value.note ?? "")))
+      .map((r) => r.value),
+    [NARROW_VALUE, CLIENT_VALUE],
     "the client's unconditional value and its digital-segment exception both stand");
 });
 

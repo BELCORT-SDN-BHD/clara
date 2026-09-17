@@ -88,6 +88,38 @@ creation, but every assertion under test runs through a least-privileged persona
 the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
 `p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent).
 
+## Firm knowledge defaults (#654, `0205_firm_knowledge_defaults.sql`)
+
+`knowledge-firm-defaults.test.mjs` is the firm-default half of the governed Knowledge lane, above
+`knowledge-records.test.mjs` (#644, `0192`). Twenty-one cells, all through `humanQuery` at the least
+privilege that should succeed: the eligibility wall (only a catalogued firm-defaultable key becomes
+a firm default), the cross-client evidence wall in BOTH directions and on BOTH client-bearing pins
+(a firm-scope record may not pin a document with any live client filing, at N=1 and N>1, nor any
+`accounting_work` at all; and a document a live firm rule cites may no longer be FILED to a client
+afterwards, while a correction or withdrawal carrying the predecessor's pins stays admissible so a
+contaminated rule can always be retracted), the same wall under CONCURRENCY (the capture and the
+filing staged as two overlapping transactions in both arrival orders, and with the filing made both
+through `clara.file_document` and as a raw table write, so the serialisation is shown to come from
+the wall's own advisory lock rather than from the filing door's row lock), the client exception
+surviving a later firm default in
+both the register and the runtime pack, the promotion floor and what the act records, revoked
+membership on all three knowledge lanes, the trust wall at the firm boundary, the two new reads,
+the promotion as an operation (op_key replay is one receipt, a reused key with different arguments
+is refused by name, two admins racing behind the `uq_knowledge_live` barrier leave exactly one live
+rule), and the negative census proving no function outside the knowledge cohort reads
+`clara.knowledge_records`.
+
+Its frontier gate is `knowledge-firm-defaults-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_KNOWLEDGE_FIRM_0205`), wired into the package `test` script. A package-wide run
+against a chain below `0205` SKIPS the battery loudly; a focused run (no gate preloaded) FAILS. A
+skip is not evidence. The shared world is `knowledge-fixtures.mjs` (#644's firm, four ranks, two
+clients) plus `knowledge-firm-fixtures.mjs` (documents with and without live client filings, a live
+Work to cite, membership deactivation, a session-local `session_replication_role = 'replica'` filing
+that manufactures the pre-0205 contaminated state the retraction hatch exists for, and the runtime
+form of 0205's own violator census); the race cell additionally uses `rig-fixtures.mjs`'
+`freshResolution` so the filing half can run through the real `clara.file_document` door, which
+refuses a document with no client attribution.
+
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
 ## Intake-surface batteries (#633)
