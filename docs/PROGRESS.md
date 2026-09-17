@@ -25,5 +25,5 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 
 1. Triage the 56 `needs-triage` follow-ups (#861–#915 + #917).
 2. The owner returns to the #597 map: **#682** (verify the real accounting journey and runtime recovery on the released combination, incl. #820's cleanup, #810's census, #813's provider eval) → **#683** (final acceptance + blueprint sync, then close #612 and #597).
-4. When the lawyer-reviewed Terms/DPA wording arrives: publish v2 through `clara.publish_legal_document` (BELCORT owner) or a seed migration.
-5. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
+3. When the lawyer-reviewed Terms/DPA wording arrives: publish v2 through `clara.publish_legal_document` (BELCORT owner) or a seed migration.
+4. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
