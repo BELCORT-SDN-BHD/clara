@@ -14,6 +14,7 @@ import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
 import { DOCUMENT_KINDS, type DocumentRow, type RequestReextractionResult } from "@/lib/documents/types";
+import { renderKindLabel } from "@/lib/documents/kind-label";
 
 /** A CHECKED lookup from the DB's `admission` string to its own translation
  *  key — never a `t(\`reextraction.admission.${x}\` as ...)` cast (the exact
@@ -67,14 +68,21 @@ export function DocumentAdmin({
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
         <SectionHeader level={4}>{t("kindHeading")}</SectionHeader>
-        <p className="text-sm text-muted-foreground">{t("kindCurrent", { kind: doc.document_kind ?? t("kindUnclassified") })}</p>
+        {/* #633 AC2 — the CURRENT kind as a PHRASE. This line used to interpolate
+            `doc.document_kind` raw, so it read "Current: ssm_company_doc"; a null kind
+            read "Current: unclassified", naming an absence rather than the actionable
+            state AC3(a) asks for. `renderKindLabel` answers both. */}
+        <p className="text-sm text-muted-foreground">{t("kindCurrent", { kind: renderKindLabel(doc.document_kind, t) })}</p>
         <div className="flex flex-wrap gap-2">
           <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
             <SelectTrigger aria-label={t("kindHeading")} size="sm">
               <SelectValue placeholder={t("kindPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+              {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB
+                  enum, because that value is exactly what `set_document_kind` is called
+                  with. Before this the control offered "ssm_company_doc" to an accountant. */}
+              {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
             </SelectContent>
           </Select>
           <Input

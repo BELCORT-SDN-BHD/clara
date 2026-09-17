@@ -527,3 +527,57 @@ The classify-before-OCR race itself is closed (#606): migration
 `awaiting_extraction` until a `done` OCR/structured-parse extraction exists, and the `facts_gate`
 consumer re-enters that enqueue on `document.extraction_completed` as well as
 `document.classified`.
+
+### `tests/intake-admission-e2e.mjs` (#633)
+
+The real-Postgres-World proof that a file reaches the WORK ADMISSION DOOR with no human
+pressing anything. It starts where `intake-e2e.mjs` stops: that one owns the transport
+(CORS, the streaming PUT, the token lock, the upload capability never crossing workflow
+step IO); this one owns the chain AFTER the bytes are read.
+
+Seven legs. **Leg 1** has three arms and ZERO `clara.request_autodraft` anywhere in the
+automatic lane — asserted from the source of `intake.mjs`, `intake-lanes.mjs`,
+`intake-recovery.mjs`, `autodraft.mjs`, `facts-gate.mjs` and `intakeRoutes.ts`, with a
+control proving the door exists (it is #614's RECOVERY act, not a gate):
+
+* **(a) the control.** An UNFILED upload's classify task settles `failed` with the
+  estate's own `firm_narrow_consent_inactive` (0123's pre-attribution branch) and invents
+  no kind. Before fix round 1 this was the ONLY thing that ever happened on this fixture,
+  while leg 1's poll predicate (`row !== null`) passed on it anyway.
+* **(b) the consented chain.** With the client's `document_processing` consent granted
+  through the real governed verbs and the document filed the way the browser's queue files
+  it, the chain runs ingest → extraction `done` → classify `done` → `document_kind` set
+  → `document.classified`, with no human act in it.
+* **(c) the admission door.** A real MyInvois UBL invoice runs upload → `structured_parse`
+  → `local_facts` `done` → `document.invoice_facts_completed` → the autodraft consumer
+  calling `clara.admit_autodraft_task` for that document's live filing, inside a sweep run
+  it opened itself (origin `sweep`; the door's own CLR10 makes a run-bound `one_click`
+  impossible). The door's verdict is read back and printed VERBATIM.
+
+**Residual, named.** Arm (c) proves the door is REACHED, not that a coding task is
+admitted: `_coding_lane_core` refuses this fixture's document (`tier_a_fails`,
+`direction_unresolved`, `vendor_unresolved`, `no_consent` — measured on clara_633) and
+routes it to `needs_you`. A Tier-A-complete document needs counterparty resolution, a
+resolved direction and coding consent — the autodraft lane's own fixture, not this one's.
+
+Legs 2–7: (2) a failed extraction yields `awaiting_extraction` and never a kind (0177's
+router); (3) duplicate bytes adopt onto the EXISTING document while the same name with
+different bytes stays distinct (identity is the sha256, `0003:76`); (4) a mixed five-file
+batch at the client's own CONCURRENCY of 2 settles each file independently, plus a burst
+beyond the runtime's upload ceiling refused 429 PER ITEM; (5) a replayed finalize leaves
+exactly one document and one ingest task; (6) H-53 — a `consent_evidence` born on this
+route keeps custody and never enters the coding lane; (7) C-37 — a real OFX (lane `none`,
+store-only at intake for `intake-lanes.mjs:45-51`'s reason, not for the retired "no OFX
+reader" one) and a REAL XLSX (built in the file as a stored-entry ZIP with a genuine
+central directory — fix round 1: the previous `PK\x03\x04` stub was quarantined on every
+run while the leg printed "admitted"), with the levels `clara.document_capabilities`
+actually publishes.
+
+Standalone, like `intake-e2e.mjs` — not collected by `node --test`. Wired in
+`.github/actions/db-live-gates/action.yml` as its own step, reusing the same throwaway
+database and bootstrapped world the Slice-5 step just built.
+
+NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
+between finalize and checkpoint. This file boots the runtime in-process (as
+`intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
+spawned-engine shape `interview-kill-resume-e2e.mjs` uses.

@@ -237,3 +237,23 @@ able to read all rows; `CLARA_DR_STRICT=1` makes its canary/AP checks mandatory,
 Database dumps do not include Storage bytes or managed Auth configuration.
 The [backup service](../backup/README.md) adds encrypted off-site document copies and selected Auth
 data. Restore verification is necessary before treating a backup as recoverable.
+
+## Web consumers added by #633 — no new door
+
+#633 shipped ZERO SQL. Three existing objects gained their first (or their first
+list-form) `apps/web` caller, and the batteries in `tests/` that pin them are named in
+`tests/README.md`:
+
+- `clara.list_unassigned_documents(p_limit)` (0009:2590, SECURITY INVOKER, granted
+  `clara_authenticated` + `clara_agent_ro` at :2908-2913) — the firm's
+  unassigned-sources leaf. The function was never the gap; the caller was.
+- `clara.document_capabilities` (0191:200-214, granted :271) — read ONCE per mount as a
+  global catalogue and joined per row in the browser, rather than calling
+  `clara.get_document_state` per list row (an N+1 under the user's own JWT).
+- `clara.document_intakes_visible` (0007:2233, granted :2747) — read in LIST form, not
+  only single-row, so an upload receipt survives a reload.
+
+`clara.entry_evidence_links` is read DIRECTLY for the document→Work link. It carries
+`grant select … to clara_authenticated` (0182:360) under FORCE RLS
+`firm_id = clara.jwt_firm()` (:358-359); a SECURITY DEFINER wrapper would REMOVE that
+guarantee and force a hand re-implementation of it, for zero new capability.

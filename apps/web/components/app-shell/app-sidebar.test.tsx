@@ -113,13 +113,17 @@ function tree({
   });
 }
 
-const FIRM_VIEWER = ["/", "/clients", "/work", "/settings"];
-const FIRM_BOOKKEEPER = ["/", "/clients", "/work", "/activity", "/settings"];
+// #633 — `/documents`, the firm's unassigned sources, sits between Work and Activity because
+// that is where the registry puts it, and it is VIEWER-floored because that is what the READ
+// admits (`clara.list_unassigned_documents` is SECURITY INVOKER; measured on the #633 rig).
+// The attribution ACT's higher floor is the DB's refusal on the row, not a hidden destination.
+const FIRM_VIEWER = ["/", "/clients", "/work", "/documents", "/settings"];
+const FIRM_BOOKKEEPER = ["/", "/clients", "/work", "/documents", "/activity", "/settings"];
 // #615 — the operator support destination is firm-altitude, owner-floored AND operator-gated, so it
 // is the one row that separates an operator owner's sidebar from any other owner's. Written out in
 // full (never `[...FIRM_BOOKKEEPER, "/operator"]`) because the ORDER is the registry's, and a
 // spread would have put it after Settings where the registry puts it before.
-const FIRM_OPERATOR_OWNER = ["/", "/clients", "/work", "/activity", "/operator", "/settings"];
+const FIRM_OPERATOR_OWNER = ["/", "/clients", "/work", "/documents", "/activity", "/operator", "/settings"];
 
 // ── rank shaping ────────────────────────────────────────────────────────────
 
@@ -176,7 +180,7 @@ test("inside a client the sidebar renders BOTH groups, the client's own name fir
     assert.deepEqual(labels, ["Rome Properties", "E2E Accounting"], "the client group must come first");
 
     const rendered = hrefs(h.container);
-    // The client's six destinations, then the firm's five. Accounting's children
+    // The client's six destinations, then the firm's six. Accounting's children
     // are collapsed on this route, so they are absent.
     assert.deepEqual(rendered, [
       `/clients/${CLIENT}`,

@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { documentBadges, type DocumentBadge } from "@/lib/documents/copy";
+import { renderKindLabel } from "@/lib/documents/kind-label";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState } from "@/components/common/state";
 import { DocumentSourceActions } from "./document-source-actions";
@@ -29,7 +30,8 @@ function badgeLabel(badge: DocumentBadge, t: Translate): string {
   switch (badge.kind) {
     case "extraction": return t("badgeExtraction", { status: t(badge.statusKey) });
     case "pageCount": return t("badgePageCount", { count: badge.count });
-    case "documentKind": return badge.value; // a DB-owned enum string (e.g. "invoice"), not chrome prose
+    // #633 AC2 — the phrase, never the enum. See copy.ts's own overturned ruling.
+    case "documentKind": return renderKindLabel(badge.value, t);
     case "financialDate": return t("badgeFinancialDate", { date: badge.date });
     case "retention": return badge.until
       ? t("badgeRetentionUntil", { state: badge.state, until: badge.until })

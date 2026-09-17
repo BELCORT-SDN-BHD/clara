@@ -16,6 +16,12 @@ import { handleAuthWallMock, handleCheckoutMock } from "./fs4-checkout-mock.mjs"
 // other spec's surface changes. See that file's header for what it does and does not
 // prove.
 import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
+// #633's documents-tab + firm-leaf lane. AHEAD of chat-parity in BOTH chains: its
+// receipts read is the LIST form of document_intakes_visible, which chat-parity answers
+// unconditionally, and its runtime legs are keyed to its own upload intake id. Every
+// branch is id-scoped and returns false otherwise, so chat-parity's single-row poll and
+// its own three intake legs are untouched.
+import { DOCS_INTAKE, handleDocumentsIntakeRuntime, handleDocumentsIntakeSupabase } from "./documents-intake-mock.mjs";
 // P6-5's own lane, the same file-disjoint shape, consulted through the three hooks below.
 // Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
 // beside the chat-parity lane without either starving the other's fixtures.
@@ -199,6 +205,10 @@ const clients = [
   ...ACTIVITY_CLIENTS,
   // #641's three — the same append shape, for the same reason.
   ...WORK_LIST_CLIENTS,
+  // #633's own client, appended the same way. The documents-intake lane needs a real
+  // `clients` row or its route's SERVER-side layout read resolves to a not-found before
+  // any of its cells run.
+  { id: DOCS_INTAKE.clientId, name: "Kuala Trading Sdn Bhd", status: "active", created_at: "2026-03-01T00:00:00.000Z" },
 ];
 
 // #614 — Postgres `uuid` shape (`clara.clients.id`, 0003_books_core.sql:34-40), mirrored
@@ -568,6 +578,7 @@ async function handleSupabase(request, response, url) {
   // would have starved the chat-parity thread of its `chat_sessions` row, which #507's new
   // client/thread pairing check turns into a 404.
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleDocumentsIntakeSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
@@ -909,6 +920,7 @@ await new Promise((resolveListen, rejectListen) => {
 // the shared session list. `handleChat` is last of the three and now returns false on a
 // miss, so FS-4 C-6's confirm route still reaches its own handler.
 const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, url) => {
+  if (await handleDocumentsIntakeRuntime(request, response, url)) return true;
   if (await handleChatParityRuntime(request, response, url)) return true;
   if (await handleP6_5Runtime(request, response, url)) return true;
   if (await handleDocumentsViewerRuntime(request, response, url)) return true;

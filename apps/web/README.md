@@ -143,3 +143,55 @@ Rollback immediately sends all traffic to the selected version. It does not rest
 database state or deleted resources. See [Cloudflare rollbacks](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/).
 
 Do not use `wrangler versions list` to decide what is live; it shows version history without traffic percentages.
+
+## The documents surfaces (#633)
+
+**Two entrances, one transport.** `lib/documents/intake.ts` carries every upload —
+the client documents tab, the Clara composer's attach affordance and the interview
+card all share it. Since #633 it has TWO bodies behind one contract: an
+`XMLHttpRequest` one when a caller asks for real byte progress (`fetch` has no
+upload-progress event in any shipping browser), and the original `fetch` one
+otherwise. Both classify failures through the same `kindForStatus` taxonomy; the XHR
+body additionally detects a FOLLOWED redirect through `responseURL`, because XHR has
+no manual-redirect mode and a session that expired mid-upload would otherwise arrive
+as a 200 carrying a login page.
+
+**Upload is adopted automatically. "Start processing again" is recovery, not a gate.**
+Nothing on these surfaces asks a person to begin processing a file they have already
+uploaded: the runtime's facts-gate and autodraft consumers admit the work themselves
+(`packages/runtime/plugins/startWorld.ts:476` and `:390`). `clara.request_autodraft`
+is the per-filing RECOVERY act #614 made it, and it stays where #614 put it — on the
+filing's own history, not on the queue.
+
+**Three regions on the client tab.**
+- *Uploads* (`components/documents/upload-panel.tsx`) — this browser session's queue,
+  as a Data Table with real byte progress, honest processing-task counts, and three
+  distinct controls: Cancel stops the transfer and keeps the row, Retry runs it
+  again, Remove takes it off the list. None of them cancels an accepted Work; that is
+  a governed act on another object, reached by a link from the document's detail.
+- *Recent uploads* (`components/documents/intake-receipts.tsx`) — the DURABLE record,
+  re-read at mount so a reload recovers it, and re-read by a hard-bounded settle-poll
+  (`lib/documents/use-settle-poll.ts`) while any row can still change. The predicate
+  is "filed to this client, or mine and unattributed" — never "my uploads", because
+  `clara.document_intakes` has no client column. **A tick costs ONE read.** The mount
+  pays four (the masked intake view, this client's filings, the unassigned set and
+  `caller_context`) and keeps the last three as a derivation; each tick re-reads the
+  masked view alone through `refreshIntakeReceipts` and rebuilds the rows against that
+  derivation, and the full four are paid again exactly once, on the tick where the batch
+  settles. Until fix round 1 the tick re-ran the whole derivation — up to four reads a
+  tick under the caller's own JWT, the heaviest of them a SECURITY INVOKER RPC.
+- *Filed to this client* — unchanged.
+
+**The firm's unassigned sources** live at `/documents`
+(`components/firm/documents/unassigned-sources.tsx`), over the already-granted
+`clara.list_unassigned_documents`. Each document is asked about ONCE — one act per row,
+and the row leaves the population on the next settled read because the DB's own predicate
+stops matching it. What the DOOR guarantees is narrower than that and is stated where it
+matters (the leaf's header, `packages/db/tests/unassigned-intake-reuse.test.mjs`): a
+repeat to the SAME client is refused CLR10 in the estate's own words, but a second
+attribution to a DIFFERENT client is ACCEPTED and leaves two live filings — which 0123's
+classify gate then refuses as `document_processing_multi_client`. The nav floor is
+`viewer` because that is what the READ admits (measured on a rig persona); the
+attribution act's own higher floor arrives as the DB's refusal on the row rather than
+as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
+is the destination it was already pointing at.

@@ -7,6 +7,9 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { useReadErrKind } from "@/lib/parts/read-err-kind";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadFiledDocuments, loadFirmClients, loadOpenCandidates } from "@/lib/documents/loaders";
+import { isSettled, loadIntakeReceipts, refreshIntakeReceipts, type IntakeReceiptsLoad } from "@/lib/documents/receipts";
+import { useCapabilityRegistry } from "@/lib/documents/use-capability-registry";
+import { useSettlePoll } from "@/lib/documents/use-settle-poll";
 import { applyDocumentParam, documentUrl, parseDocumentParam } from "@/lib/documents/url-state";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
@@ -16,6 +19,7 @@ import { nextPaint } from "@/components/firm/work-question-affordance";
 import { FiledDocumentList } from "./filed-document-list";
 import { OpenCandidateList } from "./open-candidate-list";
 import { UploadPanel } from "./upload-panel";
+import { IntakeReceipts } from "./intake-receipts";
 import { DocumentDetail, DOCUMENT_HEADING_ID } from "./document-detail";
 import { DoorFeedback } from "./door-feedback";
 import { CodingLanePanel } from "./coding-lane-panel";
@@ -33,7 +37,16 @@ import { CodingLanePanel } from "./coding-lane-panel";
  * and Back left the tab. See `lib/documents/url-state.ts` for the parameter's own
  * contract and `openedViaPushRef` below for how the two close paths differ.
  */
-export function DocumentsWorkbench({ clientId }: { clientId: string }) {
+export function DocumentsWorkbench({ clientId, settlePoll: settlePollOptions }: {
+  clientId: string;
+  /** THE SETTLE-POLL'S BOUNDS, as a documented option with the SHIPPED values as its
+   *  defaults — the idiom `useUploadQueue`'s own `pollAttempts`/`pollIntervalMs` already
+   *  establishes in this ticket. The shipped delay is 1.5 s and rises; a cell that must
+   *  prove what ONE TICK COSTS cannot wait that out, and the fix round found the
+   *  original bound cell passing with ZERO ticks because of exactly that. The ARM under
+   *  test is the same code either way. */
+  settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };
+}) {
   const t = useTranslations("ClientDocuments");
   const router = useRouter();
   const pathname = usePathname();
@@ -49,6 +62,43 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const filed = useHydratedPart(sessionTokenAccessor, () => filedKind.wrap(() => loadFiledDocuments(clientId, t)));
   const candidates = useHydratedPart(sessionTokenAccessor, () => loadOpenCandidates(clientId, t));
   const clients = useHydratedPart(sessionTokenAccessor, () => loadFirmClients(t));
+
+  /** #633 AC1(c) — the durable receipts cell, and the ONE read the settle-poll
+   *  repeats. See `lib/documents/receipts.ts` for why the predicate is "filed to
+   *  this client OR mine-and-unattributed" rather than "my uploads". */
+  /** FIX ROUND 1 (review finding 633-ADV-4). A tick must cost ONE read, not four. The
+   *  last full load is held here so a tick can rebuild every row through
+   *  `refreshIntakeReceipts` — `document_intakes_visible` alone — against the filing
+   *  set, unassigned set, identity and metadata the mount already paid for. The full
+   *  derivation is re-read exactly once more, on the tick where the batch SETTLES, so
+   *  a file that became filed mid-batch gets its real kind and mime. `reload()` from
+   *  anywhere else (a door, a client change) is always a full read, because `narrowRef`
+   *  is only ever raised by `onTick` and is lowered again the moment it is spent. */
+  const lastLoadRef = useRef<IntakeReceiptsLoad | null>(null);
+  const narrowRef = useRef(false);
+  const receipts = useHydratedPart(sessionTokenAccessor, async (live) => {
+    const previous = lastLoadRef.current;
+    if (narrowRef.current && previous !== null) {
+      const next = await refreshIntakeReceipts(previous, { session: live });
+      if (!isSettled(next)) {
+        lastLoadRef.current = next;
+        return next;
+      }
+      narrowRef.current = false; // settled: pay the other three reads once, then stop
+    }
+    const full = await loadIntakeReceipts(clientId, { session: live });
+    lastLoadRef.current = full;
+    return full;
+  });
+  const capabilities = useCapabilityRegistry(sessionTokenAccessor);
+  const settlePoll = useSettlePoll({
+    enabled: !isSettled(receipts.data) && receipts.data !== null,
+    onTick: () => { narrowRef.current = true; void receipts.reload(); },
+    // The client id is the scope; a change must drop the previous scope's budget
+    // rather than inherit it (and `useHydratedPart` re-reads on its own besides).
+    resetKey: clientId,
+    ...settlePollOptions,
+  });
 
   /** The id a URL named that this client cannot show — a hand-edited or stale link, or a
    *  well-formed uuid whose read came back empty. Held so the aside can say "not available in this
@@ -194,6 +244,9 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const refreshFiled = () => {
     void filed.reload();
     void candidates.reload();
+    // #633 — a filing act moves a receipt between "unassigned" and "filed here", so
+    // the receipts cell is part of the SAME re-derivation, not a straggler.
+    void receipts.reload();
     setFilingEpoch((n) => n + 1);
   };
 
@@ -214,7 +267,28 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           <section className="flex flex-col gap-2">
             <SectionHeader level={2}>{t("uploadHeading")}</SectionHeader>
-            <UploadPanel clientId={clientId} onFiled={refreshFiled} />
+            <UploadPanel clientId={clientId} onFiled={refreshFiled} capabilityIndex={capabilities.index} />
+          </section>
+
+          {/* #633 AC1(c) — THE RECEIPTS CELL. A FIFTH independently-hydrated cell,
+              re-derived on mount (so a reload recovers every receipt the queue's
+              React ref used to lose) and re-read by a BOUNDED settle-poll while any
+              row can still change. It is separate from the queue above on purpose:
+              the queue speaks for THIS browser session's uploads, this cell speaks
+              for the DURABLE record, and conflating them is what made a reload look
+              like nothing had happened. */}
+          <section className="flex flex-col gap-2">
+            <SectionHeader level={2}>{t("receiptsHeading")}</SectionHeader>
+            <IntakeReceipts
+              load={receipts.data}
+              loading={receipts.loading}
+              err={receipts.err}
+              clr={receipts.clr}
+              capabilityIndex={capabilities.index}
+              exhausted={settlePoll.exhausted}
+              onRefresh={() => { void receipts.reload(); }}
+              act={(fn) => receipts.act(fn)}
+            />
           </section>
 
           <section className="flex flex-col gap-2">

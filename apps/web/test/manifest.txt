@@ -51,6 +51,7 @@ components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/composer-attachment-control.test.tsx
 components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
 components/clara/composer-keyboard.test.tsx
@@ -90,6 +91,7 @@ components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/document-facts-table.test.tsx
+components/documents/document-kind-labels.test.tsx
 components/documents/document-metadata-viewer-gate.test.tsx
 components/documents/document-page-overlay.test.tsx
 components/documents/document-source-actions.test.tsx
@@ -100,6 +102,7 @@ components/documents/documents-governance-keyboard.test.tsx
 components/documents/documents-url-state.test.tsx
 components/documents/documents-workbench-refresh.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/checkout-faces-a11y.test.tsx
 components/entry/email-confirmation-origin.test.tsx
@@ -131,6 +134,7 @@ components/firm/agent-tasks-keyboard.test.tsx
 components/firm/client-scope-invalidation.test.tsx
 components/firm/client-workspace-overview.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
+components/firm/documents/unassigned-sources.test.tsx
 components/firm/firm-home/firm-home-board.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
@@ -251,11 +255,13 @@ lib/command/do-action-floors.test.ts
 lib/command/do-actions.test.ts
 lib/command/routes.test.ts
 lib/documents/bytes.test.ts
+lib/documents/capability-registry.test.ts
 lib/documents/copy.test.ts
 lib/documents/document-state.test.ts
 lib/documents/doors.test.ts
 lib/documents/extract-shape.test.ts
 lib/documents/intake.test.ts
+lib/documents/kind-label.test.ts
 lib/documents/loaders.test.ts
 lib/documents/open-in-new-tab.test.ts
 lib/documents/pdf-worker-asset.test.ts
@@ -263,6 +269,7 @@ lib/documents/reads.test.ts
 lib/documents/region-geometry.test.ts
 lib/documents/runtime-wire.test.ts
 lib/documents/useUploadQueue.test.ts
+lib/documents/work-links.test.ts
 lib/doors.test.ts
 lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts

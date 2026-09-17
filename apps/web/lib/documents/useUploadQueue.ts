@@ -41,19 +41,40 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  beginIntake, finalizeIntake, INTAKE_ADOPTED, putIntakeBytes, readIntake,
+  beginIntake, finalizeIntake, INTAKE_ADOPTED, listProcessingTasksForDocument, putIntakeBytes, readIntake,
   type IntakeRecoveryRefused,
 } from "./intake";
 import { isRuntimeError } from "./runtime-wire";
 import { fileToClient } from "./doors";
 import { MAX_FILE_BYTES, type IntakeFailureCode, type IntakeOrigin } from "./types";
 import type { SessionTokenAccessor } from "@/lib/session";
-import type { WireErrorKind } from "@/lib/wire-error-kind";
+import { kindForStatus, type WireErrorKind } from "@/lib/wire-error-kind";
 
 const CONCURRENCY = 2;
 
 export type QueueState = "queued" | "starting" | "uploading" | "verifying" | "filing" | "ready" | "failed" | "error" | "stopped";
 export type QueueErrorPhase = "upload" | "filing" | "timeout";
+
+/** WHY A `stopped` ROW STOPPED — #633 AC1(a)/AC7.
+ *
+ *  `stopped` was ONE terminal state wearing two completely different meanings, and a
+ *  surface could not tell them apart. It still is one state string (a rename would
+ *  break `ComposerAttachmentControl.tsx:58`'s Send gate and `chat-parity-walk.spec.ts:209`
+ *  in the same move); the DISCRIMINANT rides beside it:
+ *    * `"cancelled"` — the person stopped this transfer BEFORE the finalize request was
+ *      sent. Nothing durable exists server-side; nothing was adopted; Retry is honest.
+ *    * `"untracked"` — the queue stopped following a row where a document MAY already
+ *      exist server-side (the finalize request had been sent, or custody was confirmed).
+ *      The file is not lost — it resurfaces in this client's filed/candidate lanes, or
+ *      as an unassigned source at firm altitude — but this queue no longer speaks for it.
+ *  `null` on every non-`stopped` row, and cleared by `retry`. */
+export type QueueStopReason = "cancelled" | "untracked";
+
+/** The real processing-task counts behind a row — #633 AC8's COUNT half, from the
+ *  already-granted `document_processing_tasks_visible` read (`intake.ts`'s
+ *  `listProcessingTasksForDocument`, already wired into the detail loader). `null`
+ *  until a document id exists: there is nothing honest to count before custody. */
+export type QueueTaskCounts = { done: number; total: number };
 
 export type QueueItem = {
   localId: string;
@@ -62,7 +83,23 @@ export type QueueItem = {
   file: File;
   intakeId: string | null;
   documentId: string | null;
+  /** THE CAPABILITY JOIN KEY (#633 AC3(b)). Seeded from the browser's own
+   *  `file.type`, then OVERWRITTEN by the intake row's `declared_mime` as soon as the
+   *  first poll read lands — that value is the CANONICAL spelling
+   *  (`packages/runtime/lib/intake.mjs:88` canonicalises through MIME_ALIASES before
+   *  anything is stored), which is the only spelling `clara.document_capabilities`
+   *  indexes (0191:206). A browser-reported type this estate never admitted resolves
+   *  to no format and the surface publishes nothing — the honest answer. */
+  declaredMime: string | null;
   state: QueueState;
+  /** MEASURED upload bytes from the XHR seam (`intake.ts`'s `putIntakeBytes`
+   *  `onProgress`) — never a simulated ramp, never an indeterminate event dressed as
+   *  a number. `null` until the browser reports its first computable event, which is
+   *  why a surface must render an honest "no measurement yet" rather than 0 %. */
+  bytesSent: number | null;
+  bytesTotal: number | null;
+  taskCounts: QueueTaskCounts | null;
+  stopReason: QueueStopReason | null;
   failureCode: IntakeFailureCode | null;
   recoveryReason: IntakeRecoveryRefused["reason"] | null;
   /** The DB's own remedy text when the recovery door refused — AUTHORITATIVE
@@ -86,6 +123,13 @@ export type UploadQueue = {
   items: QueueItem[];
   add: (files: File[]) => void;
   retry: (localId: string) => void;
+  /** #633 AC1(a) — STOP THIS TRANSFER, KEEP THE ROW. Distinct from `remove`, which
+   *  takes the row off the list. A cancelled row is terminal, carries its
+   *  `stopReason`, and can be retried; the ONE thing it never does is cancel an
+   *  accepted Work (that is `cancel_accounting_work`, a governed act on a different
+   *  object, reached by a LINK from the document's own detail — AC7's "local cancel
+   *  vs Work cancel"). */
+  cancel: (localId: string) => void;
   remove: (localId: string) => void;
   clearDone: () => void;
 };
@@ -94,12 +138,24 @@ export type UploadQueueOptions = {
   origin?: IntakeOrigin;
   sessionId?: string;
   filingSource?: string;
+  /** THE POLL BOUND, as data. Defaults are the shipped values (60 reads, 1 s apart);
+   *  they are options ONLY so the exhausted-poll arm — C-73's "an exhausted poll
+   *  settles as error/timeout and is never dressed as success" — can be driven at all.
+   *  A 60-second wall-clock wait is not a unit test, and the alternative (asserting on
+   *  the pure predicate alone, the way `pastFinalize`'s own cell has to) would leave
+   *  the loop that produces the state unexercised. Production passes neither. */
+  pollAttempts?: number;
+  pollIntervalMs?: number;
 };
 
-const BLANK: Pick<QueueItem, "failureCode" | "recoveryReason" | "recoveryRemedy" | "recoveryDocumentMime" | "recoveryUploadMime" | "errorPhase" | "errorStatus" | "errorKind" | "error"> = {
+const DEFAULT_POLL_ATTEMPTS = 60;
+const DEFAULT_POLL_INTERVAL_MS = 1000;
+
+const BLANK: Pick<QueueItem, "failureCode" | "recoveryReason" | "recoveryRemedy" | "recoveryDocumentMime" | "recoveryUploadMime" | "errorPhase" | "errorStatus" | "errorKind" | "error" | "bytesSent" | "bytesTotal" | "taskCounts" | "stopReason"> = {
   failureCode: null, recoveryReason: null, recoveryRemedy: null,
   recoveryDocumentMime: null, recoveryUploadMime: null, errorPhase: null,
   errorStatus: null, errorKind: null, error: null,
+  bytesSent: null, bytesTotal: null, taskCounts: null, stopReason: null,
 };
 
 /** A LIVE row still occupies its identity slot for dedupe purposes (N14); a
@@ -155,6 +211,24 @@ function isAbort(e: unknown): boolean {
   return e instanceof Error && e.name === "AbortError";
 }
 
+/** The FILING leg's failure taxonomy, read off the thrown object's own typed fields
+ *  — never parsed out of message text ("spelling is not identity", AGENTS.md). Both
+ *  `DoorError` and `DoorRefusal` descend from `WireError` and carry `.status`; only
+ *  `DoorError` carries a coarse `.kind`, so a CLR-shaped refusal (which is a REAL
+ *  business answer, not a transport problem) is classified from its status instead,
+ *  exactly the way `read.ts` folds one. */
+function doorStatus(e: unknown): number | null {
+  const status = (e as { status?: unknown })?.status;
+  return typeof status === "number" ? status : null;
+}
+
+function doorKind(e: unknown): WireErrorKind | null {
+  const kind = (e as { kind?: unknown })?.kind;
+  if (typeof kind === "string") return kind as WireErrorKind;
+  const status = doorStatus(e);
+  return status === null ? null : kindForStatus(status);
+}
+
 /** `onFiled` fires once per file when its document is successfully filed to
  *  `clientId` — the caller uses it to re-hydrate the filed-documents list
  *  (hydrate-never-trust: this hook never asserts the row is filed itself).
@@ -167,6 +241,8 @@ export function useUploadQueue(
   onRejected: (note: QueueRejection) => void,
   options: UploadQueueOptions = {},
 ): UploadQueue {
+  const pollAttempts = options.pollAttempts ?? DEFAULT_POLL_ATTEMPTS;
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const ref = useRef<QueueItem[]>([]);
   const [items, setItems] = useState<QueueItem[]>([]);
   const running = useRef(0);
@@ -203,22 +279,45 @@ export function useUploadQueue(
         );
         patch(localId, { intakeId: begun.intake_id });
         patch(localId, { state: "uploading" });
-        await putIntakeBytes(begun.upload_token, begun.intake_id, file, signal);
+        await putIntakeBytes(begun.upload_token, begun.intake_id, file, {
+          signal,
+          // #633 AC8 — REAL bytes. The seam picks XHR when the platform has it and
+          // falls back to `fetch` (which cannot measure an upload) otherwise, so this
+          // callback may legitimately never fire; the row then keeps `bytesSent: null`
+          // and the surface says "no measurement" instead of inventing one.
+          onProgress: (sent, total) => { patch(localId, { bytesSent: sent, bytesTotal: total }); },
+        });
         finalizeSent.current.add(localId); // BEFORE the await (R2) — the request may land server-side even if the client aborts waiting on its response
         const receipt = await finalizeIntake(begun.upload_token, begun.intake_id, signal);
         const refused = receipt.recovery_refused;
         patch(localId, { state: "verifying" });
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < pollAttempts; i++) {
           const row = await readIntake(begun.intake_id, { session, signal }).catch((e: unknown) => {
             if (isAbort(e)) throw e; // a transient read failure retries next tick; an abort must not
             return null;
           });
           if (row) {
+            // The canonical mime lands here (see `declaredMime`'s own note) — the
+            // capability join key, from the DB rather than from the browser.
+            if (row.declared_mime) patch(localId, { declaredMime: row.declared_mime });
             // N6: filing is gated EXCLUSIVELY on this DB-confirmed row — `receipt`
             // (finalizeIntake's own advisory return, above) never drives it.
             if (row.status === "failed") return patch(localId, { state: "failed", failureCode: row.failure_code });
             if (INTAKE_ADOPTED.has(row.status) && row.document_id) {
               patch(localId, { state: "filing", documentId: row.document_id });
+              // #633 AC8, the COUNT half — the honest per-file lane/status counts the
+              // detail loader already reads (`loaders.ts:123`), now on the queue row
+              // too. BEST-EFFORT by construction: a failed count must never turn a
+              // successful custody into a failed upload, so it is caught and dropped
+              // (an abort still propagates, like every other read on this path).
+              try {
+                const tasks = await listProcessingTasksForDocument(row.document_id, { session, signal });
+                patch(localId, {
+                  taskCounts: { done: tasks.filter((t) => t.status === "done").length, total: tasks.length },
+                });
+              } catch (taskErr) {
+                if (isAbort(taskErr)) throw taskErr;
+              }
               try {
                 await fileToClient(row.document_id, clientId, options.filingSource ?? "documents_tab_upload", { session, signal });
                 patch(localId, {
@@ -231,12 +330,26 @@ export function useUploadQueue(
                 onFiled();
               } catch (fileErr) {
                 if (isAbort(fileErr)) throw fileErr;
-                patch(localId, { state: "error", errorPhase: "filing", error: (fileErr as Error).message });
+                // p633.queue.authority_lost — THE DENIED FACE, NOT A BLIP. The filing
+                // act is a governed door, so a membership revoked mid-batch answers
+                // 403/CLR04 here and not on the upload leg. Carrying only
+                // `(err as Error).message` (as this arm used to) left the surface with
+                // operational prose and no way to tell a denial from a network wobble,
+                // so it could neither name the constraint nor decide whether a Retry
+                // was honest. `documentId` stays set on purpose: custody HAPPENED —
+                // the row is "adopted, not filed", and its receipt is still readable.
+                patch(localId, {
+                  state: "error",
+                  errorPhase: "filing",
+                  errorStatus: doorStatus(fileErr),
+                  errorKind: doorKind(fileErr),
+                  error: (fileErr as Error).message,
+                });
               }
               return;
             }
           }
-          await sleep(1000, signal);
+          await sleep(pollIntervalMs, signal);
         }
         patch(localId, { state: "error", errorPhase: "timeout", error: null });
       } catch (err) {
@@ -253,7 +366,7 @@ export function useUploadQueue(
         finalizeSent.current.delete(localId);
       }
     },
-    [session, clientId, patch, onFiled, options.origin, options.sessionId, options.filingSource],
+    [session, clientId, patch, onFiled, options.origin, options.sessionId, options.filingSource, pollAttempts, pollIntervalMs],
   );
 
   const pump = useCallback(() => {
@@ -284,7 +397,7 @@ export function useUploadQueue(
         }
         ref.current = [
           ...ref.current,
-          { localId: crypto.randomUUID(), name: file.name, size: file.size, file, intakeId: null, documentId: null, state: "queued", ...BLANK },
+          { localId: crypto.randomUUID(), name: file.name, size: file.size, file, intakeId: null, documentId: null, declaredMime: file.type || null, state: "queued", ...BLANK },
         ];
       }
       sync();
@@ -299,6 +412,30 @@ export function useUploadQueue(
       pump();
     },
     [patch, pump],
+  );
+
+  /** #633 AC1(a) — CANCEL: stop the transfer, KEEP the row.
+   *
+   *  The shipped code had one function for two verbs (`remove`, :303-330): a
+   *  pre-finalize row was deleted outright, so there was no way to stop an upload
+   *  without also losing the only trace that it had ever been attempted, and nothing
+   *  left to retry. Cancel now always leaves a terminal row carrying WHY it stopped;
+   *  `remove` below keeps its original job (take it off my list) and its original
+   *  two-press guard for a row whose document may already exist.
+   *
+   *  A cancel on an already-terminal row is a no-op, never a silent delete — the
+   *  delete verb is `remove`, and the two must not be reachable from one control. */
+  const cancel = useCallback(
+    (localId: string) => {
+      const item = ref.current.find((i) => i.localId === localId);
+      if (!item) return;
+      if (!LIVE_STATES.has(item.state)) return;
+      const custodyMayExist = finalizeSent.current.has(localId) || pastFinalize(item);
+      controllers.current.get(localId)?.abort();
+      controllers.current.delete(localId);
+      patch(localId, { state: "stopped", stopReason: custodyMayExist ? "untracked" : "cancelled" });
+    },
+    [patch],
   );
 
   const remove = useCallback(
@@ -321,7 +458,7 @@ export function useUploadQueue(
         // forever and could never be cleared. The client's "Filed to this
         // client" / "Needs your confirmation" lanes are where it resurfaces if
         // a matcher or a human picks it up later.
-        patch(localId, { state: "stopped" });
+        patch(localId, { state: "stopped", stopReason: "untracked" });
         return;
       }
       ref.current = ref.current.filter((i) => i.localId !== localId);
@@ -335,5 +472,5 @@ export function useUploadQueue(
     sync();
   }, [sync]);
 
-  return { items, add, retry, remove, clearDone };
+  return { items, add, retry, cancel, remove, clearDone };
 }

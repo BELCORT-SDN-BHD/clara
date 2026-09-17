@@ -68,12 +68,16 @@ const params = (query = ""): URLSearchParams => new URLSearchParams(query);
 
 test("firm nav is rank-shaped: Activity floors at bookkeeper, Operator at owner+operator, everything else is viewer", () => {
   const ids = (s: NavigationScope) => visibleFirmNav(s).map((i) => i.id);
-  assert.deepEqual(ids(VIEWER), ["home", "clients", "work", "settings"]);
-  assert.deepEqual(ids(BOOKKEEPER), ["home", "clients", "work", "activity", "settings"]);
-  assert.deepEqual(ids(ADMIN), ["home", "clients", "work", "activity", "settings"]);
-  assert.deepEqual(ids(OWNER), ["home", "clients", "work", "activity", "settings"]);
+  // #633 — Documents (the firm's unassigned sources) is VIEWER-floored, measured on
+  // the rig: a viewer persona reads clara.list_unassigned_documents(50) successfully,
+  // while the attribution act itself refuses a viewer CLR04 and surfaces that refusal
+  // on the row. A read a viewer may make is a destination a viewer may see.
+  assert.deepEqual(ids(VIEWER), ["home", "clients", "work", "documents", "settings"]);
+  assert.deepEqual(ids(BOOKKEEPER), ["home", "clients", "work", "documents", "activity", "settings"]);
+  assert.deepEqual(ids(ADMIN), ["home", "clients", "work", "documents", "activity", "settings"]);
+  assert.deepEqual(ids(OWNER), ["home", "clients", "work", "documents", "activity", "settings"]);
   // #615 — and ONLY for an owner of the operator firm; the cell below drives both halves.
-  assert.deepEqual(ids(OPERATOR_OWNER), ["home", "clients", "work", "activity", "operator", "settings"]);
+  assert.deepEqual(ids(OPERATOR_OWNER), ["home", "clients", "work", "documents", "activity", "operator", "settings"]);
   // A NULL / unreadable rank fails closed out of the WHOLE nav, mirroring the
   // DB's own `coalesce(rank, -1)`. Asserted rather than assumed: this is the arm
   // a caller with no membership takes, and it must render no destinations at all.

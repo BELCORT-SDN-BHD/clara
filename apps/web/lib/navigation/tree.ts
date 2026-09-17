@@ -63,7 +63,7 @@ export type NavIconName =
   | "lifebuoy"
   | "receipt";
 
-export type FirmNavId = "home" | "clients" | "work" | "activity" | "operator" | "settings";
+export type FirmNavId = "home" | "clients" | "work" | "documents" | "activity" | "operator" | "settings";
 
 export type SettingsSectionId =
   | "account"
@@ -207,6 +207,14 @@ export const FIRM_NAV: readonly FirmNavItem[] = [
   { id: "home", href: "/", labelKey: "firmNav.home", icon: "house", minimumRole: "viewer" },
   { id: "clients", href: "/clients", labelKey: "firmNav.clients", icon: "users", minimumRole: "viewer" },
   { id: "work", href: "/work", labelKey: "firmNav.work", icon: "inbox", minimumRole: "viewer" },
+  // #633 — the firm's unassigned sources. MEASURED FLOOR, not a chosen one: on the
+  // #633 rig (clara_633, PG 17.11) a VIEWER persona reads
+  // `clara.list_unassigned_documents(50)` successfully — it is SECURITY INVOKER, so
+  // its floor is whatever RLS admits — while `record_client_resolution` refuses a
+  // viewer CLR04 "insufficient role" and admits a bookkeeper. The destination is
+  // therefore viewer-visible and the ACT's higher floor surfaces as the DB's own
+  // refusal on the row, never as an empty page for someone who can legitimately look.
+  { id: "documents", href: "/documents", labelKey: "firmNav.documents", icon: "files", minimumRole: "viewer" },
   { id: "activity", href: "/activity", labelKey: "firmNav.activity", icon: "activity", minimumRole: "bookkeeper" },
   {
     id: "operator",

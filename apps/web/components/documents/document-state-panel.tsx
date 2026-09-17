@@ -45,6 +45,7 @@ import {
   type DocumentStateResult, type StateTone,
 } from "@/lib/documents/document-state";
 import { DoorFeedback } from "./door-feedback";
+import { DocumentWorkLinksPanel } from "./document-work-links";
 
 /** Wraps the read's own `DocumentStateResult | null` in a non-null container so
  *  `useHydratedPart`'s `data` can tell "not yet loaded" from "loaded, and the DB legitimately
@@ -152,8 +153,20 @@ function StateRow({
  *  with no ambient state. A child reaching past that prop for a module-level global would have
  *  been the one read on the page that could not be driven. */
 export function DocumentStatePanel({
-  documentId, clientId, session = sessionTokenAccessor,
-}: { documentId: string; clientId: string; session?: SessionTokenAccessor }) {
+  documentId, clientId, session = sessionTokenAccessor, showWorkLinks = false,
+}: {
+  documentId: string;
+  clientId: string;
+  session?: SessionTokenAccessor;
+  /** #633 AC8 — mount the file/Work boundary beneath the four verdicts. OFF BY
+   *  DEFAULT, and that default is load-bearing: this same panel is reused inside Work
+   *  detail's Sources tab (#624 AC4), whose own shipped cells assert that opening
+   *  Sources fires NO second door and no write. On that surface the person is already
+   *  looking at the Work, so the links are redundant there and a cost to the contract;
+   *  the DOCUMENTS tab, where the question "did anything come of this file?" is
+   *  actually asked, turns it on. */
+  showWorkLinks?: boolean;
+}) {
   const t = useTranslations("ClientDocuments");
   const { data, loading, err, clr } = useHydratedPart<StateLoad>(
     session,
@@ -167,6 +180,11 @@ export function DocumentStatePanel({
       {data && data.result === null ? <EmptyState>{t("statesNotAvailable")}</EmptyState> : null}
       {data && data.result !== null ? <StateBody state={data.result} clientId={clientId} t={t} /> : null}
       <DoorFeedback err={err} clr={clr} />
+      {/* #633 AC8 — the file/Work boundary, BESIDE the four verdicts rather than
+          folded into them. Its own hydrated cell: the Work links come from
+          `entry_evidence_links` + `list_spoken_for_documents`, not from
+          `get_document_state`, and a failure of one must not blank the other. */}
+      {showWorkLinks ? <DocumentWorkLinksPanel documentId={documentId} clientId={clientId} session={session} /> : null}
     </section>
   );
 }

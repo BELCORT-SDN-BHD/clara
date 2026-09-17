@@ -447,29 +447,50 @@ export function startMockRuntime(port = Number(process.env.CLARA_E2E_RUNTIME_POR
       response.writeHead(status, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
     };
-    if (request.method === "POST" && url.pathname === "/api/intake/documents") {
-      void readJson(request).then(() => json(201, {
-        intake_id: CHAT_PARITY.intakeId,
-        upload_token: "e2e-upload-token",
-        expires_at: null,
-      }));
-      return;
-    }
-    if (request.method === "PUT" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/bytes`) {
-      void drain(request).then(() => { response.writeHead(204); response.end(); });
-      return;
-    }
-    if (request.method === "POST" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/finalize`) {
-      void readJson(request).then(() => json(202, { status: "finalized", document_id: CHAT_PARITY.documentId }));
-      return;
-    }
+    // THE DELEGATE GOES FIRST, and #633 is what found out why it has to.
+    //
+    // This lane's own `POST /api/intake/documents` answers UNCONDITIONALLY, and it sat
+    // ahead of the delegate — so it won every upload on the whole harness, no matter
+    // which walk made it. That was invisible while chat-parity owned the only browser
+    // upload in the estate; the moment a second lane had one (#633's documents tab and
+    // firm leaf), that lane's begin/PUT/finalize legs became unreachable and every file
+    // it uploaded silently came back as CHAT-PARITY'S intake, adopted as CHAT-PARITY'S
+    // document. A deliberately bad file therefore reached "Filed" — a false GREEN, which
+    // is the worst kind.
+    //
+    // Consulting the delegate first costs this lane nothing: every delegated handler is
+    // scoped and returns false when a request is not its own (#633's discriminates on the
+    // runtime's OWN `origin` parameter, which is `"chat"` for this lane's composer), and
+    // the three legs below still answer whenever nobody else claims them.
+    const own = () => {
+      if (request.method === "POST" && url.pathname === "/api/intake/documents") {
+        void readJson(request).then(() => json(201, {
+          intake_id: CHAT_PARITY.intakeId,
+          upload_token: "e2e-upload-token",
+          expires_at: null,
+        }));
+        return true;
+      }
+      if (request.method === "PUT" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/bytes`) {
+        void drain(request).then(() => { response.writeHead(204); response.end(); });
+        return true;
+      }
+      if (request.method === "POST" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/finalize`) {
+        void readJson(request).then(() => json(202, { status: "finalized", document_id: CHAT_PARITY.documentId }));
+        return true;
+      }
+      return false;
+    };
+
     if (delegate) {
       void delegate(request, response, url).then((handled) => {
         if (handled) return;
+        if (own()) return;
         json(404, { error: "not_found", message: `unhandled e2e runtime route: ${request.method} ${url.pathname}` });
       });
       return;
     }
+    if (own()) return;
     json(404, { error: "not_found", message: `unhandled e2e runtime route: ${request.method} ${url.pathname}` });
   });
   server.listen(port, "127.0.0.1");

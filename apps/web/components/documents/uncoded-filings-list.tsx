@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/common/state";
 import { CodingActionRefusal } from "./coding-action-refusal";
 import { isActingRowPresent } from "@/lib/firm/needs-you-gaps";
 import { businessDate } from "@/lib/business-date";
+import { renderKindLabel } from "@/lib/documents/kind-label";
 import { CODING_LANE_REASON_CODES, type CodingLane } from "@/lib/coding/types";
 import type { UncodedFilingEntry } from "@/lib/coding/loaders";
 import { UncodedFilingActions } from "./uncoded-filing-actions";
@@ -44,6 +45,10 @@ export function UncodedFilingsList({
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.uncodedFiling");
+  // #633 AC2 — the document-kind vocabulary lives in ONE namespace (ClientDocuments.kind.*),
+  // owned by lib/documents/kind-label.ts, so this lane renders the same phrase the documents
+  // tab does rather than minting a second spelling of the same 20 values.
+  const tDoc = useTranslations("ClientDocuments");
   const [lane, setLane] = useState<CodingLane>("needs_you");
   const [actingId, setActingId] = useState<string | null>(null);
 
@@ -80,7 +85,12 @@ export function UncodedFilingsList({
           <TableBody>
             {shown.map((entry) => (
               <TableRow key={entry.filing_id}>
-                <TableCell className="whitespace-normal">{entry.original_filename ?? entry.document_kind ?? entry.document_id}</TableCell>
+                {/* #633 AC2 — when a filing has no filename to show, the fallback was the
+                    raw `document_kind` token. It is a phrase now; the document id stays the
+                    last resort because it is an identifier, not a kind. */}
+                <TableCell className="whitespace-normal">
+                  {entry.original_filename ?? (entry.document_kind ? renderKindLabel(entry.document_kind, tDoc) : entry.document_id)}
+                </TableCell>
                 {/* F4, independent review: `businessDate` (Asia/Kuala_Lumpur),
                     never a raw UTC slice — see lib/business-date.ts's own
                     header on the "two days" hazard this fixes. */}

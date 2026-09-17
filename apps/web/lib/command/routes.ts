@@ -95,6 +95,13 @@ const FIRM_PRESENTATION: Record<FirmNavId, Presentation> = {
   home: { id: "firmHome", keywords: ["home", "dashboard"] },
   clients: { id: "clientRegister", keywords: ["clients", "register", "book of clients"] },
   work: { id: "firmWork", keywords: ["work", "queue", "tasks", "in progress"] },
+  // #633 — the firm's unassigned sources. "unassigned" and "unattributed" are the
+  // words a person uses for the thing they are hunting ("that SSM form nobody filed"),
+  // so they are findable here as well as the destination's own name.
+  documents: {
+    id: "firmDocuments",
+    keywords: ["documents", "files", "unassigned", "unattributed", "sources", "intake", "uploads"],
+  },
   activity: { id: "firmActivity", keywords: ["activity", "receipts", "open register", "audit"] },
   // #615 — the operator support destination. `registrations` stays among its keywords on purpose:
   // the surface a person is looking for when they type that word MOVED here, and ⌘K is exactly

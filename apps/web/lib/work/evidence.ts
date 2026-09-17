@@ -336,6 +336,13 @@ export type EntryClaimant = {
 
 export type DocumentClaim = EntryClaimant & {
   entryId: string;
+  /** #633 AC8 — the Work this file's evidence link belongs to, when there is one.
+   *  `null` has TWO honest meanings and neither is "no Work exists": the claim came
+   *  from the coding-lane arm (which carries no evidence link), or the link predates
+   *  the `work_id` column being populated. A surface renders "no Work yet" for the
+   *  absence of a LINK, never for a null on a link it did find. */
+  workId: string | null;
+  logicalOpId: string | null;
 };
 
 /** The claimant's own name, read separately because neither relation that can hold a claim
@@ -400,13 +407,21 @@ export async function findEntryForDocument(
   opts: Opts = {},
 ): Promise<DocumentClaim | null> {
   const doc = encodeURIComponent(documentId);
-  const links = await getRows<{ entry_id: string; client_id: string }>(
-    `entry_evidence_links?document_id=eq.${doc}&released_at=is.null&select=entry_id,client_id`,
+  // #633 AC8 — `work_id` and `logical_op_id` join the projection. They were always
+  // in the row (0182:333-348, with ix_entry_evidence_links_work) and this select simply
+  // never asked for them, which is why no surface could say WHICH Work a file produced.
+  // Additive: every existing consumer of DocumentClaim is unchanged.
+  const links = await getRows<{ entry_id: string; client_id: string; work_id: string | null; logical_op_id: string | null }>(
+    `entry_evidence_links?document_id=eq.${doc}&released_at=is.null&select=entry_id,client_id,work_id,logical_op_id`,
     opts,
   );
   const link = links[0];
   if (link !== undefined) {
-    return { entryId: link.entry_id, clientId: link.client_id, clientName: await readClientName(link.client_id, opts) };
+    return {
+      entryId: link.entry_id, clientId: link.client_id, workId: link.work_id ?? null,
+      logicalOpId: link.logical_op_id ?? null,
+      clientName: await readClientName(link.client_id, opts),
+    };
   }
   const coded = await getRows<{ id: string; client_id: string }>(
     `journal_entries?document_id=eq.${doc}&status=eq.approved&reversed_by=is.null&select=id,client_id`,
@@ -414,7 +429,9 @@ export async function findEntryForDocument(
   );
   const entry = coded[0];
   if (entry === undefined) return null;
-  return { entryId: entry.id, clientId: entry.client_id, clientName: await readClientName(entry.client_id, opts) };
+  // The coding-lane arm has no evidence link at all, so it has no Work id to give —
+  // null here is the honest answer, never a borrowed one.
+  return { entryId: entry.id, clientId: entry.client_id, workId: null, logicalOpId: null, clientName: await readClientName(entry.client_id, opts) };
 }
 
 /**

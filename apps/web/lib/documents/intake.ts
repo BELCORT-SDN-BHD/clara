@@ -18,7 +18,8 @@
 
 import { getRows } from "@/lib/read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { safeRuntimeFetch, expectRuntimeOk } from "./runtime-wire";
+import { safeRuntimeFetch, expectRuntimeOk, RuntimeError } from "./runtime-wire";
+import { kindForStatus } from "@/lib/wire-error-kind";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { INTAKE_ADOPTED, type IntakeOrigin, type IntakeRow, type ProcessingTaskRow } from "./types";
 
@@ -72,17 +73,156 @@ export async function beginIntake(req: BeginIntakeRequest, opts: BeginOpts = {})
   return (await res.json()) as BeginIntakeResponse;
 }
 
+/** #633 AC8 — "Progress uses real bytes or counts". The byte half arrives here.
+ *
+ *  `sent`/`total` are the browser's OWN measured upload counters, never a
+ *  simulated ramp: an indeterminate event (`lengthComputable === false`) is
+ *  DROPPED rather than reported as zero-of-zero, so a caller can only ever
+ *  render a bar it can actually justify. */
+export type ByteProgress = (sent: number, total: number) => void;
+
+export type PutIntakeBytesOptions = {
+  signal?: AbortSignal;
+  /** Ask for real byte progress. Present AND a platform `XMLHttpRequest` present
+   *  ⇒ the XHR body below; otherwise the shipped `fetch` body, unchanged. */
+  onProgress?: ByteProgress;
+};
+
+/** The 4th argument stayed polymorphic on purpose: three shipped cells and the
+ *  chat/interview callers pass a bare `AbortSignal`, and widening the contract
+ *  should not have rewritten call sites that want no progress at all. */
+function putBytesOptions(arg: AbortSignal | PutIntakeBytesOptions | undefined): PutIntakeBytesOptions {
+  if (arg === undefined) return {};
+  if (typeof (arg as AbortSignal).aborted === "boolean") return { signal: arg as AbortSignal };
+  return arg as PutIntakeBytesOptions;
+}
+
+function bytesPath(intakeId: string): string {
+  return `/api/runtime/intake/documents/${encodeURIComponent(intakeId)}/bytes`;
+}
+
+/** True when this platform can actually measure an upload. `fetch` has no
+ *  upload-progress event in ANY shipping browser (it is a `ReadableStream`
+ *  request-body feature that no engine ships for this purpose), which is the
+ *  whole reason this module carries two transports rather than one. */
+function xhrAvailable(): boolean {
+  return typeof (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest === "function";
+}
+
+type XhrLike = {
+  upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null };
+  status: number;
+  responseURL: string;
+  onload: (() => void) | null;
+  onerror: (() => void) | null;
+  onabort: (() => void) | null;
+  ontimeout: (() => void) | null;
+  open(method: string, url: string): void;
+  setRequestHeader(name: string, value: string): void;
+  send(body: unknown): void;
+  abort(): void;
+};
+
+/** THE XHR BODY. It reproduces the fetch body's contract EXACTLY — same path,
+ *  same two headers, same `RuntimeError` taxonomy (`kindForStatus`), same abort
+ *  carve-out — and adds the one thing fetch cannot give: `upload.onprogress`.
+ *
+ *  ONE HONEST DIFFERENCE, HANDLED. The fetch body passes `redirect: "manual"`
+ *  and `expectRuntimeOk` turns the proxy's 307-to-`/login` into an
+ *  `unauthenticated` RuntimeError. XHR has no manual-redirect mode at all: it
+ *  follows transparently, so a session that expired mid-upload would arrive here
+ *  as a 200 carrying a login page — a silent false success on exactly the
+ *  journey AC7's permission-loss leg is about. `responseURL` (the final URL
+ *  after redirects) is the honest signal, and a moved pathname is classified as
+ *  the same `unauthenticated` the fetch path raises. */
+function putIntakeBytesViaXhr(
+  uploadToken: string,
+  intakeId: string,
+  file: File | Blob,
+  opts: PutIntakeBytesOptions,
+): Promise<void> {
+  const url = bytesPath(intakeId);
+  return new Promise<void>((resolve, reject) => {
+    const abortError = () => new DOMException("The operation was aborted.", "AbortError");
+    if (opts.signal?.aborted) return reject(abortError());
+
+    const Ctor = (globalThis as unknown as { XMLHttpRequest: new () => XhrLike }).XMLHttpRequest;
+    const xhr = new Ctor();
+    let settled = false;
+    const finish = (fn: () => void) => { if (!settled) { settled = true; cleanup(); fn(); } };
+
+    const onAbort = () => { try { xhr.abort(); } catch { /* already done */ } finish(() => reject(abortError())); };
+    const cleanup = () => { opts.signal?.removeEventListener("abort", onAbort); };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("authorization", `Bearer ${uploadToken}`);
+    xhr.setRequestHeader("content-type", "application/octet-stream");
+
+    if (opts.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return; // never dress an indeterminate event as a measurement
+        opts.onProgress?.(e.loaded, e.total);
+      };
+    }
+
+    xhr.onerror = () => finish(() => reject(new RuntimeError("upload bytes: network request failed", { status: null, kind: "transport" })));
+    xhr.ontimeout = () => finish(() => reject(new RuntimeError("upload bytes: network request failed", { status: null, kind: "transport" })));
+    xhr.onabort = () => finish(() => reject(abortError()));
+    xhr.onload = () => finish(() => {
+      const followed = redirectedAway(url, xhr.responseURL);
+      if (followed) {
+        return reject(new RuntimeError(
+          "upload bytes: redirected (the session cookie is likely missing or expired)",
+          { status: null, kind: "unauthenticated" },
+        ));
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      reject(new RuntimeError("upload bytes failed", { status: xhr.status, kind: kindForStatus(xhr.status) }));
+    });
+
+    xhr.send(file);
+  });
+}
+
+/** Did the request end somewhere other than where it was sent? Compares PATHS,
+ *  not whole URLs: the browser resolves a same-origin relative request URL to an
+ *  absolute `responseURL`, so a string comparison would report every successful
+ *  upload as a redirect. An empty `responseURL` (never populated) is treated as
+ *  "no evidence of a redirect" rather than as proof of one. */
+function redirectedAway(requestPath: string, responseUrl: string | null | undefined): boolean {
+  if (!responseUrl) return false;
+  try {
+    const finalPath = new URL(responseUrl, "http://localhost").pathname;
+    return finalPath !== requestPath.split("?")[0];
+  } catch {
+    return false;
+  }
+}
+
 /** Stream the file bytes with the upload token, same-origin via the runtime proxy
- *  (apps/dashboard/app/shared/intake.ts:129-146's `putIntakeBytes`). `signal`
- *  cancels an in-flight upload (component unmount, the queue's own Remove). */
-export async function putIntakeBytes(uploadToken: string, intakeId: string, file: File | Blob, signal?: AbortSignal): Promise<void> {
+ *  (apps/dashboard/app/shared/intake.ts:129-146's `putIntakeBytes`). The 4th
+ *  argument cancels an in-flight upload (component unmount, the queue's own
+ *  Cancel) and, since #633, may instead be an options object asking for real
+ *  byte progress — see `putIntakeBytesViaXhr` for why that needs a second
+ *  transport rather than a flag on this one. */
+export async function putIntakeBytes(
+  uploadToken: string,
+  intakeId: string,
+  file: File | Blob,
+  arg?: AbortSignal | PutIntakeBytesOptions,
+): Promise<void> {
+  const opts = putBytesOptions(arg);
+  if (opts.onProgress && xhrAvailable()) {
+    return putIntakeBytesViaXhr(uploadToken, intakeId, file, opts);
+  }
   const res = await safeRuntimeFetch(
-    `/api/runtime/intake/documents/${encodeURIComponent(intakeId)}/bytes`,
+    bytesPath(intakeId),
     {
       method: "PUT",
       cache: "no-store",
       redirect: "manual",
-      signal,
+      signal: opts.signal,
       headers: { authorization: `Bearer ${uploadToken}`, "content-type": "application/octet-stream" },
       body: file,
     },

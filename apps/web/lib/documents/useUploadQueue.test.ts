@@ -9,7 +9,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderHook } from "../../test/hookHarness";
-import { useUploadQueue, pastFinalize, type QueueRejection } from "./useUploadQueue";
+import { useUploadQueue, pastFinalize, type QueueRejection, type QueueState } from "./useUploadQueue";
+import { COMPOSER_IN_FLIGHT_STATES } from "@/components/clara/ComposerAttachmentControl";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function session(): SessionTokenAccessor {
@@ -400,6 +401,387 @@ test("add(): a begin-intake failure lands the item in 'error'/'upload' phase, an
         assert.equal(item.errorPhase, "upload");
         assert.doesNotMatch(item.error ?? "", /internal detail/);
         assert.equal(filedCount, 0);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// =============================================================================
+// #633 — REAL BYTES, A CANCEL THAT IS NOT A DELETE, AND AN HONEST DENIED FACE
+// =============================================================================
+//
+// Three defects this block closes, each with its own cell:
+//
+//  * AC8 "Progress uses real bytes or counts" — the queue carried a phase WORD and
+//    nothing else. `bytesSent`/`bytesTotal` now come from the XHR seam's own
+//    `upload.onprogress` (intake.ts), and the count half from the already-granted
+//    `document_processing_tasks_visible` read the detail loader was already using.
+//
+//  * AC1(a)/AC7 "local cancel vs Work cancel" — `remove` was BOTH verbs in one
+//    function (:303-330), so there was no way to stop a transfer without losing the
+//    row, and nothing to retry afterwards. `cancel` and `remove` are separate verbs
+//    now, and `stopReason` says WHICH of the two indistinguishable `stopped` rows
+//    you are looking at: one you stopped before custody could exist, or one the queue
+//    stopped tracking while a document may already exist server-side.
+//
+//  * p633.queue.authority_lost (AC7) — a 401 mid-upload and a 403 on the filing act
+//    each settle THAT ONE ROW with its own status/kind, while the rest of the batch
+//    keeps running. #625 owns the revoke act; this ticket owns proving the in-flight
+//    upload and its filing afterwards refuse HONESTLY rather than reading as a
+//    transport blip or retrying silently.
+
+/** The queue's whole wire surface, scriptable per leg. Every call this hook makes
+ *  goes through `fetch`, so the boundary IS the integration. */
+type Leg = "begin" | "bytes" | "finalize" | "poll" | "tasks" | "resolution" | "file";
+type Script = Partial<Record<Leg, (url: string, n: number) => Response | Promise<Response>>>;
+
+function legOf(url: string): Leg | "unknown" {
+  if (/\/intake\/documents$/.test(url)) return "begin";
+  if (/\/bytes$/.test(url)) return "bytes";
+  if (/\/finalize$/.test(url)) return "finalize";
+  if (/document_intakes_visible/.test(url)) return "poll";
+  if (/document_processing_tasks_visible/.test(url)) return "tasks";
+  if (/rpc\/record_client_resolution/.test(url)) return "resolution";
+  if (/rpc\/file_document/.test(url)) return "file";
+  return "unknown";
+}
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/** The happy path, per leg, unless a cell overrides one. `adopt` decides which
+ *  intake ids ever reach `adopted`. */
+function queueFetch(script: Script = {}, counts: Record<string, number> = {}): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const leg = legOf(url);
+    counts[leg] = (counts[leg] ?? 0) + 1;
+    const override = leg !== "unknown" ? script[leg] : undefined;
+    if (override) return override(url, counts[leg]!);
+    switch (leg) {
+      case "begin": {
+        const n = counts.begin!;
+        return json({ intake_id: `in-${n}`, upload_token: `ut-${n}`, expires_at: null });
+      }
+      case "bytes": return new Response(null, { status: 200 });
+      case "finalize": return json({ status: "adopted", document_id: null }, 202);
+      case "poll": {
+        const id = /id=eq\.([^&]+)/.exec(url)?.[1] ?? "in-1";
+        return json([intakeRow({ id, status: "adopted", document_id: `doc-${id}` })]);
+      }
+      case "tasks": return json([
+        { id: "t1", document_id: "doc-in-1", lane: "ocr", status: "done", version_n: 1, attempt_count: 1, error_code: null, created_at: "2026-01-01T00:00:00Z", started_at: null, finished_at: null, updated_at: "2026-01-01T00:00:00Z" },
+        { id: "t2", document_id: "doc-in-1", lane: "structured_parse", status: "running", version_n: 1, attempt_count: 1, error_code: null, created_at: "2026-01-01T00:00:00Z", started_at: null, finished_at: null, updated_at: "2026-01-01T00:00:00Z" },
+      ]);
+      case "resolution": return json({ resolution_id: "res-1" });
+      case "file": return json({});
+      default: return json([]);
+    }
+  }) as typeof fetch;
+}
+
+/** A fake XMLHttpRequest whose `send` scripts the upload leg: progress events, then
+ *  either a status or a failure. Installed only by the cells that need real bytes. */
+function withFakeUploadXhr(
+  plan: (emit: (loaded: number, total: number) => void) => { status?: number; fail?: "error"; hang?: true },
+  run: () => Promise<void>,
+): Promise<void> {
+  const g = globalThis as unknown as { XMLHttpRequest?: unknown };
+  const hadOwn = Object.prototype.hasOwnProperty.call(g, "XMLHttpRequest");
+  const original = g.XMLHttpRequest;
+  class Fake {
+    upload: { onprogress?: (e: { lengthComputable: boolean; loaded: number; total: number }) => void } = {};
+    status = 0; responseURL = "";
+    onload?: () => void; onerror?: () => void; onabort?: () => void; ontimeout?: () => void;
+    open(_m: string, u: string) { this.responseURL = u; }
+    setRequestHeader() {}
+    send() {
+      const outcome = plan((loaded, total) => this.upload.onprogress?.({ lengthComputable: true, loaded, total }));
+      if (outcome.hang) return;
+      if (outcome.fail === "error") return void this.onerror?.();
+      this.status = outcome.status ?? 200;
+      this.onload?.();
+    }
+    abort() { this.onabort?.(); }
+  }
+  g.XMLHttpRequest = Fake as unknown;
+  return run().finally(() => {
+    if (hadOwn) g.XMLHttpRequest = original;
+    else delete g.XMLHttpRequest;
+  });
+}
+
+test("#633 AC8: a row carries REAL, MONOTONIC bytes from the XHR seam — never a simulated ramp", async () => {
+  await withFakeUploadXhr(
+    (emit) => { emit(0, 1000); emit(400, 1000); emit(1000, 1000); return { status: 200 }; },
+    () => withMockedFetch(queueFetch(), async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        const seen: Array<[number | null, number | null]> = [];
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        for (let i = 0; i < 25; i++) {
+          await h.settle();
+          const item = h.current.items[0];
+          if (item) seen.push([item.bytesSent, item.bytesTotal]);
+          if (item?.state === "ready") break;
+        }
+        const measured = seen.filter(([s]) => s !== null).map(([s]) => s!);
+        assert.ok(measured.length > 0, "no byte measurement ever reached the row");
+        for (let i = 1; i < measured.length; i++) {
+          assert.ok(measured[i]! >= measured[i - 1]!, `bytes went backwards: ${measured.join(",")}`);
+        }
+        assert.equal(measured[measured.length - 1], 1000, "the row must end at the measured total");
+        assert.equal(h.current.items[0]?.bytesTotal, 1000);
+      } finally {
+        await h.unmount();
+      }
+    }),
+  );
+});
+
+test("#633 AC8: the COUNT half — an adopted row carries its real processing-task counts", async () => {
+  await withMockedFetch(queueFetch(), async () => {
+    const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+    try {
+      await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+      await waitFor(() => h.current.items[0]?.state === "ready", h.settle, 30);
+      assert.equal(h.current.items[0]?.state, "ready");
+      assert.deepEqual(h.current.items[0]?.taskCounts, { done: 1, total: 2 });
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("#633 AC1(a): CANCEL pre-custody KEEPS the row (terminal 'stopped', stopReason 'cancelled') and aborts the transfer", async () => {
+  let aborted = false;
+  await withMockedFetch(
+    queueFetch({
+      bytes: () => new Promise<Response>(() => {}), // hangs; only an abort can end it
+    }),
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => h.current.items[0]?.state === "uploading", h.settle, 20);
+        assert.equal(h.current.items[0]?.state, "uploading", "control: the row must be mid-transfer");
+        const id = h.current.items[0]!.localId;
+        await h.act(() => { h.current.cancel(id); });
+        await h.settle();
+        aborted = true;
+        assert.equal(h.current.items.length, 1, "CANCEL IS NOT A DELETE — the row stays so it can be retried");
+        assert.equal(h.current.items[0]?.state, "stopped");
+        assert.equal(h.current.items[0]?.stopReason, "cancelled");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+  assert.equal(aborted, true);
+});
+
+test("#633 AC1(a): CANCEL past the finalize REQUEST says so — stopReason 'untracked', never 'cancelled'", async () => {
+  await withMockedFetch(
+    queueFetch({ finalize: () => new Promise<Response>(() => {}) }), // the request is SENT; the response never arrives
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => h.current.items[0]?.state === "uploading", h.settle, 20);
+        for (let i = 0; i < 6; i++) await h.settle(); // let the finalize request be sent
+        const id = h.current.items[0]!.localId;
+        await h.act(() => { h.current.cancel(id); });
+        await h.settle();
+        assert.equal(h.current.items.length, 1);
+        assert.equal(h.current.items[0]?.state, "stopped");
+        assert.equal(
+          h.current.items[0]?.stopReason, "untracked",
+          "a document may already exist server-side — the row must not claim it was merely cancelled",
+        );
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("#633 AC1(a): REMOVE is a DIFFERENT verb — pre-custody it takes the row off the list outright", async () => {
+  await withMockedFetch(
+    queueFetch({ bytes: () => new Promise<Response>(() => {}) }),
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => h.current.items[0]?.state === "uploading", h.settle, 20);
+        const id = h.current.items[0]!.localId;
+        await h.act(() => { h.current.remove(id); });
+        await h.settle();
+        assert.equal(h.current.items.length, 0, "Remove deletes the row; Cancel does not");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("#633: a CANCELLED row can be RETRIED — the whole point of keeping it", async () => {
+  let hang = true;
+  await withMockedFetch(
+    queueFetch({ bytes: () => (hang ? new Promise<Response>(() => {}) : new Response(null, { status: 200 })) }),
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => h.current.items[0]?.state === "uploading", h.settle, 20);
+        const id = h.current.items[0]!.localId;
+        await h.act(() => { h.current.cancel(id); });
+        await h.settle();
+        assert.equal(h.current.items[0]?.state, "stopped");
+        hang = false;
+        await h.act(() => { h.current.retry(id); });
+        await waitFor(() => h.current.items[0]?.state === "ready", h.settle, 30);
+        assert.equal(h.current.items[0]?.state, "ready");
+        assert.equal(h.current.items[0]?.stopReason, null, "a retried row must not still wear its cancellation");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("p633.queue.authority_lost — a 401 on the PUT leg denies THAT row by name while the rest of the batch finishes", async () => {
+  await withMockedFetch(
+    queueFetch({
+      bytes: (url) => (/in-1\//.test(url) ? new Response("nope", { status: 401 }) : new Response(null, { status: 200 })),
+    }),
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16, 1), fakeFile("b.pdf", 16, 2)]); });
+        await waitFor(
+          () => h.current.items.length === 2 && h.current.items.every((i) => ["ready", "error", "failed", "stopped"].includes(i.state)),
+          h.settle, 40,
+        );
+        const denied = h.current.items.find((i) => i.name === "a.pdf")!;
+        const other = h.current.items.find((i) => i.name === "b.pdf")!;
+        assert.equal(denied.state, "error");
+        assert.equal(denied.errorPhase, "upload");
+        assert.equal(denied.errorStatus, 401, "the row must carry the STATUS, so the face can name the constraint");
+        assert.equal(denied.errorKind, "unauthenticated", "never a generic transport error");
+        assert.equal(other.state, "ready", "per-item independence: one denial must not stop the batch");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("p633.queue.authority_lost — a 403 on the FILING act leaves the row honestly 'adopted, not filed', with its receipt id intact", async () => {
+  await withMockedFetch(
+    queueFetch({ resolution: () => json({ message: "insufficient role", code: "CLR04" }, 403) }),
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => ["error", "ready", "failed"].includes(h.current.items[0]?.state ?? ""), h.settle, 40);
+        const row = h.current.items[0]!;
+        assert.equal(row.state, "error");
+        assert.equal(row.errorPhase, "filing");
+        assert.equal(row.errorStatus, 403);
+        assert.equal(row.errorKind, "forbidden");
+        assert.equal(row.documentId, "doc-in-1", "custody HAPPENED — the row must keep the document id it was adopted as");
+        assert.equal(row.intakeId, "in-1", "and its intake id, so the receipt is still readable at mount");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("p633.queue.authority_lost — a denied row is NEVER silently retried by the queue", async () => {
+  const counts: Record<string, number> = {};
+  await withMockedFetch(
+    queueFetch({ bytes: () => new Response("nope", { status: 403 }) }, counts),
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => h.current.items[0]?.state === "error", h.settle, 30);
+        for (let i = 0; i < 10; i++) await h.settle();
+        assert.equal(h.current.items[0]?.errorKind, "forbidden");
+        assert.equal(counts.bytes, 1, `the queue re-sent a denied upload ${counts.bytes} times — retry is the HUMAN's act`);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("#633: the exact IN_FLIGHT state strings the composer's Send gate keys on are unchanged", () => {
+  // A rename here breaks the composer's Send gate AND chat-parity-walk.spec.ts:209's
+  // shipped terminal word in one move.
+  //
+  // FIX ROUND 1, review finding STANDARDS-F1: the cell this replaces hand-wrote BOTH
+  // arrays and compared their concatenation against a third hand-written literal — it
+  // never read the composer at all, so editing the real set could not have changed its
+  // outcome. It now imports COMPOSER_IN_FLIGHT_STATES from ComposerAttachmentControl.tsx
+  // itself, so the assertion is against the LIVE source and an edit there flips it.
+  assert.deepEqual([...COMPOSER_IN_FLIGHT_STATES].sort(), ["filing", "queued", "starting", "uploading", "verifying"]);
+  // The partition is total and disjoint: every QueueState is either in flight or
+  // terminal. A NEW state added to the queue without a decision here fails this.
+  const terminal: QueueState[] = ["ready", "failed", "error", "stopped"];
+  assert.equal(terminal.some((s) => COMPOSER_IN_FLIGHT_STATES.has(s)), false, "a terminal state must never block Send");
+  assert.deepEqual([...COMPOSER_IN_FLIGHT_STATES, ...terminal].sort(), [
+    "error", "failed", "filing", "queued", "ready", "starting", "stopped", "uploading", "verifying",
+  ].sort());
+});
+
+test("C-73: a 40-file MIXED batch settles every row independently, and an exhausted poll is 'error'/'timeout' — never a success", async () => {
+  // The client-side poll gives up after a bounded number of reads. The shipped bound
+  // (60 x 1 s) cannot be driven in a unit test, so the bound is a documented option
+  // with the shipped values as its defaults — the ARM under test is the same code.
+  const counts: Record<string, number> = {};
+  await withMockedFetch(
+    queueFetch({
+      // Every third intake never adopts: its poll exhausts. Every fifth fails outright.
+      poll: (url) => {
+        const id = /id=eq\.in-(\d+)/.exec(url)?.[1] ?? "1";
+        const n = Number(id);
+        if (n % 5 === 0) return json([intakeRow({ id: `in-${n}`, status: "failed", failure_code: "bad_type" })]);
+        if (n % 3 === 0) return json([intakeRow({ id: `in-${n}`, status: "verifying" })]);
+        return json([intakeRow({ id: `in-${n}`, status: "adopted", document_id: `doc-in-${n}` })]);
+      },
+    }, counts),
+    async () => {
+      const files = Array.from({ length: 40 }, (_, i) => fakeFile(`f${i}.pdf`, 16, i + 1));
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}, {
+        pollAttempts: 3, pollIntervalMs: 0,
+      }));
+      try {
+        await h.act(() => { h.current.add(files); });
+        await waitFor(
+          () => h.current.items.length === 40
+            && h.current.items.every((i) => ["ready", "error", "failed", "stopped"].includes(i.state)),
+          h.settle, 400,
+        );
+        const byState = h.current.items.reduce<Record<string, number>>((acc, i) => {
+          acc[i.state] = (acc[i.state] ?? 0) + 1; return acc;
+        }, {});
+        assert.equal(h.current.items.length, 40, "every file keeps its own row");
+        assert.equal(
+          h.current.items.every((i) => ["ready", "error", "failed"].includes(i.state)), true,
+          `a row never settled: ${JSON.stringify(byState)}`,
+        );
+        const timedOut = h.current.items.filter((i) => i.state === "error" && i.errorPhase === "timeout");
+        assert.ok(timedOut.length > 0, `no row exhausted its poll — the arm under test never ran (${JSON.stringify(byState)})`);
+        for (const row of timedOut) {
+          assert.notEqual(row.state, "ready", "an exhausted poll must NEVER be dressed as success");
+          assert.equal(row.documentId, null, "a timed-out row never invented a document id");
+        }
+        assert.ok((byState.failed ?? 0) > 0, "the bad_type rows must settle as `failed` with their own code");
+        assert.ok((byState.ready ?? 0) > 0, "and the good rows must still finish — per-item independence");
       } finally {
         await h.unmount();
       }

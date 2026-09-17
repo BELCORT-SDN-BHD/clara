@@ -37,7 +37,7 @@ import { useTranslations } from "next-intl";
 import { StateBanner } from "@/components/common/state";
 import { Button } from "@/components/ui/button";
 import { queueStateLabelKey } from "@/lib/documents/copy";
-import { useUploadQueue, type QueueRejection } from "@/lib/documents/useUploadQueue";
+import { useUploadQueue, type QueueRejection, type QueueState } from "@/lib/documents/useUploadQueue";
 import type { AttachmentPart } from "@/lib/parts/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -55,14 +55,21 @@ export const CHAT_MAX_ATTACHMENTS = 5;
  *  remove button — with a disabled Send that said nothing about why. The failed row stays
  *  visible with its typed refusal beside it, and `clearDone` does not sweep it, so the
  *  turn goes without it VISIBLY rather than silently. */
-const IN_FLIGHT = new Set(["queued", "starting", "uploading", "verifying", "filing"]);
+/** EXPORTED so the contract is testable AGAINST THIS SOURCE rather than against a copy
+ *  of it: `lib/documents/useUploadQueue.test.ts` imports this very set and pins its
+ *  members, and `composer-attachment-control.test.tsx` mounts this component and drives
+ *  the gate itself. Before the #633 fix round that pin was a hand-written literal
+ *  compared with two other hand-written literals, so editing this line could not have
+ *  reddened anything. */
+export const COMPOSER_IN_FLIGHT_STATES: ReadonlySet<QueueState> =
+  new Set<QueueState>(["queued", "starting", "uploading", "verifying", "filing"]);
 
 export type ComposerAttachmentState = {
   /** ONLY fully adopted-and-filed attachments — an item is a submittable part after the
    *  DB said `finalized`/`adopted` with a document_id, never after finalize's own
    *  (advisory) receipt. */
   parts: AttachmentPart[];
-  /** True while any item can still become attachable — see `IN_FLIGHT`. */
+  /** True while any item can still become attachable — see `COMPOSER_IN_FLIGHT_STATES`. */
   blocked: boolean;
 };
 
@@ -106,7 +113,7 @@ export function ComposerAttachmentControl({
     ));
     onStateChange({
       parts,
-      blocked: queue.items.some((item) => IN_FLIGHT.has(item.state)),
+      blocked: queue.items.some((item) => COMPOSER_IN_FLIGHT_STATES.has(item.state)),
     });
   }, [queue.items, onStateChange]);
 

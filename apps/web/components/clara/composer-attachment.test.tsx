@@ -405,3 +405,58 @@ test("ready attachment is filed to the activated client and rides the sent turn 
     },
   );
 });
+
+test("[633] fix round: Send is DISABLED while an attachment is still in flight, and released the moment it settles", async () => {
+  // Review finding STANDARDS-F1: `ClaraThreadView.tsx`'s `sendDisabled` composition
+  // (`… || attachments.blocked || …`) had no cell for the upload-blocking arm at all, so
+  // the only guard on `ComposerAttachmentControl`'s `COMPOSER_IN_FLIGHT_STATES` was a unit
+  // cell comparing three hand-written literals with each other. This drives the REAL
+  // composition: the intake is parked on `verifying` (an in-flight state), then released.
+  let settled = false;
+  await withFetch(
+    (url, init) => {
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+      const base = baseRouter(url);
+      if (base) return base;
+      if (url.includes("/rest/v1/document_intakes_visible")) {
+        return json([{
+          id: INTAKE_ID, uploaded_by: "user-1", origin: "chat", original_filename: "invoice.pdf",
+          declared_mime: "application/pdf", declared_bytes: 3,
+          status: settled ? "adopted" : "verifying",
+          document_id: settled ? DOCUMENT_ID : null,
+          failure_code: null, expires_at: null,
+          created_at: "2026-09-02T00:00:00Z", updated_at: "2026-09-02T00:00:01Z",
+        }]);
+      }
+      const intake = intakeRouter(url, init);
+      if (intake) return intake;
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App());
+      const sendButton = () => h.find(buttonNamed("Send"));
+      try {
+        await settleUntil(h, () => h.find(buttonNamed("Attach document")) !== null, "attach affordance");
+        const textarea = h.find((node) => node.tagName === "TEXTAREA");
+        assert.ok(textarea);
+        await h.act(() => setFieldValue(textarea, "Read this invoice"));
+        // CONTROL: with a draft and nothing uploading, Send is open. Without this the
+        // assertion below could pass for a completely unrelated reason.
+        assert.equal(sendButton()?.disabled, false, "control: a plain-text draft alone must leave Send open");
+
+        const fileInput = h.find((node) => node.tagName === "INPUT" && node.type === "file");
+        assert.ok(fileInput);
+        const file = new File([new Uint8Array([1, 2, 3])], "invoice.pdf", { type: "application/pdf", lastModified: 2 });
+        await h.fireEvent(fileInput, "change", (node) => { node.files = [file]; });
+        await settleUntil(h, () => sendButton()?.disabled === true, "Send shut while the upload is in flight");
+        assert.equal(sendButton()?.disabled, true, "an in-flight attachment must hold Send shut — sending now would drop the file");
+
+        settled = true;
+        await settleUntil(h, () => /Filed/.test(h.text()), "adopted + filed attachment");
+        assert.equal(sendButton()?.disabled, false, "once the file is adopted and filed, Send opens again");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});

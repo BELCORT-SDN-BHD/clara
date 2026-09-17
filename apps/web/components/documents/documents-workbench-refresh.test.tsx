@@ -24,6 +24,7 @@ import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { DocumentsWorkbench } from "./documents-workbench";
 import { documentsApp, makeNavigation } from "./documents-test-fixtures";
+import { INTAKE_RECEIPT_COLS } from "../../lib/documents/receipts";
 
 // The detail panel mounts @base-ui/react primitives (DocumentAdmin's Select,
 // the door dialogs) whose floating-ui internals feature-detect against
@@ -195,4 +196,208 @@ test("SIBLING P1: a filing-changing act also re-hydrates the coding lane's own c
       `the coding lane must re-hydrate after a filing act — saw ${counts.lint_findings} lint reads, unchanged from ${lintBefore}`,
     );
   });
+});
+
+// =============================================================================
+// #633 AC1(c) — RECEIPTS THAT SURVIVE A RELOAD, AND A POLL THAT STOPS
+// =============================================================================
+//
+// The queue lived in a React ref (`useUploadQueue.ts:170`) and only ever called
+// `readIntake` from inside its own poll loop (:212), so a reload lost every receipt.
+// These cells drive the WORKBENCH (not the queue) with an empty queue — exactly the
+// post-reload situation — and assert on READ COUNTS, because a re-read that returns
+// the same rows is invisible to a rendered-text assertion.
+
+const INTAKE_ID = "a1111111-1111-4111-8111-111111111111";
+const RECEIPT_DOC = "d3333333-3333-4333-8333-333333333333";
+const ME = "u9999999-9999-4999-8999-999999999999";
+
+function receiptRow(over: Record<string, unknown> = {}) {
+  return {
+    id: INTAKE_ID, uploaded_by: ME, origin: "documents_tab",
+    original_filename: "april-statement.pdf", declared_mime: "application/pdf",
+    declared_bytes: 4096, status: "adopted", document_id: RECEIPT_DOC,
+    failure_code: null, expires_at: null,
+    created_at: "2026-04-05T02:00:00Z", updated_at: "2026-04-05T02:00:01Z",
+    ...over,
+  };
+}
+
+/** The workbench's whole read surface, counted by relation. `intakes` is a function so
+ *  a cell can change what the NEXT poll read returns — the settle transition. */
+function receiptFetch(counts: Record<string, number>, intakes: () => unknown[]): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const relation = /\/rest\/v1\/(?:rpc\/)?([a-z_]+)/.exec(url)?.[1] ?? "unknown";
+    counts[relation] = (counts[relation] ?? 0) + 1;
+    const body = (() => {
+      switch (relation) {
+        case "document_intakes_visible": return intakes();
+        case "caller_context": return [{ user_id: ME, firm_id: "f1", firm_name: "F", role: "owner", role_rank: 40, is_operator: false }];
+        case "document_filings": return [FILING_ROW];
+        case "documents": return [DOC_ROW, { ...DOC_ROW, id: RECEIPT_DOC, original_filename: "april-statement.pdf" }];
+        case "list_unassigned_documents":
+          // The receipt fixture exercises arm (b) of the predicate: MINE and claimed by
+          // no filing. Arm (a) is covered by the filed document above.
+          return [{ id: RECEIPT_DOC, mime_type: "application/pdf", document_kind: null, extraction_status: "pending", unassigned: true }];
+        case "document_capabilities": return [{
+          format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
+          custody: "supported", byte_extraction: "supported", typed_facts: "supported",
+          business_operation: "supported", engine_id: null, engine_byte: "e", registry_version: 1,
+          basis: "seeded", limits: {},
+        }];
+        case "attribution_candidates": return [];
+        case "clients": return [{ id: CLIENT, name: "Rome Properties", status: "active" }];
+        case "get_document_state": return null;
+        default: return [];
+      }
+    })();
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+}
+
+/** FIX ROUND 1. The shipped poll waits 1.5 s before its FIRST tick and backs off from
+ *  there, while `h.settle()` is a 0 ms macrotask hop — so every cell here used to assert
+ *  a read budget the poll had not spent a single tick of. The bounds are now passed in
+ *  with a zero base delay (the component's documented option, shipped defaults
+ *  otherwise), and every budget assertion below is non-vacuous. */
+const FAST_POLL = { baseDelayMs: 0, maxDelayMs: 0 } as const;
+/** The same zero delay with a ceiling the harness's own mount-time settles cannot
+ *  exhaust — for the two cells that must still have budget left when the body runs. */
+const WIDE_POLL = { baseDelayMs: 0, maxDelayMs: 0, maxTicks: 60 } as const;
+
+async function withReceipts(
+  intakes: () => unknown[],
+  run: (h: Awaited<ReturnType<typeof renderComponent>>, counts: Record<string, number>) => Promise<void>,
+  poll: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number } = FAST_POLL,
+): Promise<void> {
+  const counts: Record<string, number> = {};
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = receiptFetch(counts, intakes);
+  configureSessionTokenSource(async () => "tok");
+  const nav = makeNavigation();
+  const h = await renderComponent(documentsApp(createElement(DocumentsWorkbench, { clientId: CLIENT, settlePoll: poll }), nav));
+  try {
+    for (let i = 0; i < 10; i++) await h.settle();
+    await run(h, counts);
+  } finally {
+    await h.unmount();
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    resetSessionTokenSource();
+  }
+}
+
+test("[633] AC1(c): a receipt is REHYDRATED at mount — an empty queue still shows what the DB holds", async () => {
+  await withReceipts(() => [receiptRow()], async (h, counts) => {
+    assert.ok(
+      (counts.document_intakes_visible ?? 0) >= 1,
+      "the workbench must read the masked intake view in LIST form at mount, not only inside the queue's poll",
+    );
+    assert.match(h.text(), /april-statement\.pdf/, "the durable receipt must render with no queue row backing it");
+    assert.match(h.text(), /Adopted/, "the DB's own status word, read back rather than remembered");
+  });
+});
+
+test("[633] AC1(c): the mount read projects EXACTLY the single-row poll's columns — one shape, two callers", async () => {
+  let seen = "";
+  await withReceipts(() => [receiptRow()], async () => {
+    // captured below via the module's own constant rather than by scraping the URL:
+    // the assertion that matters is that `readIntake` and the list read agree.
+    seen = INTAKE_RECEIPT_COLS;
+  });
+  assert.equal(
+    seen,
+    "id,uploaded_by,origin,original_filename,declared_mime,declared_bytes,status,document_id,failure_code,expires_at,created_at,updated_at",
+  );
+});
+
+test("[633]: a SETTLED receipt list is not polled — an open tab is not a hot read loop", async () => {
+  await withReceipts(() => [receiptRow({ status: "adopted" })], async (h, counts) => {
+    const after = counts.document_intakes_visible ?? 0;
+    for (let i = 0; i < 25; i++) await h.settle();
+    assert.equal(
+      counts.document_intakes_visible, after,
+      `a settled list must issue NO further reads — grew from ${after} to ${counts.document_intakes_visible}`,
+    );
+    assert.match(h.text(), /Every upload here has settled/);
+  });
+});
+
+test("[633]: the registry is read ONCE per mount and never enters the poll's budget", async () => {
+  await withReceipts(() => [receiptRow()], async (h, counts) => {
+    for (let i = 0; i < 25; i++) await h.settle();
+    assert.equal(
+      counts.document_capabilities, 1,
+      `the 240-row static catalogue must be read once, saw ${counts.document_capabilities}`,
+    );
+    assert.equal(
+      counts.get_document_state ?? 0, 0,
+      "no per-row get_document_state — that N+1 is the thing the registry read exists to avoid",
+    );
+  });
+});
+
+test("[633]: an UNSETTLED receipt keeps a bounded watch and says so; the poll's budget is finite", async () => {
+  // A row that never settles. The poll must issue SOME reads and then stop, rather
+  // than either never re-reading or re-reading forever.
+  await withReceipts(() => [receiptRow({ status: "verifying", document_id: null })], async (h, counts) => {
+    assert.match(h.text(), /Watching 1 unfinished upload/, "the watermark must say what is still moving");
+    const mount = counts.document_intakes_visible ?? 0;
+    for (let i = 0; i < 40; i++) await h.settle();
+    const grew = (counts.document_intakes_visible ?? 0) - mount;
+    // NON-VACUITY (fix round): the poll must have actually run, or "inside its ceiling"
+    // is a statement about nothing — which is exactly what this cell used to assert.
+    assert.ok(grew > 0, "the poll must issue SOME read while a row is still moving");
+    assert.ok(grew <= 12, `the settle-poll must stay inside its tick ceiling — issued ${grew} extra reads`);
+    assert.ok(h.find((n) => (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("data-testid") === "receipts-refresh"),
+      "an unsettled list must offer a manual Refresh, so an exhausted poll is a visible end and not a silent one");
+  });
+});
+
+test("[633] fix round: a tick re-reads the MASKED VIEW ALONE — the other three reads stay flat", async () => {
+  // Review finding 633-ADV-4: `onTick` called `reload()`, which re-ran the WHOLE
+  // derivation — `document_intakes_visible` + `document_filings` +
+  // `rpc/list_unassigned_documents` + `caller_context` (+ a conditional
+  // `documents?id=in.(...)`) — so a settling batch could issue up to ~60 reads under
+  // the caller's own JWT against the module header's own promise of one. The tick now
+  // goes through `refreshIntakeReceipts`, which reads the masked view and nothing else.
+  await withReceipts(() => [receiptRow({ status: "verifying", document_id: null })], async (h, counts) => {
+    const mountIntakes = counts.document_intakes_visible ?? 0;
+    const mountFilings = counts.document_filings ?? 0;
+    const mountUnassigned = counts.list_unassigned_documents ?? 0;
+    const mountCaller = counts.caller_context ?? 0;
+    for (let i = 0; i < 40; i++) await h.settle();
+    const ticks = (counts.document_intakes_visible ?? 0) - mountIntakes;
+    assert.ok(ticks > 0, "non-vacuity: the poll must actually have ticked, or 'flat' means nothing");
+    assert.equal(counts.document_filings ?? 0, mountFilings, `document_filings grew by ${(counts.document_filings ?? 0) - mountFilings} across ${ticks} ticks`);
+    assert.equal(counts.list_unassigned_documents ?? 0, mountUnassigned, `list_unassigned_documents (SECURITY INVOKER, the heaviest of the four) grew by ${(counts.list_unassigned_documents ?? 0) - mountUnassigned} across ${ticks} ticks`);
+    assert.equal(counts.caller_context ?? 0, mountCaller, `caller_context grew by ${(counts.caller_context ?? 0) - mountCaller} across ${ticks} ticks`);
+  }, WIDE_POLL);
+});
+
+test("[633] fix round: the three slow reads ARE paid again, exactly once, on the tick where the batch settles", async () => {
+  // The other half of the promise: a document filed to this client DURING a batch must
+  // get its real kind and mime, so the full derivation runs once more when the list
+  // settles — and then the poll stops, so it never runs a third time.
+  let settled = false;
+  await withReceipts(
+    () => [receiptRow(settled ? { status: "adopted" } : { status: "verifying", document_id: null })],
+    async (h, counts) => {
+      const mountUnassigned = counts.list_unassigned_documents ?? 0;
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(counts.list_unassigned_documents ?? 0, mountUnassigned, "still unsettled: the slow reads have not been re-issued");
+      settled = true;
+      for (let i = 0; i < 40; i++) await h.settle();
+      assert.equal(
+        (counts.list_unassigned_documents ?? 0) - mountUnassigned, 1,
+        `the settling tick must re-derive EXACTLY once, saw ${(counts.list_unassigned_documents ?? 0) - mountUnassigned}`,
+      );
+      assert.match(h.text(), /Every upload here has settled/);
+    },
+    WIDE_POLL,
+  );
 });

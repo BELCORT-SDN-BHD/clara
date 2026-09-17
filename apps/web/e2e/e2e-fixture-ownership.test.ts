@@ -55,6 +55,7 @@ const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "documents-intake-mock.mjs",
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
@@ -244,6 +245,29 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
       "/rest/v1/rpc/record_client_resolution",
       "/rest/v1/rpc/file_document",
     ],
+  },
+  // #633's documents-tab + firm-leaf lane. Four verbs are SHARED with chat-parity's lane
+  // (which owns the chat composer's own upload): both answer the intake view and the two
+  // attribution doors. This lane scopes every one of them — the intake view by id or by
+  // the LIST form plus an armed-on-this-client latch, the two doors by the document id in
+  // the body — and returns false otherwise, which is why chat-parity's single-row poll and
+  // its own three runtime legs are untouched. Declared SHARED rather than owned: two lanes
+  // answering one verb is a fact this census exists to record, not to hide.
+  "documents-intake-mock.mjs": {
+    unscopeable: [
+      // The global 240-row capability catalogue and the caller's own context. NEITHER
+      // TAKES A SUBJECT AT ALL: `clara.document_capabilities` has no tenant column (that
+      // is exactly why the web reads it once per mount and never polls it), and
+      // `clara.caller_context`'s predicate takes no argument — it is self-only by
+      // construction (0141:541-543). A mock cannot scope a request that carries nothing
+      // to scope by.
+      "/rest/v1/document_capabilities",
+      "/rest/v1/caller_context",
+      // `clara.list_unassigned_documents(p_limit)` takes a LIMIT, not a subject: its
+      // scope is RLS's, which a mock has no access to.
+      "/rest/v1/rpc/list_unassigned_documents",
+    ],
+    debt: [],
   },
   // FS-4's lane, pulled in by DERIVING the list from `serve-built.mjs` rather than typing it —
   // it was a lane mock all along and nobody had noticed it was unmeasured.
@@ -967,7 +991,12 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // criterion is "Documents AND Work show the four states". Each lane answers only for the
   // document ids IT minted and falls through otherwise, so the share is a declared one rather than
   // a collision — which is exactly the distinction this census exists to force someone to make.
-  get_document_state: ["documents-viewer-mock.mjs", "work-list-mock.mjs"],
+  // #633 joins them as a THIRD, for the same reason and with the same scoping: its walk opens the
+  // documents-tab detail to read the file -> Work boundary, and that panel's four verdicts come
+  // from this RPC. It answers only for its own two documents, and it reads the POST body through
+  // the SHARED `readCachedJson` (`mock-dispatch.mjs`), so declining another lane's document leaves
+  // that lane's body fully readable.
+  get_document_state: ["documents-intake-mock.mjs", "documents-viewer-mock.mjs", "work-list-mock.mjs"],
   // #643 x #634/#728 — `clara.list_spoken_for_documents` is the EVIDENCE CHOOSER's advisory read,
   // and #643's whole AC3 is that the periodic-adjustment form mounts the composer's own chooser
   // component, so of course the two lanes both answer it. Declared at WAVE-2 INTEGRATION rather
@@ -976,7 +1005,20 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // Each lane gates on its OWN client before answering (journal-work-mock.mjs:1624,
   // periodic-adjustment-mock.mjs:320) and falls through otherwise, so neither can answer for the
   // other's walk — which is the distinction between a declared share and a collision.
-  list_spoken_for_documents: ["journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
+  // #633 joins them: the document detail's file-to-Work panel reads the SAME advisory door
+  // for the claimant half of an evidence link. It gates on its own client id before
+  // answering and falls through otherwise, exactly as the other two do.
+  list_spoken_for_documents: ["documents-intake-mock.mjs", "journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
+  // #633 x the chat-parity train — THE ATTRIBUTION PAIR, answered by two lanes because two
+  // surfaces perform the same act: the chat composer files what it just attached, and the
+  // documents tab / firm leaf file what a person just chose. `chat-parity-mock.mjs` answers
+  // both unconditionally (its own declared debt, above); `documents-intake-mock.mjs` gates on
+  // the document id in the body — `p_subject` for the resolution, `p_document` for the filing
+  // — and returns false for anything that is not one of its own two documents, so it cannot
+  // answer for the composer's walk. Declared as a share rather than left to collide: two lanes
+  // on one verb is a fact this census exists to record.
+  record_client_resolution: ["chat-parity-mock.mjs", "documents-intake-mock.mjs"],
+  file_document: ["chat-parity-mock.mjs", "documents-intake-mock.mjs"],
   // #640 x #631 — `clara.get_work_plan_origin` is read by `<WorkPlanOriginRow>`, which #640 mounts
   // on the SHARED Work detail page, so every lane whose walk opens a Work detail now issues it.
   // Declared at WAVE-3 INTEGRATION: #640's own walk had the only Work detail that reached this row
