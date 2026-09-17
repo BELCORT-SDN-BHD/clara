@@ -14,8 +14,7 @@ separate clusters, a PR opened against `main`, and `ci` green. **Do not run any 
 all of that is true and the owner has authorised the window in-session**, per this repo's own
 `AGENTS.md` protocol.
 
-RELEASE_SHA = `<SHA>` — the commit that lands on `main` when the wave's PR merges. Unknown until
-that PR exists; every command below is written against the placeholder. Label `refresh-<sha8>`.
+RELEASE_SHA = **`a296765c`** (PR #860, fast-forwarded onto `main` 2026-09-17 22:25 MYT; `ci` green). Label `refresh-a296765c`.
 
 **Migration count — corrected from the brief's placeholder.** `git ls-tree -r --name-only
 origin/main -- packages/db/migrations/ | wc -l` = **208** files today (max version `0213`; five
@@ -75,8 +74,7 @@ order of preference:
   wave worktree's migrations directory copied in for the second run — same effect as (a), heavier
   to set up, useful only if `CLARA_MIGRATIONS_DIR` turns out not to behave as documented.
 
-Either way, this rehearsal has never been run — there is no rig or timing number to report yet.
-**Unverified**, by design of this being a draft.
+**REHEARSAL RUN 2026-09-17 22:5x MYT (option b, measured).** Fresh cluster `rig198` on 127.0.0.1:55630, db `clara_198`; the pristine chain came from a worktree whose migrations directory is the 4464e471 tree (`clara-wt/633`, 193 files): `pnpm db:migrate` → 193 applied, `pnpm db:seed` → 2 seed files. Then from the RELEASE_SHA checkout (`main` = `a296765c`): `pnpm db:migrate` → **`26 new migration(s) applied · 219 total`**, every one of the 15 riders and 11 wave prestates printed `clean` and every tail `OK` (53 notices; 0221's two roster censuses byte-identical; the four re-issued pins held), **T = 6.0 s wall** (`real 0m6.052s`). Log: session scratchpad `rehearsal-0198.log`. Caveat unchanged: an empty, seeded-only cluster proves DDL and guard logic, not row-shaped hazards in hosted's real data.
 
 Preflight read-relations probe shape (unchanged): `lib/rollback-preflight.mjs`'s own relation list.
 
@@ -391,11 +389,9 @@ shipped.
 - The wave's PR does not exist; RELEASE_SHA, the build tree diff, and CI status are all unknown.
 - DECISIONS §3.4's manifest regeneration and the three re-run World-e2e legs, on `rigmain`'s own
   chain rather than the pre-rebase `rigint2` — not measured here.
-- The exact stored `workflow.workflow_runs.name` value for the retired `chatTurn` body (assumed
-  `'chatTurn'` from the un-versioned filenames; not read off a live catalog).
-- `packages/db/scripts/migrate.mjs`'s default `lock_timeout`/`statement_timeout` when a migration
-  file (0216, 0221) sets neither locally — relevant to the failure-branch timing in step 6d.
-- Rehearsal timing (T) — step 0 has not been run.
+- ~~The exact stored `workflow.workflow_runs.name` value for the retired `chatTurn` body~~ Read 2026-09-17 off the registry at 4464e471 (`workflowBodies` line 842): the body was exported and registered as **`chatTurn_v1`**, so the hard-stop census is `select count(*) from workflow.workflow_runs where name = 'chatTurn_v1' and status not in (<terminal set>)` — confirm against `select distinct name` on the live catalog at window time.
+- ~~`packages/db/scripts/migrate.mjs`'s default `lock_timeout`/`statement_timeout`~~ Read 2026-09-17: `migrate.mjs:294` sets NO statement_timeout, lock_timeout or query deadline on its client, and 0216/0221 set none locally — a blocked `CREATE TRIGGER` there waits on the server default (unset on the pooler as far as is known), so step 6b's `pg_locks` read on `clara.journal_entries` before 6c is the only guard; cancel a blocker with `pg_cancel_backend`, never the migration.
+- ~~Rehearsal timing (T) — step 0 has not been run.~~ Measured 2026-09-17: T = 6 s, 26 applied · 219 total (step 0).
 - Whether Supabase PITR is enabled (asked and left unanswered in the 2026-09-14 runbook; unverified
   again here).
 - Everything hosted about the wave's own contents: `integration-merge.md` and `successors-final.md`
