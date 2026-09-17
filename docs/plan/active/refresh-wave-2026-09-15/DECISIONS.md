@@ -143,6 +143,7 @@ Ruled after the three-lens review and the fix/re-check rounds (`reports/<n>-revi
 | #652 | Authority window must lie inside the stated term (`effective_to` required) | **Ratified** (R4). The chat tool's schema is the module's (`lib/accrual-basis.ts`): `effective_to` is no longer optional there and the cut follows the module, not the older stanza text. |
 | #652 | CLR10 `accrual_schedule_yields_no_occurrence` for a schedule that reaches no due date | **Ratified** (R4). Follow-up for the plan lane's own door (owned by #653's recuts) to share the refusal. |
 | #654 | Firm-scope evidence census counts LIVE violations only; superseded/withdrawn revisions raise NOTICE | **Ratified** (R5). It is the invariant the three guards enforce and what every read emits. |
+| #649 | Round 2: settle door takes the client advisory rung FIRST (rung → client row → plan) rather than B1's literal remedy (client row → rung → plan) | **Ratified.** The re-checker measured that the literal order inverts against `set_client_fy_end` (rung @1127 before its `clara.clients` update @2479) — the very door settle calls — while rung-first sits above every neighbour (0037 §K, rung before rows). `clara.approve_wrong_client_correction` takes a `clara.clients` row before the rung — a pre-existing violation, follow-up issue, not this ticket's. |
 
 ### 3.2 · Blueprint drift — recorded for the #683 blueprint sync, NOT edited this wave (owner ruling 2026-09-15)
 
