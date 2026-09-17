@@ -683,11 +683,26 @@ cell("p646.replay.one_receipt: replaying either new door's op key returns the OR
 // p646.horn_a.no_work — THE MERGE GUARD.
 // =============================================================================================
 cell("p646.horn_a.no_work: after every door in this file, zero new accounting_work, zero new agent_tasks, zero correction-purpose operation_receipts, and both purpose CHECK texts byte-identical", async () => {
+  // SCOPED TO THIS FIRM — the wave-2026-09-15 integration repair, and the claim is unchanged by it.
+  // The first cut counted the WHOLE database, so any row ANY other file left behind inside this
+  // cell's before/after window moved the number. On the merged estate run (all 39 db files as one
+  // continuous process) that is exactly what happened: `agent_tasks` tipped by one (2297 !== 2296)
+  // with nothing in #646 having minted anything, and the file was 16/16 the moment it ran alone.
+  // What this cell asserts was never a property of the database — it is "no door in THIS file mints
+  // Work for THIS firm" — so the predicate now says so, and the guard is deterministic under
+  // `tests/**/*.test.mjs` instead of only under single-file iteration.
   const counts = async () => (await rootQuery(
-    `select (select count(*)::int from clara.accounting_work) as work,
-            (select count(*)::int from clara.agent_tasks) as tasks,
-            (select count(*)::int from clara.operation_receipts) as receipts,
-            (select count(*)::int from clara.agent_interruptions) as interruptions`)).rows[0];
+    `select (select count(*)::int from clara.accounting_work where firm_id = $1) as work,
+            (select count(*)::int from clara.agent_tasks where firm_id = $1) as tasks,
+            (select count(*)::int from clara.operation_receipts where firm_id = $1) as receipts,
+            (select count(*)::int from clara.agent_interruptions where firm_id = $1) as interruptions`,
+    [FIRM_A()])).rows[0];
+  // A NARROWED CENSUS CAN GO VACUOUS, which is the one risk scoping introduces: a predicate bound
+  // to nothing counts zero everywhere and every equality below passes for free. The binding is
+  // asserted before it is used.
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.firms where id = $1", [FIRM_A()])).rows[0].n, 1,
+  "the scoping predicate names a real firm — a census narrowed onto nothing would pass no matter what these doors did");
   const checks = async () => (await rootQuery(
     `select conname, pg_get_constraintdef(oid) as def from pg_constraint
       where conname in ('accounting_work_purpose_check','operation_receipts_purpose_check')
@@ -722,6 +737,23 @@ cell("p646.horn_a.no_work: after every door in this file, zero new accounting_wo
   assert.equal(checksBefore.length, 2, "and both CHECKs really are on this database");
   assert.ok(!checksBefore.some((c) => /source_correction|correction/.test(c.def)),
     "no correction purpose exists anywhere on either CHECK");
+
+  // THE POSITIVE CONTROL, LAST so it cannot move a single arm above. The four zeros are only
+  // evidence if this counter can see a mint that really happens in this firm — a guard that
+  // counted nothing would report the same four zeros forever. One journal Work admitted through
+  // the same door and fixture `p646.question.version` already uses (so this cell leaves no residue
+  // of a kind this file does not already leave) must move BOTH work and tasks by one.
+  const control = await invoiceWithFacts({ client: A2(), totalCents: 61000, tag: "horn-control" });
+  const ctlBefore = await counts();
+  await admitJournalWork({
+    client: A2(), author: KEEPER(), basis: basis(),
+    sourceRefs: [{ kind: "document", document_id: control.documentId }] });
+  const ctlAfter = await counts();
+  assert.equal(ctlAfter.work, ctlBefore.work + 1,
+    "the firm-scoped counter SEES an accounting_work this firm really mints — the zero above is a measurement, not an empty predicate");
+  assert.equal(ctlAfter.tasks, ctlBefore.tasks + 1,
+    "…and the agent_tasks half of the predicate is live too, which is the number the whole-database form got wrong");
+  noteLane("p646.horn_a.no_work: the four counts are FIRM-SCOPED since wave-2026-09-15 integration — the whole-database form was tipped by one unrelated agent_task during the 39-file estate run (2297 !== 2296) while the file was 16/16 alone. The positive control at the end proves the scoped counter still moves on a real mint");
 });
 
 // =============================================================================================
