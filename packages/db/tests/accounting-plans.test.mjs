@@ -266,11 +266,27 @@ test("p640.schedule.rules — every schedule refusal is typed and names its fiel
     client, authorityRef: ref, effectiveFrom: from, basis: b, ...over,
   });
 
+  // THE SUPPORTED ROSTER IS DERIVED FROM THE RELATION'S OWN CHECK, not re-typed. #653's 0208
+  // added `amortisation_schedule` (a ratified recut of the 0193 plan family, DECISIONS §1.3), and
+  // this cell went red at wave integration with the literal pair it was written against — the
+  // honest reading of which is that a second place was carrying the roster. The door's advertised
+  // `detail.supported` and `clara.accounting_plans`' `kind` CHECK are two DIFFERENT objects, so
+  // comparing them is a real cross-check: a kind the CHECK admits but the refusal does not name
+  // (or the reverse) is exactly the drift worth catching, and neither can move alone again.
+  const checkDef = (await rootQuery(
+    `select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid = 'clara.accounting_plans'::regclass and conname = 'accounting_plans_kind_check'`
+  )).rows[0].def;
+  const admitted = [...checkDef.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
+  assert.ok(admitted.includes("recurring_journal") && admitted.includes("reversing_journal"),
+    `the kind CHECK no longer admits this lane's own two kinds: ${checkDef}`);
   for (const kind of ["depreciation", "accrual", "amortisation", "period_close"]) {
     const { detail } = await assertPair(CLR.badRequest, PLAN_REASON.planKindUnsupported,
       () => mk({ kind }), `plan kind ${kind}`);
-    assert.deepEqual(detail.supported, ["recurring_journal", "reversing_journal"],
-      "the refusal NAMES what this slice does support");
+    assert.deepEqual([...detail.supported].sort(), [...admitted].sort(),
+      "the refusal NAMES exactly what clara.accounting_plans' own kind CHECK admits");
+    assert.equal(detail.supported.includes(kind), false,
+      `the refusal for ${kind} must not also list it as supported`);
   }
   await assertPair(CLR.badRequest, PLAN_REASON.timezoneUnsupported,
     () => mk({ timezone: "UTC" }), "a timezone other than Asia/Kuala_Lumpur");
