@@ -251,3 +251,33 @@ against a chain below the frontier FAILS, because a skip is not evidence.
   `t_entry_evidence_release` frees the receipt so the correcting claim may cite it —
   `get_work_claim_origin`, the three reads, RLS posture and replay. Gate module:
   `staff-expense-claim-preintegration-gate.mjs` (`CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS=1`).
+
+### The prepayment-amortisation battery (#653)
+
+`prepayment-schedule.test.mjs` and `prepayment-occurrences.test.mjs` are frontier-gated on the
+`prepayment_amortisation$` stem, never on a migration number, and they share
+`prepayment-schedule-fixtures.mjs`. That module JOINS TWO EXISTING WORLDS rather than building a
+third: `f-a4-pr2a-fixtures.mjs`'s `prepaidScene` supplies the prepayment half (a fiscal year, a
+filed verified document, a prepaid-asset account, an expense target and an APPROVED entry binding
+the document and debiting exactly one asset line) and `accounting-plans-fixtures.mjs` supplies the
+plan half (a real authority row, the runtime scan, the catch-up door, the occurrence readers).
+
+Two things a later hand will trip over if they are not stated here. The scene opens CALENDAR-YEAR
+fiscal years — `clara.propose_fiscal_year` derives `ends_on` from the client's fy-end, so a year
+opened on any other day is a short year `clara.open_fiscal_year` refuses without a stated
+`length_reason` — and it opens the SUCCESSOR year too when the term crosses into it, because the
+frozen evaluator refuses a term running past its fiscal year with no open successor. And the scene
+ACCEPTS the published Terms and DPA as the firm owner: model egress is a standing precondition for
+every occurrence (0195), so a scene that skipped it measures `egress_not_authorized` where it meant
+to measure something else. Both were measured, not assumed — the locked-period cell answered CLR13
+instead of CLR19 before the acceptance was added.
+
+A THIRD thing, added in the fix round: the ineligible-asset cells post to the estate's OWN
+receivable CONTROL account, `374-C56` (`account_class = 'receivable'`, measured on the rig), never
+to a hand-made "trade receivables" code — a minted account carries a NULL `account_class` and is
+therefore not a control account by `clara._adj_line_eligibility_breach`'s own rule, so a fixture
+that built its own code would measure a different estate. Posting to a control account needs a
+counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37 way.
+
+`prepayment-0208-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
+not preload it and fails loudly on a database without the lane, because a skip is not evidence.

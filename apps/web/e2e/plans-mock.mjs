@@ -20,6 +20,8 @@
 // making it a real transition rather than two canned plans is what proves the surface re-reads
 // after the write instead of painting its own optimistic answer.
 
+import { readCachedJson as readJson } from "./mock-dispatch.mjs";
+
 export const PLANS = {
   firmId: "64064064-6400-4640-8640-640640640640",
   clientId: "64c0c0c0-6400-4640-8640-640640640640",
@@ -58,16 +60,18 @@ export function plansCatchUps() {
   return state.catchUps;
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
+
+// #653 — THE SHARED CACHING READER, not a lane-local drain, and the change is measured rather
+// than stylistic. `mock-dispatch.mjs` exists precisely because the request STREAM can be read once
+// while a PARSED BODY can be re-served to as many callers as ask for it, in any order — and this
+// file's own local copy drained without caching. The moment a SECOND lane legitimately owned one
+// of this lane's verbs (#653 reuses `pause_accounting_plan` and its three siblings on its own
+// plan id, a declared share in `e2e-fixture-ownership.test.ts`), this lane's guard read the body,
+// answered `false` for a foreign plan id, and left the next lane an empty object. Measured in the
+// browser: the prepayment walk's pause dialog stayed open because its own door call 404'd.
+//
+// Nothing about THIS lane's behaviour changes: it still guards on its verb allow-list before
+// reading, and it still answers only for its own ids.
 
 const CLIENT = () => ({
   id: PLANS.clientId,

@@ -183,6 +183,13 @@ const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
     id: "accruals",
     keywords: ["accruals", "accrual", "accrued", "accrue", "reversal", "reversing", "service period"],
   },
+  // #653 — the words a preparer reaches for when a prepaid invoice needs spreading. Deliberately
+  // NOT "plans": that word belongs to the row above, and two rows answering one word is a palette
+  // that guesses.
+  prepayments: {
+    id: "prepayments",
+    keywords: ["prepayments", "prepaid", "amortisation", "amortization", "service period", "subscription", "insurance"],
+  },
   accounts: { id: "registersAccounts", keywords: ["accounts", "chart of accounts", "coa", "registers"] },
   close: { id: "close", keywords: ["close", "period", "fiscal year"] },
   tax: { id: "clientTax", keywords: ["tax", "sst", "cp204", "income tax", "computation"] },

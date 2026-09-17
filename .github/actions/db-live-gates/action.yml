@@ -323,6 +323,20 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/accrual-e2e.mjs
+        # #653 — the PREPAYMENT-AMORTISATION occurrence e2e, immediately after its #640 sibling and
+        # on the same rig. It adds ONE fact that lane cannot show: a per-period amount survives the
+        # frozen `.strict()` tool schema, the run's faithful echo and the digest comparison, so the
+        # FINAL period's entry charges the residual (50,001 of 100,001 over two months) rather than
+        # the revision's stored constant. Alongside it: two concurrent belt passes leave one
+        # occurrence and one Work, the exit_after_commit crash replays onto one entry / one receipt
+        # / one occurrence, a third pass admits nothing, and the explicit catch-up admits the
+        # earlier period carrying its own base. It SKIPS CLEANLY (exit 0, printed reason) when
+        # migration 0208 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/prepayment-occurrence-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate

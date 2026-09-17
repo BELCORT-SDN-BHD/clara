@@ -89,6 +89,7 @@ export type AccountingItemId =
   | "journals"
   | "periodicAdjustments"
   | "staffExpenseClaims"
+  | "prepayments"
   | "bank"
   | "receivables"
   | "assets"
@@ -394,6 +395,12 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   // obligation, no schedule and no future occurrence — and one prefix for two unrelated lanes makes
   // every later reader guess which one a row belongs to.
   { id: "accruals", segment: "accruals", labelKey: "accounting.accruals", icon: "route", minimumRole: "viewer" },
+  // #653 — the prepayments this client has RECOGNISED and the amortisation each one runs on. Its
+  // own destination beside `plans` rather than a view of it: a prepayment schedule IS an
+  // amortisation_schedule accounting plan, but what a person comes here for is the prepaid asset,
+  // the term its document states and the period-by-period charge — which the generic plan surface
+  // does not carry and should not learn.
+  { id: "prepayments", segment: "prepayments", labelKey: "accounting.prepayments", icon: "route", minimumRole: "viewer" },
   { id: "accounts", segment: "registers", tab: "accounts", labelKey: "accounting.accounts", icon: "list", minimumRole: "viewer" },
   { id: "close", segment: "close", labelKey: "accounting.close", icon: "lock", minimumRole: "viewer" },
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
@@ -604,6 +611,28 @@ export function accrualCreateHref(clientId: string): string {
  *  the reason `workDetailHref` states. */
 export function accrualDetailHref(clientId: string, accrualId: string): string {
   return `${clientBase(clientId)}/accruals/${encodeURIComponent(accrualId)}`;
+}
+
+/** `/clients/:clientId/prepayments` — the C8/C9 prepayment list (#653). */
+export function prepaymentsHref(clientId: string): string {
+  return `${clientBase(clientId)}/prepayments`;
+}
+
+/** `/clients/:clientId/prepayments/new` — the configure form. A ROUTE rather than a Dialog for the
+ *  reason `planCreateHref` gives: it carries a posted entry, a judged account with its stated
+ *  grounds and a derived allocation preview, which appendix C §4 sends to a detail destination.
+ *  `entry` prefills the recognition when a person arrives from an attention row. */
+export function prepaymentCreateHref(clientId: string, entryId?: string): string {
+  const base = `${clientBase(clientId)}/prepayments/new`;
+  return entryId ? `${base}?entry=${encodeURIComponent(entryId)}` : base;
+}
+
+/** `/clients/:clientId/prepayments/:scheduleId` — one derived amortisation's own address (#653).
+ *  Its allocation, its authority, its period-by-period execution and every refusal is durable
+ *  detail, so it is a ROUTE: Back works, a link from an attention row and a link from the plan are
+ *  the same URL, and a reload lands on the same schedule. */
+export function prepaymentDetailHref(clientId: string, scheduleId: string): string {
+  return `${clientBase(clientId)}/prepayments/${encodeURIComponent(scheduleId)}`;
 }
 
 export function accountingHref(clientId: string, item: AccountingItem): string {
