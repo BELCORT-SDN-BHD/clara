@@ -396,3 +396,46 @@ shipped.
   again here).
 - Everything hosted about the wave's own contents: `integration-merge.md` and `successors-final.md`
   state explicitly that no hosted run exists anywhere in this wave.
+
+---
+
+## RESULTS — executed 2026-09-17 (UTC), one session, owner-authorised
+
+Owner authorisation: the in-session word **"go"** (2026-09-17, after the status report that named the
+probe machine and the backup as hosted-side actions and promised a note before the first hosted
+write). Build tree = `a296765c`, `git status --porcelain` empty apart from the untracked `ceremony/`
+directory that holds `reads-0199-0224.mjs` (the step-3 read script, committed with this as-run).
+Every DSN travelled through `scripts/ops/dsn-pipe.mjs` (stdin → child env); the fly token stayed
+inline in each pipeline. The live machine `48ee715b763048` was touched exactly twice: `stop` and
+`start`. Logs: session scratchpad `reads-0199-0224.log`, `backup-0198.log`, `census-*.log`,
+`migrate-hosted.log`, `deploy-hosted.log`, `logs-boot.log`, `preflight-v84.log`, `ceremony-timeline.log`.
+
+| Step | Reading |
+|---|---|
+| 0 rehearsal | `rig198` (55630): **26 new · 219 total**, T = 6.0 s (recorded in step 0 above) |
+| 1 auth | `fly auth whoami` = tools@belcort.com |
+| 2 probe | `683e761cde03d8` (`probe-a296765c`, OLD image `refresh-3486b6c2`, `CLARA_START_WORLD=0`, `sleep infinity`), created 14:51Z |
+| 3a ledger | **193 / `0198_chat_clarify_expiry`**; drift gate 193/193 applied rows match their files; 0198's own checksum matches; exactly 26 files 0199…0224 pending; 219 files on disk |
+| 3a first pins | 0199 `cancel_accounting_work` `bfd9f7be…`, 0200 `answer_work_question` `c8fa8eb0…` + `_tf_accounting_work_immutable` `7a68e97c…`, 0201 `persist_document_extraction` `0230031f…` (live signature `(uuid,text,integer,jsonb,jsonb,text,text,text)`), 0204 `_record_journal_entry_core` `f9c4f525…` — all MATCH (later pins in the chain are witnessed by the rehearsal, as the script header says) |
+| 3c chatTurn_v1 | stored name is `workflow//./workflows/chatTurn.v1//chatTurn_v1`: 3 runs, **0 non-terminal** — read at 14:56Z, after the stop 15:01Z, before the deploy 15:04Z, after the release 15:16Z |
+| 3b census | `agent_tasks` non-terminal 0; unbound/held 0 (the ten #820 orphan `wake` tasks are **gone** — zero, nothing new); `agent_interruptions` pending 0; `accounting_work` non-terminal 0; `workflow_runs` 1064 completed / 1430 failed / 4 cancelled / **1 running** = `clientOnboarding_v4` `wrun_01M1MNTV64Z681KNQ6QVM4HEDH` (created 2026-09-03, 37 steps completed, no bound task — the same stale run the 0195 ceremony recorded; `clientOnboarding_v4` stays in `workflowBodies`, so it is carried, not stranded); `wake_engine_sources` bank_agent + close_prep both disabled; `pg_locks` on the nine recut/trigger tables: none; F10 advisory lock: none |
+| 3d pre-images | all 30 bodies present (`add_counterparty_alias` only at its 5-arg signature) → session scratchpad `pre-images/` (30 files + `INDEX.txt`, sha256 per body; the wave's measured shas hold, e.g. `set_document_kind` `74bb929e…`, `_assert_adjustment_basis` `9acbeb45…`, `_record_journal_entry_core` `f9c4f525…`) |
+| 3f backup | full dump `packages/db/backups/clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-17T15-00-26-880Z.sql` **215,359,224 bytes** + globals `clara-globals-2026-09-17T15-01-07-445Z.sql` (12,177 bytes), 49 s, through the probe DSN into WSL (`WSLENV` pipeline). **Finding:** `dsn-pipe.mjs` now pins `sslrootcert=<CA>` onto the DSN itself with the WINDOWS spelling of `ops/tls/pooler-ca.crt`, which a WSL child cannot open (`ENOENT`, twice) — the dump ran under a 14-line WSL wrapper (`scratchpad/backup-full.mjs`) that respells only that one pin to `/mnt/c/…` (same committed CA, `verify-full` kept, DSN env-only, never printed). Follow-up to file: a `--child-os wsl` spelling in `dsn-pipe.mjs` |
+| 4 image | `registry.fly.io/clara-runtime:refresh-a296765c` = **`sha256:b67163f322ddaf0ea68a9aa20cab7d5c580337d667aebf4b167cd61ec8ce5a2b`** (265 MB), `--build-arg CLARA_BUILD_SHA=a296765cddeb1a2c0960015ebe35f5fbf37348d1` |
+| 5 web | version **`095073c9-ecba-47ca-99de-ab3c8781deb2`** (tag `refresh-a296765c`, uploaded 14:53Z from the WSL checkout at `a296765c`; six secrets, `ASSETS` + four bindings, `CLARA_PUBLIC_ORIGINS=https://app.clarabook.com`) — not promoted until step 8 |
+| 6a stop | `48ee715b763048` stopped **15:01:48Z** (SIGINT, graceful drain, main child exit 0) |
+| 6b re-census | CLEAN — identical to 3b; the `clara_runtime_login` sessions left are Supavisor-idle, no lock on any of the nine tables |
+| 6c migrate | **`migrate: 26 new migration(s) applied · 219 total`**, 15:02:18Z → 15:03:57Z (99 s wall including the ssh hop; every file on backend pid 2339037); every riders and wave prestate printed `clean`/`OK` and every tail `OK` (0215's substrate + privilege prestates, 0221's seven tails, 0223's five recut bodies at their measured pre-images); ledger re-read **219 / `0224_preview_invite`** |
+| 7 release | probe destroyed 15:04:40Z; `fly deploy --config packages/runtime/fly.toml --image …@sha256:b67163f3…` 15:04:45Z → 15:04:58Z (config updated, machine left **`stopped`** on the new image — `fly deploy` does not start a stopped machine; a transient `replacing` state defeated the scripted start-if-stopped and cost ~8 min); `machine start` 15:13:08Z; `/ready` **200** at 15:13:29Z (`db`, `world`, `control`, `taxonomy`, `relay`, `matcher`, `autodraft`, `wakeEngine`, `localFacts` all ok; both fly checks passing). Boot lines: `serving git_sha=a296765cddeb1a2c0960015ebe35f5fbf37348d1 frontier=0224_preview_invite(219) bodies=53 pins … chatTurn=chatTurn_v20 claraWork=claraWork_v4 … clientOnboarding=clientOnboarding_v5`, `stranded bodies n=0`, `durable world started`, bundle banners `clara-work/v1` `v2` `v3` **`v4`**, `LEADER acquired`, `CONTROL listening`. (The draft's `bodies=54` was a guess; the registry at `a296765c` carries **53**, the number `freeze-lint` also counts.) Runtime outage window **15:01:48Z → 15:13:16Z** (11.5 min: ~2 min migration, the rest deploy/start sequencing) |
+| 8 promote | `wrangler versions deploy 095073c9…@100% --yes` **SUCCESS 15:14:46Z**. Signed-out smoke on `https://app.clarabook.com`, all as expected: `/login` `/favicon.ico` `/icon.png` 200; `/pending` `/api/build-info` `/checkout/cancel` 307→`/login?next=…`; `/settings/registrations` `/admin/registrations` 307→`/operator`; cross-origin POST `/auth/confirm/resend` 403. **Signed-in walk NOT done** — this session had no operator browser session (the Chrome bridge was disconnected); the owner's first signed-in walk (`/operator`, a Work's Activity tab with `p_work`, `/clients/<id>` work-pack tiles, `/clients/<id>/accruals`, `/clients/<id>/prepayments`, `/settings/knowledge`, `/settings/setup`, and `/api/build-info` `git_sha` = `a296765c…`) is the one smoke item still open |
+| 9 preflight | v84 bundle `/app/.output/server/index.mjs` (9,930,103 bytes, sha256 `3e386f33…` equal in-container and locally) pulled from a second OLD-image probe `0804d95f33dd58`, run through that probe's DSN (the live machine untouched): `target supports 51 body(ies)`; GLOBAL: 1 non-terminal run (`clientOnboarding_v4`, carried) → **ALLOWED**; the database's own rule: frontier `0224_preview_invite`, rule `0195…` → `ok the target carries every body the applied schema requires` → **ALLOWED**, exit 0. Gate (a) is the positive control the draft predicted; gate (b) was clean at 15:16Z and is a **snapshot** — it degrades with the first `chatTurn_v20` / `claraWork_v4` / `clientOnboarding_v5` run. Probe destroyed 15:17:18Z; one machine remains, `/ready` 200 |
+| 9b lock | `node scripts/check-frozen-workflows.mjs --lock-deployed` → `locked 18 newly-deployed entr(ies); every manifest entry is now deploy-locked`; plain freeze-lint OK (296 frozen files, 53 modules, 3 retired entries) — committed with this as-run |
+| post census | ledger 219 / 0224; chatTurn_v1 non-terminal 0; 1 running (`clientOnboarding_v4`); CLEAN |
+
+**Rollback points AFTER (from the ledger):** DB **219 / `0224_preview_invite`** — below the frontier only via
+the full dump above (no successor migration is drafted, exactly as the draft warned; a restore returns
+no Storage bytes, managed Auth config or engine state). Runtime **`refresh-a296765c`**
+(`sha256:b67163f3…`); previous `refresh-3486b6c2` (`sha256:b6dd2fa5…`, 51 bodies) was
+rollback-preflight **ALLOWED at 15:16Z only**. Web **`095073c9-ecba-47ca-99de-ab3c8781deb2`**; previous
+`0290977b-74a4-4c4a-849f-ee60efd631bb` (one-command rollback:
+`pnpm --dir apps/web exec wrangler versions deploy 0290977b-74a4-4c4a-849f-ee60efd631bb@100% --yes`).
