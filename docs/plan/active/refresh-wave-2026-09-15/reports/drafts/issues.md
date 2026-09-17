@@ -1019,7 +1019,39 @@ settle-door convention, with a regression cell proving the new order under concu
 
 ---
 
-**Total: 54 issues** (10 cross-cutting + 44 ticket-specific), against 61 rows in WAVE-DIGEST §3
+### #653's chat entrance stops at a grant wall — `create_prepayment_schedule` has no `clara_runtime` twin
+
+labels: needs-triage, ready-for-agent
+
+**Context.** The wave 2026-09-15 successor cut (`reports/successors-final.md` §3) did NOT cut
+`start_prepayment_schedule_work` into `chatTurn_v20` nor `read_prepayment_source` into
+`claraWork_v4`, and the reason is measured on the merged chain: `clara.create_prepayment_schedule`
+is granted to `clara_authenticated` alone and is `_human_ctx`-fronted at the bookkeeper rank
+(`0208:1674`, `:1044`); 0208 defines no `_for` twin; `get_prepayment_schedule` /
+`list_prepayment_schedules` / `list_prepayment_attention` are `clara_authenticated`-only
+(`0208:1675-1677`). The runtime pool runs as `clara_runtime`, so the tool cannot call the door.
+Both stanzas stay written in `packages/runtime/lib/prepayment-schedule-basis.ts`, which stays outside
+every frozen closure until its door exists. `docs/PRD.md:69` lists 预付款摊销 under the chat entrance
+as current behaviour; it is not, until this lands.
+
+**What is wanted.** A migration that adds an actor-explicit OBO twin
+`clara.create_prepayment_schedule_for(...)` on the `admit_periodic_adjustment_work` /
+`capture_knowledge_for` shape (live-authority recheck of the initiator, `clara_runtime` grant,
+same `_reserve_op` key space as the human door so a chat configuration and a human replay converge),
+plus `clara_runtime` grants on the three reads (or runtime-only `_for` reads). Then the next chat
+successor (`chatTurn_v21`) imports the carrier module and registers the tool; `claraWork_v5`
+adds `read_prepayment_source`.
+
+**Done when.** The twin door and grants are live on a from-scratch chain with a cell proving a
+`clara_runtime` session configures a schedule OBO a bookkeeper and is refused OBO a viewer; the
+tool ships in the next successor with a real-World e2e leg; the module joins the frozen closure.
+
+**Evidence.** `reports/successors-final.md` §3; `reports/653-final.md` "Successor contracts";
+DECISIONS.md §3.3 item 5.
+
+---
+
+**Total: 55 issues** (10 cross-cutting + 45 ticket-specific), against 61 rows in WAVE-DIGEST §3
 (10 cross-cutting + 51 ticket-specific) plus one follow-up from DECISIONS §3.1 that the digest did
 not carry as its own row. The count moves from 61+1=62 candidate rows to 54 through six merges of
 duplicate/related rows, each declared inside the merged issue's own Evidence line: the fixed-asset
