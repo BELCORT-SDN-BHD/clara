@@ -44,6 +44,7 @@ export function ArApCounterpartyDoorDialog({
   confirmDisabled,
   refusal,
   onConfirm,
+  onOpened,
   children,
 }: {
   triggerLabel: string;
@@ -78,6 +79,11 @@ export function ArApCounterpartyDoorDialog({
    *  made a refusal indistinguishable from a success, and every wrapper closed on
    *  both — destroying the input the refusal was asking the human to correct. */
   onConfirm: () => Promise<boolean>;
+  /** Called when this dialog OPENS, before the human can type. A caller whose fields are seeded
+   *  from live props uses it to re-seed them, so a draft abandoned by Escape or Cancel is not
+   *  silently re-offered on the next visit — and so a value corrected a moment ago is not shown
+   *  as still-uncorrected. It fires on open only; closing stays a pure cancel. */
+  onOpened?: () => void;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -96,7 +102,10 @@ export function ArApCounterpartyDoorDialog({
       // review-549 MAJOR 1: a fresh OPEN starts with no settled confirm of its own, so
       // the panel's standing refusal (which may belong to a sibling dialog, or to this
       // one's previous visit) is not shown until this dialog settles a confirm again.
-        if (next) setAttempt(0);
+        if (next) {
+          setAttempt(0);
+          onOpened?.();
+        }
         setOpen(next);
       }}
     >

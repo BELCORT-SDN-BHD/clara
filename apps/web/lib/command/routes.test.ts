@@ -236,6 +236,13 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   { pattern: "/clients/[clientId]/accounting/adjustments/new", builder: "periodicAdjustmentHref" },
   { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
   { pattern: "/clients/[clientId]/knowledge/[recordId]", builder: "knowledgeRecordHref" },
+  // #647 — ONE counterparty's identity. Reached from the Identity section on the client's
+  // Knowledge page and from each row of the counterparty hygiene panel, both of which hold the
+  // counterparty id already, so the href is built at render time and there is no literal to
+  // find — the same shape knowledgeRecordHref above has. It is deliberately NOT a Go row: a
+  // ⌘K destination cannot name WHICH counterparty, and a row that always needed a second
+  // choice would be a worse answer than the register it is reached from.
+  { pattern: "/clients/[clientId]/knowledge/parties/[counterpartyId]", builder: "counterpartyIdentityHref" },
   // #640's three plan destinations. Each is reached from a surface that HOLDS the plan (the list
   // row, the detail's own Revise control, the Work identity block's "From plan"), so the href is
   // built from an id at render time and there is no literal to find — the same shape

@@ -125,3 +125,34 @@ test("H-34 control: the active kind's list is what renders — reading both kind
     }
   });
 });
+
+// #647 — the panel's own closing NotBuiltNote is RETIRED, and each row now reaches the identity
+// it belongs to. The note said "a counterparty's existing aliases and the retire-alias action are
+// not available yet — this build has no read for them", which stopped being true the moment 0200
+// shipped clara.get_counterparty_identity; a not-built note that outlives the thing it excused is
+// worse than none, because a reader believes it.
+test("ticket 647 — the aliasListNotBuilt note is gone, and every row links to its own identity detail", async () => {
+  const seen: string[] = [];
+  const VENDOR = { ...CUSTOMER, id: "v1", kind: "vendor", name: "Lost Invention Sdn Bhd", name_normalized: "lostinventionsdnbhd" };
+  await withMockedEnv(mockWithKinds({ vendor: [VENDOR], customer: [] }, seen), async () => {
+    const h = await renderComponent(App());
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      const text = h.text();
+      assert.doesNotMatch(text, /not available yet/, "the not-built note is retired with the defect it described");
+      assert.doesNotMatch(text, /this build has no read for them/);
+      assert.match(text, /Open identity/, "each row reaches the identity detail");
+
+      const link = h.find((n) => {
+        const get = (n as { getAttribute?: (k: string) => unknown }).getAttribute;
+        return n.tagName === "A" && typeof get === "function"
+          && String(get.call(n, "href")).includes("/knowledge/parties/");
+      }) as { getAttribute: (k: string) => unknown } | null;
+      assert.ok(link, "the navigation is a real anchor, not a row pretending to be clickable (Item 33)");
+      assert.equal(link.getAttribute("href"), "/clients/c1/knowledge/parties/v1");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});

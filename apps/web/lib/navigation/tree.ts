@@ -109,7 +109,9 @@ export type AccountingItemId =
  * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
  * a page that is only ever reached with an intent.
  */
-export type ClientLeafId = "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord";
+export type ClientLeafId =
+  | "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord"
+  | "counterpartyIdentity";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -392,6 +394,12 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
   // name it rather than stopping at Knowledge and claiming the reader is on the register.
   { id: "knowledgeRecord", parent: "knowledge", labelKey: "clientLeaf.knowledgeRecord", minimumRole: "viewer" },
+  // #647 — /…/knowledge/parties/:counterpartyId names ONE counterparty's identity, its source,
+  // its correction history and its merge lineage. A leaf for `knowledgeRecord`'s own reason, and
+  // VIEWER because reading who a supplier is, and who said so, is the same class of act as
+  // reading the client's other knowledge; every write behind it is bookkeeper+ or admin+ and
+  // refuses a viewer at the door rather than being hidden here.
+  { id: "counterpartyIdentity", parent: "knowledge", labelKey: "clientLeaf.counterpartyIdentity", minimumRole: "viewer" },
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -427,6 +435,16 @@ export function workDetailHref(clientId: string, workId: string): string {
  *  revision. Percent-encoded for the reason `workDetailHref` states. */
 export function knowledgeRecordHref(clientId: string, recordId: string): string {
   return `${clientBase(clientId)}/knowledge/${encodeURIComponent(recordId)}`;
+}
+
+/** `/clients/:clientId/knowledge/parties/:counterpartyId` — ONE counterparty's identity (#647).
+ *  The `parties` segment is what keeps this path distinguishable from a knowledge RECORD id:
+ *  `leafFor` answers `knowledgeRecord` for ANY two-segment path under `knowledge`, so a
+ *  three-segment path with a literal middle is the only shape that can carry a second kind of
+ *  detail without making `/knowledge/:recordId` ambiguous. Percent-encoded for the reason
+ *  `workDetailHref` states. */
+export function counterpartyIdentityHref(clientId: string, counterpartyId: string): string {
+  return `${clientBase(clientId)}/knowledge/parties/${encodeURIComponent(counterpartyId)}`;
 }
 
 /** `/clients/:clientId/journals` — the posted-and-drafts surface. With an entry
@@ -583,6 +601,10 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
     return "periodicAdjustment";
   }
   if (parent === "work" && rest.length === 2) return "workDetail";
+  // #647 — the three-segment arm sorts BEFORE the two-segment one only in reading order; the
+  // exact-length rule keeps them disjoint, so `/knowledge/:recordId` and
+  // `/knowledge/parties/:counterpartyId` can never answer each other's leaf.
+  if (parent === "knowledge" && rest.length === 3 && rest[1] === "parties") return "counterpartyIdentity";
   if (parent === "knowledge" && rest.length === 2) return "knowledgeRecord";
   return null;
 }

@@ -35,11 +35,21 @@ export type AgingItem = {
   overdue: boolean;
   outstanding_cents: number | null;
   bucket: "current" | "d31_60" | "d61_90" | "d91_plus" | string | null;
+  /** #647 AC2: the party the invoice was actually RAISED under. The DB has emitted it since
+   *  裁-19 PR-1 spliced `_aging_core` (0149:596) and this type dropped it on the floor. It
+   *  differs from the group's `counterparty_id` exactly when the recorded party has since been
+   *  merged away — which is the one case a reader must be told about rather than left to
+   *  assume the invoice was always under this name. */
+  recorded_counterparty_id: string | null;
 };
 
 export type AgingCounterpartyRow = {
   counterparty_id: string;
   counterparty_name: string | null;
+  /** #647 AC2: `'canonical'` when this group's party resolves cleanly through any merge chain,
+   *  `'unresolved'` when it does not (0149:590). Absent on a pre-splice payload, which is why
+   *  the field is optional rather than defaulted to the reassuring value. */
+  resolution?: "canonical" | "unresolved" | string | null;
   current_cents: number | null;
   d31_60_cents: number | null;
   d61_90_cents: number | null;
