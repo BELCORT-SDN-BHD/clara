@@ -1,0 +1,29 @@
+{
+  "ticket": 638,
+  "lens": "SPEC",
+  "head": "ce11cc88",
+  "ran": [
+    "packages/db (env PGHOST=127.0.0.1 PGPORT=55503 PGUSER=postgres PGDATABASE=clara_638): node --test --test-concurrency=1 tests/staff-expense-claim.test.mjs -> 21 pass / 0 fail (matches report)",
+    "packages/db: node --test tests/periodic-adjustment.test.mjs -> 19 pass / 0 fail (neighbour non-regression)",
+    "packages/db: node --test --test-concurrency=1 tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset flags) -> 31 tests, 30 pass, 0 fail, 1 skip (T19 destructive, by design), 253s",
+    "packages/runtime: node --test tests/staff-expense-claim-unit.test.mjs -> 14 pass / 0 fail",
+    "packages/runtime: node scripts/check-parts-parity.mjs -> OK exit 0; node scripts/check-frozen-workflows.mjs (worktree root) -> OK exit 0, staff-expense-claim-basis.ts absent from frozen-workflows.json (grep confirmed)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-fourth-entrance.test.ts tests/parity-holes.test.ts tests/firm-scope-surfaces.test.ts tests/sql-oracle.test.ts lib/command/routes.test.ts components/work/work-detail.test.tsx lib/navigation/tree.test.ts -> 169 pass / 0 fail",
+    "apps/web e2e: pnpm --filter @clara/web e2e staff-expense-claim-walk (ports 3250/3251/3252, solo/isolated run) -> Next build clean (routes /accounting/claims and /accounting/claims/new present), 13 passed (1.3m) -- matches report's 'passed solo' account of the shared /login host-contention residual",
+    "Live query on rig: measured clara._subledger_on_approve caller census via pg_proc.prosrc regex -> exactly the SIX the migration and report claim (independently reproduces the blueprint-drift finding)",
+    "Ad hoc probe against the rig (via packages/db/tests/staff-expense-claim-fixtures.mjs helpers, script created and deleted, not committed): admitStaffExpenseClaimWork + wakeRecordJournalEntry with settlement='already_settled', paymentAccountCode='1150' -> ADMIT OK, POST OK, one entry/one committed receipt/one claim row with settlement='already_settled' and payment_account_code='1150' as expected; a second probe with paymentAccountCode set to a liability account (2010) -> refused CLR10 invalid_claim/constraint:asset as expected. Confirms the already_settled arm is implemented correctly even though no shipped test exercises it.",
+    "git diff origin/main...HEAD --stat and targeted diffs read for tree.ts, purpose-label surfaces (accounting-work-list.tsx, work-list-filters.tsx), work-detail.tsx, CONTEXT.md, manifest.txt, e2e-fixture-ownership.test.ts, rig-meta.mjs, package.json, action.yml -- all one-line/localised registrations as the brief requires",
+    "Read migration 0206_staff_expense_claims.sql in full (prestate, section A-H) and cross-checked every prestate/tail self-assertion (sha pins, purpose CHECK text, subledger census, 0042 tail 20(a)/(b), trigger firing order, RLS/grant matrix) against the brief and DECISIONS.md",
+    "gh issue view 638 --comments; gh api .../issues/comments/5589272141 (appendix C journey recipes for C1/C3/C6 and the shared state contract)"
+  ],
+  "findings": [
+    {
+      "id": "SEC-1",
+      "severity": "should",
+      "where": "packages/db/tests/staff-expense-claim.test.mjs (21 named cells, none for settlement='already_settled'); packages/runtime/tests/staff-expense-claim-e2e.mjs:270; docs/plan/active/refresh-wave-2026-09-15/reports/638-final.md:39",
+      "what": "AC2 requires the delivery to 'distinguish reimbursement, advance application and already settled cases,' and the migration has a dedicated validation arm for already_settled (0206:907-913, asset-only non-control-class payment account). No DB battery cell, runtime World e2e leg, or Playwright cell ever admits/posts an already_settled claim through the real door; the report's own AC2 evidence line misattributes coverage, citing 'World leg 1' when that leg's claim builder is hard-coded to settlement:'reimbursement' (staff-expense-claim-e2e.mjs:270).",
+      "evidence": "Only pure client/runtime derivation math exercises 'already_settled' (apps/web/lib/work/staff-expense-claim.test.ts:172-210; packages/runtime/tests/staff-expense-claim-unit.test.mjs:195,324) -- never clara.admit_staff_expense_claim_work or clara.wake_record_journal_entry. grep -n \"already_settled\" packages/db/tests/staff-expense-claim.test.mjs returns nothing. The fixtures module already wires full support (SETTLEMENT.settled, claim()'s paymentAccountCode default at staff-expense-claim-fixtures.mjs:230) but no cell uses it. I independently probed the live rig: admitStaffExpenseClaimWork + wakeRecordJournalEntry with settlement='already_settled' posted correctly (one entry, one committed receipt, one claim row), and a liability-account payment leg was correctly refused CLR10 invalid_claim/constraint:asset -- so the code itself is correct, but this is proven by nothing the ticket ships, and the report's citation of 'World leg 1' as covering it is false.",
+      "fix": "Add one DB cell (e.g. p638.claim.settled, beside p638.claim.posts) that admits+posts an already_settled claim via admitStaffExpenseClaimWork + wakeRecordJournalEntry and asserts one entry/one committed receipt/one claim row with payable_account_code and advance_id both NULL and payment_account_code set; add one refusal cell asserting a non-asset or control-class payment account is refused (CLR10 invalid_claim, constraint:'asset'). Optionally add an already_settled leg to the runtime World e2e. Correct reports/638-final.md:39 to stop citing 'World leg 1' for this arm."
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "ticket": 633,
+  "lens": "STANDARDS",
+  "head": "460c7369",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "where": "apps/web/lib/documents/useUploadQueue.test.ts:721-729",
+      "what": "The test that claims to pin ComposerAttachmentControl.tsx:58's IN_FLIGHT state-string set is tautological: it hand-writes both `inFlight` and `terminal` arrays and asserts their sorted concatenation equals a third hand-written literal array. It never imports or reads anything from ComposerAttachmentControl.tsx — `IN_FLIGHT` there is a module-private `const` (not exported), so there is nothing importable. Grepping the whole apps/web tree confirms no test file mounts ComposerAttachmentControl or exercises its `blocked` gate (ClaraThreadView's `sendDisabled` composition is likewise untested for the upload-blocking arm), so this is the only guard against the ticket's own named risk #1 (\"ComposerAttachmentControl.tsx:58 keys on exact strings\") and DECISIONS.md's stable-strings rule for #633. The final report (AC7 row) cites exactly this cell (\"a cell pinning ComposerAttachmentControl.tsx:58's exact IN_FLIGHT strings\") as the proof that regressing the shared contract would be caught.",
+      "evidence": "Read of useUploadQueue.test.ts:721-729 shows the assertion compares two locally-declared literals against a third literal, never touching the component file. `grep -n \"IN_FLIGHT\" apps/web -r` shows IN_FLIGHT is declared with a bare `const` (not `export const`) at ComposerAttachmentControl.tsx:58 and is referenced nowhere outside that file except this test's own hand-copied literal. `grep -rln \"ComposerAttachmentControl\\b\" apps/web --include=*.test.tsx --include=*.test.ts` returns only useUploadQueue.test.ts (i.e. no direct test of the component). `grep -n \"disabled.*Send\\|blocked\" apps/web/e2e/chat-parity-walk.spec.ts` returns nothing, so no browser walk exercises the Send-blocked-during-upload path either.",
+      "fix": "Either export `IN_FLIGHT` (or a `composerAttachmentBlockingStates()` accessor) from ComposerAttachmentControl.tsx and import it in the test so the assertion reads the live source, or replace the unit cell with an integration test that actually mounts ComposerAttachmentControl (or ClaraThreadView) with a queue item in each state and asserts Send's disabled attribute — so a future edit to the real IN_FLIGHT set changes this test's outcome, not just its own copy of the literal."
+    },
+    {
+      "id": "F2",
+      "severity": "should",
+      "where": "packages/db/tests/rig-docs-isolation-grants.test.mjs:321-343",
+      "what": "The p633.grants.nonregression cross-firm test for `entry_evidence_links` (\"a foreign firm's persona reads ZERO evidence links, with a non-vacuity control\") never seeds a real evidence link, despite its own comment saying it should (\"seed a document, file it, draft and approve an entry citing it. If the fixture cannot be built the cell says so\"). Running the file against the ticket's own rig confirms the underlying population is empty at cell time, so the RLS-scoping assertions (firm-B sees 0, firm-A persona sees 0 rows outside its own firm) are trivially true rather than evidence that the FORCE RLS policy actually filters a non-empty table. The finding is logged (`noteLane`), so it is not silently hidden, but the test's name promises a \"non-vacuity control\" it does not enforce with an assertion.",
+      "evidence": "Ran `node --test tests/rig-docs-isolation-grants.test.mjs` against PGHOST=127.0.0.1 PGPORT=55502 PGDATABASE=clara_633 (the ticket's own rig): output line `# * p633 evidence links in firm A at cell time: 0` — all three p633.grants.nonregression subtests pass (12/12 in that run), but the cross-firm subtest's two assertions (`theirs.rows[0].n === 0`, `mine.rows[0].n === 0`) are satisfied by an empty table, not by a real cross-firm read being filtered.",
+      "fix": "Before the two humanQuery reads, seed one real evidence link for firm A (draft + approve a journal entry citing a filed document, as the comment already describes) and assert `linkCount.rows[0].n > 0` before proceeding — turning the noteLane observation into an enforced non-vacuity assertion, matching the pattern the DB batteries use elsewhere in this same ticket (e.g. document-intake-capabilities.test.mjs's explicit `stored_only`/`supported` non-vacuity assertions)."
+    }
+  ],
+  "ran": [
+    "git log --oneline origin/main..HEAD | cat (14 commits, all carry Co-Authored-By)",
+    "git diff origin/main...HEAD --stat (59 files, +6648/-113)",
+    "node scripts/check-frozen-workflows.mjs (from worktree root) -> exit 0: 281 frozen files verified, 51 \"use workflow\" modules registered",
+    "node packages/runtime/scripts/check-parts-parity.mjs (from worktree root) -> exit 0: reader superset confirmed",
+    "pnpm typecheck (worktree root) -> exit 0 (apps/web + packages/runtime, both Done)",
+    "pnpm lint (worktree root) -> exit 0, includes check-frozen-workflows, check-parts-parity, check-token-contrast (all PASS), check-test-manifest (372 files, alphabetical, matches disk), check-message-keys (2958 keys resolve in en.json)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md (empty, confirmed untouched)",
+    "git diff origin/main...HEAD -- packages/db/migrations (empty, confirmed zero SQL as briefed)",
+    "node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-surfaces.test.ts tests/firm-scope-fourth-entrance.test.ts (from apps/web) -> 56/56 pass, confirming the new (firm)/documents leaf classifies ancestor-covered with no scope hole and needs no COLOCATED_MODULE_ROSTER entry",
+    "node --test tests/rig-docs-isolation-grants.test.mjs (from packages/db, against PGHOST=127.0.0.1 PGPORT=55502 PGDATABASE=clara_633) -> 12/12 pass; observed 'p633 evidence links in firm A at cell time: 0' confirming F2",
+    "grep/read of packages/db/tests/{document-intake-receipts,unassigned-intake-reuse,document-intake-capabilities,document-intake-noncoding,rig-docs-isolation-grants}.test.mjs confirming every assertion runs through humanQuery, rootQuery used only for fixture setup",
+    "grep/read of apps/web diffs for tree.ts, manifest.txt, serve-built.mjs, e2e-fixture-ownership.test.ts, en.json, CONTEXT.md, READMEs confirming shared-file edits match DECISIONS.md/brief shape",
+    "read of apps/web/lib/documents/{kind-label.ts,kind-label.test.ts,capability-registry.ts,use-capability-registry.ts,use-settle-poll.ts,work-links.ts,useUploadQueue.ts,useUploadQueue.test.ts} and apps/web/components/{ui/progress.tsx,documents/upload-panel.tsx,firm/documents/unassigned-sources.tsx} confirming AC1/AC2/AC3(b)/AC7/AC8 implementations match brief and are non-vacuous except F1"
+  ]
+}

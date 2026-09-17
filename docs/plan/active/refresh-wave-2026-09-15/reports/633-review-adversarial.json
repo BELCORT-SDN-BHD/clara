@@ -1,0 +1,96 @@
+{
+  "ticket": 633,
+  "lens": "adversarial migration + accounting safety",
+  "head": "460c7369",
+  "findings": [
+    {
+      "id": "633-ADV-1",
+      "severity": "blocker",
+      "where": "packages/runtime/tests/intake-admission-e2e.mjs:19-24, :263-270 (and reports/633-final.md AC4 row)",
+      "what": "AC4/AC10's headline — \"upload → automatic admission → an admitted coding task, with zero request_autodraft\" — is NOT proven by the shipped World e2e, and on every real run the automatic lane stops dead at the first gate while leg 1 still passes. The leg's poll predicate is `(row) => row !== null`, so a classify task in ANY status (including `failed`) satisfies it.",
+      "evidence": "I re-ran the worker's own e2e: `PGDATABASE=clara_633 WORKFLOW_POSTGRES_URL=… node tests/intake-admission-e2e.mjs` → exit 0, 7/7 legs, but its own log line 63 reads `[leg 1] PASS — ingest done, classify enqueued (failed), zero request_autodraft in the automatic lane`. On clara_633: `select error_code,count(*) from clara.document_processing_tasks where lane='classify' group by 1` → `firm_narrow_consent_inactive` 69, null 12; `select count(*) … lane='classify' and status='done'` → 0 (across all 5 recorded runs, incl. the worker's on 2026-09-15 and 2026-09-16T18:03); `clara.agent_tasks` holds 8 rows, all kind='wake' from 2026-09-15/16T18:03 — no coding work was ever admitted. Cause is deterministic, not rig-local: 0123_f_a7_gamma_egress.sql:1436 fails an UNFILED document's classify task with `firm_narrow_consent_inactive` unless the firm holds a live `firm_narrow_intake`/`attribution` egress activation, and the fixture `packages/runtime/tests/relay-fixtures.mjs:409 buildFirm` grants none — so CI's clara_intake_ci behaves identically. The file header (:19-24) and reports/633-final.md's AC4 row nevertheless state \"the chain reaches an admitted coding task on its own\".",
+      "fix": "Either (a) make leg 1 prove the chain: grant the firm-narrow attribution consent through the governed verbs in the e2e fixture (mirror `packages/db/tests/rig-docs-fixtures.mjs:234 ensureFirmNarrowAttribution`), then assert classify reaches `done`, `clara.documents.document_kind` becomes non-null, `_enqueue_invoice_facts_core` returns an enqueued (not `awaiting_extraction`) outcome, and the autodraft/coding admission exists — with a non-vacuity control that the same assertions go red on an unconsented firm; or (b) narrow the claim everywhere it is made (test header :19-24, the db-live-gates step comment, reports/633-final.md AC4) to exactly \"ingest completes and a classify task is enqueued with no human act; classify itself refuses without firm-narrow consent on this fixture\" and mark AC4 partial with that named residual."
+    },
+    {
+      "id": "633-ADV-2",
+      "severity": "should",
+      "where": "packages/runtime/tests/intake-admission-e2e.mjs:120-135 (xlsxBytes), :467-472 (leg 7)",
+      "what": "C-37's \"a real XLSX through begin→PUT→finalize\" is neither real nor asserted: `jszip` is not a dependency of @clara/runtime, so the fallback 45-byte PK stub is sent, the runtime quarantines it, and the leg prints `outcome: admitted` for a file that failed — then passes on two assertions that only read the registry table.",
+      "evidence": "My run's log: `[clara-runtime] intake FAILED intake=cce31902-… code=quarantined canonicalReached=false detail=ZIP central directory is missing` immediately followed by `[leg 7] xlsx bytes: 45 (504b0304), outcome: admitted`. In clara_633: `select original_filename,status,failure_code,document_id from clara.document_intakes where original_filename='trial-balance.xlsx'` → 5 rows (2026-09-15T20:11, 09-16T18:03, 22:06:06, 22:07:13, 22:07:38), ALL `failed/quarantined` with `document_id = null`. `node -e \"require('./packages/runtime/package.json')\"` shows no zip dependency. reports/633-final.md claims \"C-37 done … real OFX + real XLSX → … xlsx(supported/stored_only)\".",
+      "fix": "Assert the arm: `assert.equal(xlsxResult.refusedAt, null)` plus `assert.ok(xlsxResult.receipt.document_id)` and a poll that the intake row reaches an adopted status; supply a genuine XLSX (a committed fixture byte file, or a hand-built ZIP with a central directory) instead of the PK stub. If a real XLSX cannot be produced in this workspace, print the refusal honestly (never `admitted`) and mark C-37 partial in the report with the OFX half as the proven one."
+    },
+    {
+      "id": "633-ADV-3",
+      "severity": "should",
+      "where": "packages/db/tests/rig-docs-isolation-grants.test.mjs:321-345",
+      "what": "The tenancy cell for the ONE relation this ticket newly reads (`entry_evidence_links`, the document→Work link) is vacuous: its two assertions are counts over an empty table and its advertised \"non-vacuity control\" is a `noteLane` log line, not an assertion. It would pass identically if RLS were removed.",
+      "evidence": "On the fresh chain the passing run prints the cell's own control: `# * p633 evidence links in firm A at cell time: 0` (scratchpad/r633/db-batteries-fresh.log:418). `select count(*) from clara.entry_evidence_links` = 0 on clara_633 (after the worker's whole battery run) and on clara_633r. The property is in fact TRUE — my probe inserted a real link (`attached_via='late_attachment'`, which is what `ck_entry_evidence_links_receipt` admits without a receipt/work) and measured firm A persona = 1 row, firm B persona = 0 rows, `clara_agent_ro` select refused 42501, human UPDATE refused 42501 — but the shipped cell proves none of it.",
+      "fix": "Build the fixture inside the cell (draft+approve an entry via the rig helpers, insert the `late_attachment` link, or drive a real Work commit), assert `mine.rowCount >= 1` BEFORE asserting firm B's zero, and `t.skip` with a stated reason if the fixture cannot be built — rather than logging the count and asserting on an empty table."
+    },
+    {
+      "id": "633-ADV-4",
+      "severity": "should",
+      "where": "apps/web/lib/documents/receipts.ts:26-30 vs apps/web/components/documents/documents-workbench.tsx:63-66; bound cell at apps/web/components/documents/documents-workbench-refresh.test.tsx:333-345",
+      "what": "The settle poll re-reads the WHOLE derivation, not the single masked view its own header and the brief's decision promise: each tick issues `document_intakes_visible` + `document_filings` + `rpc/list_unassigned_documents` + `caller_context` (+ a conditional `documents?id=in.()`), so the 12-tick ceiling is up to ~60 reads per settling batch under the caller's JWT, and the heaviest of them (a SECURITY INVOKER function doing NOT EXISTS over filings) is exactly the read the plan-cache probe never measured.",
+      "evidence": "receipts.ts:26-30 states \"FOUR READS AT MOUNT, ONE ON THE POLL. Only `document_intakes_visible` changes while a batch is settling, so the bounded settle-poll re-reads THAT ALONE\"; documents-workbench.tsx:64 is `onTick: () => { void receipts.reload(); }`, and `receipts` is `useHydratedPart(…, (live) => loadIntakeReceipts(clientId, { session: live }))`, whose body is a `Promise.all` of four reads (receipts.ts:107-119) plus the metadata read at :140-146. The bound cell counts only `counts.document_intakes_visible <= 12` and never asserts the other relations stay flat; brief-633.md risk 3 demands the poll be bounded hard, and the worker's plan-cache probe covered only the 12-column intakes projection.",
+      "fix": "Make the tick call `listIntakeReceipts()` alone and re-derive filings/unassigned/caller/metadata once when the list settles (exactly what the header describes), or — if the full derivation is wanted per tick — re-measure the `list_unassigned_documents` RPC under a reused pooled session and rewrite the header. Either way extend documents-workbench-refresh.test.tsx to assert `document_filings`, `rpc/list_unassigned_documents` and `caller_context` counts do not grow while the poll runs."
+    },
+    {
+      "id": "633-ADV-5",
+      "severity": "should",
+      "where": "apps/web/components/firm/documents/unassigned-sources.tsx:19-25 and apps/web/e2e/documents-intake-mock.mjs:498-514",
+      "what": "AC5's \"ask once, and only once\" rests on a refusal the real door does not give. The leaf's header claims \"A second attempt on the same row is refused by `file_document` itself\", and the walk's mock refuses ANY second attribution with `CLR01 document_already_filed`. Measured against a real chain, only a repeat to the SAME client is refused; a second attribution to a DIFFERENT client is accepted and leaves the document with TWO live filings — the state 0123's classify gate then refuses as `document_processing_multi_client`, silently stopping that document's processing.",
+      "evidence": "Probe on clara_633r (scratchpad/r633/probe2.log): barrier race, two sessions, same client → `ok | CLR10:document is already actively filed to this client`, ACTIVE filings = 1 (exactly-one-effect holds); replay same op_key+payload → accepted idempotently, filings still 1; same op_key + different args → `CLR10 op_key reused with different args`; but \"SECOND attribution to a DIFFERENT client: ACCEPTED\", `filings now: [{c:1b8f09e2,live:true},{c:6dc24f87,live:true}]`. The mock's refusal is raised from `record_client_resolution` with code CLR01, which no door in this chain produces for this case.",
+      "fix": "State the real guarantee in the header (same-client repeat refused CLR10; a different client is a second live filing the estate permits), and either read the document's live filings before offering the act on the leaf (refusing with the DB's own words when one exists) or add a db cell + matching mock fixture for the different-client second attempt, naming the `document_processing_multi_client` consequence as the accepted outcome."
+    },
+    {
+      "id": "633-ADV-6",
+      "severity": "note",
+      "where": "apps/web/lib/documents/capability-registry.ts:88-96, 155-160",
+      "what": "The browser publishes `custody` and `byte_extraction` from `byFormat` — the FIRST row the read happened to return for that format — on the assumption that those two tiers never vary by kind. The assumption is true today but pinned nowhere, so a future registry row that varies them by kind would make the surface publish a guess.",
+      "evidence": "Measured on clara_633r: `select format, count(distinct custody), count(distinct byte_extraction) from clara.document_capabilities group by format` → 12 formats × 20 rows, every distinct count = 1 (zero formats vary). The shipped battery only asserts the ofx family (`document-intake-capabilities.test.mjs:128-129`).",
+      "fix": "Add one cell to packages/db/tests/document-intake-capabilities.test.mjs asserting that group-by returns 1 for both columns for every format — the invariant `byFormat` rests on."
+    },
+    {
+      "id": "633-ADV-7",
+      "severity": "note",
+      "where": "apps/web/components/documents/document-kind-control.tsx:69",
+      "what": "The new list/receipt-row classification control offers all 20 `DOCUMENT_KINDS`, including `consent_evidence`, which `set_document_kind` always refuses. The refusal renders verbatim (honest), but the option can never succeed and nothing points at the door that does.",
+      "evidence": "`set_document_kind`'s live body on clara_633r: `if d.document_kind='consent_evidence' or p_kind='consent_evidence' then raise exception 'consent-evidence classification is owned by the egress consent path' using errcode='CLR28'`. The audited path is `classifyConsentEvidenceDocument` (apps/web/lib/documents/doors.ts:189, owner-floored).",
+      "fix": "Drop `consent_evidence` from the control's option list (and, if useful, name the owner-only egress-consent path in the phrase), so the control offers only kinds the door can accept."
+    },
+    {
+      "id": "633-ADV-8",
+      "severity": "note",
+      "where": "rig: cluster rig633r, 127.0.0.1:55602, database clara_633r (left running for the fix round)",
+      "what": "From-scratch proof and non-regression controls, for the record. The branch ships ZERO SQL, so lens item (1)'s migration chain has nothing new in it and item (2)'s prestate pins are vacuous by construction — nothing is recut and no other wave ticket's assigned recut (DECISIONS §1.3) is touched. The fresh cluster is left up.",
+      "evidence": "`git diff origin/main...HEAD --stat` → 59 files, +6648/−113, no `packages/db/migrations/*`. On rig633r: `pnpm db:migrate` → `193 new migration(s) applied · 193 total` exit 0; `pnpm db:seed` → 2 files, exit 0; re-run `pnpm db:migrate` → `0 new migration(s) applied · 193 total` (193 is origin/main's own count at 4464e471 per RIG.md). The five #633 batteries pass 30/30 on that fresh chain.",
+      "fix": "No action. Reuse port 55602 / clara_633r for the fix round rather than rebuilding it."
+    },
+    {
+      "id": "633-ADV-9",
+      "severity": "note",
+      "where": "packages/db/tests/rig-isolation.test.mjs (T10b) — the report's one red",
+      "what": "The worker's attribution of its single db red (\"T10b names graphile_worker.* EXECUTE reachable by clara_agent_ro/wake roles — the Workflow world bootstrap's own schema, rig state not this branch\") is CORRECT, and it is a side effect of the new World e2e step: running it bootstraps the world on whatever rig it touches.",
+      "evidence": "Control on the fresh, never-bootstrapped chain: `node --test --test-concurrency=1 <28 gates> tests/operation-census.test.mjs tests/rig-isolation.test.mjs` on clara_633r (no reset flags) → `# tests 31 # pass 30 # fail 0 # skipped 1`, exit 0. The same pair reds only on the bootstrapped rig.",
+      "fix": "No action on the branch; the fix round should not chase T10b on clara_633. Worth one line in RIG.md that the #633 admission e2e bootstraps the world and makes T10b red on that cluster afterwards."
+    }
+  ],
+  "ran": [
+    "cd /c/Users/zhant/Desktop/clara-wt/633 && git log --oneline origin/main..HEAD → 14 commits (head 460c7369); git diff origin/main...HEAD --stat → 59 files, +6648/−113, zero .sql files",
+    "PowerShell: wsl -u root -- bash …/mkrig.sh rig633r 55602 → cluster rig633r online, 127.0.0.1:55602 accepting connections",
+    "node+pg: create database clara_633r → created",
+    "PGPORT=55602 PGDATABASE=clara_633r pnpm db:migrate → '193 new migration(s) applied · 193 total', exit 0; pnpm db:seed → 2 seed files, exit 0",
+    "PGPORT=55602 PGDATABASE=clara_633r pnpm db:migrate (re-run) → '0 new migration(s) applied · 193 total'",
+    "node scripts/check-frozen-workflows.mjs → OK, 281 frozen files / 51 \"use workflow\" modules, exit 0",
+    "node packages/runtime/scripts/check-parts-parity.mjs → OK (reader ⊇ emittable), exit 0",
+    "packages/runtime: PGDATABASE=clara_633 (55502) WORKFLOW_POSTGRES_URL=… node tests/intake-admission-e2e.mjs → exit 0, 7/7 legs PASS; log line 63 '[leg 1] PASS — ingest done, classify enqueued (failed)'; line 178 '[leg 7] xlsx bytes: 45 (504b0304), outcome: admitted' after '[clara-runtime] intake FAILED … code=quarantined'",
+    "packages/db on clara_633r: node --test --test-concurrency=1 <28 preintegration gates> tests/document-intake-receipts.test.mjs tests/unassigned-intake-reuse.test.mjs tests/document-intake-capabilities.test.mjs tests/document-intake-noncoding.test.mjs tests/rig-docs-isolation-grants.test.mjs → tests 30 · pass 30 · fail 0 · skipped 0 (22.9 s), exit 0",
+    "packages/db on clara_633r (no reset flags): node --test --test-concurrency=1 <28 gates> tests/operation-census.test.mjs tests/rig-isolation.test.mjs → tests 31 · pass 30 · fail 0 · skipped 1, exit 0",
+    "node scratchpad/r633/probe.mjs on clara_633r (adversarial tenancy/race/idempotency) → firmA=1/firmB=0 on entry_evidence_links with a real row; agent_ro 42501; human UPDATE 42501; barrier race → ok | CLR10 'already actively filed to this client', ACTIVE filings 1; replay same key+payload idempotent (1 filing); same key/different args → CLR10 'op_key reused with different args'; SECOND attribution to a different client ACCEPTED → 2 live filings; firmB reads 0 on document_intakes_visible / tasks_visible / document_filings / documents / list_unassigned_documents; document_capabilities 240 for both firms",
+    "node scratchpad/r633/probe6.mjs on clara_633r → reversal stamps released_at (2026-09-16T22:23:18Z) and the surface's own read (released_at is null) returns 0 rows — the work-links reversal claim holds",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-surfaces.test.ts → 35/35; tests/firm-scope-fourth-entrance.test.ts → 21/21; tests/require-firm-scope.test.ts → 58/58; e2e/e2e-fixture-ownership.test.ts → 15/15; tests/parity-holes.test.ts → 7/7 (all fail 0)",
+    "worktree root: pnpm lint → LINT_EXIT=0",
+    "SQL measurements on clara_633 / clara_633r: classify error_code census (firm_narrow_consent_inactive 69, done 0); agent_tasks (8 rows, all 'wake'); document_intakes for trial-balance.xlsx (5 rows, all failed/quarantined, document_id null); document_capabilities group-by format (12×20, distinct custody/byte_extraction = 1 each); entry_evidence_links grants/policies (clara_authenticated SELECT only, p_entry_evidence_links_read = firm_id = clara.jwt_firm(), FORCE RLS true); set_document_kind body (CLR28 for consent_evidence)"
+  ]
+}

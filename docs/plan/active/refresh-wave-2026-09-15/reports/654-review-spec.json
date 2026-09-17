@@ -1,0 +1,46 @@
+{
+  "ticket": 654,
+  "lens": "SPEC",
+  "head": "4b69d2b2",
+  "ran": [
+    "packages/db: node --test (29-gate chain) tests/knowledge-firm-defaults.test.mjs -> 15 pass / 0 fail / 0 skipped",
+    "packages/db: node --test (29-gate chain) knowledge-firm-defaults.test.mjs + knowledge-records.test.mjs + knowledge-onboarding-promotion.test.mjs -> 55 pass / 0 fail (confirms D8's deliberate kn.19/kp.08 rewrites did not regress the shared battery)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen file(s), 0 under apps/**, 51 'use workflow' modules all frozen+registered",
+    "packages/db: node --test tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no CLARA_RIG_ALLOW_RESET/ROLE_SWEEP) -> 30 pass / 1 skip (T19, destructive, by design) / 0 fail",
+    "apps/web: node --test (bootstrap+tsx) knowledge-detail.test.tsx knowledge-exception.test.tsx knowledge-firm-panel.test.tsx knowledge-promote-dialog.test.tsx lib/registers/knowledge.test.ts -> 31 pass / 0 fail",
+    "apps/web: node --test firm-admin-pages-a11y.test.tsx tests/firm-scope-fourth-entrance.test.ts tests/firm-scope-surfaces.test.ts tests/parity-holes.test.ts e2e/e2e-fixture-ownership.test.ts -> 68 pass / 0 fail",
+    "apps/web: node --test e2e/e2e-fixture-ownership.test.ts alone -> 15 pass / 0 fail (confirms the list_firm_knowledge 'unscopeable' declaration and verb census)",
+    "pnpm typecheck (repo root) -> exit 0 (apps/web, packages/runtime both Done)",
+    "pnpm lint (repo root) -> exit 0 (apps/web, packages/db, packages/runtime, packages/reporting-render all Done, freeze-lint/evaluator-lint/dead-citation/dispatch-model selftests all green)",
+    "pnpm --filter @clara/web e2e knowledge (full build+Playwright, ports 3340/3341/3342) -> 23 passed, 1 failed: 'the firm register now shows the rule with the authority the act recorded...' timed out at page.goto (net::ERR_ABORTED, 30s) after passing tests 1-3 in the same run",
+    "pnpm --filter @clara/web e2e knowledge-firm-walk (isolated re-run, same ports) -> 11 passed, 0 failed, in 1.3m; the previously-failing test completed in 5.3s -- confirms the earlier failure was host contention (12 lanes sharing the machine), not a defect, per the standing instruction to re-run in isolation rather than 'fix' it",
+    "git diff origin/main...HEAD --stat / verified no diff on packages/runtime/**, apps/web/lib/firm/capabilities.ts, apps/web/lib/parts/hooks.ts, apps/web/components/common/state.tsx, apps/web/components/firm/client-workspace-overview.tsx, docs/PRD.md, docs/ARCHITECTURE.md (all 'do not touch' constraints respected)",
+    "live rig probe (clara_654): to_regprocedure('clara.list_firm_knowledge()') resolves, clara.knowledge_key_firm_eligibility holds 3 rows -- migration 0205 is applied and consistent with the report's claimed state"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should",
+      "where": "docs/plan/active/refresh-wave-2026-09-15/reports/654-final.md:68 (successor contract, part (b) refusal map)",
+      "what": "The claraWork_v4 successor-contract stanza's refusal map for ask_knowledge_conflict names a reason 'invalid_question_fields' for the CLR10 field-validation case. clara.open_work_question (0180_work_questions.sql) never raises that reason -- every field-shape refusal in _assert_work_question_fields (0180:316-402) carries detail.reason = 'invalid_fields' (with a 'field'/'constraint' pair), never 'invalid_question_fields'. The brief requires this stanza's refusal map to be complete and correct so the integration worker can cut claraWork_v4 directly from it; as written it points at a code path that does not exist.",
+      "evidence": "0180_work_questions.sql:59 ('CLR10 invalid_fields + field + constraint') and :317-402 (ten literal detail=jsonb_build_object('reason','invalid_fields',...) sites) vs 654-final.md:68 ('CLR10 `invalid_question_fields` -> terminal author error'). No occurrence of the string 'invalid_question_fields' exists anywhere in 0180 (grep confirmed).",
+      "fix": "Correct the refusal-map line to 'CLR10 invalid_fields (field/constraint identifies which)' before this stanza is cut into claraWork_v4, so the integration worker maps the real door reason rather than a fabricated one."
+    },
+    {
+      "id": "F2",
+      "severity": "note",
+      "where": "apps/web/e2e/knowledge-firm-walk.spec.ts (whole file)",
+      "what": "The walk never calls page.emulateMedia({reducedMotion:'reduce'}), so AC5's reduced-motion state is untested for the promote dialog and the firm register. Not a regression introduced by #654: #644's own knowledge-walk.spec.ts (same shared ArApCounterpartyDoorDialog composition) also has zero reducedMotion coverage, so #654 follows the established pattern for this dialog family rather than dropping new coverage.",
+      "evidence": "grep -c reducedMotion apps/web/e2e/knowledge-firm-walk.spec.ts apps/web/e2e/knowledge-walk.spec.ts -> 0 in both files, versus e2e/chat-parity-walk.spec.ts, journal-work-walk.spec.ts, checkout-gate-walk.spec.ts etc. which do call page.emulateMedia({reducedMotion:'reduce'}).",
+      "fix": "Add one emulateMedia({reducedMotion:'reduce'}) leg to the promote-dialog open/close test, following e2e/chat-parity-walk.spec.ts's pattern -- worth doing once for both knowledge specs together rather than as a #654-only fix."
+    },
+    {
+      "id": "F3",
+      "severity": "note",
+      "where": "Playwright run of apps/web e2e 'knowledge' (full suite, 24 tests)",
+      "what": "One flaky failure was observed and independently reproduced as host contention, exactly the pattern this review's instructions warn about: 'the firm register now shows the rule with the authority the act recorded...' timed out on page.goto after 30s (net::ERR_ABORTED / frame detached) on the full-suite run, then passed in 5.3s on an isolated re-run of just knowledge-firm-walk.spec.ts (11/11 clean, no other change). The worker's own report already flags this class of risk.",
+      "evidence": "Full-suite run: 'x 4 ... the firm register now shows the rule ... (35.3s)' with 'Test timeout of 30000ms exceeded. Error: page.goto: net::ERR_ABORTED; maybe frame was detached?'. Isolated re-run of the same spec immediately after: '11 passed (1.3m)', that test at 5.3s. 654-final.md:94 already states 'the first two runs of the new spec failed on my own fixture and assertion errors ... not on flake' -- this run's failure is a third, host-contention-shaped failure mode distinct from those two.",
+      "fix": "No action needed; treat a lone page.goto ERR_ABORTED timeout on this spec on this shared host as a re-run candidate before treating it as a real regression."
+    }
+  ]
+}

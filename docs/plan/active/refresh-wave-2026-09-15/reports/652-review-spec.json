@@ -1,0 +1,43 @@
+{
+  "ticket": 652,
+  "lens": "SPEC",
+  "head": "b579e25a",
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 --import ./tests/accounting-plans-preintegration-gate.mjs --import ./tests/accrual-adjustments-preintegration-gate.mjs tests/accrual-adjustments.test.mjs -> 17 pass / 0 fail / 0 skip (matches report)",
+    "packages/runtime: node --test tests/accrual-basis-unit.test.mjs -> 16 pass / 0 fail",
+    "packages/runtime: node tests/accrual-e2e.mjs (real Postgres/Workflow World, RELAY_TEST_MODE=1) -> PASS1..PASS4, exit 0 (crash/replay, reversal binding, cancel+catch-up retry all reproduced)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/accruals/accrual-form.test.tsx lib/work/accrual-draft.test.ts -> 32 pass / 0 fail (11+21, matches report)",
+    "apps/web: pnpm e2e accrual-walk on CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3320 NEXT_PORT=3321 RUNTIME_PORT=3322 -> 14 passed, exit 0 (matches report)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, no accrual-basis.ts import into any frozen closure",
+    "packages/db: node --test --test-concurrency=1 tests/rig-isolation.test.mjs alone -> 21 total / 19 pass / 1 fail (T10b) / 1 skip (T19) -- NOT 31 as the report's row states",
+    "packages/db: node --test --test-concurrency=1 tests/operation-census.test.mjs tests/rig-isolation.test.mjs together -> 31 total / 29 pass / 1 fail (T10b) / 1 skip -- reproduces the report's '31/29/1 fail/1 skip' number exactly, confirming that number is the COMBINED total of both files, not rig-isolation.test.mjs alone",
+    "node -e (pg) against clara_652 -> confirmed clara.schema_migrations frontier is 0207_accrual_adjustments and clara.accrual_adjustments exists; confirmed graphile_worker schema has 7 functions and 0 mentions of 'graphile' in 0207's SQL, corroborating the T10b follow-up's own diagnosis",
+    "node (tsx) direct exercise of apps/web/lib/navigation/tree.ts resolveActive() against accrualsHref/accrualCreateHref/accrualDetailHref -> clientLeaf is null for all three routes, i.e. the newly added 'accrualNew'/'accrualDetail' CLIENT_LEAVES rows and leafFor branches never fire"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should",
+      "where": "apps/web/lib/navigation/tree.ts:113-122 (ClientLeafId), :403-410 (CLIENT_LEAVES rows accrualNew/accrualDetail), :622-624 (leafFor branches)",
+      "what": "The two new breadcrumb leaves for the accrual form and detail pages are dead code: they can never be produced by resolveActive(), so the breadcrumb never deepens past 'Accruals' for /accruals/new or /accruals/:id, contradicting the code's own comments ('the DETAIL leaf is viewer...', 'a durable record cannot be a static menu row'). Root cause: 'accruals' was correctly registered as its own top-level ACCOUNTING_ITEMS row (segment 'accruals', per the brief's routing ruling), so resolveActive's ACCOUNTING_ITEMS match fires on rest[0]==='accruals' alone -- before rest.length or rest[1] is ever inspected -- and short-circuits before reaching CLIENT_NAV.find/leafFor, where the new branches live. journalComposer/periodicAdjustment (the pattern this was copied from) only work because THEIR routes sit under the literal 'accounting/...' CLIENT_NAV segment, a structurally different case. 'plans' -- the exact precedent for a top-level ACCOUNTING_ITEMS segment -- correctly carries no leaf at all.",
+      "evidence": "Direct execution: resolveActive('/clients/<id>/accruals')/(.../accruals/new)/(.../accruals/acc-1) all return {clientItem:null, accountingItem:'accruals', clientLeaf:null}. No test anywhere (tree.test.ts, routes.test.ts) asserts clientLeaf for any accrual route; routes.test.ts only exercises the unrelated command-palette href builders.",
+      "fix": "Remove the accrualNew/accrualDetail members from ClientLeafId, their two CLIENT_LEAVES rows, and the two dead leafFor branches -- mirroring 'plans', which needs no leaf for the same reason. If per-page breadcrumb differentiation is actually wanted, it requires resolveActive's ACCOUNTING_ITEMS branch itself to call leafFor for top-level items (a design change beyond one-line registration, and out of this ticket's minimal-shared-edit mandate)."
+    },
+    {
+      "id": "F2",
+      "severity": "should",
+      "where": "apps/web/components/accruals/accruals-list.tsx:59-63 (emptyMessage wiring); report 652-final.md row 'AC6 ... done'",
+      "what": "AC6 and the brief's own §3 state list ('empty (first use vs filtered no-results vs valid no-data)') require the list's empty state to be verified with its own cell. No test -- neither accrual-walk.spec.ts's 14 cells nor accrual-form.test.tsx's 11 -- exercises AccrualsList with zero rows; the mock always seeds at least one posted and one configured accrual. The final report marks AC6 'done' on the strength of those 25 cells, which is an overstatement for this one explicitly-named state.",
+      "evidence": "grep for 'No accruals recorded' / empty-state assertions across accrual-form.test.tsx and accrual-walk.spec.ts returns nothing; accruals-list.tsx has no component test file at all (only accrual-form.test.tsx and accrual-draft.test.ts were added, confirmed by the branch's diffstat).",
+      "fix": "Add one cell (component test on AccrualsList with an empty API response, or a walk cell against a client with zero accruals) asserting the empty message renders; then AC6's 'done' claim is fully evidenced rather than resting on the shared DataState primitive's behavior elsewhere in the app."
+    },
+    {
+      "id": "F3",
+      "severity": "note",
+      "where": "docs/plan/active/refresh-wave-2026-09-15/reports/652-final.md, 'Commands and counts (local)' table, the rig-isolation.test.mjs row",
+      "what": "The row 'node --test --test-concurrency=1 tests/rig-isolation.test.mjs (no reset flags) | 31 / 29 pass / 1 fail (T10b) / 1 skip' cannot be reproduced by running that command in isolation -- the file has exactly 21 top-level tests (verified: 21/19/1 fail/1 skip). The '31/29/1/1' total only appears when tests/operation-census.test.mjs (10 tests) is run in the SAME invocation as rig-isolation.test.mjs, which I reproduced exactly. The substantive claim (T10b fails, and it's rig state from the Workflow bootstrap's graphile_worker schema rather than something 0207 introduced) is independently verified and correct -- this is only a command/count attribution slip in the evidence table, not a wrong result.",
+      "evidence": "Isolated run: 1..21 / pass 19 / fail 1 / skip 1. Combined run (same two files, one invocation): 1..31 / pass 29 / fail 1 / skip 1 -- exact match to the report's number. Independently confirmed graphile_worker schema exists on clara_652 with 7 functions and 0207_accrual_adjustments.sql contains zero mentions of 'graphile'.",
+      "fix": "Correct the report table to show the command actually run (both files together, or two separate rows with their own true per-file counts: operation-census 10/10, rig-isolation 21/19/1 fail/1 skip)."
+    }
+  ]
+}

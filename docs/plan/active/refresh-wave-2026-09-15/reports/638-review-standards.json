@@ -1,0 +1,22 @@
+{
+  "ticket": 638,
+  "lens": "STANDARDS",
+  "head": "ce11cc88",
+  "findings": [],
+  "ran": [
+    "pnpm typecheck (worktree root) -> exit 0 (apps/web, packages/runtime both Done)",
+    "pnpm lint (worktree root) -> exit 0 (apps/web lint incl. check-token-contrast, check-test-manifest [369 files, alphabetical], check-message-keys [3021 keys resolve]; packages/reporting-render eslint)",
+    "node scripts/check-frozen-workflows.mjs -> OK, exit 0, 281 frozen files verified, 51 use-workflow modules frozen+registered (new staff-expense-claim-basis.ts NOT imported by any frozen body)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, exit 0, reader superset of emittable set unchanged",
+    "node --test --import ./tests/staff-expense-claim-preintegration-gate.mjs packages/db/tests/staff-expense-claim.test.mjs (against live rig 127.0.0.1:55503/clara_638, 0206 applied) -> 21 pass / 0 fail / 0 skip, matches report",
+    "node --import tsx --test packages/runtime/tests/staff-expense-claim-unit.test.mjs -> 14 pass / 0 fail, matches report",
+    "node --import tsx --test apps/web/lib/work/staff-expense-claim.test.ts apps/web/lib/work/staff-expense-claim-draft.test.ts -> 21 pass / 0 fail",
+    "node --import tsx --test apps/web/e2e/e2e-fixture-ownership.test.ts -> 15 pass / 0 fail (staff-expense-claim-mock.mjs and shared get_work_claim_origin verb correctly declared)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (untouched, confirmed)",
+    "git log origin/main..HEAD, inspected all 11 commit messages for the Co-Authored-By line -> present on all 11",
+    "Read migration packages/db/migrations/0206_staff_expense_claims.sql in full (1871 lines): prestate pins (measured sha256 x6 + subledger-hook census + purpose-CHECK text + 0042 tail 20 + belt existence), FORCE RLS on both new tables, zero app-role DML, SECURITY DEFINER + search_path=clara,pg_temp + owner via set/reset role clara_fn_owner, typed CLR10/CLR39/CLR40 refusals with detail.reason+field, lock-order reasoning documented and internally consistent, deferred constraint trigger named to sort before t_je_adv_movement_belt, full 7-part tail census re-asserting all prestate claims plus grant matrix and two untouched registries (documents_document_kind_check, document_capabilities.registry_version)",
+    "git diff origin/main...HEAD on shared registration files (tree.ts, en.json, manifest.txt, serve-built.mjs, e2e-fixture-ownership.test.ts, rig-meta.mjs, package.json gate list, db-live-gates/action.yml, CONTEXT.md) -> reviewed each; single-row/blocked additions at sorted/appended positions consistent with house style and sibling tickets' existing entries in the same files",
+    "git diff origin/main...HEAD -- packages/runtime/src/workRoutes.ts, packages/runtime/lib/staff-expense-claim-basis.ts -> reviewed; new route is a literal sibling of :701, new module has zero node: imports and only imports zod",
+    "Spot-read staff-expense-claim.test.mjs cells (p638.advance.race, p638.claimant.autoenrol/floor, p638.items.continue, p638.no_second_approval, p638.walls) and staff-expense-claim-fixtures.mjs -> door invoked via roleQuery(ROLES.runtime,...) (correctly least-privileged, matching the door's own grant), posting via the shared wakeRecordJournalEntry helper under a real interactive_client credential; no silent-pass/early-return cells found among those read"
+  ]
+}

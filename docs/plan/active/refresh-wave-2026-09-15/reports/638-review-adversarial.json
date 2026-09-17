@@ -1,0 +1,87 @@
+{
+  "ticket": 638,
+  "lens": "adversarial migration + accounting safety",
+  "head": "ce11cc88",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "where": "docs/plan/active/refresh-wave-2026-09-15/reports/638-final.md:39 · packages/runtime/tests/staff-expense-claim-e2e.mjs:270 · packages/db/tests/staff-expense-claim.test.mjs",
+      "what": "AC2 (\"three settlements distinguished\") is reported **done** citing \"`already_settled` via the derivation cell + World leg 1\", but World leg 1 is a reimbursement and NOTHING in the branch admits or posts an `already_settled` claim. The arm ships with zero regression protection and the report's evidence pointer is false.",
+      "evidence": "`grep -c 'already_settled\\|alreadySettled'` → packages/db/tests/staff-expense-claim.test.mjs **0**, packages/runtime/tests/staff-expense-claim-e2e.mjs **0**, apps/web/components/accounting/staff-expense-claim-form.test.tsx **0**, apps/web/e2e/staff-expense-claim-walk.spec.ts **0**; only the two pure-shape unit files mention it (runtime 4, web-draft 4). `packages/runtime/tests/staff-expense-claim-e2e.mjs:270` is literally `settlement: \"reimbursement\"`. I proved the arm WORKS myself on the from-scratch chain (probe r638_probe1 on 55603/clara_638r): admit → 202 with claim_id, post → `{\"posted\":true}`, GL `[6200 dr 48000, 6210 dr 12500, 1150 cr 60500]`, ledger `[\"admitted\",\"posted\"]` — so this is unproven behaviour plus a wrong citation, not broken behaviour.",
+      "fix": "Add `p638.claim.settled` to packages/db/tests/staff-expense-claim.test.mjs: `claim({ settlement: SETTLEMENT.settled, payableAccountCode: null })` (the fixture already builds it — staff-expense-claim-fixtures.mjs:229), admit through the door, post via `wakeRecordJournalEntry` under the real interactive_client credential, and assert the three derived lines, exactly one committed receipt, one claim row and the `posted` ledger row. Then correct the AC2 evidence pointer in 638-final.md (World leg 1 is reimbursement)."
+    },
+    {
+      "id": "F2",
+      "severity": "should",
+      "where": "packages/db/migrations/0206_staff_expense_claims.sql:861 (_assert_claim_basis world half) · packages/db/tests/staff-expense-claim.test.mjs:533",
+      "what": "A claim dated into a closed/closing fiscal year is ADMITTED — a durable `clara.staff_expense_claims` row, Work and task — and refuses only at posting with CLR19. The cited sibling refuses it at ADMISSION (`clara._assert_adjustment_relationships`, arm \"THE LOCKED PERIOD, TYPED AND EARLY\", CLR19 `write_into_closed_period`). Because a claim, unlike a plain journal Work, writes a register row at admission, the result is a permanent, never-postable claim the register cannot distinguish from one still queued.",
+      "evidence": "Probe r638_probe4/P12 on the from-scratch rig (55603/clara_638r): after `seedFiscalYear(..., status:'closed')`, `admit_staff_expense_claim_work` returned `{work, claim}`; posting then refused `CLR19 {\"reason\":\"write_into_closed_period\"}`; `clara.list_staff_expense_claims` still returns the row with `entry_id:null, entry_status:null` and ledger `[\"admitted\"]`. apps/web/components/accounting/staff-expense-claims-table.tsx:113-116 renders exactly that as the `history.admitted` badge forever. The branch's own cell (staff-expense-claim.test.mjs:533-543) asserts only `entryCount === 0` and never looks at the stranded row. `_assert_claim_basis`'s world half (0206:861-975) asks the chart, the enrolment and the advance cap but never `clara.fiscal_years`.",
+      "fix": "Add a world-half arm to `clara._assert_claim_basis`: look up the fiscal year covering `posting_date` and, when its status is `closing`/`closed`, raise CLR19 with `detail.reason='write_into_closed_period'`, `field='claim.posting_date'` — the same shape `_assert_adjustment_relationships` raises. Flip staff-expense-claim.test.mjs:533 to `refusesSec(...)` at admission (it would go red today). If the arm is deliberately left to the posting core instead, name the residual in the report and give the register a distinct face for a claim whose Work is refused/cancelled."
+    },
+    {
+      "id": "F3",
+      "severity": "should",
+      "where": "packages/db/migrations/0206_staff_expense_claims.sql:1292 (`on conflict (work_id) do nothing`) and :430 (`uq_staff_expense_claims_corrects`) · packages/runtime/src/workRoutes.ts:731",
+      "what": "Two concurrent corrections of one claim escape as a raw `23505`, not a typed refusal: `_assert_claim_basis`'s (iv) correction-target check (0206:948) runs before the client rung and under no row lock, and step 8's `on conflict` arbitrates `work_id` only, so the loser violates the partial unique index unhandled. `workErrorResponse` claims 40P01/40001 and CLR codes only, so the route answers HTTP 500 `{error:\"internal\"}` and the browser shows `kind:\"unavailable\"` instead of the `correction_target_already_corrected` the successor contract's refusal map promises. The posting core's own handler states the house rule: \"never as a raw 23505 the runtime cannot classify\".",
+      "evidence": "Probe r638_probe2/P5 on 55603/clara_638r: post a claim, `reverse_entry`, then hold `pg_advisory_xact_lock(203005004, hashtext(client))` from a third session as a barrier and fire two `clara.admit_staff_expense_claim_work` calls (different intent keys, same `corrects_claim_id`) as `clara_runtime`. A → 202; **B → `{\"ok\":false,\"code\":\"23505\",\"msg\":\"duplicate key value violates unique constraint \\\"uq_staff_expense_claims_corrects\\\"\"}`**. Data stayed correct (exactly one correction landed; the chain is linked both ways) — the defect is the untyped refusal, not corruption. workRoutes.ts:739-742 handles only 40P01/40001; sendAdmissionError (:835-843) falls through to 500.",
+      "fix": "In `clara.admit_staff_expense_claim_work`, after the client rung is taken (step 6), `perform 1 from clara.staff_expense_claims where id = v_corrects and client_id = p_client for update` and re-ask the (iv) checks under that lock; or wrap the step-8 insert in `exception when unique_violation then raise ... CLR10 detail.reason='correction_target_already_corrected'`. Add a red-first race cell beside `p638.advance.race`."
+    },
+    {
+      "id": "F4",
+      "severity": "should",
+      "where": "packages/db/tests/staff-expense-claim.test.mjs:669 (p638.correction)",
+      "what": "AC4 is reported **done**, but the half the brief named — \"the document released by `t_entry_evidence_release`\" (brief-638.md §4 seam 11) — is not asserted anywhere. `p638.correction` passes no `sourceRefs`, and the World e2e's PASS 7 only proves the link is BORN inside the posting transaction.",
+      "evidence": "packages/db/tests/staff-expense-claim.test.mjs:669-718 builds its claims with no `sourceRefs`; `grep -n 'entry_evidence_links' packages/db/tests/staff-expense-claim.test.mjs` → no matches. packages/runtime/tests/staff-expense-claim-e2e.mjs:549-552 asserts `evLinks.rows.length === 1` and `attached_via === 'work_commit'` and never reverses. Untested consequence: after reversing a documented claim, the correction claim citing the same receipt meets `_document_posting_entry` → CLR13 `source_already_posted` unless the link was released, so AC4's unwind is unproven for the documented case.",
+      "fix": "Extend `p638.correction` (or add `p638.correction.evidence`) to admit the first claim with a filed document in `sourceRefs`, post it, `reverse_entry`, then assert the `clara.entry_evidence_links` row for that entry is released and that the correcting claim can cite the same document without CLR13."
+    },
+    {
+      "id": "F5",
+      "severity": "note",
+      "where": "packages/db/migrations/0206_staff_expense_claims.sql:1423-1424",
+      "what": "§E's header contradicts the file's own census: it says \"§H re-derives the 0037:3840-3845 census at its UNCHANGED cardinality of four\", while §0 (:259-273) and §H T.2 (:1685-1702) both assert the measured SIX, and the file header's own MEASURED CORRECTION (:74-82) explains why. A later hand reading §E would re-pin four.",
+      "evidence": "0206:1423-1424 vs 0206:259-273 and 0206:1685-1702; the fresh-chain apply printed `#638 tail OK (2/7): the subledger-hook caller census is byte-identical to the six measured before this migration ran`.",
+      "fix": "Change \"four\" to \"six\" at 0206:1424 (comment only — the assertions are already right)."
+    },
+    {
+      "id": "F6",
+      "severity": "note",
+      "where": "packages/db/migrations/0206_staff_expense_claims.sql:259-286 (prestate census + sha pins)",
+      "what": "Merge-order hazard the orchestrator should plan for: §0 refuses to apply unless the `_subledger_on_approve` caller roster matches a byte-exact six-name string AND the six non-regression bodies match shas measured on a 0001→0198 chain. 0206 merges after 0199–0205, and the census regex `p.prosrc ~ 'clara\\._subledger_on_approve *\\('` scans every clara body — so a sibling that merely names the hook inside any function's source would fail 0206's prestate at integration rather than at review.",
+      "evidence": "0206:259-273 (roster string) and :232-256 (six shas). DECISIONS §1.3 exempts all six bodies from every sibling's recut list, so the exposure is the roster string, not the shas. On my from-scratch 0001→0198+0206 chain both held: `#638 prestate: clean …` and `#638 tail OK (1/7)…(7/7)`.",
+      "fix": "At integration, apply the merged chain 0001→0209 from scratch once before release; if 0206's prestate refuses, re-measure and re-issue 0206's roster string rather than weakening the assertion."
+    },
+    {
+      "id": "F7",
+      "severity": "note",
+      "where": "rig (127.0.0.1:55603, cluster rig638r)",
+      "what": "The fresh cluster is LEFT RUNNING for the fix round: `rig638r` on port **55603**, database `clara_638r` (194 migrations 0001→0206 applied from scratch, seeded, #638 battery 21/21). Also recording why the World leg could not be proven on a fresh database: the e2e's DSN gate requires `clara_(rt_test|wave_b_ci)`, and migrating a SECOND database in the same cluster fails at `0154_binding_proposal_pr_1` (\"the clara role count moved from 14 to 18 -- this file mints no role\") because Postgres roles are cluster-level, not per-database.",
+      "evidence": "`pg_lsclusters` shows `17 rig638r 55603 online`. The clara_rt_test attempt on 55603 logged `migrate: FAIL — migration 0154_binding_proposal_pr_1 failed and was rolled back: … role count moved from 14 to 18`, exit 1. Against that half-migrated db the e2e printed `[sec-e2e] SKIPPED — migration 0206 … is not on this database`, exit 0 (which does independently prove the skip-clean condition action.yml promises). I therefore re-ran the World e2e on the lane's own rig (55503/clara_rt_test): 7 legs, `STAFF EXPENSE CLAIM E2E: PASS`, exit 0, first attempt — an independent confirmation of the report's claim, but not from-scratch.",
+      "fix": "None for the branch. If a from-scratch World leg is wanted, build a dedicated cluster whose FIRST database is named `clara_rt_test`."
+    }
+  ],
+  "ran": [
+    "PowerShell: wsl -u root -- bash /mnt/c/.../refresh-wave-2026-09-15/mkrig.sh rig638r 55603 → `127.0.0.1:55603 - accepting connections`, cluster rig638r online",
+    "node (pg) create database clara_638r on 127.0.0.1:55603 → created",
+    "PGPORT=55603 PGDATABASE=clara_638r pnpm db:migrate (worktree root, 638) → `migrate: 194 new migration(s) applied · 194 total`, EXIT=0; log carries `#638 prestate: clean -- no claim surface exists, both purpose CHECKs carry their 0194 three values, the six non-regression bodies are at their pinned texts, the subledger-hook census is the measured six` and `#638 tail OK (1/7)` … `(7/7)`",
+    "PGPORT=55603 PGDATABASE=clara_638r pnpm db:migrate (re-run) → `migrate: 0 new migration(s) applied · 194 total`, exit 0",
+    "PGPORT=55603 PGDATABASE=clara_638r pnpm db:seed → `seed: 2 seed file(s) applied`, exit 0",
+    "PGPORT=55603 PGDATABASE=clara_638r node --test --test-concurrency=1 tests/staff-expense-claim.test.mjs (packages/db) → tests 21, pass 21, fail 0, skipped 0 (26.5 s) — the whole battery green on the from-scratch chain",
+    "PGPORT=55603 PGDATABASE=clara_638r node --test --test-concurrency=1 tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset flags) → tests 31, pass 30, fail 0, skipped 1, EXIT=0",
+    "node scripts/check-frozen-workflows.mjs (worktree root) → `freeze-lint: OK — 281 frozen file(s) verified … 51 \"use workflow\" module(s) all frozen+registered`, exit 0",
+    "node packages/runtime/scripts/check-parts-parity.mjs → `parts-parity: OK — CI proves reader ⊇ emittable`; work_accepted emittable only from chatTurn v18/v19; exit 0",
+    "grep -n '^import' packages/runtime/lib/staff-expense-claim-basis.ts → only `import { z } from \"zod\"` (no node: module-level import)",
+    "pnpm --filter @clara/runtime build (nitro) → EXIT=0",
+    "PGPORT=55603 PGDATABASE=clara_rt_test pnpm db:migrate → FAIL at 0154_binding_proposal_pr_1 (cluster-level role count 14→18), MIGEXIT=1 — a rig property, not a #638 defect",
+    "PGPORT=55603 PGDATABASE=clara_rt_test node tests/staff-expense-claim-e2e.mjs → `[sec-e2e] SKIPPED — migration 0206 … is not on this database`, EXIT=0 (skip-clean proven)",
+    "PGPORT=55503 PGDATABASE=clara_rt_test WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55503/clara_rt_test RELAY_TEST_MODE=1 node tests/staff-expense-claim-e2e.mjs (lane rig) → PASS 1..7, `STAFF EXPENSE CLAIM E2E: PASS`, EXIT=0 (first attempt)",
+    "probe r638_probe1.mjs on 55603/clara_638r → P1 already_settled admit+post OK, GL 6200 dr 48000 / 6210 dr 12500 / 1150 cr 60500, ledger [admitted,posted]; P2a firm-B author on firm-A client → CLR11 client_not_found; P2b firm-A author on firm-B client → CLR11; P3a list as firm-B human → CLR11; P3b/P3c get_staff_expense_claim / get_work_claim_origin → null; P3d firm-B human direct select → 0 rows on both relations; P3e/P3f clara_agent_ro | clara_runtime | clara_wake_interactive SELECT and INSERT on both relations → 42501 permission denied (6/6 and 6/6); P3g clara_authenticated and clara_agent_ro on the door → 42501 permission denied",
+    "probe r638_probe2.mjs on 55603/clara_638r → P4 barrier race (third session holds the client rung, two clara_runtime door calls, same key + payload): A replayed=false, B replayed=true, SAME work_id/claim_id, 1 Work under the key, 1 claim row, status ledger [admitted×1] — exactly one effect; P5 two concurrent corrections of one claim: A 202, **B raw 23505 uq_staff_expense_claims_corrects**; P6 cancel as clara_authenticated → 42501 (door is runtime-only)",
+    "probe r638_probe3.mjs on 55603/clara_638r → P7 tampered basis at posting (inflated debit+credit) → CLR10 `basis_mismatch`; P8 replay-vs-cancel race across the lock order → both succeeded, NO 40P01; P9 append-only under clara_fn_owner: UPDATE amount/items and DELETE on claims → CLR08, UPDATE/DELETE on status → CLR08, TRUNCATE both → CLR08; P10 client A's claim naming client B's enrolment → CLR10 claimant_not_enrolled",
+    "probe r638_probe4.mjs on 55603/clara_638r → P11 double post under one logical identity → 1 entry, 1 committed receipt, second call replayed=true, ledger [admitted,posted]; P12 claim into a seeded CLOSED fiscal year → ADMITTED durably, posting refused CLR19, register row left with entry_id null / entry_status null / ledger [admitted]",
+    "SQL on 55603/clara_638r: stored claim `items` round-trips `supplied_tax` verbatim ({stated_code:SR, stated_cents:2880, note:…}) with amount_cents 60500",
+    "git -C /c/Users/zhant/Desktop/clara-wt/638 log --oneline origin/main..HEAD (11 commits) · git diff origin/main...HEAD --stat (43 files, +9534/-27) · git status --porcelain → clean (branch untouched)",
+    "grep of 0206 for object mutation: no `create or replace`, no `alter table` on an existing relation, no `drop`, no dynamic SQL (`execute`/`format`) — purely additive, so no sibling's assigned recut (DECISIONS §1.3) is touched",
+    "node -e count of packages/db/package.json `--import` gate flags → 29, with tests/staff-expense-claim-preintegration-gate.mjs last after firm-document-limits (the 28th)"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "ticket": 648,
+  "lens": "SPEC",
+  "head": "6a3893e1",
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 --import ./tests/firm-setup-preintegration-gate.mjs tests/firm-setup.test.mjs -> 15/15 pass (all 15 named AC1/AC2/AC3/AC4/AC7 cells: seed.reconcile, seed.empty, seed.excludes, answer.floor, answer.stale, defer.reason, commit.outstanding, capture.eligible, capture.ineligible, capture.shadow, authority.downgrade, isolation.oracle, acl.census, plans.one_open, workspace.open)",
+    "packages/db: node --test --test-concurrency=1 --import ./tests/knowledge-0192-preintegration-gate.mjs tests/knowledge-records.test.mjs -> 27/27 pass (kn.11/kn.12 firm-scope capture evidence cited by gap-648 confirmed live)",
+    "packages/db: node --test --test-concurrency=1 tests/operation-census.test.mjs -> 10/10 pass",
+    "packages/db: node --test --test-concurrency=1 tests/rig-isolation.test.mjs -> 20 pass, 1 skip (T19 destructive cell skipped, no reset flags set, as instructed)",
+    "worktree root: node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, 51 \"use workflow\" modules all frozen+registered",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/firm-setup/firm-setup-checklist.test.tsx components/firm-setup/firm-setup-a11y.test.tsx components/firm-setup/firm-setup-keyboard.test.tsx -> 16/16 pass (9+3+4)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-surfaces.test.ts tests/firm-scope-fourth-entrance.test.ts tests/sql-oracle.test.ts tests/parity-holes.test.ts -> 88/88 pass (confirms assumption #5: no fourth SCOPE_ENTRANCES row)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts -> 15/15 pass (firm-setup-mock.mjs ownership row verified)",
+    "worktree root: pnpm typecheck -> exit 0",
+    "worktree root: pnpm lint -> exit 0 (captured LINT_EXIT:0)",
+    "apps/web: npx playwright test e2e/firm-setup-walk.spec.ts (ports 3290/3291/3292), run 1 -> webServer readiness timeout at 120s; run 2 (isolated re-run) -> test 1/5 'firmSetup.walk.start' passed live in 41.1s, tests 2-5 did not finish inside my observation window under continued load and I terminated my own stalled process cleanly, releasing 3290-3292. Verified via live process enumeration (Get-CimInstance Win32_Process) that 6 other worktree lanes (638, 639, 646, 647, 649, 653) were each running their own Playwright/chromium instances concurrently with system CPU >=88%, matching the brief's own host-contention warning; reported as an evidence-gathering limitation, not a code defect, corroborated by the DB battery plus 16 passing web-unit cells exercising the identical stale-convergence/draft-preservation/denied/lost-response/focus logic the remaining Playwright cells check",
+    "direct pg query on the rig: clara.schema_migrations count = 194; to_regprocedure('clara.get_firm_setup()') resolves -- matches the final report's rig-state claim",
+    "git diff origin/main...HEAD --stat -- packages/runtime, .github/actions/db-live-gates/action.yml, apps/web/lib/require-firm-scope.ts, apps/web/tests/firm-scope-db-pins.corpus.ts -> all empty, matching the report's 'no Workflow/no fourth entrance/no dynamic-SQL pin owed' claims"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "note",
+      "where": "apps/web/e2e/firm-setup-walk.spec.ts (Playwright walk, tests 2-5)",
+      "what": "I could not independently finish a live confirmation of Playwright cells firmSetup.walk.answer/stale/responsive/finish inside this review session; the run stalled under measured host contention (6 other worktree lanes' Playwright processes running concurrently, system CPU >=88%) after the first cell passed live.",
+      "evidence": "Two live attempts: run 1 timed out at webServer readiness (120s); run 2 got past readiness and passed firmSetup.walk.start (41.1s) but produced no further output for 6+ minutes with near-zero CPU growth on its worker process, while `Get-CimInstance Win32_Process -Filter \"Name='node.exe'\"` showed simultaneous `playwright test` invocations under clara-wt\\638, \\639, \\646, \\647, \\649, \\653. I killed my own stalled process and freed ports 3290-3292 (confirmed via netstat) rather than let it interfere with other lanes. The worker's cited claim ('Playwright on 3290/3291/3292 -- 5 passed (2.7m)') is corroborated structurally: the identical assertions (CAS convergence with preserved draft, denied face with zero controls, lost-response replay with the same op_key, focus return, one live region per transition) all pass in the deterministic web-unit battery (firm-setup-checklist.test.tsx cells fs.web.03/04/06, firm-setup-keyboard.test.tsx fs.kbd.01-04), and the spec's own text assertions (e.g. 'does not hold up anything else', 'Somebody else changed this checklist', 'Firm setup is for administrators') match messages/en.json verbatim.",
+      "fix": "No code fix indicated. Re-run `npx playwright test e2e/firm-setup-walk.spec.ts` on this rig at a quiet time (or serially with the other lanes currently sharing the host) to get a second live confirmation of cells 2-5; nothing found here suggests the app itself is at fault."
+    }
+  ]
+}

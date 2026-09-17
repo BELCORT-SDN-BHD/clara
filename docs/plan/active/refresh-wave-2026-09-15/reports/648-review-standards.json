@@ -1,0 +1,41 @@
+{
+  "ticket": 648,
+  "lens": "STANDARDS",
+  "head": "6a3893e1",
+  "findings": [
+    {
+      "id": "S1",
+      "severity": "should",
+      "where": "apps/web/e2e/firm-setup-walk.spec.ts:165 (firmSetup.walk.stale)",
+      "what": "The cross-context CAS-convergence assertion `await expect(page.getByTestId(\"firm-setup-stale\")).toBeVisible();` relies on Playwright's unmodified default 5000ms timeout, immediately after a sequence the file's own comment (`test.describe.configure({ timeout: 180_000 })`, lines ~70-73) says is 'measured, ~32s on this host' because two full sign-ins and two server renders live inside the cell. The per-assertion timeout was never widened to match that documented margin.",
+      "evidence": "Independently re-ran the isolated spec (dedicated ports 3290/3291/3292, no reset flags) three times this session: run 1 timed out at browser launch (`browserContext.addCookies` after 180s — a pre-app-code CDP hang, host had 126 node/chrome processes at the time); run 2 (clean) passed cells 1 (11.3s) and 2 (20.9s) then failed exactly at this assertion (`element(s) not found`, 5000ms timeout) with cells 4-5 not run; run 3 (full retry) stalled again under escalating contention (114-130 processes) and did not conclude inside this review's window. The underlying SQL CAS mechanism itself is proven correct independently and repeatably: `p648.answer.stale` in packages/db/tests/firm-setup.test.mjs passed 15/15 against real Postgres, and the client's `submit` closure (firm-setup-checklist.tsx:166-192) carries a captured `env.revision_token` with no auto-refetch (no focus/visibilitychange/poll listener found in lib/firm/use-async-read.ts) that would silently absorb the conflict, so nothing found here implicates the application/door logic — this reads as a testing-robustness gap under this host's documented 12-lane contention, not a functional defect.",
+      "fix": "Widen the timeout on this specific assertion (e.g. `.toBeVisible({ timeout: 30_000 })`) or set a per-file/per-test `expect: { timeout }` override in the same place the test already widens the overall test timeout for this cell, so a slow-but-correct convergence isn't reported as a missing one. Re-verify once host contention is lower; do not change the CAS/door logic itself."
+    },
+    {
+      "id": "S2",
+      "severity": "note",
+      "where": "docs/plan/active/refresh-wave-2026-09-15/brief-648.md:17 and DECISIONS.md '### #648 firm setup' block",
+      "what": "The binding brief and DECISIONS.md both state 'Firm intake documents link to #633's `(firm)/documents` leaf... If #633 has not merged, render an honest named line, not a dead href, and say so.' #633 has not merged into this branch (no `(firm)/documents` route exists), and the shipped #648 diff contains zero references to firm intake documents anywhere in the web or db surface — no link, no honest placeholder line. The final report (reports/648-final.md) never mentions #633 or this decision item, unlike its explicit, careful treatment of every other N/A/deferred brief item (Runtime: none, Successor: none owed, D10 residuals, etc.).",
+      "evidence": "`grep -rn -i \"intake\\|supporting doc\\|unassigned.doc\\|uploaded\" apps/web/components/firm-setup/ apps/web/lib/firm-setup/ apps/web/app/(firm)/settings/setup/ packages/db/migrations/0203_firm_setup.sql` returns nothing; `find apps/web/app/(firm)/documents` (the #633 leaf) does not exist on this branch; reports/648-final.md has no '633' occurrence.",
+      "fix": "Not a functional gap (no AC or TDD seam in brief §3/§4 actually requires a documents reference, since the shipped catalogue is all typed text/choice/month/labelled_object with no file evidence), but the report should have closed the loop explicitly, e.g. one line: 'no firm-intake-document reference exists in this slice's twelve catalogue items, so brief item 17 is N/A here' — for a reader following the binding brief line-by-line."
+    }
+  ],
+  "ran": [
+    "git log --oneline origin/main..HEAD -> 7 commits, +5774/-8 across 31 files (matches report)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (confirmed untouched)",
+    "git diff origin/main...HEAD -- packages/runtime/ -> empty (confirmed 'Runtime: none')",
+    "pnpm typecheck (worktree root) -> exit 0",
+    "pnpm lint (worktree root) -> exit 0 (LINT_EXIT=0; apps/web eslint + check-token-contrast + check-test-manifest [369 files, alphabetical] + check-message-keys [2996 keys resolve] all green; packages/db, packages/runtime, packages/reporting-render eslint all clean)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, 0 not-deployed",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader superset of emittable",
+    "node --test packages/db/tests/firm-setup.test.mjs -> 15/15 pass (reproduced independently against rig PG 55507/clara_648)",
+    "node --test packages/db/tests/operation-census.test.mjs packages/db/tests/knowledge-records.test.mjs -> 37/37 pass (10 opcen + 27 kn, matches report's '10/10' and '27/27')",
+    "node --test packages/db/tests/rig-isolation.test.mjs (no reset/role-sweep flags) -> 20 pass, 1 skip (destructive cell), matches report",
+    "npx tsx --test apps/web/tests/firm-scope-fourth-entrance.test.ts apps/web/tests/parity-holes.test.ts apps/web/tests/sql-oracle.test.ts apps/web/tests/e2e-fixture-ownership.test.ts -> 53/53 pass",
+    "npx tsx --test apps/web/tests/firm-scope-surfaces.test.ts -> 35/35 pass (confirms no SCOPE_ENTRANCES row was needed, per report assumption 5)",
+    "npx playwright test e2e/firm-setup-walk.spec.ts on ports 3290/3291/3292, run 1 -> FAIL at browser-launch CDP timeout before any app code ran (host contention, 126 node/chrome procs)",
+    "npx playwright test e2e/firm-setup-walk.spec.ts, run 2 (clean) -> 2 passed (cells 1-2), 1 failed (cell 3, firmSetup.walk.stale, 5s UI-assertion timeout), 2 did not run",
+    "npx playwright test e2e/firm-setup-walk.spec.ts -g firmSetup.walk.stale (isolated) -> invalid methodology (breaks test.describe.serial precondition), killed",
+    "npx playwright test e2e/firm-setup-walk.spec.ts, run 4 (full retry) -> did not conclude within review window under escalating host contention (114-130 node/chrome procs)"
+  ]
+}

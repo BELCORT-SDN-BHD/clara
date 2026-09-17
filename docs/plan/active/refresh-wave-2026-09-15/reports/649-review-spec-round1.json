@@ -1,0 +1,44 @@
+{
+  "ticket": 649,
+  "lens": "SPEC",
+  "head": "baaf48fe",
+  "ran": [
+    "packages/db: node --test --test-concurrency=1 <29 gate --import flags copied verbatim from package.json> tests/client-onboarding-identity.test.mjs → 9 pass, 0 fail, 0 skip",
+    "packages/db: node --test tests/operation-census.test.mjs (no reset flags) → 10 pass, 0 fail",
+    "packages/db: node --test tests/rig-isolation.test.mjs (no reset flags) → 21 tests, 20 pass, 1 skip (T19 destructive cell, correctly skipped)",
+    "packages/runtime (PGDATABASE=clara_rt_test, WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55508/clara_rt_test): node tests/interview-e2e.mjs → exit 0, both scenarios PASS including p649.interview.sst_park_today",
+    "packages/runtime (same env): node tests/interview-kill-resume-e2e.mjs → exit 0, PASS",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test <6 new #649 files: coa-seed-decision-state, onboarding-field-composition, add-client-candidates, add-client-control, client-identity-band-knowledge, client-onboarding-progress-opening-link> → 36 pass, 0 fail",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test <4 re-measured historical-row files: onboarding-progress-sync, client-scope-invalidation, client-workspace-overview, add-client-control> → 31 pass, 0 fail (matches report's 3/3, 9/9, 12/12, 7/7)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-fourth-entrance.test.ts tests/parity-holes.test.ts tests/firm-scope-surfaces.test.ts tests/sql-oracle.test.ts e2e/e2e-fixture-ownership.test.ts → 103 pass, 0 fail",
+    "pnpm typecheck (worktree root) → exit 0",
+    "pnpm lint (worktree root) → exit 0 (check-test-manifest, check-message-keys selftests all PASS)",
+    "apps/web: npx playwright test e2e/client-create-walk.spec.ts (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3300 NEXT_PORT=3301 RUNTIME_PORT=3302, PGDATABASE=clara_649) → 4 passed"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should",
+      "where": "apps/web/e2e/interview-walk.spec.ts (untouched); brief-649.md §4 item 12, second half",
+      "what": "The brief's binding TDD-seam list (§4 item 12) calls for extending interview-walk.spec.ts with a focus-return/Back-stability arm AND the UI-21 altitude leg (type an answer in the rail, follow ContinueOnboardingCard's link, prove the draft survives, focus lands in the thread, Back returns to Home, at 320px/200%). This file was never touched by the branch.",
+      "evidence": "`git diff origin/main...HEAD --name-only` in the worktree lists no `interview-walk.spec.ts` entry at all. Independently confirmed the worker's stated reason: `which docker postgrest` finds neither on the Windows PATH, and `docs/plan/active/refresh-wave-2026-09-15/RIG.md`'s 'Running tests' section for web e2e never mentions the live-stack/docker/PostgREST runner that `apps/web/e2e/live-stack/run-live-walk.mjs` requires to populate `CLARA_E2E_INTERVIEW_*_CLIENT_ID/THREAD_ID`, which `interview-walk.spec.ts` hard-requires via `fixture()`. The final report's historical-row table marks UI-21 'NOT re-measured — named residual' rather than claiming it fixed or verified.",
+      "fix": "Either (a) have the orchestrator formally ratify UI-21 as an accepted named residual for this wave (the rig genuinely lacks docker/PostgREST for every one of the twelve worker worktrees per RIG.md, not just this one) and track the filed follow-up, or (b) require the arm's test code to be added to interview-walk.spec.ts UNEXECUTED, consistent with that file's own header convention ('that run happens in the review/merge ceremony, not during authorship'), so the assertion exists on the branch even though it cannot run pre-merge."
+    },
+    {
+      "id": "F2",
+      "severity": "note",
+      "where": "apps/web/e2e/client-create-walk.spec.ts:111,151,184 vs docs/plan/active/refresh-wave-2026-09-15/reports/649-final.md AC6 row",
+      "what": "The final report's AC6 line claims '2 axe scans' in the new Playwright walk; the file actually calls `scan()` three times.",
+      "evidence": "`grep -n \"await scan(\" apps/web/e2e/client-create-walk.spec.ts` returns three hits (lines 111, 151, 184), one per test (refused candidate face, arity-1 candidate face, 320px candidate face). Re-ran the spec (`npx playwright test e2e/client-create-walk.spec.ts`): 4 passed, all three scans included.",
+      "fix": "Correct the report line to '3 axe scans' for an exact evidence citation."
+    },
+    {
+      "id": "F3",
+      "severity": "note",
+      "where": "packages/db/migrations/0204_client_onboarding_facts.sql:404-408 vs brief-649.md lines 51 and 74 ('candidate ids in detail')",
+      "what": "The brief's binding text says the ≥2 refusal carries 'candidate ids in detail'; the shipped migration (post commit ddff3d01) carries full candidate rows (id, name, party_kind, status, client_id, match_reason) instead of bare ids.",
+      "evidence": "0204_client_onboarding_facts.sql:404-408's `detail := jsonb_build_object(..., 'candidates', v_rows)` where `v_rows` is the same jsonb array the arity-0/1 success path returns. Openly declared as 'Assumption 1' in the final report with reasoning (bare ids would force the refused face to print raw uuids or issue a second read of the same fact); DB battery cell `p649.identity.wall_two` (re-run, passing) asserts the richer row shape, not just ids.",
+      "fix": "Orchestrator should explicitly ratify Assumption 1 in the review response (or amend brief-649.md's wording to match the shipped, better-reasoned shape) so it does not stand as an un-ratified deviation from binding text."
+    }
+  ]
+}

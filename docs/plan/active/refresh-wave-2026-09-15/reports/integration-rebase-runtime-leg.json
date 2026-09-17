@@ -1,0 +1,81 @@
+{
+  "leg": "runtime",
+  "head": "9ec330da",
+  "ran": [
+    "worktree intb (detached at 9ec330da), cluster rigrt 127.0.0.1:55623: clara_wave_b_ci migrated 0001→0224 (219), seeded, WDK-bootstrapped; clara_rt_test / clara_intake_ci template copies",
+    "pnpm --filter @clara/runtime build (exit 0)",
+    "packages/runtime: PGDATABASE=clara_wave_b_ci WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55623/clara_wave_b_ci node tests/interview-e2e.mjs; interview-kill-resume-e2e.mjs; version-cutover-e2e.mjs; RELAY_TEST_MODE=1 work-journal-e2e.mjs; work-question-e2e.mjs; work-cancel-e2e.mjs; periodic-adjustment-e2e.mjs; fixed-asset-acquisition-e2e.mjs; staff-expense-claim-e2e.mjs; work-egress-e2e.mjs; chat-turn-v19-e2e.mjs; chat-turn-v20-e2e.mjs; two-build-cutover-e2e.mjs (clara_rt_test, after cancelling 4 inherited non-terminal clientOnboarding runs); plan-occurrence-e2e.mjs; accrual-e2e.mjs; prepayment-occurrence-e2e.mjs; node --test tests/body-census-guard-db.test.mjs (clara_rt_test)",
+    "earlier instance (same session, logs archived under Local/Temp/claude/rt-verify-DONE): runtime unit suite 2534 tests / 2522 pass / 7 fail / 5 skip on rigint2/clara_unit_test — the 7 = 4× pg_dump ENOENT (leader-state, relay-taxonomy, fs7 report-tools, fs7 close-stop), #693 EICAR, ready MAJOR-1 (24/24 alone), 637.pf B3 shared-db",
+    "logs: scratchpad/rtv2/world-logs/07-…23-*.log"
+  ],
+  "counts": "Unit suite (this leg, PGDATABASE=clara_unit_test on rigrt): 2658 tests / 2638 pass / 4 fail / 16 skip — all four environmental (#693 EICAR; pg-tools-fixture asserts pg_dump on PATH; 637.pf B2/B3 shared-db state). World e2e on the re-based tip 9ec330da: PASS intake-e2e, version-cutover, work-cancel 9/9, chat-turn-v20 4/4, two-build-cutover (after cancelling 4 inherited non-terminal clientOnboarding runs on clara_rt_test), plan-occurrence 5/5, accrual 4/4, prepayment-occurrence 5/5, body-census-guard-db 4/4, interview-kill-resume (on retry). ENV: intake-admission (EPERM rename on the intake spool, #693-class). REAL: six standalone scripts pin the pre-cut clara-work/v3 literal; fixed-asset-acquisition parks on the v4 particulars question; interview-e2e fails twice identically (all 17 items answered, never terminal within 90 s).",
+  "failures": [
+    {
+      "test": "packages/runtime/tests/work-journal-e2e.mjs:411 (C88.8/C-70 'the Work records the digest the process logged')",
+      "error": "actual '81e1ffcd55…' (clara-work/v4 digest) vs expected '345f2a38c3…' (v3 digest)",
+      "likely_cause": "REAL — the standalone World script hardcodes the pre-cut clara-work/v3 digest literal; the successor cut moved the claraWork pin to v4; the cut fix round swept only node --test-collected cells",
+      "owner_ticket": "successor cut (claraWork_v3→v4 pin move)"
+    },
+    {
+      "test": "packages/runtime/tests/work-question-e2e.mjs ('the Work records the v2 digest the process logged')",
+      "error": "AssertionError after PASS 1",
+      "likely_cause": "REAL — same stale-pin literal class",
+      "owner_ticket": "successor cut"
+    },
+    {
+      "test": "packages/runtime/tests/periodic-adjustment-e2e.mjs:399",
+      "error": "actual 'clara-work/v4' vs expected 'clara-work/v3' ('served by the UNCHANGED frozen bundle')",
+      "likely_cause": "REAL — same stale-pin literal class",
+      "owner_ticket": "successor cut"
+    },
+    {
+      "test": "packages/runtime/tests/staff-expense-claim-e2e.mjs",
+      "error": "'…served by the UNCHANGED frozen bundle: nothing about this lane needed a new workflow version'",
+      "likely_cause": "REAL — same stale-pin literal class (#638's own e2e written pre-cut)",
+      "owner_ticket": "successor cut"
+    },
+    {
+      "test": "packages/runtime/tests/work-egress-e2e.mjs",
+      "error": "'A: served by the v3 bundle'",
+      "likely_cause": "REAL — same stale-pin literal class",
+      "owner_ticket": "successor cut"
+    },
+    {
+      "test": "packages/runtime/tests/chat-turn-v19-e2e.mjs",
+      "error": "PASS 1 ok; then 'the Work records the digest the process logged … (wave-3: that bundle is now v3)'",
+      "likely_cause": "REAL — same stale-pin literal class (chat-turn-v20-e2e, written post-cut, passes 4/4)",
+      "owner_ticket": "successor cut"
+    },
+    {
+      "test": "packages/runtime/tests/fixed-asset-acquisition-e2e.mjs",
+      "error": "pollWork timeout: Work status 'awaiting_input' on bundle clara-work/v4 although result.entry_id/receipt_id are posted",
+      "likely_cause": "REAL/behavioural — claraWork_v4 opens the dependent particulars question after posting (#639 AC3), so the Work parks; the pre-cut e2e expects a terminal status and never answers the question. Needs the leg to answer the question through complete_fixed_asset_particulars_for / answer_work_question or to assert the park as the new terminal",
+      "owner_ticket": "#639 (claraWork_v4 particulars question)"
+    },
+    {
+      "test": "packages/runtime/tests/interview-e2e.mjs (driveClientToComplete)",
+      "error": "no terminal within 90000ms; status \"running\", terminal null, all 17 interview items answered — twice, identically, on a quiet host",
+      "likely_cause": "REAL, needs adjudication — the clientOnboarding_v5 cut (16 segments / 17 items, known-facts pre-read, F7 planAnswered skip + provenance capture item) may leave the run without a settle path after the last item; the kill-resume sibling passes, so boot is not the cause",
+      "owner_ticket": "clientOnboarding_v5 cut — re-run in isolation first"
+    },
+    {
+      "test": "packages/runtime/tests/intake-admission-e2e.mjs",
+      "error": "EPERM: operation not permitted, rename …spoolintake-….json.tmp -> ….json",
+      "likely_cause": "ENVIRONMENT — Windows Defender-class interference on the intake finalize spool (#693 family); not fixed",
+      "owner_ticket": "none — #693 family"
+    },
+    {
+      "test": "runtime unit suite: 4 reds",
+      "error": "#693 EICAR scanner cell; pg-tools-fixture.test.mjs asserts pg_dump on PATH; 637.pf B2/B3",
+      "likely_cause": "ENVIRONMENT / pre-existing shared-db state (WAVE-DIGEST §7.3); zero real regressions",
+      "owner_ticket": "none"
+    }
+  ],
+  "known_flakes": [
+    "interview-e2e 90s no-terminal under host load (inconclusive)",
+    "interview-kill-resume-e2e serve-child readiness under host load",
+    "two-build-cutover-e2e refuses to start when the rig DB inherits non-terminal clientOnboarding runs via template copy — rig hygiene; cancelling them made it ALL PASS",
+    "ready MAJOR-1 contention flake (24/24 alone)",
+    "4× pg_dump ENOENT and #693 EICAR are host environment reds"
+  ]
+}

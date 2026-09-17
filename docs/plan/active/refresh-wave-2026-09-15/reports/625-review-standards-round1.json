@@ -1,0 +1,39 @@
+{
+  "ticket": 625,
+  "lens": "STANDARDS",
+  "head": "c6f18f8c",
+  "findings": [
+    {
+      "id": "note-1-rpc-verb-declaration-deviation",
+      "severity": "note",
+      "where": "apps/web/e2e/e2e-fixture-ownership.test.ts:969 (SHARED_RPC_VERBS) and :1081 (new CORE_RELATION_HANDOVERS)",
+      "what": "The brief (brief-625.md §3 'Shared-file one-liners') literally instructed declaring caller_context, firm_members_visible and firm_invites_visible in SHARED_RPC_VERBS. The worker instead built a new, parallel census (CORE_RELATION_HANDOVERS) and left SHARED_RPC_VERBS untouched — a deviation from the binding brief's explicit instruction, disclosed prominently in the report as 'Assumption 1'.",
+      "evidence": "Verified the deviation is correct engineering, not a shortcut: SHARED_RPC_VERBS's own matcher (RPC_VERB_OPENER, :940) only fires on `verb === \"…\"`, `fn === \"…\"`, or `path === \"/rest/v1/rpc/…\"`; caller_context/firm_members_visible/firm_invites_visible are answered as `/rest/v1/<relation>` PostgREST view reads (confirmed at serve-built.mjs:497,516,531), which that regex never matches, so literal compliance would be inert. I ran `node --test apps/web/e2e/e2e-fixture-ownership.test.ts` directly and the new 'CORE-handover census' test passes (16/16 in the file), correctly catching the three-relation handover with exactly the declared claimant.",
+      "fix": "No code change needed — the substitute mechanism is sound and independently verified. Worth a one-line addendum to DECISIONS.md/brief-625.md recording that 'declare in SHARED_RPC_VERBS' was corrected to a new CORE_RELATION_HANDOVERS census for relation-level (non-RPC) reads, so a future reader of the brief doesn't re-flag this as unimplemented."
+    },
+    {
+      "id": "note-2-dead-verb-set-export",
+      "severity": "note",
+      "where": "apps/web/e2e/members-lifecycle-mock.mjs:66-75",
+      "what": "MEMBERS_LIFECYCLE_RPC_VERBS is exported with a comment claiming it exists 'so e2e-fixture-ownership.test.ts can census them against every sibling's, the way L7_RPC_VERBS is' — but unlike L7_RPC_VERBS (genuinely imported and asserted against at e2e-fixture-ownership.test.ts:29,618,628), MEMBERS_LIFECYCLE_RPC_VERBS is never imported anywhere, and the mock's own dispatch function (handleMembersLifecycleSupabase, :143-242) never references it either — each verb is matched by an inline `path === \"/rest/v1/rpc/<verb>\"` string instead.",
+      "evidence": "grep -rn \"MEMBERS_LIFECYCLE_RPC_VERBS\" across apps/web/e2e/*.ts *.mjs returns only its own declaration at members-lifecycle-mock.mjs:68 — no importer. The ownership census still works because rpcVerbCensus scans the mock file's raw source text via regex rather than importing the Set, so there is no functional gap; this is a documentation/dead-code accuracy issue only.",
+      "fix": "Either delete the unused export and correct the comment, or actually wire it in the way plans-mock.mjs does (`if (!MEMBERS_LIFECYCLE_RPC_VERBS.has(verb)) return false;`) if a genuine internal guard is wanted. Either resolves the comment/code mismatch."
+    }
+  ],
+  "ran": [
+    "pnpm typecheck (worktree root) → exit 0 (apps/web, packages/runtime both 'Done')",
+    "pnpm lint (worktree root) → exit 0; internal gates confirmed: check-token-contrast all AA pairs pass, check-test-manifest 367/367 files listed exactly once alphabetically, check-message-keys 2900/2900 t(\"…\") keys resolve in en.json",
+    "node --test packages/db/tests/preview-invite.test.mjs (PG 55501/clara_625) → 11 pass, 0 fail, 0 skip",
+    "node --test packages/db/tests/mdrw-rank-walls.test.mjs → 27 pass, 0 fail",
+    "node --test packages/db/tests/operation-census.test.mjs packages/db/tests/rig-isolation.test.mjs (no reset flags) → 30 pass, 0 fail, 1 skip (T19 destructive cell, as required)",
+    "node --test packages/runtime/tests/c5-stream-reauth-db.test.mjs (WORKFLOW_POSTGRES_URL=clara_625) → 2 pass, 0 fail",
+    "node --import test/bootstrap.mjs --import tsx --test on all 7 web unit test files touched/added by this diff (lib/firm/invite-preview.test.ts, components/invite-accept-form.test.tsx, invite-accept-a11y.test.tsx, invite-accept-keyboard.test.tsx, components/admin/members-walls.test.tsx, members-a11y.test.tsx, members-keyboard.test.tsx) → 97 pass, 0 fail",
+    "node --import test/bootstrap.mjs --import tsx --test apps/web/e2e/e2e-fixture-ownership.test.ts → 16 pass, 0 fail (including the new CORE-handover census)",
+    "pnpm --filter @clara/web e2e -- members-invite-walk responsive-shell-walk (build+start+Playwright, ports 3230/3231/3232) → 28 passed (3 members-invite-walk + 25 responsive-shell-walk), 0 failed, exit 0",
+    "node scripts/check-frozen-workflows.mjs → OK, 281 frozen files verified, 51 'use workflow' modules all frozen+registered",
+    "node packages/runtime/scripts/check-parts-parity.mjs → OK, reader ⊇ emittable",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md → empty (0 lines)",
+    "git diff origin/main...HEAD -- apps/web/lib/firm/tree.ts .github/actions/db-live-gates/action.yml → empty (0 lines)",
+    "pnpm --filter @clara/web e2e -- firm-navigation-walk, run TWICE (exploratory, not part of the ticket's required gate list; file untouched by this diff) → run 1: 7 passed/3 failed, run 2: 8 passed/2 failed; only 'the client register … EXACTLY this firm's own clients' (line 357/370, 7 rows vs expected 4) failed on BOTH runs — the exact pre-existing defect the worker's report names and attributes to shared fixture drift (ACTIVITY_CLIENTS+WORK_LIST_CLIENTS append) unrelated to #625; the other 1-2 failures differed between runs (timeouts on unrelated assertions/sign-in) and did not reproduce a second time, consistent with local machine load rather than a real regression"
+  ]
+}

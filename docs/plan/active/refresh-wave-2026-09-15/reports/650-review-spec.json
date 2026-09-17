@@ -1,0 +1,25 @@
+{
+  "ticket": 650,
+  "lens": "SPEC",
+  "head": "a948fb8b",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "note",
+      "where": "apps/web/messages/en.json:ClientWorkAttention.attempt",
+      "what": "The retry-attempt ordinal string uses ICU `plural` with hand-picked `=2`/`=3` exact matches instead of `selectordinal`, so it prints the wrong suffix once attempts reach 21 (\"21th run\" instead of \"21st run\", and again at 22/23/31/32/33...).",
+      "evidence": "en.json: `\"attempt\": \"{n, plural, one {#st run} =2 {2nd run} =3 {3rd run} other {#th run}}\"`. English CLDR `plural` category `one` matches only n=1, so n=21 falls to `other` -> \"21th run\". Rendered from `client-work-attention.tsx:150` (`t(\"attempt\", { n: row.attempts })`), fed by `_work_run_attempts.attempts` which is not bounded, so a Work with 21+ runs would show the wrong ordinal. Cosmetic only — no AC references this string, and realistic attempt counts are small.",
+      "fix": "Use ICU `selectordinal` instead of `plural`, e.g. `\"attempt\": \"{n, selectordinal, one {#st run} two {#nd run} few {#rd run} other {#th run}}\"`, which computes the correct English ordinal category for every n."
+    }
+  ],
+  "ran": [
+    "packages/db (rig 55509/clara_650): node --test --test-concurrency=1 <29 preintegration-gate imports> tests/client-work-pack.test.mjs -> 12 tests, 12 pass, 0 fail, 0 skip (16.5s) — reproduces the report's own count",
+    "packages/db: direct pg queries against clara_650 confirming clara.schema_migrations max='0199_client_work_pack', clara.get_client_work_pack prosecdef=false/provolatile='s', matching the migration and the report's catalog claims",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/work/client-work-pack.test.ts lib/work/use-client-work-pack.test.ts components/firm/client-home/client-work-attention.test.tsx components/firm/client-workspace-overview.test.tsx -> 48 tests, 48 pass, 0 fail",
+    "node scripts/check-frozen-workflows.mjs (worktree root) -> OK, 281 frozen files verified, 51 'use workflow' modules registered, exit 0",
+    "apps/web e2e (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3310 NEXT_PORT=3311 RUNTIME_PORT=3312): pnpm --filter @clara/web e2e home-board-walk — first solo run: 7 passed, 2 failed (tests 8/9, both ERR_CONNECTION_REFUSED mid-run); diagnosed as stale zombie next-build/next-start processes left on MY OWN ports 3310-3312 from an earlier interrupted background invocation (confirmed via netstat + Get-Process, killed only those two PIDs which belonged to this worktree's node_modules), plus a stale .next/lock; after cleanup, re-ran twice more (one hit the stale lock, one hit 'port already used' from the still-dying prior server) and a fourth clean run passed 9/9 in 47.7s, exit 0 — corroborates the report's claimed 9/9 and confirms the two interim failures were host/leftover-process artifacts, not a code defect",
+    "pnpm typecheck (worktree root) -> apps/web typecheck: Done, packages/runtime typecheck: Done, exit 0",
+    "pnpm lint (worktree root) -> apps/web lint Done including check-test-manifest and token-contrast gates, exit 0",
+    "Read/diffed: packages/db/migrations/0199_client_work_pack.sql (full), apps/web/lib/work/client-work-pack.ts, apps/web/lib/work/use-client-work-pack.ts, apps/web/components/firm/client-home/client-work-attention.tsx, apps/web/components/firm/client-workspace-overview.tsx diff, apps/web/components/firm/client-home/client-close-summary.tsx diff, apps/web/e2e/home-board-walk.spec.ts + home-board-mock.mjs diff, packages/db/tests/client-work-pack.test.mjs (full), CONTEXT.md/README diffs, manifest.txt/e2e-fixture-ownership.test.ts/rig-meta.mjs/package.json diffs — cross-checked every brief/DECISIONS/gap-map clause (floor restatement verbatim against 0189:344-347, retry-as-label-only + 101-id ceiling avoidance, seven-MYT-day window half-open range, no domain_events watermark, no period/fiscal parameter with tail postcheck, needs_you_ref static pointer with 裁-190 tail guard, two-reads-not-one-pack wiring, readiness label-only per Q3, C77.12 30s-timer argument + WORK_STALE_AFTER_MS import-by-reference) against the actual source"
+  ]
+}

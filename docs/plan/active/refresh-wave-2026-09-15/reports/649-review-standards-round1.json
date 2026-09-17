@@ -1,0 +1,35 @@
+{
+  "ticket": 649,
+  "lens": "STANDARDS",
+  "head": "baaf48fe",
+  "findings": [
+    {
+      "id": "STD-1",
+      "severity": "should",
+      "where": "apps/web/components/clara/OnboardingChecklistCard.tsx:438-500",
+      "what": "The new settle_client_onboarding_facts call (D7) is awaited INSIDE the same act(fn, onOk) closure as commit_client_onboarding, and onOk (`() => clientRecordChanged({ clientId })`) only fires when the WHOLE fn resolves without throwing. commit_client_onboarding is not swallowed and neither is the settle call (by design — CLR38 must surface, per the file's own comment at lines 467-478). So when commit succeeds (client genuinely becomes status='active') and the settle call then throws — CLR38 fy_end_locked_by_annual_cadence, or fy_end_month_contradicts_plan, both reachable despite the client-side validation in fyEndDraftBlocks/validateFyEnd (which only checks format, never the CLR38 cadence-lock or a month mismatch against the plan's own answer) — the CLIENT_RECORD_CHANGED bus event never fires. client-workspace-overview.tsx (lines ~120-138, mounted as a SIBLING of this rail card on the very same client-Home page) and client-register-list.tsx both refresh only on that event; both are documented as depending on it precisely because 'nothing here could know to re-read' otherwise. The rail card itself is fine (its own reloadImpl re-reads and correctly shows the active client + the CLR38 banner via refusalBanner), but the identity band / register list on the SAME page silently keep showing 'Onboarding' until an unrelated trigger causes them to reload. This directly contradicts the invariant the ticket's own comment states at lines 496-499 ('a refused commit changed nothing and announces nothing') — a settle refusal is NOT a refused commit: the commit already succeeded and the record already changed.",
+      "evidence": "Traced act()'s implementation in apps/web/lib/parts/hooks.ts:230-253: onOk fires only inside the try block, after `await fn()` resolves; any throw inside fn (including from settleClientOnboardingFacts at OnboardingChecklistCard.tsx:483-494) skips onOk entirely and only sets err/clr. Confirmed client-workspace-overview.tsx:120-138 subscribes to CLIENT_RECORD_CHANGED as its ONLY re-read trigger for this exact status-badge staleness class (its own comment: 'nothing here could know to re-read'). Confirmed the only existing regression test for this invariant, 'H-50 — a SUCCESSFUL commit announces CLIENT_RECORD_CHANGED exactly once, and a REFUSED one announces nothing' (apps/web/components/clara/onboarding-checklist.test.tsx:483-511, unmodified by this branch), never populates the fy-end draft, so fyEndDraftIsBlank is true and settleClientOnboardingFacts is never invoked in that test — the new failure path is untested by both this test and the three new settle-focused tests in onboarding-field-composition.test.tsx (lines ~260-330), none of which assert on CLIENT_RECORD_CHANGED. Whole apps/web suite run (node scripts/run-tests.mjs) still passed 3746/3748 with this gap present, confirming no test catches it.",
+      "fix": "Fire the client-record-changed announcement as soon as commit_client_onboarding itself succeeds, independent of what promote/settle do afterward — e.g. call clientRecordChanged({ clientId }) immediately after the `await commitClientOnboarding(...)` line (before the promote/settle calls), or split into two act() invocations so the settle call's own failure cannot suppress the first one's onOk. Add a third case to the existing H-50 test (commit ok + settle raises CLR38) asserting the announcement still fires exactly once."
+    }
+  ],
+  "ran": [
+    "git log --oneline origin/main..HEAD; git diff origin/main...HEAD --stat (34 files, 5 commits, all carrying Co-Authored-By: Claude Fable 5.1)",
+    "git diff origin/main...HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (blueprints untouched)",
+    "Read packages/db/migrations/0204_client_onboarding_facts.sql in full (683 lines): header/prestate-pins/tail-assertions/event-taxonomy all match house shape (0193/0194 precedent)",
+    "node -e (via lib/pg.mjs) on rig 127.0.0.1:55508/clara_649: confirmed client_identity_candidates, settle_client_onboarding_facts, _plan_fye_month all resolve; re-measured all 5 non-regression sha256(prosrc) pins live on the rig -> byte-identical to the migration's pinned values",
+    "packages/db: node --test --test-concurrency=1 <29 gates> tests/client-onboarding-identity.test.mjs -> 9 tests, 9 pass, 0 fail",
+    "packages/db: node --test tests/operation-census.test.mjs -> 10 pass, 0 fail",
+    "packages/db: node --test tests/rig-isolation.test.mjs (no reset flags) -> 21 tests, 20 pass, 1 skip (T19 destructive, expected)",
+    "packages/runtime (PGDATABASE=clara_rt_test, WORKFLOW_POSTGRES_URL set): node tests/interview-e2e.mjs -> PASS incl. new p649.interview.sst_park_today; node tests/interview-kill-resume-e2e.mjs -> PASS",
+    "pnpm typecheck (worktree root) -> exit 0",
+    "pnpm lint (worktree root) -> exit 0, including apps/web's eslint + check-token-contrast + check-test-manifest(+selftest) + check-message-keys(+selftest) all green",
+    "node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files verified, no drift",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "apps/web: node scripts/run-tests.mjs (whole suite) -> 3748 tests, 3746 pass, 0 fail, 2 skipped (the two pre-existing live-provider-gated auth cells); no thread-live-clarify flake this run",
+    "apps/web: node --test e2e/e2e-fixture-ownership.test.ts -> 15 pass, 0 fail",
+    "apps/web: npx playwright test e2e/client-create-walk.spec.ts (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3300, NEXT_PORT=3301, RUNTIME_PORT=3302) -> full run 3 passed + 1 failed (frame-detached mid-navigation, environment flake); re-ran the failing test alone -> 1 passed in 15.8s, confirming it is not a code defect",
+    "Manual diff review of shared files (apps/web/test/manifest.txt, apps/web/e2e/serve-built.mjs, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/messages/en.json, packages/db/package.json, packages/db/tests/rig-meta.mjs, CONTEXT.md) -> minimal, sorted, one-liner/localized insertions per DECISIONS §1.6",
+    "Confirmed zero diff on apps/web/lib/navigation/tree.ts, lib/firm/require-firm-scope.ts, lib/firm/needs-you.ts, components/clara/InterviewRunCard.tsx, lib/documents/useUploadQueue.ts, lib/documents/intake.ts, .github/actions/db-live-gates/action.yml",
+    "Manual code review: apps/web/lib/onboarding/{identity,fy-end,settle,coa}.ts, components/firm/client-identity-candidates.tsx, components/firm/client-register-list.tsx (AddClientControl), components/clara/OnboardingFyEndField.tsx, OnboardingChecklistCard.tsx, OnboardingItemRow.tsx, ApplyStandardChartControl.tsx, client-identity-band.tsx, client-onboarding-progress.tsx, packages/runtime/tests/interview-e2e.mjs diff"
+  ]
+}

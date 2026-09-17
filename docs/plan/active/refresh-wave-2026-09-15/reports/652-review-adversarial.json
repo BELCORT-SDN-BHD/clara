@@ -1,0 +1,86 @@
+{
+  "findings": [
+    {
+      "id": "A1",
+      "severity": "should",
+      "where": "packages/db/migrations/0207_accrual_adjustments.sql:315-316,731 (clara.accrual_adjustments.service_period_*, clara._accrual_journal_basis)",
+      "what": "One stated service period is frozen into the plan revision's basis, so every occurrence of a multi-period schedule posts a journal line describing the SAME term — including occurrences whose posting date precedes that term. There is no congruence wall between the stated term and the effective window: the term may sit wholly outside it and the schedule may be open-ended.",
+      "evidence": "Probe C on the fresh chain (clara_652r): configured effective_from=2026-06-01, effective_to=null, monthly/last_day_of_month, stated term 2026-07-01..2026-07-31, then catch-up + post. Three primary entries: posting=2026-06-30, 2026-07-31, 2026-08-31 — each with lines [{acct 6100, dr 120000, desc \"accrued 2026-07-01 to 2026-07-31\"},{acct 2020, cr 120000, desc \"accrual\"}]. So a July term is debited in June and again in August, and the ledger text is false on two of the three entries. Probe C2: an accrual whose term is 2031-01-01..2031-12-31 on an effective window of one month was ACCEPTED (accrual 808fc28c-3378-4b66-8b02-54ca661dcd2f). Cents, accounts and posting dates are correct throughout (dr=cr=120000 on all three).",
+      "fix": "In clara._assert_accrual_particulars / the two doors, refuse a configuration whose stated term is not bracketed by the authority window (CLR10 accrual_term_window_mismatch, field accrual.service_period_start/end), AND refuse a schedule that would generate more than one primary occurrence while carrying a single fixed term (require effective_to, and require the schedule to yield exactly one primary due date for the stated-term methods). If a recurring accrual is intended, drop the term from the derived line description at 0207:731 — clara._plan_occurrence_basis is #653-owned and pinned, so it cannot vary it — and name the per-occurrence term as a residual in the report."
+    },
+    {
+      "id": "A2",
+      "severity": "should",
+      "where": "packages/db/migrations/0207_accrual_adjustments.sql:328-333 (method CHECK) · apps/web/messages/en.json:4900,4964",
+      "what": "`method` is recorded on the accrual row and never applied anywhere: no lane reads clara.accrual_adjustments at all, and the posted amount comes solely from the frozen revision basis. All four selection rules therefore post identically, while the form labels the control \"How each period's amount is chosen\" and offers \"The amount the previous period recorded\".",
+      "evidence": "Probe E on clara_652r: two accruals, method={rule:'stated_amount'} and method={rule:'prior_period_amount'}, same stated 120000. Both revisions carry the identical frozen basis and both post primary@2026-06-30=120000, primary@2026-07-31=120000, primary@2026-08-31=120000 — including the FIRST period, where 'the amount the previous period recorded' does not exist. `grep -rn accrual_adjustments packages/db/migrations/*.sql | grep -v 0207` returns nothing; `grep -c accrual packages/runtime/lib/plan-occurrences.mjs` = 0.",
+      "fix": "Either narrow the enum in this slice to the rule that is actually honoured (`stated_amount`) and name the other three as a successor residual, or keep the enum and say out loud — in the 0207 header, CONTEXT.md's \"Calculation method\" entry and the form's methodHint — that the rule is recorded for the successor and does not vary what this slice posts. As written the product copy promises per-period amount selection that no code performs."
+    },
+    {
+      "id": "A3",
+      "severity": "note",
+      "where": "packages/db/migrations/0207_accrual_adjustments.sql:963-969,1069-1075 (both doors' _reserve_op call) · packages/db/migrations/0004_governed_fns.sql:57",
+      "what": "The same-op-key-different-payload conflict surfaces as a bare CLR10 with NO detail, so it carries none of the `detail.reason` the file's own refusal vocabulary promises and the web lane cannot classify or field-map it.",
+      "evidence": "Probe B2 on clara_652r: replay of one key with cents changed 120000 -> 999 raised `code=CLR10 detail=(none) msg=\"op_key reused with different args\"`, and the footprint stayed {plans:1,revisions:1,occurrences:1,accruals:1,work:2}. The 0207 header's \"REFUSAL VOCABULARY THIS FILE OWNS\" block and its \"INHERITED UNCHANGED\" list both omit this case.",
+      "fix": "Wrap the _reserve_op call in an exception block in both doors and re-raise as CLR10 with detail {\"reason\":\"op_key_conflict\"} (or add the token to the header's inherited list and map it in apps/web/lib/accruals + the form's refusal copy), so a preparer sees \"this key already configured a different accrual\" rather than an unclassified failure."
+    },
+    {
+      "id": "A4",
+      "severity": "note",
+      "where": "packages/db/migrations/0207_accrual_adjustments.sql:1364",
+      "what": "The tail's \"this file altered no foreign table\" proof for clara.document_service_periods is a transcribed literal (`count(*) <> 14`) rather than a value captured in §0, unlike the six body digests which are captured into the w652_plan_pin temp table and re-compared.",
+      "evidence": "Line 1364: `if (select count(*)::int from pg_constraint where conrelid='clara.document_service_periods'::regclass) <> 14 then raise ...`. It held on the from-scratch chain (194 migrations applied, exit 0), but it asserts a property of the whole chain below 0207, not of this file: any migration numbered under 0207 that ever adds a constraint to that relation reds the entire chain with a message about this file. #653's 0208 is the wave's declared user of that relation and sits above 0207 today, so the risk is a renumbering away.",
+      "fix": "Capture the count in §0 into the same temp table (`create temp table w652_foreign_pin as select count(*) ...`) and compare §E against it, exactly as the six plan-lane digests are handled. The assertion then proves what it claims — that THIS file added nothing — independent of the chain below it."
+    },
+    {
+      "id": "A5",
+      "severity": "note",
+      "where": "packages/db/tests/accrual-adjustments.test.mjs:428,486,711",
+      "what": "Three of the battery's seventeen cells — the reversal binding (p652.reversal.binds), the locked-period catch-up (p652.catchup.locked) and entrance independence (p652.plan.occurrence.typed) — skip themselves when the run day is the last day of its month, so on one day in 31 the ticket's reversal and lock evidence is a counted skip rather than a pass.",
+      "evidence": "`if (await isMonthEnd()) { t.skip(\"p652.reversal.binds needs a day that is not the month end…\") }` at :428, and the same guard at :486 and :711. My run on 2026-09-17 was 17/17 pass / 0 skip; on 2026-09-30 it would be 17/14/3. WORK-ORDER rule 10: \"skipped batteries are not evidence\".",
+      "fix": "Shape those three cells' schedules with `dayRule:'day_of_month', dayOfMonth:15` instead of `last_day_of_month` — the scenario \"an accrual admitted, its reversal outstanding\" then exists on every calendar day and the guard can be deleted."
+    },
+    {
+      "id": "A6",
+      "severity": "note",
+      "where": "apps/web/lib/command/routes.ts:145",
+      "what": "The ⌘K keyword \"accruals\" is REMOVED from the existing `plans` row rather than only added to the new `accruals` row — a behaviour change to a shipped surface inside a shared file the brief did not assign to this ticket.",
+      "evidence": "`git diff origin/main...HEAD -- apps/web/lib/command/routes.ts`: `- plans: { id: \"registersPlans\", keywords: [\"plans\", \"adjustments\", \"accruals\", \"registers\"] }` / `+ plans: { id: \"registersPlans\", keywords: [\"plans\", \"adjustments\", \"registers\"] }`. Declared by the worker as assumption 6; lib/command/routes.test.ts is 15/15 green either way.",
+      "fix": "Leave the `plans` keyword list intact and let both rows answer the word (the accruals row already ranks first on an exact match), or keep the removal and have the orchestrator confirm it against DECISIONS §1.6's \"one-line registrations at the sorted position\" rule for shared web files."
+    },
+    {
+      "id": "A7",
+      "severity": "note",
+      "where": "review rig (not a branch defect)",
+      "what": "The fresh from-scratch cluster is LEFT RUNNING for the fix round: cluster rig652r, PostgreSQL 17 on 127.0.0.1:55610, database clara_652r, frontier 0207 (194 migrations + 2 seed files). It also settles the worker's one open rig claim.",
+      "evidence": "`wsl -u root -- bash .../mkrig.sh rig652r 55610` -> 127.0.0.1:55610 accepting connections; `pnpm db:migrate` -> \"194 new migration(s) applied · 194 total\", re-run -> \"0 new migration(s) applied · 194 total\"; `pnpm db:seed` -> 2 files. On this clean chain (no WDK world bootstrapped) `tests/rig-isolation.test.mjs` without the reset flags is 21 tests / 20 pass / 0 FAIL / 1 skip, confirming the worker's report that T10b's red on clara_652 is graphile_worker rig state and not 0207. The e2e's own gate `ALLOWED_DB=/^clara_(rt_test|wave_b_ci|[0-9]{3,4})$/` rejects `clara_652r`, so tests/accrual-e2e.mjs was run on the ticket's own rig (clara_652, 55510) instead.",
+      "fix": "No action on the branch. Re-use port 55610 / clara_652r for the fix round; drop with `pg_dropcluster --stop 17 rig652r` when the wave closes."
+    }
+  ],
+  "head": "b579e25a",
+  "lens": "ADVERSARIAL MIGRATION + ACCOUNTING SAFETY",
+  "ran": [
+    "PowerShell: wsl -u root -- bash /mnt/c/Users/zhant/Desktop/clara-rebuild/docs/plan/active/refresh-wave-2026-09-15/mkrig.sh rig652r 55610 -> cluster rig652r online, 127.0.0.1:55610 accepting connections",
+    "node -e create database clara_652r on 127.0.0.1:55610 -> created",
+    "PGPORT=55610 PGDATABASE=clara_652r pnpm db:migrate (worktree root) -> '194 new migration(s) applied · 194 total', exit 0; 0207 prestate notice 'clean' and tail notice 'OK' both printed on that chain",
+    "PGPORT=55610 PGDATABASE=clara_652r pnpm db:migrate (re-run) -> '0 new migration(s) applied · 194 total', exit 0",
+    "PGPORT=55610 PGDATABASE=clara_652r pnpm db:seed -> 2 seed file(s) applied, exit 0",
+    "packages/db: node --test --test-concurrency=1 $GATES (29 --import preintegration gates) tests/accrual-adjustments.test.mjs on clara_652r -> 17 tests / 17 pass / 0 fail / 0 skipped",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/operation-census.test.mjs on clara_652r -> 10 tests / 10 pass / 0 fail",
+    "packages/db: node --test --test-concurrency=1 $GATES tests/rig-isolation.test.mjs on clara_652r, NO reset/role-sweep flags -> 21 tests / 20 pass / 0 fail / 1 skipped",
+    "probeA.mjs (scratchpad, imports packages/db/tests fixtures) on clara_652r -> relrowsecurity=t relforcerowsecurity=t relacl=null; 0 views named accrual; 16 new functions all SECURITY DEFINER, ACLs = fn_owner + (authenticated x3 | runtime x1); SELECT/INSERT/UPDATE/DELETE/TRUNCATE on clara.accrual_adjustments = 42501 for clara_authenticated, clara_runtime, clara_agent_ro, clara_wake_interactive, clara_wake_proactive (25/25 refused); firm-B human list=CLR11 client_not_found, get=CLR11 accrual_not_found, create=CLR11 client_not_found; create_accrual_adjustment_for = 42501 for authenticated/agent_ro/both wake roles; OBO with a cross-firm author = CLR11 client_not_found",
+    "probeB.mjs on clara_652r -> replay of one key+payload returns the same accrual_id/plan_id with footprint {plans:1,revisions:1,occurrences:1,accruals:1,work:2} and exactly two op_receipts rows (create_accounting_plan '<k>:plan' + create_accrual_adjustment '<k>'); same key + changed cents -> CLR10 'op_key reused with different args' (no detail), footprint unchanged; two-session barrier race on one key -> BOTH sessions answered the SAME accrual_id, footprint still one of each; two concurrent configurations on distinct keys -> both ok, no 40P01",
+    "probeC.mjs on clara_652r -> 3 posted primary entries all dr=cr=120000 balanced, expense 6100 debited / liability 2020 credited; all three carry desc 'accrued 2026-07-01 to 2026-07-31' at posting dates 2026-06-30, 2026-07-31, 2026-08-31; a term wholly outside the effective window ACCEPTED; UPDATE and DELETE on clara.accrual_adjustments refused CLR08 accrual_adjustment_immutable even as superuser",
+    "probeD.mjs on clara_652r -> no agent identity holds a firm membership (agent-as-author inapplicable); concurrent configure + configure + request_plan_catch_up + wake_due_plan_occurrences on one client/plan -> all four ok, no 40P01, occurrences attempt=1 throughout",
+    "probeE.mjs on clara_652r -> method {rule:'stated_amount'} and {rule:'prior_period_amount'} produce byte-identical revision bases and identical postings 120000/120000/120000",
+    "probeF.mjs on clara_652r -> invalid schedule, unknown frequency and an unresolved authority_ref each refuse AFTER the outer reservation and leave zero op_receipts rows and an unchanged footprint (no partial rows)",
+    "packages/runtime: PGPORT=55510 PGDATABASE=clara_652 WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55510/clara_652 RELAY_TEST_MODE=1 node tests/accrual-e2e.mjs (ticket rig, real Postgres/Workflow World) -> PASS 1 (one commit, no engine, nothing posted) · PASS 2 (exit_after_commit replay: one entry/receipt/occurrence/accrual) · PASS 3+4 (reversal named entry 4ca40340, survived cancel + human catch-up) , exit 0",
+    "worktree root: node scripts/check-frozen-workflows.mjs -> OK, 281 frozen files, 51 'use workflow' modules; packages/runtime/lib/accrual-basis.ts imports only 'zod' (no node: module-level import)",
+    "worktree root: node packages/runtime/scripts/check-parts-parity.mjs -> OK, exit 0 (work_accepted still emittable from v18/v19 only; no WORK_ACCEPTED_PURPOSES change)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/parity-holes.test.ts 7/7 · tests/firm-scope-surfaces.test.ts 35/35 · tests/sql-oracle.test.ts 25/25 · tests/firm-scope-fourth-entrance.test.ts 21/21 · e2e/e2e-fixture-ownership.test.ts 15/15 · lib/navigation/tree.test.ts 24/24 · lib/command/routes.test.ts 15/15 (all 0 fail)",
+    "apps/web: components/accruals/accrual-form.test.tsx 11/11 · lib/work/accrual-draft.test.ts 21/21; packages/runtime: node --test tests/accrual-basis-unit.test.mjs 16/16",
+    "worktree root: pnpm typecheck -> exit 0 (apps/web Done, packages/runtime Done); pnpm lint -> exit 0 (apps/web eslint + token-contrast + test-manifest + message-keys all green, packages/db, packages/runtime, packages/reporting-render Done)",
+    "git -C C:/Users/zhant/Desktop/clara-wt/652 log --oneline origin/main..HEAD (9 commits) · git diff origin/main...HEAD --stat (35 files, +7730/-6) · grep -cin 'create or replace' packages/db/migrations/0207_accrual_adjustments.sql -> 2, both inside comments (zero real recuts, so no DECISIONS §1.3 assignment is touched); only ALTER TABLE statements target clara.accrual_adjustments itself"
+  ],
+  "ticket": 652
+}

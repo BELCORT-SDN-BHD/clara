@@ -1,0 +1,112 @@
+{
+  "ticket": 649,
+  "lens": "ADVERSARIAL MIGRATION + ACCOUNTING SAFETY",
+  "head": "baaf48fe",
+  "findings": [
+    {
+      "id": "B1",
+      "severity": "blocker",
+      "where": "packages/db/migrations/0204_client_onboarding_facts.sql:454 (and :502)",
+      "what": "settle_client_onboarding_facts INVERTS the onboarding family's lock order: it takes the clara.onboarding_plans row lock FIRST (:454) and only then reaches clara.clients (:502, via set_client_fy_end's advisory rung + UPDATE). Every other door in that family takes the CLIENT first — commit_client_onboarding (0017:2764 clients FOR UPDATE, then 0017:2768 plans FOR UPDATE), cancel_client_onboarding (0017:2852/:2853), approve_opening_seed (0017:3856 advisory 203005004 then 0017:3857 plan FOR UPDATE); 0037:2518-2536 states the estate's lock-order law. The result is a real 40P01 in BOTH directions, and one of them kills the accounting write with an untyped error the web door has no refusal face for.",
+      "evidence": "Proven three times on the ticket's own rig (PGPORT=55508 db clara_649), scripts in C:\\Users\\zhant\\AppData\\Local\\Temp\\claude\\649rev\\lockorder{,-commit,-rev}.mjs. Tx X performs cancel/commit's OWN first two lock acquisitions; Tx A calls the real settle door.\n(1) lockorder.mjs → `X result: 40P01 deadlock detected` / `A result: {...fy_end_day:30,fy_end_month:6...}`.\n(2) lockorder-commit.mjs (commit_client_onboarding) → `X result: 40P01 deadlock detected`.\n(3) lockorder-rev.mjs (cancel already waiting on the plan lock) → `SETTLE result: 40P01 deadlock detected (detail=Process 4728 waits for ShareLock on transaction 19301; blocked by process 4729. Process 4729 waits for ShareLock on transaction 19300; blocked by process 4728.)` / `CANCEL result: CLR10 client onboarding is not open` / `client row: {\"fy_end_month\":null,\"fy_end_day\":null,...}` — the legitimate financial-year write was the victim and nothing was recorded. No existing cell covers this: p649.settle.replay_isolation only races settle against settle, which shares one order.",
+      "fix": "In settle_client_onboarding_facts, acquire the client row lock before the plan row lock, exactly as commit/cancel do. E.g. after _reserve_op: `select client_id into v_client from clara.onboarding_plans where id = p_plan;` (unlocked), then `perform 1 from clara.clients where id = v_client for update;`, then the existing `select * into p from clara.onboarding_plans where id = p_plan for update;` and the existing firm/scope/state checks (which still refuse a foreign or absent plan with CLR11/CLR10 and no oracle). Add a cell that runs a settle and a cancel/commit against the same client with a barrier and asserts a typed refusal on both sides, never 40P01."
+    },
+    {
+      "id": "B2",
+      "severity": "blocker",
+      "where": "apps/web/e2e/client-create-mock.mjs:126 + apps/web/components/firm/client-register-list.tsx:225",
+      "what": "The row the ticket lists as 'CB-AE2E-024 / H-51 verify-only + extended' is RED. AddClientControl's Confirm now hard-requires clara.client_identity_candidates before it dispatches the birth door (client-register-list.tsx:225 `const clear = await runIdentityCheck(); if (!clear) return false;`), but the new lane mock OWNS that verb and returns false for every name outside its own three (client-create-mock.mjs:126), and no other lane claims it. agentic-finish-walk.spec.ts's H-51 arm types 'ROME PUBLIC ADVISORY', the read fails, the door is never called, and the walk never navigates. The worker never ran this spec — the report's Playwright evidence is `client-create-walk: 4 passed` only.",
+      "evidence": "`pnpm --filter @clara/web e2e agentic-finish-walk` on the assigned port triple (3300/3301/3302), run TWICE. Contended run (log .../649rev/pw-agentic.log, PW_EXIT=1): test 8 failed at spec:339 before reaching the click, and 4 other tests failed in beforeEach/sign-in — host contention. SOLO re-run (log .../649rev/pw-agentic2.log, PW_EXIT=1): tests 4,5,7 that had failed now PASS; tests 1,3,6 flake the other way; **test 8 H-51 fails in BOTH runs**, solo at the exact dispatch assertion: `TimeoutError: page.waitForURL: Timeout 15000ms exceeded` at agentic-finish-walk.spec.ts:358. Causation nailed by the server log and the DOM snapshot: exactly ONE `[e2e-mock] POST /rest/v1/rpc/client_identity_candidates` in the whole run (pw-agentic2.log:695), immediately followed by the failure, and NO `begin_client_onboarding` after it; apps/web/e2e/.artifacts/agentic-finish-walk-H-51-.../error-context.md shows the dialog still open with 'ROME PUBLIC ADVISORY' in the field.",
+      "fix": "Make client-create-mock.mjs ANSWER `client_identity_candidates` for names it does not own with the honest arity-0 shape `{ name, arity: 0, candidates: [] }` instead of `return false` (a verb no lane answers is not a fall-through, it is an outage), or add that generic arity-0 answer to serve-built.mjs's own fixture block. Then declare `client_identity_candidates` in e2e-fixture-ownership.test.ts's SHARED_RPC_VERBS alongside `begin_client_onboarding`, and run `agentic-finish-walk` (not only `client-create-walk`) before re-reporting."
+    },
+    {
+      "id": "S1",
+      "severity": "should",
+      "where": "apps/web/components/firm/client-register-list.tsx:186-196 and :334 (banner at :204)",
+      "what": "A FAILED identity read is rendered as evidence of absence, which is the exact inversion of this file's own review law 2. The catch branch sets `setCheckedFor(typed); setCandidates([]); setArity(0)`, so the dialog renders `tid('noCandidates')` = 'Nothing in this firm answers to that name.' (:334) for a read that never ran; the only error surface, the StateBanner at :204, is rendered OUTSIDE `<OnboardingDoorDialog>` and therefore sits behind the portalled modal. The unit cell that is supposed to catch this (add-client-candidates.test.tsx:290) asserts `/unavailable/.test(textOf(body))` over the whole document body, so the banner-behind-the-modal placement and the false 'nothing matches' line both pass.",
+      "evidence": "Observed live in the H-51 failure snapshot, apps/web/e2e/.artifacts/agentic-finish-walk-H-51-C-8272d-.../error-context.md: `- paragraph [ref=f3e183]: Nothing in this firm answers to that name.` inside `- dialog [ref=f3e173]`, while the page-level `- alert [ref=f3e169]` is outside it. The read had failed (one client_identity_candidates POST, no begin_client_onboarding, no navigation).",
+      "fix": "Track the failed-read case separately from arity 0 (e.g. `checkOutcome: 'answered' | 'failed'`), render the noCandidates line only on 'answered', render the refusal inside the dialog for every failure kind (not just `arity >= 2 && refusal`, :309), and tighten the unit cell to assert BOTH that 'Nothing in this firm answers to that name.' is absent and that the failure text is inside the dialog."
+    },
+    {
+      "id": "S2",
+      "severity": "should",
+      "where": "packages/db/migrations/0204_client_onboarding_facts.sql:284-286",
+      "what": "clara._plan_fye_month's NUMBER branch matches `'^[0-9]+$'` (unbounded) and then casts `::int`, so an out-of-range JSON number raises an untyped 22003 out of the human settle door instead of a CLR refusal. The string branch already gets this right (`'^[0-9]{1,2}$'`, :288). The file's own comment claims 'ANY OTHER SHAPE READS AS ABSENT: an object, an array, a number outside 1..12 or a non-numeric string is not a month' — that is false for a large number. It is reachable through a granted door: clara.update_onboarding_plan (0017:2632, the runtime interview CAS writer) validates only item_key/item_kind/state and inserts `j->'answer'` verbatim.",
+      "evidence": "Probe on the fresh from-scratch rig (PGPORT=55608 db clara_649r), C:\\Users\\zhant\\AppData\\Local\\Temp\\claude\\649rev\\probe.mjs: a committed plan carrying `fye = 99999999999999999999` (JSON number) then `settle_client_onboarding_facts(...)` as an admin → `settle when plan fye answer = 1e20   22003 value \"99999999999999999999\" is out of range for type integer`. Every other malformed shape in the same probe refuses correctly (identifier arms give CLR10 identifier_malformed / identifier_kind_unknown).",
+      "fix": "Use `'^[0-9]{1,2}$'` in the number branch too (or cast through numeric and range-check before `::int`), so an unreadable month reads as absent and the door refuses CLR10 fy_end_month_unanswered. Add a cell planting an out-of-range fye number and asserting the typed refusal."
+    },
+    {
+      "id": "S3",
+      "severity": "should",
+      "where": "apps/web/components/command/command-palette.tsx:308 + apps/web/lib/command/do-actions.ts:141-152; claim at apps/web/README.md:30",
+      "what": "The ⌘K palette is a second, live entrance to clara.begin_client_onboarding that never asks clara.client_identity_candidates, so AC1's only wall (the face) covers one of the two shipped entrances. The new README section states the opposite as fact: 'The client register's **Add client** control is the only surface in the product that opens a client file' (README.md:30). The report marks AC1 'done' and its residual list names only the DB-side birth-door residual, not the palette.",
+      "evidence": "`DO_ACTIONS` carries `beginClientOnboarding` with `altitude: \"any\"` (do-actions.ts:141-152) and the palette dispatches it with a bare `runDoAction(spec, doEnv, session)` (command-palette.tsx:308) — no readClientIdentityCandidates anywhere in that path (grep over apps/web shows `readClientIdentityCandidates` only in lib/onboarding/identity.ts and client-register-list.tsx). Proven green in the browser: agentic-finish-walk.spec.ts:77 '裁-37 · ⌘K Do … And it DISPATCHES' passed (49.1s, pw-agentic.log:188) and the whole run logged ZERO client_identity_candidates requests (`grep -c` = 0).",
+      "fix": "Either call readClientIdentityCandidates for the `beginClientOnboarding` spec inside the palette's handleDo (or lift it into runDoAction keyed on that spec id) so both entrances ask the same question, or — if the palette is deliberately out of scope — correct README.md:30 and name the palette bypass as an explicit residual in the report beside the direct-birth one."
+    },
+    {
+      "id": "S4",
+      "severity": "should",
+      "where": "apps/web/e2e/client-create-mock.mjs:77-86 and :117-126",
+      "what": "The new lane mock reimplements a private, non-caching `readJson` and drains the request stream for an owned VERB before it decides on the NAME, then returns false — the exact hazard apps/web/e2e/mock-dispatch.mjs was created to close ('a lane that reads the body and THEN decides the verb is not its own leaves every later lane in the chain reading an already-drained stream, which resolves to `{}` … the failure is silent'). `begin_client_onboarding` is a DECLARED shared verb whose other claimant reads its body through the shared helper (agentic-finish-mock.mjs:368, `readCachedJson`), and #649's lane is hooked ahead of it in serve-built.mjs, so that lane now always sees `{}`.",
+      "evidence": "client-create-mock.mjs:77 `async function readJson(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); … }` — no `__e2eParsedBody` cache; :122 `const body = await readJson(request);` runs before :126 `if (!OWNED_NAMES.has(name)) return false;`. mock-dispatch.mjs's header and agentic-finish-mock.mjs:80 `import { readCachedJson as readJson } from \"./mock-dispatch.mjs\"`. Consequence today is contained (the agentic lane only echoes `body.p_name` back and nothing reads it), which is why it is a should and not a blocker.",
+      "fix": "Import `readCachedJson` and `matchVerb` from `./mock-dispatch.mjs` and delete the local readJson, so the parsed body is re-servable to every later lane in any dispatch order."
+    },
+    {
+      "id": "N1",
+      "severity": "note",
+      "where": "cluster rig649r, 127.0.0.1:55608 (left running for the fix round)",
+      "what": "The from-scratch proof cluster is left up as instructed. Port 55608, cluster rig649r. Two databases on it: `clara_649r` — the full 0001→0204 chain (194 migrations) plus seed, which is the rig the DB battery and the adversarial probes ran against; and `clara_wave_b_ci` — a TEMPLATE clone of clara_649r with the WDK world bootstrapped, for the runtime World legs (the e2es are hard-gated to PGDATABASE in {clara_rt_test, clara_wave_b_ci}, packages/runtime/tests/interview-e2e.mjs:50-53, which independently confirms report assumption #4).",
+      "evidence": "`pg_lsclusters` after mkrig.sh shows `17 rig649r 55608 online`. `pnpm db:migrate` → `migrate: 194 new migration(s)` then on re-run `migrate: 0 new migration(s) applied · 194 total · target 127.0.0.1:55608/clara_649r`.",
+      "fix": "Reuse it for the fix round (`export PGHOST=127.0.0.1 PGPORT=55608 PGUSER=postgres PGDATABASE=clara_649r`); drop the cluster with `pg_dropcluster --stop 17 rig649r` when the wave closes."
+    },
+    {
+      "id": "N2",
+      "severity": "note",
+      "where": "packages/runtime/tests/interview-e2e.mjs (report claim: 'exit 0 on a real in-process WDK Postgres World')",
+      "what": "I could not reproduce the runtime World legs green on a from-scratch chain, and because the failure is in the PRE-EXISTING positive drive the run never reached #649's own new scenario p649.interview.sst_park_today — so that cell is unproven on this rig. I am not attributing the failure to the branch: the failing scenario is version-agnostic by construction, the stacks name only this worktree, and a fixed 90 s wall-clock deadline on a twelve-lane Windows host is a plausible cause.",
+      "evidence": "Nitro built once (`pnpm --filter @clara/runtime build`, BUILD_EXIT=0). Run 1 (PGPORT=55608 PGDATABASE=clara_wave_b_ci, world bootstrapped): scenarios (a) and (a-firm) PASS, then `INTERVIEW E2E: FAIL — driveClientToComplete: no terminal within 90000ms; last={... pending_park:{parkIndex:11, seg:\"msic\", phase:\"c\"} ...}`, IV_EXIT=1; interview-kill-resume-e2e then failed with `serve child did not become ready (/health + /ready 200)`, KR_EXIT=1. Run 2, database dropped, re-cloned and re-bootstrapped, interview-e2e run SOLO: same two PASSes, then the same failure at a DIFFERENT, later park — `pending_park:{parkIndex:13, seg:\"sst_regime\", phase:\"c\"}` — IV_EXIT=1. Logs: .../649rev/iv-e2e.log, iv-kr.log, iv-e2e-solo.log.",
+      "fix": "Re-run both legs on a quiet host before merge and paste the exit codes; if the deadline is the cause, raise driveClientToComplete's 90 s budget (or make it env-tunable) rather than leaving a wall-clock number as the gate. Everything else the brief demanded re-measured clean: whole apps/web suite 3748/3746/0 fail/2 skipped, DB battery 9/9 on the fresh chain, operation-census + rig-isolation 31/30/1 skip, check-frozen-workflows OK (281 files), check-parts-parity OK, pnpm typecheck exit 0."
+    },
+    {
+      "id": "N3",
+      "severity": "note",
+      "where": "apps/web/components/firm/client-register-list.tsx:186",
+      "what": "The refusal path contradicts the law its own read path states. lib/onboarding/identity.ts:readClientIdentityCandidates deliberately uses the DATABASE's arity ('never `candidates.length` — a row this module could not read must not silently lower the number the human is told about'), but the collision branch does `setArity(candidatesFromRefusal(err).length || 2)`, which is candidates.length. 0204 puts `arity` in the refusal detail (migration :405-407), so the honest number is available.",
+      "evidence": "client-register-list.tsx:186 vs apps/web/lib/onboarding/identity.ts's `arity: Number.isInteger(r.arity) ? (r.arity as number) : candidates.length`. Migration detail shape confirmed live on the rig: `CLR10 {\"reason\":\"name_family_collision\",...,\"arity\":2,\"candidates\":[...]}`.",
+      "fix": "Read `arity` off the typed detail (add an `arityFromRefusal(err)` beside `candidatesFromRefusal`) and fall back to `candidates.length || 2` only when it is absent."
+    },
+    {
+      "id": "N4",
+      "severity": "note",
+      "where": "apps/web/components/firm/client-home/client-onboarding-progress.tsx:70",
+      "what": "openingStory admits `answered` for `carry_down_deferred`, but clara.commit_client_onboarding's opening-position gate accepts that key only in states `('deferred','resolved')` (0017:2818-2822). The doc comment two lines above claims these keys are read 'BY NAME so they are a contract, not prose', so the web is one state wider than the contract it says it mirrors. Harmless in direction (the extra link points at the registers' opening tab, which is where that work happens) but it makes the surface and the door disagree about what counts as a deferred carry-down.",
+      "evidence": "client-onboarding-progress.tsx:70 `if (has(\"carry_down_deferred\", [\"deferred\", \"resolved\", \"answered\"])) return \"deferred\";` vs packages/db/migrations/0017_wave_b.sql:2818-2822 `... and i.item_key='carry_down_deferred' and i.state in ('deferred','resolved')`. The `?tab=opening` target is real (components/registers/registers-workbench.tsx:28,:40,:71).",
+      "fix": "Drop `\"answered\"` from that list so the two read the same states, or keep it and say in the comment that the surface is deliberately wider than the commit gate and why."
+    }
+  ],
+  "ran": [
+    "wsl -u root -- bash .../mkrig.sh rig649r 55608 → cluster rig649r online at 127.0.0.1:55608 (pg_lsclusters confirms)",
+    "node+pg: create database clara_649r on 55608 → created",
+    "PGPORT=55608 PGDATABASE=clara_649r pnpm db:migrate (worktree root) → MIGRATE_EXIT=0, 194 applied 0001→0204; '#649 prestate: clean' and '#649 tail: OK' both raised on THAT chain",
+    "PGPORT=55608 PGDATABASE=clara_649r pnpm db:seed → SEED_EXIT=0",
+    "PGPORT=55608 PGDATABASE=clara_649r pnpm db:migrate (re-run) → exit 0, 'migrate: 0 new migration(s) applied · 194 total'",
+    "grep -niE 'create or replace|drop function|alter (table|function)|create (table|view|policy|trigger|index)' 0204_client_onboarding_facts.sql → no matches; only 2 GRANTs, both EXECUTE to clara_authenticated (no other wave ticket's DECISIONS §1.3 recut touched)",
+    "node --test --test-concurrency=1 <29 preintegration gates> tests/client-onboarding-identity.test.mjs (PGPORT=55608 clara_649r) → 9 tests, 9 pass, 0 fail, 0 skipped",
+    "node --test --test-concurrency=1 tests/operation-census.test.mjs tests/rig-isolation.test.mjs (PGPORT=55608, no reset flags) → 31 tests, 30 pass, 0 fail, 1 skipped",
+    "node .../649rev/probe.mjs (PGPORT=55608 clara_649r) — tenant/role/idempotency probe → firm-B admin reads firm-A's exact name AND firm-A's SSM identifier = arity 0 / []; firm-B settle on firm-A's plan = CLR11 plan_not_in_firm, client row unmoved; clara_agent_ro / clara_wake_interactive / clara_wake_proactive / clara_runtime = 42501 on BOTH doors; removed member = CLR04; viewer settle = CLR04; bookkeeper settle = accepted (matches set_client_fy_end's floor); identifier shapes refuse CLR10 identifier_malformed / identifier_kind_unknown; op-key reuse across settle and set_client_fy_end = CLR10 receipt-hash, one receipt, nothing moved; cancelled plan = CLR10 onboarding_plan_not_committed, nothing written; fye=1e20 = **22003 untyped** (finding S2); 0204 adds no table and no view, so FORCE-RLS/masked-view checks are N/A",
+    "node .../649rev/lockorder.mjs (PGPORT=55508 clara_649) → X (cancel) 40P01 deadlock detected; settle succeeded",
+    "node .../649rev/lockorder-commit.mjs (PGPORT=55508 clara_649) → X (commit) 40P01 deadlock detected",
+    "node .../649rev/lockorder-rev.mjs (PGPORT=55508 clara_649) → SETTLE 40P01 deadlock detected, client row left {fy_end_month:null, fy_end_day:null}; cancel got its typed CLR10",
+    "node scripts/check-frozen-workflows.mjs → OK, 281 frozen file(s), 51 'use workflow' modules frozen+registered, exit 0 (branch adds no runtime module — successor contract only)",
+    "node packages/runtime/scripts/check-parts-parity.mjs → OK, exit 0 (reader ⊇ emittable)",
+    "pnpm --filter @clara/runtime build (nitro) → BUILD_EXIT=0",
+    "node+pg: create database clara_wave_b_ci template clara_649r on 55608; pnpm --filter @clara/runtime exec bootstrap → world schema created",
+    "node packages/runtime/tests/interview-e2e.mjs (55608/clara_wave_b_ci) run 1 → IV_EXIT=1, FAIL at pre-existing driveClientToComplete, park 11 msic, 90 s deadline; node tests/interview-kill-resume-e2e.mjs → KR_EXIT=1 'serve child did not become ready'",
+    "node packages/runtime/tests/interview-e2e.mjs SOLO on a freshly re-cloned + re-bootstrapped clara_wave_b_ci → IV_EXIT=1, FAIL again at driveClientToComplete but a DIFFERENT, later park (13 sst_regime); #649's own p649.interview.sst_park_today never reached",
+    "node apps/web/scripts/run-tests.mjs (whole apps/web manifest) → 3748 tests, 3746 pass, 0 fail, 0 cancelled, 2 skipped, 0 'not ok' — matches the report exactly",
+    "node apps/web/scripts/check-message-keys.mjs → OK, 2942 keys resolve; node apps/web/scripts/check-test-manifest.mjs → OK, 371 files, alphabetical",
+    "pnpm typecheck (worktree root) → exit 0 (apps/web + packages/runtime)",
+    "pnpm --filter @clara/web e2e agentic-finish-walk (ports 3300/3301/3302) run 1 → PW_EXIT=1, 4 passed / 5 failed; failures 1-4 are beforeEach `apiRequestContext.post` timeouts and sign-in stuck on /login = host contention",
+    "pnpm --filter @clara/web e2e agentic-finish-walk SOLO re-run → PW_EXIT=1, 5 passed / 4 failed; tests 4,5,7 flipped to pass and 1,3,6 flipped to fail (contention), but **test 8 H-51/CB-AE2E-024 failed in BOTH runs** — solo failure is the real one: TimeoutError page.waitForURL at agentic-finish-walk.spec.ts:358, exactly one client_identity_candidates POST and no begin_client_onboarding after it"
+  ]
+}
