@@ -162,14 +162,14 @@ labels: needs-triage, ready-for-agent
 
 **Context.** Multiple migrations assert the historical caller count of four when the measured live
 count is six (`finalize_close`, `reopen_fiscal_year` added by 0056). Both #638 and #639 pin the
-roster independently at six in their own new migrations (0206, 0201) rather than fixing the shared
+roster independently at six in their own new migrations (0221, 0216) rather than fixing the shared
 stale text, per DECISIONS §1.3's no-shared-recut rule.
 
 **What is wrong.** A pin copied across migrations drifts from reality and each new migration has to
 re-derive the correct number rather than reading it from one place.
 
 **Done when.** One migration re-derives and re-states the six-name pin once so later migrations can
-reference it instead of copying stale text; both 0201 and 0206's own pins are reconciled at
+reference it instead of copying stale text; both 0216 and 0221's own pins are reconciled at
 integration per WAVE-DIGEST §5's merge-order hazard note.
 
 **Evidence.** WAVE-DIGEST.md §3 cross-cutting row 8 and §5 integration hazard row 1.
@@ -639,11 +639,11 @@ regression cell.
 
 ---
 
-### 0203 firm-setup migration polish (three items deferred while byte-frozen this round)
+### 0218 firm-setup migration polish (three items deferred while byte-frozen this round)
 
 labels: needs-triage, ready-for-agent
 
-**Context.** #648's fix round found three small SQL-side defects in migration 0203 but left all
+**Context.** #648's fix round found three small SQL-side defects in migration 0218 but left all
 three unpatched because the migration was deliberately kept byte-unchanged that round (each has a
 documented reason it is unreachable today, and editing would have cost a rollback/re-apply cycle
 across two rigs for no correctness gain this wave): (1) a no-op firm-setup reconciliation still
@@ -706,7 +706,7 @@ runner.
 labels: needs-triage, ready-for-human
 
 **Context.** The fy-end day lands only on `clara.clients` (via `set_client_fy_end`, per DECISIONS
-D7); a `financial_year_end_day` key + map row through 0205 would close the gap. #654 owns
+D7); a `financial_year_end_day` key + map row through 0220 would close the gap. #654 owns
 `knowledge_keys`, so this is naturally its lane.
 
 **What is wrong.** A canonical client fact exists on the client row but not in the Knowledge system
@@ -1027,9 +1027,9 @@ labels: needs-triage, ready-for-agent
 `start_prepayment_schedule_work` into `chatTurn_v20` nor `read_prepayment_source` into
 `claraWork_v4`, and the reason is measured on the merged chain: `clara.create_prepayment_schedule`
 is granted to `clara_authenticated` alone and is `_human_ctx`-fronted at the bookkeeper rank
-(`0208:1674`, `:1044`); 0208 defines no `_for` twin; `get_prepayment_schedule` /
+(`0223:1674`, `:1044`); 0223 defines no `_for` twin; `get_prepayment_schedule` /
 `list_prepayment_schedules` / `list_prepayment_attention` are `clara_authenticated`-only
-(`0208:1675-1677`). The runtime pool runs as `clara_runtime`, so the tool cannot call the door.
+(`0223:1675-1677`). The runtime pool runs as `clara_runtime`, so the tool cannot call the door.
 Both stanzas stay written in `packages/runtime/lib/prepayment-schedule-basis.ts`, which stays outside
 every frozen closure until its door exists. `docs/PRD.md:69` lists 预付款摊销 under the chat entrance
 as current behaviour; it is not, until this lands.
@@ -1055,7 +1055,7 @@ DECISIONS.md §3.3 item 5.
 (10 cross-cutting + 51 ticket-specific) plus one follow-up from DECISIONS §3.1 that the digest did
 not carry as its own row. The count moves from 61+1=62 candidate rows to 54 through six merges of
 duplicate/related rows, each declared inside the merged issue's own Evidence line: the fixed-asset
-CLR40 pair (#639, 2→1), the `merge_counterparties` pair (#647, 2→1), the 0203 firm-setup polish trio
+CLR40 pair (#639, 2→1), the `merge_counterparties` pair (#647, 2→1), the 0218 firm-setup polish trio
 (#648, 3→1), the client-creation name-collision pair (#649, 2→1), the prepayment term-lifecycle trio
 (#653, 3→1), and the needs-you/review-queue pair (#650, 2→1) — the last of these bundles two small,
 independently-fixable polish items under one title as an editorial judgment call, not because they

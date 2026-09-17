@@ -41,3 +41,5 @@ Before running either command, replace every `<INTEGRATION_PLACEHOLDER>` with th
 confirm the labels exist in the target repo with `gh label list` (the three used here —
 `needs-triage`, `ready-for-agent`, `ready-for-human` — already exist as of this wave, so no
 `gh label create` step is needed).
+
+> Migration numbers in these drafts were re-mapped on 2026-09-17 after origin/main took 0199–0213 (DECISIONS §3.4): the wave's files are 0214–0224. Reports under `reports/` written before that keep the old numbers.
