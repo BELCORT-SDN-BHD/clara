@@ -389,3 +389,166 @@ the live catalog and diffing — not read off the migration files.
     unruled. This branch does not change it in either direction.
 11. `pnpm build`'s web half is green **only with a local `apps/web/.env.local`** (§4). CI
     supplies its own; a freshly created worktree does not.
+
+---
+
+## 8 · Runtime verification — build, runtime unit suite, World e2e (item 2 above, closed)
+
+Separate leg, same worktree/branch/head, read-only on the code. `pnpm --filter @clara/runtime
+build` (nitro): **exit 0** — `.output/server/index.mjs` (9.94 MB), 51 workflows / 232 steps.
+Two pre-existing, non-fatal warnings, unrelated to this wave: three `swc` "failed to read input
+source map" notices for `@ai-sdk/openai` / `provider-utils` / `gateway` `.js.map` files that
+don't ship in those packages, and an `UNRESOLVED_IMPORT` for `@opentelemetry/api` in
+`@workflow/world-vercel` and `@workflow/world-local`'s own `telemetry.js` (both already guard the
+import with `.catch(() => null)`, so nitro's own "treating it as an external dependency" is the
+correct outcome, not a defect).
+
+### 8.1 · A rig-contamination finding that determines how to read everything below
+
+`rigint`'s `clara_int` was **not** the pristine 204-migration/2-seed-file database RIG.md and
+§0 above describe by the time this leg started reading it: `select count(*) from clara.firms`
+returned **795**, not the 2 rows a fresh `pnpm db:seed` produces (independently reproduced, see
+below). `clara_int` was live-shared with a concurrently-running `pnpm --filter @clara/db test`
+process (PID 44116, another leg's db-estate-suite battery) for the whole first half of this
+session — the two legs were never given separate clusters. Both `clara_intake_ci` and
+`clara_wave_b_ci` for the World e2e battery were built as `CREATE DATABASE … TEMPLATE clara_int`
+(deliberately, to avoid re-running `pnpm db:migrate` from scratch on `rigint` a second time —
+0154's cluster-global role census makes a second from-scratch chain on one cluster unsafe, per
+DECISIONS §3.3 item 3 and WAVE-DIGEST §5's `#646/#653/#654` row), so they inherited the same 795
+firms and, more importantly, a large backlog of stale `workflow.workflow_runs` rows (`examined
+=1790` sst-watches on first boot; 248 already `failed` / 45 `running` by the time interview-e2e
+ran) that the reconciler retries with backoff on every subsequent World e2e's boot.
+
+**Six of the eighteen `db-live-gates` legs read as FAILED against that contaminated pair** —
+`interview-e2e`, `interview-kill-resume-e2e`, `work-journal-e2e`, `work-question-e2e`,
+`chat-turn-v19-e2e` (all "no terminal / pollWork timeout", the admitted Work or interview run
+never reaching a terminal state inside each file's own deadline) and `two-build-cutover-e2e`
+(correctly, by design, **refusing to start** — "this database already carries live
+accounting-Work state… 10 unbound accounting_work tasks" — because `clara_rt_test` was itself a
+template copy taken from the already-dirty `clara_wave_b_ci`).
+
+**Verified as a rig artifact, not a wave regression**, by building a second, genuinely isolated
+comparison rig — `rigint2` on `127.0.0.1:55601` (via `mkrig.sh rigint2 55601`, the same script
+RIG.md names for recreating `rigint`; new cluster, touches no ticket's worktree or port) — with a
+byte-for-byte fresh `pnpm db:migrate` (204 migrations, every `#638/#652/#653/#625` prestate/tail
+notice clean, identical to `rigint`'s own chain) then `pnpm db:seed` (**2 firms**, 8.8s — the
+true baseline the CI action's own `clara_wave_b_ci` step produces). All six previously-failing
+files, plus `body-census-guard-db.test.mjs`, were re-run against this database and its
+`clara_rt_test` template copy (cut immediately after bootstrap, before any Work-admitting step,
+exactly as the action does):
+
+| leg | contaminated `rigint`/`clara_int`-derived | clean `rigint2` (fresh migrate+seed) |
+|---|---|---|
+| `interview-e2e` | FAIL — driveClientToComplete timeout | **PASS** — `INTERVIEW E2E: ALL PASS` |
+| `interview-kill-resume-e2e` | FAIL — driveToComplete timeout | **PASS** |
+| `work-journal-e2e` | FAIL — pollWork timeout | **PASS** |
+| `work-question-e2e` | FAIL — `AssertionError: both workers attempted (attempts=1)` | **PASS** — `ALL LEGS PASSED` |
+| `chat-turn-v19-e2e` | FAIL — pollWork timeout | **PASS** |
+| `two-build-cutover-e2e` | FAIL — refuses to start (correct, on dirty `clara_rt_test`) | **PASS** |
+| `body-census-guard-db` | PASS (unaffected) | **PASS** (re-confirmed) |
+
+Every one of the six flips to PASS with no code change, on the identical migration chain, using
+the CI-shaped seed volume. **Conclusion: this wave's runtime code has no defect here** — the
+failures are an artifact of sharing one rig between two concurrent verification legs and of this
+leg's own necessary workaround (template-copy instead of a second from-scratch migrate). The
+CI action's own `clara_wave_b_ci`/`clara_intake_ci` (each a fresh, unshared `pnpm db:migrate &&
+pnpm db:seed`) will not carry this backlog. **Recommendation for future waves: give the runtime
+leg and the db-estate-suite leg separate clusters from the start**, not one shared `rigint`.
+
+### 8.2 · World e2e — full `db-live-gates` battery, file order, final status
+
+All eighteen legs pass. Counts below are from whichever run is trustworthy for that leg (the
+`rigint`/`clara_int`-derived run for the twelve legs it never miscalled; `rigint2`'s clean run for
+the six above and the world-guard's re-confirmation):
+
+| # | leg | db | result |
+|---|---|---|---|
+| 1 | `intake-e2e` | `clara_intake_ci` | PASS |
+| 2 | `intake-admission-e2e` (#633) | `clara_intake_ci` | PASS — 7 legs |
+| 3 | `interview-e2e` (Gate 3) | `clara_wave_b_ci` | PASS (clean rig) |
+| 4 | `interview-kill-resume-e2e` | `clara_wave_b_ci` | PASS (clean rig) |
+| 5 | `version-cutover-e2e` (Gate 7) | `clara_wave_b_ci` | PASS — `ALL PASS` |
+| 6 | `work-journal-e2e` (#623) | `clara_wave_b_ci` | PASS (clean rig) |
+| 7 | `work-question-e2e` (#629) | `clara_wave_b_ci` | PASS (clean rig) |
+| 8 | `work-cancel-e2e` (#630) | `clara_wave_b_ci` | PASS |
+| 9 | `periodic-adjustment-e2e` (#643) | `clara_wave_b_ci` | PASS |
+| 10 | `fixed-asset-acquisition-e2e` (#639) | `clara_wave_b_ci` | PASS |
+| 11 | `staff-expense-claim-e2e` (#638) | `clara_wave_b_ci` | PASS |
+| 12 | `work-egress-e2e` (#631) | `clara_wave_b_ci` | PASS |
+| 13 | `chat-turn-v19-e2e` | `clara_wave_b_ci` | PASS (clean rig) |
+| 14 | `two-build-cutover-e2e` (#637) | `clara_rt_test` | PASS (clean rig) |
+| 15 | `plan-occurrence-e2e` (#640) | `clara_wave_b_ci` | PASS |
+| 16 | `accrual-e2e` (#652) | `clara_wave_b_ci` | PASS |
+| 17 | `prepayment-occurrence-e2e` (#653) | `clara_wave_b_ci` | PASS |
+| 18 | `body-census-guard-db.test.mjs` (world guard, LAST) | `clara_rt_test` | PASS — 4/4 |
+
+**Not run: the two DR legs at the bottom of `action.yml`** (`pnpm --filter @clara/db
+dr:selftest`, and the full-profile two-cluster backup→restore→verify). These are a
+backup/restore battery, not a World e2e — the file itself names them separately from the
+"runtime e2es" — and the full-profile leg needs THREE further clusters (`postgres_b`/`_c`/`_d`
+roles) this leg was not given. Flagged as a residual for whoever owns the DR gate, not folded
+into the counts above.
+
+**Boot-race idiom check** (waitBooted on the engine's own provenance line, wave-2026-09-14's
+`wave2-ci-boot-race.md` fix). Every World e2e file that actually **asserts** a boot/provenance
+line (`chat-turn-v19-e2e`, `fixed-asset-acquisition-e2e`, `periodic-adjustment-e2e`,
+`staff-expense-claim-e2e`, `two-build-cutover-e2e`, `work-cancel-e2e`, `work-egress-e2e`,
+`work-journal-e2e`, `work-question-e2e` — found by grepping for the
+`[clara-runtime] serving …`/banner assertion, not just for `spawnServe`) already carries
+`waitBooted`. `body-census-guard-db.test.mjs` uses its own equivalent: each `spawnImage(...)`
+call gets a **fresh** `state` object bound to that child's own stdout listener, so it cannot
+read a predecessor's heartbeat by construction. The three files that spawn-kill-respawn but
+never assert a banner (`plan-occurrence-e2e`, `accrual-e2e`, `prepayment-occurrence-e2e`) and the
+two that boot the world in-process (`interview-e2e`, `version-cutover-e2e`) are outside this
+idiom's scope by the same test — no gap found.
+
+### 8.3 · Runtime unit suite (`packages/runtime`, `node --test tests/**/*.test.mjs`)
+
+Run **three times**, each correcting the last:
+1. First pass, on the shared/contaminated `clara_int` (`rigint`): 2060 tests, 1951 pass, **76**
+   fail, 33 skip (499s) — then the process never exited on its own (3 leaked `pg` connections to
+   `clara_int` observed 90s after its own TAP summary printed; killed by hand). Bash's `>>`
+   redirect on this host also lost most of the individual `not ok` lines under concurrent
+   writes (the aggregate counters, computed by node before any redirection, are trusted; the
+   per-case list is not) — superseded, not reported further.
+2. Second pass, same `clara_int`, using node's own `--test-reporter=tap
+   --test-reporter-destination=<file>` (bypasses the lossy shell redirect) plus
+   `--test-force-exit`: 2534 tests, 2504 pass, 5 fail, 25 skip (855s). Confirms the redirect was
+   the problem; still shares `clara_int` with the other leg's own db-estate-suite run, so still
+   not the number of record.
+3. **Authoritative pass**, isolated on `rigint2`'s `clara_unit_test` (a template copy of the
+   same cluster's freshly-bootstrapped, 2-firm `clara_rt_test` — no other process ever touched
+   it): **2534 tests, 2522 pass, 7 fail, 5 skip, 767.5s.**
+
+The 7 failures, all with error text:
+
+| test | file | error |
+|---|---|---|
+| `fs7.v17.db.report-tools: open, assess and seal each reach their live interactive wrapper` | `leader-state`-adjacent db test | `pg_dump failed to start (spawnSync pg_dump ENOENT)` |
+| `fs7.v17.db.close-stop: a chat-mintable client credential remains task-unbound…` | same file | `pg_dump failed to start (spawnSync pg_dump ENOENT)` |
+| `tests/leader-state.test.mjs` (whole file) | `leader-state.test.mjs:134` → `migrate-harness.mjs:149 cloneAmbientDatabase` | `pg_dump failed to start (spawnSync pg_dump ENOENT)` |
+| `tests/relay-taxonomy.test.mjs` (whole file) | same helper | `pg_dump failed to start (spawnSync pg_dump ENOENT)` |
+| `scanner rejects EICAR, encrypted PDF, and XML entity expansion` | intake scanner test | `open 'C:\…\clara-intake-…\eicar.bin'` — **this is #693**, RIG.md's own named, ignore-and-do-not-fix Windows/Defender-quarantine red |
+| `ready MAJOR-1: a BLACK-HOLED lane leaves /ready far inside fly's 5s timeout` | `ready.test.mjs:259` | `subsequent polls are not slowed by the hung lane either` (12.5s to fail) — a timing assertion on a host running several other concurrent agents' workloads; matches WAVE-DIGEST §5's "host-contention flakes" pattern, not re-run in isolation to confirm |
+| `637.pf: B3 — two sources sharing one task_kind count the task ONCE…` | `rollback-preflight.test.mjs:517` | `19 !== 1` — an unscoped `count(*)`-style read over `clara.agent_tasks`/`clara.document_processing_tasks` sees rows other files in the **same** full-suite run left queued; passes in isolation (RIG.md's own "run single test files while iterating" caveat), a cross-file test-isolation gap worth a follow-up but not a wave regression |
+
+Four of the seven are one root cause (`pg_dump` absent from PATH in this Windows shell's process
+env — RIG.md already documents "No `psql` on Windows"; the same is true of `pg_dump` here, an
+environment gap on this host, not code). One is the wave's own pre-named Windows red (#693). One
+is a plausible host-contention flake. One is a genuine but pre-existing (not wave-introduced —
+`rollback-preflight.test.mjs` predates this wave) cross-file isolation gap in a test that only
+manifests when the whole glob runs together. **None reproduce a functional defect in this wave's
+delivered code.**
+
+### 8.4 · Artifacts left for the orchestrator
+
+New cluster `rigint2` (`127.0.0.1:55601`, WSL `rigint2`) with `clara_wave_b_ci` (204 migrations,
+2-seed-file baseline), `clara_rt_test` and `clara_unit_test` (both template copies) — kept
+un-dropped in case the orchestrator wants to re-run or extend this comparison; safe to drop
+otherwise (it was never a ticket's assigned rig). On `rigint`: `clara_intake_ci`,
+`clara_wave_b_ci` and `clara_rt_test` (the contaminated template copies this leg built and used)
+are left as-is alongside `clara_int` itself, which this leg did not write to and did not reset.
+
+**Unverified**: the DR battery (§8.2); whether `clara_int`'s 795-firm state reflects the OTHER
+leg's db-estate-suite run finishing successfully (not this leg's to claim — ask that leg for its
+own counts against `clara_int`); anything hosted.
