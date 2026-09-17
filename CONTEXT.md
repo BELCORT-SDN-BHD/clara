@@ -353,6 +353,22 @@ _Avoid_: A failed payment; a reason to re-charge; an error the applicant must re
 One completed accounting act that records a movement a period's own facts establish rather than a transaction: a periodic stock adjustment (from a supplied opening/closing count or an instructed movement) or a supplied payroll/statutory obligation. It carries typed particulars — the period, the method or obligation kind, the exact amount, the account each leg plays, where the figures came from and the instruction — and those particulars must agree with the posted entry's own lines.
 _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its scheduled occurrences; a rate, threshold or employee calculation the product worked out.
 
+**Staff expense claim**:
+One completed act recording who spent what, on which itemised basis, when it was incurred and when it posts, and which of reimbursement / advance application / already settled it is. The claimant is a STAFF-ADVANCE ENROLMENT HANDLE, not a person record: a claim names the account the firm keeps for that person, and a claim for somebody new enrols one inside the same transaction. Supplied tax facts are carried verbatim and validated against nothing. Its Work's purpose is the plain `journal_entry` every manual posting carries; what makes it a claim is the claim object, not a purpose value.
+_Avoid_: A balanced journal entry with a memo; a payroll run; an employee master record.
+
+**Employee payable**:
+A non-control liability owed to a named claimant, tracked in the staff-expense-claim register and never in AR/AP aging. It is a liability leg on an ordinary payable account (the starter chart's `2010 Other Payables`, whose `account_class` is null) plus the claim that explains it — because an open item is structurally a counterparty's claim, an employee may not be a counterparty, and a control-account leg is refused outright.
+_Avoid_: An AP open item; a counterparty.
+
+**Advance application**:
+The discharge of a recorded staff advance by a stated allocation: WHICH advance, for how much, effective on the day the money actually moved. The register never infers it — a credit on an enrolled advance account that does not say which advance it discharges is refused by name.
+_Avoid_: A silent FIFO; a GL credit with no named advance.
+
+**Claimant handle**:
+The staff-advance enrolment a claim is recorded against — an account dedicated to one person, carrying the name the register shows and the professional's own written attestation. It is what lets two claims by one person be read together. NAMED LIMIT: it is a label on an ACCOUNT, not a person record, and the estate holds no staff master; two people who have never been given a dedicated account cannot be told apart by it.
+_Avoid_: An employee record; a user; a counterparty; a free-text name typed on each claim.
+
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.

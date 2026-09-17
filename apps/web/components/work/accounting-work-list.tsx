@@ -111,7 +111,18 @@ export type WorkListScope = { kind: "firm" } | { kind: "client"; clientId: strin
  *  are widening, and `basis_origin` could grow the same way, so a missing message key must degrade
  *  to the database's own token rather than crash a `t()` lookup — the same posture
  *  `lib/work/types.ts` takes for an unenumerated status. */
-const KNOWN_PURPOSE_LABELS = new Set(["journal_entry"]);
+// #638 · WIDENED TO THE THREE THE COLUMN ACTUALLY ADMITS. It read `new Set(["journal_entry"])` —
+// true when 0178 shipped and STALE since 0194 widened the CHECK to three, so the Work list could
+// neither label nor filter a periodic adjustment or a supplied payroll obligation and rendered the
+// database's raw token instead. DECISIONS §1.7 gives this vocabulary one owner precisely so the
+// four surfaces are corrected together and once.
+//
+// A STAFF EXPENSE CLAIM IS NOT A FOURTH VALUE HERE, and that is by design rather than by omission:
+// it is admitted with purpose `journal_entry` (migration 0206's header says why a fourth purpose
+// cannot post), and what makes it a CLAIM is read from `clara.get_work_claim_origin` — the Work
+// detail asks that door by name. Adding a token here would be inventing a purpose the estate does
+// not have.
+const KNOWN_PURPOSE_LABELS = new Set(["journal_entry", "periodic_stock_adjustment", "payroll_obligation"]);
 const KNOWN_ORIGIN_LABELS = new Set(["user_direct", "clara_interpreted"]);
 
 export function AccountingWorkList({

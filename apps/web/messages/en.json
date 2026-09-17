@@ -78,6 +78,7 @@
     "clientLeaf": {
       "journalComposer": "Record journal entry",
       "periodicAdjustment": "Record periodic adjustment",
+      "staffExpenseClaim": "Record staff expense claim",
       "workDetail": "Journal entry",
       "knowledgeRecord": "Knowledge record",
       "counterpartyIdentity": "Counterparty identity",
@@ -86,6 +87,7 @@
     "accounting": {
       "journals": "Journals",
       "periodicAdjustments": "Periodic adjustments",
+      "staffExpenseClaims": "Staff claims",
       "bank": "Bank",
       "receivables": "Receivables & payables",
       "assets": "Assets",
@@ -1157,6 +1159,7 @@
         "reports": "Reports",
         "journals": "Journals",
         "periodicAdjustments": "Periodic adjustments",
+        "staffExpenseClaims": "Staff claims",
         "bank": "Bank",
         "registersAging": "Receivables & payables",
         "registersAssets": "Assets register",
@@ -1379,6 +1382,134 @@
       "receipt": "Operation receipt",
       "logicalOpId": "Operation identity",
       "source": "Source document",
+      "corrects": "Corrects",
+      "correctedBy": "Corrected by"
+    }
+  },
+  "StaffExpenseClaim": {
+    "heading": "Record staff expense claim",
+    "body": "Record what a member of your client's staff spent, item by item, and how it is being settled. Submitting admits durable work; the entry is posted by that work and appears on its own page. Nothing here invents a date, a document or an amount \u2014 every figure is the one you enter.",
+    "settlement": {
+      "label": "How is this claim settled?",
+      "help": "Switching keeps the accounts you have already chosen for the others.",
+      "options": {
+        "reimbursement": "The firm owes the claimant",
+        "advance_application": "It discharges an advance they already hold",
+        "already_settled": "They have already been paid"
+      },
+      "help_reimbursement": "The amount is credited to a non-control payable. It is tracked on this register, never in receivables and payables aging: an employee is not a counterparty.",
+      "help_advance_application": "The amount is credited to the staff-advance account they were paid from, against the advance you name below.",
+      "help_already_settled": "The amount is credited to the bank or cash account that paid them."
+    },
+    "claimant": {
+      "heading": "Who claimed",
+      "accountCode": "The account this client keeps for them",
+      "accountCodeHelp": "A staff-advance account dedicated to one person. It is how two claims by the same person are kept together; there is no separate staff record.",
+      "newHelp": "This account has no enrolment yet, so recording this claim will enrol it. The register asks for three things before it will.",
+      "personLabel": "Name the register will carry",
+      "attestation": "Written attestation",
+      "attestationHelp": "Who this account is for, and whether the balance is a related-party balance. It is stored verbatim and shown beside the balance.",
+      "confirmDedicated": "Dedicated account",
+      "confirmDedicatedBody": "This account is dedicated to this one person. The register's tie-out means nothing on a mixed account.",
+      "identifier": "Their identifier at the firm",
+      "identifierHelp": "Optional. Carried with the claim exactly as you type it."
+    },
+    "incurredDate": "Incurred on",
+    "incurredDateHelp": "When the money was spent.",
+    "postingDate": "Posting date",
+    "postingDateHelp": "When the books should say so. It cannot be earlier than the incurred date.",
+    "items": {
+      "heading": "What was claimed",
+      "help": "One line per item. If a line's own facts are not established yet, name what it is waiting for and the rest of the claim still posts.",
+      "description": "What it was",
+      "expenseAccountCode": "Expense account",
+      "amountCents": "Amount",
+      "incurredDate": "Incurred on",
+      "incurredDateHelp": "Only if this line differs from the claim above.",
+      "pendingFact": "Waiting on",
+      "pendingFactHelp": "Name the fact this line still lacks, such as the date on the receipt. A line that is waiting carries no amount and posts nothing.",
+      "suppliedTax": "Tax stated on the receipt",
+      "suppliedTaxHelp": "Carried with the claim exactly as the receipt states it. This beta derives no tax treatment from it.",
+      "add": "Add another item",
+      "remove": "Remove this item",
+      "totalLabel": "Claim total:"
+    },
+    "payableAccountCode": "Owed to the claimant on",
+    "payableAccountCodeHelp": "A non-control liability account, such as Other Payables.",
+    "advanceAccountCode": "Staff advance account",
+    "advanceAccountCodeHelp": "The enrolled account the advance was paid from.",
+    "advanceId": "Which advance",
+    "advanceIdHelp": "The advance this claim discharges. The register never guesses: if the claimant holds two, say which one.",
+    "paymentAccountCode": "Paid from",
+    "paymentAccountCodeHelp": "The bank or cash account they were already paid from.",
+    "sourceKind": {
+      "label": "Where this claim came from",
+      "help": "A filed document, or something your client told you.",
+      "options": {
+        "document": "A document",
+        "instruction": "An instruction"
+      }
+    },
+    "instruction": "The claim in your own words",
+    "instructionHelp": "This is the basis on the record, and it becomes the entry's memo.",
+    "accountPlaceholder": "Choose an account",
+    "submit": "Submit",
+    "preview": {
+      "heading": "The entry this claim produces",
+      "body": "Derived from the items and the settlement above and shown here so you can check it before submitting. This form sends the claim, never the lines: the accounts and amounts follow the claim, and you change them by changing the claim."
+    },
+    "rejected": {
+      "title": "The server did not accept this claim",
+      "body": "Correct the highlighted field and submit again. Nothing was recorded."
+    },
+    "issues": {
+      "required": "Fill this in.",
+      "invalidDate": "Enter a real calendar date, as YYYY-MM-DD.",
+      "incurredAfterPosting": "The money was spent after the date this would post. Check both dates.",
+      "accountRequired": "Choose an account.",
+      "accountUnknown": "This client's chart has no active account with that code.",
+      "accountsMustDiffer": "This must be a different account from the items above.",
+      "amountRequired": "This line claims nothing. Enter the amount, or say what it is waiting for.",
+      "amountNotExact": "Enter an exact amount in ringgit and sen.",
+      "pendingItemHasAmount": "A line that is waiting on a fact cannot also carry an amount.",
+      "everyItemPending": "Every line is waiting on a fact, so there is nothing to post yet.",
+      "attestationRequired": "Write the attestation before enrolling this account.",
+      "confirmDedicatedRequired": "Confirm that this account is dedicated to one person.",
+      "advanceRequired": "Name which advance this claim discharges.",
+      "tooLong": "This is too long. Shorten it before submitting."
+    },
+    "origin": {
+      "label": "Staff expense claim",
+      "value": "{claimant} \u00b7 {settlement}"
+    },
+    "history": {
+      "heading": "Staff expense claims",
+      "body": "Every staff expense claim recorded for this client, with who claimed, what they itemised, when it was incurred, how it was settled and the entry it produced.",
+      "newAction": "Record staff expense claim",
+      "link": "See this client's claims",
+      "tableLabel": "Staff expense claims",
+      "empty": "No staff expense claim has been recorded for this client yet.",
+      "claimant": "Claimant",
+      "dates": "Dates",
+      "incurredShort": "Incurred",
+      "postedShort": "Posts",
+      "amount": "Amount",
+      "settlement": "Settlement",
+      "state": "State",
+      "admitted": "Recorded, not yet posted",
+      "posted": "Posted",
+      "reversed": "Reversed",
+      "itemsWaiting": "{count, plural, one {# line waiting} other {# lines waiting}}",
+      "waitingOn": "Waiting on {fact}",
+      "suppliedTax": "Tax stated:",
+      "disclose": "Items and links",
+      "instruction": "Basis",
+      "entry": "Journal entry",
+      "work": "Work",
+      "receipt": "Operation receipt",
+      "logicalOpId": "Operation identity",
+      "source": "Source document",
+      "advance": "Advance discharged",
       "corrects": "Corrects",
       "correctedBy": "Corrected by"
     }
@@ -1637,7 +1768,9 @@
       "clara_interpreted": "Asked of Clara"
     },
     "purposeLabels": {
-      "journal_entry": "Journal entry"
+      "journal_entry": "Journal entry",
+      "periodic_stock_adjustment": "Periodic stock adjustment",
+      "payroll_obligation": "Supplied payroll obligation"
     },
     "filterClient": "Client",
     "filterClientAll": "All clients",
@@ -1677,6 +1810,7 @@
     "purposes": {
       "journals": "Draft, review and post journal entries.",
       "periodicAdjustments": "Periodic stock counts and supplied payroll obligations, with the entries they produced.",
+      "staffExpenseClaims": "Staff expense claims: who claimed, what they itemised, and how each one was settled.",
       "bank": "Load statements, match lines and reconcile each account.",
       "receivables": "Open receivable and payable balances by counterparty and age.",
       "assets": "The fixed asset register, its cost, depreciation and net book value.",

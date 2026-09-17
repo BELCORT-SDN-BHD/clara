@@ -48,11 +48,17 @@ import {
   type WorkListUrlState,
 } from "@/lib/work/work-list-url-state";
 
-/** The one purpose `clara.accounting_work.purpose` carries today (0178's own CHECK). Rendered as
- *  a Select rather than hard-coded away because C51.2 asks the operation to be exposed under a
- *  user goal, and because the vocabulary is growing: an unknown purpose already in the URL is
- *  preserved by `parseWorkListUrlState` and rendered verbatim here. */
-const KNOWN_PURPOSES = ["journal_entry"] as const;
+/** The THREE purposes `clara.accounting_work.purpose` carries (0194's own CHECK). Rendered as a
+ *  Select rather than hard-coded away because C51.2 asks the operation to be exposed under a user
+ *  goal, and because the vocabulary can still grow: an unknown purpose already in the URL is
+ *  preserved by `parseWorkListUrlState` and rendered verbatim here.
+ *
+ *  #638 · IT READ `["journal_entry"]` UNTIL NOW — true under 0178, stale since 0194, so the filter
+ *  could not name two of the three values the column admits. DECISIONS §1.7 gives this vocabulary
+ *  one owner so all four surfaces are corrected together. A staff expense claim is deliberately NOT
+ *  a fourth value: it is admitted as `journal_entry` and identified through
+ *  `clara.get_work_claim_origin` (migration 0206's header says why). */
+const KNOWN_PURPOSES = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation"] as const;
 
 const ALL = "__all__";
 

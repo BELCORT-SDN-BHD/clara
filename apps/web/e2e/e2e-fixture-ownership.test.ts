@@ -70,6 +70,7 @@ const LANE_MOCKS = [
   "operator-support-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
+  "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
@@ -437,6 +438,16 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     unscopeable: ["/rest/v1/rpc/client_identity_candidates"],
     debt: [],
   },
+  // #638 — every handler is scoped to this lane's own client id (`SEC.clientId`) and falls through
+  // otherwise: the PostgREST reads (clients, coa_accounts and staff_advance_accounts by
+  // `client_id`; list_staff_expense_claims by `p_client`; get_staff_expense_claim and
+  // get_work_claim_origin by ids this module minted), the RUNTIME admission route by
+  // `body.clientId`, and the CONTROL ENDPOINT by `body.client` — the guard
+  // `periodic-adjustment-mock.mjs` had to be given after a standards review, written in from the
+  // start here. The lane answers NEITHER `list_accounting_work` NOR `staff_advance_summary`: both
+  // are read by surfaces other lanes drive, and a lane that claimed them would replace their
+  // fixtures.
+  "staff-expense-claim-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -1139,6 +1150,17 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // stated at the hook in `serve-built.mjs`: the scoped lane runs FIRST, or a #649 name would be
   // born into the other lane's fixture.
   begin_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
+  // #638 — `clara.get_work_claim_origin` is the Work detail identity block's "Staff expense claim"
+  // row, and it is read on EVERY Work detail for the same structural reason the plan-origin row
+  // above is: a claim is admitted with purpose `journal_entry` (migration 0206 states why a fourth
+  // purpose cannot post through the estate's closed posting core), so the purpose alone cannot say
+  // what a Work IS and the surface has to ask. The three lanes answer OPPOSITE facts and each gates
+  // on its own Work ids first: `staff-expense-claim-mock.mjs` answers a real claim for its own
+  // register rows, while `journal-work-mock.mjs` and `plans-mock.mjs` answer the door's own SQL
+  // NULL for Works that are not claims. Neither can answer for another lane's walk.
+  get_work_claim_origin: [
+    "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs",
+  ],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of

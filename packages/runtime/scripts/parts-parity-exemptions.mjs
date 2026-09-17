@@ -98,6 +98,25 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/periodic-adjustment-basis.ts","refuse","...extra","352b4ea7be368a6fcdc4292b6cc8caa29d79ef1be773541fde5b61d7c7283df7","0"],
   ["packages/runtime/lib/periodic-adjustment-basis.ts","adjustmentFromInput","...shared","76c15665f7232df94199ede36f6b443d4fb354641be4f7f4c168c218603f2a4c","0"],
   ["packages/runtime/lib/periodic-adjustment-basis.ts","adjustmentFromInput","...shared","1e92d27b7c90eec878b28a3b0d3668ac486d4fe43abf6c4086adf46fd3d47940","0"],
+  // #638's staff-expense-claim basis builder — the same four shapes, reviewed on the same terms as
+  // #643's sibling directly above, and for the same reason: the file is new, the gate scans every
+  // module under packages/runtime, and the `build` job runs it (.github/workflows/ci.yml:193).
+  //
+  //   · `...sharedShape` (×3) is a ZOD SHAPE spread — the field map the three settlement schemas
+  //     share (claimant, source_kind, instruction, the two dates, items, corrects_claim_id) so each
+  //     has ONE definition rather than three that drift. Writing them out three times is exactly
+  //     what the spread exists to prevent, and a Zod shape cannot reach a parts array at all.
+  //   · `...extra` in `refuse` is the refusal's `details` bag — the shape both
+  //     `opening-tb-cells.mjs` and `periodic-adjustment-basis.ts` already carry above: a typed
+  //     refusal envelope, never a part.
+  //
+  // No literal or computed `type` key appears anywhere in the file, so none of the four can mint a
+  // discriminant the web reader would have to cover. Each fingerprint was computed with the gate's
+  // own `describeParitySite`, so it invalidates itself if that statement changes.
+  ["packages/runtime/lib/staff-expense-claim-basis.ts","reimbursementClaimInputSchema","...sharedShape","bd9ccc18d769cfb3a0d7edfde248ff62072d94338be5bbc1eca0837fc0039ec0","0"],
+  ["packages/runtime/lib/staff-expense-claim-basis.ts","advanceApplicationClaimInputSchema","...sharedShape","11994e10ac72937842106ed510e0d4c04af8e897375fca3d2c794f5ecb967862","0"],
+  ["packages/runtime/lib/staff-expense-claim-basis.ts","alreadySettledClaimInputSchema","...sharedShape","362115e7cc6841256e746ee6ecf5f631817cbed47989948dfc37b18201df7f6e","0"],
+  ["packages/runtime/lib/staff-expense-claim-basis.ts","refuse","...extra","a5e906bc930432901c96285f9de656248a734212636d6fe86038773c653ca80f","0"],
   ["packages/runtime/lib/pools.mjs","loginConfig","...base","98cf919c97d1ae00b5eaf0f369ccfd8368a451e21c0bfeb237a78b304dee355c","0"],
   ["packages/runtime/lib/reconciler-documents.mjs","reconcileDocumentTasks","...out","48500e7e5edbbc563616ed9195403baa934c0b0a838936eb389f4bdb81e24270","0"],
   ["packages/runtime/lib/reconciler-documents.mjs","reconcileDocumentTasks","...task","4974d947f96a0817191ecd214f08ec651acf1e304dd9f46f9df8a495ebb80e1a","0"],

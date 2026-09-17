@@ -214,3 +214,29 @@ Two cells are worth knowing about before editing them:
 Counterparty fixtures are planted as post-images: `clara.counterparties` carries an immutability
 trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
 retired counterparty is inserted with both `merged_into` and `retired_at` set.
+
+## Batteries with their own frontier gate
+
+Each of these is keyed on a migration's stable STEM in `clara.schema_migrations` (never a number)
+and skips only when the package-wide sweep preloads its `*-preintegration-gate.mjs`; a focused run
+against a chain below the frontier FAILS, because a skip is not evidence.
+
+- `staff-expense-claim.test.mjs` (+ `staff-expense-claim-fixtures.mjs`) — #638, stem
+  `staff_expense_claims$` (migration 0206). Twenty-four cells over the claim lane: the Work-lane
+  posting of a claim (claim row born at admission, one approved entry, one committed receipt, one
+  `posted` status-ledger row and one `clara.op_receipts` row under the same `logical_op_id`), all
+  THREE settlements posted through the real door — reimbursement, advance application and
+  `already_settled` (which is not "no journal": the expense debits land against the stated payment
+  account, and a non-asset payment leg is refused by name) — the
+  proof that #638 recuts nothing shared (both purpose CHECK texts and six pinned bodies
+  byte-identical), the CLR40 advance-DEBIT wall this ticket deliberately leaves standing, the birth
+  trigger's firing position before `t_je_adv_movement_belt`, the advance-application arm with its
+  over-application refusal and its two-session race, auto-enrolment of a new claimant against the
+  admin floor that still refuses the same bookkeeper directly, per-item continuation, the whole
+  typed refusal vocabulary (including CLR19 at ADMISSION for a sealed fiscal year, so no register
+  row is stranded on a claim that can never post), PRD:114's no-second-approval posture, 0042 tail
+  20(a)/(b), the correction chain — its two-session race, whose loser is a typed
+  `correction_target_already_corrected` rather than a raw 23505, and its document half, where
+  `t_entry_evidence_release` frees the receipt so the correcting claim may cite it —
+  `get_work_claim_origin`, the three reads, RLS posture and replay. Gate module:
+  `staff-expense-claim-preintegration-gate.mjs` (`CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS=1`).

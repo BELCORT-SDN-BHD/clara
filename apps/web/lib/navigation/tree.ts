@@ -88,6 +88,7 @@ export type ClientNavId =
 export type AccountingItemId =
   | "journals"
   | "periodicAdjustments"
+  | "staffExpenseClaims"
   | "bank"
   | "receivables"
   | "assets"
@@ -115,8 +116,8 @@ export type AccountingItemId =
  * a page that is only ever reached with an intent.
  */
 export type ClientLeafId =
-  | "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord"
-  | "counterpartyIdentity" | "fixedAsset";
+  | "journalComposer" | "periodicAdjustment" | "staffExpenseClaim" | "workDetail"
+  | "knowledgeRecord" | "counterpartyIdentity" | "fixedAsset";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -365,6 +366,14 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   // guess which one a row belongs to — the same reason migration 0194 is `clara.periodic_adjustments`
   // and not `clara.adjustment_*`.
   { id: "periodicAdjustments", segment: "accounting/adjustments", labelKey: "accounting.periodicAdjustments", icon: "boxes", minimumRole: "viewer" },
+  // #638 — the staff expense claims this client has recorded: who claimed, what they itemised, when
+  // it was incurred, how it was settled. It is its OWN destination under `accounting/claims` and
+  // NOT a view of the registers workbench, for the reason C6 forces: an employee payable is a
+  // non-control liability plus this register, and it may not appear in the AR/AP aging tab at all
+  // (0042 tail 20 forbids an employee counterparty, which is what an open item structurally is).
+  // The advance half stays where it is, at `registers?tab=staffAdvances`, and the claim register
+  // links across to it rather than re-drawing a statement panel that already ships.
+  { id: "staffExpenseClaims", segment: "accounting/claims", labelKey: "accounting.staffExpenseClaims", icon: "receipt", minimumRole: "viewer" },
   { id: "bank", segment: "bank", labelKey: "accounting.bank", icon: "bank", minimumRole: "viewer" },
   { id: "receivables", segment: "registers", tab: "aging", labelKey: "accounting.receivables", icon: "scale", minimumRole: "viewer" },
   { id: "assets", segment: "registers", tab: "fixedAssets", labelKey: "accounting.assets", icon: "boxes", minimumRole: "viewer" },
@@ -400,15 +409,21 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
  * makes about every other row. Hiding the hub's primary action from a viewer
  * grants and revokes nothing; the DB refuses either way.
  *
- * `workDetail`'S LABEL IS THE WORK'S PURPOSE, AND TODAY THAT IS A CONSTANT — a
- * NAMED LIMIT rather than a shortcut. `clara.accounting_work.purpose` carries a
- * CLOSED one-member CHECK (`purpose in ('journal_entry')`), so "Journal entry" is
- * the only value the crumb can take and a static key is the truth. This module
- * is pure functions over a URL and holds no row, so the day a second purpose is
- * admitted the crumb has to become data-driven (the page reads the row; the
- * breadcrumb would take the label as a name, the way it already takes the
- * client's). Leaving the constant in place then would silently label a payroll
- * Work "Journal entry", so this note is the trigger for that change.
+ * `workDetail`'S LABEL IS STILL A CONSTANT, AND THAT IS NOW A STATED LIMIT RATHER
+ * THAN A FACT ABOUT THE COLUMN. This note used to say `clara.accounting_work.purpose`
+ * carried a CLOSED ONE-MEMBER CHECK — true when it was written, stale since
+ * migration 0194 widened it to three (`journal_entry`,
+ * `periodic_stock_adjustment`, `payroll_obligation`). #638 corrects it rather
+ * than leaving a reader to mis-scope the label work, and states what actually
+ * holds today: the crumb is a static key because this module is pure functions
+ * over a URL and holds no row, so a data-driven crumb needs the PAGE to pass the
+ * label in. The Work list and the Work detail DO label every purpose, through
+ * `lib/work/purpose-label.ts` — and a staff expense claim is labelled there from
+ * `clara.get_work_claim_origin` rather than from a purpose value at all, because
+ * a claim's purpose is deliberately the plain `journal_entry` every other manual
+ * posting carries (migration 0206's header says why a fourth purpose cannot
+ * post). So the crumb reading "Journal entry" on a claim Work is CORRECT, and
+ * the remaining limit is only that a periodic adjustment's crumb says it too.
  */
 export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   { id: "journalComposer", parent: "accounting", labelKey: "clientLeaf.journalComposer", minimumRole: "bookkeeper" },
@@ -418,6 +433,12 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // as the DENIED state rather than as a form. The HISTORY row above it is viewer, because reading
   // the client's own adjustments is the same class of act as reading their journals.
   { id: "periodicAdjustment", parent: "accounting", labelKey: "clientLeaf.periodicAdjustment", minimumRole: "bookkeeper" },
+  // #638 — BOOKKEEPER, for `journalComposer`'s own reason: the write door behind it
+  // (`clara.admit_staff_expense_claim_work`, bookkeeper+) can only ever refuse a viewer, and
+  // offering a control that can only refuse is 裁-187's rule. The route still renders for a viewer
+  // as the DENIED state rather than as a form. The HISTORY row above it is viewer, because reading
+  // the client's own claims is the same class of act as reading their journals.
+  { id: "staffExpenseClaim", parent: "accounting", labelKey: "clientLeaf.staffExpenseClaim", minimumRole: "bookkeeper" },
   { id: "workDetail", parent: "work", labelKey: "clientLeaf.workDetail", minimumRole: "viewer" },
   // #644 — /…/knowledge/:recordId names ONE knowledge record, so it is a leaf for the same
   // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
@@ -457,6 +478,24 @@ export function journalComposerHref(clientId: string): string {
 /** `/clients/:clientId/accounting/adjustments/new` — the C8/C11 periodic-adjustment form. */
 export function periodicAdjustmentHref(clientId: string): string {
   return `${clientBase(clientId)}/accounting/adjustments/new`;
+}
+
+/** `/clients/:clientId/accounting/claims` — the C3/C6 staff-expense-claim register (#638). */
+export function staffExpenseClaimsHref(clientId: string): string {
+  return `${clientBase(clientId)}/accounting/claims`;
+}
+
+/** `/clients/:clientId/accounting/claims/new` — the C1/C3 claim form (#638). */
+export function staffExpenseClaimHref(clientId: string): string {
+  return `${clientBase(clientId)}/accounting/claims/new`;
+}
+
+/** `/clients/:clientId/registers?tab=staffAdvances` — the SHIPPED staff-advance register, which the
+ *  claim register links across to rather than re-drawing. The tab is deliberately not a sidebar row
+ *  (see `ACCOUNTING_ITEMS`' own header); a link from the surface that names an advance is exactly
+ *  the entrance it was left reachable through. */
+export function staffAdvancesHref(clientId: string): string {
+  return `${clientBase(clientId)}/registers?tab=staffAdvances`;
 }
 
 /** `/clients/:clientId/work/:workId` — one durable Work record's own address.
