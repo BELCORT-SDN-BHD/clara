@@ -1,9 +1,55 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { ACTIVITY_CLIENTS } from "./activity-mock.mjs";
 import { CELL_BUDGET, grantCellBudget } from "./helpers";
+import { WORK_LIST_CLIENTS } from "./work-list-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+
+const E2E_DIR = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * THE SHARED CLIENT REGISTER, READ FROM THE FIXTURE ITSELF (#619's population cell).
+ *
+ * This cell asserted a LITERAL FOUR rows. `serve-built.mjs`'s `clients` array is the ONE
+ * unfiltered register every walk shares, and it GROWS: #632 appended two, #641 appended three and
+ * #633 appended one, so the literal was stale by three before this wave and by four after it —
+ * red on `origin/main` for reasons nowhere in any of those diffs (#625's own report and its
+ * adversarial review both recorded it and both correctly ruled it out of their scope).
+ *
+ * A HARD-CODED COUNT CANNOT PROVE THIS CELL'S OWN TITLE. "Exactly this firm's own clients" is a
+ * claim about the register, so the expectation is derived from the register: the literal rows in
+ * that array plus the rows of every lane export it splices. The isolation half below is what
+ * carries the "no sibling lane's client leaks in" weight — a lane that ANSWERED the unfiltered
+ * read instead of appending to it would show up as a row this derivation never named, and the
+ * count assertion fires on it.
+ */
+const SPREAD_FIXTURES: Record<string, ReadonlyArray<{ name: string }>> = {
+  ACTIVITY_CLIENTS,
+  WORK_LIST_CLIENTS,
+};
+
+function sharedRegisterNames(): string[] {
+  const source = readFileSync(join(E2E_DIR, "serve-built.mjs"), "utf8");
+  const block = /\nconst clients = \[\n([\s\S]*?)\n\];\n/.exec(source);
+  if (block === null) {
+    throw new Error("serve-built.mjs no longer declares `const clients = [ … ];` — this cell reads that array as the shared register");
+  }
+  const body = block[1]!;
+  const names = [...body.matchAll(/name:\s*"([^"]+)"/g)].map((m) => m[1]!);
+  for (const spread of body.matchAll(/\.\.\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    const rows = SPREAD_FIXTURES[spread[1]!];
+    if (rows === undefined) {
+      throw new Error(`the shared register splices ${spread[1]}, which this cell cannot resolve — import that lane's export and add it to SPREAD_FIXTURES above`);
+    }
+    names.push(...rows.map((row) => row.name));
+  }
+  return names;
+}
 
 async function signIn(page: Page, email: string): Promise<void> {
   // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
@@ -364,14 +410,18 @@ test("the client register is a named table whose population is EXACTLY this firm
   const table = page.getByRole("table", { name: "Clients" });
   await expect(table).toBeVisible();
 
-  // POPULATION — exactly the shared mock's own unfiltered register (`serve-built.mjs`'s
-  // `clients` array): CLIENT_A, CLIENT_B, and #632's two ACTIVITY_CLIENTS, appended to that
-  // SAME array. Four rows, no more and no fewer.
-  await expect(table.locator("tbody tr")).toHaveCount(4);
-  await expect(table.getByRole("link", { name: "Rome Properties" })).toBeVisible();
-  await expect(table.getByRole("link", { name: "Bee Creative Solution" })).toBeVisible();
-  await expect(table.getByRole("link", { name: "Activity Feed Fixture" })).toBeVisible();
-  await expect(table.getByRole("link", { name: "Activity Permission-Flip Fixture" })).toBeVisible();
+  // POPULATION — exactly the shared mock's own unfiltered register (`serve-built.mjs`'s `clients`
+  // array), derived from that array rather than counted here: its own two literal rows plus every
+  // lane export it splices. No more and no fewer, whichever lane appended last.
+  const register = sharedRegisterNames();
+  expect(
+    register.length,
+    "the derivation read no rows out of serve-built.mjs's shared register — the assertions below would be vacuous",
+  ).toBeGreaterThan(3);
+  await expect(table.locator("tbody tr")).toHaveCount(register.length);
+  for (const name of register) {
+    await expect(table.getByRole("link", { name, exact: true })).toBeVisible();
+  }
 
   // ISOLATION — every OTHER lane mock's own client exists only behind that lane's own
   // ID-SCOPED handler (`e2e-fixture-ownership.test.ts`'s N4/N5 rule: the UNFILTERED
