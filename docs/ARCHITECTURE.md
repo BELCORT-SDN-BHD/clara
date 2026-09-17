@@ -505,7 +505,11 @@ World 启动前另有一道 stranded-body 普查闸门：
     在实现或启用相应能力时验证，不固化为架构常量；算术只用来核对会计师自己供的数字；
   - 不把知识叙述当作可执行授权（知识记录里的 policy 是描述性的，不改变入账行为）；
   - 法律文本签署与 close evidence exception 是**人类专属动作**，结构上只对 `clara_authenticated` 开门，
-    agent 车道永远取不到——收紧或放宽都要同时改这句话与对应的 grant。
+    agent 车道永远取不到——收紧或放宽都要同时改这句话与对应的 grant；
+  - 一次事务一份对账回执是被接受的形状，不是缺陷：`clara.complete_bank_reconciliation` 每次调用只结一张对账单，
+    事务本地 GUC `clara.completing_recon` 只容纳一个收据 id（migration 0040），因此同一事务内完成第二份对账会在
+    settled-authority belt 上以 `recon_period_settled` 拒绝；今天没有任何已发布调用方能触及它（web 一次一个 RPC，
+    chat 的 bank act 一次一张），不修（owner 2026-09-18，#886，历史上 Wave C-c 的 F-3）。
 
 ---
 
