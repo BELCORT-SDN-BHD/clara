@@ -4,6 +4,19 @@
 // falls through with `return false` for a subject that is not this lane's), so no walk can starve
 // another's fixtures.
 //
+// THAT FIRST SENTENCE WAS NOT TRUE WHEN THIS LANE MET ITS SIBLINGS, and the repair is why every id
+// here now carries the `-6536-4653-8653-653653653653` tail. This lane and `accrual-mock.mjs`
+// (#652) were written on parallel branches, both derived their space from `plans-mock.mjs`'s
+// `64c0c0c0-…` by bumping the stem, so both lanes' client rows arrived at ONE address —
+// 65c0c0c0-6500-4650-8650-650650650650. Neither branch's walk could fail: each was
+// alone on its own tree. On the merged tree `handleAccrualSupabase` is consulted FIRST, so it
+// answered this lane's `/rest/v1/accounting_work` and `/rest/v1/coa_accounts` with the accrual
+// fixtures and `prepayments.walk.refusal` timed out selecting an authority option that was never
+// rendered. ID-SCOPING IS ONLY AS GOOD AS THE IDS: two lanes at one address behave exactly like
+// the unscoped claim N4 bans, whichever way each handler is written. The client id is this lane's
+// ADDRESS, and `e2e-fixture-ownership.test.ts`'s client-id census now measures that no two lanes
+// share one.
+//
 // WHAT IS REAL AND WHAT IS FAKE. The browser, the built Next bundle and every line of client code
 // under test are REAL — the attention band, the configure form and its validator, the disabled
 // allocation preview, the explain-and-choose surface, the four lifecycle Dialogs, the focus
@@ -32,15 +45,15 @@
 import { readCachedJson as readJson, matchVerb } from "./mock-dispatch.mjs";
 
 export const PREPAY = {
-  firmId: "65065065-6500-4650-8650-650650650650",
-  clientId: "65c0c0c0-6500-4650-8650-650650650650",
-  scheduleId: "65111111-6500-4650-8650-650650650650",
-  planId: "65222222-6500-4650-8650-650650650650",
-  entryId: "65333333-6500-4650-8650-650650650650",
-  unscheduledEntryId: "65444444-6500-4650-8650-650650650650",
-  documentId: "65555555-6500-4650-8650-650650650650",
-  workId: "65666666-6500-4650-8650-650650650650",
-  postedEntryId: "65777777-6500-4650-8650-650650650650",
+  firmId: "65065065-6536-4653-8653-653653653653",
+  clientId: "65365365-6536-4653-8653-653653653653",
+  scheduleId: "65111111-6536-4653-8653-653653653653",
+  planId: "65222222-6536-4653-8653-653653653653",
+  entryId: "65333333-6536-4653-8653-653653653653",
+  unscheduledEntryId: "65444444-6536-4653-8653-653653653653",
+  documentId: "65555555-6536-4653-8653-653653653653",
+  workId: "65666666-6536-4653-8653-653653653653",
+  postedEntryId: "65777777-6536-4653-8653-653653653653",
   purpose: "Annual software subscription",
   refusingPurpose: "Annual software subscription",
 };
@@ -117,7 +130,7 @@ const POSTED_OCC = (due) => ({
   outcome: { state: "admitted", logical_op_id: `work:${PREPAY.workId}:journal_entry:1`, replayed: false },
   created_at: `${due}T00:00:12.000Z`, attempts: [],
   work_status: "completed", work_error: null,
-  receipt_id: "65b1b1b1-6500-4650-8650-650650650650", entry_id: PREPAY.postedEntryId,
+  receipt_id: "65b1b1b1-6536-4653-8653-653653653653", entry_id: PREPAY.postedEntryId,
 });
 
 /** THE REFUSED PERIOD. Admitted, then the POSTING core refused it — the case that is invisible
@@ -153,7 +166,7 @@ const DETAIL = () => {
     source_memo: "annual software subscription, paid in advance",
     source_status: "approved",
     document_id: PREPAY.documentId,
-    service_period_id: "65e1e1e1-6500-4650-8650-650650650650",
+    service_period_id: "65e1e1e1-6536-4653-8653-653653653653",
     term_start: "2026-01-01",
     term_end: "2026-03-31",
     basis_kind: "human_stated",
@@ -257,14 +270,14 @@ const ATTENTION_UNSCHEDULED = () => (state.created ? [] : [{
 const CREATED = () => ({
   schedule_id: PREPAY.scheduleId,
   plan_id: PREPAY.planId,
-  revision_id: "65d1d1d1-6500-4650-8650-650650650650",
+  revision_id: "65d1d1d1-6536-4653-8653-653653653653",
   revision: 1,
   status: "active",
   kind: "amortisation_schedule",
   client_id: PREPAY.clientId,
   source_entry_id: PREPAY.unscheduledEntryId,
   document_id: PREPAY.documentId,
-  service_period_id: "65e2e2e2-6500-4650-8650-650650650650",
+  service_period_id: "65e2e2e2-6536-4653-8653-653653653653",
   basis_kind: "human_stated",
   term_start: "2026-01-01",
   term_end: "2026-03-31",
