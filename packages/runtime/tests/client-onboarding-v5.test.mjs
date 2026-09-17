@@ -206,12 +206,102 @@ test("v5.known: an answer given IN THIS RUN beats the register — the person is
   assert.equal(v4Known.knownFactFor(seg("currency"), { currency: "MYR" }, known), null);
 });
 
-test("v5.known: the first row per key wins, and a firm row is labelled as one", () => {
-  const known = v4Known.knownFactsFromPack(PACK([
+test("v5.known: the CLIENT's own record beats the firm's rule, whichever order the pack returns them in", () => {
+  // `clara.get_knowledge_pack` sorts by `knowledge_key` ALONE (0192:1502,
+  // `jsonb_agg(j order by knowledge_key)`) and appends the legacy rows after that, so two rows
+  // under one key come back in whatever order the scan produced. This fold may NOT rely on it:
+  // `default_currency` is one of the three firm-eligible keys, so a firm rule and a client
+  // exception with different applicability genuinely reach the pack together — and whichever wins
+  // is the value that SKIPS the question.
+  const clientFirst = v4Known.knownFactsFromPack(PACK([
     record("default_currency", "MYR", { record_id: "client-row" }),
     record("default_currency", "SGD", { record_id: "firm-row", scope_kind: "firm" }),
   ]));
-  assert.equal(known.currency.recordId, "client-row", "the pack returns the client's own rows ahead of the firm's inherited ones");
+  assert.equal(clientFirst.currency.recordId, "client-row");
+
+  const firmFirst = v4Known.knownFactsFromPack(PACK([
+    record("default_currency", "SGD", { record_id: "firm-row", scope_kind: "firm" }),
+    record("default_currency", "MYR", { record_id: "client-row" }),
+  ]));
+  assert.equal(firmFirst.currency.recordId, "client-row",
+    "the client's own exception governs its own interview, whatever order the aggregate emitted");
+  assert.equal(firmFirst.currency.scopeKind, "client");
+
+  // A firm rule with NO client row beside it still answers — it is the firm's stated default and
+  // nothing contradicts it.
+  const firmOnly = v4Known.knownFactsFromPack(PACK([
+    record("default_currency", "SGD", { record_id: "firm-row", scope_kind: "firm" }),
+  ]));
+  assert.equal(firmOnly.currency.recordId, "firm-row");
+  assert.equal(firmOnly.currency.scopeKind, "firm");
+
+  // Two CLIENT rows under one key is a conflict this lane does not resolve: the first wins and the
+  // later one is simply not used, which is what the docblock has always said.
+  const twoClient = v4Known.knownFactsFromPack(PACK([
+    record("default_currency", "MYR", { record_id: "first" }),
+    record("default_currency", "USD", { record_id: "second" }),
+  ]));
+  assert.equal(twoClient.currency.recordId, "first");
+});
+
+// ---------------------------------------------------------------------------
+// 4b · #649 item 3's OTHER half: the plan's own answered items
+// ---------------------------------------------------------------------------
+//
+// The stanza seeds `prior` "from clara.get_knowledge_pack … PLUS the plan's own answered items".
+// The pack half shipped at the cut; this is the plan half. It matters for a plan a firm partly
+// filled from the dashboard before starting the interview — `clara.begin_client_onboarding` seeds
+// NO items, so a fresh plan folds to `{}` and nothing about a first run changes.
+
+test("v5.plan-prior: an item the plan already carries as ANSWERED seeds prior, normalised by the segment's own validator", () => {
+  const prior = v4Known.priorFromPlanItems(V4, [
+    { itemKey: "interview_run", state: "answered", answer: { run_id: "r1" } },
+    { itemKey: "entity_type", state: "answered", answer: "sdn_bhd" },
+    { itemKey: "fye", state: "answered", answer: 6 },
+    { itemKey: "fye_day", state: "answered", answer: "30" },
+  ]);
+  assert.equal(prior.entity_type, "sdn_bhd");
+  assert.equal(prior.fye, 6);
+  assert.equal(prior.fye_day, 30, "the validator NORMALISES — a plan item is put through the same code path a person's typing takes");
+  assert.ok(!("interview_run" in prior), "the run binding is not a segment and answers no question");
+});
+
+test("v5.plan-prior: a PENDING item, an absent item and a value the validator refuses all leave the question to be asked", () => {
+  const prior = v4Known.priorFromPlanItems(V4, [
+    { itemKey: "entity_type", state: "pending", answer: null },
+    { itemKey: "turnover", state: "answered", answer: "RM500M+" },
+    { itemKey: "fye", state: "answered", answer: 2 },
+    { itemKey: "fye_day", state: "answered", answer: 31 },
+  ]);
+  assert.ok(!("entity_type" in prior), "a pending item is an unanswered question, not an answered one");
+  assert.ok(!("turnover" in prior), "a recorded value outside the segment's own enum is asked, never replayed");
+  assert.equal(prior.fye, 2);
+  assert.ok(!("fye_day" in prior),
+    "…and the cross-field validator runs with the prior built SO FAR: February has 29 days, so 31 is refused here exactly as it would be from a person");
+});
+
+test("v5.plan-prior: an empty or absent item list folds to nothing — a fresh plan behaves exactly as v4 did", () => {
+  assert.deepEqual(v4Known.priorFromPlanItems(V4, []), {});
+  assert.deepEqual(v4Known.priorFromPlanItems(V4, null), {});
+  assert.deepEqual(v4Known.priorFromPlanItems(V4, undefined), {});
+});
+
+test("v5.plan-prior: a register-answered segment is stamped with WHERE the value came from", () => {
+  const known = v4Known.knownFactsFromPack(PACK([record("default_currency", "MYR")]));
+  const item = v4Known.knownProvenanceItem(known.currency);
+  assert.equal(item.item_key, "currency__known_from_register");
+  assert.equal(item.item_kind, "capture", "0017 closes item_kind to must_ask/capture/todo");
+  assert.equal(item.required_for_commit, false, "a NEW key nothing in commit_client_onboarding reads — the gate does not move");
+  assert.equal(item.state, "answered");
+  assert.equal(item.answer.knowledge_record_id, "rec-default_currency");
+  assert.equal(item.answer.knowledge_key, "default_currency");
+  assert.equal(item.answer.scope_kind, "client");
+  assert.equal(item.answer.trust, "asserted");
+  // The ANSWER item itself is untouched: `clara.commit_client_onboarding` reads plan answers by
+  // name, so wrapping the value in a provenance envelope would have moved the ceremony's gate.
+  const currency = seg("currency");
+  const auto = v4Known.knownAnswer(currency, {}, known);
+  assert.equal(auto.value, "MYR", "the answer stays the answer");
 });
 
 test("v5.known: segmentAsking copies field by field and drops questionFor", () => {

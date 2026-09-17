@@ -71,16 +71,55 @@ export function classifyWorkError(error: unknown): WorkErrorClass {
  * payload rides in the result as the honest remainder: the register row exists, its depreciation
  * particulars are still pending, and the human completes them from the asset's own page.
  */
-export function particularsPendingNote(assetId: string, reason: "expired" | "cancelled"): Record<string, unknown> {
+export function particularsPendingNote(
+  assetId: string,
+  reason: "expired" | "cancelled" | "not_opened",
+): Record<string, unknown> {
+  const reasons = {
+    expired: "question_expired",
+    cancelled: "question_cancelled",
+    not_opened: "question_not_opened",
+  } as const;
+  const messages = {
+    expired:
+      "The acquisition posted. The question about this asset's depreciation particulars expired "
+      + "before it was answered, so they are still pending on the fixed-asset register.",
+    cancelled:
+      "The acquisition posted. The question about this asset's depreciation particulars was "
+      + "cancelled, so they are still pending on the fixed-asset register.",
+    not_opened:
+      "The acquisition posted. The question about this asset's depreciation particulars could not "
+      + "be opened, so nobody was asked and they are still pending on the fixed-asset register. "
+      + "They can be completed from the asset's own page.",
+  } as const;
   return {
     asset_id: assetId,
     particulars_complete: false,
-    reason: reason === "expired" ? "question_expired" : "question_cancelled",
+    reason: reasons[reason],
+    message: messages[reason],
+  };
+}
+
+/**
+ * The payload a run settles with when `clara.open_work_question` REFUSED to open the question the
+ * segment asked for — and nothing has been posted.
+ *
+ * WHY THIS EXISTS RATHER THAN THE GENERIC CATCH. `openWorkQuestionStep` is a door call, and a door
+ * call raises: a hook token already bound, a question already pending on this task, a field array
+ * 0180's grammar refuses (option values that are not distinct is the one the successor review
+ * found). Unwrapped, every one of those reached the body's outer catch and settled the Work
+ * `failed`/`internal` with "This Work run failed before it could record an entry" — true about the
+ * entry, useless about the cause, and not recoverable-looking to the person holding it. This says
+ * what actually happened, in the vocabulary `workErrorPayload` uses, and says it is recoverable:
+ * the Work can be re-run, and nothing was written.
+ */
+export function questionNotOpenedPayload(): Record<string, unknown> {
+  return {
+    code: "internal",
+    reason: "question_not_opened",
     message:
-      reason === "expired"
-        ? "The acquisition posted. The question about this asset's depreciation particulars expired "
-          + "before it was answered, so they are still pending on the fixed-asset register."
-        : "The acquisition posted. The question about this asset's depreciation particulars was "
-          + "cancelled, so they are still pending on the fixed-asset register.",
+      "This Work needed to ask a question and the question could not be opened, so nothing was "
+      + "posted and nobody was asked. Re-running the Work is safe.",
+    recoverable: true,
   };
 }

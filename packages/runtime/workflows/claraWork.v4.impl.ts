@@ -103,12 +103,13 @@ import type { ClaraWorkPartAdditionsV3 } from "./claraWork.v3.parts.js";
 import {
   APPLY_FIXED_ASSET_PARTICULARS_TOOL,
   FA_PARTICULARS_FIELDS,
+  FA_PARTICULARS_KEYS,
   faParticularsAnswerSchema,
   localParticularsRefusal,
   particularsFromAnswer,
   type FaParticularsAnswer,
 } from "../lib/fixed-asset-acquisition.js";
-import { knowledgeConflictFields, WORK_KNOWLEDGE_PACK_PURPOSE } from "../lib/knowledge-conflicts.mjs";
+import { distinctConflictRecordCount, knowledgeConflictFields, WORK_KNOWLEDGE_PACK_PURPOSE } from "../lib/knowledge-conflicts.mjs";
 
 // v1's/v2's/v3's park, resume and lifecycle bodies, re-exported BY IMPORT (never copied).
 export {
@@ -358,7 +359,11 @@ export function findQuestionCallV4(
         const rows = Array.isArray(input.rows) ? (input.rows as Array<Record<string, unknown>>) : [];
         // The schema already bounds this at 2..4; the finder re-reads it because a malformed call
         // that slipped a validator must park nothing rather than open a question with one option.
-        if (!key || !why || rows.length < 2) continue;
+        // DISTINCT records, not rows: the schema types `record_id` a uuid and never requires the
+        // four to differ, and `clara.open_work_question` refuses a choice field with a repeated
+        // option value (0180:394-398 `option_values_unique`). Two rows naming ONE record are not a
+        // conflict, and counting them as one would open a question with a single real choice.
+        if (!key || !why || rows.length < 2 || distinctConflictRecordCount(rows) < 2) continue;
         return {
           toolCallId,
           toolName,
@@ -754,11 +759,19 @@ export async function applyParticularsStepV4(
   "use step";
   const parsed = faParticularsAnswerSchema.safeParse(answer);
   if (!parsed.success) {
+    // NAME THE CONTROL WHEN THE SCHEMA CAN. A CLR37 from the DOOR carries a `detail.axis` that
+    // `refusalFieldForAxis` turns into a field; a refusal from this schema has the field in its own
+    // issue path, and dropping it would make the one refusal a surface CANNOT act on. Only a key the
+    // particulars door actually accepts is reported — an issue about an unknown key names no
+    // control, and the form renders that at form level.
+    const first = parsed.error.issues[0];
+    const path = first && Array.isArray(first.path) && typeof first.path[0] === "string" ? first.path[0] : null;
+    const field = path !== null && (FA_PARTICULARS_KEYS as readonly string[]).includes(path) ? path : null;
     return {
       ok: false,
       code: "CLR37",
       reason: "fa_particulars_invalid",
-      field: null,
+      field,
       message:
         "The depreciation particulars that came back were not the shape the register accepts, so nothing "
         + "was changed. The acquisition is posted; the particulars are still pending.",
@@ -812,11 +825,23 @@ export async function applyParticularsStepV4(
 
 /** The question a dependent particulars park asks, and the reason beside it. The asset's
  *  placeholder description is named so a human answering from Needs-you — who never saw the run —
- *  knows which asset this is about. */
+ *  knows which asset this is about.
+ *
+ *  THE SOURCE REF IS #639'S OWN STANZA, `{kind:'fixed_asset', asset_id}`, and it is built HERE so
+ *  the one cast it needs lives beside its reason. `workQuestionSourceRefSchema` closes the kind to
+ *  three values because that schema is what a MODEL may put in an `ask_question` call, and a model
+ *  inventing kinds is a surface nobody can resolve. This question is not a model's — it is the
+ *  workflow's own act after a commit — and the DATABASE's rule is only that `source_ref` is an
+ *  object or null (0180:183), which is why `clara.open_work_question` accepts the fourth kind and
+ *  `p639.question.dependent` already drives it on a live rig, asserting `source_ref.asset_id`.
+ *  `sourceRefText` (apps/web/components/work/work-question-form.tsx) reads `kind` and `id`, so the
+ *  answer form's supporting line now reads `fixed_asset` rather than the WRONG `basis_line <uuid>`
+ *  the cut shipped; the asset itself is named in the question and its cost in the context. */
 export function particularsQuestionV4(pending: PendingFixedAssetV4): {
   question: string;
   reason: string;
   context: string;
+  sourceRef: AskQuestionInputV3["source_ref"];
   fields: AskQuestionInputV3["fields"];
 } {
   const label = pending.description.trim() === "" ? "the asset this entry acquired" : pending.description.trim();
@@ -832,6 +857,7 @@ export function particularsQuestionV4(pending: PendingFixedAssetV4): {
         ? " This asset sits on a non-depreciable enrolment (no accumulated-depreciation account), so its"
           + " method must be “not depreciated” — an in-service date is still required."
         : ""),
+    sourceRef: { kind: "fixed_asset", asset_id: pending.assetId } as unknown as AskQuestionInputV3["source_ref"],
     fields: questionFields(FA_PARTICULARS_FIELDS as unknown as ReadonlyArray<Record<string, unknown>>),
   };
 }

@@ -81,7 +81,7 @@ import {
   workErrorPayload,
 } from "./claraWork.v4.impl.js";
 import { CLARA_WORK_BUDGETS_V4 } from "./claraWork.v4.bundle.js";
-import { budgetExhaustedPayload, particularsPendingNote, taskErrorCodeFor, workOutcomeFor } from "./claraWork.v4.errors.js";
+import { budgetExhaustedPayload, particularsPendingNote, questionNotOpenedPayload, taskErrorCodeFor, workOutcomeFor } from "./claraWork.v4.errors.js";
 import { CLARIFY_FRAMING } from "./chatTurn.v11.prompt.js";
 
 /** The resume payload the control listener writes for a WORK question. */
@@ -200,13 +200,31 @@ export async function claraWork_v4(input: { taskId: string }): Promise<{ taskId:
           const hookToken = await mintHookTokenStep();
           const hook = createHook<WorkResume>({ token: hookToken });
           const asked = particularsQuestionV4(pending);
+          // A DOOR CALL RAISES, AND A RAISE HERE MUST NOT UNDO A POSTED ENTRY. Unwrapped, a
+          // refusal from `clara.open_work_question` reached the outer catch and settled the Work
+          // `failed`/`internal` with "Nothing was posted" — which would be FALSE: the acquisition
+          // is on the books and its register row exists. The Work settles COMPLETED with the same
+          // honest remainder an expired question leaves, and the particulars stay answerable from
+          // the asset's own page.
           const opened = await openWorkQuestionStep(taskId, hookToken, {
             question: asked.question,
             reason: asked.reason,
             context: asked.context,
-            sourceRef: { kind: "basis_line", id: pending.assetId },
+            sourceRef: asked.sourceRef,
             fields: asked.fields,
-          });
+          }).catch(() => null);
+
+          if (opened === null) {
+            particulars = particularsPendingNote(pending.assetId, "not_opened");
+            await settle(
+              "completed",
+              null,
+              null,
+              completedResultV4(seg.posted, confirm.confirmed, { toolCalls, replans, transientRetries }, segment + 1, tokens, particulars),
+            );
+            break;
+          }
+
           await emitWorkQuestionStepV3(opened, work.clientId);
 
           const resolution = await hook; // PARK — zero compute until answered/expired/cancelled
@@ -268,13 +286,21 @@ export async function claraWork_v4(input: { taskId: string }): Promise<{ taskId:
         await emitWorkStatusStepV3(work.workId, work.clientId, "awaiting_input");
         const hookToken = await mintHookTokenStep();
         const hook = createHook<WorkResume>({ token: hookToken });
+        // WRAPPED, for the reason the particulars open above is wrapped: 0180's field grammar is a
+        // wall the DOOR holds, and a model-supplied field array that trips it (option values that
+        // are not distinct, most concretely) must leave a Work a person can read — not a run that
+        // died claiming it "failed before it could record an entry".
         const opened = await openWorkQuestionStep(taskId, hookToken, {
           question: seg.question.question,
           reason: seg.question.reason,
           context: seg.question.context,
           sourceRef: seg.question.sourceRef,
           fields: seg.question.fields,
-        });
+        }).catch(() => null);
+        if (opened === null) {
+          await settle("failed", "internal", questionNotOpenedPayload(), null);
+          break;
+        }
         await emitWorkQuestionStepV3(opened, work.clientId);
 
         const resolution = await hook; // PARK — zero compute until answered/expired/cancelled

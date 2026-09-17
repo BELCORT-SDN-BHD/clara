@@ -325,15 +325,19 @@ async function main() {
       const terminal = await driveToComplete({ runId, planId }, jwt, answers);
       assert.equal(terminal.status, "complete", `resumed drive completes (got ${terminal.status})`);
       assert.equal(terminal.terminal.outcome, "interview_complete", "typed complete terminal after resume");
-      // 15 under v2 for the sdn_bhd fixture: the 13 v1-era answered segments plus `mpers_eligibility`
-      // and `accounting_basis`. The POINT of the assertion is unchanged — a run driven across a
-      // SIGKILL answers exactly as many segments as one driven in a single process.
-      assert.equal(Number(terminal.terminal.answered), 15, `total answered equals the single-process count (15); got ${terminal.terminal.answered}`);
+      // 16 under clientOnboarding_v5 for the sdn_bhd fixture: the 13 v1-era answered segments, plus
+      // `mpers_eligibility` and `accounting_basis` (v2's F2 additions, which made it 15), plus
+      // `fye_day` — the sixteenth, inserted immediately after `fye` by CLIENT_SEGMENTS_V4 (#649's
+      // D7). `interview-e2e.mjs`'s own single-process drive was updated to the same 16 in the cut
+      // that repointed the pin; this file is the SAME drive across a SIGKILL, so it must agree.
+      // The POINT of the assertion is unchanged — a run driven across a SIGKILL answers exactly as
+      // many segments as one driven in a single process.
+      assert.equal(Number(terminal.terminal.answered), 16, `total answered equals the single-process count (16); got ${terminal.terminal.answered}`);
 
       const itemsFinal = await rig.readOnboardingPlanItems(planId);
       const keysFinal = itemsFinal.map((it) => it.item_key);
       assert.equal(new Set(keysFinal).size, keysFinal.length, "each item_key appears EXACTLY once (exactly-once across the kill)");
-      assert.equal(itemsFinal.filter((it) => it.item_key !== "interview_run").length, 16, "16 business items total after the resumed drive (one per answered segment, except coa_seed which emits TWO -- coa_seed_decision + coa_chart_apply)");
+      assert.equal(itemsFinal.filter((it) => it.item_key !== "interview_run").length, 17, "17 business items total after the resumed drive (one per answered segment, except coa_seed which emits TWO -- coa_seed_decision + coa_chart_apply; +1 for clientOnboarding_v5's fye_day)");
       assert.equal(itemsFinal.filter((it) => it.item_key === "interview_run").length, 1, "the interview_run binding is still present exactly once");
 
       console.log("[kill-resume] PASS: SIGKILL mid-park → same-index re-park, byte-identical checkpoints, exactly-once drive to complete");

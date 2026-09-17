@@ -165,6 +165,36 @@ test("v4.knowledge-conflict: 2..4 rows, one choice field, and the escape is ALWA
   assert.ok(fields[0].options.every((o) => o.label && o.value), "0180 refuses an option with no label or no value");
 });
 
+// 0180:394-398 REFUSES a choice field whose option VALUES are not distinct
+// (`option_values_unique`), and `openWorkQuestionStep` is not a try/catch: a duplicate
+// model-supplied `record_id` therefore killed the run instead of asking the question. The schema
+// bounds `rows` at 2..4 and types each id a uuid; it never required them to be different.
+test("v4.knowledge-conflict: two rows naming the SAME record cannot mint a duplicate option", () => {
+  const dup = "11111111-1111-4111-8111-111111111111";
+  const fields = conflicts.knowledgeConflictFields([
+    { record_id: dup, scope_kind: "firm", applies_when: "every client", value: "MYR" },
+    { record_id: dup, scope_kind: "client", applies_when: "SGD invoices", value: "SGD" },
+    { record_id: "22222222-2222-4222-8222-222222222222", scope_kind: "client", applies_when: "cash sales", value: "USD" },
+  ]);
+  const values = fields[0].options.map((o) => o.value);
+  assert.equal(new Set(values).size, values.length, "0180 refuses a choice field with a repeated option value");
+  assert.deepEqual(values, [dup, "22222222-2222-4222-8222-222222222222", conflicts.KNOWLEDGE_CONFLICT_NEITHER],
+    "the FIRST mention of a record survives, in the order the run offered them");
+});
+
+test("v4.finder: a conflict call with fewer than two DISTINCT records parks nothing", () => {
+  const call = (toolName, input) => [{ content: [{ type: "tool-call", toolName, toolCallId: `c-${toolName}`, input }] }];
+  const same = "33333333-3333-4333-8333-333333333333";
+  assert.equal(v4Impl.findQuestionCallV4(call("ask_knowledge_conflict", {
+    knowledge_key: "default_currency",
+    rows: [
+      { record_id: same, scope_kind: "firm", applies_when: "every client", value: "MYR" },
+      { record_id: same, scope_kind: "client", applies_when: "SGD invoices", value: "SGD" },
+    ],
+    why_it_blocks: "which currency the memo states",
+  })), null, "two rows that are the SAME record are not a conflict — and a one-option question is not a question");
+});
+
 test("v4.finder: all THREE question tools park, and only ask_question supplies its own fields", () => {
   const call = (toolName, input) => [{ content: [{ type: "tool-call", toolName, toolCallId: `c-${toolName}`, input }] }];
 
@@ -279,6 +309,11 @@ test("v4.particulars: the question asks the module's own fields and names the as
   const required = asked.fields.filter((f) => f.required).map((f) => f.key);
   assert.deepEqual(required, ["method", "start_date"],
     "only the two a human must state: an in-service date is required for EVERY method, the drivers only for the method that uses them");
+  // #639's stanza spells the source ref `{kind:'fixed_asset', asset_id}` and the DB battery's
+  // `p639.question.dependent` asserts `source_ref.asset_id` on a live rig. A fixed asset labelled
+  // `basis_line` on the surface a human answers from is a wrong label on a real record.
+  assert.deepEqual(asked.sourceRef, { kind: "fixed_asset", asset_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    "the question names the ASSET it depends on, in the stanza's own spelling");
 });
 
 test("v4.particulars: a NON-DEPRECIABLE enrolment is said out loud in the question's context", () => {
@@ -289,12 +324,59 @@ test("v4.particulars: a NON-DEPRECIABLE enrolment is said out loud in the questi
 });
 
 test("v4.particulars: the local mirror refuses a method the enrolment cannot carry, BEFORE the door", () => {
-  const answer = { method: "straight_line", useful_life_months: 60, residual_cents: 0, start_date: "2026-04-01" };
+  // THE ANSWER IS THE ONE THE DOOR CAN STORE, not the one the schema would be happiest with.
+  // `useful_life_months` is declared `kind:"text"`, so `clara.answer_work_question` accepts it only
+  // as a JSON string and stores it verbatim — driving this cell with a number would test the schema
+  // against itself and would have missed the successor review's F1 entirely.
+  const answer = faLib.faParticularsAnswerSchema.parse({
+    method: "straight_line", useful_life_months: "60", residual_cents: 0, start_date: "2026-04-01",
+  });
+  assert.equal(answer.useful_life_months, 60, "the door's string is the particulars door's number by the time the mirror sees it");
   assert.equal(faLib.localParticularsRefusal(answer, { nonDepreciable: false, costCents: 100000 }), null, "control: it is a good answer");
   const refused = faLib.localParticularsRefusal(answer, { nonDepreciable: true, costCents: 100000 });
   assert.ok(refused, "a non-depreciable enrolment admits `none` alone");
   assert.equal(refused.axis, "non_depreciable");
   assert.equal(refused.field, "method", "and the refusal names the CONTROL a human should look at");
+});
+
+// The open is a DOOR CALL and door calls raise. Both sites are now wrapped, and the two payloads
+// below are what a raise settles with instead of "This Work run failed before it could record an
+// entry" — which, after a commit, is a false sentence about a posted ledger entry.
+test("v4.particulars: a question that could NOT be opened still settles the posted entry honestly", () => {
+  const note = v4Errors.particularsPendingNote("a1", "not_opened");
+  assert.equal(note.particulars_complete, false);
+  assert.equal(note.reason, "question_not_opened");
+  assert.match(String(note.message), /^The acquisition posted\./,
+    "the entry is on the books — a failure sentence here would be a lie about a real ledger row");
+  assert.match(String(note.message), /from the asset's own page/, "and it names the remedy");
+});
+
+test("v4.particulars: a malformed answer names the CONTROL, not just the form", async () => {
+  // The door-shaped path is the live one, so the only way to reach this refusal now is an answer
+  // that is genuinely not a whole number. When that happens the refusal must still be actionable:
+  // `refusalFieldForAxis` names the control for a DOOR refusal, and the schema's own issue path is
+  // the only thing that can name it for a LOCAL one.
+  const work = { workId: "w1", clientId: "c1", firmId: "f1", initiator: "u1" };
+  const out = await v4Impl.applyParticularsStepV4(work, "a1", {
+    method: "straight_line", useful_life_months: "sixty", start_date: "2026-09-15",
+  }, { nonDepreciable: false, costCents: 100000 });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, "CLR37");
+  assert.equal(out.reason, "fa_particulars_invalid");
+  assert.equal(out.field, "useful_life_months", "the form can focus the control that is wrong");
+
+  const unknown = await v4Impl.applyParticularsStepV4(work, "a1", {
+    method: "straight_line", useful_life_months: 60, start_date: "2026-09-15", depreciation_policy: "aggressive",
+  }, { nonDepreciable: false, costCents: 100000 });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.field, null, "a key the door does not accept names no control — that is a form-level refusal");
+});
+
+test("v4.errors: a question that could not be opened is a NAMED, recoverable settle", () => {
+  const payload = v4Errors.questionNotOpenedPayload();
+  assert.equal(payload.reason, "question_not_opened");
+  assert.equal(payload.recoverable, true, "nothing was written, so re-running is safe and the payload says so");
+  assert.match(String(payload.message), /nothing was posted and nobody was asked/);
 });
 
 test("v4.particulars: the pending note settles the Work COMPLETED with an honest remainder", () => {

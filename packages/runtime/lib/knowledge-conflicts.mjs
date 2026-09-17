@@ -205,19 +205,46 @@ export const KNOWLEDGE_CONFLICT_NEITHER = "neither_correct_the_record";
  * `0180:362-479`'s field grammar is CLOSED — five kinds, 2..20 options on a choice — and the caller
  * is refused before a round trip by `claraWork.v4.tools.ts`'s own schema (2..4 rows), so the
  * option count is 3..5 here and always inside the door's bound.
+ *
+ * AND THE BOUND BESIDE IT IS UNIQUENESS, WHICH IS WHY THIS DE-DUPLICATES BY `record_id`.
+ * `0180:394-398` refuses a choice field whose option VALUES are not distinct
+ * (`constraint 'option_values_unique'`), and the `rows` schema types each `record_id` a uuid
+ * without ever requiring the four to differ. A model that named one record twice — the obvious way
+ * to describe "this row, under two readings" — would therefore have made
+ * `clara.open_work_question` RAISE, and the raise reaches the workflow's catch, so the Work would
+ * settle `failed`/`internal` instead of asking anybody anything. The first mention of a record
+ * wins and the rest are dropped: the ORDER the run offered them is the order a human reads, and a
+ * silently re-labelled second copy of one record is not a second choice.
+ *
+ * It refuses nothing on its own. `findQuestionCallV4` is where a call with fewer than two DISTINCT
+ * records is declined, the same way it already declines `rows.length < 2` — a question with one
+ * option is not a question.
  */
 export function knowledgeConflictFields(rows) {
   const list = Array.isArray(rows) ? rows : [];
+  const seen = new Set();
+  const options = [];
+  for (const row of list) {
+    const value = String(row?.record_id);
+    if (seen.has(value)) continue;
+    seen.add(value);
+    options.push({ value, label: conflictOptionLabel(row ?? {}) });
+  }
+  options.push({ value: KNOWLEDGE_CONFLICT_NEITHER, label: "Neither — I will correct the record" });
   return [
     {
       key: KNOWLEDGE_CONFLICT_FIELD_KEY,
       label: "Which recorded fact applies to this Work?",
       kind: "choice",
       required: true,
-      options: [
-        ...list.map((row) => ({ value: String(row.record_id), label: conflictOptionLabel(row) })),
-        { value: KNOWLEDGE_CONFLICT_NEITHER, label: "Neither — I will correct the record" },
-      ],
+      options,
     },
   ];
+}
+
+/** How many DISTINCT records a conflict call actually names. Exported so the finder's refusal and
+ *  the option list are the same count rather than two readings of one array. */
+export function distinctConflictRecordCount(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  return new Set(list.map((row) => String(row?.record_id))).size;
 }

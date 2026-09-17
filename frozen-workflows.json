@@ -38,7 +38,7 @@
     },
     "packages/runtime/lib/accrual-basis.ts": {
       "sha256": "f06a82142b6856364097f736d45aee5908b5bcfc176f4cb0e170328f5fffe1b4",
-      "note": ""
+      "note": "#652 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the accrual schema and `accrualFromInput`, so check-frozen-workflows.mjs's import closure hash-locks this file (the web form imports the same module and is NOT frozen — only this closure membership locks it). DEPLOY ORDER: migration 0222 (clara.create_accrual_adjustment_for) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/lib/capability-registry.mjs": {
       "sha256": "db98138aa47832da8a31a8f9a51d31ab503d6bb61ab899da2706051b68218c0a",
@@ -46,12 +46,12 @@
       "deployed": true
     },
     "packages/runtime/lib/fixed-asset-acquisition.ts": {
-      "sha256": "b9170a79a37c10e68bee67b37fac1ba6da79d9833ff856c8324380998fa9c669",
-      "note": ""
+      "sha256": "9846bdbdf33c374994fb9033ea8765f7b3dd64e9016867b6d2177a544868a6d9",
+      "note": "#639 — frozen BY CLOSURE, not by marker: claraWork_v4 imports FA_PARTICULARS_FIELDS, faParticularsAnswerSchema, particularsFromAnswer, localParticularsRefusal and refusalFieldForAxis, so check-frozen-workflows.mjs's import closure hash-locks this file (the web question form imports the same module and is NOT frozen — only this closure membership locks it). It carries the bridge between the two spellings the DATABASE uses: a `text` field's answer is a JSON string at clara.answer_work_question (0180) and a number at clara._fa_validate_particulars (0041). DEPLOY ORDER: migration 0216 (clara.complete_fixed_asset_particulars_for) must be live BEFORE this image runs any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/lib/knowledge-conflicts.mjs": {
-      "sha256": "e1d9799e7675b173ca28f65bcfbff3354e1512d0b7d2d1189aab6ba9ceef27c1",
-      "note": ""
+      "sha256": "7591e9528503e6a5e5d50ff5047641089a9a97574965e957a5f9d85ff4454a04",
+      "note": "#654 — frozen BY CLOSURE, not by marker: claraWork_v4 imports readWorkKnowledge, renderWorkKnowledge, knowledgeConflictFields and distinctConflictRecordCount, so check-frozen-workflows.mjs's import closure hash-locks this file. It DELEGATES the pack read to lib/knowledge.mjs rather than restating it, and no module-level `node:` import may live here — the WDK compiles this closure into a VM script where `require` is undefined and the failure is a RUN-TIME one no build gate can see. DEPLOY ORDER: migration 0192 (clara.get_knowledge_pack) must be live BEFORE this image runs any Work; it is already live from the chatTurn_v19 image. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/lib/knowledge.mjs": {
       "sha256": "e8a6119687dfa8b09e3a3ac4c2a014584bce83e12d57d7537d4c53c65788c2d6",
@@ -70,7 +70,7 @@
     },
     "packages/runtime/lib/staff-expense-claim-basis.ts": {
       "sha256": "a3727b07502d0a52fd5f0a6317909cb15c5998cc4aff1f1f386fcca022f0f6df",
-      "note": ""
+      "note": "#638 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the claim schema, `claimFromInput` and `localClaimRefusal`, so check-frozen-workflows.mjs's import closure hash-locks this file. It is subject to the SAME hash lock as a frozen body: after the ceremony stamps `deployed: true`, a change here ships only with a new chatTurn successor. DEPLOY ORDER: migration 0221 (clara.admit_staff_expense_claim_work) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/lib/work-trace.mjs": {
       "sha256": "96c7e7b51a648c753de3d8d1ac745d39f6015d312f269a1408a8e04330d320d6",
@@ -774,23 +774,23 @@
     },
     "packages/runtime/workflows/chatTurn.v20.impl.ts": {
       "sha256": "f92e45b93bb05153df43840d3123e627baefae408f72c0ab6cc06191e952638a",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the chatTurn_v20 closure (ONE shared successor for #638 and #652: the `start_staff_expense_claim_work` and `start_accrual_work` tools, and nothing else — v19's five files carried forward with only the tool map changed, no new wire kind and no WORK_ACCEPTED_PURPOSES widening); registry.ts points chatTurn: at chatTurn.v20.ts. v1 is RETIRED (#810) and v2..v19 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0221 (staff expense claims) AND 0222 (accrual adjustments) must BOTH be live BEFORE this image serves a chat turn, on top of v19's own 0192 and 0194 — the two tools call clara.admit_staff_expense_claim_work (0221) and clara.create_accrual_adjustment_for (0222). Against a database without them each raises undefined_function (42883), the tool answers `internal` and the turn continues: contained, corrupting nothing. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v20.prompt.ts": {
       "sha256": "f0009e8fb7ec5191dcbbab39317c1a6afaf7a69a297fa85bbb7f84e01d2e15ec",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the chatTurn_v20 closure (ONE shared successor for #638 and #652: the `start_staff_expense_claim_work` and `start_accrual_work` tools, and nothing else — v19's five files carried forward with only the tool map changed, no new wire kind and no WORK_ACCEPTED_PURPOSES widening); registry.ts points chatTurn: at chatTurn.v20.ts. v1 is RETIRED (#810) and v2..v19 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0221 (staff expense claims) AND 0222 (accrual adjustments) must BOTH be live BEFORE this image serves a chat turn, on top of v19's own 0192 and 0194 — the two tools call clara.admit_staff_expense_claim_work (0221) and clara.create_accrual_adjustment_for (0222). Against a database without them each raises undefined_function (42883), the tool answers `internal` and the turn continues: contained, corrupting nothing. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v20.tools.ts": {
       "sha256": "83ae58dcc0c3f3aef5627f74182b7de5118c7d058d1cfc5297677c3c67a7b759",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the chatTurn_v20 closure (ONE shared successor for #638 and #652: the `start_staff_expense_claim_work` and `start_accrual_work` tools, and nothing else — v19's five files carried forward with only the tool map changed, no new wire kind and no WORK_ACCEPTED_PURPOSES widening); registry.ts points chatTurn: at chatTurn.v20.ts. v1 is RETIRED (#810) and v2..v19 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0221 (staff expense claims) AND 0222 (accrual adjustments) must BOTH be live BEFORE this image serves a chat turn, on top of v19's own 0192 and 0194 — the two tools call clara.admit_staff_expense_claim_work (0221) and clara.create_accrual_adjustment_for (0222). Against a database without them each raises undefined_function (42883), the tool answers `internal` and the turn continues: contained, corrupting nothing. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v20.ts": {
       "sha256": "2bcbe82020f033ae403dcb0bb7e5155065d14ce87c50fae736b851e96b245011",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the chatTurn_v20 closure (ONE shared successor for #638 and #652: the `start_staff_expense_claim_work` and `start_accrual_work` tools, and nothing else — v19's five files carried forward with only the tool map changed, no new wire kind and no WORK_ACCEPTED_PURPOSES widening); registry.ts points chatTurn: at chatTurn.v20.ts. v1 is RETIRED (#810) and v2..v19 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0221 (staff expense claims) AND 0222 (accrual adjustments) must BOTH be live BEFORE this image serves a chat turn, on top of v19's own 0192 and 0194 — the two tools call clara.admit_staff_expense_claim_work (0221) and clara.create_accrual_adjustment_for (0222). Against a database without them each raises undefined_function (42883), the tool answers `internal` and the turn continues: contained, corrupting nothing. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v20.usage.ts": {
       "sha256": "b11c322d773c596b5185485ece904d9c61d2b297ab6c4b0930c71cf52d591231",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the chatTurn_v20 closure (ONE shared successor for #638 and #652: the `start_staff_expense_claim_work` and `start_accrual_work` tools, and nothing else — v19's five files carried forward with only the tool map changed, no new wire kind and no WORK_ACCEPTED_PURPOSES widening); registry.ts points chatTurn: at chatTurn.v20.ts. v1 is RETIRED (#810) and v2..v19 stay frozen and exported (policy (c)). DEPLOY ORDER: migrations 0221 (staff expense claims) AND 0222 (accrual adjustments) must BOTH be live BEFORE this image serves a chat turn, on top of v19's own 0192 and 0194 — the two tools call clara.admit_staff_expense_claim_work (0221) and clara.create_accrual_adjustment_for (0222). Against a database without them each raises undefined_function (42883), the tool answers `internal` and the turn continues: contained, corrupting nothing. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/chatTurn.v3.errors.ts": {
       "sha256": "ab2b374a20443976058c5b90ee601d6e7c25226c8191ac36d8959372a85628cb",
@@ -1109,27 +1109,27 @@
     },
     "packages/runtime/workflows/claraWork.v4.bundle.ts": {
       "sha256": "434c71af7db193f7170b1a526d199ae62776f48500a97f81187449ae09054072",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the claraWork_v4 closure (#654's knowledge-context read and `ask_knowledge_conflict`, #652's `answer_accrual_term`, and #639's dependent fixed-asset particulars question, which is a WORKFLOW act rather than a roster entry); registry.ts points claraWork: at claraWork.v4.ts. v1..v3 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0216 (the fixed-asset particulars door) must BOTH be live BEFORE this image runs any Work, on top of v3's own 0195 — v4 calls clara.get_knowledge_pack (0192) and clara.complete_fixed_asset_particulars_for (0216). Without 0192 the knowledge block says the read did not succeed; without 0216 the particulars discovery finds nothing and no question opens. Both contained. v3's 0195 rollback cost is UNCHANGED and still applies: a pre-v3 image never prepares an egress dispatch and 0195's recut posting core refuses it. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v4.errors.ts": {
-      "sha256": "477f9c947ccbaef69d862c67be6c4ee967e9d787104a67b59fe64588b2366254",
-      "note": ""
+      "sha256": "449a7db64231d75adb7cebbed3ed55f51628b7c36fc203455eb4ea3911388ec3",
+      "note": "wave 2026-09-15 — part of the claraWork_v4 closure (#654's knowledge-context read and `ask_knowledge_conflict`, #652's `answer_accrual_term`, and #639's dependent fixed-asset particulars question, which is a WORKFLOW act rather than a roster entry); registry.ts points claraWork: at claraWork.v4.ts. v1..v3 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0216 (the fixed-asset particulars door) must BOTH be live BEFORE this image runs any Work, on top of v3's own 0195 — v4 calls clara.get_knowledge_pack (0192) and clara.complete_fixed_asset_particulars_for (0216). Without 0192 the knowledge block says the read did not succeed; without 0216 the particulars discovery finds nothing and no question opens. Both contained. v3's 0195 rollback cost is UNCHANGED and still applies: a pre-v3 image never prepares an egress dispatch and 0195's recut posting core refuses it. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v4.impl.ts": {
-      "sha256": "f4001b6d4548214e3687e8992449ecf1a715b0fb498f2815cd02e5065824c999",
-      "note": ""
+      "sha256": "32c1d9d5e70c3281055fa2027f76da2bd0c7a0d0dc71c140d99d59f6a630fca1",
+      "note": "wave 2026-09-15 — part of the claraWork_v4 closure (#654's knowledge-context read and `ask_knowledge_conflict`, #652's `answer_accrual_term`, and #639's dependent fixed-asset particulars question, which is a WORKFLOW act rather than a roster entry); registry.ts points claraWork: at claraWork.v4.ts. v1..v3 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0216 (the fixed-asset particulars door) must BOTH be live BEFORE this image runs any Work, on top of v3's own 0195 — v4 calls clara.get_knowledge_pack (0192) and clara.complete_fixed_asset_particulars_for (0216). Without 0192 the knowledge block says the read did not succeed; without 0216 the particulars discovery finds nothing and no question opens. Both contained. v3's 0195 rollback cost is UNCHANGED and still applies: a pre-v3 image never prepares an egress dispatch and 0195's recut posting core refuses it. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v4.prompt.ts": {
       "sha256": "e465c65303f254dcf3e9cf02c8d51f068a50628261ad90e13fd998c154dfb2ca",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the claraWork_v4 closure (#654's knowledge-context read and `ask_knowledge_conflict`, #652's `answer_accrual_term`, and #639's dependent fixed-asset particulars question, which is a WORKFLOW act rather than a roster entry); registry.ts points claraWork: at claraWork.v4.ts. v1..v3 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0216 (the fixed-asset particulars door) must BOTH be live BEFORE this image runs any Work, on top of v3's own 0195 — v4 calls clara.get_knowledge_pack (0192) and clara.complete_fixed_asset_particulars_for (0216). Without 0192 the knowledge block says the read did not succeed; without 0216 the particulars discovery finds nothing and no question opens. Both contained. v3's 0195 rollback cost is UNCHANGED and still applies: a pre-v3 image never prepares an egress dispatch and 0195's recut posting core refuses it. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v4.tools.ts": {
       "sha256": "d3e000b5ca3d75026b7330efbdf526b796c6dc306f23af7d66af589c5842673c",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the claraWork_v4 closure (#654's knowledge-context read and `ask_knowledge_conflict`, #652's `answer_accrual_term`, and #639's dependent fixed-asset particulars question, which is a WORKFLOW act rather than a roster entry); registry.ts points claraWork: at claraWork.v4.ts. v1..v3 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0216 (the fixed-asset particulars door) must BOTH be live BEFORE this image runs any Work, on top of v3's own 0195 — v4 calls clara.get_knowledge_pack (0192) and clara.complete_fixed_asset_particulars_for (0216). Without 0192 the knowledge block says the read did not succeed; without 0216 the particulars discovery finds nothing and no question opens. Both contained. v3's 0195 rollback cost is UNCHANGED and still applies: a pre-v3 image never prepares an egress dispatch and 0195's recut posting core refuses it. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v4.ts": {
-      "sha256": "7d36d362767eca0fc727e6f6530327a7073ef7f4a8db27ab498dc05629932a52",
-      "note": ""
+      "sha256": "d82f3541bdad2d1565af2405b469522b99d6b9dfe000ac7ee4fa4b6ed0b5341a",
+      "note": "wave 2026-09-15 — part of the claraWork_v4 closure (#654's knowledge-context read and `ask_knowledge_conflict`, #652's `answer_accrual_term`, and #639's dependent fixed-asset particulars question, which is a WORKFLOW act rather than a roster entry); registry.ts points claraWork: at claraWork.v4.ts. v1..v3 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migrations 0192 (governed knowledge records) AND 0216 (the fixed-asset particulars door) must BOTH be live BEFORE this image runs any Work, on top of v3's own 0195 — v4 calls clara.get_knowledge_pack (0192) and clara.complete_fixed_asset_particulars_for (0216). Without 0192 the knowledge block says the read did not succeed; without 0216 the particulars discovery finds nothing and no question opens. Both contained. v3's 0195 rollback cost is UNCHANGED and still applies: a pre-v3 image never prepares an egress dispatch and 0195's recut posting core refuses it. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",
@@ -1152,8 +1152,8 @@
       "deployed": true
     },
     "packages/runtime/workflows/clientOnboarding.v5.ts": {
-      "sha256": "bd7311cf61183a862fa323b151ff98a5a5dfc39bcfa4722e109119c5a210ce4e",
-      "note": ""
+      "sha256": "57cf051133683c933219d56563bec828293fd37fe70e6879dc29df3e1bc9bfbf",
+      "note": "wave 2026-09-15 — part of the clientOnboarding_v5 closure (#649's successor contract: H-52's `sst_no` gate, the `fye_day` segment, and the known-facts pre-read that makes an answered fact an absent question); registry.ts points clientOnboarding: at clientOnboarding.v5.ts. v1..v4 stay frozen and exported (policy (c)). DEPLOY ORDER: migration 0192 (clara.get_knowledge_pack) must be live BEFORE this image runs an interview — it is already live from the chatTurn_v19 image, so nothing new is owed by this cut; without it the pre-read folds to no known facts and every question is asked, which is v4's behaviour exactly. The fy-end DAY reaches clara.clients through clara.settle_client_onboarding_facts (0219) on the HUMAN lane, never from this body. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
@@ -1296,12 +1296,12 @@
       "deployed": true
     },
     "packages/runtime/workflows/interview.v4.known.ts": {
-      "sha256": "a9da159a693a9d8a9449de03b336f99da2f5378889b1c26e4db668ebf9745f9e",
-      "note": ""
+      "sha256": "64f803dea7e3ab2818a0bc95f5277732fac075f8809fd1a97797910927d8afd5",
+      "note": "wave 2026-09-15 — part of the clientOnboarding_v5 closure (#649's successor contract: H-52's `sst_no` gate, the `fye_day` segment, and the known-facts pre-read that makes an answered fact an absent question); registry.ts points clientOnboarding: at clientOnboarding.v5.ts. v1..v4 stay frozen and exported (policy (c)). DEPLOY ORDER: migration 0192 (clara.get_knowledge_pack) must be live BEFORE this image runs an interview — it is already live from the chatTurn_v19 image, so nothing new is owed by this cut; without it the pre-read folds to no known facts and every question is asked, which is v4's behaviour exactly. The fy-end DAY reaches clara.clients through clara.settle_client_onboarding_facts (0219) on the HUMAN lane, never from this body. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/interview.v4.questions.ts": {
       "sha256": "dad520e3cf7f46fa04aec51c76423f2b5791f766190321d3b829a457b8c3e59c",
-      "note": ""
+      "note": "wave 2026-09-15 — part of the clientOnboarding_v5 closure (#649's successor contract: H-52's `sst_no` gate, the `fye_day` segment, and the known-facts pre-read that makes an answered fact an absent question); registry.ts points clientOnboarding: at clientOnboarding.v5.ts. v1..v4 stay frozen and exported (policy (c)). DEPLOY ORDER: migration 0192 (clara.get_knowledge_pack) must be live BEFORE this image runs an interview — it is already live from the chatTurn_v19 image, so nothing new is owed by this cut; without it the pre-read folds to no known facts and every question is asked, which is v4's behaviour exactly. The fy-end DAY reaches clara.clients through clara.settle_client_onboarding_facts (0219) on the HUMAN lane, never from this body. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",

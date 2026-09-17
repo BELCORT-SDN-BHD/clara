@@ -14,7 +14,7 @@
 // only then persisted), and v3's ARM BEFORE ANNOUNCE fix (GH #152) — the two lines in `ask` that
 // must not be reordered.
 //
-// THREE DIFFERENCES, ALL OF THEM #649's SUCCESSOR CONTRACT, DELIVERED AT THE WAVE'S INTEGRATION CUT
+// FOUR DIFFERENCES, ALL OF THEM #649's SUCCESSOR CONTRACT, DELIVERED AT THE WAVE'S INTEGRATION CUT
 // BECAUSE DECISIONS §1.1 FORBIDS AN IMPLEMENTATION BRANCH FROM CUTTING ONE.
 //
 //   1. THE QUESTION INVENTORY IS CLIENT_SEGMENTS_V4 (interview.v4.questions.ts), which is
@@ -25,10 +25,22 @@
 //   2. THE KNOWN-FACTS PRE-READ. One call to `clara.get_knowledge_pack`, before the segment loop,
 //      through the sibling step module `interview.v4.known.ts`. A segment whose registered fact the
 //      segment's OWN validator accepts is not asked: its plan item is written from the recorded
-//      value and the activity echo says where it came from. "An answered fact is an absent
-//      question, not an unanswered one."
+//      value and the activity echo says where it came from, and a companion `capture` item under a
+//      NEW key (`<segment>__known_from_register`) records WHICH knowledge record supplied it — the
+//      durable half of that sentence, because `update_onboarding_plan` can only stamp `answered_by`
+//      with a real active bookkeeper and the run's starter did not answer it. "An answered fact is
+//      an absent question, not an unanswered one."
 //
-//   3. "KNOWN, CONFIRM", NOT ONLY "KNOWN, SKIP". A recorded fact the validator REFUSES does not
+//   3. THE PLAN'S OWN ANSWERED ITEMS SEED `prior` TOO — the other half of the stanza's "seeding
+//      `prior` from `clara.get_knowledge_pack` … plus the plan's own answered items". A firm that
+//      filled part of the plan from the dashboard and then started the interview was asked every
+//      one of those questions again by v4. Each item is put through the SEGMENT'S OWN validator,
+//      in segment order, so what seeds `prior` is a value the question could lawfully have been
+//      answered with; a value the validator refuses seeds nothing and the question is asked.
+//      `clara.begin_client_onboarding` seeds NO items, so a plan born and interviewed in one go is
+//      unaffected, and `answered` still counts what THIS run asked.
+//
+//   4. "KNOWN, CONFIRM", NOT ONLY "KNOWN, SKIP". A recorded fact the validator REFUSES does not
 //      silently disappear: the question is asked with the recorded value and its provenance in
 //      front of the person. What this cut does NOT do is write the correction back — that is
 //      `capture_knowledge`'s act under a named human's authority, and a workflow step carries no
@@ -53,8 +65,10 @@ import { CLIENT_SEGMENTS_V4 } from "./interview.v4.questions.js";
 import {
   knownAnswer,
   knownEcho,
+  knownProvenanceItem,
   knownQuestionFor,
   loadKnownFactsStep,
+  priorFromPlanItems,
   segmentAsking,
   type KnownFacts,
 } from "./interview.v4.known.js";
@@ -138,7 +152,17 @@ export async function clientOnboarding_v5(input: ClientOnboardingV5Input): Promi
     knownMap["interview_run"] = itemFingerprint({ state: "answered", answer: { run_id: runId } });
   }
 
-  const prior: Record<string, unknown> = {};
+  // #649 ITEM 3, THE PLAN HALF. The stanza seeds `prior` from the knowledge pack AND from "the
+  // plan's own answered items"; the pack half is `known` above, this is the other. It closes the
+  // ordinary case of a firm that filled part of the plan from the dashboard and THEN started the
+  // interview — v4 re-asked every one of those questions. `clara.begin_client_onboarding` seeds no
+  // items, so a plan born and interviewed in one go folds to `{}` here and this run is v4's.
+  //
+  // `planAnswered` is kept SEPARATELY rather than read back off `prior`, because `prior` fills as
+  // the loop runs: the set is "what the plan told us before anybody was asked anything", and the
+  // skip below must mean exactly that.
+  const prior: Record<string, unknown> = priorFromPlanItems(CLIENT_SEGMENTS_V4, plan0.items);
+  const planAnswered = new Set<string>(Object.keys(prior));
   let answered = 0;
 
   // Persist a confirmed segment under the revision CAS, re-echoing (re-ask + re-confirm against
@@ -179,6 +203,12 @@ export async function clientOnboarding_v5(input: ClientOnboardingV5Input): Promi
     // unanswered one.
     if (!segmentApplies(seg, prior)) continue;
 
+    // AN ITEM THE PLAN ALREADY CARRIES IS AN ABSENT QUESTION TOO, and it is not this run's to
+    // re-record: the value is already durable, already attributed to whoever wrote it, and already
+    // in `prior` for the cross-field validators below. Nothing is written and `answered` does not
+    // move — that count is what THIS run asked and had answered.
+    if (planAnswered.has(seg.key)) continue;
+
     // #649 ITEM 3 — AN ALREADY-ANSWERED FACT IS AN ABSENT QUESTION. The register's value is put
     // through the SEGMENT'S OWN VALIDATOR, so what lands in the plan is a value this question could
     // lawfully have been answered with, normalised by the same code path a person's typing takes.
@@ -187,7 +217,14 @@ export async function clientOnboarding_v5(input: ClientOnboardingV5Input): Promi
     const auto = knownAnswer(seg, prior, known);
     if (auto) {
       const asked = segmentAsking(seg, questionOf(seg, prior));
-      const items = seg.toItems ? seg.toItems(auto.value, asked) : [defaultItem(asked, auto.value)];
+      const segItems = seg.toItems ? seg.toItems(auto.value, asked) : [defaultItem(asked, auto.value)];
+      // AND THE DURABLE RECORD SAYS WHO ANSWERED IT, HONESTLY. `update_onboarding_plan` stamps
+      // `answered_by` with the actor it is given and requires an active bookkeeper+, so the answer
+      // item is attributed to the member who STARTED the run — somebody who did not answer this
+      // question. The value stays exactly where the commit ceremony reads it; a companion `capture`
+      // item under a NEW key records which knowledge record supplied it, at which watermark.
+      // `concat`, not `push`: a segment's own `toItems` owns the array it returns.
+      const items = segItems.concat([knownProvenanceItem(auto.fact)]);
       prior[seg.key] = auto.value;
       const done = await persistSegment(seg, {
         outcome: "answered",

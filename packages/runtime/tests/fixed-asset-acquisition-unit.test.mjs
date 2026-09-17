@@ -97,6 +97,80 @@ test("fa.particulars the builder emits the database's own spelling and OMITS wha
   assert.equal(rb.residual_cents, 50_000, "exact minor units, never a float and never a major unit");
 });
 
+// THE DOOR'S OWN ANSWER IS THE CONTRACT, and this cell is the one that would have caught the
+// mismatch the successor review found as F1. `clara.answer_work_question` stores the answer
+// VERBATIM after `clara._assert_work_answer` judged it against THESE fields: a `text` field can
+// only ever be a JSON STRING (0180:477-482), a `money` field only ever an integer JSON NUMBER,
+// and the reserved `note` key is explicitly allowed beside them. So the object that reaches
+// `applyParticularsStepV4` on a real run is the one built below — and nothing else is what a
+// human answering from Needs-you can produce.
+test("fa.door the answer the DOOR can actually store is the answer this schema accepts", () => {
+  // Straight line, exactly as `p639.question.dependent` answers it on a live rig: the driver as a
+  // STRING because it is declared `kind:"text"`, the residual as a NUMBER because it is `money`,
+  // a blank optional the door treats as absent, and a human's remark under the reserved key.
+  const doorSl = {
+    method: "straight_line",
+    useful_life_months: "60",
+    rate_bps: "",
+    residual_cents: 0,
+    start_date: "2026-09-15",
+    description: "Air compressor",
+    note: "bought at the September auction",
+  };
+  const sl = fa.faParticularsAnswerSchema.safeParse(doorSl);
+  assert.equal(sl.success, true,
+    `the door-shaped answer parses (${sl.success ? "" : JSON.stringify(sl.error?.issues)})`);
+  assert.deepEqual(fa.particularsFromAnswer(sl.data), {
+    method: "straight_line",
+    start_date: "2026-09-15",
+    useful_life_months: 60,
+    residual_cents: 0,
+    description: "Air compressor",
+  }, "…and the builder hands the DATABASE its own spelling: numbers, no blank, no note");
+
+  // Reducing balance: BOTH drivers arrive as strings.
+  const rb = fa.faParticularsAnswerSchema.safeParse({
+    method: "reducing_balance", useful_life_months: "120", rate_bps: "2000",
+    residual_cents: 50000, start_date: "2026-01-01",
+  });
+  assert.equal(rb.success, true, "reducing balance is answerable too");
+  assert.equal(fa.particularsFromAnswer(rb.data).rate_bps, 2000);
+  assert.equal(fa.particularsFromAnswer(rb.data).useful_life_months, 120);
+
+  // `none` was never the only survivable method, and this pins that it is not.
+  assert.equal(fa.faParticularsAnswerSchema.safeParse({ method: "none", start_date: "2026-04-01" }).success, true);
+
+  // A PROGRAMMATIC caller (this file's own SL, the e2e fixtures) still parses: the bridge widens
+  // what is accepted, it does not move the contract onto strings.
+  assert.equal(fa.faParticularsAnswerSchema.safeParse(SL).success, true,
+    "a number is still a number — the door's string is an ADDITIONAL accepted spelling");
+
+  // And a driver that is not a whole number is refused, at the field, rather than coerced. This is
+  // why the bridge is a guarded conversion and not `z.coerce.number()`, which would turn every one
+  // of these into a plausible wrong number.
+  for (const bad of ["sixty", "6.5", "-", "1e3", "60 months"]) {
+    const r = fa.faParticularsAnswerSchema.safeParse({
+      method: "straight_line", useful_life_months: bad, start_date: "2026-09-15",
+    });
+    assert.equal(r.success, false, `useful_life_months=${JSON.stringify(bad)} is not a whole number of months`);
+  }
+
+  // A BLANK optional is the door's own "absent", not a refusal and not a zero: 0180 skips a
+  // whitespace-only optional in its validation loop and then stores the answer verbatim, so the
+  // blank genuinely arrives here.
+  const blank = fa.faParticularsAnswerSchema.safeParse({
+    method: "none", start_date: "2026-04-01", useful_life_months: " ", rate_bps: "", description: "  ",
+  });
+  assert.equal(blank.success, true, "a blank optional parses");
+  assert.deepEqual(fa.particularsFromAnswer(blank.data), { method: "none", start_date: "2026-04-01" },
+    "…as ABSENT — a blank life on a `none` asset is not a life, so 0041's drivers rule is not tripped");
+
+  // The local mirror judges the PARSED answer, so the whole lane — door answer, schema, mirror —
+  // agrees about one good answer.
+  assert.equal(fa.localParticularsRefusal(sl.data, { nonDepreciable: false, costCents: 1_000_000 }), null,
+    "the door-shaped answer the schema accepted is one the mirror also accepts");
+});
+
 test("fa.axis every CLR37 axis the doors raise maps to a control, or honestly to none", () => {
   assert.equal(fa.refusalFieldForAxis({ axis: "start_date" }), "start_date");
   assert.equal(fa.refusalFieldForAxis({ axis: "drivers" }), "useful_life_months");

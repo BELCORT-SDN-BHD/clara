@@ -12,7 +12,10 @@
 //     answering surface renders. Proven against `clara._assert_work_question_fields` by the DB
 //     battery (`p639.question.dependent`), not merely asserted here.
 //   * faParticularsAnswerSchema — the CLOSED key set `clara._fa_validate_particulars` admits
-//     (0041:2977-2984). A key outside it is refused by the database with axis `unknown_key`.
+//     (0041:2977-2984). A key outside it is refused by the database with axis `unknown_key`. It
+//     parses the answer THE ANSWER DOOR CAN STORE, which is not the same spelling: a `text` field
+//     is a JSON string there and a number here, and `note` is admitted there and refused here. The
+//     conversion is `fromDoorAnswer`, below, and it is the whole of the successor review's F1.
 //   * particularsFromAnswer — the `p_particulars` jsonb the door takes, built from the answer the
 //     human gave, in the DATABASE's own spelling.
 //   * localParticularsRefusal — the earlier, more legible half of a validation the database owns.
@@ -62,7 +65,14 @@ export type FaParticularsKey = (typeof FA_PARTICULARS_KEYS)[number];
  *  ONLY `method` AND `start_date` ARE REQUIRED, and that is the ticket in one line: an in-service
  *  date is required for EVERY method including `none` (0041:3001), and the drivers are required
  *  only by the method that uses them — so a human who knows the method and the date can finish,
- *  and one who does not is told which single control is missing. */
+ *  and one who does not is told which single control is missing.
+ *
+ *  THE TWO DRIVERS ARE `text`, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT. A months count and a
+ *  basis-point rate are not MONEY: `money` is the one kind whose browser control runs typed text
+ *  through `parseAmountToCents` (apps/web/lib/work/question-fields.ts), so a person typing `60`
+ *  months into one would send 6000. `text` is what the DB battery proved this array with
+ *  (`p639.question.dependent` answers `useful_life_months: "60"`), and `faParticularsAnswerSchema`
+ *  converts the string the door stores into the number the particulars door takes. */
 export const FA_PARTICULARS_FIELDS = [
   {
     key: "method",
@@ -87,8 +97,58 @@ const isoDate = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .describe("A calendar date, YYYY-MM-DD. Ask the human if they did not give one.");
 
-/** The typed answer. `.strict()` on purpose: a key the database would refuse must not travel. */
-export const faParticularsAnswerSchema = z
+/**
+ * THE DOOR'S ANSWER, TURNED INTO THE DATABASE'S OWN SPELLING — the ONE place the two grammars meet.
+ *
+ * THERE ARE TWO GRAMMARS HERE AND THEY ARE BOTH THE DATABASE'S. `clara._assert_work_answer`
+ * (0180:444-486) judges an ANSWER against the declared FIELDS: a `text` field is a JSON **string**
+ * and nothing else, a `money` field an integer JSON **number** and nothing else, and the reserved
+ * `note` key is explicitly admitted beside them. `clara._fa_validate_particulars` (0041:2970-3033)
+ * judges `p_particulars`, where `useful_life_months` and `rate_bps` are **numbers**. So the two
+ * drivers are declared `text` above (proven against `clara._assert_work_question_fields` by the DB
+ * battery, and answered as `"60"` by `p639.question.dependent` on a live rig) and are sent as
+ * numbers below — and THIS function is the bridge. Without it the only answer a human could give
+ * is the one the run would refuse, which is the successor review's F1 in one sentence.
+ *
+ * Three rules, each one the door's own:
+ *
+ *   1. A `text`-declared integer driver arrives as a decimal string and becomes a number. Anything
+ *      that is not a whole number is left ALONE, so the refusal names the field instead of being
+ *      coerced into a plausible wrong value (`z.coerce.number()` would make `""` a zero).
+ *   2. A BLANK optional is ABSENT. `clara._assert_work_answer` treats a whitespace-only string in
+ *      an optional field as "simply absent from the accepted answer" — and then stores the answer
+ *      VERBATIM (`answer = p_answer`, 0180:847), so the blank really does arrive here.
+ *   3. The reserved `note` is dropped. It is the human's remark on the ANSWER; it lives durably on
+ *      `clara.agent_interruptions.answer`, which is the record every surface renders, and
+ *      `clara._fa_validate_particulars` would refuse it as `unknown_key`.
+ *
+ * Anything that is not an object passes through untouched, so the object schema below produces the
+ * refusal rather than this function inventing one.
+ */
+const DOOR_INTEGER_KEYS = new Set<string>(["useful_life_months", "rate_bps"]);
+
+function fromDoorAnswer(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key === "note") continue;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") continue;
+      if (DOOR_INTEGER_KEYS.has(key) && /^-?\d+$/.test(trimmed)) {
+        out[key] = Number(trimmed);
+        continue;
+      }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+/** The typed answer. `.strict()` on purpose: a key the database would refuse must not travel —
+ *  and `fromDoorAnswer` above has already put the answer the ANSWER door stored into the spelling
+ *  the PARTICULARS door takes, so one object satisfies both. */
+export const faParticularsAnswerSchema = z.preprocess(fromDoorAnswer, z
   .object({
     method: z.enum(FA_METHODS).describe(
       "How this asset is depreciated. `none` is a stated policy (land, for instance), not an omission.",
@@ -112,7 +172,7 @@ export const faParticularsAnswerSchema = z
     is_commercial_vehicle: z.boolean().nullable().optional(),
     is_new: z.boolean().nullable().optional(),
   })
-  .strict();
+  .strict());
 
 export type FaParticularsAnswer = z.infer<typeof faParticularsAnswerSchema>;
 
