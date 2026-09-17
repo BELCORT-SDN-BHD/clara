@@ -12,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { MoneyInput } from "@/components/common/money-input";
 import { NativeSelect } from "@/components/common/native-select";
 import { FaDoorDialog } from "./FaDoorDialog";
+import { toDialogRefusal } from "@/components/common/dialog-refusal";
+import { faRefusalControlId } from "@/lib/registers/fa-refusal-field";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
 import { fmtCents } from "@/lib/registers/money";
 import { completeFixedAssetParticulars, reviseFixedAssetParticulars, disposeFixedAsset } from "@/lib/registers/fixed-assets";
@@ -31,13 +33,20 @@ type RowActionsProps = {
    *  state; the boolean decides only whether the dialog — and the particulars
    *  the human typed into it — survives a refusal. */
   act: (fn: () => Promise<void>) => Promise<boolean>;
+  /** #639 — THE CALLER'S STANDING FAILURE, so the refusal travels INTO the dialog with the human.
+   *  `useAsyncRead` keeps the raw thrown error (a `DoorRefusal` instance, not a message), which is
+   *  what makes both halves of AC7 possible here: the refusal renders beside the fields it is
+   *  about, and its typed `axis` names the CONTROL to focus. Optional — a caller that has no such
+   *  state passes nothing and the dialog behaves exactly as before. */
+  error?: unknown;
 };
 
 /** Complete once (COMPLETE-ONCE — the door's own law): pending/active rows
  *  that have never had a method set. */
-export function CompleteParticularsDialog({ clientId, asset, busy, act }: RowActionsProps) {
+export function CompleteParticularsDialog({ clientId, asset, busy, act, error }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [particulars, setParticulars] = useState<FaParticularsInput>(EMPTY_PARTICULARS);
+  const idPrefix = `fa-complete-${asset.id}`;
 
   return (
     <FaDoorDialog
@@ -46,6 +55,8 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act }: RowAct
       description={t("completeDescription")}
       confirmLabel={t("complete")}
       busy={busy}
+      refusal={toDialogRefusal(error)}
+      refusalFocusId={faRefusalControlId(idPrefix, error)}
       confirmDisabled={!particularsReadyToSubmit(particulars)}
       onConfirm={() =>
         act(async () => {
@@ -53,7 +64,7 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act }: RowAct
         })
       }
     >
-      <FaParticularsFields idPrefix={`fa-complete-${asset.id}`} value={particulars} onChange={setParticulars} />
+      <FaParticularsFields idPrefix={idPrefix} value={particulars} onChange={setParticulars} />
     </FaDoorDialog>
   );
 }
@@ -61,7 +72,7 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act }: RowAct
 /** Prospective revision: only offered on an active row that ALREADY has its
  *  particulars complete — seeded from the row's own current values so the
  *  human edits forward rather than re-typing everything. */
-export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActionsProps) {
+export function ReviseParticularsDialog({ clientId, asset, busy, act, error }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [particulars, setParticulars] = useState<FaParticularsInput>({
@@ -83,6 +94,8 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActio
       description={t("reviseDescription")}
       confirmLabel={t("revise")}
       busy={busy}
+      refusal={toDialogRefusal(error)}
+      refusalFocusId={faRefusalControlId(`fa-revise-${asset.id}`, error)}
       confirmDisabled={!effectiveFrom || !particularsReadyToSubmit(particulars)}
       onConfirm={() =>
         act(async () => {
@@ -110,7 +123,7 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActio
  *  needs to see the freeze BEFORE opening it, which is the whole reason the
  *  projection exists. The trigger stays enabled either way (constraint:
  *  never pre-hide on a client-side guess — the door is still the wall). */
-export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActionsProps) {
+export function DisposeDialog({ clientId, asset, accounts, busy, act, error }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [disposalDate, setDisposalDate] = useState("");
   const [proceedsCents, setProceedsCents] = useState<number | null>(null);
@@ -134,6 +147,7 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
       description={t("disposeDescription")}
       confirmLabel={t("dispose")}
       busy={busy}
+      refusal={toDialogRefusal(error)}
       confirmDisabled={!disposalDate || !gainAccount || !lossAccount || !proceedsValid || !costPortionValid}
       onConfirm={() =>
         act(async () => {

@@ -25,6 +25,8 @@ import { loadChartOfAccounts } from "@/lib/registers/accounts";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataTableCard } from "@/components/common/data-table-card";
+import { Badge } from "@/components/ui/badge";
+import { fixedAssetHref } from "@/lib/navigation/tree";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState, ErrorMessage } from "@/components/firm/data-state";
 import { LoadingState } from "@/components/common/state";
@@ -115,7 +117,22 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
             <TableBody>
               {rows.map((a) => (
                 <TableRow key={a.id}>
-                  <TableCell>{a.description ?? a.id.slice(0, 8)}</TableCell>
+                  {/* #639 — THE ROW BECOMES A DOOR. `clara.get_fixed_asset` had no UI caller at
+                      all before this ticket: the register showed a list and three dialogs and
+                      there was nowhere to read ONE asset. The badge beside it is the product
+                      sentence in two words — the acquisition is done, the depreciation setup is
+                      what is waiting — and it is a LABEL beside a link, never the only cue and
+                      never the only colour (appendix D row 7). */}
+                  <TableCell>
+                    <div className="flex flex-col items-start gap-1">
+                      <Link href={fixedAssetHref(clientId, a.id)} className="underline-offset-4 hover:underline">
+                        {a.description ?? a.id.slice(0, 8)}
+                      </Link>
+                      {!a.particulars_complete && (a.status === "pending" || a.status === "active") ? (
+                        <Badge variant="outline">{t("pendingParticulars")}</Badge>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{statusLabels[a.status] ?? a.status}</TableCell>
                   <TableCell className="text-muted-foreground">{a.acquired_date ?? "—"}</TableCell>
                   <TableCell>{fmtCents(a.cost_cents, tc("centsUnsafe"))}</TableCell>
@@ -141,13 +158,13 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
                       ) : null}
                       <div className="flex flex-wrap justify-end gap-1.5">
                         {!a.particulars_complete && (a.status === "pending" || a.status === "active") ? (
-                          <CompleteParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} />
+                          <CompleteParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} error={error} />
                         ) : null}
                         {a.particulars_complete && a.status === "active" ? (
-                          <ReviseParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} />
+                          <ReviseParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} error={error} />
                         ) : null}
                         {a.status === "active" ? (
-                          <DisposeDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} />
+                          <DisposeDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={actAndRefresh} error={error} />
                         ) : null}
                       </div>
                     </div>

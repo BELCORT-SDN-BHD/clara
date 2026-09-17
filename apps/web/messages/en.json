@@ -80,7 +80,8 @@
       "periodicAdjustment": "Record periodic adjustment",
       "workDetail": "Journal entry",
       "knowledgeRecord": "Knowledge record",
-      "counterpartyIdentity": "Counterparty identity"
+      "counterpartyIdentity": "Counterparty identity",
+      "fixedAsset": "Fixed asset"
     },
     "accounting": {
       "journals": "Journals",
@@ -1249,6 +1250,8 @@
     }
   },
   "WorkDetail": {
+    "fixedAssetLabel": "Fixed asset registered",
+    "fixedAssetPendingParticulars": "waiting on depreciation particulars",
     "fromPlanLabel": "Scheduled by",
     "fromPlan": "From plan: {purpose}",
     "fromPlanLink": "Open the plan",
@@ -2631,6 +2634,7 @@
       "nbv": "Net book value",
       "method": "Method",
       "incompleteNote": "{count} asset(s) have incomplete particulars.",
+      "pendingParticulars": "Waiting on depreciation particulars",
       "statuses": {
         "pending": "Pending",
         "active": "Active",
@@ -3244,6 +3248,70 @@
       "approveCorrectionTrigger": "Approve correction",
       "approveCorrectionTitle": "Approve the correction batch",
       "approveCorrectionDescription": "Finalizes the seed's own correction drafts — runs at serializable isolation."
+    }
+  },
+  "FixedAssetDetail": {
+    "heading": "Fixed asset",
+    "subheading": "The acquisition, its source and value, the depreciation particulars and the schedule they produce.",
+    "notFound": "This fixed asset is not available in your firm.",
+    "pendingParticulars": "Waiting on depreciation particulars",
+    "tabsLabel": "Asset sections",
+    "tabs": {
+      "acquisition": "Acquisition",
+      "particulars": "Particulars & policy",
+      "schedule": "Schedule",
+      "history": "History"
+    },
+    "acquisition": {
+      "acquiredDate": "Acquired",
+      "cost": "Cost",
+      "assetAccount": "Asset account",
+      "postingDate": "Posting date",
+      "origin": "Recorded by",
+      "memo": "Memo",
+      "journalEntry": "Journal entry",
+      "work": "Accounting work",
+      "noWork": "Recorded outside an accounting-work run.",
+      "sourceDocument": "Source document",
+      "noDocument": "No source document \u2014 this acquisition was recorded from stated figures.",
+      "receipt": "Operation receipt",
+      "creditBoundary": "Acquisitions paid from cash or bank are recorded here. An acquisition on supplier credit reaches this register through document intake and coding, because a general journal cannot carry a payable leg.",
+      "unavailable": "This asset has no acquisition of its own \u2014 it was created by a revision or a part-disposal of another asset."
+    },
+    "particulars": {
+      "waiting": "The acquisition is complete. These depreciation particulars are still outstanding, and only the depreciation setup is waiting on them.",
+      "usefulLife": "Useful life (months)",
+      "rate": "Annual rate (basis points)",
+      "residual": "Residual value",
+      "startDate": "In-service date",
+      "caClass": "Capital allowance class",
+      "nonDepreciable": "This asset is enrolled without an accumulated-depreciation account, so its method must be \u201cNone\u201d."
+    },
+    "schedule": {
+      "empty": "No depreciation schedule is projected for this asset.",
+      "blockedByParticulars": "No schedule yet \u2014 it is projected once the depreciation particulars are answered.",
+      "periodStart": "Period start",
+      "periodEnd": "Period end",
+      "projected": "Projected charge"
+    },
+    "history": {
+      "asset": "Asset",
+      "relation": "Relation",
+      "derivedFrom": "Derived from",
+      "predecessor": "Predecessor",
+      "successor": "Successor",
+      "coAcquired": "Co-acquired",
+      "reversedBy": "Acquisition reversed by",
+      "disposedAt": "Disposed",
+      "empty": "No related register rows.",
+      "chainOpen": "This acquisition was reversed and nothing re-booked has been found. If it was corrected, the replacement is a separate acquisition.",
+      "derivationNote": "These relationships are derived from the books, not stored links. Each row says how it was derived.",
+      "links": {
+        "supersede": "Revision or part-disposal lineage",
+        "co_acquired_on_same_document": "Same source document, booked together",
+        "source_document": "Same source document",
+        "reversed_acquisition": "Reversed acquisition on the same account"
+      }
     }
   },
   "FixedAssetsDepreciation": {

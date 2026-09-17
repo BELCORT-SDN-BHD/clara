@@ -243,6 +243,11 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   // ⌘K destination cannot name WHICH counterparty, and a row that always needed a second
   // choice would be a worse answer than the register it is reached from.
   { pattern: "/clients/[clientId]/knowledge/parties/[counterpartyId]", builder: "counterpartyIdentityHref" },
+  // #639 — one fixed asset's own address, reached from the register row, the needs-you
+  // inbox and the Work identity block, all of which HOLD the asset id. There is no static
+  // address for it and a ⌘K Go row would need an id nobody has typed — the same shape
+  // workDetailHref and knowledgeRecordHref already have.
+  { pattern: "/clients/[clientId]/registers/assets/[assetId]", builder: "fixedAssetHref" },
   // #640's three plan destinations. Each is reached from a surface that HOLDS the plan (the list
   // row, the detail's own Revise control, the Work identity block's "From plan"), so the href is
   // built from an id at render time and there is no literal to find — the same shape

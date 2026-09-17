@@ -542,6 +542,35 @@ verifying the named human's live membership itself) before the tool can be regis
 `clara.wake_fn_allowlist` row is owed or wanted: that allowlist is keyed by BARE NAME, so a row for
 this name would widen wake reach over the human door as well.
 
+### #639 — the dependent depreciation-particulars question (`lib/fixed-asset-acquisition.ts`)
+
+An acquisition posts the instant its facts suffice; the depreciation particulars may be missing,
+and then ONE dependent, versioned question parks the same Work until a human answers it. Opening
+that question from a run is a FROZEN act (`claraWork.v3.tools.ts`'s `ask_question` carries no
+`execute` — the workflow body opens it), so the tool itself ships in the wave's single shared
+`claraWork_v4` cut. Everything that tool needs which is NOT the frozen body lives in
+`lib/fixed-asset-acquisition.ts`, tested on its own by `tests/fixed-asset-acquisition-unit.test.mjs`:
+
+* `FA_PARTICULARS_FIELDS` — the `p_fields` array `clara.open_work_question` validates and every
+  answering surface renders. Only `method` and `start_date` are required: an in-service date is
+  required for EVERY method including `none`, and the drivers only for the method that uses them.
+* `faParticularsAnswerSchema` — the CLOSED key set `clara._fa_validate_particulars` admits,
+  `.strict()`, so a key the database would refuse cannot travel.
+* `particularsFromAnswer` — the `p_particulars` jsonb in the database's own spelling.
+* `refusalFieldForAxis` / `localParticularsRefusal` — the CLR37 axis → CONTROL map and the earlier,
+  more legible half of a validation the database owns. Every check mirrors one 0041/0201 enforces.
+
+Nothing frozen imports this module today, so it is not in `frozen-workflows.json`. The moment
+`claraWork.v4.tools.ts` imports it, `scripts/check-frozen-workflows.mjs`'s IMPORT-ESCAPE hash-locks
+it with the closure — the intended trajectory, and why its schema is written to be final.
+
+`tests/fixed-asset-acquisition-e2e.mjs` is the standalone World leg (see **Standalone e2es**):
+an acquisition into an enrolled fixed-asset cost account commits through `/api/work/journal` with
+its register row in the SAME transaction, a replayed intentKey births no twin, a crash between the
+database commit and the workflow checkpoint leaves the register row standing and the respawned
+engine returns the SAME asset id, and the runtime particulars door refuses a demoted initiator by
+name while writing no journal when it succeeds. It skips cleanly below migration 0201.
+
 ## Evaluation
 
 [Classifier fixtures](tests/fixtures/classify/README.md) explain the recall harness.

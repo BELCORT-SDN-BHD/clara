@@ -111,7 +111,7 @@ export type AccountingItemId =
  */
 export type ClientLeafId =
   | "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord"
-  | "counterpartyIdentity";
+  | "counterpartyIdentity" | "fixedAsset";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -400,6 +400,14 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // reading the client's other knowledge; every write behind it is bookkeeper+ or admin+ and
   // refuses a viewer at the door rather than being hidden here.
   { id: "counterpartyIdentity", parent: "knowledge", labelKey: "clientLeaf.counterpartyIdentity", minimumRole: "viewer" },
+  // #639 — /…/registers/assets/:assetId names ONE fixed asset. A leaf for the same reason
+  // workDetail and knowledgeRecord are: a durable record cannot be a static menu row, and the
+  // breadcrumb has to name the asset rather than stopping at Fixed assets and claiming the reader
+  // is on the register. Parented on `accounting` — the CLIENT-NAV row, the only altitude a leaf's
+  // parent may name (the sidebar's "Fixed assets" entry is an ACCOUNTING ITEM under it, and
+  // `periodicAdjustment` is parented the same way for the same reason). The LIST stays exactly
+  // where it is: `registers?tab=fixedAssets`.
+  { id: "fixedAsset", parent: "accounting", labelKey: "clientLeaf.fixedAsset", minimumRole: "viewer" },
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -445,6 +453,15 @@ export function knowledgeRecordHref(clientId: string, recordId: string): string 
  *  `workDetailHref` states. */
 export function counterpartyIdentityHref(clientId: string, counterpartyId: string): string {
   return `${clientBase(clientId)}/knowledge/parties/${encodeURIComponent(counterpartyId)}`;
+}
+
+/** `/clients/:clientId/registers/assets/:assetId` — ONE fixed asset's own address (#639).
+ *
+ *  A REAL ROUTE SEGMENT UNDER THE REGISTER, not a second register and not a `?tab=`: the list
+ *  stays at `registers?tab=fixedAssets` and this is the detail, on the `knowledge/:recordId`
+ *  precedent. Percent-encoded for the reason `workDetailHref` states. */
+export function fixedAssetHref(clientId: string, assetId: string): string {
+  return `${clientBase(clientId)}/registers/assets/${encodeURIComponent(assetId)}`;
 }
 
 /** `/clients/:clientId/journals` — the posted-and-drafts surface. With an entry

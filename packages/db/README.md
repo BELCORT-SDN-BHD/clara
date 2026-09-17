@@ -237,6 +237,35 @@ a limit the caller leaves out — or sends as NULL — keeps the value the firm 
 `updated_by`. That holds because the four limit columns carry no table default; the trigger is the
 only thing that supplies 100 / 1000 / 2 / 2, and it does so on a firm's first insert alone.
 
+### The fixed-asset acquisition boundary (#639, migration 0201)
+
+An acquisition and its fixed-asset register row commit TOGETHER, on every lane, and the instrument
+is a DEFERRED CONSTRAINT TRIGGER rather than a hook:
+
+| object | grant | what it is |
+|---|---|---|
+| `clara._tf_fa_acquisition_birth()` + `t_je_fa_acquisition_birth` | none (trigger) | The lane-agnostic birth. `after insert or update on clara.journal_entries … deferrable initially deferred … when (new.status='approved')`, named to fire BEFORE `t_je_fa_movement_belt` — deferred triggers fire in alphabetical trigger-name order, measured on PG 17.11, not creation order. It carries `_fa_on_approve` arm 4's predicate verbatim plus an `origin='scheduled_run'` exclusion arm 4 does not have, and is idempotent against the hook through the same `on conflict (acquisition_line_id) do nothing`. |
+| `clara.fixed_assets.acquisition_document_id` | — | The source document, copied AT BIRTH. Write-once: `clara._tf_fixed_assets_immutable_0017` forbids any later write to a column outside its post-approval allowlist, so a row birthed by the hook carries NULL and the READ resolves the acquisition entry's own `document_id`. The two can never disagree (0201 tail T.7). |
+| `clara._fa_acquisition_json(uuid)` / `clara._fa_acquisition_history(uuid)` | none | The acquisition as its own fact, and the correction chain. The Work and the receipt are DERIVED BY JOIN from `acquisition_entry_id`: the receipt is inserted AFTER the approve and the Work `result` is built inside the posting core, so an approve-time write of either would stamp NULL forever. The chain's vocabulary is `supersede` / `co_acquired_on_same_document` / `source_document` / `reversed_acquisition_on_same_enrolment`; **two rows born from the SAME invoice are `co_acquired`, which is orderless** — one cost line births one row by design, so a two-line invoice is ordinary and neither row supersedes the other — and the `source_document` ordering is STRICT, so an equal `approved_at` can never make two rows each other's successor. |
+| `clara.get_fixed_asset(uuid)` / `clara._fa_asset_json(uuid,date)` | `clara_authenticated` (read) | Recut. `acquisition`, `particulars` and `history` are THREE separate blocks, so "policy and schedule clearly separate" is structural rather than a layout choice. |
+| `clara.complete_fixed_asset_particulars_for(uuid,uuid,jsonb,text,uuid)` | `clara_runtime` ONLY | The particulars door a run may call ON BEHALF OF the human whose Work asked the dependent question. Live-authority rechecks (active membership, bookkeeper floor, active client) taken UNDER A LOCK — `clara.firms … for key share` then `firm_memberships … for share`, the pair `0195:1792-1797` measured, so a demotion queues behind the answer instead of slipping between the read and the write — complete-once, op-keyed, and it writes NO journal entry. The browser keeps `clara.complete_fixed_asset_particulars`, which is `clara_authenticated`-only. Its three failures are deliberately distinguishable (CLR11 `client_not_found`, CLR04 `obo_not_active` / `insufficient_role`, CLR10 `client_inactive`): this door is runtime-only and names an explicit `p_obo`, so the estate's no-existence-oracle rule — which is about browser-reachable doors — is carried by the human door beside it. |
+
+**Two boundaries this lane states rather than widens.**
+
+* **A credit-financed acquisition does not reach the register through the Work lane.** The posting
+  core refuses a payable or receivable leg on a generic basis (`0178:1355-1367`, CLR10
+  `generic_control_leg`), so an acquisition on supplier credit reaches the register only through
+  document intake → coding, where the AP leg is lawful. Cash and bank acquisitions go through the
+  journal composer or the Work lane. The composer's refusal names the other door.
+* **MYR only, at admission.** `0178:734-736` admits no other currency, and the acquisition read
+  says `MYR` out loud rather than leaving a silent absence. Multi-currency is the accepted PRD:127
+  deferral, not a gap in this lane.
+
+**And one census this migration re-derived.** `0037_wave_c_a_subledger.sql:3840-3845` pinned the
+subledger hook's callers at FOUR. Measured on a migrated chain the live set is SIX: 0056's close
+model added `finalize_close` and `reopen_fiscal_year`. 0201's tail re-derives and re-pins the
+measured six, so a seventh is caught.
+
 ## Frozen evaluator deployment
 
 An evaluator registered as undeployed remains unavailable until deliberately activated.

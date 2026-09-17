@@ -313,6 +313,42 @@ _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its sc
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
+**Fixed asset acquisition**:
+The moment a client takes an asset onto its books: one approved journal entry whose debit lands on
+an enrolled fixed-asset cost account, and — in the SAME transaction, on whichever lane posted it —
+one register row naming that entry, that cost line, the date, the exact cost and the source
+document the entry cited. It is COMPLETE when those facts are recorded; the depreciation
+particulars are a separate, later fact and their absence takes nothing away from it.
+_Avoid_: A journal entry alone as a synonym; a second step a person can forget; treating an
+acquisition as unfinished because its depreciation is not yet configured; an acquisition on
+supplier credit (that reaches the register through document intake and coding, never a general
+journal).
+
+**Pending particulars**:
+A register row whose acquisition is recorded and whose depreciation configuration is not. It is a
+live, usable asset with a stated cost and a named source; what is outstanding is only the
+configuration the depreciation run depends on, and the run skips such a row BY NAME and charges
+every other asset as usual.
+_Avoid_: An incomplete or draft asset; a failed acquisition; a reason to hold the journal entry; a
+row the depreciation run treats as an error.
+
+**Depreciation particulars**:
+The depreciation configuration of one asset: the method, the in-service date it starts from, the
+useful life and — for reducing balance — the annual rate, plus any residual value and the asset's
+own description. An in-service date is required for every method, including an asset that is
+stated as not depreciated. Supplying them completes a REGISTER fact and never writes a second
+journal entry.
+_Avoid_: A depreciation authority (that is the firm's permission to run it); a schedule (that is
+what these produce); a policy the product infers from the evidence; a second accounting entry.
+
+**Dependent particulars question**:
+The ONE versioned question a Work opens after it has already posted an acquisition, asking for the
+depreciation particulars it could not know. It parks that Work and nothing else: the acquisition is
+committed and stays committed whatever the Work's status becomes. Answering it from any entrance —
+the register, the asset's own page or Needs you — continues the same Work and the same question.
+_Avoid_: A question that blocks the acquisition; a second question per Work; a reason to re-post;
+a clarification a new conversation can restart.
+
 **Capability registry**:
 The server-owned catalogue of what a Clara run may exercise, and under what terms: each capability's purpose token, the class of data it moves, whether exercising it is an egress event at all, and the database surface it needs. A run's tool set is built from the hashed bundle's own roster and the registry names what those tools are FOR, so "which capability moved this client's data, under which purpose" is a lookup rather than a grep. It is documentation and a lookup; the database verbs are the only gate.
 _Avoid_: A permission; anything a prompt, a file, a wiki page or an imported record can add to; a list of tool names.

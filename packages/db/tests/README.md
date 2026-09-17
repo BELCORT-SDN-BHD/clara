@@ -24,6 +24,23 @@ Use matching PostgreSQL 17 client binaries for clone/dump tests; `PG_DUMP` and `
 The migration helper's `cloneAmbientDatabase` enforces the destructive guard against its source
 environment before cloning.
 
+## Frontier-gated batteries and the focused-run rule
+
+A battery whose subject is one migration gates on that migration's STABLE STEM in
+`clara.schema_migrations`, never on a number: numbers are claimed at merge, and a `like '0201_%'`
+gate stops gating the moment a file is renumbered. `tests/fixed-asset-acquisition.test.mjs`
+(#639, stem `fixed_asset_acquisition$`) carries the discipline in its clearest form:
+
+* the package-wide sweep preloads `tests/fixed-asset-acquisition-preintegration-gate.mjs`
+  (one `--import` in `package.json`'s `test` script), which sets
+  `CLARA_ALLOW_MISSING_FA_ACQUISITION=1` so a database BELOW the migration skips, counted;
+* a FOCUSED invocation does not preload it and therefore **fails loudly** on a database that lacks
+  the migration. A skip is not evidence, and a worker running one file by hand should be told so
+  rather than shown a green run about nothing.
+
+Every assertion under test in that battery runs through a `humanQuery` / `roleQuery` persona
+(least-privileged role) or a real wake credential; `rootQuery` appears only as a readback.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator

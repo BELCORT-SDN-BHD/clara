@@ -100,6 +100,9 @@ import { WORK_LIST_CLIENTS, answerWorkListPage, handleWorkListSupabase } from ".
 // guards `readJson` on an exact-verb allow-list, so it drains no other lane's request stream and
 // can run anywhere in the chain below.
 import { handlePlansSupabase } from "./plans-mock.mjs";
+// #639's C7 acquisition lane. Every handler names this lane's own client id or asset id
+// before it answers and falls through otherwise; it has no runtime half at all.
+import { handleFixedAssetSupabase } from "./fixed-asset-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -500,7 +503,14 @@ async function handleSupabase(request, response, url) {
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
     const bookkeeper = state.email.startsWith("bookkeeper@");
     const owner = state.email.startsWith("owner@");
-    if (!bookkeeper && !owner) {
+    // #639 — a THIRD rank prefix. A walk that must prove what a DENIED write looks like in the
+    // browser needs a session whose role is genuinely below the door's floor; before this there
+    // were only owner@ and bookkeeper@, and every other email was membership-less (which lands on
+    // /pending and never reaches a client surface at all). `viewer@` is rank 0, the real bottom of
+    // `FIRM_ROLES` (lib/firm/caller-context.ts:107), so the shell admits the viewer-floored leaves
+    // and the DOOR — not the UI — is what refuses the write.
+    const viewer = state.email.startsWith("viewer@");
+    if (!bookkeeper && !owner && !viewer) {
       // Every non-navigation persona remains membership-less by default.
       sendJson(response, 200, [], cors);
       return;
@@ -509,8 +519,8 @@ async function handleSupabase(request, response, url) {
       user_id: SUBJECT,
       firm_id: FIRM_ID,
       firm_name: "E2E Accounting",
-      role: bookkeeper ? "bookkeeper" : "owner",
-      role_rank: bookkeeper ? 1 : 3,
+      role: viewer ? "viewer" : bookkeeper ? "bookkeeper" : "owner",
+      role_rank: viewer ? 0 : bookkeeper ? 1 : 3,
       is_operator: owner,
     }], cors);
     return;
@@ -620,6 +630,11 @@ async function handleSupabase(request, response, url) {
   // lane above. Placed before the home board for the same reason the journal-work lane is — that
   // lane answers `/rest/v1/clients` with an honest id-scoped row and this one must reach its own.
   if (await handlePlansSupabase(request, response, path, url, sendJson, cors)) return;
+  // #639's C7 lane. Position is not load-bearing: every branch is scoped to this lane's own
+  // client or asset ids and falls through otherwise. Placed before the home board for the
+  // reason the two lanes above are — it answers `/rest/v1/clients` with an id-scoped row of
+  // its own and must reach it.
+  if (await handleFixedAssetSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
@@ -704,6 +719,22 @@ async function handleSupabase(request, response, url) {
     // none", which is exactly what an empty answer means on a lane with no
     // fixture for it.
     sendJson(response, 200, [], cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_fixed_assets") {
+    // #639 — `<WorkAssetRow>` (components/registers/work-asset-row.tsx) is mounted in the WORK
+    // DETAIL identity block, so this call now fires on every Work detail page across the whole
+    // suite — four lanes serve one (journal-work, periodic-adjustment, plans, work-list), and none
+    // of them has a fixed-asset fixture or needs one. The SAME reasoning #626 records for
+    // `get_my_preferences` and #634 for `list_entry_links` above: a generic, honest EMPTY answer
+    // here keeps every other spec's page free of an unhandled-route 404 for a call it never asked
+    // about, and the lane that OWNS the answer (fixed-asset-mock.mjs) claims the verb earlier in
+    // the chain and never reaches this default.
+    //
+    // EMPTY IS HONEST HERE, and it is what the component is built for: a Work that registered no
+    // fixed asset renders no asset row at all, which is most Works.
+    sendJson(response, 200, { client_id: null, as_of: null, assets: [], incomplete_count: 0 }, cors);
     return;
   }
 
