@@ -52,18 +52,14 @@ regexes = [
   '''^ABIAOUA2CQEAAREPDAIE$''',
   '''^ABIAG0AYBAEAAQFMAQEA$''',
   '''^ABIAQAAUABQAKAAVABUA$''',
-  '''^ABIAPUALCQMCAQABTAQB
-'',
+  '''^ABIAPUALCQMCAQABTAQB$''',
   # Wave 2026-09-15 e2e/unit FIXTURE labels that trip generic-api-key on entropy alone
   # (PR #860): the accrual lane mock's self-describing instruction intent key, the
-  # members-lifecycle mock's two invite-preview tokens (both spell "e2e-clara-invite-…"),
+  # members-lifecycle mock's two invite-preview tokens (both spell e2e-clara-invite-...),
   # and the prepayments unit test's hard-coded authority Work uuid (a row id in a
   # mocked read, not a credential). Regex-based, anchored to the captured value, per
   # the idiom above; the lines are test fixtures under apps/web/e2e and apps/web/lib.
-  '''^instruction-2026-06-30
-'',
-  '''^e2e-clara-invite-(pending|revoked)
-'',
-  '''^2b7c6d5e-4f3a-4b2c-8d1e-0f9a8b7c6d5e
-'',
+  '''^instruction-2026-06-30$''',
+  '''^e2e-clara-invite-(pending|revoked)$''',
+  '''^2b7c6d5e-4f3a-4b2c-8d1e-0f9a8b7c6d5e$''',
 ]
