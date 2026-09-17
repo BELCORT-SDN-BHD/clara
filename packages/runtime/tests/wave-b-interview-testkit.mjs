@@ -101,6 +101,13 @@ export const INTERVIEW_V2_CLIENT_ANSWERS = {
   banks: "skip",
   currency: "MYR",
   fye: "6",
+  // WAVE 2026-09-15 (#649 D7): clientOnboarding_v5 asks the year-end DAY immediately after the
+  // month, because `clara.clients` has carried `fy_end_day` since 0041 and deriving one would be
+  // inventing an accounting fact on a professional's record. 30 is chosen rather than 31 on
+  // purpose: the fixture's month is JUNE, `ck_clients_fy_end` caps June at 30, and the v4 segment
+  // validator refuses 31 against that month — so a script that answered 31 here would prove the
+  // validator works by failing the drive.
+  fye_day: "30",
   // v2 (F2): the CA 2016 s.244 private-entity screen — asked of a Sdn Bhd and of nobody else.
   // "no" is the determination path that keeps MPERS available, and opens no follow-up (only a
   // bare "subsidiary" does).

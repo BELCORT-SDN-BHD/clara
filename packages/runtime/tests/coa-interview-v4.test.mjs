@@ -214,17 +214,27 @@ test("§3.2 v4 is byte-identical to v3 apart from the inventory it walks and its
     "the successor body carries the predecessor's logic verbatim -- only the inventory and the names move");
 });
 
-test("§3.3 the registry points clientOnboarding at v4, and v3 stays exported and distinct", () => {
-  assert.equal(reg.workflows.clientOnboarding, v4mod.clientOnboarding_v4, "the pointer moved to v4");
-  assert.equal(reg.clientOnboarding_v3, v3mod.clientOnboarding_v3,
-    "v3 is still EXPORTED under its own name -- the >=48h parks resume into their own body");
-  assert.notEqual(reg.workflows.clientOnboarding, v3mod.clientOnboarding_v3, "and they are different bodies");
+// WAVE 2026-09-15 RE-AIMED THIS CELL AT WHAT IT WAS ALWAYS ABOUT. It was written to prove the
+// 裁-21 PR-c repoint; the integration cut moved the pin on to clientOnboarding_v5 (#649's H-52
+// gate, the fy-end DAY segment and the known-facts pre-read). What this cell actually asserts --
+// and must keep asserting -- is POLICY (c): the pin moved, and EVERY superseded body is still
+// exported under its own name so a >=48h park resumes into the semantics it started with. The pin
+// is read from `reg.workflowPins` rather than retyped, so the next cut moves it in one place.
+test("§3.3 the registry pins clientOnboarding at its newest body, and v1..v4 stay exported and distinct", () => {
+  assert.equal(reg.workflowPins.clientOnboarding, "clientOnboarding_v5", "the pin is the wave 2026-09-15 successor");
+  assert.equal(reg.workflows.clientOnboarding, reg[reg.workflowPins.clientOnboarding],
+    "and the dispatch table points at the body the pin names");
+  assert.equal(reg.clientOnboarding_v4, v4mod.clientOnboarding_v4,
+    "v4 is still EXPORTED under its own name -- the >=48h parks resume into their own body");
+  assert.equal(reg.clientOnboarding_v3, v3mod.clientOnboarding_v3, "and so is v3");
+  assert.notEqual(reg.workflows.clientOnboarding, v4mod.clientOnboarding_v4, "the pinned body is a different one");
+  assert.notEqual(reg.workflows.clientOnboarding, v3mod.clientOnboarding_v3, "from either predecessor");
   for (const older of ["clientOnboarding_v1", "clientOnboarding_v2"]) {
     assert.equal(typeof reg[older], "function", `${older} is still exported`);
   }
   // The registry VIEW is the object the enqueue-provenance check trusts; the pointer must be
   // reachable through it, not merely through the module's own named export.
-  assert.equal(reg.workflowsByName.clientOnboarding, v4mod.clientOnboarding_v4,
+  assert.equal(reg.workflowsByName.clientOnboarding, reg.workflows.clientOnboarding,
     "and the frozen registry view carries the same object -- the bundle proof");
 });
 

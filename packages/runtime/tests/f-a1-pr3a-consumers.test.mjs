@@ -58,11 +58,18 @@ after(async () => {
 // same policy (c) ladder every predecessor joined. EXTENDED, never re-cut.
 // #643 + #644's shared successor has now moved the chatTurn pin again, v18 -> v19, with autoDraft
 // still untouched — so v18 joins the same policy (c) ladder in its turn. EXTENDED, never re-cut.
-test("registry.ts pins autoDraft_v10/chatTurn_v19 and still exports superseded v9/v8/v18/v17/v16/v15/v14/v13/v12 (policy (c))", () => {
+// ...and the wave 2026-09-15 integration cut moved it once more, v19 -> v20, with autoDraft STILL
+// untouched, so v19 joins the ladder in its turn. THE PIN IS NOW READ FROM `workflowPins` RATHER
+// THAN RETYPED: this cell's subject is the PAIR (a chatTurn repoint never moves autoDraft) and the
+// policy (c) ladder underneath it, never which version happens to be newest — so a version literal
+// here only made the cell red at every cut for the one reason it is not about.
+test("registry.ts pins autoDraft_v10 and its own chatTurn pin, and still exports superseded v9/v8/v19/v18/v17/v16/v15/v14/v13/v12 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v10");
   assert.equal(typeof registryMod.autoDraft_v9, "function");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v19");
+  assert.equal(registryMod.workflows.chatTurn.name, registryMod.workflowPins.chatTurn);
+  assert.notEqual(registryMod.workflowPins.autoDraft, "autoDraft_v9", "control: the autoDraft pin is its own and did not follow chatTurn");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v19, "function");
   assert.equal(typeof registryMod.chatTurn_v18, "function");
   assert.equal(typeof registryMod.chatTurn_v17, "function");
   assert.equal(typeof registryMod.chatTurn_v16, "function");

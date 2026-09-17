@@ -112,7 +112,13 @@ import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { buildPreviousVersionImage, removeScratchTree } from "./scratch-image.mjs";
 import { RUNTIME_SOURCE_ROOTS, assertBuiltBundleFresh } from "./built-bundle-gate.mjs";
-import { bodyIdentifierOf, preflight, readMigrationFrontier, supportedBodiesFromBundle } from "../lib/rollback-preflight.mjs";
+import {
+  bodyIdentifierOf,
+  frontierBodyViolations,
+  preflight,
+  readMigrationFrontier,
+  supportedBodiesFromBundle,
+} from "../lib/rollback-preflight.mjs";
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[tb-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -765,21 +771,34 @@ async function main() {
     assert.equal(drained.scoped.verdict, "allowed", "with BOTH Works terminal, the SAME build-A target now ALLOWS — the inventory tracks live state, not a snapshot");
     console.log("[tb-e2e] preflight: with both Works settled, rollback to A is now ALLOWED");
 
-    // --- …AND THE DATABASE STILL REFUSES IT. THE FRONTIER RULE (wave-3, #815) ----
+    // --- …AND THE DATABASE HAS A VOTE OF ITS OWN. THE FRONTIER RULE (wave-3, #815) ----
     // This is the leg neither census can see, and the drained state above is what makes it
-    // legible: the run census is clean, no task is unbound, the SCOPED verdict just said
-    // ALLOWED — and the GLOBAL verdict still refuses, because the DATABASE is at 0195 and build
-    // A does not carry the body 0195's rule requires. The same ruling that lets W1 post above is
-    // what makes this refusal necessary: 0195 grandfathers PRE-v3 bundles, so an image without
-    // the successor would run the whole Work lane through that grandfather arm — the egress wall
-    // in force in the schema, and nothing at all subject to it.
+    // legible: the run census is clean, no task is unbound, the SCOPED verdict just said ALLOWED —
+    // and a target that predates the applied schema's own rule is REFUSED anyway. 0195 grandfathers
+    // pre-`claraWork_v3` bundles so a forward cutover finishes honestly, which means a rollback to
+    // an image without that body would run the whole Work lane through the grandfather arm: the
+    // egress wall in force in the schema, and nothing at all subject to it.
     //
-    // AND IT IS MEASURED BY DIFFERENCE, not by demanding a pristine estate. This drill runs on a
-    // shared rig and deliberately tolerates foreign live rows (#708, and its own door refuses only
-    // on non-terminal runs and unbound `accounting_work` tasks) — a `held` wake task left by an
+    // THE REQUIRED BODY IS READ FROM THE RULE TABLE, NEVER ASSUMED TO BE THE CUT'S SUCCESSOR, and
+    // that is this leg's own repair at the wave 2026-09-15 cut. The leg was authored at the
+    // claraWork v2 -> v3 pair, where `pair.pinned` and the body 0195 requires happened to be the
+    // SAME identifier, and it wrote `pair.pinned` into four assertions. At the v3 -> v4 pair they
+    // come apart: the rule still requires `claraWork_v3`, which build A — the v3 image — CARRIES,
+    // so the old text asserted a refusal that must not happen and the drill went red on a fact that
+    // was correct. `frontierBodyViolations(frontier, [])` names every body the applied schema
+    // demands at this instant; everything below is derived from that, so the next cut moves nothing
+    // here.
+    //
+    // AND IT IS STILL MEASURED BY DIFFERENCE, not by demanding a pristine estate. This drill runs
+    // on a shared rig and deliberately tolerates foreign live rows (#708, and its own door refuses
+    // only on non-terminal runs and unbound `accounting_work` tasks) — a `held` wake task left by an
     // earlier suite strands against EVERY target, so "the global verdict refuses" alone would not
-    // prove the frontier rule did it. The pair of verdicts below differs in exactly ONE body, at
-    // the same instant on the same database, so whatever else the estate is carrying cancels out.
+    // prove the frontier rule did it. The pair of verdicts below differs in exactly the required
+    // bodies, at the same instant on the same database, so whatever else the estate is carrying
+    // cancels out. What CHANGED is only where the difference comes from: at a pair whose
+    // predecessor predates the rule it is build A's own roster, and at a later pair it is build A's
+    // roster with the required bodies removed — a target that predates the rule, which is what the
+    // rule is about either way.
     assert.deepEqual(drained.outside, [], "frontier leg: the RUN census is clean — nothing is parked outside build A");
     assert.deepEqual(
       drained.unbound.tasks.filter((t) => t.kind === "accounting_work"),
@@ -787,39 +806,77 @@ async function main() {
       "frontier leg: …and the Work lane itself is fully drained, which is the state a rollback would be taken in",
     );
     assert.equal(drained.frontier.version, frontierVersion, "the preflight read the database's OWN frontier");
-    assert.equal(drained.verdict, "refused",
-      `the GLOBAL verdict refuses a drained rollback to A (reasons ${JSON.stringify(drained.reasons)})`);
-    assert.ok(drained.reasons.includes("frontier_requires_body"),
-      `…on the frontier rule (reasons ${JSON.stringify(drained.reasons)})`);
+
+    // Every body the applied schema demands, as the rule table itself answers it for an empty
+    // roster. A frontier that carried no rule at all would make this whole leg vacuous, so it is a
+    // control rather than a lookup.
+    const requiredBodies = [...new Set(frontierBodyViolations(frontierVersion, []).map((v) => v.body))];
     assert.ok(
-      drained.frontier.violations.some((v) => v.body === pair.pinned && v.migration.startsWith("0195_")),
-      `…naming 0195 and ${pair.pinned}; got ${JSON.stringify(drained.frontier.violations)}`,
+      requiredBodies.length > 0,
+      `control: a database at ${frontierVersion} must carry at least one frontier body rule; got ${JSON.stringify(requiredBodies)}`,
     );
-    // THE CONTROL: the same question, the same instant, ONE body added — the frontier reason is gone
-    // and nothing else about the answer moved. That is the rule isolated.
-    const withPinned = await preflight({ query, supported: [...bodiesA, pair.pinned], scope: { workIds: [w1.work_id, w2.work_id] } });
-    assert.deepEqual(withPinned.frontier.violations, [], `adding ${pair.pinned} satisfies the applied schema's rule`);
-    assert.equal(withPinned.reasons.includes("frontier_requires_body"), false, "…so the reason is gone");
+    assert.ok(
+      frontierBodyViolations(frontierVersion, []).some((v) => v.migration.startsWith("0195_")),
+      "control: 0195's rule is one of them — this is the leg it was written for",
+    );
+    // BUILD A'S OWN ANSWER, STATED RATHER THAN ASSUMED: exactly the required bodies it does not
+    // carry, no more and no fewer.
+    const aMissing = requiredBodies.filter((b) => !bodiesA.includes(b));
     assert.deepEqual(
-      drained.reasons.filter((r) => r !== "frontier_requires_body"),
-      withPinned.reasons,
+      [...drained.frontier.violations.map((v) => v.body)].sort(),
+      [...aMissing].sort(),
+      `build A's frontier violations are exactly the required bodies it lacks; got ${JSON.stringify(drained.frontier.violations)}`,
+    );
+
+    // THE TARGET THE RULE IS ABOUT — an image from before the rule existed. Build A's roster minus
+    // the required bodies IS build A at the v2 -> v3 pair (the subtraction removes nothing there).
+    const preRuleBodies = bodiesA.filter((b) => !requiredBodies.includes(b));
+    const preRule = await preflight({ query, supported: preRuleBodies, scope: { workIds: [w1.work_id, w2.work_id] } });
+    assert.equal(preRule.verdict, "refused",
+      `the GLOBAL verdict refuses a drained rollback to a pre-rule target (reasons ${JSON.stringify(preRule.reasons)})`);
+    assert.ok(preRule.reasons.includes("frontier_requires_body"),
+      `…on the frontier rule (reasons ${JSON.stringify(preRule.reasons)})`);
+    assert.ok(
+      preRule.frontier.violations.some((v) => v.migration.startsWith("0195_") && requiredBodies.includes(v.body)),
+      `…naming 0195 and a required body; got ${JSON.stringify(preRule.frontier.violations)}`,
+    );
+    // THE CONTROL: the same question, the same instant, the required bodies added back — the
+    // frontier reason is gone and nothing else about the answer moved. That is the rule isolated.
+    const withRequired = await preflight({
+      query,
+      supported: [...new Set([...preRuleBodies, ...requiredBodies])],
+      scope: { workIds: [w1.work_id, w2.work_id] },
+    });
+    assert.deepEqual(withRequired.frontier.violations, [], `adding ${requiredBodies.join(", ")} satisfies the applied schema's rule`);
+    assert.equal(withRequired.reasons.includes("frontier_requires_body"), false, "…so the reason is gone");
+    assert.deepEqual(
+      preRule.reasons.filter((r) => r !== "frontier_requires_body"),
+      withRequired.reasons,
       "…and NOTHING else about the verdict moved: the two answers differ in exactly that one reason",
     );
-    console.log(`[tb-e2e] preflight frontier rule: database at ${drained.frontier.version} REFUSES build A — ${pair.pinned} required, not carried; adding it clears the reason`);
+    console.log(
+      `[tb-e2e] preflight frontier rule: database at ${drained.frontier.version} REFUSES a target without `
+        + `${requiredBodies.join(", ")}; adding it clears the reason `
+        + `(build A itself ${aMissing.length === 0 ? "CARRIES the required body, so its own verdict is allowed" : `lacks ${aMissing.join(", ")}`})`,
+    );
 
     // THE COMMAND ITSELF, because the rule exists for the moment an operator types it before
     // `fly deploy --image <previous>`: what has to be true is the EXIT CODE and the text on stderr.
-    // `--target-bundle` is the strongest of the three doors — it reads build A's actual artifact,
-    // the same file `bodiesA` came from.
-    const cliA = await runPreflightCli(["--target-bundle", built.serverEntry]);
-    assert.equal(cliA.code, 1, `rollback-preflight --target-bundle <A> must exit 1 (got ${cliA.code})\n${cliA.stdout}\n${cliA.stderr}`);
+    // The pre-rule roster goes in through `--supported`, the third of the three doors, for the
+    // reason above — `--target-bundle <A>` reads a REAL artifact, and at a pair whose predecessor
+    // already carries the required body that artifact is not a pre-rule target at all.
+    const cliA = await runPreflightCli(["--supported", preRuleBodies.join(",")]);
+    assert.equal(cliA.code, 1, `rollback-preflight --supported <pre-rule roster> must exit 1 (got ${cliA.code})\n${cliA.stdout}\n${cliA.stderr}`);
     assert.match(cliA.stderr, /frontier_requires_body/, "…naming the reason");
     assert.match(cliA.stderr, /0195_work_egress_purpose_and_execution_trace/, "…the migration whose rule is in force");
-    assert.match(cliA.stderr, new RegExp(pair.pinned), "…and the body the target does not carry");
-    // THE POSITIVE CONTROL, through the same command: build B's own bundle carries the body, so the
-    // frontier leg passes. Its EXIT CODE is deliberately not asserted, for the reason above — a
-    // foreign stranded row on a shared rig is exactly what this drill refuses to let decide its
-    // assertions — so the leg is read out of `--json` instead of out of the process's status.
+    for (const body of requiredBodies) {
+      assert.match(cliA.stderr, new RegExp(body), `…and ${body}, the body the target does not carry`);
+    }
+    // THE POSITIVE CONTROL, through the same command AND through a REAL artifact: build B's own
+    // bundle carries every required body, so the frontier leg passes. Its EXIT CODE is deliberately
+    // not asserted, for the reason above — a foreign stranded row on a shared rig is exactly what
+    // this drill refuses to let decide its assertions — so the leg is read out of `--json` instead
+    // of out of the process's status.
     const cliB = await runPreflightCli(["--target-bundle", runtimeBundle, "--json"]);
     // The CLI prints the JSON object and THEN its one-line verdict banner, so the payload is taken
     // from the first `{` to the last line-initial `}` rather than by parsing the whole stream.
@@ -827,7 +884,10 @@ async function main() {
     assert.deepEqual(cliBJson.frontier.violations, [], "the CLI's own answer for build B: the applied schema's rule is satisfied");
     assert.equal(cliBJson.reasons.includes("frontier_requires_body"), false);
     assert.equal(cliBJson.frontier.version, frontierVersion, "…read from the same database");
-    console.log(`[tb-e2e] preflight CLI: --target-bundle A exits ${cliA.code} naming frontier_requires_body; --target-bundle B carries ${pair.pinned} and clears the rule`);
+    console.log(
+      `[tb-e2e] preflight CLI: --supported <pre-rule roster> exits ${cliA.code} naming frontier_requires_body; `
+        + `--target-bundle B carries ${requiredBodies.join(", ")} and clears the rule`,
+    );
 
     // --- STOP B, then the UNBOUND-WORK leg --------------------------------
     // With no engine running, an admitted Work's task never acquires a workflow run — the state

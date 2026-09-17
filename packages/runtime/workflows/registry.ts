@@ -29,9 +29,11 @@ import { chatTurn_v16 } from "./chatTurn.v16.js";
 import { chatTurn_v17 } from "./chatTurn.v17.js";
 import { chatTurn_v18 } from "./chatTurn.v18.js";
 import { chatTurn_v19 } from "./chatTurn.v19.js";
+import { chatTurn_v20 } from "./chatTurn.v20.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
+import { claraWork_v4 } from "./claraWork.v4.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -58,6 +60,7 @@ import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
 import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
 import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 import { clientOnboarding_v4 } from "./clientOnboarding.v4.js";
+import { clientOnboarding_v5 } from "./clientOnboarding.v5.js";
 import { bankAgent_v1 } from "./bankAgent.v1.js";
 import { closePrep_v1 } from "./closePrep.v1.js";
 
@@ -140,7 +143,35 @@ export const workflows = {
   // reader trails the declarers. A rollback to v18 stops offering the two tools and stops reading
   // the knowledge pack, without changing the database; Work and knowledge records already written
   // keep their own durable surfaces. That is the honest runbook line, not "rollback is free".
-  chatTurn: chatTurn_v19,
+  //
+  // #638 + #652 (THE WAVE 2026-09-15 SHARED SUCCESSOR): REPOINTED v19 -> v20. v20 adds exactly TWO
+  // tools (`start_staff_expense_claim_work`, `start_accrual_work`), ZERO wire kinds and ZERO steps.
+  // Both new tools mint the `work_accepted` card v18 already declared, because both admit
+  // `journal_entry`-purpose Work: a staff expense claim rides the existing purpose (migration
+  // 0206's own amendment — a fourth `accounting_work.purpose` cannot post without recutting the
+  // posting core), and an accrual occurrence is admitted by `clara._plan_admit_occurrence` through
+  // `clara.admit_journal_work` with `adjustment_basis` NULL (0193). `WORK_ACCEPTED_PURPOSES` is
+  // therefore UNWIDENED and `apps/web` needs no reader change at all — the first chat repoint in
+  // this estate that owes no parity work.
+  //
+  // WHAT THE WAVE ASKED FOR AND THIS IMAGE DOES NOT CARRY, recorded here because a reader will look
+  // for it: #653's `start_prepayment_schedule_work` and #647's `record_counterparty_alias`. Each
+  // needs a door this lane cannot reach — `clara.create_prepayment_schedule` is `_human_ctx`-fronted
+  // and granted to `clara_authenticated` alone (0208 §D.1), and `clara.add_counterparty_alias` has
+  // no OBO twin at all (DECISIONS D11) — and a workflow cut does not write migrations. Both
+  // contracts stay in their non-frozen modules, which are deliberately NOT imported by this closure.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0206 AND 0207 MUST BE LIVE BEFORE THIS
+  // IMAGE SERVES A TURN, on top of v19's 0192/0194. Against a database without them each new tool's
+  // door raises `undefined_function` (42883), which `authoringRefusal` does not read as a governed
+  // refusal, so the tool answers `internal` and the turn continues: CONTAINED, corrupting nothing,
+  // and it makes Clara refuse what it just offered. The REVERSE order is FREE: 0206 and 0207 against
+  // a v19 image add relations and verbs that nothing calls.
+  //
+  // ROLLBACK TO v19 stops offering the two tools and changes no database state; claims and accruals
+  // already admitted keep their own surfaces and their queued Work runs under the unchanged
+  // claraWork pin. The standing parked-run preflight still applies.
+  chatTurn: chatTurn_v20,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -202,7 +233,42 @@ export const workflows = {
   // together with a migration that relaxes the posting core's egress arm, or accept that the Work
   // lane refuses until the image rolls forward again. Work already parked on a v2 question stays
   // answerable (the doors are the database's, not the image's).
-  claraWork: claraWork_v3,
+  //
+  // #654 + #652 + #639 (THE WAVE 2026-09-15 SHARED SUCCESSOR): REPOINTED v3 -> v4. v4 adds NO wire
+  // kind — `claraWork.v3.parts.ts` stays the declarer and `check-parts-parity.mjs` needs no new
+  // file in its set. What it adds is a READ, two QUESTIONS and one POST-COMMIT ACT:
+  //   · the client's governed knowledge, read once before the segment loop through the non-frozen
+  //     `lib/knowledge-conflicts.mjs`, rendered into the opening message as DATA and never allowed
+  //     to stop a run by failing; its `knowledge_version` rides into every `model_call` trace row's
+  //     `observed` object (#654 stanza (a); `knowledge_version` was already in `work-trace.mjs`'s
+  //     closed vocabulary, so the trace itself is unchanged);
+  //   · `answer_accrual_term` (#652) and `ask_knowledge_conflict` (#654) — both EXECUTE-LESS, both
+  //     parking through the same `clara.open_work_question` machinery `ask_question` uses, neither
+  //     able to write anything. The roster goes from three names to five and the bundle id moves to
+  //     `clara-work-tools/v4` accordingly;
+  //   · #639's dependent fixed-asset particulars question, opened by the WORKFLOW after a commit
+  //     whose entry birthed a register row with no method or in-service date, and applied through
+  //     `clara.complete_fixed_asset_particulars_for` (`clara_runtime`-only, 0201 §E). It posts NO
+  //     second journal; 0201's tail T.9 asserts the door's body names no `journal_entries` row.
+  //
+  // WHAT IS NOT CARRIED: #653's `read_prepayment_source`. Measured on the merged chain — every
+  // prepayment read is `clara_authenticated`-only (0208 §D.1) and `clara.prepayment_schedules` and
+  // `clara.document_service_periods` carry no select for any machine role — so the tool could only
+  // return a grant refusal. The frozen prompt's "no source document" sentence is therefore UNCHANGED
+  // from v3's, and #653's claraWork contract stays open.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: 0192 (the knowledge pack) and 0201 (the particulars
+  // door) must be live before this image runs any Work, on top of v3's own 0195. Against a database
+  // without 0192 the knowledge read renders "unavailable" and the run carries on; without 0201 the
+  // particulars discovery read finds nothing and no question is ever opened. Both are contained by
+  // construction — the wrong order costs a capability and corrupts nothing.
+  //
+  // ROLLBACK TO v3 IS THE STANDING PARKED-RUN PREFLIGHT AND THEN A REPOINT, and it is not free while
+  // 0195 is live for the reason v3's own note gives. A Work parked on one of v4's two new questions
+  // stays ANSWERABLE under a v3 image (the doors and the read doors are the database's), but the
+  // resumed v3 run has no tool call to match the answer to and will settle without using it — so a
+  // rollback should drain v4's parked questions first, not only its runs.
+  claraWork: claraWork_v4,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -261,7 +327,28 @@ export const workflows = {
   // DEPLOY ORDER: none owed in either direction. v4 calls no new database verb — it writes one
   // extra plan item — and PR-b's clara.coa_chart_state accepts the LEGACY answer value, so a v3
   // image against a post-PR-b database and a v4 image against a pre-PR-b one both behave.
-  clientOnboarding: clientOnboarding_v4,
+  //
+  // #649 (THE WAVE 2026-09-15 CUT): REPOINTED v4 -> v5. THREE differences, all of them #649's own
+  // successor contract, which DECISIONS §1.1 forbade the implementation branch from cutting:
+  //   1. the inventory is `CLIENT_SEGMENTS_V4` — `sst_no` gated behind
+  //      `sst_regime !== 'not_registered'` (H-52: the interview stops asking a client that has just
+  //      said it is not registered for its registration number), and a new `fye_day` segment
+  //      immediately after `fye` (D7: ASK the day, never derive it; `required_for_commit` stays
+  //      FALSE because the commit gate is a live ceremony and moving it is a product decision
+  //      nobody ruled). Every other segment is v3's SAME OBJECT REFERENCE;
+  //   2. a known-facts PRE-READ of `clara.get_knowledge_pack` before the segment loop, so a fact the
+  //      firm already recorded is an ABSENT question rather than an unanswered one — admitted only
+  //      when the segment's OWN validator accepts the recorded value;
+  //   3. "known, confirm": a recorded fact the validator REFUSES is shown inside the question rather
+  //      than silently skipped. Writing the correction back is NOT built — that is
+  //      `capture_knowledge`'s act under a named human's authority, and a workflow step carries no
+  //      authenticated actor.
+  //
+  // DEPLOY ORDER: none owed in either direction. The one new read is `clara.get_knowledge_pack`
+  // (0192), already granted to `clara_runtime` and live since the chatTurn_v19 image; against a
+  // database without it the fold yields no known facts and the interview asks every question, which
+  // is exactly v4's behaviour. `interviewRoutes.ts` needs no edit — the input shape is v4's.
+  clientOnboarding: clientOnboarding_v5,
   // GATE G1's TWO WAKE BODIES — NEW CLASSES, never repoints. These two keys are what
   // clara.wake_engine_sources' own `workflow_export` column already names: migration 0133 §G
   // seeded ('bank_agent', ..., workflow_export 'bankAgent', ...) and ('close_prep', ...,
@@ -770,6 +857,7 @@ export { chatTurn_v18 };
 // the pinned v19 body is exported too so the rollback preflight can use the same uniform census
 // for every version.
 export { chatTurn_v19 };
+export { chatTurn_v20 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -781,6 +869,7 @@ export { claraWork_v2 };
 // pinned v3 body is exported too so the rollback preflight can use the same uniform census for
 // every version.
 export { claraWork_v3 };
+export { claraWork_v4 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -807,6 +896,7 @@ export { invoiceFacts_v1 };
 export { witnessFacts_v3 };
 export { firmInterview_v3 };
 export { clientOnboarding_v4 };
+export { clientOnboarding_v5 };
 export { bankAgent_v1 };
 export { closePrep_v1 };
 
@@ -858,9 +948,11 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v17",
   "chatTurn_v18",
   "chatTurn_v19",
+  "chatTurn_v20",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
+  "claraWork_v4",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -887,6 +979,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "clientOnboarding_v2",
   "clientOnboarding_v3",
   "clientOnboarding_v4",
+  "clientOnboarding_v5",
   "bankAgent_v1",
   "closePrep_v1",
 ]);
@@ -897,15 +990,15 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v19",
-  claraWork: "claraWork_v3",
+  chatTurn: "chatTurn_v20",
+  claraWork: "claraWork_v4",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v3",
   witnessFacts: "witnessFacts_v3",
   autoDraft: "autoDraft_v10",
   firmInterview: "firmInterview_v3",
-  clientOnboarding: "clientOnboarding_v4",
+  clientOnboarding: "clientOnboarding_v5",
   bankAgent: "bankAgent_v1",
   closePrep: "closePrep_v1",
 });

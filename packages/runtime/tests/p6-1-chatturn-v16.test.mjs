@@ -103,8 +103,11 @@ function admittedRead(readId, extra = {}) {
 // ==============================================================================================
 
 test("p6-1.registry: chatTurn_v16 remains exported after the successor repoint to chatTurn_v19", () => {
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v19", "#643 + #644's shared successor now pins chatTurn_v19");
-  assert.equal(registry.workflows.chatTurn, v19Module.chatTurn_v19, "the new pin IS its module's own function");
+  // THE PIN IS READ, NOT RETYPED (#643 + #644 put it at v19; the wave 2026-09-15 cut moved it to
+  // v20). What this cell is about is that P6-1's OWN body and its two successors stayed reachable.
+  assert.equal(registry.workflows.chatTurn.name, registry.workflowPins.chatTurn, "the dispatch table points at the body the pin names");
+  assert.equal(registry.workflows.chatTurn, registry[registry.workflowPins.chatTurn], "the pinned body IS the registry's own export of that name");
+  assert.equal(registry.chatTurn_v19, v19Module.chatTurn_v19, "#643 + #644's body remains reachable by identity");
   assert.equal(registry.chatTurn_v18, v18Module.chatTurn_v18, "#623's body remains reachable by identity");
   assert.equal(registry.chatTurn_v17, v17Module.chatTurn_v17, "FS-7's body remains reachable by identity");
   assert.equal(registry.chatTurn_v16, v16Module.chatTurn_v16, "P6-1's body remains reachable by identity");
@@ -410,7 +413,12 @@ test(
     // A DISCRIMINATING post-condition: exit 0 alone would also be produced by a gate that
     // checked nothing, so assert it reports having actually looked at the things it names.
     assert.match(r.stdout, /check-workflow-bundle: OK/, "the gate reports OK");
-    assert.match(r.stdout, /chatTurn pinned at v19/, "...and says which version it found pinned in the served artifact");
+    // THE VERSION IS READ FROM THE REGISTRY, NOT RETYPED. The gate itself derives what it expects
+    // from `registry.ts`, so pinning a literal here would only assert that two files agree about a
+    // number — and would go red at every successor cut for the one reason this cell is not about.
+    const pinnedVersion = /_v(\d+)$/.exec(registry.workflowPins.chatTurn)?.[1];
+    assert.ok(pinnedVersion, `control: the chatTurn pin names a version (${registry.workflowPins.chatTurn})`);
+    assert.match(r.stdout, new RegExp(`chatTurn pinned at v${pinnedVersion}\\b`), "...and says which version it found pinned in the served artifact");
     assert.match(r.stdout, /freeform_result emitter/, "...and that the emitter survived the compile");
     assert.match(r.stdout, /superseded body\(ies\) still ship for parked runs/, "...and that policy (c) holds in the image");
   },

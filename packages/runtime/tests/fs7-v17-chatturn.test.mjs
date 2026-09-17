@@ -58,16 +58,22 @@ const FROZEN_MARKER = "@" + "frozen";
 // This cell's subject does not change — it asks whether the pin moved and whether the SUPERSEDED
 // bodies are still reachable by identity — so the pin's name follows the registry and v17/v16 keep
 // their own lines, the same ladder every prior bump extended.
-test("fs7.v17.registry: chatTurn is pinned to v19 while v17 and v16 remain their own exported bodies", () => {
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v19");
+test("fs7.v17.registry: chatTurn is pinned past v17 while v17 and v16 remain their own exported bodies", () => {
+  // THE PIN IS READ, NOT RETYPED (it has been v17, v18, v19 and now v20). What this cell asserts is
+  // that FS-7's own body and its predecessor stayed reachable across every one of those moves.
+  assert.equal(registry.workflows.chatTurn.name, registry.workflowPins.chatTurn);
   assert.equal(registry.chatTurn_v17, v17Module.chatTurn_v17, "policy (c): v17 remains reachable by identity");
   assert.equal(registry.chatTurn_v16, v16Module.chatTurn_v16, "policy (c): v16 remains reachable by identity");
   assert.notEqual(registry.workflows.chatTurn, v17Module.chatTurn_v17, "the live pin actually moved");
   assert.notEqual(registry.workflows.chatTurn, v16Module.chatTurn_v16);
 });
 
-test("fs7.v17.registry.policy-c: every chatTurn body v1..v19 remains reachable by export", async () => {
-  for (let n = 1; n <= 19; n += 1) {
+test("fs7.v17.registry.policy-c: every chatTurn body v1..vN remains reachable by export", async () => {
+  // THE CEILING IS THE PIN'S OWN VERSION, derived rather than retyped, so the day a successor is cut
+  // this cell tests the NEW body too instead of silently stopping one short of it.
+  const highest = Number(/_v(\d+)$/.exec(registry.workflowPins.chatTurn)?.[1] ?? 0);
+  assert.ok(highest >= 19, `control: the chatTurn pin names a version (${registry.workflowPins.chatTurn})`);
+  for (let n = 1; n <= highest; n += 1) {
     const name = `chatTurn_v${n}`;
     const mod = await import(`../workflows/chatTurn.v${n}.ts`);
     assert.equal(typeof registry[name], "function", `registry exports ${name}`);

@@ -263,6 +263,31 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/chat-turn-v19-e2e.mjs
+        # chatTurn_v20 + claraWork_v4 (the WAVE 2026-09-15 integration cut) — immediately after its
+        # v19 sibling, on the same rig, and still before the two builds and the world guard, for the
+        # same reason: it admits and settles its own Work and leaves none live.
+        #
+        # FOUR LEGS, and each needs a real World plus a real HTTP boundary. (1) #638's chat entrance
+        # end to end: one turn admits a staff-expense-claim Work through
+        # `clara.admit_staff_expense_claim_work`, the reconciler runs it, and the claim posts with
+        # its employee-payable credit leg — purpose `journal_entry`, because 0206's amendment rules
+        # that a fourth purpose cannot post without recutting the posting core. (2) #652's chat
+        # entrance in its rarest and most honest branch: an accrual whose authority window opens next
+        # year is CONFIGURED with no occurrence, so the tool answers `ok` with `work_accepted: null`
+        # and the transcript carries no card — an absent card is the honest rendering of an absent
+        # Work. (3) #654's `claraWork_v4` knowledge context, measured in BOTH places it can be: the
+        # block reaches the run's PROMPT (the child prints a line when it sees it) and the run's
+        # `model_call` execution-trace row carries `knowledge_version` as an observed revision.
+        # (4) the claim's typed particulars NEVER reach the run's prompt, measured inside the model
+        # rather than asserted about it, with the posted entry as the positive control.
+        #
+        # It SKIPS CLEANLY (exit 0, printed reason) when migration 0206, 0207, 0192 or 0195 is
+        # absent, so it is safe to merge before any DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/chat-turn-v20-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
         # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
         # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor

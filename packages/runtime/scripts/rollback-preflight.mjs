@@ -50,10 +50,12 @@
 // refuses a target that does not carry a body the applied schema REQUIRES, whatever the censuses
 // say. Today there is one such rule: from `0195_work_egress_purpose_and_execution_trace` on, the
 // target must carry `claraWork_v3` — 0195's recut posting core requires a consumed
-// `accounting_work` egress authorisation and no other body can obtain one, so a pre-v3 image would
-// run the whole Work lane through 0195's grandfather arm with the wall in force and nothing
-// subject to it. The refusal reason is `frontier_requires_body` and it is GLOBAL: no scope clears
-// it, because it counts no rows.
+// `accounting_work` egress authorisation and NO BODY BEFORE v3 can obtain one, so a pre-v3 image
+// would run the whole Work lane through 0195's grandfather arm with the wall in force and nothing
+// subject to it. The rule names the FLOOR, not the newest body: `claraWork_v4` (wave 2026-09-15)
+// dispatches the same way, and Appendix A policy (c) means every later image carries v3 anyway, so
+// naming v3 is what makes the rule refuse pre-v3 targets and only those. The refusal reason is
+// `frontier_requires_body` and it is GLOBAL: no scope clears it, because it counts no rows.
 //
 // SCOPE IS EXPLICIT, OFF BY DEFAULT, AND NEVER THE EXIT CODE. Both censuses always run in FULL; a
 // scope adds a second, narrowed verdict beside the global one. The exit code follows the GLOBAL

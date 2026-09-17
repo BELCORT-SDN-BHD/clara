@@ -14,6 +14,21 @@
 // wave's successor ceremony, NOTHING frozen may import this file — including dynamically, because
 // `scripts/check-frozen-workflows.mjs`'s specifier scan matches `import("…")` too.
 //
+// THE CEREMONY HAPPENED AND THIS FILE IS STILL OUTSIDE IT (wave 2026-09-15 integration cut,
+// 2026-09-17). `chatTurn_v20` and `claraWork_v4` were cut and the registry repointed, and NEITHER
+// imports this module — so it is still not in `frozen-workflows.json` and the four lines at the
+// foot of this file are still owed. The reason is a MEASUREMENT, not a preference: 0208 grants
+// `clara.create_prepayment_schedule`, `get_prepayment_schedule`, `list_prepayment_schedules` and
+// `list_prepayment_attention` to `clara_authenticated` ALONE (`0208:1674-1677`), the door is
+// `_human_ctx`-fronted at the bookkeeper rank (`0208:1043`), `clara.prepayment_schedules` carries a
+// NULL relacl and `clara.document_service_periods` is granted select to `clara_authenticated` only
+// (`0140:627`). The runtime pool SET ROLEs to `clara_runtime` and carries no JWT actor, so both
+// contracts at the foot of this file — the chat tool and `read_prepayment_source` — could only ever
+// return a grant refusal. Closing them needs an OBO twin (`clara.create_prepayment_schedule_for`,
+// in `clara.create_accrual_adjustment_for`'s shape) and a machine-lane read, and a migration is not
+// a workflow cut's to write. Both stanzas stay contracts; the omission is named in
+// `docs/plan/active/refresh-wave-2026-09-15/reports/successors-final.md`.
+//
 // THE DATABASE IS THE AUTHORITY, ALWAYS. `clara.create_prepayment_schedule` (migration 0208)
 // re-checks every rule below against the client's live chart, the frozen evaluator's own output
 // and the document's live service period. Nothing here is a rule of its own: every check is a

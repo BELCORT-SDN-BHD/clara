@@ -62,9 +62,10 @@
 // ask "is anything IN FLIGHT that the target cannot run". They cannot see a rule that lives in the
 // SCHEMA and needs a body in the image. Migration 0195 is the first: its recut
 // `clara._record_journal_entry_core` refuses an accounting write whose run holds no consumed
-// `accounting_work` egress authorisation, and the ONLY body that can obtain one is `claraWork_v3`
+// `accounting_work` egress authorisation, and the FIRST body that can obtain one is `claraWork_v3`
 // (`prepare_work_egress_dispatch`/`consume_egress_dispatch` are called from
-// `workflows/claraWork.v3.impl.ts` and nowhere else). 0195 GRANDFATHERS runs claimed under a
+// `workflows/claraWork.v3.impl.ts`, and from `claraWork.v4.impl.ts` since the wave 2026-09-15 cut —
+// from no body before v3). 0195 GRANDFATHERS runs claimed under a
 // pre-v3 bundle so a forward cutover finishes honestly — which means a rollback to a pre-v3 image
 // would run the whole Work lane through the grandfather arm, i.e. WITHOUT the egress wall, on a
 // database whose frontier says the wall is in force. That is not something a parked run can tell
@@ -101,11 +102,12 @@ export const FRONTIER_BODY_RULES = Object.freeze([
     requires: Object.freeze(["claraWork_v3"]),
     why:
       "0195's recut clara._record_journal_entry_core requires a consumed accounting_work egress "
-      + "authorisation at the accounting write, and claraWork_v3 is the ONLY body that obtains one "
+      + "authorisation at the accounting write, and claraWork_v3 is the FIRST body that obtains one "
       + "(prepare_work_egress_dispatch / consume_egress_dispatch are called from "
-      + "workflows/claraWork.v3.impl.ts and nowhere else). A target without it would run the Work "
-      + "lane entirely through 0195's pre-v3 grandfather arm — the wall in force, and nothing "
-      + "subject to it.",
+      + "workflows/claraWork.v3.impl.ts, and from claraWork.v4.impl.ts since the wave 2026-09-15 "
+      + "cut — from no body before v3, which is why the rule names v3 and not the newest one). A "
+      + "target without it would run the Work lane entirely through 0195's pre-v3 grandfather arm "
+      + "— the wall in force, and nothing subject to it.",
   }),
 ]);
 

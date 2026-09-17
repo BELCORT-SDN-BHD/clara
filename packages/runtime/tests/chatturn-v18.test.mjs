@@ -94,7 +94,7 @@ const ADMITTED = { work_id: WORK_ID, task_id: "99999999-9999-4999-8999-999999999
 // and every predecessor stays EXPORTED under policy (c) — so the pin's name follows the registry
 // and v18 joins the retained-export ladder beside v17.
 test("623.v18: the registry pins chatTurn at v19 and keeps claraWork a class of its own", () => {
-  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v19, "chatTurn: routes to the newest body");
+  assert.equal(registry.workflows.chatTurn, registry[registry.workflowPins.chatTurn], "chatTurn: routes to the newest body");
   assert.ok(typeof registry.workflows.claraWork === "function", "claraWork: is registered");
   assert.ok(registry.workflowNames.includes("claraWork"), "the class name is dispatchable by string too");
   // #623 ADDED `claraWork` AS A NEW CLASS; #629 THEN REPOINTED IT v1 -> v2 (the typed shared
@@ -104,24 +104,43 @@ test("623.v18: the registry pins chatTurn at v19 and keeps claraWork a class of 
   // …and #631 repointed it again, v2 -> v3 (the egress gate and the execution trace), which is the
   // same motion once more: the Work lane's cutover still does not touch chatTurn, and v1 and v2
   // both stay exported.
-  assert.match(REGISTRY_SRC, /claraWork: claraWork_v3/);
-  assert.ok(typeof registry.claraWork_v1 === "function", "v1 is still exported for parked runs and rollback");
-  assert.ok(typeof registry.claraWork_v2 === "function", "…and so is v2, v3's rollback target");
-  assert.ok(typeof registry.claraWork_v3 === "function", "…and the pinned body is exported too");
-  assert.match(REGISTRY_SRC, /chatTurn: chatTurn_v19/);
-  // v18 and v17 stay EXPORTED (policy (c)) so a parked run resumes and a rollback has a target.
-  assert.ok(typeof registry.chatTurn_v18 === "function", "#623's body is still exported — it is v19's rollback target");
+  // …and the wave 2026-09-15 cut repointed BOTH classes once more — claraWork v3 -> v4 (the
+  // knowledge context, two execute-less questions and the #639 particulars pair) and chatTurn
+  // v19 -> v20 (two admitting tools, no new wire kind). The claim is unchanged for the fourth time
+  // and is now read from `workflowPins` rather than retyped, so the next cut moves it in ONE place
+  // and this cell keeps asserting what it was written to assert: policy (c).
+  // THE TRAILING COMMA IS THE BOUNDARY, deliberately rather than `\b`: `chatTurn_v1` is a PREFIX of
+  // `chatTurn_v19`, and the registry's own bundle gate has already paid once for a substring match
+  // that could not tell a version from the start of a longer one.
+  assert.ok(REGISTRY_SRC.includes(`\n  claraWork: ${registry.workflowPins.claraWork},`), "the claraWork pin line names the pinned body");
+  assert.ok(REGISTRY_SRC.includes(`\n  chatTurn: ${registry.workflowPins.chatTurn},`), "the chatTurn pin line names the pinned body");
+  for (const body of ["claraWork_v1", "claraWork_v2", "claraWork_v3", "claraWork_v4"]) {
+    assert.ok(typeof registry[body] === "function", `${body} is still exported for parked runs and rollback`);
+  }
+  // v19, v18 and v17 stay EXPORTED (policy (c)) so a parked run resumes and a rollback has a target.
+  assert.ok(typeof registry.chatTurn_v19 === "function", "v19 is still exported — it is v20's rollback target");
+  assert.ok(typeof registry.chatTurn_v18 === "function", "#623's body is still exported");
   assert.ok(typeof registry.chatTurn_v17 === "function", "v17 is still exported");
 });
 
 test("623.v18: the registry comment states the deploy order in the direction that is owed", () => {
-  const paragraph = /#623 \(THE FIRST PERSISTENT CLARA SUCCESSOR\)[\s\S]*?chatTurn: chatTurn_v19/.exec(REGISTRY_SRC)?.[0];
+  // THE ANCHOR IS THE PIN LINE, WHATEVER VERSION IT NAMES. It was `chatTurn: chatTurn_v19`; the
+  // wave 2026-09-15 cut moved it to v20 and the next one will move it again, and re-typing a
+  // version number here would make this cell fail for the one reason it is NOT about.
+  const paragraph = new RegExp(
+    "#623 \\(THE FIRST PERSISTENT CLARA SUCCESSOR\\)[\\s\\S]*?\\n {2}chatTurn: chatTurn_v\\d+,",
+  ).exec(REGISTRY_SRC)?.[0];
   assert.ok(paragraph, "the repoint carries its own note");
   const flat = paragraph.replace(/\s*\n\s*\/\/\s?/g, " ");
   assert.match(flat, /MIGRATION 0178 MUST BE LIVE ON THE DATABASE BEFORE THIS IMAGE ADMITS ANY WORK/, "it names the migration and the direction plainly");
   assert.match(flat, /REVERSE order is\s+free/, "and says the reverse order costs nothing");
   // …and the successor's own note owes the same thing for ITS migrations.
   assert.match(flat, /MIGRATIONS 0192 AND 0194 MUST BE LIVE BEFORE THIS\s+IMAGE SERVES A TURN/, "v19 names its own two migrations and the direction");
+  // …and so does the wave 2026-09-15 successor. EVERY repoint in this paragraph owes the same
+  // sentence, which is the actual contract this cell holds: a reader of registry.ts must be able to
+  // learn the deploy order for the CURRENT pin without opening a migration.
+  assert.match(flat, /MIGRATIONS 0206 AND 0207 MUST BE LIVE BEFORE THIS\s+IMAGE SERVES A TURN/, "v20 names its own two migrations and the direction");
+  assert.match(flat, /REVERSE order\s+is FREE: 0206 and 0207/, "and says the reverse order costs nothing for those two as well");
 });
 
 // --- 2. the predecessors did not move --------------------------------------

@@ -201,7 +201,12 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // v2 and v1 are still carried for runs parked on their hooks, and an operator reading
   // /api/build-info has to be able to see all three rather than infer the rollback targets.
   assert.match(src, /import \{ claraWorkBundleIdentityV3 \} from "\.\.\/workflows\/claraWork\.v3\.bundle\.js"/, "the route imports the v3 bundle identity");
-  assert.match(src, /bundles: \[claraWorkBundleIdentityV3\(\), claraWorkBundleIdentityV2\(\), claraWorkBundleIdentity\(\)\]/, "...and passes all THREE into the payload, pinned first, so one read answers which bundles this image serves");
+  // WAVE 2026-09-15 — FOUR identities now, PINNED FIRST. v4 is what `workflows.claraWork`
+  // dispatches; v3, v2 and v1 are still carried for runs parked on their hooks, and the count is
+  // the point rather than the names: an operator reading /api/build-info must see every rollback
+  // target this image actually carries, not infer them from the pin.
+  assert.match(src, /import \{ claraWorkBundleIdentityV4 \} from "\.\.\/workflows\/claraWork\.v4\.bundle\.js"/, "the route imports the v4 bundle identity");
+  assert.match(src, /bundles: \[claraWorkBundleIdentityV4\(\), claraWorkBundleIdentityV3\(\), claraWorkBundleIdentityV2\(\), claraWorkBundleIdentity\(\)\]/, "...and passes all FOUR into the payload, pinned first, so one read answers which bundles this image serves");
   // #637 — the SAME import-here-pass-in shape for the registry's provenance exports. Without
   // these two the payload could name the bundles but not the BODIES, and a rollback preflight
   // reading a target image's /api/build-info would have nothing to compare a parked run against.

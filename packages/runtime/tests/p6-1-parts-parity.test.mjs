@@ -140,11 +140,19 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
       classification: "emittable",
       // #643/#644 (wave-3) — chatTurn_v19 mints this kind too, from the SAME two files v18 does.
       // A superseded body keeps shipping (policy (c)), so both versions' sites stay on the census.
+      // WAVE 2026-09-15 — chatTurn_v20 mints it from TWO tools, so its tools module appears TWICE.
+      // That is the census reporting one site per construction rather than one per file, and it is
+      // the evidence this cut wanted: `start_staff_expense_claim_work` and `start_accrual_work` both
+      // announce a `journal_entry` Work, which is why `WORK_ACCEPTED_PURPOSES` did NOT have to widen
+      // for either of them (0206's amendment; 0193's `_plan_admit_occurrence`).
       constructionSites: [
         "packages/runtime/workflows/chatTurn.v18.prompt.ts",
         "packages/runtime/workflows/chatTurn.v18.tools.ts",
         "packages/runtime/workflows/chatTurn.v19.prompt.ts",
         "packages/runtime/workflows/chatTurn.v19.tools.ts",
+        "packages/runtime/workflows/chatTurn.v20.prompt.ts",
+        "packages/runtime/workflows/chatTurn.v20.tools.ts",
+        "packages/runtime/workflows/chatTurn.v20.tools.ts",
       ],
     },
     {
@@ -160,10 +168,14 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
     {
       kind: "work_result",
       classification: "emittable",
+      // WAVE 2026-09-15 — claraWork_v4 writes it too, from the same place v3 does. v4 declares NO
+      // new kind at all (claraWork.v3.parts.ts stays the declarer), so this row and `work_status` /
+      // `work_question` below are the only places the cut is visible on this census.
       constructionSites: [
         "packages/runtime/workflows/claraWork.v1.impl.ts",
         "packages/runtime/workflows/claraWork.v2.impl.ts",
         "packages/runtime/workflows/claraWork.v3.impl.ts",
+        "packages/runtime/workflows/claraWork.v4.impl.ts",
       ],
     },
     {

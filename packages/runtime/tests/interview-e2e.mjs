@@ -374,10 +374,11 @@ async function main() {
     const terminalState = await driveClientToComplete({ runId, planId }, jwt);
     assert.equal(terminalState.status, "complete", `full drive → complete (got ${terminalState.status})`);
     assert.equal(terminalState.terminal.outcome, "interview_complete", "typed complete terminal");
-    // 15 = the 13 v1-era answered segments + the two v2 (F2) additions this fixture's entity type
-    // reaches: `mpers_eligibility` (the Sdn Bhd-only s.244 screen) and `accounting_basis`. Four
-    // skippables are still skipped. A sole-prop fixture would answer 14 — the screen is not asked.
-    assert.equal(Number(terminalState.terminal.answered), 15, `15 client segments answered (4 skippables skipped); got ${terminalState.terminal.answered}`);
+    // 16 = the 13 v1-era answered segments + the two v2 (F2) additions this fixture's entity type
+    // reaches (`mpers_eligibility`, the Sdn Bhd-only s.244 screen, and `accounting_basis`) + the ONE
+    // clientOnboarding_v5 adds: `fye_day` (#649 D7 — ask the year-end DAY, never derive it). Four
+    // skippables are still skipped. A sole-prop fixture would answer 15 — the screen is not asked.
+    assert.equal(Number(terminalState.terminal.answered), 16, `16 client segments answered (4 skippables skipped); got ${terminalState.terminal.answered}`);
 
     // Plan items: one answered item per must_ask/capture segment; the AMB-11 opening key present;
     // the interview_run binding EXACTLY once; ZERO duplicate item_key values.
@@ -387,7 +388,15 @@ async function main() {
     assert.equal(items.filter((it) => it.item_key === "interview_run").length, 1, "the interview_run binding is present exactly once");
     assert.ok(keys.includes("first_year_zero_opening"), "the AMB-11 new-first-year opening item key is present");
     const business = items.filter((it) => it.item_key !== "interview_run");
-    assert.equal(business.length, 16, `16 business items persisted (one per answered segment, except coa_seed which emits TWO -- coa_seed_decision + the coa_chart_apply consumer, 裁-21 PR-c); got ${business.length}`);
+    assert.equal(business.length, 17, `17 business items persisted (one per answered segment, except coa_seed which emits TWO -- coa_seed_decision + the coa_chart_apply consumer, 裁-21 PR-c; +1 for clientOnboarding_v5's fye_day); got ${business.length}`);
+    // #649 D7, POSITIVELY: the day is on the plan, it is a `capture`, and it does NOT gate the
+    // commit ceremony. `required_for_commit` staying false is a ruling, not an oversight — making
+    // the day a prerequisite would newly block every commit whose plan predates this cut.
+    const fyeDay = items.find((it) => it.item_key === "fye_day");
+    assert.ok(fyeDay, `the fy-end DAY is on the plan (keys=${JSON.stringify(keys)})`);
+    assert.equal(fyeDay.item_kind, "capture", "recorded as a capture, not a must_ask");
+    assert.equal(fyeDay.required_for_commit, false, "and it does NOT gate commit_client_onboarding");
+    assert.equal(Number(fyeDay.answer), 30, "carrying the day the human gave, normalised to a number by the segment's own validator");
     for (const it of business) {
       // coa_chart_apply is the ONE exception: the fixture answers coa_seed "yes" (firm_template),
       // and coaSeedItemsV3 deliberately stamps that arm `state: "deferred"` -- a TODO the human
@@ -401,27 +410,28 @@ async function main() {
     // confirmed segment (15) plus the interview_run binding write (1). No CLR04/CLR06 surfaced to
     // the route (each answer was DB-revalidated as bookkeeper+ — proven by the drive succeeding).
     const planF = await rig.readOnboardingPlan(planId);
-    assert.ok(Number(planF.revision_n) >= n0 + 16, `revision advanced ≥ +16 (bind + 15 answers); n0=${n0} nF=${planF.revision_n}`);
+    assert.ok(Number(planF.revision_n) >= n0 + 17, `revision advanced ≥ +17 (bind + 16 answers); n0=${n0} nF=${planF.revision_n}`);
     assert.equal(planF.state, "open", "the plan stays open post-interview (commit_client_onboarding is the separate human ceremony)");
 
-    console.log("[interview-e2e] PASS (positive): full 15-segment v2 drive → interview_complete, 16 items, no dupes, revision advanced");
+    console.log("[interview-e2e] PASS (positive): full 16-segment drive → interview_complete, 17 items, no dupes, revision advanced");
   }
 
   // -------------------------------------------------------------------------
-  // (p649.interview.sst_park_today) THE OWED RED, RECORDED AS OWED.
+  // (p649.interview.sst_park_closed) H-52, CLOSED — AND THIS IS THE FLIP ITSELF.
   //
-  // Row H-52 of #649: a client who answered "not registered for SST" is STILL asked for an SST
+  // Row H-52 of #649: a client who answered "not registered for SST" was STILL asked for an SST
   // registration number. The applicability rule the fix needs (`appliesTo: prior =>
-  // prior.sst_regime !== 'not_registered'` on the `sst_no` segment) cannot be added on an
+  // prior.sst_regime !== 'not_registered'` on the `sst_no` segment) could not be added on an
   // implementation branch — the question inventory lives inside a FROZEN workflow closure
   // (`frozen-workflows.json`; `scripts/check-frozen-workflows.mjs` hash-locks the transitive
-  // relative-import closure of every frozen body), so the change ships as a NEW body at the
-  // wave's single successor cut and this file inherits it with no edit.
+  // relative-import closure of every frozen body) — so #649 shipped this cell asserting TODAY's
+  // behaviour, green, and MEANT to go red at the wave's single successor cut.
   //
-  // SO THIS SCENARIO ASSERTS TODAY'S BEHAVIOUR, ON PURPOSE. It is green now and it is MEANT to
-  // go red at the cut: the successor's own acceptance is exactly that this park stops being
-  // announced. Whoever cuts it flips the assertion in the same commit, and the flip is the
-  // evidence that H-52 closed. An owed red nobody wrote down is an owed red nobody closes.
+  // THE CUT HAPPENED AND THIS IS THE ASSERTION FLIPPED IN THE SAME COMMIT, which is exactly the
+  // evidence #649's own report asked for: `interview.v4.questions.ts` gates `sst_no` behind
+  // `sstNumberApplies`, `clientOnboarding_v5` walks that inventory, and the registry pins it. What
+  // the cell now proves is the stronger claim: the park is never ANNOUNCED, and the plan carries no
+  // `sst_no` item at all — an ABSENT question, not an unanswered one.
   // -------------------------------------------------------------------------
   {
     const { owner } = await rig.buildFirm("iv-sst-park");
@@ -436,18 +446,32 @@ async function main() {
     const { INTERVIEW_V2_CLIENT_ANSWERS } = await import("./wave-b-interview-testkit.mjs");
     const answers = scriptedAnswers({ ...INTERVIEW_V2_CLIENT_ANSWERS, sst_regime: "not_registered" });
 
+    // `driveUntilSegment` returns null when the run reaches a TERMINAL without ever opening the
+    // segment it was told to wait for — which is now the whole point. The drive answers every
+    // question the interview does ask and finishes; `sst_no` is never one of them.
     const park = await driveUntilSegment({ runId, planId }, jwt, "sst_no", answers);
-    assert.ok(park, "TODAY: the sst_no park is still announced after sst_regime=not_registered — H-52, live and unfixed");
-    assert.equal(park.seg, "sst_no");
-    assert.equal(park.phase, "q");
+    assert.equal(park, null, "H-52 CLOSED: the sst_no park is never announced after sst_regime=not_registered");
 
-    // TIDY: cancel the run at the very park this scenario came to observe, so nothing is left
-    // parked on the shared database.
-    const cancel = await postJson("/api/interview/cancel", { runId, scope: "client", parkIndex: park.parkIndex, planId }, jwt);
-    assert.equal(cancel.status, 200, `sst scenario cancel → 200 (got ${cancel.status} ${JSON.stringify(cancel.body)})`);
-    await pollState({ runId, scope: "client", planId }, jwt, (b) => b.terminal?.outcome === "cancelled", "sst scenario cancel terminal");
+    const terminal = await pollState({ runId, scope: "client", planId }, jwt, (b) => !!b.terminal, "sst scenario terminal");
+    assert.equal(terminal.terminal.outcome, "interview_complete", "and the run finishes rather than stalling on a question nobody asked");
 
-    console.log("[interview-e2e] PASS (p649.interview.sst_park_today): sst_no IS still parked after not_registered — the successor's owed red, recorded as owed");
+    // AN ABSENT QUESTION LEAVES NO ITEM — the distinction `interview.v2.core.ts`'s `segmentApplies`
+    // exists for. An `sst_no` row in state `deferred` or `skipped` would be the same defect wearing
+    // a different word: a plan that records a question about a registration this client does not
+    // hold.
+    const items = await rig.readOnboardingPlanItems(planId);
+    assert.equal(
+      items.filter((it) => it.item_key === "sst_no").length,
+      0,
+      `no sst_no plan item at all (keys=${JSON.stringify(items.map((it) => it.item_key))})`,
+    );
+    // THE POSITIVE CONTROL, so "no item" cannot pass because the drive did nothing: the segment
+    // that GATES it is on the plan, carrying the answer that made `sst_no` inapplicable.
+    const regime = items.find((it) => it.item_key === "sst_regime");
+    assert.ok(regime, "control: the sst_regime segment WAS asked and recorded");
+    assert.equal(regime.answer, "not_registered", "carrying the answer the gate reads");
+
+    console.log("[interview-e2e] PASS (p649.interview.sst_park_closed): sst_no is never parked after not_registered, and leaves no plan item — H-52 closed by the clientOnboarding_v5 cut");
   }
 
   console.log("\nINTERVIEW E2E: ALL PASS");

@@ -19,6 +19,39 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The three pins the wave 2026-09-15 cut moved
+
+`chatTurn → chatTurn_v20`, `claraWork → claraWork_v4`, `clientOnboarding → clientOnboarding_v5`.
+Every superseded body stays exported and in `workflowBodies` — the boot census refuses to start the
+world database-wide if a body a parked run needs is missing, and that is policy (c) enforced rather
+than promised. What each new body carries, and nothing more:
+
+* **`chatTurn_v20`** — exactly two tools over v19's map: `start_staff_expense_claim_work` (#638) and
+  `start_accrual_work` (#652). NO new wire kind and NO widened `WORK_ACCEPTED_PURPOSES`: both admit
+  `journal_entry`-purpose Work (0206's amendment for the claim; 0193's `_plan_admit_occurrence` for
+  the accrual occurrence), so `apps/web`'s reader is unmoved. Deploy 0206 and 0207 first.
+* **`claraWork_v4`** — a knowledge-context read before the segment loop through the non-frozen
+  `lib/knowledge-conflicts.mjs`, whose `knowledge_version` rides into every `model_call` execution
+  trace as an observed revision (#654); two EXECUTE-LESS question tools, `answer_accrual_term`
+  (#652) and `ask_knowledge_conflict` (#654), which park through the same
+  `clara.open_work_question` machinery `ask_question` already uses and can write nothing; and
+  #639's dependent fixed-asset particulars question, opened by the WORKFLOW after a commit whose
+  entry birthed a register row with no method or in-service date and applied through
+  `clara.complete_fixed_asset_particulars_for`, which writes no journal. The roster goes from three
+  names to five and the bundle id moves to `clara-work-tools/v4`. Deploy 0192 and 0201 first.
+* **`clientOnboarding_v5`** (+ `interview.v4.questions.ts`, `interview.v4.known.ts`) — `sst_no`
+  gated behind `sst_regime !== 'not_registered'` (#649 H-52), a `fye_day` segment immediately after
+  `fye` (#649 D7; `required_for_commit` stays FALSE), and a known-facts pre-read of
+  `clara.get_knowledge_pack` so a registered fact the segment's own validator accepts makes the
+  question absent — and one it REFUSES makes the question a confirm with the record shown. No
+  migration and no route change.
+
+TWO CONTRACTS THE CUT COULD NOT DELIVER, and both are grant walls rather than omissions: #653's
+`start_prepayment_schedule_work` / `read_prepayment_source` (every prepayment door and read is
+`clara_authenticated`-only, 0208 §D.1) and #647's `record_counterparty_alias` (no
+`clara.add_counterparty_alias_for` exists). Their modules are deliberately still outside every
+frozen closure.
+
 The agent can draft and post within the database's current wake authority, perform audited freeform
 reads, and prepare bank/close/report work. SQL enforces the admitted operations and their accounting
 conditions. The approved simplification of human attestations/maker-checker remains implementation
@@ -121,7 +154,9 @@ reason printed — when migration 0206 is absent (`clara.staff_expense_claims`,
 `clara.staff_expense_claim_status` and `clara.admit_staff_expense_claim_work` are probed before
 anything is spawned), so the runtime half is safe to merge before the database half lands. It
 drives `POST /api/work/staff-expense-claim` end to end: a claim row durable at ADMISSION, a run
-served by the UNCHANGED frozen `clara-work/v3` bundle with the purpose vocabulary unwidened, a
+served by the UNCHANGED frozen claraWork bundle the image pins (written at `clara-work/v3`;
+`clara-work/v4` since the wave 2026-09-15 cut repointed the class, and the file reads the digest off
+the boot banner rather than pinning a version) with the purpose vocabulary unwidened, a
 `posted` status-ledger row written by the operation receipt's own trigger, a lost acknowledgement
 that replays onto the same claim, a changed claim under one intent key that is a typed 409, a
 replay under REVOKED membership that is refused rather than replayed, per-item continuation, the
@@ -352,7 +387,7 @@ to. The same four facts appear in one boot line, so a log and an HTTP read can b
 trusting either alone:
 
 ```
-[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v19 claraWork=claraWork_v3 …
+[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v20 claraWork=claraWork_v4 clientOnboarding=clientOnboarding_v5 …
 ```
 
 `git_sha=<unset>` and `frontier=<unavailable: reason>` are the honest readings when the build arg
@@ -597,7 +632,14 @@ successor imports it, and then it is hash-locked forever** — `periodic-adjustm
 `deployed: true` in `frozen-workflows.json` by closure alone, because `chatTurn_v19` imports it.
 `lib/counterparty-identity.ts` is outside every closure today (`node
 scripts/check-frozen-workflows.mjs` from the repository root is the check), and the day a successor
-imports it that stops being true.
+imports it that stops being true. The wave 2026-09-15 cut is the worked example in both directions:
+it imported `lib/staff-expense-claim-basis.ts`, `lib/accrual-basis.ts`,
+`lib/fixed-asset-acquisition.ts` and the new `lib/knowledge-conflicts.mjs` — all four are now
+manifest entries, hash-locked against `origin/main` by closure alone, and the deploy ceremony
+(`--lock-deployed`, never `--update`) is what later stamps them `deployed: true` — and deliberately
+did NOT import `lib/prepayment-schedule-basis.ts` or `lib/counterparty-identity.ts`, because neither
+of their doors is reachable from a machine role — freezing a module before its door exists would make
+it correctable only by superseding it.
 
 One thing that wiring will need and that this repository does not have: `clara.add_counterparty_alias`
 is `_human_ctx`-fronted and refuses `origin='agent_proposed'` outright, so an agent lane needs a new

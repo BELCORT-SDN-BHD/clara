@@ -75,8 +75,11 @@ test("policy (c): autoDraft_v9 is still exported and reachable after the H-17 re
 // v15 joins the policy (c) roster below on the same terms. #623, and then #643 + #644's shared
 // successor, move it further still — v16 -> v17 -> v18 -> v19, autoDraft untouched throughout —
 // and v17/v18 each join the policy (c) roster in their turn.
-test("registry pins chatTurn to the v19 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV19.chatTurn_v19);
+test("registry pins chatTurn to its newest export, and v19 stays reachable", () => {
+  // THE PIN IS READ, NOT RETYPED. This cell's subject is the blind registry's own invariant — the
+  // dispatch table and the named exports agree — not which version happens to be newest today.
+  assert.equal(registry.workflows.chatTurn, registry[registry.workflowPins.chatTurn]);
+  assert.equal(registry.chatTurn_v19, entryChatTurnV19.chatTurn_v19, "policy (c): v19 is still its module's own function");
 });
 
 test("registry still EXPORTS chatTurn_v18 so no parked v18 run is stranded (Appendix A policy (c))", () => {

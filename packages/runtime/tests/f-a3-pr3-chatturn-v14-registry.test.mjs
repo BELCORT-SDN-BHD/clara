@@ -40,7 +40,12 @@ test("v13 stays exported and frozen -- no parked run is stranded by the v14 repo
 test("chatTurn_v14 stays exported and IS its own function; the registry now pins v19 (policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v14, "function", "registry re-exports chatTurn_v14");
   assert.equal(registry.chatTurn_v14, v14Module.chatTurn_v14, "the registry's chatTurn_v14 export IS chatTurn.v14.ts's own function");
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v19", "#643 + #644's shared successor repointed chatTurn past #623's v18, FS-7's v17, P6-1's v16, F-A6's v15 and this file's own v14 pin");
+  // THE PIN IS READ, NOT RETYPED. #643 + #644's shared successor repointed chatTurn past #623's
+  // v18, FS-7's v17, P6-1's v16, F-A6's v15 and this file's own v14 pin; the wave 2026-09-15 cut
+  // moved it again to v20. What this cell is ABOUT is that v14 survived every one of those moves —
+  // so the successor's number is read from `workflowPins` and the next cut needs no edit here.
+  assert.equal(registry.workflows.chatTurn.name, registry.workflowPins.chatTurn, "the dispatch table points at the body the pin names");
+  assert.notEqual(registry.workflowPins.chatTurn, "chatTurn_v14", "and the pin has moved well past this file's own");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v13, "the registry no longer points chatTurn: at v13");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v14, "...nor at v14");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v15, "...nor at v15");

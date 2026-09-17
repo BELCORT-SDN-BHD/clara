@@ -15,6 +15,15 @@
 // CARRIER, unit-tested standalone, and the day the owner says yes the successor has a schema, an
 // argument builder and a refusal map that were reviewed rather than improvised.
 //
+// THE SUCCESSOR WAS CUT AND THIS FILE IS STILL OUTSIDE IT (wave 2026-09-15 integration cut,
+// 2026-09-17). `chatTurn_v20` shipped with #638's and #652's tools and does NOT import this module,
+// so it is still absent from `frozen-workflows.json` and the four lines at the foot of this file are
+// still owed. Nothing changed about D11's reasoning: `clara.add_counterparty_alias` is still
+// `_human_ctx`-fronted, still `clara_authenticated`-only, still refuses `origin='agent_proposed'`,
+// and no branch of that wave shipped the OBO twin `clara.add_counterparty_alias_for`. A tool that
+// could only return a grant refusal is not a capability, and a workflow cut does not write
+// migrations. Named in `docs/plan/active/refresh-wave-2026-09-15/reports/successors-final.md`.
+//
 // THE DATABASE IS THE AUTHORITY, ALWAYS. Every check below MIRRORS one migration 0200 enforces
 // (its own §7.1 arms and the four CHECK constraints on `clara.counterparty_aliases`); none is a
 // rule of its own. The point of mirroring is that a model sees the mistake beside the thing that

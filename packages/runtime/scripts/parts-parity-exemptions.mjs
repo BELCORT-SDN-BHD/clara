@@ -363,6 +363,16 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   ["packages/runtime/workflows/chatTurn.v19.ts","chatTurn_v19","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v19.ts","chatTurn_v19","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/chatTurn.v19.ts","chatTurn_v19","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  // chatTurn_v20 (wave 2026-09-15). IDENTICAL in kind to v18's and v19's three sites above, and
+  // ALL THREE FINGERPRINTS ARE BYTE-IDENTICAL TO v19's — which is the evidence this cut wanted from
+  // the ledger rather than from a reviewer's eye: the park/resume statements were carried over
+  // unchanged, not rewritten. `tool-call`, `tool-result` and `json` are the AI SDK's OWN
+  // message-content discriminants, not Clara transcript part kinds; they are constructed here to
+  // replay the parked clarify call and to feed the human's answer back to the model as that tool's
+  // result. v20 adds NO transcript part kind at all.
+  ["packages/runtime/workflows/chatTurn.v20.ts","chatTurn_v20","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
+  ["packages/runtime/workflows/chatTurn.v20.ts","chatTurn_v20","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  ["packages/runtime/workflows/chatTurn.v20.ts","chatTurn_v20","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"tool-result\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"json\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   // #629 — claraWork_v2's resume message. IDENTICAL in kind to v1's two sites above: `tool-result`
@@ -380,6 +390,16 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // enclosing function moved.
   ["packages/runtime/workflows/claraWork.v3.ts","claraWork_v3","type: \"tool-result\"","5d48ab5cb7e0ddaaa4d0ed79741bfc26d45985a488b6e89349f2459a6bb14b31","0"],
   ["packages/runtime/workflows/claraWork.v3.ts","claraWork_v3","type: \"json\"","5d48ab5cb7e0ddaaa4d0ed79741bfc26d45985a488b6e89349f2459a6bb14b31","0"],
+  // claraWork_v4 (wave 2026-09-15). IDENTICAL in kind to v1's, v2's and v3's sites above:
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds, and they are constructed here for the reason all three predecessors
+  // construct them — feeding the human's attributed answer back to the model as the parked tool's
+  // result. THE FINGERPRINT MOVED AND THE REASON IS ONE FIELD: v4 answers `toolName:
+  // seg.question.toolName` rather than the `ASK_QUESTION_TOOL` constant, because THREE tools can
+  // now park a v4 run and a tool result that named the wrong one is a message the model cannot
+  // match to its own call. The four attributed value fields are v2's, unchanged.
+  ["packages/runtime/workflows/claraWork.v4.ts","claraWork_v4","type: \"tool-result\"","bb63edae7941974d3f6f9542ab9817bc9b568725cb1c5d8fdb29e97eb9336827","0"],
+  ["packages/runtime/workflows/claraWork.v4.ts","claraWork_v4","type: \"json\"","bb63edae7941974d3f6f9542ab9817bc9b568725cb1c5d8fdb29e97eb9336827","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],

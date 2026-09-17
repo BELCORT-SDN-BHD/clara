@@ -43,6 +43,7 @@ import { sanitizedErrorCode } from "../lib/pool-error-contract.mjs";
 import { CLARA_WORK_BUNDLE_V1_BANNER } from "../workflows/claraWork.v1.bundle.js";
 import { CLARA_WORK_BUNDLE_V2_BANNER } from "../workflows/claraWork.v2.bundle.js";
 import { CLARA_WORK_BUNDLE_V3_BANNER } from "../workflows/claraWork.v3.bundle.js";
+import { CLARA_WORK_BUNDLE_V4_BANNER } from "../workflows/claraWork.v4.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -283,6 +284,12 @@ export default definePlugin(() => {
       // and the pinned digest is the SAME constant /api/build-info serves and
       // `clara.claim_work_run` writes onto every Work row.
       console.log(CLARA_WORK_BUNDLE_V3_BANNER);
+      // WAVE 2026-09-15 — THE FOURTH LINE, for the reason #629 gave for the second and #631 for the
+      // third: v4 is what `workflows.claraWork` now dispatches, and v1/v2/v3 are still carried for
+      // runs parked on their hooks. A rollback preflight reads these four lines to know which
+      // bodies this process has; the pinned digest is the SAME constant /api/build-info serves and
+      // `clara.claim_work_run` writes onto every Work row.
+      console.log(CLARA_WORK_BUNDLE_V4_BANNER);
       // #637 (C88.8 / C-70) — the ONE MORE LINE this comment used to promise here (which commit
       // built this image, which schema it is talking to, which body each class dispatches to, and
       // how many bodies it carries for parked runs) is `emitProvenanceLine()`, ABOVE, at the top of

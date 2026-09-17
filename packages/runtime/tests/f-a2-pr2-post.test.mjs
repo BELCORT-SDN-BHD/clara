@@ -487,10 +487,13 @@ test("f-a2.pr2.chat-usage-writes-through-F-A9-agent-door with the attended ident
 // 9 · The registry repoints, and the frozen predecessors still exported.
 // =============================================================================================
 
-test("f-a2.pr2.registry: chatTurn and autoDraft are repointed, and v8/v9/v12/v13/v14/v15/v18 stay EXPORTED so no parked run is stranded", () => {
+// THE CHATTURN PIN IS READ, NOT RETYPED (wave 2026-09-15, v19 -> v20). It has been v13, v14, v15,
+// v16, v17, v18, v19 and now v20 while this cell's actual subject — every superseded body stays
+// exported, and an autoDraft pin is not a chatTurn pin — never moved once.
+test("f-a2.pr2.registry: chatTurn and autoDraft are repointed, and v8/v9/v12/v13/v14/v15/v18/v19 stay EXPORTED so no parked run is stranded", () => {
   assert.equal(registry.workflows.autoDraft.name, "autoDraft_v10",
     "H-17 moved the pin v9 -> v10; the claim is 'the pin is newest', so v9 joins the policy-(c) loop below");
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v19", "#643 + #644's shared successor repointed chatTurn past #623's v18, FS-7's v17, P6-1's v16 and the earlier v15/v14/v13 pins");
+  assert.equal(registry.workflows.chatTurn.name, registry.workflowPins.chatTurn, "the dispatch table points at the body the chatTurn pin names");
   assert.equal(typeof registry.autoDraft_v8, "function", "policy (c): never delete an export with in-flight runs");
   assert.equal(typeof registry.chatTurn_v15, "function", "policy (c): the version this cell pinned before P6-1 stays exported once superseded");
   assert.equal(typeof registry.chatTurn_v14, "function", "policy (c): the version this cell used to pin stays exported once superseded");
@@ -500,7 +503,8 @@ test("f-a2.pr2.registry: chatTurn and autoDraft are repointed, and v8/v9/v12/v13
   assert.equal(typeof registry.chatTurn_v16, "function", "policy (c): P6-1's body remains exported after FS-7");
   assert.equal(typeof registry.chatTurn_v17, "function", "policy (c): FS-7's body remains exported after #623");
   assert.equal(typeof registry.chatTurn_v18, "function", "policy (c): #623's body remains exported after #643 + #644's shared successor");
-  assert.equal(registry.chatTurn_v19, registry.workflows.chatTurn);
+  assert.equal(typeof registry.chatTurn_v19, "function", "policy (c): #643 + #644's body remains exported after the wave 2026-09-15 cut");
+  assert.equal(registry[registry.workflowPins.chatTurn], registry.workflows.chatTurn, "the pinned body is directly addressable by workflow id too");
   for (let n = 1; n <= 9; n += 1) assert.equal(typeof registry[`autoDraft_v${n}`], "function");
   for (let n = 1; n <= 11; n += 1) assert.equal(typeof registry[`chatTurn_v${n}`], "function");
 });

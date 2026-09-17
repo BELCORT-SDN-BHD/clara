@@ -39,6 +39,7 @@ import { workflowBodies, workflowNames, workflowPins } from "../workflows/regist
 import { claraWorkBundleIdentity } from "../workflows/claraWork.v1.bundle.js";
 import { claraWorkBundleIdentityV2 } from "../workflows/claraWork.v2.bundle.js";
 import { claraWorkBundleIdentityV3 } from "../workflows/claraWork.v3.bundle.js";
+import { claraWorkBundleIdentityV4 } from "../workflows/claraWork.v4.bundle.js";
 
 export function buildInfoRoutes(): express.Router {
   const router = express.Router();
@@ -63,7 +64,7 @@ export function buildInfoRoutes(): express.Router {
         names: workflowNames,
         bodies: workflowBodies,
         pins: workflowPins,
-        bundles: [claraWorkBundleIdentityV3(), claraWorkBundleIdentityV2(), claraWorkBundleIdentity()],
+        bundles: [claraWorkBundleIdentityV4(), claraWorkBundleIdentityV3(), claraWorkBundleIdentityV2(), claraWorkBundleIdentity()],
       }),
     );
   });

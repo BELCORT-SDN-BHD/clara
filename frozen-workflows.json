@@ -36,10 +36,22 @@
       "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
+    "packages/runtime/lib/accrual-basis.ts": {
+      "sha256": "cad2963217c7c0cfb54659b5f8a8455e1689ea9b9031e7ad7bfb27b5a1aca0ae",
+      "note": ""
+    },
     "packages/runtime/lib/capability-registry.mjs": {
       "sha256": "db98138aa47832da8a31a8f9a51d31ab503d6bb61ab899da2706051b68218c0a",
       "note": "#631 — frozen BY CLOSURE, not by marker: claraWork_v3 imports the server-owned capability -> purpose/data-class catalogue, so check-frozen-workflows.mjs's import closure hash-locks this file. A change here needs a new claraWork successor once the ceremony stamps `deployed: true` (ARCHITECTURE §10 records the ruling). DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — see #815. NOT deploy-locked yet.",
       "deployed": true
+    },
+    "packages/runtime/lib/fixed-asset-acquisition.ts": {
+      "sha256": "703ee876b50397601fc6d6c35f3a75d528bab315ab772788b0398831e1542b96",
+      "note": ""
+    },
+    "packages/runtime/lib/knowledge-conflicts.mjs": {
+      "sha256": "e1d9799e7675b173ca28f65bcfbff3354e1512d0b7d2d1189aab6ba9ceef27c1",
+      "note": ""
     },
     "packages/runtime/lib/knowledge.mjs": {
       "sha256": "e8a6119687dfa8b09e3a3ac4c2a014584bce83e12d57d7537d4c53c65788c2d6",
@@ -55,6 +67,10 @@
       "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
       "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file (the web form imports the same module and is NOT frozen — only this closure membership locks it). DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet.",
       "deployed": true
+    },
+    "packages/runtime/lib/staff-expense-claim-basis.ts": {
+      "sha256": "d6d7f46b2eefe72fe5f5e17dd49c9a86ba1928283941187e5a04cb467f19960c",
+      "note": ""
     },
     "packages/runtime/lib/work-trace.mjs": {
       "sha256": "96c7e7b51a648c753de3d8d1ac745d39f6015d312f269a1408a8e04330d320d6",
@@ -771,6 +787,26 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v20.impl.ts": {
+      "sha256": "f92e45b93bb05153df43840d3123e627baefae408f72c0ab6cc06191e952638a",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v20.prompt.ts": {
+      "sha256": "5d122a0046713d749a6776c5d43e876605c95de9dae0956e59c12359b1ec3d4f",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v20.tools.ts": {
+      "sha256": "c36cbd20439c7380f40fc529b8c13c0c6a727322ac4b69dc0c766f7101925c77",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v20.ts": {
+      "sha256": "7008435d47ecb981b20b3978282f531804b6cad6c7ad8d3adeb20e5e8aae25a5",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v20.usage.ts": {
+      "sha256": "b11c322d773c596b5185485ece904d9c61d2b297ab6c4b0930c71cf52d591231",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.v3.errors.ts": {
       "sha256": "ab2b374a20443976058c5b90ee601d6e7c25226c8191ac36d8959372a85628cb",
       "note": "",
@@ -1086,6 +1122,30 @@
       "note": "#631 — part of the claraWork_v3 closure (model/OCR/other egress obeys CURRENT purpose authorisation: prepare+consume of a single-use `accounting_work` dispatch before every agent.generate, one redacted execution-trace row per step, #737's error-roster pairs and #738's `work_status.client_id`); registry.ts points claraWork: here. v1 and v2 stay frozen and exported (policy (c)) for runs parked on their hooks. DEPLOY ORDER: migration 0195 must be live BEFORE this image runs any Work — v3 calls clara.prepare_work_egress_dispatch and clara.record_work_execution_trace, and 0195's recut posting core REFUSES a write from an image that never prepared. ROLLBACK IS NOT FREE once 0195 is live: a v2 image never prepares, so the recut core refuses every Work. Ship 0195 and this image TOGETHER and run #637's rollback preflight against that pair — see #815. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
     },
+    "packages/runtime/workflows/claraWork.v4.bundle.ts": {
+      "sha256": "434c71af7db193f7170b1a526d199ae62776f48500a97f81187449ae09054072",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v4.errors.ts": {
+      "sha256": "477f9c947ccbaef69d862c67be6c4ee967e9d787104a67b59fe64588b2366254",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v4.impl.ts": {
+      "sha256": "4bf7184df888cf347d08b1d7a3f69a43fb88f1c4a20f5aed1cafd3f67789c4df",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v4.prompt.ts": {
+      "sha256": "3a4b0c0b51ed396ccc44483d17c000283a31f8aefd267e0762e68ba028c4bdd5",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v4.tools.ts": {
+      "sha256": "a3ebecf313675db759d70df9d9660d59d3c5df701aa1e93fe2a4f19047db7541",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v4.ts": {
+      "sha256": "091fc36448111bd700f035c1b9ab800fbad3831b4cc07f0795211675bf7a3e41",
+      "note": ""
+    },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",
       "note": "",
@@ -1105,6 +1165,10 @@
       "sha256": "7a7338cfaf7cc9978f52f2f365002b28b600d28ea011647a47642ed0864227ad",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/clientOnboarding.v5.ts": {
+      "sha256": "baadc32721d8247446961231cbe27694ef1430b36f93d3b5b79aa22dc1fe3108",
+      "note": ""
     },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
@@ -1245,6 +1309,14 @@
       "sha256": "65209166a631ae7f62e2f5336dfe550773fb66bf6900103204bcecd7de5e8ba5",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/interview.v4.known.ts": {
+      "sha256": "187431317beb4ca4d6df9a22b65dc38f71adf9e59cfd71dd78c79292fd1bd0b3",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v4.questions.ts": {
+      "sha256": "6dd1629bbedfc52212528652d7b374c548c7cf33d34d23e1e5714e92b388d77e",
+      "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",

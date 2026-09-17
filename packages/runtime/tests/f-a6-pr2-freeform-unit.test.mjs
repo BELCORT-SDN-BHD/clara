@@ -499,11 +499,15 @@ test("f-a6.pr2.prompt: v15's system prompt is v14's plus the freeform guidance, 
 // #623, and then #643 + #644's shared successor, moved the pin again: v16 -> v17 -> v18 -> v19.
 // The subject is unchanged — v15 stays exported and IS its own function — the "is the pin" half
 // simply follows the ladder.
-test("f-a6.pr2.registry: v15 stays exported and IS its own function; chatTurn: now pins v19", () => {
+// ...and v19 -> v20 at the wave 2026-09-15 integration cut. THE PIN IS READ FROM `workflowPins`
+// rather than retyped, because the subject of this cell is v15's survival and not the successor's
+// number.
+test("f-a6.pr2.registry: v15 stays exported and IS its own function; chatTurn: pins its newest body", () => {
   assert.equal(typeof registry.chatTurn_v14, "function");
   assert.equal(registry.chatTurn_v14, v14Module.chatTurn_v14, "no parked run is stranded by the repoint");
   assert.equal(registry.chatTurn_v15, v15Module.chatTurn_v15, "the registry's v15 export IS chatTurn.v15.ts's own function");
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v19", "#643 + #644's shared successor repointed chatTurn past #623's v18, FS-7's v17, P6-1's v16 and this file's own v15 pin");
+  assert.equal(registry.workflows.chatTurn.name, registry.workflowPins.chatTurn, "the dispatch table points at the body the pin names");
+  assert.notEqual(registry.workflowPins.chatTurn, "chatTurn_v15", "…and the pin has moved well past this file's own");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v14);
   assert.notEqual(registry.workflows.chatTurn, v15Module.chatTurn_v15, "...and no longer at v15 either");
 });

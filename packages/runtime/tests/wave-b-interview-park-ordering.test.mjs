@@ -665,9 +665,18 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
   const OWNER_LINE = '  await streamOwnerStep({ scope: "client", planId });';
   const RES0_LINE = "    let res = res0;";
   /** Replace every REAL hand-off of `ask` with an inline stand-in, leaving the closure declared
-   *  and the file otherwise intact — the starting point for the reachability shapes below. */
-  const KILL_HANDOFFS = (s) =>
-    s.replaceAll("askAndConfirmSegmentV2(seg, ask, prior)", "askAndConfirmSegmentV2(seg, (async () => null) as never, prior)");
+   *  and the file otherwise intact — the starting point for the reachability shapes below.
+   *
+   *  IT ANCHORS ON THE HAND-OFF, NOT ON THE WHOLE CALL, and that is this mutation's own repair at
+   *  the wave 2026-09-15 cut. It used to `replaceAll` the literal
+   *  `askAndConfirmSegmentV2(seg, ask, prior)`, which was v4's exact argument list;
+   *  `clientOnboarding_v5` passes `segmentAsking(seg, knownQuestionFor(seg, prior, known))` as the
+   *  first argument, so the literal matched nothing and the shape below announced itself VACUOUS —
+   *  correctly, and loudly, which is why this file's own "did the mutation apply?" assertion exists.
+   *  What the mutation is ABOUT is the SECOND argument, the closure hand-off, so that is all it
+   *  names now and the first argument can be anything a future body wants. */
+  const HANDOFF_RE = /askAndConfirmSegmentV2\((.*?), ask, prior\)/g;
+  const KILL_HANDOFFS = (s) => s.replace(HANDOFF_RE, "askAndConfirmSegmentV2($1, (async () => null) as never, prior)");
 
   // Each shape carries the REASON it must be refused for. Asserting only `ok === false` would
   // let a shape start passing for an unrelated reason and quietly stop testing what it was

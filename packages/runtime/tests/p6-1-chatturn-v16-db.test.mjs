@@ -70,8 +70,13 @@ const skip = READY ? false : "P6-1: the Q8 hydrate surfaces (0103/0126/0131/0137
 
 const AGENT_ROLES = ["clara_agent_ro", "clara_wake_interactive", "clara_wake_proactive", "clara_wake_bank", "clara_wake_filing", "clara_freeform_ro", "clara_runtime"];
 
-test("p6-1.db.registry: v19 is the current pin and preserves v16's promotion behaviour", () => {
-  assert.equal(currentChatName, "chatTurn_v19", "#643 + #644's shared successor succeeded #623");
+test("p6-1.db.registry: the current pin preserves v16's promotion behaviour", () => {
+  // THE PIN'S NAME IS READ FROM `workflowPins`, NOT RETYPED (it has been v16, v17, v18, v19, and
+  // v20 since the wave 2026-09-15 cut). What this cell measures is that WHATEVER is pinned still
+  // promotes the three representative shapes exactly as v16 does — a version literal here would go
+  // red at every successor for the one reason the cell is not about.
+  assert.equal(currentChatName, registry.workflowPins.chatTurn, "the dispatch table points at the body the pin names");
+  assert.notEqual(currentChatName, "chatTurn_v16", "…and the pin has moved past this file's own body");
   // A bare text part exercises no promotion arm at all (both sides would agree on ANY promoter,
   // including a broken one), so this discriminates nothing — MATERIAL-3, PR #485 fix round. Use
   // the same three-shape content fs7-v17-chatturn.test.mjs proves v17-vs-v16 identical over: a
