@@ -75,7 +75,26 @@ export type CoaChartStateRow = {
   templateId: string | null;
   templateVersion: number | null;
   adoptionState: string | null;
+  /** #649 — `seed_decision_plan_state`, added to `clara.coa_chart_state` by 0170 and never read
+   *  by this module until now. It exists because `state` alone LIES during onboarding: the
+   *  verdict's `dec` CTE reads COMMITTED plans only (0170's own header, quoting 0156:1080-1088),
+   *  so a client who answered the chart question inside an OPEN plan reads `undecided` — on a
+   *  client who has decided. This key says which:
+   *    `committed`  a committed decision exists (committed WINS when both are true)
+   *    `open`       only an OPEN plan has answered `coa_seed_decision`
+   *    `null`       neither has
+   *  The honest copy that needs it lives in `ApplyStandardChartControl`. */
+  seedDecisionPlanState: string | null;
 };
+
+/** 0170's three values for `seed_decision_plan_state`. A fourth shipped by a later migration
+ *  renders as its own raw token rather than being folded into one of these. */
+export const COA_SEED_DECISION_PLAN_STATES = ["committed", "open"] as const;
+export type CoaSeedDecisionPlanState = (typeof COA_SEED_DECISION_PLAN_STATES)[number];
+
+export function isKnownSeedDecisionPlanState(value: string): value is CoaSeedDecisionPlanState {
+  return (COA_SEED_DECISION_PLAN_STATES as readonly string[]).includes(value);
+}
 
 /** READ (not a governed act): `clara.coa_chart_state(p_client)`. Returns `null` when the
  *  RPC yields nothing this caller can see — never a fabricated "undecided". */
@@ -93,6 +112,10 @@ export async function readCoaChartState(clientId: string, opts: Opts = {}): Prom
     templateId: typeof r.template_id === "string" ? r.template_id : null,
     templateVersion: Number.isInteger(r.template_version) ? (r.template_version as number) : null,
     adoptionState: typeof r.adoption_state === "string" ? r.adoption_state : null,
+    // #649 — read, never derived. A database pinned below 0170 answers no such key, and this
+    // reads `null` there: absent is absent, and the control's copy says only what it can read.
+    seedDecisionPlanState:
+      typeof r.seed_decision_plan_state === "string" ? r.seed_decision_plan_state : null,
   };
 }
 

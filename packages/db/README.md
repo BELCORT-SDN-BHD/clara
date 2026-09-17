@@ -175,6 +175,80 @@ drifts):
 Twenty-eight rows in total, as of this writing. The next migration that touches this allowlist
 repeats this correction in its own header rather than leaving a reader to rediscover it.
 
+## Client identity candidates and the onboarding-facts settle door (0204)
+
+[0204_client_onboarding_facts.sql](migrations/0204_client_onboarding_facts.sql) adds two human-lane
+doors and one ungranted helper. It recuts nothing: `begin_client_onboarding(text,text)`,
+`create_client(text,text)`, `commit_client_onboarding` and `set_client_fy_end` keep their live
+bodies, pinned by pre-image `sha256(prosrc)` in 0204's own prestate and re-asserted in its tail.
+
+`clara.client_identity_candidates(p_name text, p_identifier jsonb default null)` — SECURITY
+DEFINER, admin floor (the same floor `begin_client_onboarding` enforces), firm taken from the
+session and never from a parameter. It answers which clients or live counterparties of the
+caller's own firm already share the name's leading token, plus an exact-name hit and, when an
+identifier is supplied, a `client_identifiers (kind, value_normalized)` match normalised exactly
+as `add_client_identifier` normalises it. Three arities, ruled by the owner: 0 proceeds, 1 is
+returned for the human face to show and acknowledge, and **2 or more RAISES** CLR10
+`name_family_collision` carrying the same candidate rows in `detail` (each with its `id`, name,
+party kind, status and match reason) — so the refused face renders the database's message verbatim
+beside the same linkable list it would have shown at arity 1, rather than going looking for the
+names through a second read of the same fact.
+
+**This is the ungranted-core / granted-wrapper idiom, and the reason is executable law rather than
+style.** `clara.name_family_token`, `clara.name_family_candidates` and
+`clara.name_family_is_ambiguous` may not be granted to any application role:
+[0103_f_a7_pi_additive.sql](migrations/0103_f_a7_pi_additive.sql) ends with a live
+`has_function_privilege` census over five application roles × those three signatures that raises
+CLR10 on any EXECUTE, repeated in [0126](migrations/0126_f_a7_pr_2_agent_receipt_surface.sql) and
+[0154](migrations/0154_role_membership_census.sql). So the browser is granted the WRAPPER and never
+the predicate; 0204's tail re-measures that census against the committed catalog, and
+`tests/client-onboarding-identity.test.mjs`'s `p649.identity.census_replay` re-measures it again at
+test time.
+
+**What the wall is not.** The read blocks nothing by itself: a caller that never asks can still
+call `begin_client_onboarding` at any arity and a client is born. That residual is deliberate
+(this wave recuts no birth verb, and a defaulted third parameter would create the overload
+`0103:1055-1070` refuses) and is kept honest by `p649.identity.direct_birth_residual`.
+
+`clara.settle_client_onboarding_facts(p_plan uuid, p_fy_end_month int, p_fy_end_day int,
+p_op_key text)` — SECURITY DEFINER, bookkeeper floor, human lane only. It carries a **committed**
+client onboarding plan's financial-year end onto `clara.clients` by calling
+`clara.set_client_fy_end` unchanged.
+
+- **The day is a parameter, asked and never derived** (owner ruling D7, 2026-09-15). The interview
+  asks only a month; `ck_clients_fy_end` admits only both-NULL or both-set, so the day has to come
+  from somewhere, and deriving month-end would invent an accounting fact on a professional's
+  record. A NULL `p_fy_end_day` is CLR10 `fy_end_day_required`. The web form offers month-end as a
+  visible suggestion the human clicks, never as a silent default.
+- **The month is the plan's** unless the caller names one: absent, it reads the plan's own `fye`
+  answer through the ungranted `clara._plan_fye_month(uuid)`; supplied and different, it refuses
+  CLR10 `fy_end_month_contradicts_plan` naming both numbers; absent on both sides, CLR10
+  `fy_end_month_unanswered`.
+- **CLR38 is surfaced, never swallowed.** The live `set_client_fy_end` body is not 0041's text
+  (0042 §S5.12 and 0045 §S5.12-b2 spliced two live-ANNUAL cadence guards into it); both raise CLR38
+  `fy_end_locked_by_annual_cadence`, and 0204 lets them propagate with the inner door's own
+  message, code and detail. The raise aborts the transaction, so the settle receipt goes with it.
+- **One lock order, three rungs, and not one of them taken outside the caller's firm.** The door
+  takes the client advisory rung `203005004`, then the `clara.clients` row, then the
+  `clara.onboarding_plans` row. Each step is another door's existing law, measured off the LIVE
+  bodies: `commit_client_onboarding` (`0017:2764` then `:2768`) and `cancel_client_onboarding`
+  (`0017:2852` then `:2853`) take the client row before the plan row; `set_client_fy_end` takes the
+  rung before it touches `clara.clients` (0042 §S5.12, "the rung before the guard reads");
+  `approve_opening_seed` takes the rung before the plan row. 0037 SECTION K states the rung ladder
+  as a partial order and says why the rungs are taken EARLY — that is what makes an extension
+  deadlock-free rather than merely documented. `p649.settle.lock_order` and
+  `p649.settle.opening_rung_order` race the real door against each of those orders and require a
+  queued success, never 40P01. Both plan reads carry `firm_id = c.firm`, so a foreign or unknown
+  plan locks nothing at all: a lock is a side effect an outsider can time, and 0021's
+  no-existence-oracle rule is not only about the words in the refusal
+  (`p649.settle.foreign_plan_takes_no_lock`).
+- **There is no machine twin, and the ground is structural**: `set_client_fy_end` opens with
+  `clara._human_ctx`, which raises CLR04 with no `jwt_sub`, and is EXECUTE-granted to
+  `clara_authenticated` alone. A runtime-role twin could not call it.
+- **The day is not in Knowledge this wave** — a named residual. `clara.knowledge_keys` and
+  `clara.knowledge_plan_item_map` belong to #654, and 0204's tail asserts it minted no row in
+  either.
+
 ## Storage grant/policy battery
 
 [deploy/storage-provision.sql](deploy/storage-provision.sql) cannot run against the local rig —

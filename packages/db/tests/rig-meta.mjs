@@ -2065,6 +2065,38 @@ export const FIRM_SETUP_0203_COHORT = [
 ];
 // #648 END
 
+// #649 [0204, create a client and continue accounting onboarding from what is already known] —
+// its own cohort for the same "wholly present or wholly absent" reason 0192's and 0193's carry:
+// folding these names into an older roster would red every database between the two frontiers,
+// and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the TWO human doors — clara_authenticated ONLY. `client_identity_candidates` is an identity
+//   ORACLE (it enumerates a firm's client and counterparty names by leading token), floored at
+//   ADMIN inside its own body to match clara.begin_client_onboarding exactly;
+//   `settle_client_onboarding_facts` writes a client's canonical financial-year end through
+//   clara.set_client_fy_end and is bookkeeper-floored to match that door. The agent role, both
+//   wake roles and clara_runtime gain ZERO on either: clara.set_client_fy_end is
+//   clara_authenticated-only (0041:4414) and clara._human_ctx raises CLR04 with no jwt_sub
+//   (0004:302-303), so a machine lane could not execute the settle door's own body even if it
+//   held the grant — a dark grant, in 0057 B6's sense.
+const CLIENT_ONBOARDING_FACTS_0204_HUMAN_FNS = [
+  "client_identity_candidates", "settle_client_onboarding_facts",
+];
+//   …and the ONE ungranted helper: the reader of a plan's settled financial-year-end MONTH,
+//   reached only from the settle door (which runs as clara_fn_owner). Declared here so a future
+//   accidental grant FAILS rather than passes silently, and so `cohortFailures` reports a
+//   half-applied 0204 rather than a silently narrower boundary.
+//
+//   THE THREE `name_family_*` HELPERS ARE DELIBERATELY ABSENT FROM EVERY ROSTER IN THIS FILE
+//   AND STAY THAT WAY. 0204 publishes their ANSWER through the definer wrapper above precisely
+//   so that 0103:1225-1239's five-role EXECUTE census (repeated at 0126:509 and 0154:551) stays
+//   green; the grant matrix's expected-false sweep over those names IS that assertion.
+const CLIENT_ONBOARDING_FACTS_0204_UNGRANTED_FNS = ["_plan_fye_month"];
+export const CLIENT_ONBOARDING_FACTS_0204_COHORT = [
+  ...CLIENT_ONBOARDING_FACTS_0204_HUMAN_FNS, ...CLIENT_ONBOARDING_FACTS_0204_UNGRANTED_FNS,
+];
+// #649 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -2247,6 +2279,10 @@ export const ALLOWED = {
     // ONLY, bookkeeper-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
     ...CLIENT_WORK_PACK_0199_HUMAN_FNS,
+    // #649 [0204] the identity-candidates read (admin floor) + the onboarding-facts settle door
+    // (bookkeeper floor) — see the block above. clara_authenticated ONLY; clara_runtime, the
+    // agent role and both wake roles gain ZERO.
+    ...CLIENT_ONBOARDING_FACTS_0204_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2669,6 +2705,11 @@ export async function grantMatrixFailures() {
   }
   // #718 END
   failures.push(...cohortFailures("#647 0200 counterparty-identity provenance lane", COUNTERPARTY_IDENTITY_0200_COHORT, liveNames));
+  // #649 [0204] — the identity read, the settle door and the ungranted month helper ship as one
+  // lane; half of them is a settle door with no way to ask about duplicates first, which is a
+  // narrower boundary nobody chose.
+  failures.push(...cohortFailures("#649 0204 client-onboarding facts lane", CLIENT_ONBOARDING_FACTS_0204_COHORT, liveNames));
+  // #649 END
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

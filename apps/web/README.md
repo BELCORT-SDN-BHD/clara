@@ -79,6 +79,64 @@ The document-kind change is its own exported dialog
 ([`components/documents/document-kind-dialog.tsx`](components/documents/document-kind-dialog.tsx)),
 so the firm intake surface mounts the same control rather than copying a second kind-change form.
 
+## Creating a client, and the two facts the commit does not write
+
+The client register's **Add client** control reuses ⌘K's own dispatch rather than minting a second
+call site. Confirm asks `clara.client_identity_candidates` before it reaches
+`clara.begin_client_onboarding`, and the answer decides what happens next — the three arities the
+owner ruled on 2026-09-15:
+
+- **0** — nothing in the firm answers to that name. The same click goes straight on to the door.
+- **1** — the candidate is **shown**, with a real link to the record and the reason it matched, and
+  Confirm re-enables only once a person ticks "this is a different business". The database does not
+  refuse at this arity and must not be made to: its own predicate is `count(*) > 1`, so one
+  same-family party has never been "ambiguous" anywhere in this estate. The acknowledgement is the
+  only wall here, and it lives in the face.
+- **2 or more** — the **database** refuses, CLR10 `name_family_collision`, and the refusal renders
+  verbatim with its code beside the same candidate list — which the refusal itself carries, so the
+  face never issues a second read of the fact it is reporting. **And a belt, labelled as one**: if
+  that read ever *answered* an arity of 2 or more instead of refusing it, Confirm is shut rather
+  than live-looking-and-inert. 0204 raises at this arity and never returns it as a success, so the
+  state is unreachable through the live door; the cell that holds the belt honest drives a mock
+  door to answer it (`add-client-candidates.test.tsx`).
+
+Editing the name retires the check, the acknowledgement and the refusal; it never clears the typed
+text. **There is no client-side duplicate rule and there must not be one**: the family predicate may
+not be granted to any application role (a live census in migration 0103 raises on any such grant),
+which is why the browser is given a definer wrapper and never the predicate.
+
+**The wall is the READ, not the birth door.** A caller that never asks can still call
+`begin_client_onboarding` and a client is born — a named residual, kept honest by
+`packages/db/tests/client-onboarding-identity.test.mjs`'s `p649.identity.direct_birth_residual`.
+
+**⌘K is a SECOND entrance to that door, and it does not ask.** `DO_ACTIONS`'
+`beginClientOnboarding` (`lib/command/do-actions.ts`) is dispatched straight from the palette
+(`components/command/command-palette.tsx`), with no `client_identity_candidates` read anywhere in
+that path — `agentic-finish-walk.spec.ts`'s 裁-37 arm proves it green, dispatching with zero
+identity reads in the whole run. So the arities above are the register control's wall, not the
+product's: the same name typed into the palette is born unchecked. That is a **named residual**,
+not a claim, and it is a face-level sibling of the birth-door one above — closing it means giving
+the palette an arity-1 acknowledgement of its own (a design, not a one-liner), or moving the wall
+into the door, which needs the new birth verb the residual above describes.
+
+**Committing an onboarding plan writes neither Knowledge nor the client's own record.** Two
+separate, named acts follow it at the same call site, and they are treated differently on purpose:
+
+1. `promote_plan_answers_to_knowledge` is a **projection** and its failure is deliberately
+   swallowed — a failed Knowledge write must not present itself as a failed commit, and the act is
+   safe to repeat.
+2. `settle_client_onboarding_facts` writes the client's **own financial-year end** and its failure
+   is **shown**. Above all CLR38 `fy_end_locked_by_annual_cadence`: a live ANNUAL adjustment
+   template or depreciation authority means the year end did not move, and a refused financial-year
+   write presented as a settled onboarding is the worst outcome this journey can produce.
+
+The financial-year **day** is asked, never derived (owner ruling D7). The interview asks only a
+month; `clara.clients` admits a year end only as a month and a day together. The commit dialog's
+field offers month end as a **button that names the day it will fill** and never as a default —
+deriving it would invent an accounting fact on a professional's record. Leaving both boxes blank is
+a real choice: the settle door is then not called at all, and the dialog says so, rather than
+manufacturing a `fy_end_day_required` refusal for a value nobody gave.
+
 ## Close and bank operating order
 
 Prepare and reconcile the books before beginning a financial-year close. For an ongoing client with brought-forward balances, record an evidenced opening position in this order:

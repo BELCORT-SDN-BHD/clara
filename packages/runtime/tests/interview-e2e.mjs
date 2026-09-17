@@ -6,10 +6,11 @@
 //
 // VERSION-AGNOSTIC BY CONSTRUCTION: it starts runs through the HTTP routes, which enqueue
 // via workflows/registry.ts — so it drives WHATEVER THE REGISTRY POINTS AT, never a version
-// named here (today clientOnboarding_v3 / firmInterview_v3; it drove v1 at GATE 3 and v2
-// after the F1/F2 repoint, with no edit to this file). Do not re-pin a version into this
-// header — a version named in prose goes stale at the next repoint and misleads the next
-// reader about what actually ran.
+// named here. It has driven every client-onboarding and firm-interview body the registry has
+// pinned so far, across each repoint, with no edit to this file. Do not re-pin a version into
+// this header — a version named in prose goes stale at the next repoint and misleads the next
+// reader about what actually ran. (#649 struck the stale parenthetical that used to sit here
+// and named two bodies the registry had already moved past, rather than repointing it.)
 // Run (against a disposable local DB named in the ENVIRONMENT):
 //
 //   PGHOST=127.0.0.1 PGPORT=55440 PGUSER=postgres PGDATABASE=clara_rt_test \
@@ -208,6 +209,39 @@ async function driveClientToComplete({ runId, planId }, jwt, answers = scriptedA
   throw new Error(`driveClientToComplete: no terminal within ${deadlineMs}ms; last=${JSON.stringify(lastBody)}`);
 }
 
+/** Drive a CLIENT interview forward, answering each open park from `answers`, until a 'q' park
+ *  opens on `segment` — or until `deadlineMs`. Returns that park, or `null` if the run reached a
+ *  terminal without ever announcing it. Used by the #649 scenario below, which needs to observe
+ *  WHICH parks the live body announces rather than only where it ends up. */
+async function driveUntilSegment({ runId, planId }, jwt, segment, answers, deadlineMs = 90000) {
+  const answered = new Set();
+  const end = Date.now() + deadlineMs;
+  while (Date.now() < end) {
+    const s = await getState({ runId, scope: "client", planId }, jwt);
+    if (s.status !== 200) {
+      await sleep(150);
+      continue;
+    }
+    if (s.body.terminal) return null;
+    const pp = s.body.pending_park;
+    if (!pp) {
+      await sleep(120);
+      continue;
+    }
+    if (pp.phase === "q" && pp.seg === segment) return pp;
+    if (answered.has(pp.parkIndex)) {
+      await sleep(120);
+      continue;
+    }
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg, pp.parkIndex);
+    const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
+    if (res.status === 200) answered.add(pp.parkIndex);
+    else if (res.status !== 409) throw new Error(`answer failed at park ${pp.parkIndex} (${pp.seg}/${pp.phase}): ${res.status} ${JSON.stringify(res.body)}`);
+    await sleep(60);
+  }
+  throw new Error(`driveUntilSegment: '${segment}' never opened within ${deadlineMs}ms`);
+}
+
 async function main() {
   const rig = await import("./rig.mjs");
   const { containsSecretShape } = await import("./wave-b-interview-testkit.mjs");
@@ -371,6 +405,49 @@ async function main() {
     assert.equal(planF.state, "open", "the plan stays open post-interview (commit_client_onboarding is the separate human ceremony)");
 
     console.log("[interview-e2e] PASS (positive): full 15-segment v2 drive → interview_complete, 16 items, no dupes, revision advanced");
+  }
+
+  // -------------------------------------------------------------------------
+  // (p649.interview.sst_park_today) THE OWED RED, RECORDED AS OWED.
+  //
+  // Row H-52 of #649: a client who answered "not registered for SST" is STILL asked for an SST
+  // registration number. The applicability rule the fix needs (`appliesTo: prior =>
+  // prior.sst_regime !== 'not_registered'` on the `sst_no` segment) cannot be added on an
+  // implementation branch — the question inventory lives inside a FROZEN workflow closure
+  // (`frozen-workflows.json`; `scripts/check-frozen-workflows.mjs` hash-locks the transitive
+  // relative-import closure of every frozen body), so the change ships as a NEW body at the
+  // wave's single successor cut and this file inherits it with no edit.
+  //
+  // SO THIS SCENARIO ASSERTS TODAY'S BEHAVIOUR, ON PURPOSE. It is green now and it is MEANT to
+  // go red at the cut: the successor's own acceptance is exactly that this park stops being
+  // announced. Whoever cuts it flips the assertion in the same commit, and the flip is the
+  // evidence that H-52 closed. An owed red nobody wrote down is an owed red nobody closes.
+  // -------------------------------------------------------------------------
+  {
+    const { owner } = await rig.buildFirm("iv-sst-park");
+    const { clientId, planId } = await rig.beginClientOnboarding({ ownerSub: owner, name: `iv sst ${Date.now()}` });
+    const jwt = await mint(owner);
+
+    const start = await postJson("/api/interview/client/start", { clientId, planId }, jwt);
+    assert.equal(start.status, 202, `client/start admitted 202 (got ${start.status} ${JSON.stringify(start.body)})`);
+    const runId = start.body.run_id;
+
+    // The ONE changed answer: this client is NOT registered for SST.
+    const { INTERVIEW_V2_CLIENT_ANSWERS } = await import("./wave-b-interview-testkit.mjs");
+    const answers = scriptedAnswers({ ...INTERVIEW_V2_CLIENT_ANSWERS, sst_regime: "not_registered" });
+
+    const park = await driveUntilSegment({ runId, planId }, jwt, "sst_no", answers);
+    assert.ok(park, "TODAY: the sst_no park is still announced after sst_regime=not_registered — H-52, live and unfixed");
+    assert.equal(park.seg, "sst_no");
+    assert.equal(park.phase, "q");
+
+    // TIDY: cancel the run at the very park this scenario came to observe, so nothing is left
+    // parked on the shared database.
+    const cancel = await postJson("/api/interview/cancel", { runId, scope: "client", parkIndex: park.parkIndex, planId }, jwt);
+    assert.equal(cancel.status, 200, `sst scenario cancel → 200 (got ${cancel.status} ${JSON.stringify(cancel.body)})`);
+    await pollState({ runId, scope: "client", planId }, jwt, (b) => b.terminal?.outcome === "cancelled", "sst scenario cancel terminal");
+
+    console.log("[interview-e2e] PASS (p649.interview.sst_park_today): sst_no IS still parked after not_registered — the successor's owed red, recorded as owed");
   }
 
   console.log("\nINTERVIEW E2E: ALL PASS");

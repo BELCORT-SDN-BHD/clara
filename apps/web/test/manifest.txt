@@ -51,6 +51,7 @@ components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/coa-seed-decision-state.test.tsx
 components/clara/composer-attachment-control.test.tsx
 components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
@@ -62,6 +63,7 @@ components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx
+components/clara/onboarding-field-composition.test.tsx
 components/clara/onboarding-progress-sync.test.tsx
 components/clara/rail-boundary.test.tsx
 components/clara/rail-chrome.test.tsx
@@ -132,10 +134,13 @@ components/firm/activity/activity-event-sheet.test.tsx
 components/firm/activity/activity-feed.test.tsx
 components/firm/activity/activity-row.test.tsx
 components/firm/activity/use-activity-feed.test.ts
+components/firm/add-client-candidates.test.tsx
 components/firm/add-client-control.test.tsx
 components/firm/agent-task-detail.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
+components/firm/client-home/client-identity-band-knowledge.test.tsx
+components/firm/client-home/client-onboarding-progress-opening-link.test.tsx
 components/firm/client-home/client-work-attention.test.tsx
 components/firm/client-scope-invalidation.test.tsx
 components/firm/client-workspace-overview.test.tsx

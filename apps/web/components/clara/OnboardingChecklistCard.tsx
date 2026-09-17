@@ -50,6 +50,8 @@ import {
   promotePlanAnswersToKnowledge,
   resolveOnboardingPlanItem,
 } from "@/lib/onboarding/api";
+import { settleClientOnboardingFacts } from "@/lib/onboarding/settle";
+import { fyEndMonthParam, type FyEndDraft } from "@/lib/onboarding/fy-end";
 import { clientRecordChanged } from "@/lib/command/bus";
 import { isInternalItemKey } from "@/lib/onboarding/answer-format";
 import { COA_CHART_APPLY_ITEM_KEY } from "@/lib/onboarding/coa";
@@ -61,7 +63,23 @@ import { BeginOnboardingCard } from "./OnboardingBeginCard";
 import { InterviewRunCard } from "./InterviewRunCard";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
 import { OnboardingItemRow } from "./OnboardingItemRow";
+import { OnboardingFyEndField, fyEndDraftBlocks, fyEndDraftIsBlank } from "./OnboardingFyEndField";
 import { SettledOnboardingCard } from "./OnboardingSettledCard";
+
+/** The plan's own recorded financial-year-end MONTH, or `null`.
+ *
+ *  Reads the same two honest shapes `clara._plan_fye_month` reads (0204 §2): the interview writes
+ *  a JSON NUMBER (`validateFye` returns 1-12, and 0192's map row says so), and a human resolution
+ *  through `clara.resolve_onboarding_plan_item` writes `to_jsonb(p_resolution)` — a STRING. Any
+ *  other shape reads as ABSENT here exactly as it does there, so the description this drives never
+ *  claims a month the settle door would not accept. */
+export function planFyEndMonth(items: readonly OnboardingPlanItemRow[]): number | null {
+  const row = items.find((i) => i.item_key === "fye" && (i.state === "answered" || i.state === "resolved"));
+  if (!row || row.answer === null || row.answer === undefined) return null;
+  const raw = row.answer;
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d{1,2}$/.test(raw.trim()) ? Number(raw.trim()) : null;
+  return n !== null && Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
+}
 
 /** The one entry point `ClaraThreadView` mounts. `clientId` decides the
  *  shape — see this file's own header for why. */
@@ -214,6 +232,10 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
   const [cancelReason, setCancelReason] = useState("");
   const [attestation, setAttestation] = useState("");
   const [interviewRunActive, setInterviewRunActive] = useState(false);
+  // #649 / D7 — the financial-year end the human states at the commit ceremony. Held HERE rather
+  // than inside the dialog so a refusal (or a closed-and-reopened dialog) keeps what was typed:
+  // the whole point of asking is that nobody has to type it twice.
+  const [fyEnd, setFyEnd] = useState<FyEndDraft>({ month: "", day: "" });
   // 裁-27 — the revision trail, read LAZILY when an amend dialog opens. `null` is "not read
   // yet" and is rendered as such; an empty array after a successful read is the different,
   // positive fact "this answer has never been amended". A failed read stays `null` too, and
@@ -393,6 +415,13 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
         // doc comment states the same discipline ("stays unpassed unless a prior CLR05 refusal
         // named it"). This card never composes an attestation string.
         const attestationRequired = clr?.code === "CLR05" && clr?.reason === "self_attestation";
+        // #649 / D7 — the financial-year end, asked here because this is the moment the client
+        // record becomes canonical. A BLANK pair never blocks Confirm: recording the year end
+        // later is a real choice, and the dialog says plainly that nothing will be recorded. A
+        // PARTIALLY or WRONGLY filled pair does block, because somebody who started typing a year
+        // end meant to record one — and the database would refuse it anyway.
+        const planMonth = planFyEndMonth(items);
+        const fyEndBlocks = fyEndDraftBlocks(fyEnd, planMonth);
         return (
           <div className="flex flex-wrap gap-2">
             {/* Consent shows what it approves (working protocol): the dialog
@@ -404,7 +433,7 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
               description={t("commitDescription", { client: data.client?.name ?? clientId, completed, total })}
               confirmLabel={t("commitConfirm")}
               busy={busy}
-              confirmDisabled={blockReason !== null}
+              confirmDisabled={blockReason !== null || fyEndBlocks}
               onConfirm={() =>
                 act(
                   async () => {
@@ -412,6 +441,25 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
                       { clientId, planId: plan.id, expectedPlanRevision: plan.revision_token, attestation: attestation.trim() || null },
                       { session },
                     );
+                    // H-50 — ANNOUNCED HERE, THE MOMENT THE RECORD ACTUALLY CHANGED, and not from
+                    // `act`'s `onOk`.
+                    //
+                    // `onOk` fires only when the WHOLE closure resolves, so the two calls below
+                    // would gate it: a settle refusal (CLR38, or a month contradicting the plan —
+                    // neither of which the client-side validation can see) would suppress the
+                    // announcement for a commit that ALREADY SUCCEEDED. The client is
+                    // `status='active'` and the plan is committed as of the line above; the
+                    // identity band and the register (different React subtrees, mounted beside
+                    // this card) have no other re-read trigger — both files say so in their own
+                    // comments — so they would keep showing "Onboarding" for an active client with
+                    // nothing left to correct them.
+                    //
+                    // A REFUSED COMMIT STILL ANNOUNCES NOTHING: this line is unreachable when the
+                    // call above throws. That is the half of the invariant
+                    // `onboarding-checklist.test.tsx`'s H-50 cell has always pinned;
+                    // `onboarding-field-composition.test.tsx`'s "a settle refusal AFTER a
+                    // successful commit" cell pins this one.
+                    clientRecordChanged({ clientId });
                     // #644 / CB-AE2E-030 — THE ANSWERS BECOME KNOWLEDGE, HERE.
                     //
                     // `commit_client_onboarding` writes nothing into any fact
@@ -434,16 +482,48 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
                     } catch {
                       // intentionally not rethrown — see above.
                     }
+
+                    // #649 / D7 — THE CANONICAL CLIENT RECORD, and this call is NOT swallowed.
+                    //
+                    // The promotion above is a PROJECTION: it copies answers into a register that
+                    // can be rebuilt, so a failure there must not present itself as a failed
+                    // commit. This one WRITES THE CLIENT'S OWN FINANCIAL YEAR through
+                    // `clara.set_client_fy_end`, and its refusals are about that write — above
+                    // all CLR38 `fy_end_locked_by_annual_cadence`, which means the year end DID
+                    // NOT MOVE because a live ANNUAL adjustment template or depreciation
+                    // authority stands. A refused financial-year write shown as a settled
+                    // onboarding is the worst outcome this journey can produce, so it is rethrown
+                    // into `act`'s own catch and rendered VERBATIM with its code — on the settled
+                    // card, which receives this card's `refusalBanner` for exactly this reason.
+                    //
+                    // A BLANK PAIR CALLS NOTHING. Not sending a day would meet CLR10
+                    // `fy_end_day_required` — a refusal manufactured by this surface for a value
+                    // the human deliberately did not give. The dialog says so before Confirm.
+                    if (!fyEndDraftIsBlank(fyEnd)) {
+                      await settleClientOnboardingFacts(
+                        {
+                          planId: plan.id,
+                          // NULL means "use the plan's own recorded answer" — the door reads the
+                          // plan, this form never echoes it back.
+                          fyEndMonth: fyEndMonthParam(fyEnd),
+                          fyEndDay: Number(fyEnd.day.trim()),
+                        },
+                        { session },
+                      );
+                    }
                   },
-                  // H-50 — the client's own record just changed (`status='active'`,
-                  // 0017:2825) and the surfaces that render it live in a different React
-                  // subtree. `onOk` fires INSIDE act's try block, so a refusal never reaches
-                  // it: a refused commit changed nothing and announces nothing.
-                  () => clientRecordChanged({ clientId }),
                 )
               }
             >
               {blockReason ? <p className="text-xs text-muted-foreground">{t(`commitBlocked.${blockReason}`)}</p> : null}
+              {/* #649 / D7 — the financial-year end, month AND day, month-end offered as a
+                  visible suggestion and never pre-applied. */}
+              <OnboardingFyEndField
+                draft={fyEnd}
+                onChange={setFyEnd}
+                planMonth={planFyEndMonth(items)}
+                disabled={busy}
+              />
               {/* 裁-187 — hidden until the door asks. See `attestationRequired` above. */}
               {attestationRequired ? (
                 <>

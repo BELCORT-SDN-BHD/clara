@@ -55,6 +55,7 @@ const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
   "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
@@ -408,6 +409,25 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // comes from the caller's JWT), so there is nothing else in the request to key on. Nothing to
   // declare.
   "firm-setup-mock.mjs": { unscopeable: [], debt: [] },
+  // #649's client-creation lane. Its `/rest/v1/clients` handler is id-scoped, and for its two RPC
+  // verbs the NAME is the request's own subject rather than a label for one:
+  // `clara.client_identity_candidates(p_name, p_identifier)` and
+  // `clara.begin_client_onboarding(p_name, p_op_key)` carry no id at all.
+  // `begin_client_onboarding` gates on this lane's three names and falls through for every other,
+  // because a SECOND claimant (`agentic-finish-mock.mjs`) answers it for the rest — that is the
+  // distinction that lane draws the other way, declaring the verb unscopeable because its own walk
+  // does not care which name reached it. `client_identity_candidates` has NO second claimant and
+  // the Add-client control asks it before every dispatch on every walk, so this lane answers every
+  // OTHER name with the honest arity-0 empty rather than falling through into a 501: an unanswered
+  // verb is an outage, and an empty answer carries no fixture a sibling walk could resolve as its
+  // own (`home-board-mock.mjs`'s row states the same posture for its own unscoped reads). That is
+  // what the `unscopeable` entry below records — not "there is no discriminant in the request",
+  // but "scoping this one is what BREAKS a sibling walk", with the reason written in the mock's
+  // own source. It is not debt: a debt is a handler that could scope at no cost and does not.
+  "client-create-mock.mjs": {
+    unscopeable: ["/rest/v1/rpc/client_identity_candidates"],
+    debt: [],
+  },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -1101,6 +1121,15 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
   get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
+  // #649 x P6-5 — `clara.begin_client_onboarding` is the ONE door that creates a client, so any
+  // lane whose walk creates one answers it. The two answer for DIFFERENT names and the door
+  // carries no id, so the name is the request's own subject here rather than a label for one:
+  // `client-create-mock.mjs` gates on its own three names and falls through for every other,
+  // `agentic-finish-mock.mjs` answers whatever is left (it declares the verb unscopeable above,
+  // because its own walk does not care which name reached it). ORDER IS LOAD-BEARING and is
+  // stated at the hook in `serve-built.mjs`: the scoped lane runs FIRST, or a #649 name would be
+  // born into the other lane's fixture.
+  begin_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of

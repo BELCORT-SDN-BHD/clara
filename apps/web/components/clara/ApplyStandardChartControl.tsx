@@ -47,6 +47,7 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import {
   applyCoaTemplate,
   isKnownCoaChartState,
+  isKnownSeedDecisionPlanState,
   listPublishedCoaTemplates,
   readCoaChartState,
   readCoaFamilyPlan,
@@ -182,14 +183,23 @@ export function ApplyStandardChartControl({
             ? t(`state.${stateKey}`, { accounts: chart.accounts ?? 0 })
             : t("state.unknown", { state: chart.state })}
         </EmptyState>
-        {/* H-29 IS NOT THIS LANE'S, and this file deliberately carries no copy about it.
-            `clara.coa_chart_state`'s `dec` CTE filters `p2.state='committed'`
-            (packages/db/migrations/0156_coa_apply_template.sql:1082), so an OPEN plan's
-            answered `coa_seed_decision` returns no row and the CASE falls through to
-            'undecided'. `readCoaChartState` is NOT reading the wrong field. The DB-A lane is
-            re-cutting that read and adding a `seed_decision_plan_state` key, so the honest
-            wording for the open-plan case belongs with the shape that lane ships — a sentence
-            written here now would be falsified by its merge. */}
+        {/* #649 — H-29, WIRED AT LAST. This comment used to end "the honest wording for the
+            open-plan case belongs with the shape that lane ships"; 0170 shipped that shape
+            (`seed_decision_plan_state`) and nothing read it until now, so `undecided` kept
+            rendering on a client who had decided — the interview's `coa_seed_decision` answer
+            lives on an OPEN plan, and `clara.coa_chart_state`'s `dec` CTE reads COMMITTED plans
+            only (0156:1082). The key is now read by `readCoaChartState` and says which case this
+            is, so the line below is the DATABASE's own answer rather than a guess:
+              `open`      decided in the interview; the chart applies after commit.
+              `committed` a committed decision exists (committed wins when both are true).
+              anything else / null — the generic verdict copy stands unchanged. */}
+        {stateKey === "undecided" && chart.seedDecisionPlanState === "open" ? (
+          <p className="text-xs text-muted-foreground">{t("seedDecidedOnOpenPlan")}</p>
+        ) : chart.seedDecisionPlanState !== null && !isKnownSeedDecisionPlanState(chart.seedDecisionPlanState) ? (
+          <p className="text-xs text-muted-foreground">
+            {t("seedDecisionPlanStateUnknown", { state: chart.seedDecisionPlanState })}
+          </p>
+        ) : null}
         {stateKey === "adopted" ? (
           <>
             {/* GATE 1 disposition (P6-X exit gate, 2026-09-03): `clara.get_coa_template_adoption`
