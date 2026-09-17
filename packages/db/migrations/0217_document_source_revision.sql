@@ -115,8 +115,11 @@ set local lock_timeout = '5s';
 --     0197's own literal (0197:221, :634), re-measured and found equal. NON-REGRESSION: this file
 --     must not move it, and the tail re-reads it.
 --   clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)
---     -> 0230031fe7d3f18332310fc19f39936b1408cb89ba597f77ce576017fea35905
---     0191's own post-splice literal (0191:659), re-measured and found equal. NON-REGRESSION.
+--     -> b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8
+--     WAS 0191's own post-splice literal (0191:659, 0230031f...). RE-MEASURED 2026-09-17 on a
+--     0001->0213 reference chain at the wave's re-base: the riders batch recut this body in
+--     0201_document_regions_unique_field_path (#778, the `on conflict (extraction_id,field_path)`
+--     arm), so the pin is re-issued at that body rather than weakened. NON-REGRESSION.
 -- =====================================================================================
 create temp table _d646_prestate (k text primary key, v text not null) on commit drop;
 
@@ -124,7 +127,7 @@ do $d646_pre$
 declare
   c_set_kind_sha  constant text := '74bb929ec7c38e451e6bc734203499ad03d2dfd46cabae9d3d38187d08b3b4db';
   c_posting_sha   constant text := '8ba5e67f7bc92a809e5fbea04b635331c764a48263c1fef4e06f8efe67ebcfd0';
-  c_persist_sha   constant text := '0230031fe7d3f18332310fc19f39936b1408cb89ba597f77ce576017fea35905';
+  c_persist_sha   constant text := 'b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8';
   c_set_kind_sig  constant text := 'clara.set_document_kind(uuid,text,text,text)';
   c_posting_sig   constant text := 'clara._document_posting_entry(uuid,uuid)';
   c_persist_sig   constant text := 'clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)';
@@ -242,7 +245,7 @@ begin
     ('accounting_work_purpose_check', v_aw),
     ('operation_receipts_purpose_check', v_or);
 
-  raise notice '#646 prestate: clean -- clara.set_document_kind is byte-identical to its 0169 post-image (%), carries all seven guards and references document_fact_revisions nowhere; clara._document_posting_entry and clara.persist_document_extraction are at 0197''s and 0191''s own pinned shas; both purpose CHECKs are stashed for the tail; clara.document_fact_revisions does not exist; no control witness names the recut body.',
+  raise notice '#646 prestate: clean -- clara.set_document_kind is byte-identical to its 0169 post-image (%), carries all seven guards and references document_fact_revisions nowhere; clara._document_posting_entry is at 0197''s own pinned sha and clara.persist_document_extraction at the body #778''s 0201 left; both purpose CHECKs are stashed for the tail; clara.document_fact_revisions does not exist; no control witness names the recut body.',
     left(c_set_kind_sha, 12);
 end $d646_pre$;
 
@@ -1296,7 +1299,7 @@ begin
     from pg_proc p
    where p.oid = 'clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure;
   if v_sha is distinct from (select v from _d646_prestate where k = 'persist_sha') then
-    raise exception '#646 tail: clara.persist_document_extraction MOVED (now %) -- 0191''s field-path splice is not what this file left', v_sha
+    raise exception '#646 tail: clara.persist_document_extraction MOVED (now %) -- #778''s 0201 field-path splice is not what this file left', v_sha
       using errcode = 'CLR10';
   end if;
   select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
@@ -1534,5 +1537,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#646 tail: OK -- clara.document_fact_revisions exists, FORCE-RLS, clara_fn_owner-owned, SELECT-only for clara_authenticated and unreachable by the runtime or agent lanes, append-only + no-truncate, two revision kinds and NO correction_id column. Four doors (revise_document_fact, dismiss_orphaned_classification_question, list_source_revisions, list_source_dependents) plus the recut set_document_kind are VOLATILE-or-STABLE SECURITY DEFINER search_path-pinned bodies owned by clara_fn_owner, executable by clara_authenticated and by NOBODY else (agent_ro, runtime, both wake roles and PUBLIC all refused); the four internal helpers reach nobody at all. The recut carries every 0169 guard re-read from the INSTALLED body, reads its observation BEFORE writing its own extraction, names neither accounting_work nor agent_tasks, and both new writers name neither the Work lane nor knowledge_records. revise_document_fact APPENDS (no UPDATE or DELETE on clara.document_regions) and applies the canonical field-path grammar; the orphan door''s predicate is ZERO LIVE FILINGS and it never calls clara._active_document_filing, which is itself re-read unchanged. clara._document_posting_entry and clara.persist_document_extraction are byte-identical to 0197''s and 0191''s pinned shas, and BOTH purpose CHECKs are byte-identical to the texts the prestate stashed -- #646 widens no purpose and joins no purpose-CHECK spine. document.fact_revised is registered client_scoped with exactly one active context_update taxonomy row. No table in workflow/graphile_worker/spike touched. D1 WRITE-QUIESCE IS OWED -- clara.set_document_kind is an audited writer body replacement, one door, one window.';
+  raise notice '#646 tail: OK -- clara.document_fact_revisions exists, FORCE-RLS, clara_fn_owner-owned, SELECT-only for clara_authenticated and unreachable by the runtime or agent lanes, append-only + no-truncate, two revision kinds and NO correction_id column. Four doors (revise_document_fact, dismiss_orphaned_classification_question, list_source_revisions, list_source_dependents) plus the recut set_document_kind are VOLATILE-or-STABLE SECURITY DEFINER search_path-pinned bodies owned by clara_fn_owner, executable by clara_authenticated and by NOBODY else (agent_ro, runtime, both wake roles and PUBLIC all refused); the four internal helpers reach nobody at all. The recut carries every 0169 guard re-read from the INSTALLED body, reads its observation BEFORE writing its own extraction, names neither accounting_work nor agent_tasks, and both new writers name neither the Work lane nor knowledge_records. revise_document_fact APPENDS (no UPDATE or DELETE on clara.document_regions) and applies the canonical field-path grammar; the orphan door''s predicate is ZERO LIVE FILINGS and it never calls clara._active_document_filing, which is itself re-read unchanged. clara._document_posting_entry is byte-identical to 0197''s pinned sha and clara.persist_document_extraction to the body #778''s 0201 left, and BOTH purpose CHECKs are byte-identical to the texts the prestate stashed -- #646 widens no purpose and joins no purpose-CHECK spine. document.fact_revised is registered client_scoped with exactly one active context_update taxonomy row. No table in workflow/graphile_worker/spike touched. D1 WRITE-QUIESCE IS OWED -- clara.set_document_kind is an audited writer body replacement, one door, one window.';
 end $d646_tail$;

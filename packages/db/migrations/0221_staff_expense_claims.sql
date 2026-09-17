@@ -239,17 +239,22 @@ begin
   -- THE SIX BODIES THIS FILE EDITS NONE OF, PINNED AS NON-REGRESSIONS. They are NOT recut pins:
   -- nothing below derives from their text. They exist so that applying 0221 on a chain where one
   -- of them has DRIFTED fails loudly here, instead of §H's re-assertion passing against a body
-  -- this file never measured. MEASURED on a 0001->0198 chain (PG 17.11), never transcribed.
+  -- this file never measured. First measured on a 0001->0198 chain (PG 17.11), never transcribed.
+  -- RE-MEASURED 2026-09-17 on a 0001->0213 reference chain at the wave's re-base: THREE of the six
+  -- were recut by the riders batch (PR #838) while this branch was open, so their pins are re-issued
+  -- here rather than weakened -- `_record_journal_entry_core` by 0204_record_journal_entry_core_reversal_liveness
+  -- (#787), `_assert_adjustment_basis` and `_assert_adjustment_relationships` by
+  -- 0212_payroll_settled_cents (#797). The other three are byte-identical to the 0198 measurement.
   for v_def, v_sha in
     select * from (values
       ('clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)',
        '10b89677d342a424d5959ded8ad2c8c974c4ff9bdc26f5c0dd6c773a15af2612'),
       ('clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)',
-       'f9c4f5258fdd45c115871c67bfb3af9b91a587ff9f723d340b583e052defa4fb'),
+       'bc24524656e1a47812d12c4db24afde565e2aad3bb60f25d18234c05860838b3'),
       ('clara._assert_adjustment_basis(text,jsonb)',
-       '9acbeb45dde502b3f029a8b785e87b93db9cc152eff83e5e22b46a827b0a0e82'),
+       '69377e43cb924ad73ce87f6fd0fa26aa5c18597064b59bc88e8247fb31e2c263'),
       ('clara._assert_adjustment_relationships(uuid,text,jsonb,jsonb,boolean)',
-       'c55219e03219bb3f6b94dfe18bc1870123a7c72912fb56a2f0ff16db1a552854'),
+       'ca1510cf9d82a1ed8c87d8de94e8dbdff2f586744337bc5d477f4e7e4e687c02'),
       ('clara.book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)',
        'ea9957fcb4fef5b578859977b1a81edf8d6bfebdaef49bd2223721d907b1a285'),
       ('clara._adv_on_approve(uuid)',
@@ -1720,16 +1725,18 @@ begin
       raise exception '#638 tail: % MOVED -- a staff expense claim rides journal_entry and widens nothing', v_def;
     end if;
   end loop;
+  -- The same six, re-read AFTER this file ran. Three carry riders-batch bodies (#787's 0204,
+  -- #797's 0212) since the wave's re-base; the pins are the prestate's own, re-issued together.
   for v_def, v_src in
     select * from (values
       ('clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)',
        '10b89677d342a424d5959ded8ad2c8c974c4ff9bdc26f5c0dd6c773a15af2612'),
       ('clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)',
-       'f9c4f5258fdd45c115871c67bfb3af9b91a587ff9f723d340b583e052defa4fb'),
+       'bc24524656e1a47812d12c4db24afde565e2aad3bb60f25d18234c05860838b3'),
       ('clara._assert_adjustment_basis(text,jsonb)',
-       '9acbeb45dde502b3f029a8b785e87b93db9cc152eff83e5e22b46a827b0a0e82'),
+       '69377e43cb924ad73ce87f6fd0fa26aa5c18597064b59bc88e8247fb31e2c263'),
       ('clara._assert_adjustment_relationships(uuid,text,jsonb,jsonb,boolean)',
-       'c55219e03219bb3f6b94dfe18bc1870123a7c72912fb56a2f0ff16db1a552854'),
+       'ca1510cf9d82a1ed8c87d8de94e8dbdff2f586744337bc5d477f4e7e4e687c02'),
       ('clara.book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)',
        'ea9957fcb4fef5b578859977b1a81edf8d6bfebdaef49bd2223721d907b1a285'),
       ('clara._adv_on_approve(uuid)',
