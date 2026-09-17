@@ -133,7 +133,7 @@ test("every alias carries its lane, its basis and its source — and all four la
   // …and the alias carries the DAY it was recorded, in the business timezone: the human-stated
   // trade name went in at 2026-02-01T02:00:00Z, which is 1 Feb 2026 in Asia/Kuala_Lumpur.
   await expect(page.getByText("1 Feb 2026", { exact: false }).first()).toBeVisible();
-  // The origin vocabulary 0200 widened is readable too, including the value no door writes here.
+  // The origin vocabulary 0215 widened is readable too, including the value no door writes here.
   await expect(page.getByText("Proposed by Clara").first()).toBeVisible();
   await expect(page.getByText("Read off a document").first()).toBeVisible();
   // A raw message key on screen is the H-25 defect the message-key gate exists for.

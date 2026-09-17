@@ -1,5 +1,5 @@
 // #647 — COUNTERPARTY IDENTITY PROVENANCE, THE REVISION LOG, THE THREE READS AND THE FOUR EVENTS.
-// Migration of record: packages/db/migrations/0200_counterparty_identity_provenance.sql.
+// Migration of record: packages/db/migrations/0215_counterparty_identity_provenance.sql.
 // Brief of record: docs/plan/active/refresh-wave-2026-09-15/brief-647.md (orchestrator decisions).
 //
 // EVERY ASSERTION UNDER TEST RUNS THROUGH `humanQuery` — a real least-privileged
@@ -8,7 +8,7 @@
 // proves a human-lane behaviour from the owner connection has proven nothing about the human lane).
 //
 // THE GATE. `counterparty-identity-preintegration-gate.mjs` is preloaded by the package-wide
-// `pnpm test` script, so on a chain that has NOT applied 0200 this battery skips LOUDLY. A FOCUSED
+// `pnpm test` script, so on a chain that has NOT applied 0215 this battery skips LOUDLY. A FOCUSED
 // invocation does not preload it and therefore FAILS — a cell that only ever skips is a false green.
 //
 // THE MUTANT TABLE — one per wall, with the object it attacks:
@@ -48,14 +48,14 @@ before(async () => {
 });
 after(async () => { await endPool(); });
 
-/** FAIL-CLOSED unless the pre-0200 shape is DECLARED by the package-wide gate module. */
+/** FAIL-CLOSED unless the pre-0215 shape is DECLARED by the package-wide gate module. */
 function need(t) {
   if (applied) return false;
   if (process.env.CLARA_ALLOW_MISSING_COUNTERPARTY_IDENTITY === "1") {
-    t.skip("0200 counterparty-identity cohort absent and the pre-0200 shape is DECLARED (CLARA_ALLOW_MISSING_COUNTERPARTY_IDENTITY=1)");
+    t.skip("0215 counterparty-identity cohort absent and the pre-0215 shape is DECLARED (CLARA_ALLOW_MISSING_COUNTERPARTY_IDENTITY=1)");
     return true;
   }
-  assert.fail("the #647 counterparty-identity cohort (0200) is absent and nothing declared a pre-0200 database — set CLARA_ALLOW_MISSING_COUNTERPARTY_IDENTITY=1 only when that is deliberate");
+  assert.fail("the #647 counterparty-identity cohort (0215) is absent and nothing declared a pre-0215 database — set CLARA_ALLOW_MISSING_COUNTERPARTY_IDENTITY=1 only when that is deliberate");
   return true;
 }
 
@@ -79,7 +79,7 @@ test("p647.provenance.human — an alias added through the door by a BOOKKEEPER 
   assert.equal(row.origin, "trade_name");
   assert.equal(row.source_document_id, null, "p647.provenance.human: no source pinned, and that is a recorded absence rather than a silent one");
 
-  // W10 — the 0011 immutability trigger is ENABLED again after 0200's backfill disabled it.
+  // W10 — the 0011 immutability trigger is ENABLED again after 0215's backfill disabled it.
   const err = await caught(() => rootQuery(
     "update clara.counterparty_aliases set recorded_via='agent' where id=$1", [r.alias_id]));
   assert.ok(err, "p647.provenance.human: a non-retirement UPDATE is still refused");
@@ -363,7 +363,7 @@ test("p647.revisions.lock_order — RETIRING an alias and RENAMING the same coun
   // live alias on the identity detail; the rename is posted from the hygiene panel), so a human
   // would see an untyped "deadlock detected" rather than a governed refusal.
   //
-  // MEASURED on this rig before the fix (2026-09-17, clara_647 at frontier 0200): 5 of 8 rounds
+  // MEASURED on this rig before the fix (2026-09-17, clara_647 at frontier 0215): 5 of 8 rounds
   // raised 40P01 and the RETIREMENT was the act that died — its revision never appended. Ten
   // rounds is therefore a hard red for the defect and a deterministic green once the revision
   // helper stops choosing its number under a clara.counterparties row lock.

@@ -14,7 +14,7 @@
 //             half-understood draft is worse than none: it would seed a form with figures nobody
 //             typed. Cents in particular must be a SAFE INTEGER even coming out of storage.
 //
-//   field.*   ONE MAPPER, TWO PREFIXES. The typed particulars are `accrual.<key>` (0207's own
+//   field.*   ONE MAPPER, TWO PREFIXES. The typed particulars are `accrual.<key>` (0222's own
 //             spelling) and the schedule refusals come back unprefixed from 0193's own validator.
 //             A `field` path that does not name a control must answer null rather than a control
 //             that does not exist — a focus call on a detached node is a silent no-op that looks
@@ -24,7 +24,7 @@
 //             its own. The two that matter most are the ones this ticket owns: a SILENT TERM and a
 //             STATED ZERO, each named at the control the preparer typed in.
 //
-//   wire.*    `toAccrualParticulars` emits ONLY what 0207 reads, and `term_source` is always
+//   wire.*    `toAccrualParticulars` emits ONLY what 0222 reads, and `term_source` is always
 //             `human_stated` — the form has no control for it, because a period a model read off a
 //             document may not enter the durable record.
 
@@ -68,7 +68,7 @@ function goodDraft(over: Partial<AccrualDraft> = {}): AccrualDraft {
     servicePeriodEnd: "2026-07-31",
     method: "stated_amount",
     instruction: "the client's standing instruction of 2026-06-30",
-    // THE WINDOW SITS INSIDE THE STATED TERM (0207's SIXTH MEASUREMENT).
+    // THE WINDOW SITS INSIDE THE STATED TERM (0222's SIXTH MEASUREMENT).
     effectiveFrom: "2026-07-01",
     effectiveTo: "2026-07-31",
     ...over,
@@ -183,7 +183,7 @@ test("652.parse: cents must be a SAFE INTEGER even coming out of storage", () =>
 // 3 · The field mapper.
 // ==============================================================================================
 
-test("652.field: 0207's own paths, 0193's schedule paths, and everything else", () => {
+test("652.field: 0222's own paths, 0193's schedule paths, and everything else", () => {
   assert.equal(fieldForAccrualPath("accrual.service_period_start"), "servicePeriodStart");
   // `term_source` has NO control — the form cannot send anything but `human_stated`, so a refusal
   // naming it is a form-level one rather than a control to focus.
@@ -270,7 +270,7 @@ test("652.valid: the purpose, the authority and the instruction are each require
 });
 
 test("652.valid: the schedule runs INSIDE the term it names, and an open-ended authority is refused", () => {
-  // The three arms of 0207's window wall, mirrored at the control that holds each mistake. MEASURED
+  // The three arms of 0222's window wall, mirrored at the control that holds each mistake. MEASURED
   // before the wall existed: a June authority under a July term posted three entries, two of them
   // describing a period they did not accrue for (review round 1, A1).
   assert.deepEqual(validateAccrualDraft(goodDraft({ effectiveTo: "" }), KNOWN),
@@ -316,7 +316,7 @@ test("652.valid: the authority window", () => {
 });
 
 test("652.valid: a term too short for its own schedule is refused at the DAY RULE, not at the term", () => {
-  // 0207's SEVENTH MEASUREMENT, mirrored at the control. MEASURED on a rig before the wall existed
+  // 0222's SEVENTH MEASUREMENT, mirrored at the control. MEASURED on a rig before the wall existed
   // (review round 2, NB1): a 2026-07-01..2026-07-15 term on a month-end rule was ACCEPTED, the plan
   // went live, and `clara.request_plan_catch_up` over the whole window answered
   // `{"events":[],"admitted":0}` — an accrual that can never accrue.

@@ -22,7 +22,7 @@
 //                                register row whose depreciation particulars are still absent.
 //   applyParticularsStepV4       writes the answered particulars through
 //                                `clara.complete_fixed_asset_particulars_for`. It posts NO journal
-//                                — 0201's tail T.9 asserts the door's body contains no
+//                                — 0216's tail T.9 asserts the door's body contains no
 //                                `journal_entries` reference at all.
 //   claimWorkRunStepV4           v1's claim, stamping V4's manifest, plus the `dispatch` trace row.
 //   runWorkSegmentStepV4         v3's segment on v4's tools and v4's bundle text, with the
@@ -664,8 +664,8 @@ export type PendingFixedAssetV4 = {
  * THE READ IS THE ONE THING #639's STANZA LEFT OPEN, and it is worth saying exactly what was
  * measured rather than what was assumed. The stanza's question carries `source_ref:
  * {kind:'fixed_asset', asset_id}` and its apply takes `p_asset`, so the run must learn an asset id;
- * it names no read for it. Measured on the merged 0001→0209 chain: `clara.get_fixed_asset` and
- * `clara.list_fixed_assets` are granted to `clara_authenticated` ALONE (0201 §E), `clara_runtime`
+ * it names no read for it. Measured on the merged 0001→0224 chain: `clara.get_fixed_asset` and
+ * `clara.list_fixed_assets` are granted to `clara_authenticated` ALONE (0216 §E), `clara_runtime`
  * holds no select on `clara.fixed_assets`, and no wake wrapper reads the register. What IS
  * reachable is the run's own OBO READ credential: `clara_agent_ro` holds select on
  * `clara.fixed_assets` under the policy `p_fixed_assets_agent` (`firm_id = clara.wake_firm()`), and
@@ -737,7 +737,7 @@ export type ParticularsOutcomeV4 =
  * `clara.complete_fixed_asset_particulars_for` is `clara_runtime`-only, takes the initiating human
  * as an EXPLICIT `p_obo`, and rechecks their live membership, the bookkeeper floor and the client's
  * status at this moment rather than at admission — which is the point of an OBO door for an answer
- * that may arrive hours later. 0201's tail T.9 asserts that neither particulars door's body
+ * that may arrive hours later. 0216's tail T.9 asserts that neither particulars door's body
  * contains the string `journal_entries`: the acquisition posted when it posted, and this is a
  * register fact arriving afterwards.
  *

@@ -193,7 +193,7 @@ export type AccrualFieldId =
   | "memo" | "frequency" | "dayRule" | "dayOfMonth" | "effectiveFrom" | "effectiveTo"
   | "sourceDocumentId";
 
-/** The controls a SERVER refusal can land on. Everything migration 0207 can name in
+/** The controls a SERVER refusal can land on. Everything migration 0222 can name in
  *  `detail.field` appears here and nothing else does: a mapper that promised to focus a control for
  *  a refusal that cannot arrive would be a promise the database never keeps. */
 const ACCRUAL_FIELDS = new Set<string>([
@@ -205,7 +205,7 @@ const ACCRUAL_FIELDS = new Set<string>([
 /**
  * `detail.field` → the control that holds the mistake.
  *
- * TWO PREFIXES, ONE MAPPER. The typed particulars are prefixed `accrual.` (0207's own spelling, so
+ * TWO PREFIXES, ONE MAPPER. The typed particulars are prefixed `accrual.` (0222's own spelling, so
  * they can never collide with the journal basis's `posting_date` / `lines[N]`), and the door's own
  * schedule refusals come back unprefixed from `clara._assert_plan_schedule` (`frequency`,
  * `day_rule`, `day_of_month`, `effective_from`, `effective_to`) because that validator is 0193's
@@ -273,7 +273,7 @@ export function validateAccrualDraft(
   if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
 
   if (t(draft.effectiveFrom) === "") issues.push({ field: "effectiveFrom", code: "effectiveFromRequired" });
-  // THE AUTHORITY ENDS, AND IT ENDS INSIDE THE TERM IT ACCRUES FOR (0207's SIXTH MEASUREMENT,
+  // THE AUTHORITY ENDS, AND IT ENDS INSIDE THE TERM IT ACCRUES FOR (0222's SIXTH MEASUREMENT,
   // mirrored here so the mistake is named beside the control rather than a round trip later). An
   // open-ended authority under a term that ends would go on posting a line naming a period it had
   // already run past — measured on a rig before the wall existed.
@@ -308,7 +308,7 @@ export function validateAccrualDraft(
     issues.push({ field: "dayOfMonth", code: "dayOfMonthAbsent" });
   }
 
-  // …AND THE SCHEDULE REACHES AN ACCRUAL DATE INSIDE THE WINDOW (0207's SEVENTH MEASUREMENT).
+  // …AND THE SCHEDULE REACHES AN ACCRUAL DATE INSIDE THE WINDOW (0222's SEVENTH MEASUREMENT).
   // ASKED LAST, and only once everything it depends on stands up: a day number out of range or a
   // window that ends before it starts is the mistake to fix first, and this issue would otherwise
   // pile onto a control the preparer has already been sent to. MEASURED before the wall existed
@@ -343,7 +343,7 @@ export function accrualFieldElementId(field: AccrualFieldId): string {
 }
 
 /** The draft as the door's `p_accrual` argument, in the DATABASE's own field spelling. Only what
- *  0207 reads: the schedule, the window and the authority are the door's OWN arguments, and a key
+ *  0222 reads: the schedule, the window and the authority are the door's OWN arguments, and a key
  *  the database never reads could carry no refusal. */
 export function toAccrualParticulars(draft: AccrualDraft): {
   expense_account_code: string;

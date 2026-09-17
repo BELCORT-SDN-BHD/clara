@@ -1,4 +1,4 @@
--- 0201_fixed_asset_acquisition — #639 (refresh spec #612; journeys C1, C3, C7): A SUPPORTED
+-- 0216_fixed_asset_acquisition — #639 (refresh spec #612; journeys C1, C3, C7): A SUPPORTED
 -- ACQUISITION PRODUCES ITS JOURNAL *AND* ITS FIXED-ASSET REGISTER ROW IN ONE COMMIT, ON EVERY
 -- LANE, WHILE THE DEPRECIATION PARTICULARS WAIT ALONE.
 -- =====================================================================================
@@ -21,7 +21,7 @@
 -- spliced into `clara._subledger_on_approve` (0041:4530), and THAT function's callers are the
 -- approve cores `0037_wave_c_a_subledger.sql:3840-3845` pinned as four — `_approve_entry_core`,
 -- `_approve_opening_entry`, `approve_wrong_client_correction`, `reverse_entry` — which MEASURED on
--- clara_639 at 0200 are now SIX (0056's close model added `finalize_close` and
+-- clara_639 at 0215 are now SIX (0056's close model added `finalize_close` and
 -- `reopen_fiscal_year`). §F (T.5) re-derives and re-pins the measured set.
 --
 -- `clara._record_journal_entry_core` — the live posting core the Work lane runs (0195:1685) — is
@@ -34,7 +34,7 @@
 --
 -- MEASURED ON THE RIG BEFORE THIS FILE WAS WRITTEN, not reasoned about:
 -- `packages/db/tests/fixed-asset-acquisition.test.mjs` cell `p639.birth.work_lane`, run against a
--- clara_639 pinned at 0200, failed with SQLSTATE CLR40 and the message "this entry moves an
+-- clara_639 pinned at 0215, failed with SQLSTATE CLR40 and the message "this entry moves an
 -- account enrolled for the fixed-asset register (200-D41 as cost) without a register act".
 --
 -- AND THE IN-TREE CLAIM THAT SAYS OTHERWISE IS STALE. `0041:4528-4529` reads "All four approve
@@ -204,7 +204,7 @@ begin
   -- (3) THE TWO BODIES THIS FILE RECUTS, PINNED BY PRE-IMAGE sha256(prosrc). These are the FIRST
   -- fixed-asset pins ever written: `grep -ln '_fa_asset_json\|get_fixed_asset' migrations/018*.sql
   -- migrations/019*.sql` returns nothing, so no earlier file constrains them. BOTH VALUES WERE
-  -- MEASURED ON A MIGRATED clara_639 (0001->0200, PG 17.11) — they CANNOT be read off 0041's text,
+  -- MEASURED ON A MIGRATED clara_639 (0001->0215, PG 17.11) — they CANNOT be read off 0041's text,
   -- because what lives in pg_proc is the body after every later splice.
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid='clara._fa_asset_json(uuid,date)'::regprocedure;
@@ -281,7 +281,7 @@ comment on column clara.fixed_assets.acquisition_document_id is
   '#639: the source document of the entry that acquired this asset, COPIED AT BIRTH by '
   'clara._tf_fa_acquisition_birth. Write-once: clara._tf_fixed_assets_immutable_0017 forbids any '
   'later write, so a row birthed by _fa_on_approve arm 4 carries NULL and the READ resolves the '
-  'acquisition entry''s own document_id instead. The two can never disagree (0201 tail T.7).';
+  'acquisition entry''s own document_id instead. The two can never disagree (0216 tail T.7).';
 
 -- =====================================================================================
 -- §B  THE LANE-AGNOSTIC BIRTH. A deferred constraint trigger, named to fire before the belt.
@@ -570,7 +570,7 @@ begin
       order by (je.flags -> 'fa_disposal' ->> 'disposal_date')::date, je.id
       limit 1;
   end if;
-  -- 0201 (#639): THE ACQUISITION'S SOURCE DOCUMENT. The column is the BIRTH-TIME COPY written
+  -- 0216 (#639): THE ACQUISITION'S SOURCE DOCUMENT. The column is the BIRTH-TIME COPY written
   -- by clara._tf_fa_acquisition_birth; the acquisition ENTRY is the authority, because a row
   -- birthed by clara._fa_on_approve arm 4 can never be back-filled (0017's post-approval
   -- immutability allowlist) and that is exactly the document lane. One index lookup on a FK.
@@ -597,7 +597,7 @@ begin
     -- [CROSS-SECTION EDIT -- round-5 fix lane. Reported, not silent.] WDB-G10's UI face.
     'disposal_draft_outstanding', v_dfreeze,
     'disposal_draft_entry_id', v_ddraft,
-    -- 0201 (#639): THE ACQUISITION, on every row shape the register renders, so the list can
+    -- 0216 (#639): THE ACQUISITION, on every row shape the register renders, so the list can
     -- link to the journal entry and the source document without a second read per row.
     'acquisition_entry_id', f.acquisition_entry_id,
     'acquisition_line_id', f.acquisition_line_id,
@@ -654,7 +654,7 @@ begin
   return jsonb_build_object('asset', clara._fa_asset_json(p_asset, v_as_of),
     'lineage', v_lineage, 'charges', v_charges, 'schedule', v_sched,
     'uncharged_due', clara._fa_uncharged_months(p_asset, clara._fa_month_end(v_as_of)),
-    -- 0201 (#639): THE ACQUISITION IS COMPLETE EVEN WHILE THE PARTICULARS ARE NOT, so they are
+    -- 0216 (#639): THE ACQUISITION IS COMPLETE EVEN WHILE THE PARTICULARS ARE NOT, so they are
     -- two blocks rather than two halves of one. "Policy/schedule clearly separate" (AC8) becomes
     -- structural here, not a layout choice the surface could quietly undo.
     'acquisition', clara._fa_acquisition_json(p_asset),
@@ -927,7 +927,7 @@ begin
   -- in the same migration's tail).
   --
   -- 0037:3840-3845 pinned FOUR — `_approve_entry_core`, `_approve_opening_entry`,
-  -- `approve_wrong_client_correction`, `reverse_entry`. MEASURED on clara_639 at 0200 the live set
+  -- `approve_wrong_client_correction`, `reverse_entry`. MEASURED on clara_639 at 0215 the live set
   -- is SIX: 0056's close model added `finalize_close` (the closing-transfer entry it approves) and
   -- `reopen_fiscal_year` (the mirror it approves when a year is reopened). Both call the hook with
   -- their own entry, both are genuine approve paths, and neither was known to 0037. The pinned
@@ -942,7 +942,7 @@ begin
   if v_names is distinct from array['_approve_entry_core','_approve_opening_entry',
                                     'approve_wrong_client_correction','finalize_close',
                                     'reopen_fiscal_year','reverse_entry'] then
-    raise exception '#639 tail: the subledger hook caller set is % -- 0201 re-pinned the measured six (0037:3840-3845 pinned four; 0056 added two)', v_names
+    raise exception '#639 tail: the subledger hook caller set is % -- 0216 re-pinned the measured six (0037:3840-3845 pinned four; 0056 added two)', v_names
       using errcode='CLR10';
   end if;
   if position('clara._subledger_on_approve(' in

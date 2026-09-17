@@ -1127,68 +1127,68 @@ const ACCOUNTING_PLANS_0193_CLOCK_NAMES = [
 const WORK_EGRESS_0195_CLOCK_NAMES = ["record_work_execution_trace"];
 
 // ===========================================================================================
-// WAVE 2026-09-15 (0199..0209) - arm (D), EIGHT stem-gated cohorts, FIFTEEN names.
+// WAVE 2026-09-15 (0214..0224) - arm (D), EIGHT stem-gated cohorts, FIFTEEN names.
 //
-// Measured at wave integration on a from-scratch 0001..0209 chain (rigint, 127.0.0.1:55600,
+// Measured at wave integration on a from-scratch 0001..0224 chain (rigint, 127.0.0.1:55600,
 // clara_int), by running arm (D)'s own detector over the live catalog and diffing against this
 // roster - not read off the eleven migration files. Every name below stamps or compares an
 // INSTANT; the three that ALSO derive an MYT date appear on arm (B)'s roster as well, with their
 // adjudication written there rather than duplicated here.
 //
 // The migrations that add NOTHING to this roster are named rather than omitted, because a silent
-// absence is indistinguishable from a missed census: 0204 (#649 client-onboarding facts), 0207
-// (#652 accrual adjustments) and 0208 (#653 prepayment amortisation) read no clock token at all
-// in any body they create. 0207's and 0208's schedules take their dates from the plan lane's own
+// absence is indistinguishable from a missed census: 0219 (#649 client-onboarding facts), 0222
+// (#652 accrual adjustments) and 0223 (#653 prepayment amortisation) read no clock token at all
+// in any body they create. 0222's and 0223's schedules take their dates from the plan lane's own
 // arithmetic (0193), and every `created_at` they add is a column DEFAULT, which lives in
 // pg_attrdef and not in any prosrc - the same reason the 0185 and 0192 blocks above give.
 
-// #650 [0199] - `clara.get_client_work_pack` samples ONE instant into a timestamptz local
+// #650 [0214] - `clara.get_client_work_pack` samples ONE instant into a timestamptz local
 // (`v_now timestamptz := now()`) and builds both its seven-MYT-date window bounds and its
 // `computed_at` from that single sample. The clock read itself is an instant, never a date; the
 // date it goes on to derive is arm (B)'s subject, pinned there.
-const CLIENT_WORK_PACK_0199_CLOCK_NAMES = ["get_client_work_pack"];
+const CLIENT_WORK_PACK_0214_CLOCK_NAMES = ["get_client_work_pack"];
 
-// #647 [0200] - the three counterparty identity READS each carry exactly one clock token, and it
+// #647 [0215] - the three counterparty identity READS each carry exactly one clock token, and it
 // is the same one in all three: `to_char(now() at time zone 'Asia/Kuala_Lumpur', 'YYYY-MM-DD...')`
 // for the envelope's `as_of` string. The value that leaves the body is TEXT a human reads, never a
 // date the estate computes with; nothing downstream parses it back. The zone spelling is arm (B)'s
-// subject and is pinned there. 0200's writers read NO clock: every `recorded_at` on
+// subject and is pinned there. 0215's writers read NO clock: every `recorded_at` on
 // `clara.counterparty_identity_revisions` is a column DEFAULT.
-const COUNTERPARTY_IDENTITY_0200_CLOCK_NAMES = [
+const COUNTERPARTY_IDENTITY_0215_CLOCK_NAMES = [
   "get_counterparty_identity", "list_counterparty_identity", "list_counterparty_merge_corrections",
 ];
 
-// #639 [0201] - `clara._fa_complete_particulars_core` sets `updated_at = now()` on the register row
+// #639 [0216] - `clara._fa_complete_particulars_core` sets `updated_at = now()` on the register row
 // it completes: one sample of an INSTANT into a timestamptz column, arm (D)'s exempt shape. The
 // migration's other bodies add none - the lane-agnostic birth trigger (`_tf_fa_acquisition_birth`)
 // copies columns and takes its dates from the entry it fires for, and `_fa_acquisition_json` /
 // `_fa_acquisition_history` / `_fa_asset_json` / `get_fixed_asset` are projections.
-const FA_ACQUISITION_0201_CLOCK_NAMES = ["_fa_complete_particulars_core"];
+const FA_ACQUISITION_0216_CLOCK_NAMES = ["_fa_complete_particulars_core"];
 
-// #646 [0202] - `clara.dismiss_orphaned_classification_question` stamps `resolved_at = now()` when
+// #646 [0217] - `clara.dismiss_orphaned_classification_question` stamps `resolved_at = now()` when
 // it closes the dead-end question, the same shape every question-resolving door in the estate
 // carries. `revise_document_fact`, `list_source_revisions`, `list_source_dependents` and the recut
 // `set_document_kind` read no clock: the revision relation's `recorded_at` is a column DEFAULT and
 // the two reads are projections.
-const DOCUMENT_SOURCE_REVISION_0202_CLOCK_NAMES = ["dismiss_orphaned_classification_question"];
+const DOCUMENT_SOURCE_REVISION_0217_CLOCK_NAMES = ["dismiss_orphaned_classification_question"];
 
-// #648 [0203] - the four firm-setup writers, and all four for one reason: a setup item that moves
+// #648 [0218] - the four firm-setup writers, and all four for one reason: a setup item that moves
 // state moves its instant in the same statement. `_firm_setup_bump` (`updated_at`),
 // `answer_firm_setup_item` and `defer_firm_setup_item` (`answered_at` + `updated_at`) and
 // `commit_firm_setup` (`committed_at`). `clara.get_firm_setup()` - the read - carries no clock at
 // all, which is why it is absent here and present in no other roster.
-const FIRM_SETUP_0203_CLOCK_NAMES = [
+const FIRM_SETUP_0218_CLOCK_NAMES = [
   "_firm_setup_bump", "answer_firm_setup_item", "commit_firm_setup", "defer_firm_setup_item",
 ];
 
-// #654 [0205] - the two firm-knowledge READS each derive `v_today` from the clock to decide which
+// #654 [0220] - the two firm-knowledge READS each derive `v_today` from the clock to decide which
 // revision is LIVE today. The clock read is arm (D)'s; the MYT conversion is arm (B)'s and is
-// adjudicated there. 0205's three guards (`_tf_knowledge_firm_eligibility`,
+// adjudicated there. 0220's three guards (`_tf_knowledge_firm_eligibility`,
 // `_tf_knowledge_firm_evidence`, `_tf_document_filing_firm_knowledge`) read no clock: they compare
 // stored revision state.
-const KNOWLEDGE_FIRM_0205_CLOCK_NAMES = ["get_knowledge_applicability", "list_firm_knowledge"];
+const KNOWLEDGE_FIRM_0220_CLOCK_NAMES = ["get_knowledge_applicability", "list_firm_knowledge"];
 
-// #638 [0206] - two bodies, two DIFFERENT lawful shapes, neither a date.
+// #638 [0221] - two bodies, two DIFFERENT lawful shapes, neither a date.
 //   * `_assert_claim_basis` passes the instant as the AS-OF ARGUMENT of an existing reader,
 //     `clara._adv_enrolment_at(p_client, v_credit, now())` - the same `coalesce(p_at, now())`
 //     as-of idiom `_adv_reversal_admission` carries and that the base array's own header records.
@@ -1196,12 +1196,12 @@ const KNOWLEDGE_FIRM_0205_CLOCK_NAMES = ["get_knowledge_applicability", "list_fi
 //     instant, one sample into a timestamptz column.
 // The claim doors themselves add none: the claim relation's `created_at` is a column DEFAULT and
 // every posting date comes from the basis the caller stated.
-const STAFF_EXPENSE_CLAIMS_0206_CLOCK_NAMES = ["_assert_claim_basis", "_claim_resolve_claimant"];
+const STAFF_EXPENSE_CLAIMS_0221_CLOCK_NAMES = ["_assert_claim_basis", "_claim_resolve_claimant"];
 
-// #625 [0209] - `clara.preview_invite` COMPARES a stored `expires_at` against the clock
+// #625 [0224] - `clara.preview_invite` COMPARES a stored `expires_at` against the clock
 // (`i.status = 'pending' and i.expires_at <= now()`) to fold a lapsed invitation into the
 // `expired` outcome. A comparison, not a stamp and not a date; the door writes nothing at all.
-const PREVIEW_INVITE_0209_CLOCK_NAMES = ["preview_invite"];
+const PREVIEW_INVITE_0224_CLOCK_NAMES = ["preview_invite"];
 // WAVE 2026-09-15 END
 
 // #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
@@ -1328,15 +1328,15 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("client_knowledge_records$")) names.push(...KNOWLEDGE_RECORDS_0192_CLOCK_NAMES);
   if (await appliedStem("accounting_plans$")) names.push(...ACCOUNTING_PLANS_0193_CLOCK_NAMES);
   if (await appliedStem("work_egress_purpose_and_execution_trace$")) names.push(...WORK_EGRESS_0195_CLOCK_NAMES);
-  // WAVE 2026-09-15 (0199..0209) - stem-gated, never number-gated, for the reason :207-214 gives.
-  if (await appliedStem("client_work_pack$")) names.push(...CLIENT_WORK_PACK_0199_CLOCK_NAMES);
-  if (await appliedStem("counterparty_identity_provenance$")) names.push(...COUNTERPARTY_IDENTITY_0200_CLOCK_NAMES);
-  if (await appliedStem("fixed_asset_acquisition$")) names.push(...FA_ACQUISITION_0201_CLOCK_NAMES);
-  if (await appliedStem("document_source_revision$")) names.push(...DOCUMENT_SOURCE_REVISION_0202_CLOCK_NAMES);
-  if (await appliedStem("firm_setup$")) names.push(...FIRM_SETUP_0203_CLOCK_NAMES);
-  if (await appliedStem("firm_knowledge_defaults$")) names.push(...KNOWLEDGE_FIRM_0205_CLOCK_NAMES);
-  if (await appliedStem("staff_expense_claims$")) names.push(...STAFF_EXPENSE_CLAIMS_0206_CLOCK_NAMES);
-  if (await appliedStem("preview_invite$")) names.push(...PREVIEW_INVITE_0209_CLOCK_NAMES);
+  // WAVE 2026-09-15 (0214..0224) - stem-gated, never number-gated, for the reason :207-214 gives.
+  if (await appliedStem("client_work_pack$")) names.push(...CLIENT_WORK_PACK_0214_CLOCK_NAMES);
+  if (await appliedStem("counterparty_identity_provenance$")) names.push(...COUNTERPARTY_IDENTITY_0215_CLOCK_NAMES);
+  if (await appliedStem("fixed_asset_acquisition$")) names.push(...FA_ACQUISITION_0216_CLOCK_NAMES);
+  if (await appliedStem("document_source_revision$")) names.push(...DOCUMENT_SOURCE_REVISION_0217_CLOCK_NAMES);
+  if (await appliedStem("firm_setup$")) names.push(...FIRM_SETUP_0218_CLOCK_NAMES);
+  if (await appliedStem("firm_knowledge_defaults$")) names.push(...KNOWLEDGE_FIRM_0220_CLOCK_NAMES);
+  if (await appliedStem("staff_expense_claims$")) names.push(...STAFF_EXPENSE_CLAIMS_0221_CLOCK_NAMES);
+  if (await appliedStem("preview_invite$")) names.push(...PREVIEW_INVITE_0224_CLOCK_NAMES);
   return names.sort();
 }
 
@@ -1423,8 +1423,8 @@ const KL_ROSTER_DBA_BANK_ENROLMENT = ["_bank_enrolled_fy_months"];
 const KL_ROSTER_0193_PLANS = ["_assert_plan_schedule"];
 
 // ===========================================================================================
-// WAVE 2026-09-15 (0199..0209) - arm (B), FOUR stem-gated cohorts, SEVEN names, measured on a
-// from-scratch 0001..0209 chain at wave integration. Two classes, kept apart on purpose.
+// WAVE 2026-09-15 (0214..0224) - arm (B), FOUR stem-gated cohorts, SEVEN names, measured on a
+// from-scratch 0001..0224 chain at wave integration. Two classes, kept apart on purpose.
 //
 // CLASS 1 - THE ZONE AS A NAME, no date derived. `_assert_plan_schedule`'s case above, exactly.
 // CLASS 2 - A READ-SIDE MYT DATE. Three read doors spell `(now() at time zone
@@ -1440,33 +1440,33 @@ const KL_ROSTER_0193_PLANS = ["_assert_plan_schedule"];
 //   see KL_ROSTER_0046 above). A follow-up issue carries the question for the two knowledge reads,
 //   where the argument is weaker. Pinned WITH the reason, not folded in silently.
 
-// #650 [0199] - CLASS 2. `clara.get_client_work_pack` derives `v_today` and the two half-open
+// #650 [0214] - CLASS 2. `clara.get_client_work_pack` derives `v_today` and the two half-open
 // bounds of its seven-MYT-date recent-success window from one `now()` sample, and names the zone a
 // fourth time as the `timezone` key of the envelope it returns (so the face states the calendar it
 // counted in rather than assuming one).
-const KL_ROSTER_0199_WORK_PACK = ["get_client_work_pack"];
+const KL_ROSTER_0214_WORK_PACK = ["get_client_work_pack"];
 
-// #647 [0200] - CLASS 1. The three identity reads spell the zone inside
+// #647 [0215] - CLASS 1. The three identity reads spell the zone inside
 // `to_char(now() at time zone 'Asia/Kuala_Lumpur', 'YYYY-MM-DD"T"HH24:MI:SS')`, a DISPLAY
 // conversion producing the envelope's `as_of` TEXT. No date value exists in any of the three
 // bodies for the house authority to own, and `clara._book_today()` answers a date rather than a
 // formatted instant, so the standing advice does not apply here at all.
-const KL_ROSTER_0200_COUNTERPARTY_IDENTITY = [
+const KL_ROSTER_0215_COUNTERPARTY_IDENTITY = [
   "get_counterparty_identity", "list_counterparty_identity", "list_counterparty_merge_corrections",
 ];
 
-// #654 [0205] - CLASS 2, the weaker half. `clara.list_firm_knowledge()` and
+// #654 [0220] - CLASS 2, the weaker half. `clara.list_firm_knowledge()` and
 // `clara.get_knowledge_applicability` each take `v_today` to select the revision live today; the
 // web form's default effective date is read from the second. Both are STABLE read doors that write
 // nothing.
-const KL_ROSTER_0205_FIRM_KNOWLEDGE = ["get_knowledge_applicability", "list_firm_knowledge"];
+const KL_ROSTER_0220_FIRM_KNOWLEDGE = ["get_knowledge_applicability", "list_firm_knowledge"];
 
-// #653 [0208] - CLASS 1. `clara.create_prepayment_schedule` spells the zone twice and computes no
+// #653 [0223] - CLASS 1. `clara.create_prepayment_schedule` spells the zone twice and computes no
 // date from either: once as the `p_timezone => 'Asia/Kuala_Lumpur'` argument it hands
 // `clara.create_accounting_plan` (whose `timezone` column is a one-member CHECK), and once as a
 // `'timezone'` key in the jsonb it returns. The amortisation dates themselves come from the plan
-// lane's own arithmetic. 0208's other bodies spell the zone nowhere.
-const KL_ROSTER_0208_PREPAYMENT = ["create_prepayment_schedule"];
+// lane's own arithmetic. 0223's other bodies spell the zone nowhere.
+const KL_ROSTER_0223_PREPAYMENT = ["create_prepayment_schedule"];
 // WAVE 2026-09-15 END
 
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
@@ -1489,10 +1489,10 @@ export async function s5KlDuplicationRoster(query) {
   )).rows[0].ok;
   if (bankEnrolment) names.push(...KL_ROSTER_DBA_BANK_ENROLMENT);
   if (await appliedStem("accounting_plans$")) names.push(...KL_ROSTER_0193_PLANS);
-  // WAVE 2026-09-15 (0199..0209) - stem-gated, never number-gated.
-  if (await appliedStem("client_work_pack$")) names.push(...KL_ROSTER_0199_WORK_PACK);
-  if (await appliedStem("counterparty_identity_provenance$")) names.push(...KL_ROSTER_0200_COUNTERPARTY_IDENTITY);
-  if (await appliedStem("firm_knowledge_defaults$")) names.push(...KL_ROSTER_0205_FIRM_KNOWLEDGE);
-  if (await appliedStem("prepayment_amortisation$")) names.push(...KL_ROSTER_0208_PREPAYMENT);
+  // WAVE 2026-09-15 (0214..0224) - stem-gated, never number-gated.
+  if (await appliedStem("client_work_pack$")) names.push(...KL_ROSTER_0214_WORK_PACK);
+  if (await appliedStem("counterparty_identity_provenance$")) names.push(...KL_ROSTER_0215_COUNTERPARTY_IDENTITY);
+  if (await appliedStem("firm_knowledge_defaults$")) names.push(...KL_ROSTER_0220_FIRM_KNOWLEDGE);
+  if (await appliedStem("prepayment_amortisation$")) names.push(...KL_ROSTER_0223_PREPAYMENT);
   return names.sort().join(" ");
 }

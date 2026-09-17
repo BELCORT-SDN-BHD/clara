@@ -144,7 +144,7 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
       // That is the census reporting one site per construction rather than one per file, and it is
       // the evidence this cut wanted: `start_staff_expense_claim_work` and `start_accrual_work` both
       // announce a `journal_entry` Work, which is why `WORK_ACCEPTED_PURPOSES` did NOT have to widen
-      // for either of them (0206's amendment; 0193's `_plan_admit_occurrence`).
+      // for either of them (0221's amendment; 0193's `_plan_admit_occurrence`).
       constructionSites: [
         "packages/runtime/workflows/chatTurn.v18.prompt.ts",
         "packages/runtime/workflows/chatTurn.v18.tools.ts",

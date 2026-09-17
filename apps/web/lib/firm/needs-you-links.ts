@@ -58,7 +58,7 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   lint_finding: "/journals",
   // Both "incomplete" kinds are register rows missing particulars. `fixed_asset_incomplete` is
   // REPOINTED by #639: the row carries the ASSET id in its shared `id` column
-  // (0041's S4.9 splice says so in its own words), and since 0201 there is a real route that
+  // (0041's S4.9 splice says so in its own words), and since 0216 there is a real route that
   // selects that asset from the URL. This file's header named exactly that condition — "when a
   // tab learns to select a row from the URL, this map is where that lands" — so the suffix here
   // stays the register tab and `needsYouRowHref` narrows it to the detail below.

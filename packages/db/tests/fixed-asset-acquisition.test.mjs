@@ -1,19 +1,19 @@
-// #639 [0201] — 完成资产购入与登记，独立等待缺失折旧资料.
+// #639 [0216] — 完成资产购入与登记，独立等待缺失折旧资料.
 //
 // THE CELL THAT DEFINES THE TICKET IS `p639.birth.work_lane`, AND IT IS WRITTEN FIRST. Before
-// 0201 it fails at COMMIT with CLR40 `fa_belt_unregistered_movement`: the Work lane's posting core
+// 0216 it fails at COMMIT with CLR40 `fa_belt_unregistered_movement`: the Work lane's posting core
 // (`clara._record_journal_entry_core`, 0195:2110-2113) approves with a raw
 // `update ... set status='approved'` and calls no subledger hook, so no register row is born, and
 // the DEFERRED belt `t_je_fa_movement_belt` (0041:2741-2743) refuses the whole transaction at
 // COMMIT — after the operation receipt (0195:2130) and the Work result (0195:2194) were written.
-// Everything 0201 adds is whatever makes that cell green without moving a pinned body.
+// Everything 0216 adds is whatever makes that cell green without moving a pinned body.
 //
 // EVERY ASSERTION UNDER TEST RUNS THROUGH A PERSONA (`humanQuery` / `roleQuery` / the wake
 // credential), never `rootQuery` — DECISIONS §1.10. Root appears only as a readback.
 //
 // FRONTIER-GATED on the `fixed_asset_acquisition$` stem, never on a number. A FOCUSED invocation
 // (without `--import ./tests/fixed-asset-acquisition-preintegration-gate.mjs`) FAILS LOUDLY when
-// 0201 is absent, because a skip is not evidence.
+// 0216 is absent, because a skip is not evidence.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ after(async () => {
   await endPool();
 });
 
-/** Every cell needs 0041 (the register), 0178 (the Work lane) and 0201 (this slice). */
+/** Every cell needs 0041 (the register), 0178 (the Work lane) and 0216 (this slice). */
 async function gate(t, { needAcq = true } = {}) {
   if (!live) {
     t.skip("0041 is not applied — the #639 battery is dormant");
@@ -216,7 +216,7 @@ test("p639.birth.exclusions opening entries, reversal mirrors, disposals and sch
   }
 
   // (c) A scheduled depreciation run. Today it debits the EXPENSE account, so the cost join misses;
-  //     0201's guard closes the mechanical site itself so it needs BOTH guards to fail.
+  //     0216's guard closes the mechanical site itself so it needs BOTH guards to fail.
   const src = await rootQuery(
     "select p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace "
     + "where n.nspname='clara' and p.proname='_tf_fa_acquisition_birth'");
@@ -245,7 +245,7 @@ test("p639.census.approve_paths the subledger-hook caller set is the re-derived 
   assert.deepEqual(hookCallers, ["_subledger_on_approve"],
     "census: clara._fa_on_approve is invoked from exactly ONE body — the subledger hook");
   // 0037:3840-3845 pinned FOUR. MEASURED on clara_639 the live set is SIX — 0056's close model
-  // added `finalize_close` and `reopen_fiscal_year` — so 0201's tail re-derives and re-pins the
+  // added `finalize_close` and `reopen_fiscal_year` — so 0216's tail re-derives and re-pins the
   // measured set rather than carrying a census that has been stale for two callers.
   const sub = await subledgerHookCallers();
   assert.deepEqual(sub.slice().sort(), [
@@ -261,7 +261,7 @@ test("p639.census.approve_paths the subledger-hook caller set is the re-derived 
   assert.ok(paths.includes("_record_journal_entry_core"),
     "census: the Work lane's posting core IS an approve path…");
   assert.ok(!sub.includes("_record_journal_entry_core"),
-    "census: …and it does NOT call the subledger hook — the fact 0201's lane-agnostic trigger closes");
+    "census: …and it does NOT call the subledger hook — the fact 0216's lane-agnostic trigger closes");
   assert.ok(paths.length >= sub.length,
     "census: every hook caller is an approve path, and there is at least one that is not");
 });
@@ -334,7 +334,7 @@ test("p639.provenance.document_lane a hook-born row carries its source document 
   assert.equal(detail.asset.acquisition_document_id, filed.documentId,
     "document_lane: the register row shape carries it too, so the list can link without a second read");
 
-  // The entry and its register row agree, which is the invariant 0201's tail asserts estate-wide.
+  // The entry and its register row agree, which is the invariant 0216's tail asserts estate-wide.
   const entry = await entryRowOf(filed.entry);
   assert.equal(entry.document_id, filed.documentId);
 });
@@ -471,7 +471,7 @@ test("p639.settle.clr40_classification a commit-time CLR40 carries the SQLSTATE 
   if (await gate(t)) return;
   const client = await acqClient("settle_clr40");
   // Reducing the cost of an enrolled fixed-asset account is a NAMED deferral the belt still
-  // refuses AT COMMIT, and it is the remaining commit-time CLR40 on this journey after 0201.
+  // refuses AT COMMIT, and it is the remaining commit-time CLR40 on this journey after 0216.
   const { entry } = await buyAsset({ client, cents: 300_000, postingDate: dayIn(mon(-2), 6) });
   assert.ok(entry);
   const before = { entries: await entryCountOf(client), receipts: await committedReceiptCountOf(client) };
@@ -566,7 +566,7 @@ test("p639.particulars.race two runtime sessions arriving TOGETHER produce exact
   // when two callers arrive together, and this battery had no two-session cell at all — every
   // "complete once" assertion was sequential, which proves the guard only for a caller that can
   // SEE the first write. The door takes `pg_advisory_xact_lock(203005004, hashtext(client))` and
-  // then `clara.fixed_assets … for update` (0201 §D); this cell drives both from two REAL
+  // then `clara.fixed_assets … for update` (0216 §D); this cell drives both from two REAL
   // `clara_runtime` sessions with a COMMIT barrier between them.
   const client = await acqClient("particulars_race");
   const { out, author } = await workLaneAcquisition({ client });

@@ -174,7 +174,7 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
     // AN ACTUALLY INVALID ANSWER - and a REACHABLE one. `particularsReadyToSubmit` gates method,
     // date and life, so the only way to reach the door with something it refuses is a value the
     // client does not check: a residual above cost (this asset cost RM 4,200.00). The door
-    // answers CLR37 with `axis: "residual"` (0201 SS D), which is the axis this walk exists to
+    // answers CLR37 with `axis: "residual"` (0216 SS D), which is the axis this walk exists to
     // follow all the way to a control. ROUND-1 REVIEW (SPEC F1): this cell was titled exactly
     // this and filled a wholly VALID form - it never submitted an invalid answer at all.
     await dialogBody.getByLabel("Residual value (RM)").fill("99,999.00");

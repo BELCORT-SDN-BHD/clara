@@ -1,5 +1,5 @@
 // #649 — A6: create a client, then continue accounting onboarding from what is already known.
-// Migration: 0204_client_onboarding_facts.sql; gated on the LIVE CATALOG, never on the number.
+// Migration: 0219_client_onboarding_facts.sql; gated on the LIVE CATALOG, never on the number.
 //
 // WHAT THIS BATTERY OWNS. Two doors and one negative:
 //   * `clara.client_identity_candidates` — the duplicate/ambiguity READ the human face asks
@@ -11,7 +11,7 @@
 //     rather than swallowed.
 //   * the NEGATIVE the whole wrapper design turns on: `0103:1225-1239`'s five-role
 //     `has_function_privilege` census over the three `name_family_*` helpers is STILL EMPTY
-//     after 0204 (repeated at `0126:509` and `0154:551`).
+//     after 0219 (repeated at `0126:509` and `0154:551`).
 //
 // EVERY ASSERTION UNDER TEST GOES THROUGH `humanQuery` — a real per-role session carrying real
 // JWT claims, under real RLS. `rootQuery` appears only where the subject is the CATALOG itself
@@ -47,7 +47,7 @@ const EXPECTED_CELLS = 13;
 let live = false;
 let executed = 0;
 
-/** True iff 0204's whole cohort is applied. A PARTIAL cohort THROWS — "wholly present or wholly
+/** True iff 0219's whole cohort is applied. A PARTIAL cohort THROWS — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a settle door without its
  *  identity read (or without the ungranted month helper) is a narrower boundary nobody chose. */
 async function factsCohortApplied() {
@@ -62,7 +62,7 @@ async function factsCohortApplied() {
   const flags = Object.values(row);
   const present = flags.filter(Boolean).length;
   if (present !== 0 && present !== flags.length) {
-    throw new Error(`#649 0204 cohort is PARTIAL: ${JSON.stringify(row)}`);
+    throw new Error(`#649 0219 cohort is PARTIAL: ${JSON.stringify(row)}`);
   }
   return present === flags.length;
 }
@@ -76,11 +76,11 @@ after(async () => {
 function gate(t) {
   if (live) return false;
   if (process.env.CLARA_ALLOW_MISSING_CLIENT_ONBOARDING_FACTS === "1") {
-    console.warn("SKIP client-onboarding-identity: the 0204 cohort is not applied (explicit pre-integration run).");
-    t.skip("0204 cohort absent -- explicit pre-integration run");
+    console.warn("SKIP client-onboarding-identity: the 0219 cohort is not applied (explicit pre-integration run).");
+    t.skip("0219 cohort absent -- explicit pre-integration run");
     return true;
   }
-  assert.fail("the 0204 client-onboarding-facts cohort is required for a focused run: apply 0204_client_onboarding_facts.sql");
+  assert.fail("the 0219 client-onboarding-facts cohort is required for a focused run: apply 0219_client_onboarding_facts.sql");
 }
 
 function cell(name, fn) {
@@ -346,11 +346,11 @@ cell("p649.identity.floor — admin floor: a bookkeeper and a viewer get CLR04, 
     "clara_runtime");
 });
 
-cell("p649.identity.census_replay — after 0204 the 0103 privilege census over the three name_family_* helpers is STILL empty", async () => {
+cell("p649.identity.census_replay — after 0219 the 0103 privilege census over the three name_family_* helpers is STILL empty", async () => {
   // THE SUBJECT IS THE CATALOG, so this one reads as root by construction: `has_function_privilege`
   // is a system read, and asking it as a role would only tell us about that role. This is the exact
   // assertion 0103:1225-1239 makes at migration time (repeated at 0126:509 and 0154:551), re-run
-  // against the database 0204 actually left behind.
+  // against the database 0219 actually left behind.
   const r = await rootQuery(
     `select s.sig, r.rolname
        from (values ('clara.name_family_token(text)'),
@@ -360,7 +360,7 @@ cell("p649.identity.census_replay — after 0204 the 0103 privilege census over 
                           ('clara_wake_proactive'),('clara_runtime')) r(rolname)
       where has_function_privilege(r.rolname, s.sig, 'execute')`);
   assert.deepEqual(r.rows, [],
-    "0204 publishes the predicate's ANSWER through a definer wrapper precisely so no app role gains the predicate");
+    "0219 publishes the predicate's ANSWER through a definer wrapper precisely so no app role gains the predicate");
 
   // The counter-half: the WRAPPER is reachable by the human lane and by nobody else, so the
   // negative above is not merely "nothing was granted anywhere".

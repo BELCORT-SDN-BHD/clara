@@ -242,7 +242,7 @@ export function withdrawKnowledge(
 
 // =============================================================================
 // #654 — FIRM-WIDE DEFAULTS AND THE CLIENT EXCEPTIONS THAT SURVIVE THEM
-// (0205_firm_knowledge_defaults.sql).
+// (0220_firm_knowledge_defaults.sql).
 //
 // THE PROMOTION IS NOT A NEW DOOR. `clara.capture_knowledge(p_scope_kind =>
 // 'firm')` has been the promotion path since 0192 and is already admin+ by
@@ -388,7 +388,7 @@ export function loadKnowledgeApplicability(
  *
  * NO SOURCE PINS. A firm default cites no document at all here — the shipped
  * promotion path passes an empty source for the same reason (0192:1706-1711), and
- * 0205's evidence wall would refuse any document a client is filed against.
+ * 0220's evidence wall would refuse any document a client is filed against.
  *
  * TRUST TRAVELS FROM WHAT IS BEING GENERALISED: `sourceKind` is the client row's
  * own, so an extracted or inferred row cannot be laundered into an asserted firm

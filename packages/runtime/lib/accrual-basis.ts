@@ -16,7 +16,7 @@
 // that cut**: an accidental import is a hard CI reject, not a re-baseline.
 //
 // THE DATABASE IS THE AUTHORITY, ALWAYS. `clara._assert_accrual_particulars` and
-// `clara._assert_accrual_world` (migration 0207) re-check every rule below — at the door, against
+// `clara._assert_accrual_world` (migration 0222) re-check every rule below — at the door, against
 // the client's live chart, the live filings and the live 0140 term carrier. Nothing here is a rule
 // of its own: every check is a MIRROR of one the database enforces, so a preparer or a model sees
 // the mistake beside the thing that caused it instead of as a refusal a round trip later.
@@ -33,7 +33,7 @@ import { z } from "zod";
 export const START_ACCRUAL_WORK_TOOL = "start_accrual_work";
 
 /**
- * The CLOSED selection-rule set `accrual.method.rule` admits — migration 0207's own enum, restated
+ * The CLOSED selection-rule set `accrual.method.rule` admits — migration 0222's own enum, restated
  * here so the tool offers exactly what the schedule performs and a refusal can list it.
  *
  * IT SELECTS AMONG AMOUNTS A HUMAN STATED; IT COMPUTES NOTHING. That is why this is an enum rather
@@ -122,7 +122,7 @@ export const startAccrualWorkInputSchema = z
         + "The database RESOLVES it; a Knowledge preference or a remembered sentence cannot supply it.",
       ),
     effective_from: isoDate.describe("The day this accrual's authority starts. It never reaches back past this."),
-    // REQUIRED, and bracketed by the stated term (0207's SIXTH MEASUREMENT). An accrual for a
+    // REQUIRED, and bracketed by the stated term (0222's SIXTH MEASUREMENT). An accrual for a
     // service period that ends cannot authorise a schedule that does not: every occurrence must
     // post inside the term its own line names, so an open-ended accrual is a refusal rather than a
     // default. Ask the human when it stops.
@@ -207,7 +207,7 @@ function accrualDueNth(
 }
 
 /**
- * Whether this schedule reaches at least one ACCRUAL date inside `[from, to]` (0207's SEVENTH
+ * Whether this schedule reaches at least one ACCRUAL date inside `[from, to]` (0222's SEVENTH
  * MEASUREMENT). A term shorter than one period of its own schedule reaches none — measured on a rig
  * before the wall existed: a 2026-07-01..2026-07-15 term on a month-end rule was accepted, and its
  * plan then held zero occurrences for ever.
@@ -230,7 +230,7 @@ export function accrualScheduleYields(
 
 /**
  * Every shape refusal a model can act on WITHOUT a database round trip, in the DATABASE's own
- * `field` vocabulary (`accrual.<key>`, migration 0207's own spelling) so one mapper serves both
+ * `field` vocabulary (`accrual.<key>`, migration 0222's own spelling) so one mapper serves both
  * halves of the validation. The database re-checks all of these and is the authority.
  */
 export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusal | null {
@@ -300,7 +300,7 @@ export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusa
       { constraint: "after_effective_from" },
     );
   }
-  // THE SCHEDULE RUNS INSIDE THE TERM IT NAMES (0207's SIXTH MEASUREMENT, mirrored here so a model
+  // THE SCHEDULE RUNS INSIDE THE TERM IT NAMES (0222's SIXTH MEASUREMENT, mirrored here so a model
   // is told before the round trip). Otherwise an occurrence posts a line naming a period it did
   // not accrue for — measured on a rig: a June entry carrying "2026-07-01 to 2026-07-31".
   if (input.effective_from < input.service_period_start) {
@@ -323,7 +323,7 @@ export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusa
       { constraint: "within_term", service_period_end: input.service_period_end },
     );
   }
-  // …AND IT REACHES A DATE INSIDE THAT WINDOW (0207's SEVENTH MEASUREMENT). A term shorter than one
+  // …AND IT REACHES A DATE INSIDE THAT WINDOW (0222's SEVENTH MEASUREMENT). A term shorter than one
   // period of its own schedule was ACCEPTED before this wall and could never post: the accrual was
   // recorded, the plan went live, and no due date was ever reached. The refusal names the DAY RULE,
   // because the same term with a rule that falls inside it is configured — this is a wall, not a
@@ -346,7 +346,7 @@ export function localAccrualRefusal(input: StartAccrualWorkInput): AccrualRefusa
  * The `p_accrual` jsonb, in the DATABASE's own field spelling — the fourth argument of
  * `clara.create_accrual_adjustment_for`.
  *
- * IT EMITS ONLY WHAT 0207 READS. `authority_work_id`, `frequency`, `day_rule`, `day_of_month`,
+ * IT EMITS ONLY WHAT 0222 READS. `authority_work_id`, `frequency`, `day_rule`, `day_of_month`,
  * `effective_from` and `effective_to` are separate arguments of that door and are deliberately NOT
  * folded in here: a key the database never reads could carry no refusal and would be a figure
  * nobody can be held to (`periodic-adjustment-basis.ts`'s own `settled_cents` rule).
@@ -455,7 +455,7 @@ export function basisFromAccrual(
 //      (naming `answer.occurrence.work_id`, which is NULL when the authority starts in the future
 //      — say "configured, nothing due yet" rather than inventing a Work id), and the database's
 //      typed `(code, detail.reason)` handed back on a refusal. Every reason token this lane raises
-//      is listed in migration 0207's header; none of them is a new CLASS of error, so
+//      is listed in migration 0222's header; none of them is a new CLASS of error, so
 //      `claraWork.v1.errors.ts` needs no change.
 //
 // WHAT THE SUCCESSOR MUST NOT DO: mint a new claraWork bundle. An accrual occurrence runs through

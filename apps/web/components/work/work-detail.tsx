@@ -188,7 +188,7 @@ export function WorkDetailView({
   loadLinks?: typeof listEntryLinks;
   /** #638 — WHAT THIS WORK ACTUALLY IS, when its purpose cannot say. A staff expense claim is
    *  admitted with purpose `journal_entry` (the vocabulary is deliberately unwidened — migration
-   *  0206's header states why a fourth purpose cannot post), so labelling by purpose alone would
+   *  0221's header states why a fourth purpose cannot post), so labelling by purpose alone would
    *  call a claim "Journal entry" and stop. `clara.get_work_claim_origin` answers NULL for every
    *  Work that is not a claim, so this read costs one round trip and never invents an origin. */
   loadClaimOrigin?: typeof getWorkClaimOrigin;

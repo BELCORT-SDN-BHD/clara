@@ -1,13 +1,13 @@
 // #653 — THE FORM'S PURE MIRROR, driven as pure functions.
 //
 // WHAT EACH CELL PINS:
-//   tokens.*     every refusal token this surface renders a message for is one migration 0208's
+//   tokens.*     every refusal token this surface renders a message for is one migration 0223's
 //                door actually raises, spelled the DATABASE's way. A token this file invented would
 //                be a message that never appears; a token it missed would be a refusal the surface
 //                cannot name.
 //   mirror.*     the validator refuses only what the door refuses, and nothing the door accepts. It
 //                is deliberately shallow: everything that needs a row is the database's.
-//   derived.*    the cadence is a CONSTANT, not a control, and the constants are the ones 0208
+//   derived.*    the cadence is a CONSTANT, not a control, and the constants are the ones 0223
 //                derives.
 //   allocation.* the ONE arithmetic a surface may assert about numbers it did not derive — do the
 //                lines the database sent add up to the total it sent — and which line carries the
@@ -42,7 +42,7 @@ const line = (start: string, end: string, cents: number): PeriodLine => ({
 // 1 · The tokens.
 // ==============================================================================================
 
-test("tokens.database — every token this surface can render a message for is one migration 0208's door raises, in the DATABASE's own spelling", () => {
+test("tokens.database — every token this surface can render a message for is one migration 0223's door raises, in the DATABASE's own spelling", () => {
   assert.deepEqual(Object.values(PREPAYMENT_REFUSAL).sort(), [
     "amortisation_period_line_missing",
     "authority_ref_unresolved",
@@ -152,7 +152,7 @@ test("mirror.element_ids — each field's control id is stable, so a failed subm
 // 3 · The derived cadence.
 // ==============================================================================================
 
-test("derived.cadence — the cadence is a CONSTANT this module states rather than a control the form offers, and it is the one 0208 derives", () => {
+test("derived.cadence — the cadence is a CONSTANT this module states rather than a control the form offers, and it is the one 0223 derives", () => {
   assert.equal(PREPAYMENT_FREQUENCY, "monthly");
   assert.equal(PREPAYMENT_DAY_RULE, "last_day_of_month");
   assert.equal(PREPAYMENT_TIMEZONE, "Asia/Kuala_Lumpur");

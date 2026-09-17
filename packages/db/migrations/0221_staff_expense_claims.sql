@@ -1,4 +1,4 @@
--- 0206_staff_expense_claims — #638 (refresh spec #612; journeys C1, C3, C6): STAFF EXPENSE
+-- 0221_staff_expense_claims — #638 (refresh spec #612; journeys C1, C3, C6): STAFF EXPENSE
 -- CLAIMS, EMPLOYEE PAYABLES AND ADVANCE SETTLEMENT.
 -- =====================================================================================
 -- Spec of record: issue #638 — "完整处理员工报销、垫款与应付明细". Domain words: CONTEXT.md —
@@ -79,7 +79,7 @@
 -- the census. 0037's assertion is a statement about the world of 0037. Everything this file says
 -- about the hook is therefore pinned to the SIX the catalog actually holds -- and #638 adds NONE
 -- of them, which is the whole point: section 0 and section H assert the identical roster before
--- and after, so a seventh caller arriving with 0206 would be impossible to miss. `clara._record_journal_entry_core` is not one of them: it INSERTs
+-- and after, so a seventh caller arriving with 0221 would be impossible to miss. `clara._record_journal_entry_core` is not one of them: it INSERTs
 -- a draft and flips status with a bare UPDATE (0195:2098-2112). The belt, by contrast, is a
 -- DEFERRED CONSTRAINT trigger firing on EVERY approved row (0043:3176) — so on the Work lane a
 -- debit onto an enrolled advance account meets CLR40 `advance_movement_unregistered` and a credit
@@ -237,7 +237,7 @@ begin
   end loop;
 
   -- THE SIX BODIES THIS FILE EDITS NONE OF, PINNED AS NON-REGRESSIONS. They are NOT recut pins:
-  -- nothing below derives from their text. They exist so that applying 0206 on a chain where one
+  -- nothing below derives from their text. They exist so that applying 0221 on a chain where one
   -- of them has DRIFTED fails loudly here, instead of §H's re-assertion passing against a body
   -- this file never measured. MEASURED on a 0001->0198 chain (PG 17.11), never transcribed.
   for v_def, v_sha in
@@ -545,7 +545,7 @@ create table clara.staff_expense_claim_status (
 comment on table clara.staff_expense_claim_status is
   '#638: the append-only status ledger of one staff expense claim. One row per (claim, state), so '
   'every stamp is idempotent. Written by clara.admit_staff_expense_claim_work (admitted, '
-  'items_pending) and by the two triggers in 0206 section D (posted, reversed).';
+  'items_pending) and by the two triggers in 0221 section D (posted, reversed).';
 create index ix_staff_expense_claim_status_entry
   on clara.staff_expense_claim_status(entry_id) where (entry_id is not null);
 
@@ -1697,7 +1697,7 @@ grant execute on function clara.get_work_claim_origin(uuid) to clara_authenticat
 comment on function clara.get_work_claim_origin(uuid) is
   '#638: the claim a `journal_entry` Work carries, or NULL. Lets the Work list and Work detail '
   'label a staff expense claim WITHOUT a purpose value -- the purpose vocabulary is deliberately '
-  'unwidened (see 0206''s header). Viewer+, firm-scoped.';
+  'unwidened (see 0221''s header). Viewer+, firm-scoped.';
 
 reset role;
 
@@ -1738,7 +1738,7 @@ begin
   loop
     if (select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') from pg_proc p
          where p.oid = v_def::regprocedure) is distinct from v_src then
-      raise exception '#638 tail: % is NOT byte-identical to the body this file measured -- 0206 recuts nothing shared', v_def;
+      raise exception '#638 tail: % is NOT byte-identical to the body this file measured -- 0221 recuts nothing shared', v_def;
     end if;
   end loop;
 
@@ -1757,7 +1757,7 @@ begin
               || 'clara.finalize_close(uuid,text,text), '
               || 'clara.reopen_fiscal_year(uuid,text,jsonb,text,text), '
               || 'clara.reverse_entry(uuid,text,text)' then
-    raise exception '#638 tail: the subledger hook''s callers are {%} -- 0206 adds none, so this roster must be BYTE-IDENTICAL to the one section 0 measured', v_names;
+    raise exception '#638 tail: the subledger hook''s callers are {%} -- 0221 adds none, so this roster must be BYTE-IDENTICAL to the one section 0 measured', v_names;
   end if;
 
   -- (T.3) 0042 TAIL 20(a)/(b), RE-RUN AS THIS FILE'S OWN ASSERTION. WDB-G7 is unrecoverable
@@ -1917,11 +1917,11 @@ begin
   end if;
   select count(distinct registry_version)::int into v_n from clara.document_capabilities;
   if v_n <> 1 then
-    raise exception '#638 tail: clara.document_capabilities carries % registry versions -- 0206 bumps none', v_n;
+    raise exception '#638 tail: clara.document_capabilities carries % registry versions -- 0221 bumps none', v_n;
   end if;
 
-  raise notice '#638 tail OK (1/7): both purpose CHECK texts are byte-identical to 0194 and the six non-regression bodies are unchanged -- 0206 recuts nothing shared';
-  raise notice '#638 tail OK (2/7): the subledger-hook caller census is byte-identical to the six measured before this migration ran -- 0206 adds no caller';
+  raise notice '#638 tail OK (1/7): both purpose CHECK texts are byte-identical to 0194 and the six non-regression bodies are unchanged -- 0221 recuts nothing shared';
+  raise notice '#638 tail OK (2/7): the subledger-hook caller census is byte-identical to the six measured before this migration ran -- 0221 adds no caller';
   raise notice '#638 tail OK (3/7): 0042 tail 20(a)/(b) stand -- no advance/claim concept in open_items, no employee/staff counterparty kind';
   raise notice '#638 tail OK (4/7): t_je_adv_claim_application_birth sorts before t_je_adv_movement_belt and both are DEFERRABLE INITIALLY DEFERRED';
   raise notice '#638 tail OK (5/7): both new relations are RLS-forced, readable by clara_authenticated only, with zero application-role DML and every citation tenant-carrying';

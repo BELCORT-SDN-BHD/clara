@@ -17,10 +17,10 @@
 // THE CEREMONY HAPPENED AND THIS FILE IS STILL OUTSIDE IT (wave 2026-09-15 integration cut,
 // 2026-09-17). `chatTurn_v20` and `claraWork_v4` were cut and the registry repointed, and NEITHER
 // imports this module — so it is still not in `frozen-workflows.json` and the four lines at the
-// foot of this file are still owed. The reason is a MEASUREMENT, not a preference: 0208 grants
+// foot of this file are still owed. The reason is a MEASUREMENT, not a preference: 0223 grants
 // `clara.create_prepayment_schedule`, `get_prepayment_schedule`, `list_prepayment_schedules` and
-// `list_prepayment_attention` to `clara_authenticated` ALONE (`0208:1674-1677`), the door is
-// `_human_ctx`-fronted at the bookkeeper rank (`0208:1043`), `clara.prepayment_schedules` carries a
+// `list_prepayment_attention` to `clara_authenticated` ALONE (`0223:1674-1677`), the door is
+// `_human_ctx`-fronted at the bookkeeper rank (`0223:1043`), `clara.prepayment_schedules` carries a
 // NULL relacl and `clara.document_service_periods` is granted select to `clara_authenticated` only
 // (`0140:627`). The runtime pool SET ROLEs to `clara_runtime` and carries no JWT actor, so both
 // contracts at the foot of this file — the chat tool and `read_prepayment_source` — could only ever
@@ -29,7 +29,7 @@
 // a workflow cut's to write. Both stanzas stay contracts; the omission is named in
 // `docs/plan/active/refresh-wave-2026-09-15/reports/successors-final.md`.
 //
-// THE DATABASE IS THE AUTHORITY, ALWAYS. `clara.create_prepayment_schedule` (migration 0208)
+// THE DATABASE IS THE AUTHORITY, ALWAYS. `clara.create_prepayment_schedule` (migration 0223)
 // re-checks every rule below against the client's live chart, the frozen evaluator's own output
 // and the document's live service period. Nothing here is a rule of its own: every check is a
 // MIRROR of one the database enforces, so a model sees the mistake beside the thing that caused it
@@ -49,7 +49,7 @@ import { z } from "zod";
 
 export const START_PREPAYMENT_SCHEDULE_WORK_TOOL = "start_prepayment_schedule_work";
 
-/** The plan kind migration 0208 adds. Named here so the successor's part payload can echo it
+/** The plan kind migration 0223 adds. Named here so the successor's part payload can echo it
  *  without re-spelling a string the database owns. */
 export const AMORTISATION_PLAN_KIND = "amortisation_schedule";
 
@@ -106,7 +106,7 @@ export const startPrepaymentScheduleWorkInputSchema = z
 
 export type StartPrepaymentScheduleWorkInput = z.infer<typeof startPrepaymentScheduleWorkInputSchema>;
 
-/** The typed `detail.reason` tokens migration 0208's door raises, and the two 0140 tokens it
+/** The typed `detail.reason` tokens migration 0223's door raises, and the two 0140 tokens it
  *  surfaces verbatim from the frozen evaluator. Spelled here ONCE so the successor's refusal map
  *  and this module's mirror cannot drift apart. */
 export const PREPAYMENT_REFUSAL = {
@@ -299,7 +299,7 @@ export function prepaymentSchedulePart(answer: Record<string, unknown>): Prepaym
 //      `const local = localPrepaymentRefusal(input); if (local) return local;`.
 //   3. `const opKey = stableOpKey(ctx.taskId, START_PREPAYMENT_SCHEDULE_WORK_TOOL, input);` — the
 //      SAME identity discipline `start_journal_work` uses, so a re-run turn REPLAYS the schedule
-//      it already created instead of answering `prepayment_schedule_exists`. (Migration 0208 asks
+//      it already created instead of answering `prepayment_schedule_exists`. (Migration 0223 asks
 //      `_reserve_op` BEFORE the duplicate check for exactly this reason; the two halves have to
 //      agree or a lost response becomes a second question.)
 //   4. ONE query, with named arguments in the database's own spelling:
@@ -321,7 +321,7 @@ export function prepaymentSchedulePart(answer: Record<string, unknown>): Prepaym
 //      `prepayment_schedule_configured`. On a refusal: the database's typed `(code,
 //      detail.reason)` handed back, rendered with `prepaymentRefusalMessage(reason, detail)`.
 //      Every reason token this lane raises is listed in `PREPAYMENT_REFUSAL` above and in
-//      migration 0208's header; none of them is a new CLASS of error, so `claraWork.v1.errors.ts`
+//      migration 0223's header; none of them is a new CLASS of error, so `claraWork.v1.errors.ts`
 //      needs no change.
 //
 // WHAT v20 MUST NOT DO: mint a new claraWork bundle, and mint no `accounting_work.purpose`. An

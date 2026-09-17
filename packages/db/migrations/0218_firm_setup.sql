@@ -1,4 +1,4 @@
--- 0203_firm_setup — #648 (journey A5): RESUME FIRM SETUP FROM THE FACTS THAT ARE ACTUALLY MISSING.
+-- 0218_firm_setup — #648 (journey A5): RESUME FIRM SETUP FROM THE FACTS THAT ARE ACTUALLY MISSING.
 -- =====================================================================================
 -- Spec of record: issue #648, the wave brief
 -- `docs/plan/active/refresh-wave-2026-09-15/brief-648.md` and the wave rulings in

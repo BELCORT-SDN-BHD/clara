@@ -159,7 +159,7 @@ test("all FOUR recorded_via lanes render a real ArApCounterparty string — no m
     // The defect this cell exists for: a raw key path on screen instead of a sentence.
     assert.doesNotMatch(text, /ClientKnowledge\.recordedVia/, "the C13 two-value union must not be reused for a four-lane column");
     assert.doesNotMatch(text, /ArApCounterparty\.recordedVia/, "every lane resolves to a real string");
-    // The origin vocabulary widened by 0200 renders too — a row that exists must be readable
+    // The origin vocabulary widened by 0215 renders too — a row that exists must be readable
     // even though no door in this build writes it.
     assert.match(text, /Proposed by Clara/);
   });

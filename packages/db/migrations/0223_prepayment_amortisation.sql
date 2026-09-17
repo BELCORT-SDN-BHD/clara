@@ -1,4 +1,4 @@
--- 0208_prepayment_amortisation — #653 (refresh spec #612; journeys C8, C9): A RECOGNISED
+-- 0223_prepayment_amortisation — #653 (refresh spec #612; journeys C8, C9): A RECOGNISED
 -- PREPAYMENT IS AMORTISED OVER THE SERVICE PERIOD ITS DOCUMENT STATES, EXACT TO THE CENT, ONE
 -- PERIOD AT A TIME, THROUGH THE SHARED PLAN SCHEDULER.
 -- =====================================================================================
@@ -842,7 +842,7 @@ begin
   -- #653 - THE MISSING PERIOD LINE. Recorded on the occurrence rather than raised, exactly as
   -- the orphan wall below is: the refusal is legible in the plan's own history, nothing is
   -- admitted, and the SAME row becomes admissible if a schedule later covers the date. A
-  -- corrected term does NOT re-derive an existing schedule (0208 SB's own comment says why),
+  -- corrected term does NOT re-derive an existing schedule (0223 SB's own comment says why),
   -- so this is the typed way a due date outside the derived allocation answers.
   if v_line_missing then
     v_outcome := jsonb_build_object('state','refused','code','CLR10',

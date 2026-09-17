@@ -16,7 +16,7 @@
 //      `clara.admit_staff_expense_claim_work` under `withRuntime`, and then the reconciler's
 //      `accounting_work` arm — the ONLY thing that can dispatch a chat-admitted Work, because a
 //      frozen file may not import the registry to call `start()`. The Work carries purpose
-//      `journal_entry` (0206's amendment: a fourth purpose cannot post without recutting the posting
+//      `journal_entry` (0221's amendment: a fourth purpose cannot post without recutting the posting
 //      core), `clara_interpreted`, and a `chat_task` source ref naming the REAL task and session;
 //      one `clara.staff_expense_claims` row lands beside it, the run posts one approved entry whose
 //      credit leg is the employee payable, and exactly one committed receipt.
@@ -42,7 +42,7 @@
 //      BASIS did reach it.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent shared with its siblings), and
-// the file SKIPS CLEANLY when migration 0206 OR 0207 is absent — v20 wires both halves, and a green
+// the file SKIPS CLEANLY when migration 0221 OR 0222 is absent — v20 wires both halves, and a green
 // e2e against a database missing either would be a lie.
 
 import assert from "node:assert/strict";
@@ -293,11 +293,11 @@ async function main() {
   `);
   const p = probe.rows[0] ?? {};
   if (!p.claim_tbl || !p.claim_door) {
-    console.log("[v20-e2e] SKIPPED — migration 0206 (clara.staff_expense_claims + admit_staff_expense_claim_work) is not on this database");
+    console.log("[v20-e2e] SKIPPED — migration 0221 (clara.staff_expense_claims + admit_staff_expense_claim_work) is not on this database");
     process.exit(0);
   }
   if (!p.accrual_tbl || !p.accrual_door) {
-    console.log("[v20-e2e] SKIPPED — migration 0207 (clara.accrual_adjustments + create_accrual_adjustment_for) is not on this database");
+    console.log("[v20-e2e] SKIPPED — migration 0222 (clara.accrual_adjustments + create_accrual_adjustment_for) is not on this database");
     process.exit(0);
   }
   if (!p.kn_pack || !p.traces) {
@@ -334,7 +334,7 @@ async function main() {
    *
    * WHY THE ACCRUAL NEEDS ONE AT ALL, and why this test seeds it rather than letting the model name
    * something: `clara.create_accrual_adjustment_for` RESOLVES `p_authority_ref` against
-   * `clara.accounting_work` in the same firm and client (0207 §D), and refuses
+   * `clara.accounting_work` in the same firm and client (0222 §D), and refuses
    * `authority_ref_unresolved` otherwise. An accrual is an instruction, and the instruction lives on
    * a row somebody authorised — a remembered preference or a sentence in a conversation cannot
    * supply it. So this is the fixture's own authority, and the chat tool cites it by id exactly as a
@@ -426,7 +426,7 @@ async function main() {
     }
     assert.ok(claimWork, "the chat turn admitted a Work through clara.admit_staff_expense_claim_work");
     assert.equal(claimWork.purpose, "journal_entry",
-      "0206's amendment: a claim rides the EXISTING purpose — a fourth one cannot post without recutting the posting core");
+      "0221's amendment: a claim rides the EXISTING purpose — a fourth one cannot post without recutting the posting core");
     assert.equal(claimWork.adjustment_basis, null, "and it carries no adjustment basis — the particulars live in their own relation");
     assert.equal(claimWork.initiator, one.owner, "admitted for the HUMAN who was talking, not a service identity");
     assert.equal(claimWork.basis_origin, "clara_interpreted", "a chat-originated basis is labelled INTERPRETED, never user_direct");
@@ -532,7 +532,7 @@ async function main() {
       `EXACTLY ONE work_accepted card — the claim's. The accrual configured a schedule with nothing due, and an absent card`
       + ` is the honest rendering of an absent Work (parts=${JSON.stringify(parts.map((x) => x.type))})`);
     assert.equal(String(accepted[0].work_id), String(claimWork.id));
-    assert.equal(accepted[0].purpose, "journal_entry", "carrying the purpose 0206's amendment gives a claim");
+    assert.equal(accepted[0].purpose, "journal_entry", "carrying the purpose 0221's amendment gives a claim");
     assert.equal(String(accepted[0].client_id), String(one.client));
     console.log("[v20-e2e] PASS 4: the claim's particulars never reached the run, and the transcript carries exactly one card — the Work that exists");
   } finally {

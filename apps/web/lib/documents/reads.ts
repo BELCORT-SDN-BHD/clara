@@ -218,7 +218,7 @@ export async function getDocumentState(
   );
 }
 
-// --- #646 (migration 0202) --------------------------------------------------------
+// --- #646 (migration 0217) --------------------------------------------------------
 
 /** `clara.list_source_revisions(p_document uuid) -> jsonb`, STABLE — read RPC, bookkeeper+.
  *

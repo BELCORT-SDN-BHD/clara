@@ -1,6 +1,6 @@
 // #625 — clara.preview_invite(p_token): the ONE pre-password read that lets an invitee see WHICH
 // FIRM and WHICH ROLE they are about to join, before they set a password and before the
-// acceptance door runs. Migration 0209.
+// acceptance door runs. Migration 0224.
 //
 // EVERY CELL CALLS THROUGH A REAL LEAST-PRIVILEGED PERSONA. `asHumanEmail` (p4t1-fixtures.mjs:11)
 // does `set role clara_authenticated` and sets a real `request.jwt.claims` blob carrying `sub`
@@ -16,7 +16,7 @@
 //      no row;
 //   4. `token_hash` is unreachable — not in the answer, not through a table grant, and the
 //      function itself is EXECUTE-reachable by `clara_authenticated` and nobody else.
-// …plus (5) a NON-REGRESSION pin: 0209 recuts no body, so the five member doors and
+// …plus (5) a NON-REGRESSION pin: 0224 recuts no body, so the five member doors and
 // `_jwt_email()` must hash exactly as they did before it applied, and `accept_invite`'s
 // JWT-email wall must still sit BEFORE `_reserve_op` in its own stripped source.
 
@@ -30,10 +30,10 @@ import {
 import { inviteMember, revokeInvite, acceptInvite, expireInvite, freshPersona, humanEmailQuery } from "./p4t1-fixtures.mjs";
 
 const PREVIEW_DOOR = "clara.preview_invite(text)";
-const PREVIEW_MIGRATION = "0209_preview_invite.sql";
+const PREVIEW_MIGRATION = "0224_preview_invite.sql";
 
-/** The SIX bodies 0209 must leave untouched, with the sha256 of their `prosrc` MEASURED on this
- *  rig at 193 migrations (0001→0198) before 0209 existed — never transcribed from a creating
+/** The SIX bodies 0224 must leave untouched, with the sha256 of their `prosrc` MEASURED on this
+ *  rig at 193 migrations (0001→0198) before 0224 existed — never transcribed from a creating
  *  file, because several of these are splices (`set_member_role` alone was emitted at 0005:707,
  *  0145:592 and 0157:248, so a pin taken from any one of those files matches nothing).
  *  The migration's own §0 prestate carries the same six numbers and refuses to apply if one has
@@ -310,10 +310,10 @@ test("p625.preview.no_leak: a runtime session actually RAISES 42501 -- the ACL i
 });
 
 // ---------------------------------------------------------------------------
-// 5 — non-regression: 0209 recuts nothing
+// 5 — non-regression: 0224 recuts nothing
 // ---------------------------------------------------------------------------
 
-test("p625.doors.nonregression: the five member doors and _jwt_email() hash EXACTLY as they did before 0209 applied", async (t) => {
+test("p625.doors.nonregression: the five member doors and _jwt_email() hash EXACTLY as they did before 0224 applied", async (t) => {
   if (unready(t)) return;
   for (const [sig, expected] of DOOR_PINS) {
     const r = await rootQuery(
@@ -321,7 +321,7 @@ test("p625.doors.nonregression: the five member doors and _jwt_email() hash EXAC
       [sig],
     );
     assert.ok(r.rows[0], `${sig} must still resolve`);
-    assert.equal(r.rows[0].sha, expected, `${sig} has DRIFTED -- 0209 recuts no body, so this is a real regression`);
+    assert.equal(r.rows[0].sha, expected, `${sig} has DRIFTED -- 0224 recuts no body, so this is a real regression`);
   }
 });
 
@@ -387,7 +387,7 @@ test("p625.preview.issuer_rank: an invitation whose ISSUER was demoted still pre
 
   // THE DIVERGENCE ITSELF. If this ever stops refusing — or starts refusing with a different
   // code or sentence — the preview door's documented blind spot has moved and this file, the
-  // 0209 header, `apps/web/lib/firm/invite-preview.ts` and `packages/db/README.md`'s residual
+  // 0224 header, `apps/web/lib/firm/invite-preview.ts` and `packages/db/README.md`'s residual
   // must move with it.
   const refusal = await refusalOf(() => acceptInvite(invitee.sub, invitee.email, {
     token: issued.token, displayName: "Issuer Rank", opKey: opk("isr_a"),

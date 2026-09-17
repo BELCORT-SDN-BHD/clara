@@ -67,7 +67,7 @@
 //            this surface before.
 //
 //            #638 adds ONE MORE PREFIX on the same footing: `claim.<key>`, the typed particulars
-//            of a staff expense claim (migration 0206's own spelling), including the nested
+//            of a staff expense claim (migration 0221's own spelling), including the nested
 //            `claim.claimant.<key>` and the 1-BASED `claim.items[N].<key>`. The same total
 //            `_x` -> `X` re-speller serves it, so a field the schema gains cannot fall out of
 //            step. Its reasons are the database's own: `invalid_claim` folds to its `constraint`
@@ -376,7 +376,7 @@ export function toDbAdjustment(
 /**
  * #638 — THE TYPED PARTICULARS OF A STAFF EXPENSE CLAIM, translated into the database's own shape.
  *
- * SHAPE ONLY, AND DELIBERATELY THIN. `clara._assert_claim_basis` (migration 0206) is the authority
+ * SHAPE ONLY, AND DELIBERATELY THIN. `clara._assert_claim_basis` (migration 0221) is the authority
  * and re-checks every rule — the claimant handle, the two dates, the itemisation and its exact sum,
  * the settlement vocabulary, the expense class of every item account, the non-control payable, the
  * advance's own capacity. This function exists to name the FIELD for the composer and to refuse the
@@ -780,7 +780,7 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
     const constraint = detailField(err, "constraint");
     // #638 · `invalid_claim` folds on the same footing and for the same measured reason: the
     // route's own earlier validation answers bare constraint tokens (`object` / `nonempty` /
-    // `integer_cents` / `iso_date` / …) while migration 0206 answers the SAME tokens buried in
+    // `integer_cents` / `iso_date` / …) while migration 0221 answers the SAME tokens buried in
     // `detail.constraint` under `reason: "invalid_claim"`. Unfolded, the browser saw two
     // vocabularies for one refusal depending on WHICH half caught it.
     const folds = reason === "invalid_basis" || reason === "invalid_source_ref" || reason === "invalid_claim";
@@ -1038,7 +1038,7 @@ export function workRoutes(): express.Router {
   // ---- C1/C3/C6 admission: a STAFF EXPENSE CLAIM -----------------------------
   //
   // A SIBLING of `/api/work/periodic-adjustment`, not a widened version of it, and for the reason
-  // migration 0206 gives for keeping a third database door: the three take different payloads and
+  // migration 0221 gives for keeping a third database door: the three take different payloads and
   // are reached by different surfaces.
   //
   // ONE ARGUMENT, NOT TWO. Unlike the periodic-adjustment door, this one takes NO `basis`: the

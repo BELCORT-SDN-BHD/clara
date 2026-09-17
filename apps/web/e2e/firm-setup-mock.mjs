@@ -59,7 +59,7 @@ function armed(request) {
 /**
  * THE CATALOGUE, as `clara.get_firm_setup` emits it — six rows over three groups, so the walk
  * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, and a fact
- * that reaches the knowledge register. The shapes and option lists are the ones 0203 seeds from
+ * that reaches the knowledge register. The shapes and option lists are the ones 0218 seeds from
  * `clara.knowledge_keys.allowed_values`; nothing here invents a vocabulary.
  */
 const CATALOGUE = [

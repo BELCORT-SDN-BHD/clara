@@ -226,7 +226,7 @@ test("x42v.g3 the remedy the refusal names is executable: reversing the repaymen
 // re-opening the class.
 //
 // [wave 2026-09-15 integration] THAT PREDICTION CAME TRUE, ON THE APPLICATION SIDE ONLY.
-// #638 [0206] added a second application minter, and this cell went red exactly as
+// #638 [0221] added a second application minter, and this cell went red exactly as
 // `0043:1418` said it would. The VOID stamp and the soft-birth are still single-writer —
 // those two arms are unchanged below — so the chokepoint the file's law rests on (the
 // reversal re-ask at `clara._adv_on_approve`) is intact. What the application arm now
@@ -249,7 +249,7 @@ test("x42v.g4 the register's void stamp and soft-birth still have exactly ONE wr
     `exactly one body stamps the void columns (found: ${voidWriters.join(", ") || "none"})`);
 
   // THE APPLICATION SIDE GAINED A SECOND MINTER, AND THAT IS WHAT THIS ARM WAS BUILT TO CATCH.
-  // #638 [0206] added `clara._tf_adv_claim_application_birth` under DECISIONS §1.4: the Work lane
+  // #638 [0221] added `clara._tf_adv_claim_application_birth` under DECISIONS §1.4: the Work lane
   // never calls `clara._subledger_on_approve`, so `_adv_on_approve` arm (2) never runs there and a
   // staff expense claim settled against an advance registered nothing. `0043:1418` predicted
   // exactly this cell going red on "a future second writer" — so the roster is widened WITH the
@@ -326,5 +326,5 @@ test("x42v.g4 the register's void stamp and soft-birth still have exactly ONE wr
         and u.ln ~ 'perform clara\\._adv_on_approve\\(' order by 1`)).rows.map((r) => r.proname);
   assert.deepEqual(hookCallers, ["_subledger_on_approve"],
     `the advance hook has exactly one caller (found: ${hookCallers.join(", ") || "none"})`);
-  noteLane("x42v.g4: one void writer, one soft-birth writer, one hook caller — the reversal re-ask sits on the only path every mirror of every producer takes. TWO application minters since #638 [0206]: clara._adv_on_approve (cap via clara._adv_assert_proposal) and clara._tf_adv_claim_application_birth (cap directly, at COMMIT, under the advance row lock)");
+  noteLane("x42v.g4: one void writer, one soft-birth writer, one hook caller — the reversal re-ask sits on the only path every mirror of every producer takes. TWO application minters since #638 [0221]: clara._adv_on_approve (cap via clara._adv_assert_proposal) and clara._tf_adv_claim_application_birth (cap directly, at COMMIT, under the advance row lock)");
 });

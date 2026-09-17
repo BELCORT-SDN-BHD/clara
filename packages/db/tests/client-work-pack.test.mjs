@@ -1,9 +1,9 @@
-// #650 — the CLIENT WORK PACK battery for packages/db/migrations/0199_client_work_pack.sql.
+// #650 — the CLIENT WORK PACK battery for packages/db/migrations/0214_client_work_pack.sql.
 //
 // FRONTIER-GATED on the `client_work_pack$` stable stem (the `work-list.test.mjs:1-20` shape,
 // restated here for this migration's own stem so the slice-frontier legs SKIP cleanly rather
-// than red on a database pinned before 0199 lands). A skip is not evidence; the green run that
-// matters is the one on a chain that carries 0199.
+// than red on a database pinned before 0214 lands). A skip is not evidence; the green run that
+// matters is the one on a chain that carries 0214.
 //
 // WHAT THIS FILE IS ABOUT. `clara.get_client_work_pack` is the ONE client-scoped read behind the
 // client home's Work attention band: two FACETS over distinct Work ids — what is runnable or
@@ -65,12 +65,12 @@ before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud. The package-wide sweep preloads
   // `client-work-pack-preintegration-gate.mjs`, which sets the flag below to declare "a database
   // without this lane is an expected pre-integration state". A worker running this file directly
-  // against a rig that is supposed to carry 0199 sets nothing, so an absent lane fails here
+  // against a rig that is supposed to carry 0214 sets nothing, so an absent lane fails here
   // rather than reporting a green run over a file that quietly executed no assertion.
   if (!(await packLaneReady()) && process.env.CLARA_ALLOW_MISSING_CLIENT_WORK_PACK !== "1") {
     throw new Error(
       `#650: no migration matching /${STEM}/ is applied to this database, and `
-      + "CLARA_ALLOW_MISSING_CLIENT_WORK_PACK is not set. Apply 0199_client_work_pack.sql, or "
+      + "CLARA_ALLOW_MISSING_CLIENT_WORK_PACK is not set. Apply 0214_client_work_pack.sql, or "
       + "preload tests/client-work-pack-preintegration-gate.mjs if a lane-less database is "
       + "expected here.",
     );

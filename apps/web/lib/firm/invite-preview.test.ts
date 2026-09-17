@@ -1,4 +1,4 @@
-// lib/firm/invite-preview.ts — the fail-closed reading of `clara.preview_invite` (#625, 0209).
+// lib/firm/invite-preview.ts — the fail-closed reading of `clara.preview_invite` (#625, 0224).
 //
 // THE JUDGEMENT THIS FILE PINS is the one the invite surface hangs its password form on:
 // which observations are DEFINITE (a real answer, or the door's own refusal) and which are

@@ -10,7 +10,7 @@ import { rootQuery, humanQuery } from "./rig-helpers.mjs";
 
 export const opk = () => `cid-${randomUUID()}`;
 
-/** True iff 0200's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
+/** True iff 0215's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a half-applied identity lane
  *  must be visible as a defect rather than skipped as an old frontier. */
 export async function identityCohortApplied() {
@@ -86,7 +86,7 @@ export async function createCounterparty(sub, { client, kind = "vendor", name, r
   return r.rows[0].r.counterparty_id;
 }
 
-/** clara.add_counterparty_alias at its POST-0200 shape — five named args plus the defaulted
+/** clara.add_counterparty_alias at its POST-0215 shape — five named args plus the defaulted
  *  provenance trailer. The five-named-arg form (the live web door's own call,
  *  apps/web/lib/registers/counterparty-doors.ts) is exercised separately by addAliasFiveArgs. */
 export async function addAlias(sub, { client, counterparty, alias, origin = "human", basis = null,

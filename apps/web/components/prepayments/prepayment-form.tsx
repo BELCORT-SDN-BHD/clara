@@ -24,7 +24,7 @@
 //     `clara.prepayment_schedule_v1` from the recognition entry's own prepaid leg and the
 //     document's own service period. There is NO Calendar/Popover date picker on this form for the
 //     same reason: the term is not this form's to state.
-//   · THE CADENCE — monthly, each period's own month end. Migration 0208's `_assert_plan_schedule`
+//   · THE CADENCE — monthly, each period's own month end. Migration 0223's `_assert_plan_schedule`
 //     refuses a typed one for this kind, so a control here could only ever produce a refusal.
 //
 // THE PREVIEW IS A DISABLED TABLE, AFTER THE FACT. The door answers with the derived allocation;
@@ -100,7 +100,7 @@ export function PrepaymentForm({
 
   // ONE OP KEY PER SUBMITTED DECISION: minted on the first attempt and reused for every retry of
   // the SAME figures, so a lost response replays through `clara._reserve_op` rather than asking a
-  // second question. Changing a field renews it — that is a different decision. Migration 0208
+  // second question. Changing a field renews it — that is a different decision. Migration 0223
   // asks its reservation BEFORE the duplicate check so this replay actually wins.
   const opKeyRef = useRef<string | null>(null);
   const renewKey = () => {

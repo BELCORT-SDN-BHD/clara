@@ -511,7 +511,7 @@ cell("kn.18 the runtime pack answers status ok with the version it used, and rea
 // per-condition, so the shadow is too.
 // =============================================================================================
 
-// #654 (0205) CHANGED THE KEY THIS CELL USES, and nothing else about it. `sst_regime` is a
+// #654 (0220) CHANGED THE KEY THIS CELL USES, and nothing else about it. `sst_regime` is a
 // CLIENT-IDENTITY fact — one business's own SST registration status — and owner ruling D8 made
 // it un-promotable at firm scope (`clara._tf_knowledge_firm_eligibility`, CLR10
 // `knowledge_scope_not_firm_defaultable`). The SUBJECT of this cell is the per-applicability

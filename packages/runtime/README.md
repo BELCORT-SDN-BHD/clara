@@ -28,8 +28,8 @@ than promised. What each new body carries, and nothing more:
 
 * **`chatTurn_v20`** — exactly two tools over v19's map: `start_staff_expense_claim_work` (#638) and
   `start_accrual_work` (#652). NO new wire kind and NO widened `WORK_ACCEPTED_PURPOSES`: both admit
-  `journal_entry`-purpose Work (0206's amendment for the claim; 0193's `_plan_admit_occurrence` for
-  the accrual occurrence), so `apps/web`'s reader is unmoved. Deploy 0206 and 0207 first.
+  `journal_entry`-purpose Work (0221's amendment for the claim; 0193's `_plan_admit_occurrence` for
+  the accrual occurrence), so `apps/web`'s reader is unmoved. Deploy 0221 and 0222 first.
 * **`claraWork_v4`** — a knowledge-context read before the segment loop through the non-frozen
   `lib/knowledge-conflicts.mjs`, whose `knowledge_version` rides into every `model_call` execution
   trace as an observed revision (#654); two EXECUTE-LESS question tools, `answer_accrual_term`
@@ -38,7 +38,7 @@ than promised. What each new body carries, and nothing more:
   #639's dependent fixed-asset particulars question, opened by the WORKFLOW after a commit whose
   entry birthed a register row with no method or in-service date and applied through
   `clara.complete_fixed_asset_particulars_for`, which writes no journal. The roster goes from three
-  names to five and the bundle id moves to `clara-work-tools/v4`. Deploy 0192 and 0201 first.
+  names to five and the bundle id moves to `clara-work-tools/v4`. Deploy 0192 and 0216 first.
 * **`clientOnboarding_v5`** (+ `interview.v4.questions.ts`, `interview.v4.known.ts`) — `sst_no`
   gated behind `sst_regime !== 'not_registered'` (#649 H-52), a `fye_day` segment immediately after
   `fye` (#649 D7; `required_for_commit` stays FALSE), and a known-facts pre-read of
@@ -48,7 +48,7 @@ than promised. What each new body carries, and nothing more:
 
 TWO CONTRACTS THE CUT COULD NOT DELIVER, and both are grant walls rather than omissions: #653's
 `start_prepayment_schedule_work` / `read_prepayment_source` (every prepayment door and read is
-`clara_authenticated`-only, 0208 §D.1) and #647's `record_counterparty_alias` (no
+`clara_authenticated`-only, 0223 §D.1) and #647's `record_counterparty_alias` (no
 `clara.add_counterparty_alias_for` exists). Their modules are deliberately still outside every
 frozen closure.
 
@@ -150,7 +150,7 @@ that same database, and the WDK world bootstrap
 sequence.
 
 `tests/staff-expense-claim-e2e.mjs` (#638) is one of them. It SKIPS CLEANLY — exit 0, with the
-reason printed — when migration 0206 is absent (`clara.staff_expense_claims`,
+reason printed — when migration 0221 is absent (`clara.staff_expense_claims`,
 `clara.staff_expense_claim_status` and `clara.admit_staff_expense_claim_work` are probed before
 anything is spawned), so the runtime half is safe to merge before the database half lands. It
 drives `POST /api/work/staff-expense-claim` end to end: a claim row durable at ADMISSION, a run
@@ -194,7 +194,7 @@ checkpoint replays onto the same logical identity and still leaves exactly ONE r
 `clara.accrual_adjustments`; the reversal waits for the accrual's committed entry, names it and
 posts; and a cancel followed by the human's explicitly scoped `clara.request_plan_catch_up`
 produces a re-attempt under the SAME occurrence identity with one accrual record throughout. It
-SKIPS CLEANLY (exit 0, printed reason) when migration 0207 is absent, so it is safe to merge before
+SKIPS CLEANLY (exit 0, printed reason) when migration 0222 is absent, so it is safe to merge before
 the DB half lands, and `CLARA_SKIP_ACCRUAL_E2E=1` opts out. Its non-frozen basis module,
 [`lib/accrual-basis.ts`](lib/accrual-basis.ts), is unit-tested separately by
 `tests/accrual-basis-unit.test.mjs` and carries the `chatTurn` successor's wiring stanza in its own
@@ -739,7 +739,7 @@ ceremony the owner schedules; docs/PROGRESS.md carries the exact step order. Hos
 `packages/runtime/lib/counterparty-identity.ts` is the zod input schema, door-argument builder and
 refusal map for a `record_counterparty_alias` chat tool that **does not exist in this image**. The
 owner ruling this wave (`docs/plan/active/refresh-wave-2026-09-15/DECISIONS.md`, D11) is that
-migration `0200` ships identity PROVENANCE only: every identity door is granted to
+migration `0215` ships identity PROVENANCE only: every identity door is granted to
 `clara_authenticated` and to no machine role, so no workflow class can call one and no successor was
 cut for it. The module exists so the contract was reviewed rather than improvised, and it is covered
 standalone by `tests/counterparty-identity-unit.test.mjs`.
@@ -782,7 +782,7 @@ that question from a run is a FROZEN act (`claraWork.v3.tools.ts`'s `ask_questio
   `.strict()`, so a key the database would refuse cannot travel.
 * `particularsFromAnswer` — the `p_particulars` jsonb in the database's own spelling.
 * `refusalFieldForAxis` / `localParticularsRefusal` — the CLR37 axis → CONTROL map and the earlier,
-  more legible half of a validation the database owns. Every check mirrors one 0041/0201 enforces.
+  more legible half of a validation the database owns. Every check mirrors one 0041/0216 enforces.
 
 Nothing frozen imports this module today, so it is not in `frozen-workflows.json`. The moment
 `claraWork.v4.tools.ts` imports it, `scripts/check-frozen-workflows.mjs`'s IMPORT-ESCAPE hash-locks
@@ -793,7 +793,7 @@ an acquisition into an enrolled fixed-asset cost account commits through `/api/w
 its register row in the SAME transaction, a replayed intentKey births no twin, a crash between the
 database commit and the workflow checkpoint leaves the register row standing and the respawned
 engine returns the SAME asset id, and the runtime particulars door refuses a demoted initiator by
-name while writing no journal when it succeeds. It skips cleanly below migration 0201.
+name while writing no journal when it succeeds. It skips cleanly below migration 0216.
 
 ## Evaluation
 

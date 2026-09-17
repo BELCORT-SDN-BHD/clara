@@ -17,7 +17,7 @@ pnpm --filter @clara/db test
 ```
 
 A focused run of one frontier-gated battery does **not** preload those gates, which is the point:
-`tests/accrual-adjustments.test.mjs` (#652) fails loudly on a database without migration 0207
+`tests/accrual-adjustments.test.mjs` (#652) fails loudly on a database without migration 0222
 rather than skipping in silence, while the package-wide sweep's
 `tests/accrual-adjustments-preintegration-gate.mjs` turns that same absence into a counted skip.
 Run it focused with the 29 `--import ./tests/*-preintegration-gate.mjs` flags from
@@ -63,9 +63,9 @@ from the claim and never from an argument.
 `mdrw-*` (`mdrw-rank-walls`) drive the member doors' rank walls: the target-rank wall, the self-act
 refusal, the authz-before-lifecycle ordering, the replay contract and a two-session lock race.
 
-`preview-invite.test.mjs` drives `clara.preview_invite` (0209): the recipient's own read, the
+`preview-invite.test.mjs` drives `clara.preview_invite` (0224): the recipient's own read, the
 byte-identical no-oracle refusal, the three non-pending effective statuses, the grant posture, and
-the six non-regression `prosrc` pins that prove 0209 recut nothing. Its gate is
+the six non-regression `prosrc` pins that prove 0224 recut nothing. Its gate is
 `preview-invite-preintegration-gate.mjs`; a focused run leaves `CLARA_ALLOW_MISSING_PREVIEW_INVITE`
 unset and must count zero skips.
 
@@ -92,7 +92,7 @@ migration before its result counts.
 A new feature battery ships three things together: the battery itself, its own gate module beside
 it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the migration adds so
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
-`counterparty-identity-preintegration-gate.mjs` (migration `0200`, #647) is the current example.
+`counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
 
 ## Owner-level fixture DML, where it is unavoidable
 
@@ -107,7 +107,7 @@ which `uq_agent_interruptions_work_version` permits but `open_work_question` ref
 cell proves that refusal first, so the reader can tell a defence-in-depth assertion from a
 verb-reachable one).
 
-`firm-setup.test.mjs` (#648, journey A5) needs the 0203 cohort — `clara.firm_setup_keys`, the four
+`firm-setup.test.mjs` (#648, journey A5) needs the 0218 cohort — `clara.firm_setup_keys`, the four
 firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
 against a chain below that frontier FAILS by name; the package run preloads
 `firm-setup-preintegration-gate.mjs`, which turns the same absence into a loud skip. Its world is
@@ -116,7 +116,7 @@ creation, but every assertion under test runs through a least-privileged persona
 the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
 `p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent).
 
-## Firm knowledge defaults (#654, `0205_firm_knowledge_defaults.sql`)
+## Firm knowledge defaults (#654, `0220_firm_knowledge_defaults.sql`)
 
 `knowledge-firm-defaults.test.mjs` is the firm-default half of the governed Knowledge lane, above
 `knowledge-records.test.mjs` (#644, `0192`). Twenty-one cells, all through `humanQuery` at the least
@@ -138,13 +138,13 @@ rule), and the negative census proving no function outside the knowledge cohort 
 `clara.knowledge_records`.
 
 Its frontier gate is `knowledge-firm-defaults-preintegration-gate.mjs`
-(`CLARA_ALLOW_MISSING_KNOWLEDGE_FIRM_0205`), wired into the package `test` script. A package-wide run
-against a chain below `0205` SKIPS the battery loudly; a focused run (no gate preloaded) FAILS. A
+(`CLARA_ALLOW_MISSING_KNOWLEDGE_FIRM_0220`), wired into the package `test` script. A package-wide run
+against a chain below `0220` SKIPS the battery loudly; a focused run (no gate preloaded) FAILS. A
 skip is not evidence. The shared world is `knowledge-fixtures.mjs` (#644's firm, four ranks, two
 clients) plus `knowledge-firm-fixtures.mjs` (documents with and without live client filings, a live
 Work to cite, membership deactivation, a session-local `session_replication_role = 'replica'` filing
-that manufactures the pre-0205 contaminated state the retraction hatch exists for, and the runtime
-form of 0205's own violator census); the race cell additionally uses `rig-fixtures.mjs`'
+that manufactures the pre-0220 contaminated state the retraction hatch exists for, and the runtime
+form of 0220's own violator census); the race cell additionally uses `rig-fixtures.mjs`'
 `freshResolution` so the filing half can run through the real `clara.file_document` door, which
 refuses a document with no client attribution.
 
@@ -207,9 +207,9 @@ and NOTHING in the ticket reaches
 is `document-source-revision-preintegration-gate.mjs`; a focused run without that module FAILS
 rather than skipping.
 
-## `client-onboarding-identity.test.mjs` (0204, #649)
+## `client-onboarding-identity.test.mjs` (0219, #649)
 
-Thirteen cells over the two 0204 doors, every assertion under test issued through `humanQuery` as a
+Thirteen cells over the two 0219 doors, every assertion under test issued through `humanQuery` as a
 real per-role session under real RLS. `rootQuery` appears only where the subject IS the catalog
 (the `has_function_privilege` census), where a fixture is being planted, or where the ADVERSARY in a
 concurrency cell performs an acquisition no application role may issue directly (no app-role DML, so
@@ -217,7 +217,7 @@ a human session cannot take a row lock or an advisory rung at all).
 
 Frontier-gated on the live catalog through
 `client-onboarding-identity-preintegration-gate.mjs`, which the package `test` script preloads: a
-package-wide run against a chain below 0204 SKIPS loudly, a focused run FAILS. A **partial** cohort
+package-wide run against a chain below 0219 SKIPS loudly, a focused run FAILS. A **partial** cohort
 throws rather than skipping — a settle door without its identity read is a narrower boundary nobody
 chose.
 
@@ -250,7 +250,7 @@ and skips only when the package-wide sweep preloads its `*-preintegration-gate.m
 against a chain below the frontier FAILS, because a skip is not evidence.
 
 - `staff-expense-claim.test.mjs` (+ `staff-expense-claim-fixtures.mjs`) — #638, stem
-  `staff_expense_claims$` (migration 0206). Twenty-four cells over the claim lane: the Work-lane
+  `staff_expense_claims$` (migration 0221). Twenty-four cells over the claim lane: the Work-lane
   posting of a claim (claim row born at admission, one approved entry, one committed receipt, one
   `posted` status-ledger row and one `clara.op_receipts` row under the same `logical_op_id`), all
   THREE settlements posted through the real door — reimbursement, advance application and
@@ -296,5 +296,5 @@ therefore not a control account by `clara._adj_line_eligibility_breach`'s own ru
 that built its own code would measure a different estate. Posting to a control account needs a
 counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37 way.
 
-`prepayment-0208-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
+`prepayment-0223-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.

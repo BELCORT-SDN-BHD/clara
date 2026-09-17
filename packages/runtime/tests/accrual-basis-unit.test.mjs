@@ -1,7 +1,7 @@
 // #652 — THE ACCRUAL LANE'S NON-FROZEN BASIS MODULE, driven as pure functions.
 //
 // WHAT THIS FILE PINS. `lib/accrual-basis.ts` is what a MODEL's words become on their way to
-// `clara.create_accrual_adjustment_for`, and migration 0207 re-validates every rule in it and is
+// `clara.create_accrual_adjustment_for`, and migration 0222 re-validates every rule in it and is
 // the authority. These cells are the earlier, more legible half, and their job is to prove three
 // things a review cannot check by reading:
 //
@@ -12,7 +12,7 @@
 //             field path, because `apps/web/lib/work/accrual-draft.ts`'s `fieldForAccrualPath` is
 //             ONE mapper written against ONE vocabulary and a second spelling is a mapper that is
 //             right half the time (#634's lesson, restated).
-//   emit.*    `accrualFromInput` emits ONLY what 0207 reads, and `basisFromAccrual` derives the
+//   emit.*    `accrualFromInput` emits ONLY what 0222 reads, and `basisFromAccrual` derives the
 //             SAME two lines `clara._accrual_journal_basis` derives — pinned against the live
 //             function on a rig in `tests/accrual-e2e.mjs`, and here against its shape.
 
@@ -95,7 +95,7 @@ test("652.schema: the method set is closed, and it is exactly the rule the sched
 test("652.schema: the authority window is REQUIRED and bracketed by the stated term", () => {
   const bare = Object.fromEntries(Object.entries(INPUT).filter(([k]) => k !== "effective_to"));
   assert.equal(mod.startAccrualWorkInputSchema.safeParse(bare).success, false,
-    "an accrual for a term that ENDS cannot authorise a schedule that does not (0207's SIXTH MEASUREMENT)");
+    "an accrual for a term that ENDS cannot authorise a schedule that does not (0222's SIXTH MEASUREMENT)");
 });
 
 test("652.schema: an accrual of zero or a negative amount never even parses", () => {
@@ -239,7 +239,7 @@ test("652.emit: accrualFromInput lands on the DATABASE's own snake_case shape an
     + "never reads could carry no refusal");
   assert.equal(out.currency, "MYR");
   assert.deepEqual(out.method, { rule: "stated_amount" },
-    "the method crosses as the object 0207's CHECK admits — `{rule}` and nothing else");
+    "the method crosses as the object 0222's CHECK admits — `{rule}` and nothing else");
   assert.equal(out.amount_cents, 120000);
 });
 
@@ -274,7 +274,7 @@ test("652.emit: basisFromAccrual derives ONE debit on the expense leg and ONE cr
   assert.equal(b.lines[1].credit_cents, 120000);
   assert.equal(b.lines[0].description, "one period of the accrual term 2026-07-01 to 2026-07-31",
     "the term travels on the line — and says what is true of EVERY occurrence, because the basis is "
-    + "frozen on the revision and each occurrence posts one PERIOD of that term (0207's SIXTH "
+    + "frozen on the revision and each occurrence posts one PERIOD of that term (0222's SIXTH "
     + "MEASUREMENT, and clara._accrual_journal_basis's own wording)");
   const debits = b.lines.reduce((n, l) => n + l.debit_cents, 0);
   const credits = b.lines.reduce((n, l) => n + l.credit_cents, 0);

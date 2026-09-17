@@ -45,7 +45,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** The PREVIEW the fake door answers by default: a live invitation into this firm, at the role
- *  the membership row will carry. #625 — `clara.preview_invite` (0209) is called between
+ *  the membership row will carry. #625 — `clara.preview_invite` (0224) is called between
  *  verification and the password fields, so EVERY cell in this file now goes through it. */
 const PREVIEW_ROW = {
   firm_name: "ROME PROPERTIES",
@@ -902,7 +902,7 @@ test("the membership read goes out CREDENTIALED and profile-scoped — never an 
 });
 
 // ===========================================================================
-// #625 — THE PREVIEW STEP (0209), THE TWO FACE SETS, AND THE JOINED STAGE.
+// #625 — THE PREVIEW STEP (0224), THE TWO FACE SETS, AND THE JOINED STAGE.
 //
 // AC2's second half: "the accepted role and scope are visible BEFORE entering the workspace".
 // Two independent things make that true, and each has its own cells below:

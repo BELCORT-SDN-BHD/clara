@@ -1,4 +1,4 @@
-// #639 [0201, fixed-asset acquisition] — the battery's frontier gate, verb wrappers and the ONE
+// #639 [0216, fixed-asset acquisition] — the battery's frontier gate, verb wrappers and the ONE
 // world that carries BOTH the fixed-asset register (0041) and the accounting-work lane
 // (0178/0195). NOT a test file: the name does not end in `.test.mjs`, so `node --test` ignores it.
 //
@@ -38,10 +38,10 @@ export {
 };
 
 // ===========================================================================================
-// 1 · The frontier gate — on 0201's STABLE STEM, never its number (numbers are claimed at MERGE).
+// 1 · The frontier gate — on 0216's STABLE STEM, never its number (numbers are claimed at MERGE).
 // ===========================================================================================
 
-/** #639's migration STEM. `0201_fixed_asset_acquisition.sql` → `fixed_asset_acquisition$`. */
+/** #639's migration STEM. `0216_fixed_asset_acquisition.sql` → `fixed_asset_acquisition$`. */
 export const FA_ACQ_STEM = "fixed_asset_acquisition$";
 
 let _acq = null;

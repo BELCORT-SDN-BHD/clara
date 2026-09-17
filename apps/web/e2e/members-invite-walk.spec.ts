@@ -228,7 +228,7 @@ test("#625: the roster and both confirmations scan clean, and the row menu drops
 // ---------------------------------------------------------------------------------------------
 // THE PREVIEW STEP, IN A REAL BROWSER (round-1 F4).
 //
-// Migration 0209 exists for exactly ONE caller, and until these two cells every proof of it was
+// Migration 0224 exists for exactly ONE caller, and until these two cells every proof of it was
 // jsdom with a stubbed global `fetch`: no browser leg drove `/invite/:token` past `verifyOtp`, so
 // the first governed door call made on a session minted moments earlier was never exercised end
 // to end — and because an INDEFINITE read degrades silently to "password form, no preview block",

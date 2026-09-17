@@ -54,7 +54,7 @@ export type FixedAssetRow = {
    *  a client-side guess on its own — the door is still the wall. */
   disposal_draft_outstanding: boolean;
   disposal_draft_entry_id: string | null;
-  /** #639 (migration 0201) — the acquisition, projected on EVERY row shape so the register can
+  /** #639 (migration 0216) — the acquisition, projected on EVERY row shape so the register can
    *  link a row to its journal entry and its source document without a second read per row.
    *  `acquisition_document_id` is `coalesce(f.acquisition_document_id, e.document_id)` over the
    *  acquisition ENTRY: a row birthed by `clara._fa_on_approve` arm 4 carries no birth-time copy
@@ -111,7 +111,7 @@ export type FaProjectedPeriod = {
   projected_cents: number;
 };
 
-/** #639 — THE ACQUISITION AS ITS OWN FACT (`clara._fa_acquisition_json`, migration 0201).
+/** #639 — THE ACQUISITION AS ITS OWN FACT (`clara._fa_acquisition_json`, migration 0216).
  *
  *  `work_id` and `receipt_id` are DERIVED BY JOIN from the acquisition entry, never stored: the
  *  operation receipt is inserted AFTER the approve and the Work `result` is built inside the
@@ -171,7 +171,7 @@ export type FaParticularsBlock = {
 /** #639 — the correction chain, MADE VISIBLE rather than re-linked.
  *
  *  Reversing an acquisition unwinds its register row and re-booking births a NEW one keyed to the
- *  new cost line; no column links the two and 0201 adds none, because a stored link would be a
+ *  new cost line; no column links the two and 0216 adds none, because a stored link would be a
  *  claim about intent that only a human holds. Every related row therefore says HOW it was
  *  derived, and the surface renders that word. `chain_open` is true when this row's acquisition
  *  was reversed and nothing re-booked has been derived — an empty list would otherwise read as
@@ -218,7 +218,7 @@ export type FixedAssetDetail = {
    *  and depreciable. */
   schedule: FaProjectedPeriod[];
   uncharged_due: unknown[];
-  /** #639 (0201). Present on every database at or past that migration; a chain pinned below it
+  /** #639 (0216). Present on every database at or past that migration; a chain pinned below it
    *  answers `undefined`, which is why the detail surface renders each block behind its own
    *  presence check rather than assuming three keys that did not always exist. */
   acquisition?: FaAcquisition | null;

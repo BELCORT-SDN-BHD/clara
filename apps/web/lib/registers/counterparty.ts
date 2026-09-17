@@ -24,10 +24,10 @@
 // created_by, created_at, updated_at.
 //
 // clara.counterparty_aliases — still carries no clara_authenticated policy on the BASE table
-// (re-measured on the #647 rig at frontier 0200: only p_counterparty_aliases_owner and
+// (re-measured on the #647 rig at frontier 0215: only p_counterparty_aliases_owner and
 // p_counterparty_aliases_freeform), and it never will: it is the first member of
 // wave-a-shape.test.mjs's fn-fronted family. The human read is
-// `clara.counterparty_aliases_visible` (0145:960, WIDENED by 0200 to project client_id, kind,
+// `clara.counterparty_aliases_visible` (0145:960, WIDENED by 0215 to project client_id, kind,
 // origin, recorded_via, created_by and source_document_id) and
 // `clara.get_counterparty_identity` — see ./counterparty-identity.ts.
 //
@@ -95,7 +95,7 @@ export function loadCounterparties(
 
 // (The rung-0 finding that used to sit here — "retire_counterparty_alias has no honest way to
 // discover an alias id" — was taken at frontier 0140 and was already refuted by 0145:960-964.
-// It is deleted rather than amended: `clara.get_counterparty_identity` (#647, 0200 §8.2) is the
+// It is deleted rather than amended: `clara.get_counterparty_identity` (#647, 0215 §8.2) is the
 // read, `./counterparty-identity.ts` is its module, and the retire control is wired.)
 
 export type OpenItemRow = {

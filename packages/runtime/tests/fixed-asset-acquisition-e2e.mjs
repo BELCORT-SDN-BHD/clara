@@ -10,7 +10,7 @@
 //   WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:5544/clara_rt_test \
 //   node tests/fixed-asset-acquisition-e2e.mjs
 //
-// WHY THIS FILE EXISTS AT ALL. Migration 0201's birth trigger is DEFERRED: it fires at COMMIT,
+// WHY THIS FILE EXISTS AT ALL. Migration 0216's birth trigger is DEFERRED: it fires at COMMIT,
 // inside the same transaction the posting core opened, in a process the run controls. Every db
 // cell drives it through `clara.wake_record_journal_entry` on one connection; only a real Postgres
 // World with a real engine can show it surviving the things a production run actually does — an
@@ -22,7 +22,7 @@
 //      ENROLLED fixed-asset cost account produces one Work, one run served by the UNCHANGED frozen
 //      `clara-work/v3` bundle, one approved entry, one committed `clara.operation_receipts` row
 //      AND — the whole point of #639 — exactly ONE `clara.fixed_assets` row, born in the same
-//      transaction, with NO depreciation particulars. Before 0201 this POST could not commit at
+//      transaction, with NO depreciation particulars. Before 0216 this POST could not commit at
 //      all: the deferred belt refused it at COMMIT with CLR40 `fa_belt_unregistered_movement`.
 //   2. THE ACQUISITION IS COMPLETE WHILE THE PARTICULARS WAIT. The register row is `active`, its
 //      cost is exact, and `depreciation_start_date` / `useful_life_months` are NULL.
@@ -39,7 +39,7 @@
 //      exists for, because a parked question may be answered hours later.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent shared with its siblings), and
-// the file SKIPS CLEANLY when migration 0201 is absent — its runtime half merges alongside its DB
+// the file SKIPS CLEANLY when migration 0216 is absent — its runtime half merges alongside its DB
 // half, and a green e2e against a database with no acquisition birth trigger would be a lie.
 
 import assert from "node:assert/strict";
@@ -262,7 +262,7 @@ async function main() {
            to_regclass('clara.fixed_assets') is not null as reg
   `);
   if (!probe.rows[0]?.birth || !probe.rows[0]?.door || !probe.rows[0]?.reg) {
-    console.log("[fa-acq-e2e] SKIPPED — migration 0201 (t_je_fa_acquisition_birth + clara.complete_fixed_asset_particulars_for) is not on this database");
+    console.log("[fa-acq-e2e] SKIPPED — migration 0216 (t_je_fa_acquisition_birth + clara.complete_fixed_asset_particulars_for) is not on this database");
     process.exit(0);
   }
 
@@ -338,7 +338,7 @@ async function main() {
 
     const done = await pollWork(workId, one.jwt, (b) => TERMINAL.has(b.work.status), "acquisition settles");
     assert.equal(done.work.status, "completed",
-      `the acquisition COMMITS (got ${done.work.status} / ${JSON.stringify(done.work.error)}) — before 0201 this was a `
+      `the acquisition COMMITS (got ${done.work.status} / ${JSON.stringify(done.work.error)}) — before 0216 this was a `
       + "CLR40 fa_belt_unregistered_movement at COMMIT and the Work settled failed");
     assert.equal(done.work.bundle?.id, "clara-work/v3",
       "…served by the UNCHANGED frozen bundle: closing this lane needed no new workflow version");

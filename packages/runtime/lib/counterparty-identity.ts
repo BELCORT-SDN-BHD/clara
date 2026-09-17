@@ -9,7 +9,7 @@
 // and nothing about it should need to move afterwards.
 //
 // NOTHING HERE SHIPS A TOOL, AND THAT IS THE POINT. D11 (DECISIONS §0) ruled that Clara gets NO
-// identity write verb in this wave: migration 0200 ships PROVENANCE — who wrote an alias, on what
+// identity write verb in this wave: migration 0215 ships PROVENANCE — who wrote an alias, on what
 // basis, off which document — plus the correction history, and grants EXECUTE on every identity
 // door to `clara_authenticated` and to no machine role at all. So this module is a CONTRACT
 // CARRIER, unit-tested standalone, and the day the owner says yes the successor has a schema, an
@@ -24,7 +24,7 @@
 // could only return a grant refusal is not a capability, and a workflow cut does not write
 // migrations. Named in `docs/plan/active/refresh-wave-2026-09-15/reports/successors-final.md`.
 //
-// THE DATABASE IS THE AUTHORITY, ALWAYS. Every check below MIRRORS one migration 0200 enforces
+// THE DATABASE IS THE AUTHORITY, ALWAYS. Every check below MIRRORS one migration 0215 enforces
 // (its own §7.1 arms and the four CHECK constraints on `clara.counterparty_aliases`); none is a
 // rule of its own. The point of mirroring is that a model sees the mistake beside the thing that
 // caused it instead of as a round-trip refusal — never that the mirror is trusted.
@@ -35,7 +35,7 @@ import { z } from "zod";
  *  the refusal map can never drift apart by a typo. */
 export const RECORD_COUNTERPARTY_ALIAS_TOOL = "record_counterparty_alias";
 
-/** `clara.counterparty_aliases.origin`'s widened CHECK (0200 §1). `agent_proposed` is the ONE
+/** `clara.counterparty_aliases.origin`'s widened CHECK (0215 §1). `agent_proposed` is the ONE
  *  value the human door refuses and this lane exists for: an alias Clara proposes is labelled as
  *  Clara's, which is exactly what AC1's "without labelling agent writes human" asks. */
 export const ALIAS_ORIGINS = [
@@ -48,7 +48,7 @@ export type AliasOrigin = (typeof ALIAS_ORIGINS)[number];
  *  person stated it. */
 export const AGENT_ORIGINS = ["extracted", "agent_proposed"] as const;
 
-/** `clara.counterparty_aliases.recorded_via`'s four values (0200 §1). The DOOR stamps this from
+/** `clara.counterparty_aliases.recorded_via`'s four values (0215 §1). The DOOR stamps this from
  *  its own lane and never takes it from a caller — the constant exists so the successor's part
  *  rendering can name the lane it wrote under without re-deriving it. */
 export const RECORDED_VIA = ["human_ui", "agent", "seeding", "legacy_unknown"] as const;
@@ -85,7 +85,7 @@ export const recordCounterpartyAliasInputSchema = z
 export type RecordCounterpartyAliasInput = z.infer<typeof recordCounterpartyAliasInputSchema>;
 
 /** The argument list `clara.add_counterparty_alias` takes, in ITS OWN parameter order — the ten
- *  parameters 0200 §7.1 cut, with the five leading ones unchanged from 0011:1706 so the shipped
+ *  parameters 0215 §7.1 cut, with the five leading ones unchanged from 0011:1706 so the shipped
  *  web door's five-named-argument call still resolves against the same single body. */
 export type AliasDoorArgs = {
   p_client: string;
@@ -104,7 +104,7 @@ export type AliasDoorArgs = {
  * Build the door's arguments. It NEVER supplies `recorded_via`: the door stamps that from its own
  * lane, and a caller that could state it could state `human_ui`.
  *
- * NOTE FOR WHOEVER WIRES THIS. The door as cut by 0200 is `_human_ctx`-fronted at bookkeeper and
+ * NOTE FOR WHOEVER WIRES THIS. The door as cut by 0215 is `_human_ctx`-fronted at bookkeeper and
  * refuses `agent_proposed` outright, so an agent lane needs a NEW sibling door (an OBO twin in
  * the `clara.capture_knowledge_for` shape, 0192:2167 — actor-explicit, `clara_runtime`-granted,
  * verifying the named human's live membership itself). That door does not exist yet and this
@@ -133,7 +133,7 @@ export type LocalRefusal = { refusal: true; reason: string; message: string };
 
 /**
  * The shape refusals a model can act on without a database round trip — each one a MIRROR of a
- * rule 0200 enforces, named with the SAME reason token the database raises, so a reviewer reading
+ * rule 0215 enforces, named with the SAME reason token the database raises, so a reviewer reading
  * a transcript cannot tell whether the wall that fired was local or remote and does not need to.
  */
 export function localAliasRefusal(input: RecordCounterpartyAliasInput): LocalRefusal | null {
@@ -143,7 +143,7 @@ export function localAliasRefusal(input: RecordCounterpartyAliasInput): LocalRef
     || input.source_field_path !== undefined;
 
   if (input.origin === "extracted") {
-    // 0200 §7.1: an extracted alias OWES both halves of its pin (CLR10 source_incomplete), and
+    // 0215 §7.1: an extracted alias OWES both halves of its pin (CLR10 source_incomplete), and
     // the table's own ck_counterparty_aliases_extraction_required says the same thing.
     if (!input.source_document_id || !input.source_extraction_id) {
       return {
@@ -156,7 +156,7 @@ export function localAliasRefusal(input: RecordCounterpartyAliasInput): LocalRef
   } else if (hasExtractionPin) {
     // ck_counterparty_aliases_extraction_pins: a stray EXTRACTION, REGION or FIELD pin on any
     // other origin is provenance theatre, and the door refuses CLR10 source_not_extracted. A
-    // DOCUMENT-only pin is deliberately NOT refused here, because neither 0200 section 7.1's
+    // DOCUMENT-only pin is deliberately NOT refused here, because neither 0215 section 7.1's
     // guard nor ck_counterparty_aliases_extraction_pins mentions source_document_id: a mirror
     // that is stricter than the wall it mirrors would refuse locally what the door would admit.
     return {
@@ -192,7 +192,7 @@ export function localAliasRefusal(input: RecordCounterpartyAliasInput): LocalRef
 
 /**
  * The database's own typed `(code, detail.reason)` pairs for this lane, mapped to the sentence a
- * model may say. EVERY entry is a refusal migration 0200 or 0011 actually raises; nothing here
+ * model may say. EVERY entry is a refusal migration 0215 or 0011 actually raises; nothing here
  * invents a failure mode, and an unmapped pair MUST fall through to the door's own message rather
  * than being re-worded (the estate's verbatim-refusal law).
  */
@@ -234,7 +234,7 @@ export function refusalKey(code: string, reason: string | null | undefined): str
 //      identity discipline every other tool uses, so a re-run turn resolves to the alias it
 //      already recorded instead of recording a second one.
 //   4. ONE query, against whichever door the owner rules in (see `aliasDoorArgs`' own note: the
-//      0200 door is human-lane only, so an agent lane needs an OBO twin first):
+//      0215 door is human-lane only, so an agent lane needs an OBO twin first):
 //
 //        select clara.add_counterparty_alias_for(
 //          $1::uuid,  -- ctx.clientId
@@ -248,7 +248,7 @@ export function refusalKey(code: string, reason: string | null | undefined): str
 //        ) as r
 //
 //      …stamping `recorded_via = 'agent'` inside the door from its OWN lane. The caller never
-//      supplies it: `clara._tf_counterparty_alias_recorded_via` (0200 §2) refuses any row
+//      supplies it: `clara._tf_counterparty_alias_recorded_via` (0215 §2) refuses any row
 //      claiming `human_ui` with no `clara.jwt_sub()`, and a door that accepted a caller-supplied
 //      lane would make that trigger the only wall left.
 //   5. PART KIND on success: the existing generic `knowledge_recorded`-shaped acknowledgement is
@@ -263,6 +263,6 @@ export function refusalKey(code: string, reason: string | null | undefined): str
 //      `add_counterparty_alias` would widen wake reach over the HUMAN door too).
 //
 // WHAT v20 MUST NOT DO: call `clara.add_counterparty_alias` itself. That body is granted to
-// `clara_authenticated` and to no machine role (0200's tail asserts it), refuses `agent_proposed`
+// `clara_authenticated` and to no machine role (0215's tail asserts it), refuses `agent_proposed`
 // outright, and is `_human_ctx`-fronted — so a runtime call can only ever be a 42501.
 // ---------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-// #646's cohort ships as 0202_document_source_revision.sql. Every other in-flight ticket's rig
+// #646's cohort ships as 0217_document_source_revision.sql. Every other in-flight ticket's rig
 // sits below that frontier while this branch is unmerged, so package-wide CI preloads this module
 // and the battery SKIPS LOUDLY there rather than failing for being early.
 //

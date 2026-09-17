@@ -24,8 +24,8 @@
 // number — numbers are claimed at MERGE (standing law), and the `db-slice-frontiers` matrix runs
 // this package against databases pinned at EARLIER frontiers where none of these doors exists.
 //
-// THE PRE-INTEGRATION ESCAPE (`CLARA_ALLOW_MISSING_PREPAYMENT_0208`, set by
-// prepayment-0208-preintegration-gate.mjs) is the package-wide sweep's own reason to be quiet. A
+// THE PRE-INTEGRATION ESCAPE (`CLARA_ALLOW_MISSING_PREPAYMENT_0223`, set by
+// prepayment-0223-preintegration-gate.mjs) is the package-wide sweep's own reason to be quiet. A
 // FOCUSED run does not preload that module, so `assertPrepaymentCohortPresent` FAILS loudly there
 // rather than skipping in silence: a skip is not evidence (WORK-ORDER item 7).
 
@@ -87,14 +87,14 @@ export async function gatePrepayment(t) {
  *  failure, and only the package-wide sweep's preloaded gate module turns it into a skip. */
 export async function assertPrepaymentCohortPresent(t) {
   if (await prepaymentLaneReady()) return false;
-  if (process.env.CLARA_ALLOW_MISSING_PREPAYMENT_0208 === "1") {
+  if (process.env.CLARA_ALLOW_MISSING_PREPAYMENT_0223 === "1") {
     markSkip();
     t.skip("#653 prepayment-amortisation lane absent (pre-integration sweep)");
     return true;
   }
   assert.fail(
     "#653: the prepayment-amortisation lane is absent. Apply the migration, or set "
-    + "CLARA_ALLOW_MISSING_PREPAYMENT_0208=1 for the package-wide pre-integration sweep.");
+    + "CLARA_ALLOW_MISSING_PREPAYMENT_0223=1 for the package-wide pre-integration sweep.");
   return true;
 }
 
@@ -293,7 +293,7 @@ export async function relationPosture(relname) {
  *  `clara_fn_owner=X/clara_fn_owner` on every governed body in the estate, so including it would
  *  make "this function is ungranted" read as one grant on every row and the census would measure
  *  nothing. The question this instrument answers is which APPLICATION role can reach the body;
- *  the owner/definer/search_path posture is migration 0208's own tail census. */
+ *  the owner/definer/search_path posture is migration 0223's own tail census. */
 export async function functionGrants(signature) {
   const r = await rootQuery(
     `select pg_get_userbyid(a.grantee) as grantee, a.privilege_type

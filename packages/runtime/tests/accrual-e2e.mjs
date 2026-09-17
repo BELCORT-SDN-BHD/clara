@@ -44,7 +44,7 @@
 //      are compared against `clara.journal_entries` and `clara.operation_receipts` directly.
 //
 // GATED. `CLARA_SKIP_ACCRUAL_E2E=1` opts out, and the file SKIPS CLEANLY (exit 0, with a printed
-// reason) when migration 0207 is absent — its runtime half merges alongside its DB half, and a
+// reason) when migration 0222 is absent — its runtime half merges alongside its DB half, and a
 // green e2e against a database with no `clara.accrual_adjustments` would be a lie, not a pass.
 
 import assert from "node:assert/strict";
@@ -194,7 +194,7 @@ async function main() {
   `);
   const p = probe.rows[0] ?? {};
   if (!p.accrual_tbl || !p.door || !p.read_door || !p.scan) {
-    console.log("[accrual-e2e] SKIPPED — migration 0207 (clara.accrual_adjustments + its doors) is not on this database");
+    console.log("[accrual-e2e] SKIPPED — migration 0222 (clara.accrual_adjustments + its doors) is not on this database");
     process.exit(0);
   }
 
@@ -236,7 +236,7 @@ async function main() {
   const effectiveFrom = `${zone.rows[0].back.slice(0, 7)}-01`;
   const accrualDue = zone.rows[0].prev_month_end;
   // THE AUTHORITY ENDS ON THE LAST ACCRUAL IT AUTHORISES, and the stated term brackets exactly
-  // that window (0207's SIXTH MEASUREMENT): every occurrence then posts inside the term its own
+  // that window (0222's SIXTH MEASUREMENT): every occurrence then posts inside the term its own
   // line names, and the latest due date is in the past on EVERY calendar day — which is why this
   // e2e no longer skips its reversal legs at a month end (review round 1, A1 + A5). 0193's
   // `_plan_window_ceiling` (0193:1008) lifts an auto-reversing plan's ceiling to the reversal of

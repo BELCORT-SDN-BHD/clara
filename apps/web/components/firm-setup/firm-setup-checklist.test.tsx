@@ -550,7 +550,7 @@ test("fs.web.10 a settled fact keeps a correction path: a skipped one can be ans
   });
 
   // …AND AFTER A WITHDRAWAL the register no longer owns it. `clara.get_firm_setup` joins the item's
-  // record on `state = 'live'` (0203_firm_setup.sql:1016-1018), so a withdrawn fact leaves
+  // record on `state = 'live'` (0218_firm_setup.sql:1016-1018), so a withdrawn fact leaves
   // `knowledge_record_id` null — and the facts panel refuses to correct a withdrawn revision. If
   // the checklist still pointed at the panel there would be no path at all; it offers the form.
   const WITHDRAWN = {

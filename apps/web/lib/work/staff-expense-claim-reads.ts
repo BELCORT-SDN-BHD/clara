@@ -5,7 +5,7 @@
 // `clara.staff_expense_claims` to its committed `clara.operation_receipts` row and then to the
 // posted entry's live state and reversal, and caps its own answer — three things a PostgREST filter
 // chain would either re-derive in the browser or get subtly wrong. `clara.list_staff_expense_claims`
-// and `clara.get_staff_expense_claim` (migration 0206) are viewer-floored, firm+client-scoped and
+// and `clara.get_staff_expense_claim` (migration 0221) are viewer-floored, firm+client-scoped and
 // capped at 500 in ONE place, so the browser never has to be trusted with any of it.
 //
 // THE ENROLMENT REGISTER IS READ DIRECTLY UNDER RLS, not through a wrapper. `clara.staff_advance_accounts`
@@ -158,7 +158,7 @@ export type WorkClaimOrigin = {
  *
  * WHY IT EXISTS AT ALL. A staff expense claim is admitted with purpose `journal_entry` — the
  * purpose vocabulary is deliberately unwidened, because a fourth value cannot post through the
- * estate's closed posting core (migration 0206's header states the measurement). So a Work detail
+ * estate's closed posting core (migration 0221's header states the measurement). So a Work detail
  * that labelled by purpose alone would call a claim "Journal entry" and stop there. This read is
  * how the surface says WHAT it actually is, without inventing a purpose value: the door
  * (`clara.get_work_claim_origin`, the `get_work_plan_origin` precedent) is viewer-floored and

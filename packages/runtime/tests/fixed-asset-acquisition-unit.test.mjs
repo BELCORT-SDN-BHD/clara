@@ -6,7 +6,7 @@
 //
 //   fa.*      `lib/fixed-asset-acquisition.ts` — the CLOSED particulars key set, the declared
 //             question fields, the `p_particulars` builder, and the CLR37 axis → CONTROL map.
-//             Migration 0201/0041 re-validate every rule and are the authority; this is the
+//             Migration 0216/0041 re-validate every rule and are the authority; this is the
 //             earlier, more legible half whose only job is to NAME THE FIELD.
 //   clr40.*   THE SPECIFICATION #639 AC7 was missing. A commit-time CLR40 from the fixed-asset
 //             belt is a DEFERRED constraint-trigger refusal: it arrives after the operation
@@ -174,7 +174,7 @@ test("clr40.belt a commit-time fixed-asset belt refusal settles the Work FAILED 
     "#639 AC7's SPECIFIED settlement: a commit-time CLR40 settles the Work FAILED, not refused");
   assert.equal(errors.taskErrorCodeFor(c.kind), "internal");
   assert.equal(c.recoverable, false,
-    "…and it is NOT offered as a retry: after 0201 the acquisition arm can no longer raise it at "
+    "…and it is NOT offered as a retry: after 0216 the acquisition arm can no longer raise it at "
     + "all, so a surviving CLR40 is a genuine estate disagreement, never a human's mistake");
 });
 

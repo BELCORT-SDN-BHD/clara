@@ -1,5 +1,5 @@
 // #648 (journey A5) — RESUME FIRM SETUP FROM THE FACTS THAT ARE ACTUALLY MISSING.
-// Migration: 0203_firm_setup.sql. Every cell gates on the LIVE CATALOG, never on a migration
+// Migration: 0218_firm_setup.sql. Every cell gates on the LIVE CATALOG, never on a migration
 // number (`firmSetupCohortApplied` below).
 //
 // WHAT THESE CELLS ARE FOR. #648's acceptance is mostly a claim about what the DATABASE does with
@@ -30,7 +30,7 @@ const EXPECTED_CELLS = 17;
 let live = false;
 let executed = 0;
 
-/** True iff 0203's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
+/** True iff 0218's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a half-applied firm setup lane
  *  must be visible as a defect rather than skipped as an old frontier. */
 async function firmSetupCohortApplied() {
@@ -61,12 +61,12 @@ after(async () => {
 
 function gate(t) {
   if (live) return false;
-  if (process.env.CLARA_ALLOW_MISSING_FIRM_SETUP_0203 === "1") {
-    console.warn("SKIP firm-setup: the 0203 cohort is not applied (explicit pre-integration run).");
+  if (process.env.CLARA_ALLOW_MISSING_FIRM_SETUP_0218 === "1") {
+    console.warn("SKIP firm-setup: the 0218 cohort is not applied (explicit pre-integration run).");
     t.skip("firm setup cohort absent -- explicit pre-integration run");
     return true;
   }
-  assert.fail("the 0203 firm setup cohort is required for a focused run: apply 0203_firm_setup.sql");
+  assert.fail("the 0218 firm setup cohort is required for a focused run: apply 0218_firm_setup.sql");
 }
 
 function cell(name, fn) {
@@ -815,7 +815,7 @@ cell("p648.isolation.oracle firm B's admin naming firm A's real plan id is refus
   assert.equal(item.state, "pending");
 });
 
-cell("p648.acl.census every 0203 name is clara_authenticated-only; no runtime, agent or wake role reaches one", async () => {
+cell("p648.acl.census every 0218 name is clara_authenticated-only; no runtime, agent or wake role reaches one", async () => {
   const granted = [
     "clara.seed_firm_setup_plan(text)",
     "clara.answer_firm_setup_item(uuid,uuid,text,jsonb,text)",

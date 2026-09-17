@@ -68,7 +68,7 @@ import { SettledOnboardingCard } from "./OnboardingSettledCard";
 
 /** The plan's own recorded financial-year-end MONTH, or `null`.
  *
- *  Reads the same two honest shapes `clara._plan_fye_month` reads (0204 §2): the interview writes
+ *  Reads the same two honest shapes `clara._plan_fye_month` reads (0219 §2): the interview writes
  *  a JSON NUMBER (`validateFye` returns 1-12, and 0192's map row says so), and a human resolution
  *  through `clara.resolve_onboarding_plan_item` writes `to_jsonb(p_resolution)` — a STRING. Any
  *  other shape reads as ABSENT here exactly as it does there, so the description this drives never

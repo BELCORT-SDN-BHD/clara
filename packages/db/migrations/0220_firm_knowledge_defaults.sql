@@ -1,4 +1,4 @@
--- 0205_firm_knowledge_defaults — #654 (parent spec #612; wayfinder resolution #603 Q22; owner
+-- 0220_firm_knowledge_defaults — #654 (parent spec #612; wayfinder resolution #603 Q22; owner
 -- ruling D8/D9, wave 2026-09-15; journeys C13 / B6 / D2): WHICH KNOWLEDGE MAY BECOME A FIRM-WIDE
 -- DEFAULT, WHAT A FIRM DEFAULT MAY CITE, AND WHAT A CLIENT'S OWN EXCEPTION STILL MEANS AFTERWARDS.
 -- =====================================================================================
@@ -202,7 +202,7 @@ begin
 
   -- (2) NOTHING OF THIS FILE EXISTS YET. Append-only means not re-runnable.
   if to_regclass('clara.knowledge_key_firm_eligibility') is not null then
-    raise exception '#654 prestate: clara.knowledge_key_firm_eligibility already exists -- 0205 is append-only and is not re-runnable'
+    raise exception '#654 prestate: clara.knowledge_key_firm_eligibility already exists -- 0220 is append-only and is not re-runnable'
       using errcode='CLR10';
   end if;
   if to_regprocedure('clara.list_firm_knowledge()') is not null
@@ -1066,7 +1066,7 @@ begin
       'clara.list_client_knowledge(uuid)',
       'clara.get_knowledge_pack(uuid,text,uuid)'] loop
     if to_regprocedure(v_s) is null then
-      raise exception '#654 tail: % no longer resolves -- 0205 must recut none of 0192''s bodies', v_s
+      raise exception '#654 tail: % no longer resolves -- 0220 must recut none of 0192''s bodies', v_s
         using errcode='CLR10';
     end if;
   end loop;

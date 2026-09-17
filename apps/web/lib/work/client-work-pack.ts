@@ -1,5 +1,5 @@
 // #650 (journey A-home) — the wire contract for `clara.get_client_work_pack`
-// (packages/db/migrations/0199_client_work_pack.sql), and the ONE place this codebase turns a
+// (packages/db/migrations/0214_client_work_pack.sql), and the ONE place this codebase turns a
 // Work attention facet into the URL of the list that owns it.
 //
 // TWO FACETS COME BACK, THREE TILES GO ON THE PAGE, and the asymmetry is deliberate rather than
@@ -38,7 +38,7 @@ export type ClientWorkPackOptions = {
   preview?: number;
 };
 
-/** The door's own default preview size (0199: `p_preview int default 5`). */
+/** The door's own default preview size (0214: `p_preview int default 5`). */
 export const CLIENT_WORK_PACK_PREVIEW = 5;
 
 /** The three attention facets this board shows. `needs_you` is NOT served by this door — it is

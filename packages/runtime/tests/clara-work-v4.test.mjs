@@ -98,7 +98,7 @@ test("v4.roster: the builder returns EXACTLY the hashed bundle's names, and the 
 
 test("v4.roster: #653's read_prepayment_source is ABSENT, and the frozen no-source sentence is unchanged", () => {
   // The measurement, written where it can be re-checked: every prepayment read is
-  // `clara_authenticated`-only (0208 §D.1) and no machine role holds select on
+  // `clara_authenticated`-only (0223 §D.1) and no machine role holds select on
   // `clara.prepayment_schedules` or `clara.document_service_periods`, so the tool could only ever
   // return a grant refusal. Because the tool is absent, the prompt's own "no source document"
   // sentence must NOT have been relaxed either — a prompt that invited a citation the roster cannot

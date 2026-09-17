@@ -248,7 +248,7 @@ cell("kp.08 an OPEN plan promotes nothing, and a firm plan needs the explicit fi
   const ok = await promoteAsHuman(w.admin, firmPlan, { firmScope: true });
   assert.equal(ok.scope_kind, "firm");
   assert.equal(ok.client_id, null);
-  // #654 (0205): THE FIRM-SCOPE ELIGIBILITY WALL NOW REACHES THIS DOOR, and that is the intended
+  // #654 (0220): THE FIRM-SCOPE ELIGIBILITY WALL NOW REACHES THIS DOOR, and that is the intended
   // consequence of owner ruling D8 rather than a regression. `currency` maps to
   // `default_currency`, one of the three keys a firm may default; `fye` maps to
   // `financial_year_end_month`, a CLIENT-IDENTITY fact ("this business closes in December") that a

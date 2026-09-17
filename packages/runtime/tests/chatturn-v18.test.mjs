@@ -139,8 +139,8 @@ test("623.v18: the registry comment states the deploy order in the direction tha
   // …and so does the wave 2026-09-15 successor. EVERY repoint in this paragraph owes the same
   // sentence, which is the actual contract this cell holds: a reader of registry.ts must be able to
   // learn the deploy order for the CURRENT pin without opening a migration.
-  assert.match(flat, /MIGRATIONS 0206 AND 0207 MUST BE LIVE BEFORE THIS\s+IMAGE SERVES A TURN/, "v20 names its own two migrations and the direction");
-  assert.match(flat, /REVERSE order\s+is FREE: 0206 and 0207/, "and says the reverse order costs nothing for those two as well");
+  assert.match(flat, /MIGRATIONS 0221 AND 0222 MUST BE LIVE BEFORE THIS\s+IMAGE SERVES A TURN/, "v20 names its own two migrations and the direction");
+  assert.match(flat, /REVERSE order\s+is FREE: 0221 and 0222/, "and says the reverse order costs nothing for those two as well");
 });
 
 // --- 2. the predecessors did not move --------------------------------------

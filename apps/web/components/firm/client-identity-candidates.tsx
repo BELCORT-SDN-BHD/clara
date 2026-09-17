@@ -20,7 +20,7 @@ import { useTranslations } from "next-intl";
 import { Badge } from "@/components/parts/PartBadge";
 import type { ClientIdentityCandidate } from "@/lib/onboarding/identity";
 
-/** The `match_reason` values 0204 emits. An unrecognised one renders its own raw token rather
+/** The `match_reason` values 0219 emits. An unrecognised one renders its own raw token rather
  *  than being folded into a known arm — a later migration's fourth reason must read honestly. */
 const KNOWN_REASONS = new Set(["exact_name", "name_family", "identifier"]);
 const KNOWN_KINDS = new Set(["client", "counterparty"]);

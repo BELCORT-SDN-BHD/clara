@@ -7,7 +7,7 @@
 // nothing about it, and the human had to go and find the register. AC5 asks the linked Work
 // surface to show the completed acquisition.
 //
-// DERIVED, NOT STORED, AND THROUGH A DOOR THAT ALREADY EXISTS. Migration 0201 projects
+// DERIVED, NOT STORED, AND THROUGH A DOOR THAT ALREADY EXISTS. Migration 0216 projects
 // `acquisition_entry_id` on EVERY register row shape (`clara._fa_asset_json`), so the asset this
 // Work created is the row whose acquisition entry is the Work's own posted entry. That is one
 // viewer-floored read of a register the reader may already see, not a new door and not a new

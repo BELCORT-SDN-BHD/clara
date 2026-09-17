@@ -1,5 +1,5 @@
 // #638 — STAFF EXPENSE CLAIMS, EMPLOYEE PAYABLES AND ADVANCE SETTLEMENT.
-// Migration: 0206_staff_expense_claims.sql.
+// Migration: 0221_staff_expense_claims.sql.
 //
 // Frontier-gated on the `staff_expense_claims$` stem (and on #623's own stem for the Work verbs it
 // drives), so `db-slice-frontiers` legs pinned below either migration skip cleanly.
@@ -275,7 +275,7 @@ test("p638.claim.settled an already-settled claim posts the expense debits again
 // 2 · p638.core.no_regression — #638 recuts nothing shared.
 // ===========================================================================================
 
-test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are byte-identical after 0206", async (t) => {
+test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are byte-identical after 0221", async (t) => {
   if (await gateSec(t)) return;
   const EXPECT = "CHECK ((purpose = ANY (ARRAY['journal_entry'::text, "
     + "'periodic_stock_adjustment'::text, 'payroll_obligation'::text])))";
@@ -291,7 +291,7 @@ test("p638.core.no_regression both purpose CHECKs and the six pinned bodies are 
   }
   // The six bodies #638 edits none of. The migration's own §H pins them by sha; this cell proves
   // they are still REACHABLE and unchanged from the outside, so a later recut in another branch
-  // that merged after 0206 shows up here rather than nowhere.
+  // that merged after 0221 shows up here rather than nowhere.
   const SIGS = [
     "clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)",
     "clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)",
@@ -742,7 +742,7 @@ test("p638.walls 0042 tail 20(a)/(b) are live, a payable-class leg still refuses
   //   * The CLAIM door refuses it at admission by its own name, so the preparer learns which
   //     control it is that cannot carry money owed to a person.
   //   * The POSTING CORE still refuses any payable/receivable-class leg with `generic_control_leg`
-  //     (0195:2021-2028) — unchanged by 0206, and proved here through the plain journal lane so
+  //     (0195:2021-2028) — unchanged by 0221, and proved here through the plain journal lane so
   //     the claim door's earlier refusal can never be mistaken for the wall itself.
   const client = await secClient("controlleg");
   const c = claim({ payableAccountCode: SECHART.control });

@@ -6,7 +6,7 @@
 // database's own rules NOW, while the migration that states them is in front of the reviewer.
 //
 // Every expectation below cites the wall it mirrors in
-// packages/db/migrations/0200_counterparty_identity_provenance.sql.
+// packages/db/migrations/0215_counterparty_identity_provenance.sql.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -30,10 +30,10 @@ const proposal = (over = {}) => ({
   ...over,
 });
 
-test("ci.1 the vocabulary matches 0200's own CHECK constraints, value for value", () => {
+test("ci.1 the vocabulary matches 0215's own CHECK constraints, value for value", () => {
   assert.deepEqual([...ALIAS_ORIGINS],
     ["former_name", "trade_name", "human", "extracted", "agent_proposed"],
-    "counterparty_aliases_origin_check, as 0200 §1 widened it");
+    "counterparty_aliases_origin_check, as 0215 §1 widened it");
   assert.deepEqual([...RECORDED_VIA], ["human_ui", "agent", "seeding", "legacy_unknown"],
     "ck_counterparty_aliases_recorded_via — four values, not knowledge_records' two");
   // An AGENT lane may say where it read a name, or that it is proposing one. It may never say a
@@ -63,7 +63,7 @@ test("ci.2 the input schema is .strict() — an invented key is a refusal, never
   assert.equal(recordCounterpartyAliasInputSchema.safeParse(proposal({ counterparty_id: "not-a-uuid" })).success, false);
 });
 
-test("ci.3 the door arguments are built in 0200's own parameter spelling, and NEVER carry a lane", () => {
+test("ci.3 the door arguments are built in 0215's own parameter spelling, and NEVER carry a lane", () => {
   const args = aliasDoorArgs(
     recordCounterpartyAliasInputSchema.parse(proposal({
       origin: "extracted", source_document_id: DOC, source_extraction_id: EXT,
@@ -95,7 +95,7 @@ test("ci.3 the door arguments are built in 0200's own parameter spelling, and NE
     [null, null, null, null],
   );
   // The alias is sent AS TYPED (trimmed only). Normalisation is the database's
-  // (`lower(regexp_replace(...))`, 0200 §7.1) and a client-side copy is exactly the drift the
+  // (`lower(regexp_replace(...))`, 0215 §7.1) and a client-side copy is exactly the drift the
   // house rule forbids.
   assert.equal(
     aliasDoorArgs(recordCounterpartyAliasInputSchema.parse(proposal({ alias: "  Acme  Trading  " })), { clientId: "c", opKey: "o" }).p_alias,
@@ -103,7 +103,7 @@ test("ci.3 the door arguments are built in 0200's own parameter spelling, and NE
   );
 });
 
-test("ci.4 every local refusal MIRRORS a 0200 wall and uses the database's own reason token", () => {
+test("ci.4 every local refusal MIRRORS a 0215 wall and uses the database's own reason token", () => {
   // ck_counterparty_aliases_extraction_required / CLR10 source_incomplete.
   const halfPin = localAliasRefusal({ ...proposal({ origin: "extracted", source_document_id: DOC }) });
   assert.equal(halfPin?.reason, "source_incomplete");
@@ -112,7 +112,7 @@ test("ci.4 every local refusal MIRRORS a 0200 wall and uses the database's own r
   const strayPin = localAliasRefusal({ ...proposal({ source_extraction_id: EXT }) });
   assert.equal(strayPin?.reason, "source_not_extracted");
   // …but a DOCUMENT-only pin on a non-extracted origin is NOT refused, because the door does not
-  // refuse it either: 0200 section 7.1 tests only the extraction/region/field pins, and
+  // refuse it either: 0215 section 7.1 tests only the extraction/region/field pins, and
   // ck_counterparty_aliases_extraction_pins names the same three columns. A carrier stricter than
   // the wall it claims to mirror would refuse locally what the door would admit.
   const strayDoc = localAliasRefusal({ ...proposal({ source_document_id: DOC }) });
@@ -124,7 +124,7 @@ test("ci.4 every local refusal MIRRORS a 0200 wall and uses the database's own r
   });
   assert.equal(orphanRegion?.reason, "source_incomplete");
 
-  // The normalisation must leave something: 0200 §7.1 raises CLR10 on an alias of punctuation.
+  // The normalisation must leave something: 0215 §7.1 raises CLR10 on an alias of punctuation.
   assert.equal(localAliasRefusal({ ...proposal({ alias: "--- ---" }) })?.reason, "alias_unusable");
 
   // …and the two LAWFUL shapes pass through untouched, which is what makes the four above

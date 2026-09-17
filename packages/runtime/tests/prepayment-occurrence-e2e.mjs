@@ -40,7 +40,7 @@
 // evidence. It is not a provider run and it is not hosted evidence.
 //
 // GATED. `CLARA_SKIP_PREPAYMENT_E2E=1` opts out, and the file SKIPS CLEANLY (exit 0, with a
-// printed reason) when migration 0208 is absent — its runtime half merges alongside its DB half,
+// printed reason) when migration 0223 is absent — its runtime half merges alongside its DB half,
 // and a green e2e against a database with no `clara.prepayment_schedules` would be a lie.
 
 import assert from "node:assert/strict";
@@ -177,7 +177,7 @@ async function main() {
   `);
   const p0 = probe.rows[0] ?? {};
   if (!p0.rel || !p0.door || !p0.resolver || !p0.evaluator) {
-    console.log("[prepay-e2e] SKIPPED — migration 0208 (clara.prepayment_schedules + clara.create_prepayment_schedule) is not on this database");
+    console.log("[prepay-e2e] SKIPPED — migration 0223 (clara.prepayment_schedules + clara.create_prepayment_schedule) is not on this database");
     process.exit(0);
   }
 

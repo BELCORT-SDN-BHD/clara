@@ -14,7 +14,7 @@ const refusal = (detail: Record<string, unknown> | null) =>
   });
 
 test("every axis clara._fa_validate_particulars raises maps to a control or to NOTHING, deliberately", () => {
-  // The closed axis set the door raises, transcribed from 0041:2970-3033 + 0201 §D.
+  // The closed axis set the door raises, transcribed from 0041:2970-3033 + 0216 §D.
   for (const axis of ["method", "drivers", "start_date", "residual", "non_depreciable", "lifecycle", "unknown_key", "malformed", "shape"]) {
     assert.ok(axis in FA_REFUSAL_AXIS_FIELD, `the map must answer for axis '${axis}'`);
   }

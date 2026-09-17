@@ -1,19 +1,19 @@
-// #647 — COUNTERPARTY IDENTITY: the three reads 0200 ships, and nothing else.
+// #647 — COUNTERPARTY IDENTITY: the three reads 0215 ships, and nothing else.
 //
 // Every signature below transcribes `packages/db/migrations/
-// 0200_counterparty_identity_provenance.sql`'s own `jsonb_build_object(...)` tail exactly, not a
+// 0215_counterparty_identity_provenance.sql`'s own `jsonb_build_object(...)` tail exactly, not a
 // guess, the same way ./counterparty-doors.ts's header describes.
 //
-//   clara.get_counterparty_identity(p_client, p_counterparty) — 0200 §8.2. viewer+.
+//   clara.get_counterparty_identity(p_client, p_counterparty) — 0215 §8.2. viewer+.
 //     Refuses CLR11 when the client is not in the caller's firm or the counterparty is not that
 //     client's. Returns {client_id, as_of, current, aliases, identifier_revisions, merges,
 //     conflicts}. `identifier_revisions` carries EVERY act, not only identifier ones: there is
 //     ONE revision relation by orchestrator ruling and this is the key name the brief fixed.
-//   clara.list_counterparty_identity(p_client, p_kind) — 0200 §8.3. viewer+. A NULL kind means
+//   clara.list_counterparty_identity(p_client, p_kind) — 0215 §8.3. viewer+. A NULL kind means
 //     BOTH roles, which is a different answer from a role that happens to be empty. Every count
 //     is computed in the database from the relations themselves (H-34: a surface may never show
 //     a number no read produced).
-//   clara.list_counterparty_merge_corrections(p_client) — 0200 §8.4. viewer+. AC3's bounded
+//   clara.list_counterparty_merge_corrections(p_client) — 0215 §8.4. viewer+. AC3's bounded
 //     discovery: which merges a correction could even be described for. There is NO un-merge
 //     door and this module exports no call that pretends otherwise.
 //
@@ -27,13 +27,13 @@ import type { CounterpartyKind } from "./counterparty";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
-/** The four LANES a row can have been written by (0200's `recorded_via` CHECK). Deliberately
+/** The four LANES a row can have been written by (0215's `recorded_via` CHECK). Deliberately
  *  NOT `clara.knowledge_records`' two-value union: that column names a ROLE, this one names a
  *  lane, and `lib/registers/knowledge.ts`'s `KnowledgeRecordRow` must not be widened to carry
  *  these — it is #654's register and `ClientKnowledge.recordedVia` has exactly two keys. */
 export type IdentityRecordedVia = "human_ui" | "agent" | "seeding" | "legacy_unknown";
 
-/** 0200's widened `origin` CHECK. `agent_proposed` is reachable from no door in this build —
+/** 0215's widened `origin` CHECK. `agent_proposed` is reachable from no door in this build —
  *  it is declared so the successor contract has a value to write — and is still rendered,
  *  because a row that exists must be readable. */
 export type CounterpartyAliasOriginRead =

@@ -35,7 +35,7 @@
 // "no source document" sentence below is UNCHANGED from v3's. That stanza needs a runtime-readable
 // prepayment read, and there is none: `clara.get_prepayment_schedule`,
 // `clara.list_prepayment_schedules` and `clara.list_prepayment_attention` are granted to
-// `clara_authenticated` alone (0208 §D.1), `clara.prepayment_schedules` carries no select for any
+// `clara_authenticated` alone (0223 §D.1), `clara.prepayment_schedules` carries no select for any
 // machine role, and `clara.document_service_periods` carries none either. A tool that could only
 // return a grant refusal is not a capability, and writing the migration that would grant one is
 // not a workflow cut's act. The contract stays in `lib/prepayment-schedule-basis.ts`'s footer.

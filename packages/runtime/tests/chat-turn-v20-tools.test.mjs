@@ -14,7 +14,7 @@
 //      #653's nor #647's contracts crept in.
 //   2. NO NEW WIRE KIND, AND NO WIDENED PURPOSE. Both new tools mint `work_accepted` with purpose
 //      `journal_entry`, which `WORK_ACCEPTED_PURPOSES_V19` already names, so `apps/web`'s reader is
-//      unmoved. That is 0206's amendment and 0193's `_plan_admit_occurrence` showing up in the wire
+//      unmoved. That is 0221's amendment and 0193's `_plan_admit_occurrence` showing up in the wire
 //      vocabulary as an ABSENCE of work, and it is worth asserting positively.
 //   3. THE LOCAL REFUSALS COME FIRST, BY FIELD NAME. A claim whose items do not sum, and an accrual
 //      whose authority window falls outside its own stated term, are refused BEFORE any round trip
@@ -114,7 +114,7 @@ test("v20.roster: the two contracts this cut could NOT deliver are absent BY NAM
   // which is where the door's grant is written down.
   const v20 = Object.keys(v20Tools.buildToolsV20(CTX, MODEL, 0));
   assert.ok(!v20.includes("start_prepayment_schedule_work"),
-    "#653's tool needs an OBO twin of clara.create_prepayment_schedule, which is _human_ctx-fronted and clara_authenticated-only (0208 §D.1)");
+    "#653's tool needs an OBO twin of clara.create_prepayment_schedule, which is _human_ctx-fronted and clara_authenticated-only (0223 §D.1)");
   assert.ok(!v20.includes("record_counterparty_alias"),
     "#647's tool needs clara.add_counterparty_alias_for, which no branch of this wave shipped (DECISIONS D11)");
 });
@@ -186,7 +186,7 @@ test("v20.parts: both new tools mint work_accepted with a purpose v19 ALREADY na
   });
   assert.ok(claimCard, "a claim admission mints a card");
   assert.equal(claimCard.purpose, "journal_entry",
-    "a staff expense claim IS a journal_entry Work (0206's amendment: a fourth purpose cannot post without recutting the posting core)");
+    "a staff expense claim IS a journal_entry Work (0221's amendment: a fourth purpose cannot post without recutting the posting core)");
   assert.ok(v19Parts.WORK_ACCEPTED_PURPOSES_V19.includes(claimCard.purpose), "so no widening is owed");
 });
 

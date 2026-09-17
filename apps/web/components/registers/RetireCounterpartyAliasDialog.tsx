@@ -5,7 +5,7 @@
 // WIRED SINCE #647. It used to sit here unreachable: the previous build had no honest way to
 // discover an alias's id, so offering the control would have been offering a dead one. Both
 // reads that fix that now exist — `clara.counterparty_aliases_visible` was widened in place by
-// 0200 §8.1 and `clara.get_counterparty_identity` (0200 §8.2) projects each alias's id beside
+// 0215 §8.1 and `clara.get_counterparty_identity` (0215 §8.2) projects each alias's id beside
 // its provenance — and the identity detail renders this dialog per live alias.
 //
 // A RETIREMENT IS NOT DESTRUCTIVE, so this stays a plain Dialog rather than an Alert Dialog

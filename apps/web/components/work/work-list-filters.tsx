@@ -57,7 +57,7 @@ import {
  *  could not name two of the three values the column admits. DECISIONS §1.7 gives this vocabulary
  *  one owner so all four surfaces are corrected together. A staff expense claim is deliberately NOT
  *  a fourth value: it is admitted as `journal_entry` and identified through
- *  `clara.get_work_claim_origin` (migration 0206's header says why). */
+ *  `clara.get_work_claim_origin` (migration 0221's header says why). */
 const KNOWN_PURPOSES = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation"] as const;
 
 const ALL = "__all__";

@@ -86,7 +86,7 @@ async function fillForm(page: Page, opts: { liability?: string; purpose?: string
   await page.getByLabel("Liability account").selectOption(opts.liability ?? "2020");
   await page.getByLabel("The instruction, in the client's own terms")
     .fill("The client's standing instruction of 2026-06-30, minuted by the engagement partner.");
-  // THE AUTHORITY WINDOW SITS INSIDE THE STATED TERM (0207's SIXTH MEASUREMENT): the form
+  // THE AUTHORITY WINDOW SITS INSIDE THE STATED TERM (0222's SIXTH MEASUREMENT): the form
   // refuses a schedule that would post outside the period it names, before any round trip.
   await page.getByLabel("Authority starts").fill("2026-07-01");
   await page.getByLabel("Authority ends").fill("2026-07-31");
@@ -129,7 +129,7 @@ test("accrual.walk.evidenced: the detail carries the particulars, the authority,
 
   // THE TERM AND ITS LAW, together. The term appears TWICE on this page — once as the service
   // period and once as the authority window — because this accrual accrues one stated period and
-  // its schedule runs exactly inside it (0207's SIXTH MEASUREMENT: the window is bracketed by the
+  // its schedule runs exactly inside it (0222's SIXTH MEASUREMENT: the window is bracketed by the
   // term, so every entry posts within the period it names).
   await expect(page.getByText("2026-07-01 to 2026-07-31")).toHaveCount(2);
   await expect(page.getByText("2026-07-01 to 2026-07-31").first()).toBeVisible();

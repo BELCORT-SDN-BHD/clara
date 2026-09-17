@@ -1,13 +1,13 @@
 // #654 — the shared world for the FIRM-DEFAULT battery (NOT a test file: the name does not end
 // in `.test.mjs`). It builds on #644's `knowledge-fixtures.mjs` rather than re-minting a firm,
-// four ranks and two clients: the subject here is what 0205 adds ON TOP of 0192, so the world is
-// 0192's own and only the things 0205 reasons about (the eligibility catalog, a document with and
+// four ranks and two clients: the subject here is what 0220 adds ON TOP of 0192, so the world is
+// 0192's own and only the things 0220 reasons about (the eligibility catalog, a document with and
 // without live client filings, a live Work to cite) are minted here.
 
 import { randomUUID } from "node:crypto";
 import { asRoot, rootQuery } from "./rig-helpers.mjs";
 
-/** True iff 0205's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
+/** True iff 0220's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a half-applied firm-default
  *  lane must be visible as a defect rather than skipped as an old frontier.
  *
@@ -102,15 +102,15 @@ export async function deactivateMembership(firm, user) {
   );
 }
 
-/** A filing that is REFUSED by 0205's `t_document_filings_firm_knowledge` wall today, made
- *  anyway — the only way to reach the contaminated state a database PREDATING 0205 could hold.
+/** A filing that is REFUSED by 0220's `t_document_filings_firm_knowledge` wall today, made
+ *  anyway — the only way to reach the contaminated state a database PREDATING 0220 could hold.
  *
  *  `session_replication_role = 'replica'` suppresses non-ALWAYS triggers for THIS SESSION ONLY
  *  (never a global `alter table ... disable trigger`, which a crashed cell would leave off for
  *  every other lane on the rig), and `withActor`'s own `reset all` clears it when the connection
  *  goes back to the pool. It is used by exactly one cell — the one proving that a contaminated
  *  firm rule can still be RETRACTED, which is the half of the wall a legacy row needs. */
-export async function fileDocumentPre0205(firm, document, client, filedBy) {
+export async function fileDocumentPre0220(firm, document, client, filedBy) {
   return asRoot(async (c) => {
     await c.query("set session_replication_role = 'replica'");
     try {
@@ -127,7 +127,7 @@ export async function fileDocumentPre0205(firm, document, client, filedBy) {
 }
 
 /** How many live firm-scope knowledge rows in this firm would the two evidence arms refuse if
- *  they were inserted today — the RUNTIME form of 0205 §0(8) / §E T.4's apply-time census. */
+ *  they were inserted today — the RUNTIME form of 0220 §0(8) / §E T.4's apply-time census. */
 export async function evidenceViolators(firm) {
   const r = await rootQuery(
     `select

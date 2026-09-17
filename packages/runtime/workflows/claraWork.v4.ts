@@ -20,7 +20,7 @@
 //   3. THE DEPENDENT FIXED-ASSET PARTICULARS QUESTION (#639). After a commit whose entry birthed a
 //      register row with no depreciation method or in-service date, the run opens ONE question,
 //      parks, and applies the answer through `clara.complete_fixed_asset_particulars_for`. IT POSTS
-//      NO SECOND JOURNAL — the door writes a register fact and 0201's tail T.9 asserts its body
+//      NO SECOND JOURNAL — the door writes a register fact and 0216's tail T.9 asserts its body
 //      names no `journal_entries` row.
 //   4. THE BUNDLE IS `clara-work/v4` with a FIVE-name roster, so a receipt can say which contract
 //      the run was served.
@@ -48,11 +48,11 @@
 //     re-executed step reaches the same `clara._reserve_op` key (`work_id` + `asset_id`) and the
 //     database returns the ORIGINAL answer rather than writing a second one.
 //
-// THE DEPLOY ORDER IS OWED IN ONE DIRECTION. MIGRATIONS 0192 (knowledge pack) AND 0201 (the
+// THE DEPLOY ORDER IS OWED IN ONE DIRECTION. MIGRATIONS 0192 (knowledge pack) AND 0216 (the
 // particulars door) MUST BE LIVE BEFORE THIS IMAGE RUNS ANY WORK, on top of v3's own 0195. Against
 // a database without 0192 the knowledge read classifies the missing function as `read_failed` and
 // the block says the knowledge could not be read — CONTAINED BY CONSTRUCTION. Against a database
-// without 0201 the particulars discovery read finds nothing and no question is ever opened — also
+// without 0216 the particulars discovery read finds nothing and no question is ever opened — also
 // contained, and invisible. Neither corrupts anything; both make Clara quietly do less than it
 // offers. Deploy the migrations first.
 
@@ -217,7 +217,7 @@ export async function claraWork_v4(input: { taskId: string }): Promise<{ taskId:
             // NO SEPARATE AUTHORITY RECHECK HERE, and that is a measured choice rather than an
             // omission: `clara.complete_fixed_asset_particulars_for` takes the initiator as an
             // explicit `p_obo` and rechecks their active membership, the bookkeeper floor and the
-            // client's status ITSELF, with a distinct diagnosis for each (0201 §E). A second read
+            // client's status ITSELF, with a distinct diagnosis for each (0216 §E). A second read
             // before it would be a stale copy of the same three questions.
             const applied = await applyParticularsStepV4(work, pending.assetId, resolution.answer, {
               nonDepreciable: pending.nonDepreciable,

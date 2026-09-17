@@ -63,7 +63,7 @@ function authClient(over: Partial<InviteAuthClient["auth"]> = {}): () => InviteA
   });
 }
 
-/** #625 — what `clara.preview_invite` (0209) answers. The password step is now reached THROUGH
+/** #625 — what `clara.preview_invite` (0224) answers. The password step is now reached THROUGH
  *  this read, so every keyboard walk below exercises it. */
 const PREVIEW_ROW = {
   firm_name: "ROME PROPERTIES",

@@ -437,7 +437,7 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
  * `lib/work/purpose-label.ts` — and a staff expense claim is labelled there from
  * `clara.get_work_claim_origin` rather than from a purpose value at all, because
  * a claim's purpose is deliberately the plain `journal_entry` every other manual
- * posting carries (migration 0206's header says why a fourth purpose cannot
+ * posting carries (migration 0221's header says why a fourth purpose cannot
  * post). So the crumb reading "Journal entry" on a claim Work is CORRECT, and
  * the remaining limit is only that a periodic adjustment's crumb says it too.
  */

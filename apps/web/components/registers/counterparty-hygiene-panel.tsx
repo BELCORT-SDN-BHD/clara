@@ -11,7 +11,7 @@
 // The stale rung-0 finding that used to sit here — "retire_counterparty_alias has no honest way
 // to reach it, because no read exists to discover an alias id" — was taken at frontier 0140 and
 // was already refuted by `clara.counterparty_aliases_visible` (0145:960-964). It is deleted
-// rather than amended, and the `NotBuiltNote` it justified is gone with it: 0200 §8.2 ships
+// rather than amended, and the `NotBuiltNote` it justified is gone with it: 0215 §8.2 ships
 // `clara.get_counterparty_identity`, and each row below links to the detail that renders it.
 //
 // THIS PANEL KEEPS THE ACTS, THE DETAIL KEEPS THE READS. Create, set terms, add alias, rename and

@@ -548,7 +548,7 @@ export const CODING_LINK_JE_TRIGGERS = [
 ];
 
 /**
- * #639 [0201] — the ONE trigger the fixed-asset acquisition lane adds to `journal_entries`.
+ * #639 [0216] — the ONE trigger the fixed-asset acquisition lane adds to `journal_entries`.
  *
  * TIER D, and it is a DEFERRED CONSTRAINT trigger for the reason DECISIONS §1.4 gives: the Work
  * lane never calls `clara._subledger_on_approve`, so the acquisition birth had to be made
@@ -568,7 +568,7 @@ export const FA_ACQUISITION_JE_TRIGGER = {
 };
 
 /**
- * #638 [0206] — the TWO triggers the staff-expense-claim lane adds to `journal_entries`, and they
+ * #638 [0221] — the TWO triggers the staff-expense-claim lane adds to `journal_entries`, and they
  * sit in DIFFERENT tiers, which is why they are pinned separately rather than as a pair.
  *
  * `t_je_adv_claim_application_birth` is the advance half of the same DECISIONS §1.4 ruling: a
@@ -621,7 +621,7 @@ export async function jeTriggerPins() {
     "select count(*)::int as n from clara.schema_migrations where version ~ 'coding_lane_evidence_link$'");
   if (w.rows[0].n > 0) pins.push(...CODING_LINK_JE_TRIGGERS);
   // #718 END
-  // #639 [0201] / #638 [0206] — the wave-2026-09-15 birth triggers, each gated on ITS OWN stem for
+  // #639 [0216] / #638 [0221] — the wave-2026-09-15 birth triggers, each gated on ITS OWN stem for
   // the same reason 0182's and 0197's are gated on theirs: `db-slice-frontiers` runs this battery
   // against databases pinned below these migrations, where the triggers do not exist, and an
   // unconditional pin would report them MISSING on every one of those legs.

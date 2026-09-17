@@ -1,6 +1,6 @@
 // #652 — THE ACCRUAL READ AND WRITE SEAM (journeys C3, C8).
 //
-// EVERY REACH IS AN RPC, and that is migration 0207's own shape rather than a preference:
+// EVERY REACH IS AN RPC, and that is migration 0222's own shape rather than a preference:
 // `clara.accrual_adjustments` grants NOTHING to any application role — no SELECT, no DML, no ACL at
 // all — so a plain PostgREST table read would 42501 and there is no second path to be tempted by.
 // The two reads below are definer doors (`_human_ctx(role_rank('viewer'))` plus a firm predicate
@@ -33,7 +33,7 @@ const opts = (o: Opts) => ({ session: o.session ?? sessionTokenAccessor, signal:
 
 // ── the shapes the doors answer with ────────────────────────────────────────
 
-/** The CLOSED selection-rule set migration 0207's `method` CHECK admits. It names WHICH amount a
+/** The CLOSED selection-rule set migration 0222's `method` CHECK admits. It names WHICH amount a
  *  human already stated the schedule uses; it computes nothing, which is why this is an enum and
  *  not a registered evaluator closure (the migration header argues it in full).
  *
@@ -62,7 +62,7 @@ export type AccrualListRow = {
   amount_cents: number;
   currency: string;
   effective_from: string;
-  /** NOT NULL on the relation (0207 §A): an accrual states a term that ENDS, so the authority
+  /** NOT NULL on the relation (0222 §A): an accrual states a term that ENDS, so the authority
    *  that accrues for it ends too, on or before the last day of that term. */
   effective_to: string;
   service_period_start: string;
@@ -277,7 +277,7 @@ function accrualDueNth(
 }
 
 /**
- * Whether this schedule reaches at least one ACCRUAL date inside `[from, to]` — 0207's SEVENTH
+ * Whether this schedule reaches at least one ACCRUAL date inside `[from, to]` — 0222's SEVENTH
  * MEASUREMENT (`clara._accrual_schedule_yields`), which the door re-asks and is the authority for.
  *
  * WHY THE FORM ASKS IT AT ALL: a term shorter than one period of its own schedule was ACCEPTED
@@ -301,7 +301,7 @@ export function accrualScheduleYields(
 }
 
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It
- *  mirrors `clara._accrual_journal_basis` (0207) exactly; the database derives its own and is the
+ *  mirrors `clara._accrual_journal_basis` (0222) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */
 export function derivedAccrualLines(input: {
   expenseAccountCode: string;

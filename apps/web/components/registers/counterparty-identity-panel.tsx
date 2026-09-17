@@ -1,6 +1,6 @@
 "use client";
 
-// ONE COUNTERPARTY'S IDENTITY — #647's routed detail (migration 0200, journey C13/A6/C6).
+// ONE COUNTERPARTY'S IDENTITY — #647's routed detail (migration 0215, journey C13/A6/C6).
 //
 // WHY A ROUTE AND NOT A SHEET. Appendix D's overlay hierarchy puts durable detail, history and
 // shareable outcomes behind a real URL; a Sheet is for supporting context that complements the

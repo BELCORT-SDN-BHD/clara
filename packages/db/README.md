@@ -92,7 +92,7 @@ refuses the cutover while any pre-cutover classify task is still claimable witho
 extraction, and its rollback is a new append-only recovery migration applied while that consumer
 stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
 
-[0199_client_work_pack.sql](migrations/0199_client_work_pack.sql) owes **no** consumer-first
+[0214_client_work_pack.sql](migrations/0214_client_work_pack.sql) owes **no** consumer-first
 obligation either, for a narrower reason: it adds exactly one SECURITY INVOKER read door,
 `clara.get_client_work_pack(p_client, p_preview)`, grants EXECUTE to `clara_authenticated` alone,
 and creates no relation, column, policy, index or trigger and recuts nothing. Its only consumer is
@@ -103,7 +103,7 @@ CALLS it and its own safety argument depends on that helper's 101-id ceiling and
 bookkeeper floor; the pin is what forces a later recut of the helper to re-derive this door's
 argument rather than discover it at 102 running Works.
 
-Two sentences in 0199's own header are corrected here rather than in the file, which is
+Two sentences in 0214's own header are corrected here rather than in the file, which is
 append-only. **The planner does not use `ix_accounting_work_client` for the active facet.** Forced
 RLS adds `firm_id = clara.jwt_firm()` to every read of `clara.accounting_work`, which makes
 `uq_accounting_work_intent (firm_id, client_id, intent_key)` the better leading prefix. Re-measured
@@ -129,7 +129,7 @@ listed and not counted (the second is the population the door already names thro
 `uncounted_completions`); a Work admitted and posted in the same week is in both. The board
 discloses this beside the number rather than implying the list is the tile's own population.
 
-[0207_accrual_adjustments.sql](migrations/0207_accrual_adjustments.sql) (#652) owes no
+[0222_accrual_adjustments.sql](migrations/0222_accrual_adjustments.sql) (#652) owes no
 consumer-first obligation and states why in its header: every object it adds is new, it recuts
 nothing, and it re-hashes the six 0193 plan-lane bodies it depends on in its own tail so a stray
 `create or replace` reds the migration rather than shipping. It rides `kind='reversing_journal'`
@@ -180,7 +180,7 @@ transaction and a role change
 core is sha-pinned at `0194:192-195` and `0195:396-400`. A future recut that reverses
 firms-then-row is therefore a deadlock regression against a pinned body, not a style change.
 
-[0209_preview_invite.sql](migrations/0209_preview_invite.sql) adds `clara.preview_invite(p_token)`,
+[0224_preview_invite.sql](migrations/0224_preview_invite.sql) adds `clara.preview_invite(p_token)`,
 the read an invited person makes after signing in and **before** setting a password, so the invite's
 firm, role and effective status are visible before the workspace. Deployment notes: it creates one
 SECURITY DEFINER function granted to `clara_authenticated` only, recuts **no** body (its §0 pins the
@@ -243,12 +243,12 @@ drifts):
 Twenty-eight rows in total, as of this writing. The next migration that touches this allowlist
 repeats this correction in its own header rather than leaving a reader to rediscover it.
 
-## Client identity candidates and the onboarding-facts settle door (0204)
+## Client identity candidates and the onboarding-facts settle door (0219)
 
-[0204_client_onboarding_facts.sql](migrations/0204_client_onboarding_facts.sql) adds two human-lane
+[0219_client_onboarding_facts.sql](migrations/0219_client_onboarding_facts.sql) adds two human-lane
 doors and one ungranted helper. It recuts nothing: `begin_client_onboarding(text,text)`,
 `create_client(text,text)`, `commit_client_onboarding` and `set_client_fy_end` keep their live
-bodies, pinned by pre-image `sha256(prosrc)` in 0204's own prestate and re-asserted in its tail.
+bodies, pinned by pre-image `sha256(prosrc)` in 0219's own prestate and re-asserted in its tail.
 
 `clara.client_identity_candidates(p_name text, p_identifier jsonb default null)` — SECURITY
 DEFINER, admin floor (the same floor `begin_client_onboarding` enforces), firm taken from the
@@ -269,7 +269,7 @@ style.** `clara.name_family_token`, `clara.name_family_candidates` and
 `has_function_privilege` census over five application roles × those three signatures that raises
 CLR10 on any EXECUTE, repeated in [0126](migrations/0126_f_a7_pr_2_agent_receipt_surface.sql) and
 [0154](migrations/0154_role_membership_census.sql). So the browser is granted the WRAPPER and never
-the predicate; 0204's tail re-measures that census against the committed catalog, and
+the predicate; 0219's tail re-measures that census against the committed catalog, and
 `tests/client-onboarding-identity.test.mjs`'s `p649.identity.census_replay` re-measures it again at
 test time.
 
@@ -294,7 +294,7 @@ client onboarding plan's financial-year end onto `clara.clients` by calling
   `fy_end_month_unanswered`.
 - **CLR38 is surfaced, never swallowed.** The live `set_client_fy_end` body is not 0041's text
   (0042 §S5.12 and 0045 §S5.12-b2 spliced two live-ANNUAL cadence guards into it); both raise CLR38
-  `fy_end_locked_by_annual_cadence`, and 0204 lets them propagate with the inner door's own
+  `fy_end_locked_by_annual_cadence`, and 0219 lets them propagate with the inner door's own
   message, code and detail. The raise aborts the transaction, so the settle receipt goes with it.
 - **One lock order, three rungs, and not one of them taken outside the caller's firm.** The door
   takes the client advisory rung `203005004`, then the `clara.clients` row, then the
@@ -314,7 +314,7 @@ client onboarding plan's financial-year end onto `clara.clients` by calling
   `clara._human_ctx`, which raises CLR04 with no `jwt_sub`, and is EXECUTE-granted to
   `clara_authenticated` alone. A runtime-role twin could not call it.
 - **The day is not in Knowledge this wave** — a named residual. `clara.knowledge_keys` and
-  `clara.knowledge_plan_item_map` belong to #654, and 0204's tail asserts it minted no row in
+  `clara.knowledge_plan_item_map` belong to #654, and 0219's tail asserts it minted no row in
   either.
 
 ## Storage grant/policy battery
@@ -372,9 +372,9 @@ The census reports its frontier from `clara.schema_migrations` and compares it a
 migration files on disk. It never reads a migration's own success text: a chain that ran green
 and a frontier that landed are different claims, and only the ledger states the second.
 
-### Firm setup (0203, journey A5)
+### Firm setup (0218, journey A5)
 
-The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0203. All five
+The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0218. All five
 names are `clara_authenticated`-only, owned by `clara_fn_owner`, `SECURITY DEFINER` with
 `search_path` and `plan_cache_mode` pinned, and floored at **admin** inside their own bodies; no
 runtime, agent or wake role holds EXECUTE on any of them, and `clara.firm_setup_keys` grants SELECT
@@ -390,16 +390,16 @@ to `clara_authenticated` alone.
 
 `clara.update_onboarding_plan` stays byte-identical and `clara_runtime`-only; `clara.commit_client_onboarding`
 still forces a client; `clara.promote_plan_answers_to_knowledge` is deliberately not used (its
-promotion loop joins one global `item_key` namespace with no scope discriminator). 0203 also adds
+promotion loop joins one global `item_key` namespace with no scope discriminator). 0218 also adds
 `uq_onboarding_plans_one_open_firm` — a partial unique index on `(firm_id) where state='open' and
 scope_kind='firm'`, which is what makes `clara.claim_paid_firm`'s bare `select … into` replay arm
 single-row rather than silently first-row.
 
-At frontier 0207 the accrual lane adds four public names to that boundary:
+At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
 `clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are
-attributed by `ACCRUAL_ADJUSTMENTS_0207_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs), whose
-cohort check is bimodal (wholly present once 0207 applies, wholly absent before it) because the
+attributed by `ACCRUAL_ADJUSTMENTS_0222_COHORT` in [tests/rig-meta.mjs](tests/rig-meta.mjs), whose
+cohort check is bimodal (wholly present once 0222 applies, wholly absent before it) because the
 `db-slice-frontiers` matrix runs this package against earlier frontiers.
 
 The census audits the public operation boundary, so a trigger below it is invisible to every
@@ -409,7 +409,7 @@ a limit the caller leaves out — or sends as NULL — keeps the value the firm 
 `updated_by`. That holds because the four limit columns carry no table default; the trigger is the
 only thing that supplies 100 / 1000 / 2 / 2, and it does so on a firm's first insert alone.
 
-### The fixed-asset acquisition boundary (#639, migration 0201)
+### The fixed-asset acquisition boundary (#639, migration 0216)
 
 An acquisition and its fixed-asset register row commit TOGETHER, on every lane, and the instrument
 is a DEFERRED CONSTRAINT TRIGGER rather than a hook:
@@ -417,7 +417,7 @@ is a DEFERRED CONSTRAINT TRIGGER rather than a hook:
 | object | grant | what it is |
 |---|---|---|
 | `clara._tf_fa_acquisition_birth()` + `t_je_fa_acquisition_birth` | none (trigger) | The lane-agnostic birth. `after insert or update on clara.journal_entries … deferrable initially deferred … when (new.status='approved')`, named to fire BEFORE `t_je_fa_movement_belt` — deferred triggers fire in alphabetical trigger-name order, measured on PG 17.11, not creation order. It carries `_fa_on_approve` arm 4's predicate verbatim plus an `origin='scheduled_run'` exclusion arm 4 does not have, and is idempotent against the hook through the same `on conflict (acquisition_line_id) do nothing`. |
-| `clara.fixed_assets.acquisition_document_id` | — | The source document, copied AT BIRTH. Write-once: `clara._tf_fixed_assets_immutable_0017` forbids any later write to a column outside its post-approval allowlist, so a row birthed by the hook carries NULL and the READ resolves the acquisition entry's own `document_id`. The two can never disagree (0201 tail T.7). |
+| `clara.fixed_assets.acquisition_document_id` | — | The source document, copied AT BIRTH. Write-once: `clara._tf_fixed_assets_immutable_0017` forbids any later write to a column outside its post-approval allowlist, so a row birthed by the hook carries NULL and the READ resolves the acquisition entry's own `document_id`. The two can never disagree (0216 tail T.7). |
 | `clara._fa_acquisition_json(uuid)` / `clara._fa_acquisition_history(uuid)` | none | The acquisition as its own fact, and the correction chain. The Work and the receipt are DERIVED BY JOIN from `acquisition_entry_id`: the receipt is inserted AFTER the approve and the Work `result` is built inside the posting core, so an approve-time write of either would stamp NULL forever. The chain's vocabulary is `supersede` / `co_acquired_on_same_document` / `source_document` / `reversed_acquisition_on_same_enrolment`; **two rows born from the SAME invoice are `co_acquired`, which is orderless** — one cost line births one row by design, so a two-line invoice is ordinary and neither row supersedes the other — and the `source_document` ordering is STRICT, so an equal `approved_at` can never make two rows each other's successor. |
 | `clara.get_fixed_asset(uuid)` / `clara._fa_asset_json(uuid,date)` | `clara_authenticated` (read) | Recut. `acquisition`, `particulars` and `history` are THREE separate blocks, so "policy and schedule clearly separate" is structural rather than a layout choice. |
 | `clara.complete_fixed_asset_particulars_for(uuid,uuid,jsonb,text,uuid)` | `clara_runtime` ONLY | The particulars door a run may call ON BEHALF OF the human whose Work asked the dependent question. Live-authority rechecks (active membership, bookkeeper floor, active client) taken UNDER A LOCK — `clara.firms … for key share` then `firm_memberships … for share`, the pair `0195:1792-1797` measured, so a demotion queues behind the answer instead of slipping between the read and the write — complete-once, op-keyed, and it writes NO journal entry. The browser keeps `clara.complete_fixed_asset_particulars`, which is `clara_authenticated`-only. Its three failures are deliberately distinguishable (CLR11 `client_not_found`, CLR04 `obo_not_active` / `insufficient_role`, CLR10 `client_inactive`): this door is runtime-only and names an explicit `p_obo`, so the estate's no-existence-oracle rule — which is about browser-reachable doors — is carried by the human door beside it. |
@@ -435,10 +435,10 @@ is a DEFERRED CONSTRAINT TRIGGER rather than a hook:
 
 **And one census this migration re-derived.** `0037_wave_c_a_subledger.sql:3840-3845` pinned the
 subledger hook's callers at FOUR. Measured on a migrated chain the live set is SIX: 0056's close
-model added `finalize_close` and `reopen_fiscal_year`. 0201's tail re-derives and re-pins the
+model added `finalize_close` and `reopen_fiscal_year`. 0216's tail re-derives and re-pins the
 measured six, so a seventh is caught.
 
-### Document source revision (#646, migration 0202)
+### Document source revision (#646, migration 0217)
 
 A document's own *reading* now has two governed human doors and two reads, all four
 `clara_authenticated` only and bookkeeper-floored inside their own bodies:
@@ -468,7 +468,7 @@ consequence of not guessing a client for a multi-filed document (the ledger row'
 carries the same NULL for the same reason); emitting one event per live filing is a change #676's
 posted-effect work should decide, not this ticket.
 
-0202 also recuts `clara.set_document_kind` — signature unchanged — so a kind change records the
+0217 also recuts `clara.set_document_kind` — signature unchanged — so a kind change records the
 same observation and its own `'kind'` revision row. **D1 write-quiesce is owed** for that recut
 (see the Deploy contract above). #646 mints no `clara.accounting_work` row and widens no purpose
 CHECK; the posted-effect integration is #676.
@@ -484,7 +484,7 @@ first-class fact rather than a race: `uq_knowledge_live` already treats two live
 independent whenever their applicability differs, so a client row scoped to one narrow condition
 overrides the firm row carrying that condition and leaves an unconditional firm default standing.
 
-`0205_firm_knowledge_defaults.sql` adds what that model was missing, and no write door:
+`0220_firm_knowledge_defaults.sql` adds what that model was missing, and no write door:
 
 - **Which keys may be defaulted** — `clara.knowledge_key_firm_eligibility`, an append-only,
   code-populated, FORCE-RLS catalog seeded with `default_currency`, `reporting_framework` and
@@ -540,9 +540,9 @@ overrides the firm row carrying that condition and leaves an unconditional firm 
 
 Both `knowledge_records` guards fire only for `scope_kind = 'firm'`; the client lane is
 byte-unaffected. They are named so they sort AFTER 0192's own `t_knowledge_records_authority`, which
-stamps `applies_when_digest` and refuses an unknown key first — `0205`'s tail asserts that order off
+stamps `applies_when_digest` and refuses an unknown key first — `0220`'s tail asserts that order off
 `pg_trigger` rather than trusting the alphabet, and asserts the filing-side guard's attachment
-beside it. 0205 recuts no 0192 body and therefore pins none.
+beside it. 0220 recuts no 0192 body and therefore pins none.
 
 A promotion is `clara.capture_knowledge(p_scope_kind => 'firm')` with an **authored** reason, never
 the client row's own basis, and no source pins; a correction or withdrawal of a firm rule rides the
@@ -553,7 +553,7 @@ the human-review affordance instead.
 Battery: [tests/knowledge-firm-defaults.test.mjs](tests/knowledge-firm-defaults.test.mjs), gated by
 `knowledge-firm-defaults-preintegration-gate.mjs`.
 
-### The prepayment-amortisation lane (#653, 0208)
+### The prepayment-amortisation lane (#653, 0223)
 
 `clara.create_prepayment_schedule` is the one write of that lane and it is unusual in two ways a
 census reader should know about. It CALLS A FROZEN EVALUATOR AS A DEFINER rather than through a

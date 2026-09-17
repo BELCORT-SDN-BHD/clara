@@ -14,9 +14,9 @@
 //   merged/retired target.
 // clara.add_counterparty_alias(p_client, p_counterparty, p_alias, p_origin, p_op_key,
 //   p_basis, p_source_document, p_source_extraction, p_source_region, p_source_field_path)
-//   — 0011_daily_loop.sql:1706, RECUT 0200 §7.1 (#647): the five leading parameters and their
+//   — 0011_daily_loop.sql:1706, RECUT 0215 §7.1 (#647): the five leading parameters and their
 //   NAMES are unchanged, five DEFAULTED provenance parameters are added, and there is still
-//   exactly ONE body of this name (0200's tail asserts it). bookkeeper+. `p_origin` is one of
+//   exactly ONE body of this name (0215's tail asserts it). bookkeeper+. `p_origin` is one of
 //   'former_name' | 'trade_name' | 'human' | 'extracted'; 'agent_proposed' is refused here
 //   (CLR10) because D11 gives Clara no identity write verb in this build. `recorded_via` is
 //   stamped 'human_ui' by the door from its OWN lane and is never sent from here. Refuses
@@ -27,7 +27,7 @@
 //   bookkeeper+. Wired since #647: clara.counterparty_aliases_visible and
 //   clara.get_counterparty_identity both project the alias id a retirement needs.
 // clara.set_counterparty_identifiers(p_client, p_counterparty, p_registration_no, p_tin,
-//   p_op_key) — 0174:785, RECUT 0200 §7.3 (#647) at the SAME signature and the same
+//   p_op_key) — 0174:785, RECUT 0215 §7.3 (#647) at the SAME signature and the same
 //   _finish_op envelope; each real change now also appends one identity revision. ADMIN floor,
 //   not bookkeeper. Refuses CLR11 not found · CLR23 target_retired / registration_collision /
 //   unregistered_name_collision · CLR10 registration_unusable (a registration that normalises

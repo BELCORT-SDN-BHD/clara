@@ -12,7 +12,7 @@
 // real durable fact rather than a form field that evaporates. Textarea rather than Input for
 // appendix D's own reason (59): explanation and correction reasons are free-form.
 //
-// `extracted` joins the origin list because 0200 widened the CHECK, but it is deliberately NOT
+// `extracted` joins the origin list because 0215 widened the CHECK, but it is deliberately NOT
 // offered here: an extracted alias OWES a document and an extraction pin (CLR10
 // `source_incomplete`), and this dialog has no document picker — offering an option that can only
 // refuse is exactly 裁-187's rule. The extraction lane reaches it through the successor contract.

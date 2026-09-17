@@ -1,7 +1,7 @@
 // #649 AC2 — the committed plan's answers reach the CLIENT RECORD, not only the Knowledge
 // register.
 //
-// `clara.settle_client_onboarding_facts(p_plan, p_fy_end_month, p_fy_end_day, p_op_key)` — 0204,
+// `clara.settle_client_onboarding_facts(p_plan, p_fy_end_month, p_fy_end_day, p_op_key)` — 0219,
 // bookkeeper floor, human lane only (there is no machine twin, and the ground is structural:
 // `clara.set_client_fy_end` opens with `clara._human_ctx`, which raises CLR04 with no `jwt_sub`,
 // and is EXECUTE-granted to `clara_authenticated` alone).

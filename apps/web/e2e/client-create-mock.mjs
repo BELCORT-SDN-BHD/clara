@@ -151,7 +151,7 @@ export async function handleClientCreateSupabase(request, response, path, url, s
     // ARITY >= 2 — PostgREST's own error envelope, and the exact shape `lib/doors.ts` classifies
     // as a governed DoorRefusal: a CLR code in `code`, the database's message verbatim, and the
     // typed detail inside `details`. The detail carries the CANDIDATE ROWS, which is what lets the
-    // refused face render the same linkable list the successful one would have — 0204's own
+    // refused face render the same linkable list the successful one would have — 0219's own
     // contract, not a convenience of this fixture.
     sendJson(response, 400, {
       code: "CLR10",

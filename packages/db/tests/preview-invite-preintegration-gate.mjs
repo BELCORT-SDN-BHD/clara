@@ -1,4 +1,4 @@
-// Pre-integration gate for #625's invite preview door (migration 0209). NOT a test file:
+// Pre-integration gate for #625's invite preview door (migration 0224). NOT a test file:
 // preload it for an estate sweep run against a chain that predates this PR's migration, so the
 // sweep greens with a LOUD skip instead of hard-failing every cell against a database where
 // clara.preview_invite does not exist.

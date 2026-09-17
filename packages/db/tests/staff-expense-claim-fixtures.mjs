@@ -77,7 +77,7 @@ export async function gateSec(t) {
     return true;
   }
   assert.fail(
-    "#638: the staff-expense-claim lane is absent. Apply 0206_staff_expense_claims.sql (or its "
+    "#638: the staff-expense-claim lane is absent. Apply 0221_staff_expense_claims.sql (or its "
     + "numbered suite copy), or set CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS=1 for the "
     + "package-wide pre-integration sweep.",
   );

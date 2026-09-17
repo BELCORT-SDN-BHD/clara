@@ -8,4 +8,4 @@
 // absent — a skip is not evidence. The per-cell `gatePrepayment` frontier gate is unaffected either
 // way: it always skips (counted) on a database pinned below this migration, which is what the
 // db-slice-frontiers matrix needs.
-process.env.CLARA_ALLOW_MISSING_PREPAYMENT_0208 = "1";
+process.env.CLARA_ALLOW_MISSING_PREPAYMENT_0223 = "1";

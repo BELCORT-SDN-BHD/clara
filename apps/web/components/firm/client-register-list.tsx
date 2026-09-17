@@ -175,7 +175,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
   const walled = checkStands && checkOutcome === "walled";
   // UNREACHABLE THROUGH THE LIVE DOOR, AND SAID ANYWAY (review round 2). `walled` and
   // `acknowledgementOwed` describe HOW the read answered, and neither of them describes an
-  // ambiguity the read ANSWERED rather than refused — 0204 raises at arity >= 2 and never returns
+  // ambiguity the read ANSWERED rather than refused — 0219 raises at arity >= 2 and never returns
   // it as a success. `onConfirm`'s own `arity >= 2` belt already keeps the door unreached, so what
   // this adds is the button telling the truth instead of looking live and doing nothing.
   const ambiguousAnswer = answered && arity >= 2;
@@ -200,7 +200,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
         const rows = candidatesFromRefusal(err);
         setCheckOutcome("walled");
         setCandidates(rows);
-        // THE DATABASE'S OWN ARITY (0204 carries it in the refusal detail), never `rows.length`:
+        // THE DATABASE'S OWN ARITY (0219 carries it in the refusal detail), never `rows.length`:
         // a row this browser could not parse must not silently lower the number the human is told
         // about, which is the law `lib/onboarding/identity.ts` already states for the SUCCESS
         // path. The fallbacks run in that order -- the count second, the token's own floor (this

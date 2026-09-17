@@ -12,7 +12,7 @@
 //   detail.denied         a refused read renders the refusal, never an empty page that reads as
 //                         "this client owns nothing".
 //   detail.a11y           zero structural a11y violations across every tab.
-//   detail.older_db       a database pinned BELOW 0201 answers no acquisition/particulars/history
+//   detail.older_db       a database pinned BELOW 0216 answers no acquisition/particulars/history
 //                         keys at all, and the page still renders the asset instead of crashing.
 //
 // THE FETCHES ARE MOCKED BY URL SUBSTRING, the `bank-a11y.test.tsx` / `fixed-assets-a11y.test.tsx`
@@ -276,7 +276,7 @@ test("detail.history a derived relationship SAYS it was derived", async () => {
 test("detail.co_acquired two rows born from ONE invoice are CO-ACQUIRED, never each other's successor", async () => {
   // ROUND-1 REVIEW (adversarial 639-A2). Measured on a from-scratch rig: one document-lane entry
   // with two debits on the enrolled cost account births TWO register rows (0041 §9.4 — one row per
-  // cost line, BY DESIGN), and 0201's first cut had each of them name the other `relation:
+  // cost line, BY DESIGN), and 0216's first cut had each of them name the other `relation:
   // 'successor'`, because they share the acquisition entry (therefore the document) and the
   // `approved_at >= approved_at` comparison was true in both directions. The migration now gives
   // that pair its own orderless vocabulary; this cell pins what the reader is told.
@@ -332,7 +332,7 @@ test("detail.denied a refused read renders the refusal, never an empty page", as
   });
 });
 
-test("detail.older_db a database below 0201 answers no acquisition block, and the page still renders the asset", async () => {
+test("detail.older_db a database below 0216 answers no acquisition block, and the page still renders the asset", async () => {
   // NOT a hypothetical: `db-slice-frontiers` runs this app against databases pinned at earlier
   // migrations, and the three blocks are additive keys on one read. A surface that assumed them
   // would crash on exactly the chains CI is built to exercise.

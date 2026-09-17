@@ -49,7 +49,7 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
   });
 }
 
-/** #625 — what `clara.preview_invite` (0209) answers. The password step now renders a preview
+/** #625 — what `clara.preview_invite` (0224) answers. The password step now renders a preview
  *  block above its fields, so every a11y scan below walks that block too. */
 const PREVIEW_ROW = {
   firm_name: "ROME PROPERTIES",

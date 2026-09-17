@@ -117,7 +117,7 @@ export function candidatesFromRefusal(err: unknown): ClientIdentityCandidate[] {
  *
  *  THE DATABASE'S OWN NUMBER, for the same reason `readClientIdentityCandidates` insists on it
  *  above: `candidates.length` is what this module could PARSE, and a row it could not parse must
- *  not silently lower the number the human is told about. 0204 puts `arity` in the refusal detail
+ *  not silently lower the number the human is told about. 0219 puts `arity` in the refusal detail
  *  beside the rows precisely so the refused face never has to count them. */
 export function arityFromRefusal(err: unknown): number | null {
   if (!isDoorRefusal(err)) return null;

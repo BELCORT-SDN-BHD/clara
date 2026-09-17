@@ -196,7 +196,7 @@ export async function classifyConsentEvidenceDocument(
   )) as { document_id: string; document_kind: string; prior_kind: string | null };
 }
 
-// --- #646 (migration 0202) -------------------------------------------------------
+// --- #646 (migration 0217) -------------------------------------------------------
 
 /** `clara.revise_document_fact(p_document uuid, p_field_path text, p_value jsonb,
  *  p_observed_version int, p_reason text, p_op_key text) -> jsonb` — bookkeeper+.

@@ -107,7 +107,7 @@ function admittedBasis(text) {
 }
 
 /**
- * 0206's own claim field names — the ones that exist ONLY on `clara.staff_expense_claims` and appear
+ * 0221's own claim field names — the ones that exist ONLY on `clara.staff_expense_claims` and appear
  * in no journal basis. `instruction` and `posting_date` are deliberately absent from this list: the
  * first could legitimately reach a memo and the second is on every basis, so either would raise a
  * false alarm. These five cannot.

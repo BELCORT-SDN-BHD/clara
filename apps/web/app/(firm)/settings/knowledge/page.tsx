@@ -6,7 +6,7 @@ import { KnowledgeFirmPanel } from "@/components/registers/knowledge-firm-panel"
 
 /**
  * "/settings/knowledge" — the FIRM knowledge register (#654, migration
- * 0205_firm_knowledge_defaults.sql; journeys C13 + D2).
+ * 0220_firm_knowledge_defaults.sql; journeys C13 + D2).
  *
  * WHY IT IS A SETTINGS SECTION AND NOT A CLIENT TAB. A firm default is a rule the
  * firm holds on its own behalf; it has no client to belong to, and the client

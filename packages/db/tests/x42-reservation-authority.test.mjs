@@ -349,15 +349,15 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   // rather than being absorbed into the list. 0042 S5.14 (6a) is a MIGRATION-TIME gate: it ran at
   // 0042 and cannot see a door a later migration adds, so this replay is the only thing standing
   // between a new writer and an unclassified claim.
-  //   * `_tf_fa_acquisition_birth` (#639 [0201]) — INSERT side. An INHERITOR of the same shape as
+  //   * `_tf_fa_acquisition_birth` (#639 [0216]) — INSERT side. An INHERITOR of the same shape as
   //     clara._fa_on_approve, whose arm-4 insert it duplicates: it reads its three codes off an
   //     ACTIVE clara.fa_account_profiles row joined to the journal line, never out of caller input.
   //     Measured in the inheritor arm at the bottom of this cell, which it JOINS.
-  //   * `_fa_complete_particulars_core` (#639 [0201]) — UPDATE side, and NOT a widener: it is the
+  //   * `_fa_complete_particulars_core` (#639 [0216]) — UPDATE side, and NOT a widener: it is the
   //     shared core clara.complete_fixed_asset_particulars_for calls, writing the same depreciation
   //     particulars clara.complete_fixed_asset_particulars (already on this roster) writes. Its SET
   //     clause assigns no account code and no live status, measured by the (6c) replay below.
-  //   * `_claim_resolve_claimant` (#638 [0206]) — INSERT side, and a GENUINE claiming door: it
+  //   * `_claim_resolve_claimant` (#638 [0221]) — INSERT side, and a GENUINE claiming door: it
   //     auto-enrols a staff-advance account from a code the caller supplies. It consults the shared
   //     union through clara._adv_enrolment_admission, the ONE delegate 0042 S5.14 (6b) accepts, and
   //     that reach is measured below rather than taken on the body's word.
@@ -459,7 +459,7 @@ test("x42.ra4 the questions this fix's own path never asks: the status predicate
   // chooses reads the code out of caller input, and none of these has such a read.
   // clara._adv_on_approve joined this list in round 4: it passed the OLD census only on a
   // comment match, and reading code alone exposed that it never called the union at all.
-  // clara._tf_fa_acquisition_birth (#639 [0201]) joined at wave-2026-09-15 integration: it makes
+  // clara._tf_fa_acquisition_birth (#639 [0216]) joined at wave-2026-09-15 integration: it makes
   // clara._fa_on_approve arm 4's insert from a deferred constraint trigger so the Work lane births
   // too, and takes its three codes from the SAME join onto an ACTIVE clara.fa_account_profiles row.
   // Its discriminator is measured in the same shape as the other three — the exclusion is not

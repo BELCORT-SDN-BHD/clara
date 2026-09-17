@@ -1,4 +1,4 @@
--- 0207_accrual_adjustments — #652 (refresh spec #612; journeys C3, C8): EVIDENCED ACCRUAL AND
+-- 0222_accrual_adjustments — #652 (refresh spec #612; journeys C3, C8): EVIDENCED ACCRUAL AND
 -- REVERSAL ADJUSTMENTS.
 -- =====================================================================================
 -- Spec of record: issue #652 — "用户可用会计界面、对话或资料表达应计事项，按明确有效期产生正确分录，

@@ -1851,7 +1851,7 @@ export const KNOWLEDGE_0192_COHORT = [
   ...KNOWLEDGE_0192_UNGRANTED_FNS,
 ];
 
-// #654 [0205, firm knowledge defaults + preserved client exceptions] — the FIRM-DEFAULT lane, its
+// #654 [0220, firm knowledge defaults + preserved client exceptions] — the FIRM-DEFAULT lane, its
 // own cohort above 0192's for the same "wholly present or wholly absent" reason: it adds no write
 // door at all (a promotion rides the shipped clara.capture_knowledge at firm scope), so what it
 // contributes is TWO reads and TWO guard trigger bodies.
@@ -1862,16 +1862,16 @@ export const KNOWLEDGE_0192_COHORT = [
 //   agent roles gain ZERO — a _human_ctx-gated read granted to a role that carries no JWT is a
 //   DARK grant (0057's ruling, restated 0192:1742-1745), and a run reads knowledge through
 //   clara.get_knowledge_pack, which already carries firm defaults.
-const KNOWLEDGE_FIRM_0205_HUMAN_FNS = ["list_firm_knowledge", "get_knowledge_applicability"];
+const KNOWLEDGE_FIRM_0220_HUMAN_FNS = ["list_firm_knowledge", "get_knowledge_applicability"];
 //   …and the TWO UNGRANTED guard bodies: the eligibility wall (a key the catalog does not mark
 //   firm-defaultable is refused at firm scope) and the cross-client evidence wall (a firm-scope
 //   record may not pin a document carrying ANY live client filing). Both are BEFORE INSERT
 //   triggers on clara.knowledge_records, named so they fire AFTER 0192's own authority stamp.
-const KNOWLEDGE_FIRM_0205_UNGRANTED_FNS = [
+const KNOWLEDGE_FIRM_0220_UNGRANTED_FNS = [
   "_tf_knowledge_firm_eligibility", "_tf_knowledge_firm_evidence",
 ];
-export const KNOWLEDGE_FIRM_0205_COHORT = [
-  ...KNOWLEDGE_FIRM_0205_HUMAN_FNS, ...KNOWLEDGE_FIRM_0205_UNGRANTED_FNS,
+export const KNOWLEDGE_FIRM_0220_COHORT = [
+  ...KNOWLEDGE_FIRM_0220_HUMAN_FNS, ...KNOWLEDGE_FIRM_0220_UNGRANTED_FNS,
 ];
 
 // #643 [0194, periodic stock adjustments + supplied payroll obligations] — the PERIODIC-ADJUSTMENT
@@ -1927,7 +1927,7 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
 // ungranted ACL on every run, at every frontier, without being told it exists. 0207 changes no
 // existing name, signature or grant.
 // #779 END
-// #639 [0201, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
+// #639 [0216, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
 // fails a PARTIAL cohort by design.
@@ -1937,49 +1937,49 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
 //   `complete_fixed_asset_particulars`, which is clara_authenticated-only and is NOT re-declared
 //   here (it belongs to FA_0041_HUMAN_FNS). A grant of this overload to clara_authenticated would
 //   be a second human door with no `_human_ctx` floor, which is why the matrix pins it.
-const FA_ACQUISITION_0201_RUNTIME_FNS = ["complete_fixed_asset_particulars_for"];
+const FA_ACQUISITION_0216_RUNTIME_FNS = ["complete_fixed_asset_particulars_for"];
 //   …and the UNGRANTED closure: the lane-agnostic birth trigger body, the two acquisition
 //   projections the recut reads call, and the shared particulars core both doors' walls live in.
-//   Listed so `cohortFailures` reports a half-applied 0201 rather than a silently narrower
+//   Listed so `cohortFailures` reports a half-applied 0216 rather than a silently narrower
 //   boundary — and so a grant appearing on any of them FAILS the main sweep.
-const FA_ACQUISITION_0201_UNGRANTED_FNS = [
+const FA_ACQUISITION_0216_UNGRANTED_FNS = [
   "_tf_fa_acquisition_birth", "_fa_acquisition_json", "_fa_acquisition_history",
   "_fa_complete_particulars_core",
 ];
-export const FA_ACQUISITION_0201_COHORT = [
-  ...FA_ACQUISITION_0201_RUNTIME_FNS, ...FA_ACQUISITION_0201_UNGRANTED_FNS,
+export const FA_ACQUISITION_0216_COHORT = [
+  ...FA_ACQUISITION_0216_RUNTIME_FNS, ...FA_ACQUISITION_0216_UNGRANTED_FNS,
 ];
 
-// #638 [0206, staff expense claims / employee payables / advance settlement] — its own cohort for
+// #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
 //
 //   the ONE admission door — clara_runtime ONLY, mirroring clara.admit_journal_work's and
 //   clara.admit_periodic_adjustment_work's own grants. The wake roles and clara_authenticated gain
 //   ZERO: the browser reaches this door through the runtime's authenticated route
 //   (POST /api/work/staff-expense-claim), never through PostgREST.
-const STAFF_EXPENSE_CLAIMS_0206_RUNTIME_FNS = ["admit_staff_expense_claim_work"];
+const STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS = ["admit_staff_expense_claim_work"];
 //   the THREE reads — clara_authenticated ONLY, viewer-floored inside their own bodies (the same
 //   class as clara.list_periodic_adjustments). No agent, wake or runtime variant exists: the run is
 //   told its effect by the wake verb's answer and never reads a claim.
-const STAFF_EXPENSE_CLAIMS_0206_HUMAN_FNS = [
+const STAFF_EXPENSE_CLAIMS_0221_HUMAN_FNS = [
   "list_staff_expense_claims", "get_staff_expense_claim", "get_work_claim_origin",
 ];
 //   …and the UNGRANTED closure: the claim predicates the door and the reads share, the canonical
 //   form and the basis derivation, the definer-internal claimant resolver (which re-derives 0043's
 //   four enrol walls rather than calling the admin-floored door), and the four trigger bodies —
 //   the append-only belt, the posted/reversed status stamps and the lane-agnostic advance birth
-//   trigger. Listed so `cohortFailures` reports a half-applied 0206 rather than a silently
+//   trigger. Listed so `cohortFailures` reports a half-applied 0221 rather than a silently
 //   narrower boundary.
-const STAFF_EXPENSE_CLAIMS_0206_UNGRANTED_FNS = [
+const STAFF_EXPENSE_CLAIMS_0221_UNGRANTED_FNS = [
   "_assert_claim_basis", "_claim_basis_canonical", "_claim_journal_basis", "_claim_item_total",
   "_claim_settlement_account", "_claim_text", "_claim_cents", "_claim_date", "_claim_uuid",
   "_claim_resolve_claimant", "_tf_staff_expense_claim_append_only",
   "_tf_staff_expense_claim_posted", "_tf_staff_expense_claim_reversed",
   "_tf_adv_claim_application_birth",
 ];
-export const STAFF_EXPENSE_CLAIMS_0206_COHORT = [
-  ...STAFF_EXPENSE_CLAIMS_0206_RUNTIME_FNS, ...STAFF_EXPENSE_CLAIMS_0206_HUMAN_FNS,
-  ...STAFF_EXPENSE_CLAIMS_0206_UNGRANTED_FNS,
+export const STAFF_EXPENSE_CLAIMS_0221_COHORT = [
+  ...STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS, ...STAFF_EXPENSE_CLAIMS_0221_HUMAN_FNS,
+  ...STAFF_EXPENSE_CLAIMS_0221_UNGRANTED_FNS,
 ];
 
 // #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
@@ -2027,58 +2027,58 @@ export const ACCOUNTING_PLANS_0193_COHORT = [
   ...ACCOUNTING_PLANS_0193_UNGRANTED_FNS,
 ];
 
-// #652 [0207, evidenced accrual and reversal adjustments] — its own cohort for the same "wholly
+// #652 [0222, evidenced accrual and reversal adjustments] — its own cohort for the same "wholly
 // present or wholly absent" reason 0193's and 0194's carry.
 //
 //   the THREE human doors — clara_authenticated ONLY. The write is bookkeeper+ inside its own
 //   body and both reads are viewer+ and firm-predicated; clara_runtime, the agent role and both
 //   wake roles gain ZERO on any of them, because a human configuring an accrual has their own
 //   door with their own JWT.
-const ACCRUAL_ADJUSTMENTS_0207_HUMAN_FNS = [
+const ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS = [
   "create_accrual_adjustment", "list_accrual_adjustments", "get_accrual_adjustment",
 ];
 //   …and the ONE runtime verb: the OBO twin, clara_runtime ONLY — the same lane
 //   clara.admit_periodic_adjustment_work sits in (0194:1298-1314). It resolves its actor from an
 //   ARGUMENT, never from a JWT, so a chat-lane successor needs no migration of its own.
-const ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS = ["create_accrual_adjustment_for"];
+const ACCRUAL_ADJUSTMENTS_0222_RUNTIME_FNS = ["create_accrual_adjustment_for"];
 //   …and the UNGRANTED closure: the actor-explicit plan writer, the shared configuration tail, the
 //   particulars predicates, the derived-basis and canonical projections, the occurrence read and
-//   the two triggers. Listed so cohortFailures reports a half-applied 0207 rather than a silently
+//   the two triggers. Listed so cohortFailures reports a half-applied 0222 rather than a silently
 //   narrower boundary.
-const ACCRUAL_ADJUSTMENTS_0207_UNGRANTED_FNS = [
+const ACCRUAL_ADJUSTMENTS_0222_UNGRANTED_FNS = [
   "_accrual_plan_core", "_accrual_finish", "_accrual_occurrences", "_accrual_methods",
   "_accrual_date", "_accrual_journal_basis", "_accrual_canonical",
   "_assert_accrual_particulars", "_assert_accrual_term_window", "_assert_accrual_account",
   "_assert_accrual_world",
   "_tf_accrual_adjustment_append_only", "_tf_accrual_adjustment_term_congruent",
 ];
-export const ACCRUAL_ADJUSTMENTS_0207_COHORT = [
-  ...ACCRUAL_ADJUSTMENTS_0207_HUMAN_FNS, ...ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS,
-  ...ACCRUAL_ADJUSTMENTS_0207_UNGRANTED_FNS,
+export const ACCRUAL_ADJUSTMENTS_0222_COHORT = [
+  ...ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS, ...ACCRUAL_ADJUSTMENTS_0222_RUNTIME_FNS,
+  ...ACCRUAL_ADJUSTMENTS_0222_UNGRANTED_FNS,
 ];
 
-// #653 [0208, prepayment recognition and amortisation over an explicit service period] — the
+// #653 [0223, prepayment recognition and amortisation over an explicit service period] — the
 // AMORTISATION lane, its own cohort for the same "wholly present or wholly absent" reason 0193's
 // carries. It EXTENDS 0193 rather than standing beside it: the schedule it derives is configured
 // as an `amortisation_schedule` accounting plan and admitted by 0193's own scan, so a half-applied
-// 0208 would be a plan kind the doors can create and the resolver cannot serve.
+// 0223 would be a plan kind the doors can create and the resolver cannot serve.
 //
 //   the FOUR human doors — clara_authenticated ONLY. The write is bookkeeper-floored in its own
 //   body, the three reads are viewer-floored and firm-predicated, and the agent and both wake
 //   roles gain NOTHING: a lane that could author its own future authority would be the agent
 //   deciding what it is allowed to do (0193 §I's reason, unchanged).
-const PREPAYMENT_0208_HUMAN_FNS = [
+const PREPAYMENT_0223_HUMAN_FNS = [
   "create_prepayment_schedule", "get_prepayment_schedule", "list_prepayment_schedules",
   "list_prepayment_attention",
 ];
 //   …and the UNGRANTED closure: the per-period line resolver the two basis callers ask, the read
-//   preamble, and the relation's append-only trigger. NO new runtime verb — 0208 mints no second
+//   preamble, and the relation's append-only trigger. NO new runtime verb — 0223 mints no second
 //   scan, and `wake_due_plan_occurrences` (0193) stays the only one.
-const PREPAYMENT_0208_UNGRANTED_FNS = [
+const PREPAYMENT_0223_UNGRANTED_FNS = [
   "_plan_amortisation_period_line", "_prepayment_ctx", "_tf_prepayment_schedules_append_only",
 ];
-export const PREPAYMENT_0208_COHORT = [
-  ...PREPAYMENT_0208_HUMAN_FNS, ...PREPAYMENT_0208_UNGRANTED_FNS,
+export const PREPAYMENT_0223_COHORT = [
+  ...PREPAYMENT_0223_HUMAN_FNS, ...PREPAYMENT_0223_UNGRANTED_FNS,
 ];
 
 // #631 [0195, model egress obeys current purpose authorisation + the redacted execution trace] —
@@ -2152,7 +2152,7 @@ const CODING_LANE_LINK_0197_UNGRANTED_FNS = [
 ];
 export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_FNS];
 // #718 END
-// #650 [0199, the client home's Work attention band] — the CLIENT WORK PACK lane, its own cohort
+// #650 [0214, the client home's Work attention band] — the CLIENT WORK PACK lane, its own cohort
 // for the same "wholly present or wholly absent" reason 0189's list carries.
 //
 //   ONE read door — clara_authenticated ONLY. `get_client_work_pack` is SECURITY INVOKER over
@@ -2161,12 +2161,12 @@ export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_
 //   reaches clara.agent_tasks ONLY through 0189's already-granted DEFINER helper, with at most 25
 //   preview ids. clara_runtime, the agent role and both wake roles gain ZERO: a client's attention
 //   board is a human read of a human's own queue, never something a model lane produces or
-//   consumes on its own. 0199 creates no other function and recuts nothing, so this cohort is one
+//   consumes on its own. 0214 creates no other function and recuts nothing, so this cohort is one
 //   name.
-const CLIENT_WORK_PACK_0199_HUMAN_FNS = ["get_client_work_pack"];
-export const CLIENT_WORK_PACK_0199_COHORT = [...CLIENT_WORK_PACK_0199_HUMAN_FNS];
+const CLIENT_WORK_PACK_0214_HUMAN_FNS = ["get_client_work_pack"];
+export const CLIENT_WORK_PACK_0214_COHORT = [...CLIENT_WORK_PACK_0214_HUMAN_FNS];
 
-// #647 [0200, counterparty identity provenance + the correction history] — its own cohort for the
+// #647 [0215, counterparty identity provenance + the correction history] — its own cohort for the
 // same "wholly present or wholly absent" reason 0192's and 0193's carry: folding these names into
 // an older roster would red every database between the two frontiers, and cohortFailures() fails
 // a PARTIAL cohort by design.
@@ -2177,7 +2177,7 @@ export const CLIENT_WORK_PACK_0199_COHORT = [...CLIENT_WORK_PACK_0199_HUMAN_FNS]
 //   read either, and a _human_ctx-gated read granted to a role that carries no JWT is 0057 B6's
 //   DARK GRANT. The three RECUT writers (add_counterparty_alias, rename_counterparty,
 //   set_counterparty_identifiers) keep their existing rosters above — they are not new names.
-const COUNTERPARTY_IDENTITY_0200_HUMAN_FNS = [
+const COUNTERPARTY_IDENTITY_0215_HUMAN_FNS = [
   "get_counterparty_identity", "list_counterparty_identity",
   "list_counterparty_merge_corrections",
 ];
@@ -2188,20 +2188,20 @@ const COUNTERPARTY_IDENTITY_0200_HUMAN_FNS = [
 //   refuses a machine lane claiming recorded_via='human_ui', and the two lane-agnostic revision
 //   triggers that cover the writers this slice may NOT recut (clara.merge_counterparties, whose
 //   live body is a 0149 splice, and clara.tick_seeding_proposal). Listed so cohortFailures
-//   reports a half-applied 0200 rather than a silently narrower boundary — and the signal is
-//   sharp here: a 0200 with the columns but without _tf_counterparty_alias_recorded_via is not a
+//   reports a half-applied 0215 rather than a silently narrower boundary — and the signal is
+//   sharp here: a 0215 with the columns but without _tf_counterparty_alias_recorded_via is not a
 //   narrower boundary, it is a table on which any lane may claim a human wrote the row.
-const COUNTERPARTY_IDENTITY_0200_UNGRANTED_FNS = [
+const COUNTERPARTY_IDENTITY_0215_UNGRANTED_FNS = [
   "_append_counterparty_identity_revision", "_tf_counterparty_identity_revision_immutable",
   "_tf_counterparty_alias_recorded_via", "_tf_counterparty_alias_revision",
   "_tf_counterparty_merge_revision",
 ];
-export const COUNTERPARTY_IDENTITY_0200_COHORT = [
-  ...COUNTERPARTY_IDENTITY_0200_HUMAN_FNS, ...COUNTERPARTY_IDENTITY_0200_UNGRANTED_FNS,
+export const COUNTERPARTY_IDENTITY_0215_COHORT = [
+  ...COUNTERPARTY_IDENTITY_0215_HUMAN_FNS, ...COUNTERPARTY_IDENTITY_0215_UNGRANTED_FNS,
 ];
 // #647 END
 
-// #646 [0202, the document SOURCE-REVISION lane] — its own cohort for the same "wholly present or
+// #646 [0217, the document SOURCE-REVISION lane] — its own cohort for the same "wholly present or
 // wholly absent" reason 0191's and 0192's carry: folding these names into an older roster would
 // red every database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by
 // design.
@@ -2214,29 +2214,29 @@ export const COUNTERPARTY_IDENTITY_0200_COHORT = [
 //   books rests on is a professional's judgement, and no wake credential makes one. The reads are
 //   walled with the writers for clara.list_periodic_adjustments' reason — a definer read gated on
 //   `_human_ctx` and granted to a role that carries no JWT is a DARK grant.
-const DOCUMENT_SOURCE_REVISION_0202_HUMAN_FNS = [
+const DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS = [
   "revise_document_fact", "dismiss_orphaned_classification_question",
   "list_source_revisions", "list_source_dependents",
 ];
 //   …and the UNGRANTED closure: the one observation reader both writers stamp from (derived in
 //   exactly one place so the fact door and the recut set_document_kind cannot disagree about the
 //   same document), the sole-live-filing lookup, and the two closed field-path predicates. Listed
-//   so `cohortFailures` reports a half-applied 0202 rather than a silently narrower boundary, and
+//   so `cohortFailures` reports a half-applied 0217 rather than a silently narrower boundary, and
 //   so an accidental grant on any of them FAILS instead of passing quietly.
-const DOCUMENT_SOURCE_REVISION_0202_UNGRANTED_FNS = [
+const DOCUMENT_SOURCE_REVISION_0217_UNGRANTED_FNS = [
   "_document_source_observation", "_document_sole_live_client",
   "_revisable_invoice_field", "_monetary_invoice_field",
 ];
-export const DOCUMENT_SOURCE_REVISION_0202_COHORT = [
-  ...DOCUMENT_SOURCE_REVISION_0202_HUMAN_FNS, ...DOCUMENT_SOURCE_REVISION_0202_UNGRANTED_FNS,
+export const DOCUMENT_SOURCE_REVISION_0217_COHORT = [
+  ...DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS, ...DOCUMENT_SOURCE_REVISION_0217_UNGRANTED_FNS,
 ];
 // #646's ONE relation, gated exactly as SUBLEDGER_0037_TABLES is: GOVERNED_TABLES' (a) branch
-// demands every entry EXIST, so listing it unconditionally would turn every pre-0202 database into
+// demands every entry EXIST, so listing it unconditionally would turn every pre-0217 database into
 // a MISSING-table failure that says nothing about RLS.
-export const DOCUMENT_SOURCE_REVISION_0202_TABLES = ["document_fact_revisions"];
+export const DOCUMENT_SOURCE_REVISION_0217_TABLES = ["document_fact_revisions"];
 // #646 END
 
-// #648 [0203, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
+// #648 [0218, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
 // the same "wholly present or wholly absent" reason 0192's carries: folding these names into an
 // older roster would red every database between the two frontiers, and `cohortFailures()` fails a
 // PARTIAL cohort by design.
@@ -2245,23 +2245,23 @@ export const DOCUMENT_SOURCE_REVISION_0202_TABLES = ["document_fact_revisions"];
 //   inside its own body through `clara._human_ctx` and then re-floored against the catalogue row's
 //   `min_role`. The agent, runtime and both wake roles gain ZERO here, and that is structural
 //   rather than an omission: a `_human_ctx`-gated verb granted to a role that carries no JWT
-//   claims is a DARK grant (0192 §H), and 0203's own §J tail asserts the same emptiness in-migration.
-const FIRM_SETUP_0203_HUMAN_FNS = [
+//   claims is a DARK grant (0192 §H), and 0218's own §J tail asserts the same emptiness in-migration.
+const FIRM_SETUP_0218_HUMAN_FNS = [
   "seed_firm_setup_plan", "answer_firm_setup_item", "defer_firm_setup_item",
   "commit_firm_setup", "get_firm_setup",
 ];
 //   …and the UNGRANTED closure the five share: the firm's-own-plan lookup, the catalogue answer
-//   grammar and the one revision bump. Listed so `cohortFailures` reports a half-applied 0203
+//   grammar and the one revision bump. Listed so `cohortFailures` reports a half-applied 0218
 //   rather than a silently narrower boundary.
-const FIRM_SETUP_0203_UNGRANTED_FNS = [
+const FIRM_SETUP_0218_UNGRANTED_FNS = [
   "_firm_setup_plan", "_assert_firm_setup_answer", "_firm_setup_bump",
 ];
-export const FIRM_SETUP_0203_COHORT = [
-  ...FIRM_SETUP_0203_HUMAN_FNS, ...FIRM_SETUP_0203_UNGRANTED_FNS,
+export const FIRM_SETUP_0218_COHORT = [
+  ...FIRM_SETUP_0218_HUMAN_FNS, ...FIRM_SETUP_0218_UNGRANTED_FNS,
 ];
 // #648 END
 
-// #649 [0204, create a client and continue accounting onboarding from what is already known] —
+// #649 [0219, create a client and continue accounting onboarding from what is already known] —
 // its own cohort for the same "wholly present or wholly absent" reason 0192's and 0193's carry:
 // folding these names into an older roster would red every database between the two frontiers,
 // and `cohortFailures()` fails a PARTIAL cohort by design.
@@ -2275,25 +2275,25 @@ export const FIRM_SETUP_0203_COHORT = [
 //   clara_authenticated-only (0041:4414) and clara._human_ctx raises CLR04 with no jwt_sub
 //   (0004:302-303), so a machine lane could not execute the settle door's own body even if it
 //   held the grant — a dark grant, in 0057 B6's sense.
-const CLIENT_ONBOARDING_FACTS_0204_HUMAN_FNS = [
+const CLIENT_ONBOARDING_FACTS_0219_HUMAN_FNS = [
   "client_identity_candidates", "settle_client_onboarding_facts",
 ];
 //   …and the ONE ungranted helper: the reader of a plan's settled financial-year-end MONTH,
 //   reached only from the settle door (which runs as clara_fn_owner). Declared here so a future
 //   accidental grant FAILS rather than passes silently, and so `cohortFailures` reports a
-//   half-applied 0204 rather than a silently narrower boundary.
+//   half-applied 0219 rather than a silently narrower boundary.
 //
 //   THE THREE `name_family_*` HELPERS ARE DELIBERATELY ABSENT FROM EVERY ROSTER IN THIS FILE
-//   AND STAY THAT WAY. 0204 publishes their ANSWER through the definer wrapper above precisely
+//   AND STAY THAT WAY. 0219 publishes their ANSWER through the definer wrapper above precisely
 //   so that 0103:1225-1239's five-role EXECUTE census (repeated at 0126:509 and 0154:551) stays
 //   green; the grant matrix's expected-false sweep over those names IS that assertion.
-const CLIENT_ONBOARDING_FACTS_0204_UNGRANTED_FNS = ["_plan_fye_month"];
-export const CLIENT_ONBOARDING_FACTS_0204_COHORT = [
-  ...CLIENT_ONBOARDING_FACTS_0204_HUMAN_FNS, ...CLIENT_ONBOARDING_FACTS_0204_UNGRANTED_FNS,
+const CLIENT_ONBOARDING_FACTS_0219_UNGRANTED_FNS = ["_plan_fye_month"];
+export const CLIENT_ONBOARDING_FACTS_0219_COHORT = [
+  ...CLIENT_ONBOARDING_FACTS_0219_HUMAN_FNS, ...CLIENT_ONBOARDING_FACTS_0219_UNGRANTED_FNS,
 ];
 // #649 END
 
-// #625 [0209, the invited person's pre-password preview] — its own cohort for the same "wholly
+// #625 [0224, the invited person's pre-password preview] — its own cohort for the same "wholly
 // present or wholly absent" reason 0193's and 0197's carry, and a cohort of ONE name.
 //
 //   ONE HUMAN DOOR, clara_authenticated ONLY. `clara.preview_invite(p_token)` answers
@@ -2305,10 +2305,10 @@ export const CLIENT_ONBOARDING_FACTS_0204_COHORT = [
 //   application role in the first place. There is no `anon` role in this estate, so "signed out"
 //   reaches nothing here either.
 //
-//   NO UNGRANTED CLOSURE. 0209 creates exactly one function and recuts none, so this cohort has
+//   NO UNGRANTED CLOSURE. 0224 creates exactly one function and recuts none, so this cohort has
 //   one member and the grant-matrix sweep below is what pins the rest.
-const PREVIEW_INVITE_0209_HUMAN_FNS = ["preview_invite"];
-export const PREVIEW_INVITE_0209_COHORT = [...PREVIEW_INVITE_0209_HUMAN_FNS];
+const PREVIEW_INVITE_0224_HUMAN_FNS = ["preview_invite"];
+export const PREVIEW_INVITE_0224_COHORT = [...PREVIEW_INVITE_0224_HUMAN_FNS];
 // #625 END
 
 export const ALLOWED = {
@@ -2353,14 +2353,14 @@ export const ALLOWED = {
     // stays in SALES_LANE_0046_UNGRANTED_FNS above, expected false for every role.
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
-    ...DOCUMENT_SOURCE_REVISION_0202_HUMAN_FNS, // #646 [0202] the two source-revision writes + the two reads
+    ...DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS, // #646 [0217] the two source-revision writes + the two reads
     ...KNOWLEDGE_0192_HUMAN_FNS, // #644 [0192] the three knowledge writes + the three C13 reads
     ...KNOWLEDGE_0192_SHARED_FNS, // #644 [0192] the promotion door — the ONE two-lane name
-    ...COUNTERPARTY_IDENTITY_0200_HUMAN_FNS, // #647 [0200] the three counterparty-identity reads
+    ...COUNTERPARTY_IDENTITY_0215_HUMAN_FNS, // #647 [0215] the three counterparty-identity reads
     // (viewer-floored, firm-predicated); agent/wake/runtime gain ZERO — D11, see the block above
-    ...FIRM_SETUP_0203_HUMAN_FNS, // #648 [0203] the four firm setup doors + the one A5 read
+    ...FIRM_SETUP_0218_HUMAN_FNS, // #648 [0218] the four firm setup doors + the one A5 read
     // (admin-floored; agent/wake/runtime gain ZERO — see the block above)
-    ...KNOWLEDGE_FIRM_0205_HUMAN_FNS, // #654 [0205] the firm register + the applicability read
+    ...KNOWLEDGE_FIRM_0220_HUMAN_FNS, // #654 [0220] the firm register + the applicability read
     // (viewer floor, human lane only; runtime/agent/wake gain ZERO — see the block above)
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
@@ -2492,37 +2492,37 @@ export const ALLOWED = {
     // ONLY, viewer-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
     ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
-    // #638 0206 the three staff-expense-claim reads — see the block above. clara_authenticated
+    // #638 0221 the three staff-expense-claim reads — see the block above. clara_authenticated
     // ONLY, viewer-floored in their own bodies; clara_runtime, the agent role and both wake roles
     // gain ZERO.
-    ...STAFF_EXPENSE_CLAIMS_0206_HUMAN_FNS,
+    ...STAFF_EXPENSE_CLAIMS_0221_HUMAN_FNS,
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
-    // #652 [0207] the accrual configuration door and its two reads — see the block above.
+    // #652 [0222] the accrual configuration door and its two reads — see the block above.
     // clara_authenticated ONLY; clara_runtime holds only the OBO twin, and the agent role and
     // both wake roles gain ZERO.
-    ...ACCRUAL_ADJUSTMENTS_0207_HUMAN_FNS,
-    // #653 [0208] the four prepayment-amortisation doors — see the block above. clara_authenticated
+    ...ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS,
+    // #653 [0223] the four prepayment-amortisation doors — see the block above. clara_authenticated
     // ONLY; the agent role and both wake roles gain ZERO, and there is no new runtime verb at all.
-    ...PREPAYMENT_0208_HUMAN_FNS,
+    ...PREPAYMENT_0223_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
     // #812
     // 0211 [#812] the accounting_work re-activation door — owner floor in its own body,
     // clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain ZERO.
     ...EGRESS_RECOVERY_0211_HUMAN_FNS,
     // #812
-    // #650 0199 the client home's Work attention band — see the block above. clara_authenticated
+    // #650 0214 the client home's Work attention band — see the block above. clara_authenticated
     // ONLY, bookkeeper-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
-    ...CLIENT_WORK_PACK_0199_HUMAN_FNS,
-    // #649 [0204] the identity-candidates read (admin floor) + the onboarding-facts settle door
+    ...CLIENT_WORK_PACK_0214_HUMAN_FNS,
+    // #649 [0219] the identity-candidates read (admin floor) + the onboarding-facts settle door
     // (bookkeeper floor) — see the block above. clara_authenticated ONLY; clara_runtime, the
     // agent role and both wake roles gain ZERO.
-    ...CLIENT_ONBOARDING_FACTS_0204_HUMAN_FNS,
-    // #625 [0209] the invited person's pre-password preview — see the block above.
+    ...CLIENT_ONBOARDING_FACTS_0219_HUMAN_FNS,
+    // #625 [0224] the invited person's pre-password preview — see the block above.
     // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
-    ...PREVIEW_INVITE_0209_HUMAN_FNS,
+    ...PREVIEW_INVITE_0224_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2689,13 +2689,13 @@ export const ALLOWED = {
     // clara.admit_journal_work sits in. Reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
-    // [#639, 0201] the particulars overload the run calls OBO the human who asked for the work --
+    // [#639, 0216] the particulars overload the run calls OBO the human who asked for the work --
     // clara_runtime ONLY. Declared here so a grant to clara_authenticated (a second human door
     // with no _human_ctx floor) or to either wake role FAILS the matrix.
-    ...FA_ACQUISITION_0201_RUNTIME_FNS,
-    // [#638, 0206] the staff-expense-claim admission door — clara_runtime ONLY, the same lane
+    ...FA_ACQUISITION_0216_RUNTIME_FNS,
+    // [#638, 0221] the staff-expense-claim admission door — clara_runtime ONLY, the same lane
     // clara.admit_journal_work sits in, acting OBO a named human.
-    ...STAFF_EXPENSE_CLAIMS_0206_RUNTIME_FNS,
+    ...STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS,
     ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
@@ -2751,10 +2751,10 @@ export const ALLOWED = {
     // [#640, 0193] the leader's every-cycle plan due scan — clara_runtime ONLY, the same lane
     // clara.admit_journal_work sits in. The browser lane holds none of it.
     ...ACCOUNTING_PLANS_0193_RUNTIME_FNS,
-    // [#652, 0207] the accrual configuration door ON BEHALF OF a named human — clara_runtime
+    // [#652, 0222] the accrual configuration door ON BEHALF OF a named human — clara_runtime
     // ONLY, the clara.admit_periodic_adjustment_work shape. It takes its actor from an argument
     // because a runtime connection carries no human JWT; the browser lane holds none of it.
-    ...ACCRUAL_ADJUSTMENTS_0207_RUNTIME_FNS,
+    ...ACCRUAL_ADJUSTMENTS_0222_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -2942,45 +2942,45 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
-  failures.push(...cohortFailures("#648 0203 firm setup lane", FIRM_SETUP_0203_COHORT, liveNames));
-  failures.push(...cohortFailures("#654 0205 firm knowledge defaults", KNOWLEDGE_FIRM_0205_COHORT, liveNames));
+  failures.push(...cohortFailures("#648 0218 firm setup lane", FIRM_SETUP_0218_COHORT, liveNames));
+  failures.push(...cohortFailures("#654 0220 firm knowledge defaults", KNOWLEDGE_FIRM_0220_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
-  failures.push(...cohortFailures("#638 0206 staff-expense-claim lane", STAFF_EXPENSE_CLAIMS_0206_COHORT, liveNames));
+  failures.push(...cohortFailures("#638 0221 staff-expense-claim lane", STAFF_EXPENSE_CLAIMS_0221_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
-  failures.push(...cohortFailures("#639 0201 fixed-asset acquisition lane", FA_ACQUISITION_0201_COHORT, liveNames));
-  // #652 [0207] — bimodal like F-A6's: wholly present once 0207 applies, wholly absent before it,
+  failures.push(...cohortFailures("#639 0216 fixed-asset acquisition lane", FA_ACQUISITION_0216_COHORT, liveNames));
+  // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
-  const accrualLive = ACCRUAL_ADJUSTMENTS_0207_COHORT.filter((n) => liveNames.has(n));
+  const accrualLive = ACCRUAL_ADJUSTMENTS_0222_COHORT.filter((n) => liveNames.has(n));
   if (accrualLive.length !== 0) {
-    failures.push(...cohortFailures("#652 0207 accrual-adjustment lane", ACCRUAL_ADJUSTMENTS_0207_COHORT, liveNames));
+    failures.push(...cohortFailures("#652 0222 accrual-adjustment lane", ACCRUAL_ADJUSTMENTS_0222_COHORT, liveNames));
   }
-  failures.push(...cohortFailures("#653 0208 prepayment-amortisation lane", PREPAYMENT_0208_COHORT, liveNames));
+  failures.push(...cohortFailures("#653 0223 prepayment-amortisation lane", PREPAYMENT_0223_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
   // #812
-  failures.push(...cohortFailures("#650 0199 client work-pack read lane", CLIENT_WORK_PACK_0199_COHORT, liveNames));
+  failures.push(...cohortFailures("#650 0214 client work-pack read lane", CLIENT_WORK_PACK_0214_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
-  // #646 [0202] — the document source-revision lane. Bimodal: wholly present once 0202 applies,
+  // #646 [0217] — the document source-revision lane. Bimodal: wholly present once 0217 applies,
   // wholly absent before it, so the roster is only asserted once any of its names exists.
-  const sourceRevisionLive = DOCUMENT_SOURCE_REVISION_0202_COHORT.filter((n) => liveNames.has(n));
+  const sourceRevisionLive = DOCUMENT_SOURCE_REVISION_0217_COHORT.filter((n) => liveNames.has(n));
   if (sourceRevisionLive.length !== 0) {
-    failures.push(...cohortFailures("#646 0202 document source-revision lane", DOCUMENT_SOURCE_REVISION_0202_COHORT, liveNames));
+    failures.push(...cohortFailures("#646 0217 document source-revision lane", DOCUMENT_SOURCE_REVISION_0217_COHORT, liveNames));
   }
   // #718 END
   // #776
   failures.push(...cohortFailures("#776 0206 operator applicant-name read",
     OPERATOR_APPLICANT_NAME_0206_COHORT, liveNames));
   // #776 END
-  failures.push(...cohortFailures("#647 0200 counterparty-identity provenance lane", COUNTERPARTY_IDENTITY_0200_COHORT, liveNames));
-  // #649 [0204] — the identity read, the settle door and the ungranted month helper ship as one
+  failures.push(...cohortFailures("#647 0215 counterparty-identity provenance lane", COUNTERPARTY_IDENTITY_0215_COHORT, liveNames));
+  // #649 [0219] — the identity read, the settle door and the ungranted month helper ship as one
   // lane; half of them is a settle door with no way to ask about duplicates first, which is a
   // narrower boundary nobody chose.
-  failures.push(...cohortFailures("#649 0204 client-onboarding facts lane", CLIENT_ONBOARDING_FACTS_0204_COHORT, liveNames));
+  failures.push(...cohortFailures("#649 0219 client-onboarding facts lane", CLIENT_ONBOARDING_FACTS_0219_COHORT, liveNames));
   // #649 END
-  failures.push(...cohortFailures("#625 0209 invite preview door", PREVIEW_INVITE_0209_COHORT, liveNames));
+  failures.push(...cohortFailures("#625 0224 invite preview door", PREVIEW_INVITE_0224_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
@@ -3138,11 +3138,11 @@ export async function governedRlsFailures() {
       + "A closed roster must not accumulate dead entries: either C-3 applied (all three tables) or it did not.",
     );
   }
-  const sourceRevisionTablesLive = DOCUMENT_SOURCE_REVISION_0202_TABLES.filter((t) => present.has(t));
+  const sourceRevisionTablesLive = DOCUMENT_SOURCE_REVISION_0217_TABLES.filter((t) => present.has(t));
   const roster = [
     ...GOVERNED_TABLES,
-    ...(sourceRevisionTablesLive.length === DOCUMENT_SOURCE_REVISION_0202_TABLES.length
-      ? DOCUMENT_SOURCE_REVISION_0202_TABLES : []),
+    ...(sourceRevisionTablesLive.length === DOCUMENT_SOURCE_REVISION_0217_TABLES.length
+      ? DOCUMENT_SOURCE_REVISION_0217_TABLES : []),
     ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : []),
     ...(c2Live.length === CHECKOUT_GATE_C2_TABLES.length ? CHECKOUT_GATE_C2_TABLES : []),
     ...(c3Live.length === CHECKOUT_GATE_C3_TABLES.length ? CHECKOUT_GATE_C3_TABLES : []),

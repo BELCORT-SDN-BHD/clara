@@ -1,4 +1,4 @@
--- 0200_counterparty_identity_provenance — #647 (refresh spec #612; journeys A6/C1/C4/C6/C13):
+-- 0215_counterparty_identity_provenance — #647 (refresh spec #612; journeys A6/C1/C4/C6/C13):
 -- COUNTERPARTY IDENTITY GETS PROVENANCE, ONE APPEND-ONLY CORRECTION HISTORY, AND A HUMAN READ.
 -- =====================================================================================
 -- Spec of record: issue #647 — "Clara maintains source-backed client counterparties and aliases
@@ -1068,7 +1068,7 @@ create or replace view clara.counterparty_aliases_visible with (security_barrier
 
 comment on view clara.counterparty_aliases_visible is
   '裁-11 (0145) + #647: the masked human read of clara.counterparty_aliases, scoped by
-   clara.jwt_firm() in the view predicate. WIDENED by 0200 to project client_id, kind, origin,
+   clara.jwt_firm() in the view predicate. WIDENED by 0215 to project client_id, kind, origin,
    recorded_via, created_by and source_document_id, because the identity surface #647 ships
    cannot show provenance it cannot read. firm_id is still unprojected (RLS-redundant). The base
    table gains NO grant -- clara.counterparty_aliases is the first member of wave-a-shape''s

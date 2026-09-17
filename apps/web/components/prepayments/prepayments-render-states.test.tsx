@@ -313,7 +313,7 @@ test("prepayments.list — the two attention arms render DISTINCTLY: arm A names
 });
 
 test("prepayments.list — a TRUNCATED attention read says so, because fifty of many read as 'nothing else is failing'", async () => {
-  // Each arm is capped at fifty rows, newest first (migration 0208 §E). On a client with more
+  // Each arm is capped at fifty rows, newest first (migration 0223 §E). On a client with more
   // candidates than the cap, a band that showed fifty silently would be telling a person that
   // nothing else is waiting — the exact misreading this whole surface exists to prevent.
   await withMockedEnv(rpcRouter({

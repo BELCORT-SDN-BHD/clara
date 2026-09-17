@@ -1,5 +1,5 @@
 // The H-17 / H-19 cohort ships as 0176_counterparty_alias_kind_scope.sql, which has CLAIMED its
-// number and is inside the applied frontier (#647 re-measured it on the 0200 rig: 0176 is a row
+// number and is inside the applied frontier (#647 re-measured it on the 0215 rig: 0176 is a row
 // in clara.schema_migrations). The 'authored but unnumbered, skipped by the runner until merge
 // prep' sentence this header used to carry was true only before 裁-108 settled; it is deleted
 // rather than amended. What the gate still does is unchanged and still needed: package-wide CI

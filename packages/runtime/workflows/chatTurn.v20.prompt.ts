@@ -8,7 +8,7 @@
 // card v18 declared and v19 already widens the purpose of — a staff expense claim and an accrual
 // occurrence are both `journal_entry`-purpose Work — so `apps/web/lib/parts/types.ts` needs no
 // change and `check-parts-parity.mjs` has no new declarer to read. That is not a shortcut: it is
-// migration 0206's amendment (a fourth `accounting_work.purpose` cannot post without recutting the
+// migration 0221's amendment (a fourth `accounting_work.purpose` cannot post without recutting the
 // posting core) and 0193's `_plan_admit_occurrence` (every occurrence admits through
 // `clara.admit_journal_work`) arriving in the wire vocabulary as an absence of work.
 //

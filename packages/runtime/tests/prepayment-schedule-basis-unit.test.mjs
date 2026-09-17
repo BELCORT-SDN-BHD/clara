@@ -5,7 +5,7 @@
 //              no dates, no term, no cadence and no authority id, because every one of those is
 //              either derived by the frozen evaluator or human-only by law. A model that could
 //              pass one of them would be a model supplying an accounting fact.
-//   mirror.*   the local refusal is a MIRROR: it refuses only what migration 0208 refuses, in the
+//   mirror.*   the local refusal is a MIRROR: it refuses only what migration 0223 refuses, in the
 //              database's own reason tokens, and it refuses nothing the database would accept.
 //   payload.*  the door payload is the DATABASE's own parameter names in its own order, and the
 //              authority is the CONVERSATION rather than anything the model named.
@@ -78,8 +78,8 @@ test("schema.shape — a non-uuid source entry, a blank account code and a blank
 // 2 · The refusal mirror.
 // ==============================================================================================
 
-test("mirror.tokens — every token the mirror and the message map name is one migration 0208 actually raises", () => {
-  // The five prepayment tokens are 0140's OWN spellings, carried through 0208's door verbatim
+test("mirror.tokens — every token the mirror and the message map name is one migration 0223 actually raises", () => {
+  // The five prepayment tokens are 0140's OWN spellings, carried through 0223's door verbatim
   // rather than re-invented — which is the whole reason this module has a token table at all.
   assert.deepEqual(Object.values(mod.PREPAYMENT_REFUSAL).sort(), [
     "authority_ref_unresolved",

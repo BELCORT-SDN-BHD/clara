@@ -1,7 +1,7 @@
 // #646 — SOURCE REVISION: a human corrects what a document SAYS, and the estate records which
 // reading the decision was made against.
 //
-// FRONTIER-GATED on the 0202 migration's stable STEM (`document_source_revision$`), never on its
+// FRONTIER-GATED on the 0217 migration's stable STEM (`document_source_revision$`), never on its
 // number: a `db-slice-frontiers` leg pinned below it SKIPS LOUDLY through the pre-integration gate
 // module, and a FOCUSED run without that module FAILS rather than skipping — a skip is not
 // evidence.
@@ -17,7 +17,7 @@
 //   2. a revision quoting a reading that has MOVED refuses CLR19 and echoes the attempted value;
 //   3. the arithmetic belt measures the NEW numbers, not the ones the UI stopped showing;
 //   4. NOTHING in this ticket reaches the Work lane — the merge guard against the wave's
-//      0206->0208 purpose-CHECK spine;
+//      0221->0223 purpose-CHECK spine;
 //   5. the orphan classification door is NARROW: zero live filings, and nothing else.
 //
 // NEVER LIVE: this file drives writes and runs only against a disposable rig.
@@ -50,14 +50,14 @@ async function cohortApplied() {
   const r = await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ $1", [STEM]);
   if (r.rows[0].n === 0) return false;
-  // WHOLLY PRESENT OR WHOLLY ABSENT: a half-applied 0202 is a defect, not a narrower boundary.
+  // WHOLLY PRESENT OR WHOLLY ABSENT: a half-applied 0217 is a defect, not a narrower boundary.
   const fns = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
       where ns.nspname = 'clara' and p.proname = any($1::text[])`,
     [["revise_document_fact", "dismiss_orphaned_classification_question",
       "list_source_revisions", "list_source_dependents", "_document_source_observation"]]);
   if (fns.rows[0].n !== 5) {
-    assert.fail(`0202 ledger row present but only ${fns.rows[0].n}/5 of its routines exist — half-applied migration`);
+    assert.fail(`0217 ledger row present but only ${fns.rows[0].n}/5 of its routines exist — half-applied migration`);
   }
   return true;
 }
@@ -75,13 +75,13 @@ after(async () => {
 function gate(t) {
   if (live) return false;
   if (process.env.CLARA_ALLOW_MISSING_DOCUMENT_SOURCE_REVISION === "1") {
-    console.warn("SKIP rig-docs-source-revision: the 0202 cohort is not applied (explicit pre-integration run).");
+    console.warn("SKIP rig-docs-source-revision: the 0217 cohort is not applied (explicit pre-integration run).");
     t.skip("document-source-revision cohort absent -- explicit pre-integration run");
     return true;
   }
   assert.fail(
     "rig-docs-source-revision is required for a focused run: apply "
-    + "0202_document_source_revision.sql",
+    + "0217_document_source_revision.sql",
   );
 }
 
@@ -955,7 +955,7 @@ cell("p646.reads.scope: both reads answer NULL for another firm's document and f
 // =============================================================================================
 // p646.neighbours — THE PINS THIS TICKET PROMISED NOT TO MOVE.
 // =============================================================================================
-cell("p646.neighbours: the two non-regression bodies are byte-identical to 0197's and 0191's own literals, and no role but clara_authenticated reaches any 0202 door", async () => {
+cell("p646.neighbours: the two non-regression bodies are byte-identical to 0197's and 0191's own literals, and no role but clara_authenticated reaches any 0217 door", async () => {
   const shas = (await rootQuery(
     `select p.oid::regprocedure::text as sig, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
        from pg_proc p where p.oid = any($1::regprocedure[])`,
@@ -976,7 +976,7 @@ cell("p646.neighbours: the two non-regression bodies are byte-identical to 0197'
       `select p.proname from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
         where ns.nspname='clara' and p.proname = any($1::text[])
           and has_function_privilege($2, p.oid, 'execute')`, [doors, role]);
-    assert.equal(reach.rowCount, 0, `${role} reaches no 0202 door`);
+    assert.equal(reach.rowCount, 0, `${role} reaches no 0217 door`);
   }
   const pub = await rootQuery(
     `select p.proname from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace

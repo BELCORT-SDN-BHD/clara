@@ -11,7 +11,7 @@
 // policy is still absent" is not a sentence this page says — it is the page's STRUCTURE. The
 // Acquisition tab is whole the moment the entry posts; Particulars & policy is separately
 // incomplete and separately actionable; Schedule is empty until the particulars are answered and
-// says so; History carries the correction chain. Migration 0201's read returns the same three
+// says so; History carries the correction chain. Migration 0216's read returns the same three
 // blocks separately, so the surface cannot quietly re-merge them.
 //
 // TABS RATHER THAN ROUTES, and appendix D says why (comment 5589272729, row 58): Tabs are for
@@ -98,7 +98,7 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
   };
   // A WORD PER RELATION, never a two-way `predecessor ? : successor`. Round-1 review measured a
   // pair of rows born from ONE two-line invoice each rendering "Successor" for the other -- a
-  // mutually contradictory accounting claim on the tab that exists to show corrections. 0201 now
+  // mutually contradictory accounting claim on the tab that exists to show corrections. 0216 now
   // gives co-acquired siblings their own orderless relation and this table renders it.
   const relationLabels: Record<string, string> = {
     predecessor: t("history.predecessor"),

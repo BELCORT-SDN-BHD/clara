@@ -1,4 +1,4 @@
--- 0204_client_onboarding_facts — #649 (A6: create a client, then continue accounting onboarding
+-- 0219_client_onboarding_facts — #649 (A6: create a client, then continue accounting onboarding
 -- from what is already known).
 -- =====================================================================================
 -- Spec of record: issue #649 and the wave-2026-09-15 orchestrator decisions (D7 and the
@@ -80,7 +80,7 @@
 -- `clara.update_onboarding_plan` (0017:2632) is the RUNTIME's interview writer, this door is
 -- human-lane, and #654 owns `clara.knowledge_keys`. So the day lands on `clara.clients` and
 -- nowhere else until `clientOnboarding_v5` makes it an interview answer and #654 mints a
--- `financial_year_end_day` key through 0205.
+-- `financial_year_end_day` key through 0220.
 --
 -- THE LOCK ORDER IS THE ESTATE'S, AND IT HAS THREE RUNGS, NOT TWO:
 --     client rung (203005004)  ->  clara.clients row  ->  clara.onboarding_plans row
@@ -759,7 +759,7 @@ begin
    where item_key in ('fye_day','financial_year_end_day')
       or knowledge_key = 'financial_year_end_day';
   if v_n <> 0 then
-    raise exception '#649 tail: a fy-end-day catalog row exists -- #649 mints none (DECISIONS §1.5; #654 files it through 0205)'
+    raise exception '#649 tail: a fy-end-day catalog row exists -- #649 mints none (DECISIONS §1.5; #654 files it through 0220)'
       using errcode='CLR10';
   end if;
 

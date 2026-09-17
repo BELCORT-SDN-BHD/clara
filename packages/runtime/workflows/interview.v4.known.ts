@@ -64,7 +64,7 @@ export const ONBOARDING_KNOWLEDGE_PURPOSE = "client_onboarding";
 /**
  * SEGMENT KEY → REGISTERED KNOWLEDGE KEY, for the six where the recorded value IS the answer.
  *
- * Measured against `clara.knowledge_keys` on the merged 0001→0209 chain rather than transcribed
+ * Measured against `clara.knowledge_keys` on the merged 0001→0224 chain rather than transcribed
  * from a design: `entity_type` (enum ENTITY_TYPES_V2), `turnover_band` (enum TURNOVER_BANDS_V1),
  * `msic` (format only), `sst_regime` (enum SST_REGIMES_V1), `default_currency` (enum CURRENCIES_V1)
  * and `financial_year_end_month` (range 1–12) each carry exactly the value their segment's

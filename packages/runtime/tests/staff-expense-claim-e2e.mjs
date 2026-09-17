@@ -42,7 +42,7 @@
 //      Skipped cleanly when 0182 is absent.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent shared with its siblings), and
-// the file SKIPS CLEANLY when migration 0206 is absent — its runtime half merges alongside its DB
+// the file SKIPS CLEANLY when migration 0221 is absent — its runtime half merges alongside its DB
 // half, and a green e2e against a database with no `clara.staff_expense_claims` would be a lie.
 
 import assert from "node:assert/strict";
@@ -283,7 +283,7 @@ async function main() {
            to_regprocedure('clara.admit_staff_expense_claim_work(uuid,uuid,text,jsonb,text,jsonb,text)') is not null as admit
   `);
   if (!probe.rows[0]?.claims || !probe.rows[0]?.ledger || !probe.rows[0]?.admit) {
-    console.log("[sec-e2e] SKIPPED — migration 0206 (clara.staff_expense_claims + clara.admit_staff_expense_claim_work) is not on this database");
+    console.log("[sec-e2e] SKIPPED — migration 0221 (clara.staff_expense_claims + clara.admit_staff_expense_claim_work) is not on this database");
     process.exit(0);
   }
 

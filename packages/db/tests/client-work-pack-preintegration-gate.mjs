@@ -6,7 +6,7 @@
 //
 // A FOCUSED invocation does not preload this module and therefore FAILS loudly when the lane is
 // absent — a skip is not evidence, and a worker running this battery on a rig that is supposed to
-// carry 0199 must not be told "0 failures" by a file that quietly ran nothing. The per-cell
+// carry 0214 must not be told "0 failures" by a file that quietly ran nothing. The per-cell
 // frontier gate is unaffected either way: with this flag set it always skips (counted) on a
 // database pinned below this migration, which is what the db-slice-frontiers matrix needs.
 process.env.CLARA_ALLOW_MISSING_CLIENT_WORK_PACK = "1";

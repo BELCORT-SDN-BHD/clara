@@ -266,7 +266,7 @@ test("p640.schedule.rules — every schedule refusal is typed and names its fiel
     client, authorityRef: ref, effectiveFrom: from, basis: b, ...over,
   });
 
-  // THE SUPPORTED ROSTER IS DERIVED FROM THE RELATION'S OWN CHECK, not re-typed. #653's 0208
+  // THE SUPPORTED ROSTER IS DERIVED FROM THE RELATION'S OWN CHECK, not re-typed. #653's 0223
   // added `amortisation_schedule` (a ratified recut of the 0193 plan family, DECISIONS §1.3), and
   // this cell went red at wave integration with the literal pair it was written against — the
   // honest reading of which is that a second place was carrying the roster. The door's advertised

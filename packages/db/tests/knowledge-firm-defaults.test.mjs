@@ -1,5 +1,5 @@
 // #654 — FIRM-WIDE KNOWLEDGE DEFAULTS WITH PRESERVED CLIENT EXCEPTIONS.
-// Migration: 0205_firm_knowledge_defaults.sql. Every cell gates on the LIVE CATALOG, never on the
+// Migration: 0220_firm_knowledge_defaults.sql. Every cell gates on the LIVE CATALOG, never on the
 // migration number (knowledge-firm-fixtures.mjs `knowledgeFirmCohortApplied`).
 //
 // WHAT THESE CELLS ARE FOR. #654's acceptance criteria are three claims about what the database
@@ -25,7 +25,7 @@ import {
 } from "./rig-fixtures.mjs";
 import { knowledgeWorld, committedPlan } from "./knowledge-fixtures.mjs";
 import {
-  deactivateMembership, evidenceViolators, fileDocument, fileDocumentPre0205, firmDocument,
+  deactivateMembership, evidenceViolators, fileDocument, fileDocumentPre0220, firmDocument,
   knowledgeFirmCohortApplied, liveWork, retireFiling,
 } from "./knowledge-firm-fixtures.mjs";
 
@@ -41,12 +41,12 @@ after(async () => {
 
 function gate(t) {
   if (live) return false;
-  if (process.env.CLARA_ALLOW_MISSING_KNOWLEDGE_FIRM_0205 === "1") {
-    console.warn("SKIP knowledge-firm-defaults: the 0205 cohort is not applied (explicit pre-integration run).");
+  if (process.env.CLARA_ALLOW_MISSING_KNOWLEDGE_FIRM_0220 === "1") {
+    console.warn("SKIP knowledge-firm-defaults: the 0220 cohort is not applied (explicit pre-integration run).");
     t.skip("firm-default cohort absent -- explicit pre-integration run");
     return true;
   }
-  assert.fail("the 0205 firm-default cohort is required for a focused run: apply 0205_firm_knowledge_defaults.sql");
+  assert.fail("the 0220 firm-default cohort is required for a focused run: apply 0220_firm_knowledge_defaults.sql");
 }
 
 function cell(name, fn) {
@@ -199,7 +199,7 @@ cell("p654.eligibility.admits_by_kind — a preference or a policy key is eligib
   const admitted = await admittedKeys();
   assert.deepEqual(admitted,
     ["accounting_basis", "coa_seed_decision", "default_currency", "reporting_framework"],
-    "the admitted census moved -- re-measure it and re-print it in 0205's tail");
+    "the admitted census moved -- re-measure it and re-print it in 0220's tail");
 
   // EVERY OTHER CATALOG KEY IS REFUSED, one by one, so "fail-closed" is measured rather than
   // asserted. The nine are the five carried legacy keys plus turnover_band,
@@ -236,7 +236,7 @@ cell("p654.eligibility.admits_by_kind — a preference or a policy key is eligib
 
 // =============================================================================================
 // SEAM 2 — THE CROSS-CLIENT EVIDENCE WALL. `clara._knowledge_source_pins` checks firm congruence
-// ONLY (0192:782-784), so before 0205 a firm-wide rule could pin client A's FILED document and
+// ONLY (0192:782-784), so before 0220 a firm-wide rule could pin client A's FILED document and
 // carry that pin into every other client's register and model pack. `uq_document_filing_active`
 // is over `(document_id, client_id) where retired_at is null` (0007:92-94), so the refusal and
 // its grandfather census are written against N live filings, never one.
@@ -325,7 +325,7 @@ cell("p654.evidence.admits_unfiled_firm_document — the source 0192 reserves fo
   });
   assert.equal(again.status, "captured");
   assert.deepEqual(await evidenceViolators(w.firm), { documents: 0, works: 0 },
-    "the runtime form of 0205 §0(8)/§E T.4: no LIVE firm-scope row may cite a filed document or a client's Work");
+    "the runtime form of 0220 §0(8)/§E T.4: no LIVE firm-scope row may cite a filed document or a client's Work");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -348,9 +348,9 @@ cell("p654.evidence.retraction_survives_contamination — a firm rule whose docu
   assert.equal(rule.status, "captured");
 
   // THE ONLY WAY TO REACH THIS STATE IS TO BYPASS THE FILING WALL, which is exactly what a
-  // database PREDATING 0205 is: rows captured before either trigger existed. The escape hatch
+  // database PREDATING 0220 is: rows captured before either trigger existed. The escape hatch
   // below is for them, and a cell that could not manufacture one would be asserting nothing.
-  const filing = await fileDocumentPre0205(w.firm, doc, w.clientA, w.admin);
+  const filing = await fileDocumentPre0220(w.firm, doc, w.clientA, w.admin);
   assert.equal(await liveFilings(doc), 1, "the legacy filing did not land");
 
   // A CORRECTION that introduces no new pin is admissible…
@@ -378,7 +378,7 @@ cell("p654.evidence.retraction_survives_contamination — a firm rule whose docu
     basis: "the firm presents in ringgit",
   });
   const otherDoc = await firmDocument(w.firm, w.admin, "p654v3b");
-  await fileDocumentPre0205(w.firm, otherDoc, w.clientB, w.admin);
+  await fileDocumentPre0220(w.firm, otherDoc, w.clientB, w.admin);
   const refused = await assertRaises("CLR10", () => humanQuery(w.admin,
     `select clara.correct_knowledge(p_record => $1, p_value => $2::jsonb, p_reason => $3,
         p_op_key => $4, p_source_kind => 'user_statement', p_source => $5::jsonb) as r`,
@@ -387,7 +387,7 @@ cell("p654.evidence.retraction_survives_contamination — a firm rule whose docu
   "correction re-pinning a firm rule onto a filed document");
   assert.equal(reasonOf(refused), "firm_scope_client_evidence");
 
-  // Leave the rig the way 0205's own prestate expects to find it.
+  // Leave the rig the way 0220's own prestate expects to find it.
   await retireFiling(filing, w.admin);
   await rootQuery(
     `update clara.document_filings set retired_at = now(), retired_by = $2,
@@ -424,7 +424,7 @@ cell("p654.evidence.refuses_client_work — a firm-wide default may not pin a cl
 // FIX ROUND 2 — 654-RC1. The two halves of the evidence wall are BEFORE-row triggers that each
 // read the OTHER table, so a sequential act is refused by whichever half runs second — but two
 // CONCURRENT transactions under READ COMMITTED each take a snapshot in which the other's row does
-// not exist yet, and both commit. That is exactly the state 0205 §0(8) refuses to apply against
+// not exist yet, and both commit. That is exactly the state 0220 §0(8) refuses to apply against
 // and §E T.4 asserts is zero, reached with both guards installed. This cell stages the race in
 // BOTH arrival orders and through BOTH filing paths.
 //
@@ -434,7 +434,7 @@ cell("p654.evidence.refuses_client_work — a firm-wide default may not pin a cl
 // FK check on `(source_document_id, firm_id)` takes FOR KEY SHARE on the same row and conflicts.
 // An invariant that holds only because another lane's body happens to take a row lock is an
 // invariant nobody can state, so the raw-INSERT arms remove that row lock and prove the wall
-// serialises on its OWN lock. (Both are real: the trigger is on the TABLE, and 0205's header says
+// serialises on its OWN lock. (Both are real: the trigger is on the TABLE, and 0220's header says
 // out loud that a guard on the table cannot be bypassed by a writer nobody has written yet.)
 // ---------------------------------------------------------------------------------------------
 
@@ -542,7 +542,7 @@ cell("p654.evidence.race_capture_vs_filing — the two halves of the wall serial
         `${where}: the loser must be refused BY NAME -- ${r.follower.message}`);
 
       assert.deepEqual(r.violators, { documents: 0, works: 0 },
-        `${where}: the runtime form of 0205 §0(8)/§E T.4 is violated after the race`);
+        `${where}: the runtime form of 0220 §0(8)/§E T.4 is violated after the race`);
     }
   }
   console.log("      race arms:", JSON.stringify(seen));
@@ -861,31 +861,31 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
     "_knowledge_capture_core", "_knowledge_insert_revision", "_knowledge_live_revision",
     "_tf_knowledge_records_supersede_only", "correct_knowledge", "get_knowledge_history",
     "get_knowledge_pack", "get_knowledge_record", "list_client_knowledge", "withdraw_knowledge",
-    // …and 0205's two reads plus its eligibility guard, whose own comment names 0192's authority
+    // …and 0220's two reads plus its eligibility guard, whose own comment names 0192's authority
     // trigger (the probe is `prosrc like '%knowledge_records%'`, so a comment counts — which is
     // the conservative direction for a census that must not MISS a reader).
     "list_firm_knowledge", "get_knowledge_applicability", "_tf_knowledge_firm_eligibility",
     "_tf_knowledge_firm_evidence",
-    // …and 0205's filing-side half of the same wall (fix round 1, 654-ADV-1). It sits on
+    // …and 0220's filing-side half of the same wall (fix round 1, 654-ADV-1). It sits on
     // clara.document_filings rather than on clara.knowledge_records, but it is a member of the
     // knowledge cohort by SUBJECT: it reads knowledge_records to decide whether a filing may
     // land, and it grants nothing.
     "_tf_document_filing_firm_knowledge",
   ]);
   // WAVE 2026-09-15 INTEGRATION — TWO SIBLING LANES READ THIS RELATION, EACH NAMED WITH ITS
-  // REASON rather than folded into the cohort above. Neither was on #654's rig: 0202 and 0203 are
-  // this wave's own migrations and both precede 0205, so on ANY database that carries this
+  // REASON rather than folded into the cohort above. Neither was on #654's rig: 0217 and 0218 are
+  // this wave's own migrations and both precede 0220, so on ANY database that carries this
   // battery's frontier they are present — which is why their presence is asserted below rather
   // than tolerated. The roster is NOT widened silently: each entry states what the function does
   // with the relation, and the loop underneath MEASURES that claim on the live body instead of
   // taking it.
   const READ_ONLY_CONSUMERS = new Map([
     ["get_firm_setup",
-      "#648 (0203) — the firm setup checklist LEFT JOINs the firm's own confirmed profile facts so "
+      "#648 (0218) — the firm setup checklist LEFT JOINs the firm's own confirmed profile facts so "
       + "a settled item renders what was recorded. A read of the firm's own record, on the same "
       + "viewer-visible surface; it authorises nothing and writes nothing."],
     ["list_source_dependents",
-      "#646 (0202) — the read-only projection of what stands on a document's reading: the knowledge "
+      "#646 (0217) — the read-only projection of what stands on a document's reading: the knowledge "
       + "records, open questions and parked Work questions citing it, so a human can decide what a "
       + "source revision affects. Automatic re-assessment is deferred (PRD:123, #658/#663), which is "
       + "exactly why this is a projection and not a writer."],
@@ -981,7 +981,7 @@ cell("p654.pack.second_client — the firm default reaches a client with no row 
   assert.deepEqual(packA.map((r) => [r.scope_kind, r.value.accounting_basis]), [["client", "cash"]],
     "the client that holds its own policy must not see the firm default at the same applicability");
 
-  // THE ENVELOPE IS UNCHANGED BY THIS TICKET, and that is measured rather than assumed: 0205
+  // THE ENVELOPE IS UNCHANGED BY THIS TICKET, and that is measured rather than assumed: 0220
   // recuts no 0192 body, so the pack's own field list is exactly what #644 shipped.
   assert.equal(Object.prototype.hasOwnProperty.call(packB[0], "authoritative"), false,
     "clara._knowledge_row_json emits `authoritative` on UNIONed legacy rows only (0192:1051-1084); a governed row gaining one would mean a 0192 recut");

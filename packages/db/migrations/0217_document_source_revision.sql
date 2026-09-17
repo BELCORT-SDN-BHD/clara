@@ -1,10 +1,10 @@
--- 0202_document_source_revision — #646: A HUMAN CAN REVISE A DOCUMENT'S TYPED FACTS, THE
+-- 0217_document_source_revision — #646: A HUMAN CAN REVISE A DOCUMENT'S TYPED FACTS, THE
 -- REVISION RECORDS WHICH SOURCE VERSION THE HUMAN WAS READING, AND AN ORPHANED CLASSIFICATION
 -- QUESTION FINALLY HAS A DOOR.
 -- =====================================================================================
 -- Spec of record: issue #646, its Agent Brief
 -- (docs/plan/active/refresh-wave-2026-09-15/brief-646.md) and the wave's binding
--- DECISIONS.md §2 #646. Migration number 0202 is assigned there and nowhere else.
+-- DECISIONS.md §2 #646. Migration number 0217 is assigned there and nowhere else.
 --
 -- WHAT THIS FILE ADDS, IN FIVE SENTENCES.
 --   1. `clara.document_fact_revisions` — an append-only, FORCE-RLS identity + receipt relation
@@ -1178,7 +1178,7 @@ begin
     --
     -- IT RAISES CLR02 AND THE WHOLE CALL REFUSES. That is stated rather than discovered, and
     -- #646 is where the dead end it names finally ends: a question whose filing was retired is
-    -- now closable through clara.dismiss_orphaned_classification_question (0202), which admits
+    -- now closable through clara.dismiss_orphaned_classification_question (0217), which admits
     -- ONLY origin='classification', status='open' and ZERO live filings for that (document,
     -- client). retire_document_filing (0007:1434-1466) still never touches clara.open_questions
     -- and approve_wrong_client_correction still references it nowhere, so the orphan is still
@@ -1307,7 +1307,7 @@ begin
   end if;
 
   -- (2) HORN A's PROOF. Both purpose CHECKs re-read and compared to the texts §0 stashed. If either
-  --     had moved, #646 would have joined the wave's 0206->0208 purpose-CHECK spine, which is the
+  --     had moved, #646 would have joined the wave's 0221->0223 purpose-CHECK spine, which is the
   --     one thing D6 exists to prevent.
   select pg_get_constraintdef(con.oid) into v_src from pg_constraint con
    where con.conrelid = 'clara.accounting_work'::regclass and con.conname = 'accounting_work_purpose_check';

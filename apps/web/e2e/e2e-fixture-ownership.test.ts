@@ -1207,7 +1207,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   begin_client_onboarding: ["agentic-finish-mock.mjs", "client-create-mock.mjs"],
   // #638 — `clara.get_work_claim_origin` is the Work detail identity block's "Staff expense claim"
   // row, and it is read on EVERY Work detail for the same structural reason the plan-origin row
-  // above is: a claim is admitted with purpose `journal_entry` (migration 0206 states why a fourth
+  // above is: a claim is admitted with purpose `journal_entry` (migration 0221 states why a fourth
   // purpose cannot post through the estate's closed posting core), so the purpose alone cannot say
   // what a Work IS and the surface has to ask. The three lanes answer OPPOSITE facts and each gates
   // on its own Work ids first: `staff-expense-claim-mock.mjs` answers a real claim for its own

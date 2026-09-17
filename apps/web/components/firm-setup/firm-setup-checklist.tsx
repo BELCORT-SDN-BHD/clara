@@ -216,12 +216,12 @@ export function FirmSetupChecklist() {
           && err.message.includes("op_key reused with different args")) {
         return { ok: false, kind: "already_recorded", message: err.message, code: err.code };
       }
-      // #654's TWO WALLS, mapped AHEAD of the migration that raises them (0205). Both are
+      // #654's TWO WALLS, mapped AHEAD of the migration that raises them (0220). Both are
       // `CLR10`s from a BEFORE INSERT trigger on `clara.knowledge_records`, and both are about
       // the KEY or the SOURCE rather than about the value a person typed — so neither belongs in
       // a field error beside a control. They get their own named faces, and they are mapped now
       // because a refusal that arrives before its face does reaches a practitioner as a raw
-      // database sentence. Unexercised on this branch (0205 is not applied here) and named as
+      // database sentence. Unexercised on this branch (0220 is not applied here) and named as
       // such in the report rather than claimed as tested.
       if (err.reason === "knowledge_scope_not_firm_defaultable") {
         return { ok: false, kind: "not_firm_defaultable", message: err.message, code: err.code };

@@ -118,7 +118,7 @@ import { handlePlansSupabase } from "./plans-mock.mjs";
 //
 // It also answers TWO shapes this file has no branch for: `verifyOtp`'s `type: "invite"` (the
 // `/auth/v1/verify` branch below answers `type: "signup"` and 400s the rest) and
-// `/rest/v1/rpc/preview_invite` (0209, which no other lane and no CORE branch answers). Those
+// `/rest/v1/rpc/preview_invite` (0224, which no other lane and no CORE branch answers). Those
 // are EXTENSIONS, not handovers — nothing here used to answer them — and they are what lets a
 // browser leg drive `/invite/:token` past verification to the preview step.
 import { handleMembersLifecycleSupabase } from "./members-lifecycle-mock.mjs";

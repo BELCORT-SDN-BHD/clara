@@ -12,7 +12,7 @@
 // THE THIRD TOOL THE WAVE ASKED FOR IS NOT HERE, AND THE REASON IS A MEASUREMENT RATHER THAN A
 // PREFERENCE. #653's `start_prepayment_schedule_work` would call
 // `clara.create_prepayment_schedule`, and that door is `_human_ctx`-fronted (bookkeeper floor read
-// off a JWT actor) and granted to `clara_authenticated` ALONE — migration 0208 §D.1 states it as a
+// off a JWT actor) and granted to `clara_authenticated` ALONE — migration 0223 §D.1 states it as a
 // rule: "The four doors to `clara_authenticated`; … The agent and both wake roles gain NOTHING".
 // This lane runs on the runtime pool, which SET ROLEs to `clara_runtime` and carries no JWT actor,
 // so the tool could only ever return a grant refusal. Closing it needs an OBO twin —
@@ -32,7 +32,7 @@
 // 1 · `start_staff_expense_claim_work` — THE CHAT ENTRANCE #638 LEFT OPEN.
 //
 // A staff expense claim is a `journal_entry`-purpose Work whose typed particulars live in
-// `clara.staff_expense_claims`. Migration 0206's amendment is the whole reason this tool is cheap:
+// `clara.staff_expense_claims`. Migration 0221's amendment is the whole reason this tool is cheap:
 // a FOURTH `accounting_work.purpose` cannot post without recutting the posting core, so the claim
 // rides the existing purpose and `WORK_ACCEPTED_PURPOSES` needs NO widening (see
 // chatTurn.v19.parts.ts's `WORK_ACCEPTED_PURPOSES_V19`, pinned by tests/p6-1-parts-parity.test.mjs).
@@ -229,7 +229,7 @@ export async function runStartStaffExpenseClaimWork(
         type: "work_accepted",
         work_id: String(receipt.work_id),
         client_id: clientId,
-        // THE PURPOSE IS `journal_entry`, AND IT IS NOT A PLACEHOLDER. Migration 0206's amendment
+        // THE PURPOSE IS `journal_entry`, AND IT IS NOT A PLACEHOLDER. Migration 0221's amendment
         // rules that a claim rides the existing purpose; `clara.get_work_claim_origin` is what
         // labels it as a claim on the Work surfaces, never a purpose value.
         purpose: "journal_entry",

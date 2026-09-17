@@ -20,7 +20,7 @@
 // point is a change to a deployed body: it ships as a NEW module beside this one, wired by a NEW
 // chatTurn version.
 //
-// THE DATABASE IS THE AUTHORITY, ALWAYS. `clara._assert_claim_basis` (migration 0206) re-checks
+// THE DATABASE IS THE AUTHORITY, ALWAYS. `clara._assert_claim_basis` (migration 0221) re-checks
 // every rule below at admission — the payload half before anything durable, the world half after
 // the replay branch — against the client's live chart, the live staff-advance register and the live
 // advance outstanding. Nothing here is a rule of its own: every check is a MIRROR of one the
@@ -262,7 +262,7 @@ export function settlementFieldPath(settlement: ClaimSettlement): string {
 
 /**
  * Every shape refusal a model can act on WITHOUT a database round trip, in the DATABASE's own
- * `field` vocabulary (`claim.<key>`, migration 0206's own spelling) so ONE mapper serves both halves
+ * `field` vocabulary (`claim.<key>`, migration 0221's own spelling) so ONE mapper serves both halves
  * of the validation. The database re-checks all of these and is the authority.
  *
  * WHAT IS DELIBERATELY ABSENT. The four world facts this module cannot know and must not guess:
@@ -409,7 +409,7 @@ export function claimFromInput(input: StartStaffExpenseClaimWorkInput): Record<s
 }
 
 /**
- * THE JOURNAL A CLAIM IMPLIES — the same derivation `clara._claim_journal_basis` (migration 0206)
+ * THE JOURNAL A CLAIM IMPLIES — the same derivation `clara._claim_journal_basis` (migration 0221)
  * performs inside the door.
  *
  * IT IS NOT SENT ANYWHERE. `clara.admit_staff_expense_claim_work` takes `p_claim` and derives the
@@ -477,7 +477,7 @@ export function basisFromClaim(input: StartStaffExpenseClaimWorkInput): Record<s
 // amendment made cheaper for v20. `chatTurn.v19.parts.ts:91`'s frozen
 // `WORK_ACCEPTED_PURPOSES_V19 = ["journal_entry","periodic_stock_adjustment","payroll_obligation"]`
 // already names a claim Work: the purpose of a staff expense claim IS `journal_entry`, by design
-// (see migration 0206's header — a fourth purpose cannot post without recutting the posting core).
+// (see migration 0221's header — a fourth purpose cannot post without recutting the posting core).
 // The chat `work_accepted` part therefore needs no change at all, and `p6-1-parts-parity.test.mjs`
 // stays green.
 //

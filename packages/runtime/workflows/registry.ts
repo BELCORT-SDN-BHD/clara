@@ -147,7 +147,7 @@ export const workflows = {
   // tools (`start_staff_expense_claim_work`, `start_accrual_work`), ZERO wire kinds and ZERO steps.
   // Both new tools mint the `work_accepted` card v18 already declared, because both admit
   // `journal_entry`-purpose Work: a staff expense claim rides the existing purpose (migration
-  // 0206's own amendment — a fourth `accounting_work.purpose` cannot post without recutting the
+  // 0221's own amendment — a fourth `accounting_work.purpose` cannot post without recutting the
   // posting core), and an accrual occurrence is admitted by `clara._plan_admit_occurrence` through
   // `clara.admit_journal_work` with `adjustment_basis` NULL (0193). `WORK_ACCEPTED_PURPOSES` is
   // therefore UNWIDENED and `apps/web` needs no reader change at all — the first chat repoint in
@@ -156,15 +156,15 @@ export const workflows = {
   // WHAT THE WAVE ASKED FOR AND THIS IMAGE DOES NOT CARRY, recorded here because a reader will look
   // for it: #653's `start_prepayment_schedule_work` and #647's `record_counterparty_alias`. Each
   // needs a door this lane cannot reach — `clara.create_prepayment_schedule` is `_human_ctx`-fronted
-  // and granted to `clara_authenticated` alone (0208 §D.1), and `clara.add_counterparty_alias` has
+  // and granted to `clara_authenticated` alone (0223 §D.1), and `clara.add_counterparty_alias` has
   // no OBO twin at all (DECISIONS D11) — and a workflow cut does not write migrations. Both
   // contracts stay in their non-frozen modules, which are deliberately NOT imported by this closure.
   //
-  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0206 AND 0207 MUST BE LIVE BEFORE THIS
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0221 AND 0222 MUST BE LIVE BEFORE THIS
   // IMAGE SERVES A TURN, on top of v19's 0192/0194. Against a database without them each new tool's
   // door raises `undefined_function` (42883), which `authoringRefusal` does not read as a governed
   // refusal, so the tool answers `internal` and the turn continues: CONTAINED, corrupting nothing,
-  // and it makes Clara refuse what it just offered. The REVERSE order is FREE: 0206 and 0207 against
+  // and it makes Clara refuse what it just offered. The REVERSE order is FREE: 0221 and 0222 against
   // a v19 image add relations and verbs that nothing calls.
   //
   // ROLLBACK TO v19 stops offering the two tools and changes no database state; claims and accruals
@@ -247,18 +247,18 @@ export const workflows = {
   //     `clara-work-tools/v4` accordingly;
   //   · #639's dependent fixed-asset particulars question, opened by the WORKFLOW after a commit
   //     whose entry birthed a register row with no method or in-service date, and applied through
-  //     `clara.complete_fixed_asset_particulars_for` (`clara_runtime`-only, 0201 §E). It posts NO
-  //     second journal; 0201's tail T.9 asserts the door's body names no `journal_entries` row.
+  //     `clara.complete_fixed_asset_particulars_for` (`clara_runtime`-only, 0216 §E). It posts NO
+  //     second journal; 0216's tail T.9 asserts the door's body names no `journal_entries` row.
   //
   // WHAT IS NOT CARRIED: #653's `read_prepayment_source`. Measured on the merged chain — every
-  // prepayment read is `clara_authenticated`-only (0208 §D.1) and `clara.prepayment_schedules` and
+  // prepayment read is `clara_authenticated`-only (0223 §D.1) and `clara.prepayment_schedules` and
   // `clara.document_service_periods` carry no select for any machine role — so the tool could only
   // return a grant refusal. The frozen prompt's "no source document" sentence is therefore UNCHANGED
   // from v3's, and #653's claraWork contract stays open.
   //
-  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: 0192 (the knowledge pack) and 0201 (the particulars
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: 0192 (the knowledge pack) and 0216 (the particulars
   // door) must be live before this image runs any Work, on top of v3's own 0195. Against a database
-  // without 0192 the knowledge read renders "unavailable" and the run carries on; without 0201 the
+  // without 0192 the knowledge read renders "unavailable" and the run carries on; without 0216 the
   // particulars discovery read finds nothing and no question is ever opened. Both are contained by
   // construction — the wrong order costs a capability and corrupts nothing.
   //

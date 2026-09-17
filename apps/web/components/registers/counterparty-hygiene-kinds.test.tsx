@@ -128,7 +128,7 @@ test("H-34 control: the active kind's list is what renders — reading both kind
 
 // #647 — the panel's own closing NotBuiltNote is RETIRED, and each row now reaches the identity
 // it belongs to. The note said "a counterparty's existing aliases and the retire-alias action are
-// not available yet — this build has no read for them", which stopped being true the moment 0200
+// not available yet — this build has no read for them", which stopped being true the moment 0215
 // shipped clara.get_counterparty_identity; a not-built note that outlives the thing it excused is
 // worse than none, because a reader believes it.
 test("ticket 647 — the aliasListNotBuilt note is gone, and every row links to its own identity detail", async () => {

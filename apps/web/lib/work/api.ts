@@ -231,7 +231,7 @@ export async function submitPeriodicAdjustmentWork(
 
 /**
  * #638 — ADMIT ONE STAFF EXPENSE CLAIM. A SIBLING of `submitPeriodicAdjustmentWork`, not a widened
- * version of it, and for the reason migration 0206 gives for keeping a third database door: the
+ * version of it, and for the reason migration 0221 gives for keeping a third database door: the
  * three take different payloads and are reached by different surfaces.
  *
  * ONE ARGUMENT, NOT TWO. Unlike both siblings, this door takes NO `basis`: the claim IS the basis,

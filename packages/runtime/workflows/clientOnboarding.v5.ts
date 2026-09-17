@@ -46,7 +46,7 @@
 // database without it the read classifies the missing function as a failure, the fold yields
 // nothing, and the interview asks every question — so the wrong order costs a feature and corrupts
 // nothing. The fy-end DAY reaches `clara.clients` through
-// `clara.settle_client_onboarding_facts` (0204) on the HUMAN lane, not from here.
+// `clara.settle_client_onboarding_facts` (0219) on the HUMAN lane, not from here.
 
 import { createHook } from "workflow";
 import { CLIENT_SEGMENTS_V4 } from "./interview.v4.questions.js";

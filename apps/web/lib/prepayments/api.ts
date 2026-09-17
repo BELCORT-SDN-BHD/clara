@@ -1,6 +1,6 @@
 // #653 — THE PREPAYMENT-SCHEDULE READ AND WRITE SEAM (journeys C8, C9).
 //
-// EVERY REACH IS AN RPC, and that is migration 0208's own shape rather than a preference:
+// EVERY REACH IS AN RPC, and that is migration 0223's own shape rather than a preference:
 // `clara.prepayment_schedules` carries no ACL at all — no SELECT, no DML — so a plain PostgREST
 // table read would 42501 and there is no second path to be tempted by. The three reads are definer
 // doors at the viewer floor with a firm predicate inside each body; the one write is a definer door
@@ -16,7 +16,7 @@
 // `useAsyncRead().act()`, which reloads unconditionally after success AND after failure.
 //
 // EVERY WRITE TAKES A FRESH op_key PER DECISION, minted by the caller rather than here. A retry of
-// the SAME decision must ride the SAME key so `clara._reserve_op` can replay it — and 0208 asks
+// the SAME decision must ride the SAME key so `clara._reserve_op` can replay it — and 0223 asks
 // the reservation BEFORE its duplicate check for exactly that reason, so a lost response replays
 // the schedule it already created instead of answering `prepayment_schedule_exists`.
 

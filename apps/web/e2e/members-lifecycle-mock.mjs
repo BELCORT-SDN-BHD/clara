@@ -50,7 +50,7 @@
 //
 // `serve-built.mjs`'s `/auth/v1/verify` branch answers `type: "signup"` and 400s everything else,
 // so the `type: "invite"` call `/invite/:token` makes had no answer anywhere — which is why no
-// browser leg had ever driven that page past verification, and why the ONE caller migration 0209
+// browser leg had ever driven that page past verification, and why the ONE caller migration 0224
 // exists for (`clara.preview_invite`, which no CORE branch and no sibling lane answers either) was
 // proven only in jsdom. Both are EXTENSIONS rather than handovers: nothing loses a fixture,
 // because nothing had one. They are scoped by TOKEN, not by persona — this lane's own
@@ -228,7 +228,7 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
   // THIS TAKES NOTHING FROM THE CORE. `serve-built.mjs`'s own `/auth/v1/verify` branch answers
   // `type: "signup"` and 400s everything else, so the `type: "invite"` shape `/invite/:token`
   // sends had no answer in this harness at all — which is why no browser leg had ever driven
-  // that page past verification, and why the ONE caller migration 0209 exists for was proven
+  // that page past verification, and why the ONE caller migration 0224 exists for was proven
   // only in jsdom. The scope here is not a persona but a TOKEN: this lane's own
   // `supabaseToken`, and nothing else.
   if (request.method === "POST" && path === "/auth/v1/verify") {
@@ -245,7 +245,7 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
     return true;
   }
 
-  // `clara.preview_invite` (0209), scoped by the CLARA token the `ct` parameter carries — the
+  // `clara.preview_invite` (0224), scoped by the CLARA token the `ct` parameter carries — the
   // one this lane minted, never a persona: at this point in the journey the invitee is signed in
   // as nobody this harness tracks. TWO tokens, because the step has two browser-observable
   // outcomes: `pending` lets the password form render BELOW the preview block, and a definite
@@ -257,7 +257,7 @@ export async function handleMembersLifecycleSupabase(request, response, path, ur
       : body?.p_token === MEMBERS_LIFECYCLE.previewRevokedToken ? "revoked"
       : null;
     if (status === null) return false;
-    // The door's own four keys, in 0209 §A's order, with the address MASKED the way §A masks it
+    // The door's own four keys, in 0224 §A's order, with the address MASKED the way §A masks it
     // (one leading character, three FIXED stars, the domain).
     sendJson(response, 200, {
       firm_name: MEMBERS_LIFECYCLE.firmName,

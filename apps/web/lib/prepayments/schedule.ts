@@ -1,7 +1,7 @@
 // #653 — THE PREPAYMENT FORM'S PURE MIRROR (journeys C8, C9).
 //
 // EVERY RULE HERE IS THE DATABASE'S, RE-STATED WHERE THE CONTROL IS. `clara.create_prepayment_
-// schedule` (migration 0208) re-checks all of them, and it is the authority: this module exists so
+// schedule` (migration 0223) re-checks all of them, and it is the authority: this module exists so
 // a preparer sees a mistake beside the field that holds it instead of as a refusal a round trip
 // later. Nothing below is a rule of its own, and nothing below derives an accounting fact.
 //
@@ -11,7 +11,7 @@
 //     FROZEN `clara.prepayment_schedule_v1` from the recognition entry's own prepaid leg and the
 //     document's own service period. The form renders them as a DISABLED preview after the door
 //     answers — a preview, never an editor.
-//   · THE CADENCE. Monthly, each period's own month end, derived from the same output. 0208's
+//   · THE CADENCE. Monthly, each period's own month end, derived from the same output. 0223's
 //     `clara._assert_plan_schedule` refuses a typed one for this kind, so offering the control
 //     would be offering one whose only possible outcome is a refusal.
 //   · THE TERM. A service period is HUMAN-STATED and lives on the DOCUMENT
@@ -21,7 +21,7 @@
 // WHAT IT DOES ASK is exactly what a human judges: WHICH posted prepayment, WHICH expense account
 // the amortisation charges, WHY that account, and what the schedule is FOR.
 
-/** The typed `detail.reason` tokens migration 0208's door raises. Spelled once so the form's
+/** The typed `detail.reason` tokens migration 0223's door raises. Spelled once so the form's
  *  refusal rendering and the e2e mock cannot drift apart. */
 export const PREPAYMENT_REFUSAL = {
   sourceUnfit: "prepayment_source_unfit",

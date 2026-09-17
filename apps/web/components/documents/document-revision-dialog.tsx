@@ -5,7 +5,7 @@
 // WHAT DID NOT EXIST BEFORE. `DocumentFactsTable` was strictly read-only, and the only
 // human-reachable fact verb in the estate re-ran the MACHINE (`clara.request_reextraction`) — so a
 // professional who could see that the reader had taken RM1,050.00 for RM1,150.00 had nothing to
-// press. `clara.revise_document_fact` (migration 0202) is the door; this is its face.
+// press. `clara.revise_document_fact` (migration 0217) is the door; this is its face.
 //
 // FOUR THINGS ARE ON SCREEN BEFORE THE HUMAN COMMITS, and each is an acceptance criterion rather
 // than decoration: the CURRENT value, the canonical FIELD PATH the revision will be written under,
@@ -42,7 +42,7 @@ import { DoorFeedback } from "./door-feedback";
 import type { PartClr } from "@/lib/parts/hooks";
 
 /** The field paths a human may revise. It is `clara._revisable_invoice_field`'s closed set
- *  (migration 0202), re-stated here for ONE purpose only: deciding which rows get a control. The
+ *  (migration 0217), re-stated here for ONE purpose only: deciding which rows get a control. The
  *  DB is still the arbiter — this list never suppresses a refusal and never admits a write. */
 export const REVISABLE_FIELD_PATHS: readonly string[] = [
   "invoice.total", "invoice.amount_due", "invoice.currency",

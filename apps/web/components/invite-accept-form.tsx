@@ -848,7 +848,7 @@ export function InviteAcceptForm({
               <dd className="font-medium text-foreground">
                 {knownRole(preview.preview.role) ? tRoles(preview.preview.role as InvitePreviewRole) : preview.preview.role}
               </dd>
-              {/* A HINT, never an address: the door masks it (0209 §A) and this renders what it
+              {/* A HINT, never an address: the door masks it (0224 §A) and this renders what it
                   sent. Nothing here reconstructs an address, and the form still has no email
                   field — the door reads that from the verified JWT claim. */}
               <dt className="text-muted-foreground">{tPreview("emailLabel")}</dt>

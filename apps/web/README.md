@@ -100,7 +100,7 @@ owner ruled on 2026-09-15:
   verbatim with its code beside the same candidate list — which the refusal itself carries, so the
   face never issues a second read of the fact it is reporting. **And a belt, labelled as one**: if
   that read ever *answered* an arity of 2 or more instead of refusing it, Confirm is shut rather
-  than live-looking-and-inert. 0204 raises at this arity and never returns it as a success, so the
+  than live-looking-and-inert. 0219 raises at this arity and never returns it as a success, so the
   state is unreachable through the live door; the cell that holds the belt honest drives a mock
   door to answer it (`add-client-candidates.test.tsx`).
 
@@ -204,7 +204,7 @@ invitation whose issuer has since been demoted — or who has left the firm at a
 pending, the password form renders, and the refusal arrives at the last step in the database's own
 words ("re-issue by an owner"), relayed verbatim. The admin roster is blind in exactly the same
 place, because `clara.firm_invites_visible` does not carry the issuer's rank either; closing it means
-a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0209
+a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0224
 note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
 (`p625.preview.issuer_rank`).
 

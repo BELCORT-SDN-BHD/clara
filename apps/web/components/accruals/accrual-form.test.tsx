@@ -99,7 +99,7 @@ const ACCEPTED: AccrualCreated = {
  *
  *  THE `field` RIDES `detail`, which `lib/wire.ts` has already parsed into an object by the time a
  *  caller sees it: `reason` is that object's discriminant and `field` is the rest of the contract
- *  migration 0207 raises beside it. */
+ *  migration 0222 raises beside it. */
 function refusal(code: string, reason: string | null, message: string, field?: string): Error {
   return new DoorRefusal(code, message, {
     reason,
@@ -166,7 +166,7 @@ async function fill(h: Awaited<ReturnType<typeof renderComponent>>, over: Record
     expenseAccountCode: "6100",
     liabilityAccountCode: "2020",
     instruction: "The client's standing instruction of 2026-06-30.",
-    // THE AUTHORITY WINDOW SITS INSIDE THE STATED TERM (0207's SIXTH MEASUREMENT): the form
+    // THE AUTHORITY WINDOW SITS INSIDE THE STATED TERM (0222's SIXTH MEASUREMENT): the form
     // refuses a schedule that would post outside the period it names, before any round trip.
     effectiveFrom: "2026-07-01",
     effectiveTo: "2026-07-31",
@@ -239,7 +239,7 @@ test("652.form: a failed submit focuses the first invalid control and SENDS NOTH
 });
 
 test("652.form: a schedule that would post outside its own stated term is refused BEFORE the door, at the control", async () => {
-  // #652's own ruling — refuse before admission — applied to 0207's SIXTH MEASUREMENT. MEASURED on
+  // #652's own ruling — refuse before admission — applied to 0222's SIXTH MEASUREMENT. MEASURED on
   // a rig before that wall existed: an authority running from June under a July term posted three
   // entries, two of them describing a period they did not accrue for (review round 1, A1).
   const sent: CreateAccrualInput[] = [];
@@ -276,7 +276,7 @@ test("652.form: a schedule that would post outside its own stated term is refuse
 });
 
 test("652.form: a term too short for its own schedule is refused BEFORE the door, at the day rule", async () => {
-  // 0207's SEVENTH MEASUREMENT. MEASURED on a rig before that wall existed (review round 2, NB1):
+  // 0222's SEVENTH MEASUREMENT. MEASURED on a rig before that wall existed (review round 2, NB1):
   // a 2026-07-01..2026-07-15 term on a month-end rule was ACCEPTED, the plan went live and no due
   // date was ever reached — the list read said "No due dates reached yet", for ever.
   const sent: CreateAccrualInput[] = [];

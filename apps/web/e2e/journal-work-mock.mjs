@@ -1785,7 +1785,7 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
   // row. Answered NULL for both of this lane's own Works: neither was admitted as a claim, and the
   // detail renders nothing on a null row — the door's own honest answer for a Work that is not a
   // claim, never a fabricated origin. The read exists at all because a claim is admitted with
-  // purpose `journal_entry` (migration 0206's header says why a fourth purpose cannot post), so the
+  // purpose `journal_entry` (migration 0221's header says why a fourth purpose cannot post), so the
   // purpose alone cannot say what a Work IS. SHARED with staff-expense-claim-mock.mjs and
   // plans-mock.mjs (declared in e2e-fixture-ownership.test.ts's `SHARED_RPC_VERBS`): each lane
   // gates on its own Work ids first and falls through otherwise.

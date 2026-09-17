@@ -1,11 +1,11 @@
-// clara.preview_invite (0209) — the typed, FAIL-CLOSED read behind the invite surface's
+// clara.preview_invite (0224) — the typed, FAIL-CLOSED read behind the invite surface's
 // preview step, shaped on lib/firm/caller-context.ts: a declared column census, a row validator
 // that checks EVERY declared field, and an outcome that keeps facts apart instead of collapsing
 // them.
 //
 // RUNG-0 CENSUS, at the LIVE body. `clara.preview_invite(p_token text) returns jsonb` is created
-// exactly once, at `packages/db/migrations/0209_preview_invite.sql` §A, and no later migration
-// replaces it (0209 is the frontier this module ships with). Its posture, asserted by that file's
+// exactly once, at `packages/db/migrations/0224_preview_invite.sql` §A, and no later migration
+// replaces it (0224 is the frontier this module ships with). Its posture, asserted by that file's
 // own §C tail and re-read by `packages/db/tests/preview-invite.test.mjs`:
 //
 //   - SECURITY DEFINER, `search_path = clara, pg_temp`, owned by `clara_fn_owner`;
@@ -19,7 +19,7 @@
 //     invitation whose issuer was demoted or has left the firm previews as `pending`, the
 //     password form renders, and `acceptInvite`'s own verbatim CLR path is what refuses it.
 //     Pinned by `packages/db/tests/preview-invite.test.mjs` → `p625.preview.issuer_rank`;
-//     see `packages/db/README.md`'s 0209 note for why closing it needs a fifth status;
+//     see `packages/db/README.md`'s 0224 note for why closing it needs a fifth status;
 //   - the answer is `{firm_name, role, status, masked_email}` and nothing else: never the token,
 //     never `token_hash`, never the invite id, never the unmasked address;
 //   - `status` is the EFFECTIVE status — `clara.firm_invites_visible`'s own expression
@@ -51,7 +51,7 @@ import { callDoor, isDoorRefusal, type CallDoorOptions } from "@/lib/doors";
  *  lib/wire.ts sets — never spelled into the path). */
 export const PREVIEW_INVITE_DOOR = "preview_invite";
 
-/** The FOUR keys 0209 §A builds, in the order its `jsonb_build_object` lists them. The
+/** The FOUR keys 0224 §A builds, in the order its `jsonb_build_object` lists them. The
  *  migration's own tail asserts the returned object carries exactly these four quoted keys and
  *  names neither a token nor the unmasked address, so this list is the mirror of a contract the
  *  database enforces rather than a hopeful copy. */
@@ -75,7 +75,7 @@ export type InvitePreviewRow = {
   firm_name: string;
   role: InvitePreviewRole;
   status: InvitePreviewStatus;
-  /** A HINT, never an address: `0209` masks to one leading character, three fixed stars and the
+  /** A HINT, never an address: `0224` masks to one leading character, three fixed stars and the
    *  domain. Fixed stars on purpose — a length-proportional run would publish the address's
    *  length. Rendered as-is; this module never tries to reconstruct anything from it. */
   masked_email: string;

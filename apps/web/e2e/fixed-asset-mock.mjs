@@ -494,7 +494,7 @@ export async function handleFixedAssetSupabase(request, response, path, url, sen
     // (fa-particulars-fields.tsx) gates method/date/life, so a browser cannot reach the two arms
     // above through the form at all — but it checks residual against NOTHING, and `MoneyInput`
     // clamps nothing, so a human CAN submit a residual above cost and the door refuses it with
-    // `axis: "residual"` (0201 §D, "a residual value cannot exceed cost"). That is the invalid
+    // `axis: "residual"` (0216 §D, "a residual value cannot exceed cost"). That is the invalid
     // path the walk drives, and the axis it maps onto a control.
     const costOf = { [FA.assetId]: 850000, [FA.answerableAssetId]: 420000, [FA.completeAssetId]: 1200000 };
     const cost = costOf[body.p_asset] ?? null;

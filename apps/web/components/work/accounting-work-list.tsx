@@ -118,7 +118,7 @@ export type WorkListScope = { kind: "firm" } | { kind: "client"; clientId: strin
 // four surfaces are corrected together and once.
 //
 // A STAFF EXPENSE CLAIM IS NOT A FOURTH VALUE HERE, and that is by design rather than by omission:
-// it is admitted with purpose `journal_entry` (migration 0206's header says why a fourth purpose
+// it is admitted with purpose `journal_entry` (migration 0221's header says why a fourth purpose
 // cannot post), and what makes it a CLAIM is read from `clara.get_work_claim_origin` — the Work
 // detail asks that door by name. Adding a token here would be inventing a purpose the estate does
 // not have.

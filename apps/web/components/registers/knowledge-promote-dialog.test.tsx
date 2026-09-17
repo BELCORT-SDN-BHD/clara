@@ -367,7 +367,7 @@ test("kp.06 confirming reaches clara.capture_knowledge at FIRM scope, with a fre
       assert.equal(sent.p_effective_from, "2026-09-16");
       assert.equal(sent.p_effective_to, "2027-09-30");
       assert.deepEqual(sent.p_source, {},
-        "a firm default pins NO document — 0205's evidence wall and 0192's own promotion path agree");
+        "a firm default pins NO document — 0220's evidence wall and 0192's own promotion path agree");
       assert.equal(sent.p_source_kind, "user_statement",
         "trust travels from what is being generalised; the wrapper never upgrades it");
       assert.equal(typeof sent.p_op_key, "string");

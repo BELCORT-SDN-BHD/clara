@@ -2,7 +2,7 @@
 // ticket owns across four surfaces.
 //
 // WHAT EACH GROUP PINS:
-//   validate.*  every rule is a MIRROR of one migration 0206 enforces, and it names the control
+//   validate.*  every rule is a MIRROR of one migration 0221 enforces, and it names the control
 //               that holds it. The ORDER matters too: the form focuses `issues[0].field`, so "the
 //               first invalid field" only means anything if the list is in DOM order.
 //   derive.*    the journal a claim implies is exactly what `clara._claim_journal_basis` and
@@ -309,7 +309,7 @@ test("purpose.four: all four surfaces name the SAME three values the column admi
   // (1) `lib/work/purpose-label.ts`'s SUFFIX, through its own predicate.
   for (const p of PURPOSES) assert.equal(isKnownWorkPurpose(p), true, `${p} has a label`);
   assert.equal(isKnownWorkPurpose("staff_expense_claim"), false,
-    "there is NO claim purpose — a claim is a journal_entry Work (migration 0206)");
+    "there is NO claim purpose — a claim is a journal_entry Work (migration 0221)");
 
   // (2) and (3): the Work list's label set and the filter's option set, read from their own source
   // rather than from a copy of it — a census that trusted a second list would prove nothing.

@@ -207,7 +207,7 @@ const SOURCE_GONE = rec({
 });
 
 // =============================================================================================
-// #654 — THE FIRM-DEFAULT LANE (0205_firm_knowledge_defaults.sql).
+// #654 — THE FIRM-DEFAULT LANE (0220_firm_knowledge_defaults.sql).
 // =============================================================================================
 
 /** The client record a human promotes. A promotion carries the RECORD'S OWN VALUE firm-wide
@@ -341,7 +341,7 @@ function applicabilityFor(clientId, key) {
     knowledge_version: promoted ? "21" : "11",
     key: {
       ...(KEY_DEFINITIONS[key] ?? CURRENCY_KEY_DEF),
-      // 0205's eligibility rule, as the catalog answers it: a preference or a firm-level
+      // 0220's eligibility rule, as the catalog answers it: a preference or a firm-level
       // default is promotable, an identity fact (msic, entity_type, sst_regime, the keys
       // #644's own fixtures carry) is not. This is what keeps the promote control off a
       // record the door could only refuse.

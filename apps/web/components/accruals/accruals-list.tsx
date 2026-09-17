@@ -126,7 +126,7 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
 /** The selection rule, as a sentence — with an HONEST raw-value fallback for anything outside the
  *  admitted set (the adjustments-register N10 idiom): a rule this build has not enumerated prints
  *  as itself, never as a key path and never as a silent blank. One rule is admitted because one is
- *  performed (migration 0207's FOURTH MEASUREMENT). */
+ *  performed (migration 0222's FOURTH MEASUREMENT). */
 export function methodLabel(t: Translate, rule: string): string {
   const labels: Record<string, string> = {
     stated_amount: t("methodStatedAmount"),

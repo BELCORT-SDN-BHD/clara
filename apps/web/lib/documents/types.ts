@@ -283,7 +283,7 @@ export type RequestReextractionResult = {
  *  (apps/dashboard/app/shared/intake.ts:99-100). */
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-// --- #646 (migration 0202) — the source-revision lane ----------------------------
+// --- #646 (migration 0217) — the source-revision lane ----------------------------
 
 /** `clara.revise_document_fact`'s receipt. `facts_version` is what the NEXT revision of this
  *  document must quote; `observed_version` is what THIS one was written against. */

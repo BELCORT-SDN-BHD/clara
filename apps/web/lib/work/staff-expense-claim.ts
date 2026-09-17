@@ -350,7 +350,7 @@ export function firstInvalidClaimField(issues: readonly ClaimIssue[]): ClaimFiel
 
 /**
  * THE JOURNAL LINES THE CLAIM IMPLIES — the same derivation `clara._claim_journal_basis`
- * (migration 0206) performs inside the door, and the same one
+ * (migration 0221) performs inside the door, and the same one
  * `packages/runtime/lib/staff-expense-claim-basis.ts`'s `basisFromClaim` performs for the chat lane.
  *
  * IT IS A PREVIEW, NOT A PROPOSAL. The browser never sends lines: the door takes the claim and
@@ -445,7 +445,7 @@ export function toClaimWire(
  * the same law `lib/work/journal-basis.ts`'s `fieldForServerPath` states for the basis and
  * `lib/work/periodic-adjustment.ts`'s `fieldForAdjustmentPath` restates for the particulars.
  * Whether the refusal came from `packages/runtime/src/workRoutes.ts`'s `toDbClaim` (the earlier,
- * cheaper half) or from migration 0206's `clara._assert_claim_basis` (the authority), the body is
+ * cheaper half) or from migration 0221's `clara._assert_claim_basis` (the authority), the body is
  * the same shape:
  *
  *     400 { "error": "invalid_basis", "field": "claim.<key>", "reason": <constraint|reason> }

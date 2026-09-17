@@ -249,7 +249,7 @@ export function AccrualFormView({
         return;
       }
       // THE WHOLE TYPED DETAIL, which `lib/wire.ts` already parsed off the refusal: `reason` is
-      // its discriminant and `field` is the rest of the contract 0207 raises beside it. Read
+      // its discriminant and `field` is the rest of the contract 0222 raises beside it. Read
       // defensively — a refusal whose contract carries no field is a FORM-level one, not a control
       // to focus, and focusing nothing is better than focusing the wrong thing.
       const detail = (e as { detail?: Record<string, unknown> | null }).detail;
@@ -475,7 +475,7 @@ export function AccrualFormView({
           </Field>
         </div>
 
-        {/* THE SELECTION RULE IS STATED, NOT OFFERED. Migration 0207 admits exactly one rule
+        {/* THE SELECTION RULE IS STATED, NOT OFFERED. Migration 0222 admits exactly one rule
             because exactly one is performed: the configuration freezes the stated amount into the
             plan revision's basis and every occurrence posts it. A select listing rules that all
             post the same cents would invite a preparer to record an intention the ledger never

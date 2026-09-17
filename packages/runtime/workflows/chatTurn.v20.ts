@@ -29,7 +29,7 @@
 // WHAT IS DELIBERATELY ABSENT, NAMED HERE SO A LATER READER DOES NOT THINK IT WAS FORGOTTEN:
 // #653's `start_prepayment_schedule_work` and #647's `record_counterparty_alias`. Each needs a
 // database door that does not exist for this lane — `clara.create_prepayment_schedule` is
-// `clara_authenticated`-only and `_human_ctx`-fronted (0208 §D.1), and `add_counterparty_alias` has
+// `clara_authenticated`-only and `_human_ctx`-fronted (0223 §D.1), and `add_counterparty_alias` has
 // no OBO twin at all (DECISIONS D11) — and a migration is not a workflow cut's to write. Both
 // contracts stay written in their non-frozen modules, which stay OUT of this closure.
 //
@@ -37,14 +37,14 @@
 // for both new tools and the terminal card for both is `work_accepted`, already in the set.
 //
 // THE DEPLOY ORDER, STATED PLAINLY BECAUSE IT IS THE ONE WAY THIS IMAGE CAN HURT SOMETHING.
-// MIGRATIONS 0206 AND 0207 MUST BE LIVE ON THE DATABASE BEFORE THIS IMAGE SERVES A TURN — on top
+// MIGRATIONS 0221 AND 0222 MUST BE LIVE ON THE DATABASE BEFORE THIS IMAGE SERVES A TURN — on top
 // of v19's own 0192 and 0194. `start_staff_expense_claim_work` calls
-// `clara.admit_staff_expense_claim_work` (0206); `start_accrual_work` calls
-// `clara.create_accrual_adjustment_for` (0207). Against a database without them each raises
+// `clara.admit_staff_expense_claim_work` (0221); `start_accrual_work` calls
+// `clara.create_accrual_adjustment_for` (0222). Against a database without them each raises
 // `undefined_function` (42883), which `authoringRefusal` does not classify as a governed refusal,
 // so the tool answers `internal` and the turn continues: CONTAINED, corrupting nothing, and it
 // makes Clara refuse a thing it just offered to do. Deploy the migrations first. The REVERSE order
-// is FREE: 0206 and 0207 against a v19 image add relations and verbs that nothing calls.
+// is FREE: 0221 and 0222 against a v19 image add relations and verbs that nothing calls.
 //
 // ROLLBACK TO v19 stops offering the two tools and changes no database state. Claims and accruals
 // already admitted keep their own durable surfaces (`/clients/:id/work`, `/clients/:id/accruals`)

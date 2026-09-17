@@ -255,5 +255,5 @@ export function localParticularsRefusal(
 //      p_particulars => particularsFromAnswer(answer), p_op_key, p_obo => <the Work's initiator>)`.
 //   3. Map a CLR37 refusal through `refusalFieldForAxis(details)` before showing it.
 //   4. NEVER post a second journal entry. The acquisition already posted; step 2 writes a REGISTER
-//      fact and the door itself touches no `clara.journal_entries` row (0201 tail T.9 asserts it).
+//      fact and the door itself touches no `clara.journal_entries` row (0216 tail T.9 asserts it).
 // =====================================================================================

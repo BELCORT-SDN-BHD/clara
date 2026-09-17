@@ -420,7 +420,7 @@ export async function handleStaffExpenseClaimRuntime(request, response, url) {
       work_id: SEC.workId,
       task_id: "73809001-7380-4738-8738-738073809001",
       // THE UNWIDENED PURPOSE, on the wire, exactly as the database mints it: a staff expense claim
-      // is a `journal_entry` Work (migration 0206's header says why a fourth purpose cannot post).
+      // is a `journal_entry` Work (migration 0221's header says why a fourth purpose cannot post).
       logical_op_id: `work:${SEC.workId}:journal_entry:1`,
       status: "queued",
       replayed: false,

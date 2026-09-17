@@ -1,4 +1,4 @@
--- 0209_preview_invite — #625 (refresh spec #612; journeys A3/A4): THE INVITED PERSON SEES WHICH
+-- 0224_preview_invite — #625 (refresh spec #612; journeys A3/A4): THE INVITED PERSON SEES WHICH
 -- FIRM AND WHICH ROLE THEY ARE ABOUT TO JOIN, BEFORE THEY SET A PASSWORD.
 -- =====================================================================================
 -- Spec of record: issue #625 AC2 — "a valid invite enters the intended firm without new-firm
@@ -17,7 +17,7 @@
 -- must never be readable outside a masked door) stands untouched, and this file asserts that
 -- twice: once in §0 before it writes anything and once in §C after. No existing body is recut:
 -- the five member doors and `clara._jwt_email()` are pinned by pre-image sha256 in §0 and
--- re-read in §C, so "0209 changed nothing else" is a measurement rather than a promise.
+-- re-read in §C, so "0224 changed nothing else" is a measurement rather than a promise.
 --
 -- =====================================================================================
 -- WHY A DOOR AT ALL, WHEN `clara.firm_invites_visible` ALREADY EXISTS.
@@ -52,7 +52,7 @@
 -- deliberately `clara.firm_invites_visible`'s own (below), so a fifth value would put the preview
 -- and the roster into disagreement about the same row. Widening BOTH is its own ticket; until
 -- then the divergence is PINNED by `packages/db/tests/preview-invite.test.mjs`'s
--- `p625.preview.issuer_rank` cell and recorded in `packages/db/README.md`'s 0209 note.
+-- `p625.preview.issuer_rank` cell and recorded in `packages/db/README.md`'s 0224 note.
 --
 -- NO EXISTENCE ORACLE (the §B risk 0141 wrote this table's whole posture around). Three
 -- observations — a token no row carries, a token a row DOES carry but whose email is somebody
@@ -145,7 +145,7 @@ begin
   end if;
 
   -- (5) THE SIX NON-REGRESSION PINS. This file recuts NOTHING, so these are not
-  --     derive-from-this-text pins: they are the statement "0209 found these bodies exactly
+  --     derive-from-this-text pins: they are the statement "0224 found these bodies exactly
   --     here". Every number was MEASURED on a migrated 0001->0198 rig (PG 17.11, 193 files) by
   --     reading pg_proc.prosrc -- never transcribed from a creating migration, because several
   --     of these live bodies are SPLICES: clara.set_member_role alone was emitted at 0005:707,
@@ -170,7 +170,7 @@ begin
     end if;
   end loop;
 
-  raise notice '#625 prestate: clean -- clara.preview_invite does not exist; clara.firm_invites carries ZERO application-role grant and firm_invites_visible is still 0141''s ten-column masked projection; the five member doors and _jwt_email() are at their measured pre-0209 bodies.';
+  raise notice '#625 prestate: clean -- clara.preview_invite does not exist; clara.firm_invites carries ZERO application-role grant and firm_invites_visible is still 0141''s ten-column masked projection; the five member doors and _jwt_email() are at their measured pre-0224 bodies.';
 end
 $w625_pre$;
 

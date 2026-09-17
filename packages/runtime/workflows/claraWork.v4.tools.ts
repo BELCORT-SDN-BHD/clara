@@ -45,7 +45,7 @@
 //     name of the act and the schema of its answer; claraWork.v4.impl.ts performs it;
 //   · `read_prepayment_source` — #653's stanza asks for a read of the bound document's recorded
 //     service period, and no such read is reachable from this lane: `clara.get_prepayment_schedule`
-//     and its siblings are granted to `clara_authenticated` alone (0208 §D.1) and
+//     and its siblings are granted to `clara_authenticated` alone (0223 §D.1) and
 //     `clara.document_service_periods` carries no select for any machine role. A tool that could
 //     only return a grant refusal is not a capability.
 

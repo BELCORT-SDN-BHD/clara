@@ -79,7 +79,7 @@ async function monthEndBack(n) {
 }
 
 /**
- * THE WINDOW A CONFIGURATION RUNS OVER, AND THE STATED TERM THAT BRACKETS IT (0207's SIXTH
+ * THE WINDOW A CONFIGURATION RUNS OVER, AND THE STATED TERM THAT BRACKETS IT (0222's SIXTH
  * MEASUREMENT): `effective_from >= service_period_start` and `effective_to <= service_period_end`,
  * so every occurrence posts a date INSIDE the term its own line names.
  *
@@ -630,7 +630,7 @@ test("p652.lineage.join — get_accrual_adjustment returns plan → revision →
   assert.equal(got.currency, "MYR");
   assert.equal(got.service_period_start, c.effectiveFrom, "ISO dates, not a locale rendering");
   assert.equal(got.service_period_end, c.effectiveTo,
-    "…and the stated term is the one the schedule runs inside (0207's SIXTH MEASUREMENT)");
+    "…and the stated term is the one the schedule runs inside (0222's SIXTH MEASUREMENT)");
   assert.match(got.service_period_start, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(got.term_source, "human_stated");
   assert.deepEqual(got.method, { rule: "stated_amount" });
@@ -1084,7 +1084,7 @@ test("p652.term.document — an accrual whose basis cites a filed document binds
   }
   const client = await freshAccrualClient(ALICE(), "term");
   const ref = await instructionRef({ client, author: BOB() });
-  // THE DOCUMENT'S OWN TERM IS THE WINDOW the schedule may run inside (0207's SIXTH MEASUREMENT):
+  // THE DOCUMENT'S OWN TERM IS THE WINDOW the schedule may run inside (0222's SIXTH MEASUREMENT):
   // an accrual bound to a filed term cannot go on accruing past the period that document states.
   const from = "2026-07-01";
   const to = "2026-07-31";

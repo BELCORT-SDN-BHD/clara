@@ -2,7 +2,7 @@
 //
 // EVERY ONE OF THESE IS THE DATABASE'S OWN VOCABULARY, read back rather than invented here. The
 // answer shapes, the option lists and the group keys all come from `clara.firm_setup_keys`
-// (packages/db/migrations/0203_firm_setup.sql §A), which is a code-populated catalogue precisely so
+// (packages/db/migrations/0218_firm_setup.sql §A), which is a code-populated catalogue precisely so
 // that "the facts a firm must state about itself" is data an owner can read and ratify instead of a
 // literal buried in a function body — or, worse, in a TypeScript file the owner never opens.
 //
@@ -156,7 +156,7 @@ export function isSettled(item: FirmSetupItem): boolean {
  * separate word from "persisted answers" and is not satisfied by either of the other two.
  *
  * `clara.answer_firm_setup_item` sets `state='answered'` from ANY non-committed state and replaces
- * `answer` wholesale (0203_firm_setup.sql:783-787), so the door corrects a recorded fact and
+ * `answer` wholesale (0218_firm_setup.sql:783-787), so the door corrects a recorded fact and
  * un-skips a deferred one by the same act — proven under real roles by `p648.answer.correct`. The
  * ONE case it refuses is a key that already carries a LIVE knowledge record: `capture_knowledge`
  * answers the second capture `knowledge_already_live` (0192:852), and the honest path for those is

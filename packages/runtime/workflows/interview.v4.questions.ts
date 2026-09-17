@@ -46,7 +46,7 @@
 //   door call would be a list of questions that could fail.
 //
 // WHAT THIS FILE DOES NOT DO, STATED SO NOBODY "FIXES" IT: it writes nothing to `clara.clients`.
-// The fy-end pair reaches the client row through `clara.settle_client_onboarding_facts` (0204),
+// The fy-end pair reaches the client row through `clara.settle_client_onboarding_facts` (0219),
 // which is bookkeeper-floored and human-called. A workflow step carries no authenticated actor, so
 // this segment records a PLAN ITEM and the human lane settles it — the same division
 // `interview.v3.questions.ts` states at length for the chart-of-accounts apply.

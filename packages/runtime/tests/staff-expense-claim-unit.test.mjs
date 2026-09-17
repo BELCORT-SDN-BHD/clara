@@ -3,7 +3,7 @@
 //
 // TWO SUBJECTS, ONE FILE, because they are two halves of ONE contract: `src/workRoutes.ts`'s
 // `toDbClaim` is what the BROWSER's claim becomes, and `lib/staff-expense-claim-basis.ts` is what
-// the MODEL's becomes. Migration 0206 re-validates both and is the authority; these are the
+// the MODEL's becomes. Migration 0221 re-validates both and is the authority; these are the
 // earlier, more legible halves whose job is to name the field.
 //
 // WHAT EACH CELL PINS:
@@ -217,7 +217,7 @@ test("route.settlement: each settlement names its own leg, and the advance arm n
 });
 
 test("route.field: every path the database can raise re-spells onto a control, including the nested ones", () => {
-  // The ONE mapper's vocabulary, both directions. A refusal raised by migration 0206 arrives in the
+  // The ONE mapper's vocabulary, both directions. A refusal raised by migration 0221 arrives in the
   // DATABASE's snake_case and must land on the control the browser rendered.
   for (const [db, wire] of [
     ["claim.incurred_date", "claim.incurredDate"],
@@ -363,6 +363,6 @@ test("parity: the successor contract carries NO WORK_ACCEPTED_PURPOSES widening"
   assert.ok(parts.WORK_ACCEPTED_PURPOSES_V19.includes("journal_entry"),
     "a claim Work's purpose is journal_entry, and v19 already accepts it");
   assert.equal(parts.WORK_ACCEPTED_PURPOSES_V19.includes("staff_expense_claim"), false,
-    "…and no claim purpose exists to widen it with — migration 0206 widened nothing");
+    "…and no claim purpose exists to widen it with — migration 0221 widened nothing");
   assert.equal(mod.START_STAFF_EXPENSE_CLAIM_WORK_TOOL, "start_staff_expense_claim_work");
 });
