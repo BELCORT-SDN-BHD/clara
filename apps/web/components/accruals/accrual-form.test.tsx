@@ -61,9 +61,13 @@ const ACCOUNTS: CoaAccountRow[] = [
   { client_id: CLIENT, account_code: "1150", name: "Maybank current", account_type: "asset", is_active: true },
 ];
 
+// THE DOOR'S OWN ROW SHAPE (`lib/work/work-list.ts`'s `WorkListRow`), not the deleted direct
+// read's. #809 repointed the picker at `clara.list_accounting_work`, whose projection carries a
+// FLAT `memo` and the `intent_key` migration 0203 added — the label falls back from one to the
+// other, so both are here and the fallback is a real branch rather than a hypothetical.
 const AUTHORITIES = {
   rows: [
-    { id: WORK, intent_key: "instr-1", created_at: "2026-06-30T02:00:00.000Z", basis: { memo: "Standing instruction: accrue the monthly rent" } },
+    { id: WORK, intent_key: "instr-1", created_at: "2026-06-30T02:00:00.000Z", memo: "Standing instruction: accrue the monthly rent" },
   ],
   truncated: false,
 };

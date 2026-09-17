@@ -73,8 +73,10 @@ function rpcRouter(answers: Record<string, unknown>): typeof fetch {
     for (const [verb, body] of Object.entries(answers)) {
       if (url.includes(`/rpc/${verb}`)) return jsonResponse(body);
     }
-    if (url.includes("/rest/v1/coa_accounts") || url.includes("/rest/v1/accounting_work")) {
-      return jsonResponse([]);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([]);
+    // #809 — the instruction picker reads the DOOR now, and its envelope is a page, not an array.
+    if (url.includes("/rpc/list_accounting_work")) {
+      return jsonResponse({ rows: [], next_cursor: null, truncated: false });
     }
     return jsonResponse({ message: `unmocked ${url}` }, 404);
   }) as typeof fetch;

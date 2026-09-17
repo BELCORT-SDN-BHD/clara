@@ -79,7 +79,9 @@ function rpcRouter(answers: Record<string, unknown>): typeof fetch {
         { client_id: CLIENT, account_code: "59000001", name: "Subscriptions", account_type: "expense", is_active: true },
       ]);
     }
-    if (url.includes("/rest/v1/accounting_work")) return jsonResponse([]);
+    // #809 — the instruction picker reads `clara.list_accounting_work`, not the table. EMPTY on
+    // purpose: this cell is about the form's labels and roles, not about having a candidate.
+    if (url.includes("/rpc/list_accounting_work")) return jsonResponse({ rows: [], next_cursor: null, truncated: false });
     return jsonResponse({ message: `unmocked ${url}` }, 404);
   }) as typeof fetch;
 }

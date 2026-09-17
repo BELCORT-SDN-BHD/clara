@@ -94,10 +94,18 @@ const ACCOUNTS = [
   { client_id: CLIENT, account_code: "19000001", name: "Prepayments", account_type: "asset", is_active: true },
 ];
 
-const AUTHORITIES = [
-  { id: WORK, intent_key: "instruction:2026-01", created_at: "2026-01-10T00:00:00Z",
-    basis: { memo: "the client instructed us to amortise the annual subscription" } },
-];
+// THE PICKER'S CANDIDATES, IN THE DOOR'S OWN ENVELOPE. #809 deleted the direct
+// `/rest/v1/accounting_work` read this fixture used to answer and repointed the picker at
+// `clara.list_accounting_work` (migration 0203 gave that projection the `intent_key` the label
+// falls back to), so the fixture is the door's page shape and the row is `WorkListRow`-shaped.
+const AUTHORITIES = {
+  rows: [
+    { id: WORK, client_id: CLIENT, intent_key: "instruction:2026-01", created_at: "2026-01-10T00:00:00Z",
+      memo: "the client instructed us to amortise the annual subscription" },
+  ],
+  next_cursor: null,
+  truncated: false,
+};
 
 const ATTENTION = {
   client_id: CLIENT,
@@ -166,8 +174,9 @@ function router(answers: Record<string, unknown>, post?: (verb: string) => Respo
     }
     if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(ACCOUNTS);
     // THE INSTRUCTION THIS SCHEDULE WILL CITE. The door RESOLVES `p_authority_ref` against this
-    // client's own `clara.accounting_work`, so the picker has to have something to pick.
-    if (url.includes("/rest/v1/accounting_work")) return jsonResponse(AUTHORITIES);
+    // client's own `clara.accounting_work`, so the picker has to have something to pick — and
+    // since #809 it reads that list through `clara.list_accounting_work` rather than the table.
+    if (url.includes("/rpc/list_accounting_work")) return jsonResponse(AUTHORITIES);
     return jsonResponse({ message: `unmocked ${url}` }, 404);
   }) as typeof fetch;
 }
@@ -303,7 +312,7 @@ test("prepayments.authority — the instruction the schedule cites is CHOSEN fro
     }
     if (url.includes("/rpc/list_prepayment_attention")) return jsonResponse(ATTENTION);
     if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(ACCOUNTS);
-    if (url.includes("/rest/v1/accounting_work")) return jsonResponse(AUTHORITIES);
+    if (url.includes("/rpc/list_accounting_work")) return jsonResponse(AUTHORITIES);
     return jsonResponse({ message: `unmocked ${url}` }, 404);
   }) as typeof fetch;
 

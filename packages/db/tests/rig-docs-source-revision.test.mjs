@@ -955,7 +955,7 @@ cell("p646.reads.scope: both reads answer NULL for another firm's document and f
 // =============================================================================================
 // p646.neighbours — THE PINS THIS TICKET PROMISED NOT TO MOVE.
 // =============================================================================================
-cell("p646.neighbours: the two non-regression bodies are byte-identical to 0197's and 0191's own literals, and no role but clara_authenticated reaches any 0217 door", async () => {
+cell("p646.neighbours: the two non-regression bodies are byte-identical to the bodies 0217's prestate pinned, and no role but clara_authenticated reaches any 0217 door", async () => {
   const shas = (await rootQuery(
     `select p.oid::regprocedure::text as sig, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
        from pg_proc p where p.oid = any($1::regprocedure[])`,
@@ -965,9 +965,13 @@ cell("p646.neighbours: the two non-regression bodies are byte-identical to 0197'
   assert.equal(by["clara._document_posting_entry(uuid,uuid)"],
     "8ba5e67f7bc92a809e5fbea04b635331c764a48263c1fef4e06f8efe67ebcfd0",
     "0197's pin, re-measured through the door rather than transcribed");
+  // RE-ISSUED 2026-09-17 at the wave's re-base. This was 0191's post-splice pin (0230031f…); the
+  // riders batch (PR #838) recut the body in 0201_document_regions_unique_field_path (#778), so
+  // the literal moves to the body the chain now holds — the SAME value 0217's own prestate pins,
+  // which is what makes this cell a second, independent reading of it rather than a copy.
   assert.equal(by["clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)"],
-    "0230031fe7d3f18332310fc19f39936b1408cb89ba597f77ce576017fea35905",
-    "0191's post-splice pin");
+    "b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8",
+    "the post-#778 body 0217 measured");
 
   const doors = ["revise_document_fact", "dismiss_orphaned_classification_question",
     "list_source_revisions", "list_source_dependents"];
