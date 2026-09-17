@@ -422,3 +422,92 @@ test("v5.registry: clientOnboarding is pinned at v5 and v1..v4 stay exported (po
   }
   assert.ok(registry.workflowBodies.includes("clientOnboarding_v5"));
 });
+
+// ---------------------------------------------------------------------------
+// 6 · the WALK IS BOUNDED — the standing guard behind the wave's one CI OOM
+// ---------------------------------------------------------------------------
+//
+// WHY A PARK BUDGET IS A MEMORY ASSERTION. `tests/interview-e2e.mjs` runs the WDK engine IN-PROCESS,
+// and the engine re-evaluates the whole 7.7 MB workflow bundle against a fresh vm context once per
+// durable step — measured on the rig at 309-533 MB live per evaluation. So every park this
+// inventory opens is ~5 durable steps of real heap in the leg that drives it, and a walk that
+// opened parks without bound would not fail as a hang, it would fail as `Reached heap limit`
+// (run 35225394786, exit 134). `tests/heap-bound.mjs` keeps the HARNESS inside its ceiling; this
+// cell keeps the INVENTORY inside its budget, which is the half that lives in this closure.
+//
+// Driven over the real `askAndConfirmSegmentV2`, the real `segmentApplies` and the real testkit
+// script — no engine, no database, and no copy of the body's loop beyond the two lines the body
+// itself spends on applicability.
+
+const testkit = await import("./wave-b-interview-testkit.mjs");
+
+/** Walk CLIENT_SEGMENTS_V4 exactly as the v5 body's segment loop does, counting the parks it opens.
+ *  `cap` is a hard stop, so a runaway inventory fails as a BUDGET rather than as a hung test. */
+async function walkV4(answerMap, cap = 120) {
+  const answers = testkit.scriptedAnswers(answerMap);
+  const prior = {};
+  const opened = [];
+  const ask = async (prompt) => {
+    const idx = opened.length;
+    opened.push(`${prompt.seg}/${prompt.phase}`);
+    if (opened.length > cap) throw new Error(`RUNAWAY: the inventory opened more than ${cap} parks — last was ${prompt.seg}/${prompt.phase}`);
+    return { kind: "answer", value: prompt.phase === "c" ? "yes" : answers(prompt.seg, idx), answeredBy: "cell" };
+  };
+  const answered = [];
+  for (const s of V4) {
+    if (!core.segmentApplies(s, prior)) continue;
+    const res = await core.askAndConfirmSegmentV2(s, ask, prior);
+    if (res.outcome === "skipped") continue;
+    assert.equal(res.outcome, "answered", `${s.key} reached a terminal that is neither answered nor skipped`);
+    prior[s.key] = res.value;
+    answered.push(s.key);
+  }
+  return { parks: opened.length, opened, answered, prior };
+}
+
+test("v5.bounded: a full scripted walk terminates in a FIXED number of parks", async () => {
+  const walk = await walkV4(testkit.INTERVIEW_V2_CLIENT_ANSWERS);
+  // 37 is measured, not chosen: 16 answered segments (13 v1-era + mpers_eligibility +
+  // accounting_basis + fye_day), each a question and its echo-confirm, plus the MPERS edition
+  // follow-up and the four skippables' single question each. A change that moves this number is a
+  // change to how much heap the in-process leg burns, and should be looked at as one.
+  assert.equal(walk.parks, 37, `the walk opens exactly 37 parks (got ${walk.parks}: ${walk.opened.join(", ")})`);
+  assert.equal(walk.answered.length, 16, "…answering 16 segments — the count interview-e2e's positive scenario asserts");
+  assert.ok(walk.answered.includes("fye_day"), "…including D7's day");
+});
+
+test("v5.bounded: the H-52 walk is SHORTER, and short by exactly the question it closed", async () => {
+  const full = await walkV4(testkit.INTERVIEW_V2_CLIENT_ANSWERS);
+  const notRegistered = await walkV4({ ...testkit.INTERVIEW_V2_CLIENT_ANSWERS, sst_regime: "not_registered" });
+  assert.equal(notRegistered.parks, full.parks - 1, "an absent question costs exactly one park fewer");
+  assert.ok(full.opened.includes("sst_no/q"), "control: the registered client IS asked");
+  assert.ok(!notRegistered.opened.some((p) => p.startsWith("sst_no/")), "and the unregistered one is never parked on it at all");
+  assert.equal(notRegistered.answered.length, 16, "…while still answering the same 16 segments");
+});
+
+test("v5.bounded: every known fact the register supplies REMOVES parks — it never adds any", async () => {
+  // The pre-read's whole claim is "an answered fact is an absent question". If a known fact ever
+  // made the walk LONGER, the in-process leg would pay for it in heap as well as in patience.
+  const full = await walkV4(testkit.INTERVIEW_V2_CLIENT_ANSWERS);
+  const known = v4Known.knownFactsFromPack(PACK([record("default_currency", "MYR"), record("financial_year_end_month", 6)]));
+  let parks = 0;
+  const prior = {};
+  const answers = testkit.scriptedAnswers(testkit.INTERVIEW_V2_CLIENT_ANSWERS);
+  const ask = async (prompt) => {
+    const idx = parks++;
+    if (parks > 120) throw new Error("RUNAWAY: the known-facts walk opened more than 120 parks");
+    return { kind: "answer", value: prompt.phase === "c" ? "yes" : answers(prompt.seg, idx), answeredBy: "cell" };
+  };
+  for (const s of V4) {
+    if (!core.segmentApplies(s, prior)) continue;
+    const auto = v4Known.knownAnswer(s, prior, known);
+    if (auto) { prior[s.key] = auto.value; continue; } // the body's own auto-answer arm: no park
+    const res = await core.askAndConfirmSegmentV2(s, ask, prior);
+    if (res.outcome === "skipped") continue;
+    prior[s.key] = res.value;
+  }
+  assert.ok(parks < full.parks, `two recorded facts shorten the walk (${parks} < ${full.parks})`);
+  assert.equal(parks, full.parks - 4, "…by the two questions and their two confirms");
+  assert.equal(prior.currency, "MYR", "…and the register's value is what the later segments see");
+  assert.equal(prior.fye_day, 30, "…with the day still ASKED, because only the month was on file");
+});

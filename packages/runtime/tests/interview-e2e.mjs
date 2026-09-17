@@ -41,6 +41,7 @@ import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
 import { scriptedAnswers } from "./wave-b-interview-testkit.mjs";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { startHeapBound, MiB } from "./heap-bound.mjs";
 
 // --- Fail-closed local gate (the intake-e2e precedent). Any PGPORT is accepted (local
 // 55440, CI's 5432 service), but the host MUST be loopback and the database MUST be a
@@ -251,6 +252,22 @@ async function main() {
   await import("../.output/server/index.mjs");
   await waitHealthy();
   console.log("[interview-e2e] server healthy + world started");
+
+  // HEAP BOUND — armed as soon as the engine is up, because from here on THIS process is the one
+  // replaying workflows. The WDK re-evaluates the whole 7.7 MB workflow bundle against a fresh vm
+  // context once per durable step (its own `vm/script-cache.js` says so; only the compiled Script
+  // is cached, never the evaluation), and a full client drive is ~92 steps. Probed on the rig: the
+  // live set stays a flat 119 MB, a single evaluation transiently holds 309-533 MB, and the churn
+  // runs at ~60-70 MB/s — all of it collectable. Under the default ~4 GB ceiling V8 has no reason
+  // to collect any of it until the ceiling, and run 35225394786 reached the ceiling first
+  // (Mark-Compact 4016.5 -> 4004.7 MB, twice, then exit 134 at 77 s). The garbage is the engine's;
+  // the unbounded heap is this harness's, because only a test drives 92 evaluations inside one
+  // process. `tests/heap-bound.mjs` carries the full measurement and the cells. It is best-effort
+  // and unref'd: it can neither fail nor hold open a run that is otherwise fine.
+  const heap = startHeapBound();
+  if (!heap.stats().available) {
+    console.warn("[interview-e2e] heap bound UNAVAILABLE (no in-process inspector) — the leg runs on V8's default ceiling");
+  }
 
   // -------------------------------------------------------------------------
   // (a) client onboarding: REAL cancel at the first park → typed 'cancelled' terminal.
@@ -473,6 +490,14 @@ async function main() {
 
     console.log("[interview-e2e] PASS (p649.interview.sst_park_closed): sst_no is never parked after not_registered, and leaves no plan item — H-52 closed by the clientOnboarding_v5 cut");
   }
+
+  // The bound's own figures, printed so a future OOM can be read against a NUMBER rather than a
+  // guess: `peak` is the largest heap this leg ever showed and `collections` is how many times the
+  // bound had to step in. A peak that creeps towards the ceiling with collections at zero would
+  // mean the bound never armed; a peak far above the threshold would mean it cannot keep up.
+  const h = heap.stats();
+  heap.stop();
+  console.log(`[interview-e2e] heap bound: peak ${Math.round(h.peakBytes / MiB)} MB over ${h.ticks} ticks, ${h.collections} collection(s), ${h.failures} refusal(s)`);
 
   console.log("\nINTERVIEW E2E: ALL PASS");
   process.exit(0);
