@@ -24,27 +24,18 @@ instructions. Source code and deployment evidence establish what is actually imp
 2. Use `grilling` to settle any ambiguity.
 3. Check current official documentation, through Context7 or the official docs, before going into coding or any      
    exploration/planning.
-4. Verify the affected behaviour and update its existing source of truth in the same change. For an
-   implementation ticket that source of truth is the module's README, `CONTEXT.md` and the ticket's own
-   evidence — never the PRD or Architecture.
-5. PRD and Architecture are blueprints, refreshed only after Wayfinder or to-spec settles a product or
-   technical decision and before to-tickets: overwrite the affected section (never append ticket
-   history), keep each file's maintenance frame in its header, and mark accepted technical targets
-   separately from current implementation. Resolve contradictions explicitly; keep detailed acceptance
-   in the delivery spec.
-6. Push back with real examples: When you push back or recommend, include one real practice close to the case — a 
-   company, product, or method you actually know (Linear, Shape Up, Figma), or better, one you can point to (a Mobbin 
-   screenshot, a documentation link). Never invent or embellish one: if you know no close example, say so and argue 
-   from the Founder's own product instead. An example you cannot point to is labeled as recalled, not presented as 
-   fact. 
-7. Claims need evidence: Any statement about the state of the world ("the design system covers this", "this rule is 
+4. PRD and Architecture are blueprints, best to refreshs / update /adjust the possible stale sections only after 
+   Wayfinder or to-spec session when settles a product or technical decision and before to-tickets: overwrite the affected section (never append ticket history), keep each file's maintenance frame in its header, and mark accepted technical targets separately from current implementation. Resolve contradictions explicitly; keep detailed acceptance in the delivery spec.
+5. Push back with real examples: When you push back or recommend, include one real practice close to the case — a 
+   company, product, or method you actually know (Linear, Shape Up, Figma), or better, one you can point to (a Mobbin screenshot, a documentation link). Never invent or embellish one: if you know no close example, say so and argue from the Founder's own product instead. An example you cannot point to is labeled as recalled, not presented as fact. 
+6. Claims need evidence: Any statement about the state of the world ("the design system covers this", "this rule is 
    already enforced", "that was fixed") 
    must be backed by a checkable source: a file path, a commit, a test or command run, or a link. A real-world 
    anecdote is an argument (7.2), not evidence. 
    If you cannot point to a source, say "unverified" instead of asserting. No evidence, no claim.
-8. Wayfinder or grillwithdocs session 的 map / specs 可以add "Milestone" in Github as a 版本控制, 版本控制型号可以在
+7. Wayfinder or grillwithdocs session 的 map / specs 可以add "Milestone" in Github as a 版本控制, 版本控制型号可以在
    wayfinder和agent 一起讨论.
-9. 当用户主动说" Idea session " , 这个时期讨论出来的东西可以 as "idea" and "need-triages" lable publish in GitHub 
+8. 当用户主动说" Idea session " , 这个时期讨论出来的东西可以 as "idea" and "need-triages" lable publish in GitHub 
    Issues.
 
 ## At session start (clock in)
