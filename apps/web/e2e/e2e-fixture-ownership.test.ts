@@ -1170,6 +1170,15 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // answer for the composer's walk. Declared as a share rather than left to collide: two lanes
   // on one verb is a fact this census exists to record.
   // (declared once, above, with all three claimants.)
+  // #633 x #646, FOUND AT WAVE INTEGRATION by this very census — neither branch could see it.
+  // `clara.set_document_kind` is answered by two lanes because two surfaces perform the act: #646
+  // moved the DETAIL surface's kind change into `document-kind-dialog.tsx`, and #633 mounts the
+  // same door from the firm intake list and receipt rows (`document-kind-control.tsx`). Each lane
+  // gates on document ids it minted before it answers — `document-correction-mock.mjs` on
+  // `CORR.doc` / `CORR.docOrphan`, `documents-intake-mock.mjs` on its own unassigned document and
+  // the ids its upload handler issued — and both fall through otherwise, so neither can answer
+  // for the other's walk. A declared share, not a collision.
+  set_document_kind: ["document-correction-mock.mjs", "documents-intake-mock.mjs"],
   file_document: ["chat-parity-mock.mjs", "documents-intake-mock.mjs"],
   // #640 x #631 — `clara.get_work_plan_origin` is read by `<WorkPlanOriginRow>`, which #640 mounts
   // on the SHARED Work detail page, so every lane whose walk opens a Work detail now issues it.
@@ -1303,7 +1312,15 @@ const CORE_RELATION_HANDOVERS: Record<string, string[]> = {
   // address); a roster that cannot be revoked, re-roled or removed cannot walk AC1/AC3/AC5. The
   // lane answers them ONLY for its own persona and returns false for every other address, so the
   // CORE still answers every sibling walk exactly as it did.
-  caller_context: ["members-lifecycle-mock.mjs"],
+  // WAVE 2026-09-15 INTEGRATION — `documents-intake-mock.mjs` (#633) also carries a
+  // `/rest/v1/caller_context` branch, and it answers UNCONDITIONALLY (its own owner-rank fixture,
+  // documents-intake-mock.mjs:469). MEASURED, it never runs: `serve-built.mjs` dispatches the
+  // members-lifecycle lane at :424, its own CORE `caller_context` branch at :553, and the intake
+  // lane only at :645 — so the CORE has already answered by the time that branch is reached, on
+  // #633's own branch as much as here. It is declared rather than deleted because the intake
+  // transport is #633's to own (DECISIONS §1.7) and a census that hides a claimant is worth less
+  // than one that names a dead one; removing the dead branch is filed as a follow-up.
+  caller_context: ["documents-intake-mock.mjs", "members-lifecycle-mock.mjs"],
   firm_members_visible: ["members-lifecycle-mock.mjs"],
   firm_invites_visible: ["members-lifecycle-mock.mjs"],
 };

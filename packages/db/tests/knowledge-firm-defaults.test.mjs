@@ -872,9 +872,60 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
     // land, and it grants nothing.
     "_tf_document_filing_firm_knowledge",
   ]);
-  const strays = readers.filter((r) => !COHORT.has(r.proname)).map((r) => r.sig);
+  // WAVE 2026-09-15 INTEGRATION — TWO SIBLING LANES READ THIS RELATION, EACH NAMED WITH ITS
+  // REASON rather than folded into the cohort above. Neither was on #654's rig: 0202 and 0203 are
+  // this wave's own migrations and both precede 0205, so on ANY database that carries this
+  // battery's frontier they are present — which is why their presence is asserted below rather
+  // than tolerated. The roster is NOT widened silently: each entry states what the function does
+  // with the relation, and the loop underneath MEASURES that claim on the live body instead of
+  // taking it.
+  const READ_ONLY_CONSUMERS = new Map([
+    ["get_firm_setup",
+      "#648 (0203) — the firm setup checklist LEFT JOINs the firm's own confirmed profile facts so "
+      + "a settled item renders what was recorded. A read of the firm's own record, on the same "
+      + "viewer-visible surface; it authorises nothing and writes nothing."],
+    ["list_source_dependents",
+      "#646 (0202) — the read-only projection of what stands on a document's reading: the knowledge "
+      + "records, open questions and parked Work questions citing it, so a human can decide what a "
+      + "source revision affects. Automatic re-assessment is deferred (PRD:123, #658/#663), which is "
+      + "exactly why this is a projection and not a writer."],
+  ]);
+  const strays = readers
+    .filter((r) => !COHORT.has(r.proname) && !READ_ONLY_CONSUMERS.has(r.proname))
+    .map((r) => r.sig);
   assert.deepEqual(strays, [],
     "a function outside the knowledge cohort reads clara.knowledge_records -- a firm preference is becoming an authority somewhere");
+
+  // …AND EVERY NAMED EXCEPTION IS POSITIVELY VERIFIED, not merely excused. A name on that list
+  // buys a READ and nothing else: present in the live catalog, no DML of any kind against
+  // clara.knowledge_records anywhere in its body, and not VOLATILE (a stable body cannot be the
+  // place a preference quietly becomes a written authority).
+  // POSITIVE CONTROL for the loop below: the same predicate, run against the ONE body in this
+  // schema that really does write the relation (`clara._knowledge_insert_revision`, 0192's
+  // revision writer). A "no writer found" loop that cannot recognise a writer is not evidence.
+  const WRITES_KNOWLEDGE =
+    /(insert\s+into\s+clara\.knowledge_records|update\s+clara\.knowledge_records|delete\s+from\s+clara\.knowledge_records)/i;
+  const writerProbe = (await rootQuery(
+    `select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_knowledge_insert_revision'`)).rows;
+  assert.equal(writerProbe.length, 1, "0192's revision writer must exist for this control to mean anything");
+  assert.equal(WRITES_KNOWLEDGE.test(writerProbe[0].prosrc), true,
+    "the DML predicate below cannot see a real writer -- it would excuse anything");
+
+  for (const [name, reason] of READ_ONLY_CONSUMERS) {
+    const rows = readers.filter((r) => r.proname === name);
+    assert.ok(rows.length > 0,
+      `${name} is declared a read-only knowledge consumer (${reason}) but the live catalog has no such reader -- delete the exception rather than carrying a dead one`);
+    const bodies = (await rootQuery(
+      `select p.oid::regprocedure::text as sig, p.prosrc, p.provolatile
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'clara' and p.proname = $1`, [name])).rows;
+    for (const b of bodies) {
+      assert.equal(WRITES_KNOWLEDGE.test(b.prosrc), false,
+        `${b.sig} writes clara.knowledge_records -- it is not a read-only consumer`);
+      assert.notEqual(b.provolatile, "v", `${b.sig} is VOLATILE -- a read-only knowledge consumer is stable or immutable`);
+    }
+  }
 
   // …AND THE PLAN LANE STILL REFUSES ONE BY ITS OWN DOOR (0193:1486-1489), measured through the
   // door rather than read off its source.
