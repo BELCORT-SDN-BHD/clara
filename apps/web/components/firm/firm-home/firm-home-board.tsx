@@ -51,6 +51,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState, ErrorMessage } from "../data-state";
 import { SweepStatusPanel } from "../sweep-status-panel";
 import { ClaraWorkingTile } from "./clara-working-tile";
+import { FirmSetupTile } from "./firm-setup-tile";
 import { FirmTimelineSection } from "./firm-timeline-section";
 import { NeedsYouScoreboard } from "./needs-you-scoreboard";
 import { OldestWaitingList } from "./oldest-waiting-list";
@@ -190,6 +191,10 @@ export function FirmHomeBoard() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-6">
+            {/* #648 (journey A5): AC4's authorised next step. It renders for admin+ only, and only
+                while required firm facts remain; it GATES NOTHING — see firm-setup-tile.tsx. */}
+            <FirmSetupTile />
+
             <FirmTimelineSection clientNames={clientNames} />
 
             {/* Reused verbatim: it renders the same `sweep` object off the same envelope this

@@ -90,8 +90,11 @@ test("settings sections are rank-shaped: members at admin, vendor bindings at bo
   const ids = (s: NavigationScope) => visibleSettingsSections(s).map((i) => i.id);
   assert.deepEqual(ids(VIEWER), ["account", "firm", "compliance"]);
   assert.deepEqual(ids(BOOKKEEPER), ["account", "firm", "compliance", "vendorBindings"]);
-  assert.deepEqual(ids(ADMIN), ["account", "firm", "members", "compliance", "vendorBindings"]);
-  assert.deepEqual(ids(OWNER), ["account", "firm", "members", "compliance", "vendorBindings"]);
+  // #648 added `setup` at the ADMIN floor, so it appears for admin and owner and for nobody
+  // below them — the section is ABSENT from a bookkeeper's menu by rank, and
+  // `clara.get_firm_setup` floors at the same rank so a deep link is refused by the database too.
+  assert.deepEqual(ids(ADMIN), ["account", "firm", "members", "setup", "compliance", "vendorBindings"]);
+  assert.deepEqual(ids(OWNER), ["account", "firm", "members", "setup", "compliance", "vendorBindings"]);
   // #615 moved the registration queue OUT of a firm's own settings and into the operator
   // destination, so an operator owner now sees exactly what any other owner sees here.
   assert.deepEqual(ids(OPERATOR_OWNER), SETTINGS_SECTIONS.map((s) => s.id));

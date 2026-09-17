@@ -143,7 +143,7 @@ The bounded set of a client's live knowledge records read for one stated purpose
 _Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction.
 
 **Firm knowledge default**:
-An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
+An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions. It is a rule about how the firm works across its clients, which is what distinguishes it from a **Firm profile fact** — a statement about the firm's own circumstances, which applies to nobody but the firm.
 _Avoid_: Automatically sharing one client's private facts or practices with every other client.
 
 **Counterparty identity**:
@@ -161,6 +161,14 @@ _Avoid_: Overwriting an identifier in place; a correction with no stated basis; 
 **Merge lineage**:
 The record of what a supported merge actually did — which party absorbed which, by whom, when, and on what reason — kept so that booked rows stay attributable to the party they named while current reads resolve to the surviving one. There is no un-merge anywhere in Clara; a merge recorded before lineage was kept cannot even be *described*, and the surface says which of the two a given merge is.
 _Avoid_: Promising a reversal; presenting a pre-lineage merge as correctable; rewriting historical references to the surviving party.
+
+**Firm setup**:
+The resumable list of facts a firm must state about itself, derived from the real required items on the firm's own setup record. Progress is the count of those required items that are settled; an item already answered is never asked again, an optional item may be set aside with a stated reason, and the rest of the workspace stays usable throughout.
+_Avoid_: A progress bar with no required items behind it; an onboarding approval ritual; treating optional education as a prerequisite.
+
+**Firm profile fact**:
+A firm-scope knowledge record about the accounting firm's own circumstances, carrying its source, its actor and its revision history like any other knowledge record. Distinct from a client fact, which belongs to one client, and from a **Firm knowledge default**, which is a cross-client instruction rather than a statement about the firm. The firm's registration identity — its registered name, registration number, tax identifier, registered address and professional-body number — is recorded on the firm's setup record with its author rather than as a knowledge record.
+_Avoid_: Recording a firm fact as a client fact; reading a firm profile fact as authority to post.
 
 **Accounting experience**:
 A source-linked lesson from completed work or a correction, including the outcome and conditions in which it is useful. Clara can consult it when deciding how to handle later work.

@@ -117,6 +117,13 @@ const SETTINGS_PRESENTATION: Record<SettingsSectionId, Presentation> = {
   account: { id: "settingsAccount", keywords: ["account", "profile", "sign out", "log out"] },
   firm: { id: "settingsFirm", keywords: ["firm settings", "approvals", "capabilities", "owner"] },
   members: { id: "settingsMembers", keywords: ["members", "roles", "rbac", "invites", "access"] },
+  // #648 (journey A5). "onboarding" is among the keywords deliberately: it is what a person types
+  // when they are looking for the list of facts their firm still owes, even though nothing here
+  // is an onboarding approval ritual.
+  setup: {
+    id: "settingsFirmSetup",
+    keywords: ["setup", "firm setup", "onboarding", "checklist", "missing facts", "ssm", "framework"],
+  },
   compliance: { id: "settingsCompliance", keywords: ["compliance", "sst", "registration", "watch"] },
   vendorBindings: {
     id: "settingsVendorBindings",

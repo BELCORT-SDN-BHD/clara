@@ -105,8 +105,9 @@ test("Settings hub keyboard walk reaches every visible card link in DOM order", 
       (node) => (node as { tagName?: string }).tagName === "A",
     );
     // FIVE since #615: the registration queue moved out of settings, so an operator owner's hub is
-    // now exactly any other owner's hub.
-    assert.equal(links.length, 5, "the operator owner hub exposes all five built settings destinations");
+    // now exactly any other owner's hub. SIX since #648, which added the firm setup section at
+    // the admin floor — an owner sees it, so the hub carries one more card.
+    assert.equal(links.length, 6, "the operator owner hub exposes all six built settings destinations");
     assert.deepEqual(checkKeyboardWalk(h.container as never), []);
     for (const link of links) {
       (link as { focus: () => void }).focus();

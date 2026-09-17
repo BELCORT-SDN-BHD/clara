@@ -362,6 +362,10 @@
         "title": "Members",
         "purpose": "Manage roles, invitations and access to this firm."
       },
+      "setup": {
+        "title": "Firm setup",
+        "purpose": "State the facts this firm still owes about itself."
+      },
       "compliance": {
         "title": "Compliance register",
         "purpose": "Review SST-registration watches across the firm."
@@ -438,6 +442,155 @@
           "notConfiguredBody": "Clara does not send personal notifications outside the product today, so there is nothing to choose here yet. This section will gain real controls once a notification channel exists — it will not gain a placeholder toggle before then."
         }
       }
+    }
+  },
+  "FirmSetup": {
+    "heading": "Firm setup",
+    "pageDescription": "The facts this firm still has to state about itself. Answered facts are never asked again, and nothing here holds up the rest of the workspace.",
+    "loading": "Loading the firm setup checklist…",
+    "unavailable": "The firm setup checklist could not be read.",
+    "noPlan": "This firm has no setup plan on record. That is unexpected — every firm gets one when it is created. Ask an operator to look into it before answering anything here.",
+    "denied": {
+      "title": "Firm setup is for administrators",
+      "body": "Firm setup records facts about the firm itself, so it is limited to administrators and owners. Everything else in the workspace is unaffected — your clients, Work and activity are open as usual."
+    },
+    "progress": {
+      "heading": "Progress",
+      "counter": "{answered} of {total} required facts recorded",
+      "outstanding": "Still needed: {items}",
+      "workspaceStaysOpen": "Nothing on this list holds up the rest of the workspace. Clients, Work and activity stay open while it is unfinished."
+    },
+    "notice": {
+      "seeded": "The checklist is ready. Facts that were already answered have been kept as they were.",
+      "committed": "Firm setup is complete. The confirmed facts stay correctable below."
+    },
+    "notStarted": {
+      "title": "Firm setup has not started",
+      "body": "There are {count} facts to state about this firm. Start the checklist to see them; anything already answered elsewhere will be kept."
+    },
+    "completed": {
+      "title": "Firm setup is complete",
+      "body": "Every required fact has been recorded or deliberately skipped. Confirmed facts remain correctable below."
+    },
+    "seed": {
+      "action": "Start firm setup",
+      "working": "Preparing…",
+      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again."
+    },
+    "commit": {
+      "heading": "Finish setup",
+      "ready": "Every required fact has been recorded or skipped. Finishing marks the checklist complete; the facts stay correctable.",
+      "notReady": "Finishing becomes available once every required fact is recorded or deliberately skipped.",
+      "action": "Finish firm setup",
+      "working": "Finishing…"
+    },
+    "groups": {
+      "answerAll": "Answer these {count} together",
+      "identity": {
+        "heading": "The firm's identity",
+        "purpose": "How the firm is registered. These stay on the setup record with their author; they are not recorded as knowledge this wave."
+      },
+      "tax": {
+        "heading": "Tax and financial year",
+        "purpose": "The turnover band, the tax identifier and the financial year-end month the firm reports on."
+      },
+      "accounting": {
+        "heading": "Accounting policy",
+        "purpose": "How the firm's own accounts are prepared. Three of these are recorded as firm defaults in the Knowledge register."
+      }
+    },
+    "item": {
+      "required": "Required",
+      "optional": "Optional",
+      "answer": "Answer",
+      "change": "Change this answer",
+      "answerNow": "Answer this now",
+      "correctOnRegister": "This fact is on the Knowledge register. Correct or withdraw it under \u201cFacts confirmed in setup\u201d below.",
+      "skip": "Not now",
+      "skippedBecause": "Skipped — {reason}",
+      "recordedBy": "Recorded by {who}",
+      "state": {
+        "unseeded": "Not on the list yet",
+        "pending": "Waiting",
+        "answered": "Recorded",
+        "resolved": "Recorded",
+        "deferred": "Skipped"
+      }
+    },
+    "form": {
+      "required": "Required",
+      "optional": "Optional",
+      "reachesRegister": "Recorded as a firm default in Knowledge",
+      "chooseValue": "Choose a value",
+      "fieldStep": "Question {index} of {total}",
+      "reviewStep": "Review all {total} answers",
+      "reviewBlank": "—",
+      "next": "Next",
+      "back": "Back",
+      "save": "Save",
+      "saving": "Saving…",
+      "skip": "Not now",
+      "cancel": "Cancel",
+      "draftHelp": "What you type is kept on this device until you save it, including if a colleague changes the checklist while you are working.",
+      "stale": "Somebody else changed this checklist while you were answering. It has been re-read and your typing has been kept — check the current answers above, then save again.",
+      "alreadyRecorded": "This answer was already recorded \u2014 the earlier attempt reached the server after all. The checklist above has been re-read and shows what is on record; nothing was recorded twice.",
+      "alreadyLive": "This fact is already on the Knowledge register. Correct it under \"Facts confirmed in setup\" below rather than answering it a second time.",
+      "denied": "Your role changed while you were answering. Firm setup is limited to administrators and owners.",
+      "notFirmDefaultable": "This fact cannot be set as a firm-wide default. It belongs to a particular client rather than to the firm, so it is recorded on this checklist and nowhere else.",
+      "clientEvidence": "A firm-wide fact cannot cite a document that is filed under one client. State it from the firm's own records, or record it against that client instead.",
+      "failed": "That did not reach the server. The checklist has been re-read — if your answer is already shown above it was recorded; otherwise pressing Save again sends the same request rather than answering twice.",
+      "constraint": {
+        "required": "This answer cannot be empty.",
+        "choice": "Choose one of the listed values.",
+        "month": "Enter the month as a whole number from 1 to 12.",
+        "server": "The database refused this value."
+      }
+    },
+    "skip": {
+      "title": "Skip this fact",
+      "description": "Skipping records that you decided not to answer \"{question}\" now. It does not hold up finishing setup, and you can answer it later.",
+      "reasonLabel": "Why is this being skipped?",
+      "reasonRequired": "Say why this is being skipped — a skipped fact without a reason is indistinguishable from one nobody looked at.",
+      "confirm": "Skip this fact",
+      "working": "Skipping…",
+      "cancel": "Cancel"
+    },
+    "facts": {
+      "heading": "Facts confirmed in setup",
+      "purpose": "These went to the same record Settings and Knowledge read. They apply across every client that has no exception of its own.",
+      "empty": "No firm-wide facts have been confirmed yet. Answering the reporting framework, accounting basis or default currency records one here.",
+      "authorityBearing": "Authority-bearing",
+      "withdrawn": "Withdrawn",
+      "sourceLabel": "Source",
+      "basisLabel": "Basis",
+      "actorLabel": "Recorded by",
+      "authorityDowngraded": "The person who stated this is now a {role} and would not be able to state it today. The record stands until it is corrected or withdrawn.",
+      "authorityRemoved": "The person who stated this is no longer an active member of the firm. The record stands until it is corrected or withdrawn.",
+      "legacyNotShadowed": "A client that already holds its own recorded fact for this keeps it; this firm default never replaces one.",
+      "notCorrectable": "This revision has been superseded or withdrawn, so it can no longer be corrected.",
+      "correct": "Correct",
+      "correctTitle": "Correct this fact",
+      "correctDescription": "A correction is a new revision of \"{question}\". The current value stays readable in the record's history.",
+      "withdrawAction": "Withdraw",
+      "withdrawTitle": "Withdraw this fact",
+      "withdrawDescription": "Withdrawing \"{question}\" is final: it stops applying to every client, and the withdrawal keeps the value it retires so the history still says what was withdrawn.",
+      "newValue": "New value",
+      "reasonLabel": "Why?",
+      "cancel": "Cancel",
+      "working": "Working…",
+      "problem": {
+        "reasonRequired": "A correction or a withdrawal needs its reason.",
+        "noGrammar": "This fact's question is no longer on the setup checklist, so its value cannot be edited here.",
+        "required": "This value cannot be empty.",
+        "choice": "Choose one of the listed values.",
+        "month": "Enter the month as a whole number from 1 to 12."
+      }
+    },
+    "tile": {
+      "heading": "Finish firm setup",
+      "next": "Next: {question}",
+      "action": "Open firm setup",
+      "noGate": "This does not hold up anything else — clients, Work and activity are open as usual."
     }
   },
   "Members": {
@@ -963,6 +1116,7 @@
         "settingsAccount": "Your account",
         "settingsFirm": "Firm settings",
         "settingsMembers": "Members",
+        "settingsFirmSetup": "Firm setup",
         "settingsCompliance": "Compliance register",
         "settingsVendorBindings": "Vendor identity bindings",
         "clientWorkspaceHome": "Workspace overview",

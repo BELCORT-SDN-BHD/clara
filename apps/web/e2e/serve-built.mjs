@@ -108,6 +108,12 @@ import { handlePlansSupabase } from "./plans-mock.mjs";
 // #639's C7 acquisition lane. Every handler names this lane's own client id or asset id
 // before it answers and falls through otherwise; it has no runtime half at all.
 import { handleFixedAssetSupabase } from "./fixed-asset-mock.mjs";
+// #648's A5 lane — the firm setup checklist. Its five RPC verbs are names no other lane carries,
+// it reads a body only INSIDE a matched verb, and EVERY handler falls through unless the request
+// carries this lane's own cookie marker — which it has to, because `get_firm_setup` takes no
+// argument at all (the firm comes from the caller's JWT) and the firm-home tile calls it on every
+// signed-in firm home. See that module's own header.
+import { handleFirmSetupSupabase } from "./firm-setup-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -635,6 +641,10 @@ async function handleSupabase(request, response, url) {
   // client or plan ids and falls through otherwise, and its RPC verbs are disjoint from every
   // lane above. Placed before the home board for the same reason the journal-work lane is — that
   // lane answers `/rest/v1/clients` with an honest id-scoped row and this one must reach its own.
+  // #648's A5 lane. Position is not load-bearing: every handler is guarded by this lane's cookie
+  // marker and its five verbs are disjoint from every lane above, so it answers for nobody else.
+  // It must, however, precede the generic `get_firm_setup` default below.
+  if (await handleFirmSetupSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handlePlansSupabase(request, response, path, url, sendJson, cors)) return;
   // #639's C7 lane. Position is not load-bearing: every branch is scoped to this lane's own
   // client or asset ids and falls through otherwise. Placed before the home board for the
@@ -694,6 +704,23 @@ async function handleSupabase(request, response, url) {
       lint: null,
       rows: [],
       next_cursor: null,
+    }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_setup") {
+    // #648 — `components/firm/firm-home/firm-setup-tile.tsx` is mounted on the firm home, so this
+    // call fires on EVERY signed-in firm-altitude page across the whole suite, not only #648's own
+    // walk. The SAME reasoning `get_my_preferences` records above applies: a generic, honest
+    // "nothing outstanding" default here keeps every OTHER spec's firm home free of an
+    // unhandled-route 404 for a call it never asked about, and the tile renders NOTHING against
+    // it (it returns null when no required fact is outstanding). #648's own lane mock is hooked
+    // ABOVE this line and answers instead whenever its cookie marker is present.
+    sendJson(response, 200, {
+      plan_id: null, revision_token: null, revision_n: null, state: null, committed_at: null,
+      seeded: false, catalogue_total: 0,
+      counter: { required_answered: 0, required_total: 0 },
+      items: [], required_outstanding: [], confirmed_facts: [],
     }, cors);
     return;
   }

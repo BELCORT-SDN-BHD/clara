@@ -79,6 +79,15 @@ which `uq_agent_interruptions_work_version` permits but `open_work_question` ref
 cell proves that refusal first, so the reader can tell a defence-in-depth assertion from a
 verb-reachable one).
 
+`firm-setup.test.mjs` (#648, journey A5) needs the 0203 cohort — `clara.firm_setup_keys`, the four
+firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
+against a chain below that frontier FAILS by name; the package run preloads
+`firm-setup-preintegration-gate.mjs`, which turns the same absence into a loud skip. Its world is
+planted through the root connection because the subject is the setup doors rather than firm
+creation, but every assertion under test runs through a least-privileged persona (`humanQuery`) —
+the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
+`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent).
+
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
 ## Intake-surface batteries (#633)

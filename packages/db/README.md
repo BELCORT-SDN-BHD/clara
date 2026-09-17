@@ -230,6 +230,29 @@ The census reports its frontier from `clara.schema_migrations` and compares it a
 migration files on disk. It never reads a migration's own success text: a chain that ran green
 and a frontier that landed are different claims, and only the ledger states the second.
 
+### Firm setup (0203, journey A5)
+
+The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0203. All five
+names are `clara_authenticated`-only, owned by `clara_fn_owner`, `SECURITY DEFINER` with
+`search_path` and `plan_cache_mode` pinned, and floored at **admin** inside their own bodies; no
+runtime, agent or wake role holds EXECUTE on any of them, and `clara.firm_setup_keys` grants SELECT
+to `clara_authenticated` alone.
+
+| Operation | Floor | What it does |
+|---|---|---|
+| `clara.seed_firm_setup_plan(p_op_key)` | admin | RECONCILES the firm plan against `clara.firm_setup_keys`: inserts only the catalogue rows the plan is missing and never touches an existing item, so an answer `firmInterview_v3` already wrote is neither rewritten nor re-asked. Rotates the CAS token and appends a revision snapshot. |
+| `clara.answer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_answer, p_op_key)` | admin, then the catalogue row's `min_role` | Validates the answer against the catalogue's declared shape, records it with its author, and — for the three firm-defaultable keys only — captures a firm-scope `clara.knowledge_records` row through the live `clara.capture_knowledge`. CAS mismatch is `CLR06` + `detail.reason='stale_plan'`. It is also the journey's CORRECTION PATH: it sets `state='answered'` from any non-committed state and replaces `answer` wholesale, so a recorded fact is corrected and a deferral is un-skipped by the same act (no deferral reason survives beside the new value). The one exception is a key that already carries a LIVE firm-scope knowledge record — the second capture is refused `knowledge_already_live`, and correction belongs to `clara.correct_knowledge`. |
+| `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is NOT `required_for_commit`, parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item and an already-answered one. |
+| `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every **catalogue** row that is `required_for_commit` is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
+| `clara.get_firm_setup()` | admin | The journey's ONE production-facing read: plan identity and CAS token, every catalogue row with its plan state, the required-answered/required-total counter, the outstanding required keys, and the confirmed firm-scope facts with scope, source, actor and an authority verdict taken from the author's CURRENT membership rank. |
+
+`clara.update_onboarding_plan` stays byte-identical and `clara_runtime`-only; `clara.commit_client_onboarding`
+still forces a client; `clara.promote_plan_answers_to_knowledge` is deliberately not used (its
+promotion loop joins one global `item_key` namespace with no scope discriminator). 0203 also adds
+`uq_onboarding_plans_one_open_firm` — a partial unique index on `(firm_id) where state='open' and
+scope_kind='firm'`, which is what makes `clara.claim_paid_firm`'s bare `select … into` replay arm
+single-row rather than silently first-row.
+
 The census audits the public operation boundary, so a trigger below it is invisible to every
 label above. Read [#692](https://github.com/BELCORT-SDN-BHD/clara/issues/692) before adding the
 first writer for `clara.firm_document_limits`. Its BEFORE-INSERT pseudo-upsert is column-preserving:
