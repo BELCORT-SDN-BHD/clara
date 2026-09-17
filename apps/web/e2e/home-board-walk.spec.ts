@@ -39,7 +39,10 @@ const DRAFT_ROW = {
 
 const ENVELOPE = {
   watermark: "w",
-  counts: { ready: 5, needs_review: 12, needs_you: 3, open_drafts: 2, open_questions: 1, open_tasks: 0, compliance_watches: 0, lint_findings: 4 },
+  // `work_questions` is #629's Work-keyed count and the ONLY source the attention band's
+  // "waiting on a person" tile reads — deliberately a DIFFERENT number from `needs_you`, so a
+  // tile that took the wrong key off this envelope would print 3 where it should print 2.
+  counts: { ready: 5, needs_review: 12, needs_you: 3, open_drafts: 2, open_questions: 1, open_tasks: 0, compliance_watches: 0, lint_findings: 4, work_questions: 2 },
   sweep: { open_run: false, last_finalized_at: "2026-09-03T00:31:00Z", last_ack_at: null },
   compliance: { stale_evaluator: false, clients: [] },
   rows: [DRAFT_ROW], next_cursor: null,
@@ -60,6 +63,126 @@ const PLAN_ITEMS = [
   { id: "i1", plan_id: "plan-1", firm_id: "f1", item_kind: "must_ask", item_key: "a", question: null, answer: null, state: "answered", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
   { id: "i2", plan_id: "plan-1", firm_id: "f1", item_kind: "must_ask", item_key: "b", question: null, answer: null, state: "pending", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
 ];
+
+// #650 — the Work attention band's own read, POPULATED. `active` at 3 over a two-row preview and
+// `recent_success` at 1 over a one-row preview is the discriminating shape: a build that derived a
+// tile from `rows.length` would print 2 and 1, and a build that derived either from the review
+// queue's `counts.work_questions` (3 in ENVELOPE above? no — `needs_you` is 3 and
+// `work_questions` is absent) would print something else again.
+const WORK_PACK = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 5,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  facets: {
+    active: {
+      status: "ok", count: 3, coverage: "ok", coverage_reason: null,
+      rows: [
+        {
+          work_id: "99999999-9999-4999-8999-999999999991", purpose: "journal_entry",
+          status: "running", memo: "Office rent", attempts: 2, current_run_status: "running",
+          retrying: true, created_at: "2026-09-16T01:00:00.000Z", updated_at: null,
+        },
+        {
+          work_id: "99999999-9999-4999-8999-999999999992", purpose: "payroll_obligation",
+          // The preview row and the list row below carry the SAME memo on purpose: the drilldown
+          // leg asserts the population it lands on, and a fixture that spelled one Work two ways
+          // would make that assertion about the fixture rather than about the journey.
+          status: "queued", memo: "Payroll run", attempts: 1, current_run_status: null,
+          retrying: false, created_at: "2026-09-16T00:00:00.000Z", updated_at: null,
+        },
+      ],
+    },
+    recent_success: {
+      status: "ok", count: 1, coverage: "ok", coverage_reason: null, uncounted_completions: 0,
+      rows: [{
+        work_id: "99999999-9999-4999-8999-999999999993", purpose: "journal_entry",
+        status: "completed", memo: "Bank fee", receipt_id: "r1", entry_id: "e1",
+        committed_at: "2026-09-15T02:00:00.000Z",
+      }],
+    },
+  },
+  needs_you_ref: { source: "list_review_queue.counts.work_questions" },
+};
+
+/**
+ * THE WORK LIST A DRILLDOWN ACTUALLY LANDS ON — answered from the SAME fixture the pack above is
+ * built from, rather than from a hard-coded empty page (round-1 review, finding 650-S1).
+ *
+ * An empty list passes every URL assertion no matter what the URL means, which is precisely how
+ * finding 650-B1 shipped green through a db battery, 48 web cells and a nine-leg walk. These rows
+ * are `clara.list_accounting_work`'s own projection shape (0189:445-470) and the handler below
+ * applies the door's own fences: `p_status` against `status`, and `p_since`/`p_until` against
+ * `created_at` — the ADMISSION instant, which is the whole point.
+ *
+ * So the fixture carries the two divergence classes the rig measured
+ * (`packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown`):
+ *   · "Bank fee" is the recent-success tile's one row — a committed receipt on 2026-09-15 — and
+ *     it was ADMITTED on 2026-08-20, before the window, so the list it links to drops it.
+ *   · "Rates accrual" was admitted and completed inside the window with no receipt, so the list
+ *     returns it and the tile never counted it.
+ * A walk that asserted "the drilldown shows exactly the tile's Works" would be asserting a
+ * falsehood; what it asserts instead is that the board SAID so before the person clicked.
+ */
+const LIST_ROW_BASE = {
+  client_id: CLIENT_ACTIVE,
+  client_name: "Rome Properties",
+  purpose: "journal_entry",
+  initiator: "11111111-1111-1111-1111-111111111111",
+  initiated_by: "11111111-1111-1111-1111-111111111111",
+  initiator_role: "bookkeeper",
+  basis_origin: "user_direct",
+  posting_date: "2026-09-01",
+  currency: "MYR",
+  source_ref_count: 0,
+  current_task_id: null,
+  entry_id: null,
+  receipt_id: null,
+  error_code: null,
+  error_reason: null,
+  attempts: 1,
+  current_run_status: null,
+  pending_question_id: null,
+  pending_question_version: null,
+  updated_at: null,
+};
+
+const LIST_ROWS = [
+  // The three the ACTIVE tile counts — its number is 3 and its preview is 2, so the drilldown is
+  // also the proof that a count is never `rows.length`.
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999991", status: "running",
+    memo: "Office rent", attempts: 2, current_run_status: "running",
+    created_at: "2026-09-16T01:00:00.000Z" },
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999992", status: "queued",
+    memo: "Payroll run", purpose: "payroll_obligation", created_at: "2026-09-16T00:00:00.000Z" },
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999994", status: "queued",
+    memo: "Depreciation posting", created_at: "2026-09-15T23:00:00.000Z" },
+  // CLASS 1 — in the tile, not in the list.
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999993", status: "completed",
+    memo: "Bank fee", receipt_id: "r1", entry_id: "e1", created_at: "2026-08-20T02:00:00.000Z" },
+  // CLASS 2 — in the list, not in the tile.
+  { ...LIST_ROW_BASE, id: "99999999-9999-4999-8999-999999999995", status: "completed",
+    memo: "Rates accrual", created_at: "2026-09-14T02:00:00.000Z" },
+];
+
+/** `clara.list_accounting_work`'s own fences, applied to the fixture: status membership, and a
+ *  HALF-OPEN `[p_since, p_until)` over `created_at` (0189:427-428). */
+function listWorkPage(body: unknown): { rows: unknown[]; next_cursor: null; truncated: false } {
+  const b = (body ?? {}) as { p_status?: string[] | null; p_since?: string | null; p_until?: string | null };
+  const status = Array.isArray(b.p_status) && b.p_status.length > 0 ? b.p_status : null;
+  const since = typeof b.p_since === "string" ? Date.parse(b.p_since) : null;
+  const until = typeof b.p_until === "string" ? Date.parse(b.p_until) : null;
+  const rows = LIST_ROWS.filter((r) => {
+    const at = Date.parse(r.created_at);
+    if (status !== null && !status.includes(r.status)) return false;
+    if (since !== null && at < since) return false;
+    if (until !== null && at >= until) return false;
+    return true;
+  });
+  return { rows, next_cursor: null, truncated: false };
+}
 
 function json(route: Route, body: unknown): Promise<void> {
   return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -82,6 +205,9 @@ async function seed(page: Page): Promise<void> {
   await page.route("**/e2e-supabase/rest/v1/onboarding_plan_items**", (route) => json(route, PLAN_ITEMS));
   await page.route("**/e2e-supabase/rest/v1/rpc/list_fiscal_years", (route) =>
     json(route, [{ fiscal_year_id: "fy1", label: "FY 2026", ordinal: 2, starts_on: "2026-01-01", ends_on: "2026-12-31", status: "open", fy_end_source: "asserted", has_active_reopen_receipt: false }]));
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => json(route, WORK_PACK));
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_accounting_work", (route) =>
+    json(route, listWorkPage(route.request().postDataJSON())));
   await page.route("**/e2e-supabase/rest/v1/rpc/get_close_readiness", (route) =>
     json(route, { fiscal_year_id: "fy1", close_run_id: null, run_state: null, fy_end_source: "asserted", gates: [
       { check_key: "a", drawer: 1, state: "pass", measured: null, measured_digest: "x", attested: false },
@@ -246,4 +372,174 @@ test("all three boards are clean under the full WCAG 2.1 AA scan", async ({ page
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `${face} axe violations`).toEqual([]);
   }
+});
+
+// ==============================================================================================
+// #650 — THE WORK ATTENTION BAND.
+// ==============================================================================================
+
+test("home.facets.drilldown — each count opens its OWN scoped list, and Back restores the home with focus on the control that left it", async ({ page }) => {
+  // #706 — one sign-in, one settle, then three navigations and three Backs.
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  const board = workbench(page);
+
+  // The three counts, each a full noun phrase rather than a bare number beside a label — the
+  // accessible NAME of each link IS the sentence.
+  // EVERY LEG NAMES THE POPULATION IT EXPECTS TO LAND ON, not only the URL it expects to spell.
+  // The list is answered from the same fixture as the band (`listWorkPage`), so a drilldown that
+  // opened a different set of Works than its tile described reds HERE, in the browser — which an
+  // empty-page mock could never do (round-1 review, 650-S1).
+  const table = () => page.getByRole("table", { name: "Durable work" });
+  const legs = [
+    ["2 Works are waiting on a person", /\/work\?view=needs-you$/,
+      // The needs-you count is the review queue's; this fixture mints no parked Work, so what is
+      // proven here is the URL and the return journey, and the list is honestly empty.
+      async () => { await expect(table()).toHaveCount(0); }],
+    ["3 Works are queued or running", /\/work\?status=queued%2Crunning$/,
+      async () => {
+        // THE TILE SAID THREE AND THE LIST HOLDS THREE — while the tile's own preview showed two,
+        // which is the count-is-never-rows.length rule seen from both ends in one journey.
+        await expect(table().getByRole("link", { name: "Office rent" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Payroll run" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Depreciation posting" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+      }],
+    ["1 Work finished in the last 7 days", /\/work\?status=completed&since=2026-09-10&until=2026-09-16$/,
+      async () => {
+        // AND THE DISCLOSED CASE. The tile counted "Bank fee" (its receipt posted inside the
+        // window); the list is fenced on when a Work was STARTED, so it drops that row and
+        // returns "Rates accrual", which the tile never counted. The band said this on the home
+        // before the click — asserted below — and that sentence is the whole fix for 650-B1.
+        await expect(table().getByRole("link", { name: "Rates accrual" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+      }],
+  ] as const;
+
+  // THE QUALIFICATION IS ON THE BOARD, beside the number, before anyone clicks it.
+  await expect(board.getByText(/dated by when each Work started, not when it posted/)).toBeVisible();
+
+  for (const [name, expected, landed] of legs) {
+    const link = board.getByRole("link", { name });
+    await expect(link, `${name} must be on the board as a link`).toBeVisible();
+    await link.focus();
+    await link.press("Enter");
+    await expect(page).toHaveURL(expected);
+    await landed();
+
+    await page.goBack();
+    // THE HOME'S OWN URL, not merely "a client page": a Back that landed on the workspace root
+    // with a stale query would be the "preserved return state" criterion silently unmet.
+    await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}$`));
+    // AND THE FOCUS THAT LEFT IT. A keyboard user who opens a count and comes back must not be
+    // returned to the top of the document with their place lost.
+    await expect
+      .poll(async () => page.evaluate(() => document.activeElement?.textContent?.trim() ?? ""))
+      .toContain(name);
+  }
+});
+
+test("home.facets.responsive — 320px, 200% zoom and reduced motion keep every count reachable with no horizontal scroll, and the populated board is axe-clean", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3, scans: 1 }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+
+  for (const [label, width, height] of [
+    ["320px", 320, 720],
+    // 200% zoom, the repo's own idiom (`activity-feed-walk.spec.ts:215`): a HALVED viewport is
+    // what a 200% page zoom actually does to the CSS pixel box.
+    ["200% zoom (a halved 1280x720 viewport)", 640, 360],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await settled(page);
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `the client board must not scroll horizontally at ${label}`).toBeLessThanOrEqual(1);
+    // Every count is still on screen and still a link — a band that reflowed its numbers out of
+    // the document would satisfy the overflow check and fail the person.
+    for (const name of [
+      "2 Works are waiting on a person",
+      "3 Works are queued or running",
+      "1 Work finished in the last 7 days",
+    ]) {
+      await expect(workbench(page).getByRole("link", { name }), `${name} at ${label}`).toBeVisible();
+    }
+  }
+
+  // Back to a normal viewport for the scan, and scan the POPULATED band rather than an empty one.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await settled(page);
+  await expect(workbench(page).getByText("Work attention")).toBeVisible();
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "populated Work attention band axe violations").toEqual([]);
+});
+
+test("home.facets.states — empty, unknown and denied are three different sentences, and the band dates its own read", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3 }));
+
+  // EMPTY — the door answered zero.
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => json(route, {
+    ...WORK_PACK,
+    facets: {
+      active: { status: "ok", count: 0, coverage: "ok", coverage_reason: null, rows: [] },
+      recent_success: {
+        status: "ok", count: 0, coverage: "ok", coverage_reason: null,
+        uncounted_completions: 0, rows: [],
+      },
+    },
+  }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText("Nothing is running for this client right now.")).toBeVisible();
+  await expect(workbench(page).getByText(/^Read at /)).toBeVisible();
+  // The band NEVER claims to know the database's position — there is no Work lifecycle event in
+  // this estate to derive one from.
+  await expect(workbench(page).getByText(/up to date|watermark/i)).toHaveCount(0);
+
+  // UNKNOWN — the read landed but the body could not be read. Distinct from zero.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) =>
+    json(route, { computed_at: "2026-09-16T02:00:00.000Z", facets: { active: "nope", recent_success: null } }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText(/could not be read, so there is no number to show/)).toHaveCount(2);
+  await expect(workbench(page).getByText("Nothing is running for this client right now.")).toHaveCount(0);
+
+  // DENIED — a governed refusal. The viewer-floored tile beside it is UNTOUCHED, which is the
+  // whole reason the needs-you number is not part of this read.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => route.fulfill({
+    status: 403,
+    contentType: "application/json",
+    body: JSON.stringify({ code: "CLR04", message: "insufficient role" }),
+  }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText("Your role does not include this.")).toHaveCount(2);
+  await expect(workbench(page).getByRole("link", { name: "2 Works are waiting on a person" })).toBeVisible();
+});
+
+test("home.facets.delayed — a minute with no successful read says the UPDATE is delayed, and keeps the dated numbers", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  // THE CLOCK IS INSTALLED BEFORE ANY NAVIGATION — Playwright's own rule: `install` overrides the
+  // native Date/setInterval, so it must precede every clock-related call on the page.
+  await page.clock.install();
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+
+  // From here the door fails. The band must keep the numbers it already has, dated, and after the
+  // estate's own 60-second rule say that the UPDATE is delayed — a statement about the
+  // connection, never about the Work.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ message: "upstream" }),
+  }));
+
+  await page.clock.fastForward("01:05");
+  await expect(workbench(page).getByText(/Update delayed/)).toBeVisible();
+  await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
 });

@@ -1933,6 +1933,19 @@ const CODING_LANE_LINK_0197_UNGRANTED_FNS = [
 ];
 export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_FNS];
 // #718 END
+// #650 [0199, the client home's Work attention band] — the CLIENT WORK PACK lane, its own cohort
+// for the same "wholly present or wholly absent" reason 0189's list carries.
+//
+//   ONE read door — clara_authenticated ONLY. `get_client_work_pack` is SECURITY INVOKER over
+//   clara.accounting_work and clara.operation_receipts (both already granted, both behind forced
+//   firm-scoped RLS) with 0189's own three inline predicates for its bookkeeper floor, and it
+//   reaches clara.agent_tasks ONLY through 0189's already-granted DEFINER helper, with at most 25
+//   preview ids. clara_runtime, the agent role and both wake roles gain ZERO: a client's attention
+//   board is a human read of a human's own queue, never something a model lane produces or
+//   consumes on its own. 0199 creates no other function and recuts nothing, so this cohort is one
+//   name.
+const CLIENT_WORK_PACK_0199_HUMAN_FNS = ["get_client_work_pack"];
+export const CLIENT_WORK_PACK_0199_COHORT = [...CLIENT_WORK_PACK_0199_HUMAN_FNS];
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2107,6 +2120,10 @@ export const ALLOWED = {
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
     ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
+    // #650 0199 the client home's Work attention band — see the block above. clara_authenticated
+    // ONLY, bookkeeper-floored in its own body; clara_runtime, the agent role and both wake roles
+    // gain ZERO.
+    ...CLIENT_WORK_PACK_0199_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2511,6 +2528,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
+  failures.push(...cohortFailures("#650 0199 client work-pack read lane", CLIENT_WORK_PACK_0199_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));

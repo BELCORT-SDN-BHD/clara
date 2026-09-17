@@ -87,6 +87,19 @@ _Avoid_: A single all-or-nothing accounting transaction.
 The view of work awaiting information or a decision from a person. Answering there continues the same work and question seen elsewhere.
 _Avoid_: A separate execution queue; every technical failure as a question for the user.
 
+**Work attention facet**:
+A count of DISTINCT Accounting work ids satisfying one attention predicate for one client — what
+is waiting on a person, what is queued or running, what a committed operation receipt dates inside
+the last seven `Asia/Kuala_Lumpur` calendar dates. Facets overlap and are never summed; no
+financial period narrows one; an unread facet is *unknown*, not zero.
+_Avoid_: A total; a page length; a synonym for a review-queue row count.
+
+**Work pack**:
+The one client-scoped read carrying the active and recent-success facets, each with its coverage,
+plus the instant the read itself happened. The needs-you number is not in it: the pack names the
+review-queue count that owns it.
+_Avoid_: Calling its read instant a watermark; treating it as the needs-you source.
+
 **Saved view**:
 A named set of list filters a person keeps, stored against that person rather than the firm. It is a filter on one destination — the same URL, narrowed — never a second destination and never a position in a result set.
 _Avoid_: A separate route or tab; a remembered page of results; a shared firm-level configuration.

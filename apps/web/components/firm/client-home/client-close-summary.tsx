@@ -121,6 +121,21 @@ export function ClientCloseSummary({ clientId }: { clientId: string }) {
             <dd className="text-foreground">{t("closeReadiness", { met, total })}</dd>
           </dl>
         ) : null}
+        {/* #650 AC3 — THE RESERVED READINESS SLOT, as a LABEL AND A NOTE inside the section that
+            already owns the subject, not a second component beside it.
+            The board's whole discipline is that a number on screen is a number the database
+            stated, and the tally above is exactly that: passing gates out of gates the DB
+            RETURNED. What #650 was asked to "reserve" is the other half — the applicable
+            denominator and the evidence-exception drilldowns — and this build measures neither.
+            A new widget restating an unknown this section's own header already decided not to
+            claim (see the block above on gates the DB has never measured) would be noise; a
+            named, dated pointer at the ticket that owns the measurement is not. */}
+        {year ? (
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{t("closeReadinessReservedLabel")}: </span>
+            {t("closeReadinessReserved")}
+          </p>
+        ) : null}
       </DataState>
       {/* The no-fiscal-year arm, and the ONLY place the client's standing pair is shown. It is
           the honest thing to report for a client with no year opened yet — the opener's own

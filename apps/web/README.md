@@ -14,10 +14,35 @@ Route groups organize layouts without changing URLs.
 | Firm | `/`, `/clients`, `/work`, `/activity` | Firm home, client register, open work (`?view=needs-you` is the saved attention view), and the agent receipts feed |
 | Settings | `/settings`, `/settings/account`, `/settings/firm`, `/settings/members`, `/settings/compliance`, `/settings/vendor-bindings` | The caller's own account, plus capability-shaped firm administration |
 | Operator | `/operator` | The BELCORT operator's support queue: firm registrations awaiting admission (owner of the firm that carries `is_operator`; #615, 0188 §2) |
-| Client | `/clients/:clientId` plus `/work`, `/documents`, `/accounting`, `/knowledge`, `/reports`, and the accounting workbenches `/journals`, `/bank`, `/registers`, `/close`, `/tax`, plus `/plans` (+`/new`, `/:planId`, `/:planId/revise`; #640) and `/accounting/adjustments` (+`/new`; #643) | The client workspace and its accounting workbenches |
+| Client | `/clients/:clientId` (its Home board opens on the Work attention band — Works waiting on a person, queued/running, and finished in the last seven `Asia/Kuala_Lumpur` calendar dates — each count a link into that client's own Work list, narrowed as closely as that list's own axes allow (the recent-success drilldown is the same week over a different subject, which the tile discloses; see below); the close section reserves the readiness slot with a "measured by #677" note rather than estimating it) plus `/work`, `/documents`, `/accounting`, `/knowledge`, `/reports`, and the accounting workbenches `/journals`, `/bank`, `/registers`, `/close`, `/tax`, plus `/plans` (+`/new`, `/:planId`, `/:planId/revise`; #640) and `/accounting/adjustments` (+`/new`; #643) | The client workspace and its accounting workbenches |
 | Legacy | `/needs-you` → `/work?view=needs-you`; `/admin` → `/settings`; `/admin/members` → `/settings/members`; `/admin/settings` → `/settings/firm`; `/admin/compliance` → `/settings/compliance`; `/admin/vendor-bindings` → `/settings/vendor-bindings`; `/admin/registrations` → `/operator`; `/settings/registrations` → `/operator` (two rows, never chained — Next matches one rule per request; #615) | Temporary (307) redirects declared in [`lib/navigation/legacy-routes.ts`](lib/navigation/legacy-routes.ts) and wired through `next.config.ts` |
 | Clara | `/clara/:threadId`, `/clients/:clientId/clara/:threadId` | Full-screen conversation; the docked rail is mounted once in the firm shell |
 | Server routes | `/api/runtime/*`, `/api/invite`, `/api/build-info`, `/checkout`, `/checkout/cancel`, `/checkout/success/claim`, `/auth/confirm/verify`, `/auth/confirm/resend`, `/auth/recover`, `/logout` | Same-origin runtime proxy, mail courier, release provenance, and POST-only mutation boundaries |
+
+The client Home board reads **per section**, deliberately: one failed read leaves every other
+section's real numbers on screen. The Work attention band is two reads for three tiles — the
+`active` and `recent success` facets come from `clara.get_client_work_pack` (bookkeeper floor),
+while the "waiting on a person" tile RESTATES the `counts.work_questions` the page's existing
+`clara.list_review_queue` envelope already carries (viewer floor), so a viewer keeps the number
+this page has shown since #629 and sees the other two tiles say, in words, that Work records need
+a bookkeeper role. The facets OVERLAP and are never summed; no total exists anywhere in that read.
+Freshness is the pack's own `computed_at` — "read at …", never a claim about the database's
+position, because no Work admission, claim, settle, completion, question or answer emits a domain
+event in this estate. The band re-reads on a visible return and every 30 s while the tab is
+visible, and says "update delayed" after the estate's one 60-second contract
+([`lib/work/use-work-detail.ts`](lib/work/use-work-detail.ts)) with no successful read.
+
+Each count opens the Work list narrowed by the axes that list actually HAS, and where a tile is
+narrower than the list it opens, the tile says so in words rather than letting the number imply a
+page it does not open. "Running now" opens `status=queued,running`; "retrying" is not a member of
+`clara.list_accounting_work`'s status roster, so it stays a row LABEL and never becomes a filter.
+"Finished recently" counts a committed `clara.operation_receipts` row inside the seven Malaysian
+dates, while that door fences `p_since`/`p_until` on `clara.accounting_work.created_at` — when
+the Work was STARTED — and carries no receipt-dated axis: the drilldown is therefore the same
+seven dates over a DIFFERENT SUBJECT, which the tile discloses beside the count and
+`packages/db/tests/client-work-pack.test.mjs` `p650.pack.recent_success_drilldown` measures in both
+directions. When the window itself cannot be read the link carries no dates at all, and the tile
+names that wider population instead of repeating the seven-day sentence.
 
 The browser reads allowed tables and views through [`lib/read.ts`](lib/read.ts) and calls governed Postgres functions through [`lib/doors.ts`](lib/doors.ts). Runtime requests go through the same-origin `/api/runtime/*` proxy. Firm scope is established by [`app/(firm)/layout.tsx`](app/%28firm%29/layout.tsx), which also renders the one navigation surface — sidebar, scope switcher and breadcrumb — from the registry in [`lib/navigation/tree.ts`](lib/navigation/tree.ts); client scope is activated by [`app/(firm)/clients/[clientId]/layout.tsx`](app/%28firm%29/clients/%5BclientId%5D/layout.tsx), which renders no chrome of its own and publishes the client's name to that shell. UI code renders database amounts and refusals as returned and re-reads authoritative state after governed writes.
 

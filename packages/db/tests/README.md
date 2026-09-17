@@ -35,6 +35,19 @@ every test repeatable.
 suite's matching chain, rather than running those lists against the full frontier.
 A skipped preintegration suite is not evidence that its feature passed.
 
+## Owner-level fixture DML, where it is unavoidable
+
+A cell that needs a state no verb can produce says so in source and builds it as the superuser,
+rather than pretending the verbs reached it. `client-work-pack.test.mjs` (#650, frontier stem
+`client_work_pack$`, preintegration gate `client-work-pack-preintegration-gate.mjs`) does this
+three times, each labelled at the call site: it backdates a `clara.operation_receipts` instant
+under `session_replication_role = replica` because that relation is append-only by design; it
+plants an `outcome='refused'` receipt because every live writer in the estate inserts `committed`;
+and it plants a second pending `clara.agent_interruptions` row at a higher `question_version`,
+which `uq_agent_interruptions_work_version` permits but `open_work_question` refuses (the same
+cell proves that refusal first, so the reader can tell a defence-in-depth assertion from a
+verb-reachable one).
+
 Read test helper contracts before adding teardown or starting parallel suites against one cluster.
 Database cleanup and cluster-role cleanup must account for other live test connections.
 ## Intake-surface batteries (#633)

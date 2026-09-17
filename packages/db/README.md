@@ -92,6 +92,43 @@ refuses the cutover while any pre-cutover classify task is still claimable witho
 extraction, and its rollback is a new append-only recovery migration applied while that consumer
 stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
 
+[0199_client_work_pack.sql](migrations/0199_client_work_pack.sql) owes **no** consumer-first
+obligation either, for a narrower reason: it adds exactly one SECURITY INVOKER read door,
+`clara.get_client_work_pack(p_client, p_preview)`, grants EXECUTE to `clara_authenticated` alone,
+and creates no relation, column, policy, index or trigger and recuts nothing. Its only consumer is
+a new browser module ([../../apps/web/lib/work/client-work-pack.ts](../../apps/web/lib/work/client-work-pack.ts)),
+which cannot call a function that is not there yet. It keeps ONE prestate pin — a pre-image
+`sha256(prosrc)` of `clara._work_run_attempts` — not because it recuts that body but because it
+CALLS it and its own safety argument depends on that helper's 101-id ceiling and its in-body
+bookkeeper floor; the pin is what forces a later recut of the helper to re-derive this door's
+argument rather than discover it at 102 running Works.
+
+Two sentences in 0199's own header are corrected here rather than in the file, which is
+append-only. **The planner does not use `ix_accounting_work_client` for the active facet.** Forced
+RLS adds `firm_id = clara.jwt_firm()` to every read of `clara.accounting_work`, which makes
+`uq_accounting_work_intent (firm_id, client_id, intent_key)` the better leading prefix. Re-measured
+as a bookkeeper with RLS in force on the #650 rig (1,317 `accounting_work` rows, 81
+`operation_receipts`; probed client with 102 active): the active facet plans `Bitmap Heap Scan ←
+Bitmap Index Scan on uq_accounting_work_intent`, `Index Cond ((firm_id = clara.jwt_firm()) AND
+(client_id = …))`, 0.45 ms; the recent-success facet plans `Index Scan using
+ix_operation_receipts_client` with the half-open MYT range in the Index Cond (0.05 ms), and
+`Bitmap Index Scan` on the same index for a client that has receipts (0.08 ms). Neither degrades to
+a sequential scan, so the header's CONCLUSION — no new index is owed — stands; its attribution and
+its "measured on a rig cohort before this file was written" clause are superseded by that later
+measurement. The receipts cohort is small, so that leg is a structural result (the index condition
+matched) rather than a load measurement.
+**And the recent-success drilldown is the same WEEK over a different SUBJECT.** The tile counts a
+committed `clara.operation_receipts` row inside the seven Malaysian dates; the list its number
+opens, `clara.list_accounting_work`, fences `p_since`/`p_until` on
+`clara.accounting_work.created_at` — when the Work was admitted (0189:427-428) — because that door
+has no receipt-dated axis and this wave recuts nothing in 0189. The two populations therefore
+diverge in exactly two ways, both pinned by `tests/client-work-pack.test.mjs`
+`p650.pack.recent_success_drilldown`: a Work admitted before the window and posted inside it is
+counted and not listed, and a Work admitted and completed inside the window with no receipt is
+listed and not counted (the second is the population the door already names through
+`uncounted_completions`); a Work admitted and posted in the same week is in both. The board
+discloses this beside the number rather than implying the list is the tile's own population.
+
 Rebuilding a target from the migration chain and restoring a dump are different operations.
 A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials
 afterward and probe every configured runtime lane. Existing platform roles can also collide
