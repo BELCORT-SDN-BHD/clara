@@ -40,7 +40,11 @@ owner ruled on 2026-09-15:
   only wall here, and it lives in the face.
 - **2 or more** — the **database** refuses, CLR10 `name_family_collision`, and the refusal renders
   verbatim with its code beside the same candidate list — which the refusal itself carries, so the
-  face never issues a second read of the fact it is reporting.
+  face never issues a second read of the fact it is reporting. **And a belt, labelled as one**: if
+  that read ever *answered* an arity of 2 or more instead of refusing it, Confirm is shut rather
+  than live-looking-and-inert. 0204 raises at this arity and never returns it as a success, so the
+  state is unreachable through the live door; the cell that holds the belt honest drives a mock
+  door to answer it (`add-client-candidates.test.tsx`).
 
 Editing the name retires the check, the acknowledgement and the refusal; it never clears the typed
 text. **There is no client-side duplicate rule and there must not be one**: the family predicate may
