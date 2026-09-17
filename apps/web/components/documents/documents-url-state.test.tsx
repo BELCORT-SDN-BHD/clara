@@ -26,6 +26,7 @@ import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { DocumentsWorkbench } from "./documents-workbench";
 import { DOCUMENT_HEADING_ID } from "./document-detail";
+import { applyDocumentTabParam, isDocumentTab, parseDocumentTabParam } from "../../lib/documents/url-state";
 import {
   DOCUMENTS_CLIENT, DOC_PDF, DOC_XML, DOC_ROWS,
   documentsApp, documentsFetch, makeNavigation, type Navigation,
@@ -286,4 +287,47 @@ test("a DENIED filed read offers no Retry — a control that cannot work is wors
     // …and the honest sentence is still there: withholding the control is not withholding the news.
     assert.match(h.text(), /You don't have access to this/);
   });
+});
+
+// =============================================================================================
+// #646 — `?tab=original|facts|accounting`, the SECOND parameter on the SAME route.
+//
+// These cells are about the PARSER and the FOLD, which is where the whole contract lives: which
+// values are real views, what an unrecognised one does, and — the property a careless
+// implementation loses — that the default view writes NO parameter at all, so every `?document=`
+// link #624 published still names the same address it always did.
+// =============================================================================================
+
+test("646 · the tab parameter admits exactly the three routed views, and anything else reads as Original", () => {
+  const parse = (search: string) => parseDocumentTabParam(new URLSearchParams(search));
+  assert.equal(parse(""), "original", "no parameter is the default view, not an error");
+  assert.equal(parse("tab=original"), "original");
+  assert.equal(parse("tab=facts"), "facts");
+  assert.equal(parse("tab=accounting"), "accounting");
+  // A MALFORMED TAB IS NOT A THIRD ANSWER, deliberately — unlike `?document=`, where a bad uuid is
+  // a stale link that owes someone a not-found state. There is nothing to "not find" here: the
+  // document the address named is open, and the honest answer is the view it opens on.
+  assert.equal(parse("tab=ledger"), "original", "a hand-edited view name falls back, it does not error");
+  assert.equal(parse("tab="), "original");
+  assert.equal(parse("tab=FACTS"), "original", "the check is exact — no case folding a link could not rely on");
+  assert.equal(isDocumentTab("facts"), true);
+  assert.equal(isDocumentTab("ledger"), false);
+  assert.equal(isDocumentTab(null), false);
+});
+
+test("646 · the DEFAULT view writes no tab parameter, and every other parameter survives the fold", () => {
+  const base = new URLSearchParams("document=11111111-1111-4111-8111-111111111111&page=2");
+  const facts = applyDocumentTabParam(base, "facts");
+  assert.equal(facts.get("tab"), "facts");
+  assert.equal(facts.get("document"), "11111111-1111-4111-8111-111111111111", "the document parameter is untouched");
+  assert.equal(facts.get("page"), "2", "and so is everything else on the URL");
+  assert.equal(base.get("tab"), null, "the input is not mutated — a NEW instance comes back");
+
+  // THE PROPERTY THAT PROTECTS #624's PUBLISHED LINKS: the default view DELETES the key rather than
+  // writing `?tab=original`, so the address for "the document, as it opens" is byte-identical to
+  // the one this surface has been handing out since #719.
+  const back = applyDocumentTabParam(facts, "original");
+  assert.equal(back.get("tab"), null, "switching back to Original leaves no dead parameter behind");
+  assert.equal(back.toString(), base.toString(), "and the URL is exactly the one ticket 624 published");
+  assert.equal(applyDocumentTabParam(facts, null).get("tab"), null);
 });

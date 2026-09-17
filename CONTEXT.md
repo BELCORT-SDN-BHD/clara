@@ -210,6 +210,22 @@ _Avoid_: A second question status; proof that the Work advanced.
 The append-only record that one client document is the source behind one posted journal entry: which Work and operation identity bound it, who bound it, when, and whether it was bound as the entry was recorded or attached afterwards. A document backs at most one live posted entry; a reversal releases the link so the corrected entry may cite the same document. Evidence is optional — an entry recorded without a document is a complete accounting fact.
 _Avoid_: A column rewritten on the posted entry; a claim that the document was independently verified; "unsourced" as a synonym for "wrong".
 
+**Document filing**:
+One live placement of a document into one client's books, with the attribution act that authorised it. A document may be filed to more than one client of the firm at once, and a filing is *retired* rather than deleted — a retired filing stays readable, names its reason and, when a wrong-client correction retired it, the correction that did so.
+_Avoid_: The document itself; "unfiled" as a synonym for "not yet read"; deleting a filing.
+
+**Source revision**:
+One attributable change a person makes to what a document *says* — a typed fact value or the document kind — recorded with the actor, the reason, and the source version they were reading. The reading it replaces is never edited: a revision appends a new version of the document's facts and the previous one stays readable alongside it. A revision written against a reading that has since moved is refused and the attempted value is handed back, never silently applied.
+_Avoid_: Editing a fact in place; re-running the machine reader as a synonym for correcting a value; a revision with no stated reason.
+
+**Wrong-client correction**:
+The guided move of a document from the client it was filed to onto the right one: preview the impact, propose a plan bound to the books as they stand, have a second eligible person approve it, then reverse each affected entry, retire the original filing and create the new one. It is a different record from a source revision, and the two are read together as one history rather than merged into one relation.
+_Avoid_: Editing the filing; a correction that rewrites a posted entry; presenting the moved document as never having been here.
+
+**Correction Work**:
+The accounting work that carries an accepted source revision through to posted results — reversing or replacing what the books already recorded. It does not exist yet: today an accepted source revision is recorded and its accounting impact is shown as pending, separately and by name.
+_Avoid_: Presenting a recorded source revision as a corrected set of books; fabricating a completed correction; an in-place rewrite of a posted entry.
+
 **Spoken-for document**:
 A document that already backs a live posted entry of any client of the firm — through a live Evidence link or an approved, not-reversed document-coding binding. A picker disables such a document and names its claimant; the posting door's own refusal is the actual law and is unchanged by this advisory.
 _Avoid_: A hard block; proof the document cannot be used at all; a synonym for "already filed".

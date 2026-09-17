@@ -123,3 +123,17 @@ cross-firm cell SEEDS a real `late_attachment` link (the shape
 A's own persona reads it BEFORE asserting the foreign firm's zero — fix round 1: it
 previously logged the population count and asserted two zeroes over an empty table, which
 would have passed with RLS removed.
+
+## Batteries worth naming
+
+`rig-docs-source-revision.test.mjs` (#646, frontier `document_source_revision$`) drives the human
+source-revision doors on the real chain under the real role matrix: a revision APPENDS and leaves
+the superseded extraction's regions byte-identical, a revision quoting a moved reading refuses
+CLR19 and echoes the attempted value, the arithmetic belt measures the NEW numbers, the orphaned
+classification door is narrow (zero live filings — a retired-then-re-filed document still refuses),
+op-key replay returns the original receipt, a `'fact'` row names the `invoice_facts` reading it
+superseded even after a kind change has repointed the document-wide pointer at a classification,
+and NOTHING in the ticket reaches
+`clara.accounting_work`, `clara.agent_tasks` or `clara.knowledge_records`. Its pre-integration gate
+is `document-source-revision-preintegration-gate.mjs`; a focused run without that module FAILS
+rather than skipping.

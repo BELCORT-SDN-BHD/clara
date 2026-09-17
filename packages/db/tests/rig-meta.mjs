@@ -2005,6 +2005,41 @@ export const COUNTERPARTY_IDENTITY_0200_COHORT = [
 ];
 // #647 END
 
+// #646 [0202, the document SOURCE-REVISION lane] — its own cohort for the same "wholly present or
+// wholly absent" reason 0191's and 0192's carry: folding these names into an older roster would
+// red every database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by
+// design.
+//
+//   the FOUR human doors — clara_authenticated ONLY. Two writes (a typed-fact revision and the
+//   narrow orphaned-classification-question dismissal, both bookkeeper-floored inside their own
+//   bodies behind the agent-identity wall clara.set_document_kind carries) and two reads (the
+//   chronological source lineage and the read-only dependents projection, at the SAME bookkeeper
+//   floor). The runtime, the agent read role and both wake roles gain ZERO: which reading a set of
+//   books rests on is a professional's judgement, and no wake credential makes one. The reads are
+//   walled with the writers for clara.list_periodic_adjustments' reason — a definer read gated on
+//   `_human_ctx` and granted to a role that carries no JWT is a DARK grant.
+const DOCUMENT_SOURCE_REVISION_0202_HUMAN_FNS = [
+  "revise_document_fact", "dismiss_orphaned_classification_question",
+  "list_source_revisions", "list_source_dependents",
+];
+//   …and the UNGRANTED closure: the one observation reader both writers stamp from (derived in
+//   exactly one place so the fact door and the recut set_document_kind cannot disagree about the
+//   same document), the sole-live-filing lookup, and the two closed field-path predicates. Listed
+//   so `cohortFailures` reports a half-applied 0202 rather than a silently narrower boundary, and
+//   so an accidental grant on any of them FAILS instead of passing quietly.
+const DOCUMENT_SOURCE_REVISION_0202_UNGRANTED_FNS = [
+  "_document_source_observation", "_document_sole_live_client",
+  "_revisable_invoice_field", "_monetary_invoice_field",
+];
+export const DOCUMENT_SOURCE_REVISION_0202_COHORT = [
+  ...DOCUMENT_SOURCE_REVISION_0202_HUMAN_FNS, ...DOCUMENT_SOURCE_REVISION_0202_UNGRANTED_FNS,
+];
+// #646's ONE relation, gated exactly as SUBLEDGER_0037_TABLES is: GOVERNED_TABLES' (a) branch
+// demands every entry EXIST, so listing it unconditionally would turn every pre-0202 database into
+// a MISSING-table failure that says nothing about RLS.
+export const DOCUMENT_SOURCE_REVISION_0202_TABLES = ["document_fact_revisions"];
+// #646 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -2047,6 +2082,7 @@ export const ALLOWED = {
     // stays in SALES_LANE_0046_UNGRANTED_FNS above, expected false for every role.
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
+    ...DOCUMENT_SOURCE_REVISION_0202_HUMAN_FNS, // #646 [0202] the two source-revision writes + the two reads
     ...KNOWLEDGE_0192_HUMAN_FNS, // #644 [0192] the three knowledge writes + the three C13 reads
     ...KNOWLEDGE_0192_SHARED_FNS, // #644 [0192] the promotion door — the ONE two-lane name
     ...COUNTERPARTY_IDENTITY_0200_HUMAN_FNS, // #647 [0200] the three counterparty-identity reads
@@ -2597,6 +2633,12 @@ export async function grantMatrixFailures() {
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
+  // #646 [0202] — the document source-revision lane. Bimodal: wholly present once 0202 applies,
+  // wholly absent before it, so the roster is only asserted once any of its names exists.
+  const sourceRevisionLive = DOCUMENT_SOURCE_REVISION_0202_COHORT.filter((n) => liveNames.has(n));
+  if (sourceRevisionLive.length !== 0) {
+    failures.push(...cohortFailures("#646 0202 document source-revision lane", DOCUMENT_SOURCE_REVISION_0202_COHORT, liveNames));
+  }
   // #718 END
   failures.push(...cohortFailures("#647 0200 counterparty-identity provenance lane", COUNTERPARTY_IDENTITY_0200_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
@@ -2756,8 +2798,11 @@ export async function governedRlsFailures() {
       + "A closed roster must not accumulate dead entries: either C-3 applied (all three tables) or it did not.",
     );
   }
+  const sourceRevisionTablesLive = DOCUMENT_SOURCE_REVISION_0202_TABLES.filter((t) => present.has(t));
   const roster = [
     ...GOVERNED_TABLES,
+    ...(sourceRevisionTablesLive.length === DOCUMENT_SOURCE_REVISION_0202_TABLES.length
+      ? DOCUMENT_SOURCE_REVISION_0202_TABLES : []),
     ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : []),
     ...(c2Live.length === CHECKOUT_GATE_C2_TABLES.length ? CHECKOUT_GATE_C2_TABLES : []),
     ...(c3Live.length === CHECKOUT_GATE_C3_TABLES.length ? CHECKOUT_GATE_C3_TABLES : []),

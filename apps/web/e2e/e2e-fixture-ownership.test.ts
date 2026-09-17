@@ -56,6 +56,7 @@ const LANE_MOCKS = [
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
   "counterparty-identity-mock.mjs",
+  "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
   "documents-viewer-mock.mjs",
   "fixed-asset-mock.mjs",
@@ -306,6 +307,18 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `p_candidate` before it dispatches at all — so there is nothing to declare in either
   // column, which is the state a lane mock should be in.
   "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
+  // #646's source-correction lane. Every literal-path handler names its own client or its own
+  // `c0ee0c0c-` document prefix before it answers, and the RPC half guards on an exact-verb
+  // allow-list BEFORE `readJson` and then on its own document/question/correction id — so there is
+  // nothing to declare in either column.
+  //
+  // FIVE OF ITS VERBS ARE SHARED, all five declared in SHARED_RPC_VERBS below: `get_document_state`,
+  // `get_document_extract`, `list_source_revisions` and `list_source_dependents` with
+  // `documents-viewer-mock.mjs` (the document detail panel reads all four on mount in BOTH lanes),
+  // and `record_client_resolution` with `chat-parity-mock.mjs`. This lane answers only for its own
+  // document ids and falls through otherwise, which is what makes a shared verb safe here — the N5
+  // scan below is what holds them to it, and the census below is what forced them to be NAMED.
+  "document-correction-mock.mjs": { unscopeable: [], debt: [] },
   "bank-close-registers-mock.mjs": {
     // The gate CATALOG is firm-wide and its read carries no filter AT ALL —
     // `lib/close/api.ts:320-322` sends only `select` and `order`. There is no discriminant in
@@ -1020,7 +1033,29 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // from this RPC. It answers only for its own two documents, and it reads the POST body through
   // the SHARED `readCachedJson` (`mock-dispatch.mjs`), so declining another lane's document leaves
   // that lane's body fully readable.
-  get_document_state: ["documents-intake-mock.mjs", "documents-viewer-mock.mjs", "work-list-mock.mjs"],
+  get_document_state: ["document-correction-mock.mjs", "documents-intake-mock.mjs", "documents-viewer-mock.mjs", "work-list-mock.mjs"],
+  // #646 x #624 — the source-correction lane renders the SAME document detail panel as the
+  // documents-viewer lane, so the four reads that panel issues on mount are answered by both.
+  // `document-correction-mock.mjs` gates on its own `c0ee0c0c-` document ids
+  // (document-correction-mock.mjs:329, :354, :365, :504) and `documents-viewer-mock.mjs` on its
+  // own `DOCUMENT_STATES` map / `LANE_DOCUMENT_PREFIX` (documents-viewer-mock.mjs:513, :536, :551,
+  // :561); neither can answer for the other's walk, which is what makes these declared shares
+  // rather than collisions.
+  get_document_extract: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
+  list_source_dependents: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
+  list_source_revisions: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
+  // #646 x the chat-parity lane — the wrong-client wizard's first step calls `record_client_resolution`
+  // (correction-wizard.tsx:146), which the chat-parity lane already answered. THE TWO ARMS ARE NOT
+  // SYMMETRIC and the asymmetry is declared, not glossed: #646's arm gates on its own
+  // `p_subject` (document-correction-mock.mjs:479) and falls through otherwise, while
+  // chat-parity's answers unconditionally — already recorded as DEBT in this file's own table
+  // above ("/rest/v1/rpc/record_client_resolution"). chat-parity is dispatched FIRST
+  // (serve-built.mjs:576 vs :580), so it is chat-parity's `resolution_id` that #646's walk
+  // actually receives. Harmless today only because no cell asserts on that id — the wizard uses
+  // it as an opaque handle. If chat-parity's debt is ever paid by scoping that handler, #646's
+  // own arm takes over and the walk is unchanged; that is why the correct move here was to
+  // declare the share rather than delete either arm.
+  record_client_resolution: ["chat-parity-mock.mjs", "document-correction-mock.mjs"],
   // #643 x #634/#728 — `clara.list_spoken_for_documents` is the EVIDENCE CHOOSER's advisory read,
   // and #643's whole AC3 is that the periodic-adjustment form mounts the composer's own chooser
   // component, so of course the two lanes both answer it. Declared at WAVE-2 INTEGRATION rather

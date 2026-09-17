@@ -5,16 +5,14 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   classifyConsentEvidenceDocument, placeLegalHold, releaseLegalHold,
-  requestReextraction, setDocumentKind,
+  requestReextraction,
 } from "@/lib/documents/doors";
 import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
-import { DOCUMENT_KINDS, type DocumentRow, type RequestReextractionResult } from "@/lib/documents/types";
-import { renderKindLabel } from "@/lib/documents/kind-label";
+import type { DocumentRow, RequestReextractionResult } from "@/lib/documents/types";
 
 /** A CHECKED lookup from the DB's `admission` string to its own translation
  *  key — never a `t(\`reextraction.admission.${x}\` as ...)` cast (the exact
@@ -35,10 +33,15 @@ function reextractionAdmissionLabel(admission: string, t: (key: string) => strin
 }
 
 /**
- * Classify (set_document_kind, bookkeeper+, reason REQUIRED — the DB refuses CLR10
- * without one) and legal hold place/release (admin-floor; a non-admin token refuses
- * honestly, rendered by the caller's DoorFeedback, never masked). `act` is the
- * caller's `useHydratedPart().act`.
+ * Legal hold place/release (admin-floor; a non-admin token refuses honestly, rendered by the
+ * caller's DoorFeedback, never masked), the re-extraction and consent-evidence doors, and the entry
+ * into the wrong-client correction. `act` is the caller's `useHydratedPart().act`.
+ *
+ * #646 — THE KIND CHANGE LEFT THIS FILE. It was an inline Select + reason Input + Button bar in a
+ * column of other controls; a governed act with a mandatory reason and a refusal a human has to
+ * read is a bounded DECISION, so it is now `document-kind-dialog.tsx` — its own exported component,
+ * which #633 mounts in the firm intake list and receipt rows rather than copying a second
+ * kind-change form (wave DECISIONS §2 #633).
  */
 export function DocumentAdmin({
   document: doc, busy, act, onCorrect,
@@ -50,8 +53,6 @@ export function DocumentAdmin({
 }) {
   const t = useTranslations("ClientDocuments");
   const tg = useTranslations("DraftsDocumentGovernance");
-  const [kind, setKind] = useState("");
-  const [kindReason, setKindReason] = useState("");
   const [holdReason, setHoldReason] = useState("");
   const [reextractReason, setReextractReason] = useState("");
   const [reextractOutcome, setReextractOutcome] = useState<RequestReextractionResult | null>(null);
@@ -66,45 +67,6 @@ export function DocumentAdmin({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <SectionHeader level={4}>{t("kindHeading")}</SectionHeader>
-        {/* #633 AC2 — the CURRENT kind as a PHRASE. This line used to interpolate
-            `doc.document_kind` raw, so it read "Current: ssm_company_doc"; a null kind
-            read "Current: unclassified", naming an absence rather than the actionable
-            state AC3(a) asks for. `renderKindLabel` answers both. */}
-        <p className="text-sm text-muted-foreground">{t("kindCurrent", { kind: renderKindLabel(doc.document_kind, t) })}</p>
-        <div className="flex flex-wrap gap-2">
-          <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
-            <SelectTrigger aria-label={t("kindHeading")} size="sm">
-              <SelectValue placeholder={t("kindPlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB
-                  enum, because that value is exactly what `set_document_kind` is called
-                  with. Before this the control offered "ssm_company_doc" to an accountant. */}
-              {DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input
-            className="max-w-56"
-            value={kindReason}
-            onChange={(e) => setKindReason(e.target.value)}
-            placeholder={t("reasonRequiredPlaceholder")}
-            aria-label={t("kindReasonLabel")}
-          />
-          <Button
-            size="sm"
-            disabled={busy || !kind || !kindReason.trim()}
-            onClick={() => void act(async () => {
-              await setDocumentKind(doc.id, kind, kindReason.trim());
-              setKind(""); setKindReason("");
-            })}
-          >
-            {t("setKind")}
-          </Button>
-        </div>
-      </div>
-
       <div className="flex flex-col gap-1">
         <SectionHeader level={4}>{t("adminHeading")}</SectionHeader>
         <div className="flex flex-wrap gap-2">

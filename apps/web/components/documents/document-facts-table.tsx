@@ -19,6 +19,21 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { EmptyState } from "@/components/common/state";
 import type { EvidenceRegion } from "@/lib/documents/extract-shape";
 import { cn } from "@/lib/utils";
+import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
+
+/** #646 — what a per-row Revise control needs in order to exist at all. The caller passes it only
+ *  when the source-revision read succeeded, which is the SAME bookkeeper floor the write door
+ *  holds (`clara.list_source_revisions`): a viewer's read refuses, so the caller has no
+ *  `factsVersion` to hand over and NO COLUMN IS RENDERED. That is deliberate — an affordance whose
+ *  door would refuse is worse than no affordance, and the floor is enforced by the database in both
+ *  directions rather than re-implemented here. */
+export type FactRevisionAffordance = {
+  documentId: string;
+  /** The facts version every revision opened from this table must quote. */
+  factsVersion: number;
+  busy: boolean;
+  onRevised: () => void;
+};
 
 /** The human label for a fact's `field_path`.
  *
@@ -71,6 +86,7 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
   facts,
   selectedId,
   onSelect,
+  revise,
 }: {
   facts: readonly T[];
   /** D2 — the region currently highlighted on the page overlay. Absent when
@@ -79,6 +95,10 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
   /** D2 — clicking a fact highlights its region and scrolls it into view. When
    *  absent the rows are plain text, never a control that does nothing. */
   onSelect?: (id: string) => void;
+  /** #646 — the per-row human fact revision. Absent (or below the role floor, which is the same
+   *  thing here) renders the table exactly as it rendered before this ticket: three columns, no
+   *  fourth header, no controls. */
+  revise?: FactRevisionAffordance | null;
 }) {
   const t = useTranslations("ClientDocuments");
 
@@ -93,6 +113,7 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
           <TableHead>{t("colFactField")}</TableHead>
           <TableHead>{t("colFactValue")}</TableHead>
           <TableHead>{t("colFactConfidence")}</TableHead>
+          {revise ? <TableHead>{t("colFactRevise")}</TableHead> : null}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -141,6 +162,28 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
                   <span className="text-xs">{t("evidenceNoConfidence")}</span>
                 )}
               </TableCell>
+              {revise ? (
+                <TableCell className="align-top">
+                  {/* ONLY WHERE THE DOOR WOULD ADMIT IT. `clara._revisable_invoice_field` is a
+                      CLOSED set, and a layout fragment or a statement-lane path is not in it — so a
+                      row that cannot be revised says so plainly instead of offering a control that
+                      would refuse CLR10 on confirm. */}
+                  {isRevisableFieldPath(region.field_path) ? (
+                    <DocumentRevisionDialog
+                      key={`${region.id}:${revise.factsVersion}`}
+                      documentId={revise.documentId}
+                      fieldPath={region.field_path}
+                      fieldLabel={label}
+                      currentValue={factValue(region, t)}
+                      factsVersion={revise.factsVersion}
+                      busy={revise.busy}
+                      onRevised={revise.onRevised}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{t("factNotRevisable")}</span>
+                  )}
+                </TableCell>
+              ) : null}
             </TableRow>
           );
         })}

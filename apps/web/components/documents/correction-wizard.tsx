@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { readCorrectionPreview, type CorrectionPreview } from "@/lib/documents/reads";
 import { approveCorrection, proposeCorrection, recordDocumentResolution } from "@/lib/documents/doors";
@@ -26,9 +25,15 @@ type Step = "select" | "preview" | "proposed" | "done";
  * never retried automatically.
  */
 export function CorrectionWizard({
-  open, document: doc, fromClient, clients, clientsErr, clientsClr, onClose, onDone,
+  open, suspended = false, document: doc, fromClient, clients, clientsErr, clientsClr,
+  onClose, onDone, onShowImpact,
 }: {
   open: boolean;
+  /** #646 — the impact Sheet is open, so this Dialog steps aside WITHOUT resetting. Appendix C §4
+   *  forbids an uncontrolled overlay stack, and a wizard that reset itself every time a person
+   *  looked at the evidence would be worse than the stack it avoids: the destination, the plan and
+   *  the attestation are all still here when the Sheet closes. */
+  suspended?: boolean;
   document: DocumentRow;
   fromClient: string;
   clients: ClientRow[];
@@ -41,6 +46,9 @@ export function CorrectionWizard({
   clientsClr: PartClr;
   onClose: () => void;
   onDone: () => void;
+  /** #646 — hand the blast radius to the Sheet that renders it (AC6). The caller suspends this
+   *  Dialog while that Sheet is open. */
+  onShowImpact?: (preview: CorrectionPreview, toClient: string) => void;
 }) {
   const t = useTranslations("ClientDocuments");
   const [step, setStep] = useState<Step>("select");
@@ -81,7 +89,7 @@ export function CorrectionWizard({
   const close = () => { reset(); onClose(); };
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) close(); }}>
+    <Dialog open={open && !suspended} onOpenChange={(next) => { if (!next && !suspended) close(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("correctionTitle")}</DialogTitle>
@@ -115,26 +123,23 @@ export function CorrectionWizard({
 
         {step === "preview" && preview ? (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
+            {/* THE COUNTS ARE THE DECISION'S OWN CONTEXT; the per-entry list is EVIDENCE and lives
+                in the Sheet (correction-impact-sheet.tsx). Appendix C §4: "Dialog is a focused
+                decision or edit. Sheet is a contextual side task." Before #646 this step rendered
+                the whole `<Table>` here, which turned the decision into the bottom of a report. */}
+            <p className="text-xs text-muted-foreground" data-testid="correction-blast-radius">
               {t("correctionBlastRadius", { count: preview.items.length, closed: preview.closed_period_blockers.length })}
             </p>
-            <Table>
-              <TableHeader>
-                <TableRow><TableHead>{t("correctionColEntry")}</TableHead><TableHead>{t("correctionColAction")}</TableHead><TableHead>{t("correctionColStatus")}</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.items.map((item) => (
-                  <TableRow key={item.entry_id}>
-                    <TableCell className="font-mono text-xs">{item.entry_id}</TableCell>
-                    <TableCell>{item.action}</TableCell>
-                    <TableCell>{item.status}</TableCell>
-                  </TableRow>
-                ))}
-                {preview.items.length === 0 ? (
-                  <TableRow><TableCell colSpan={3} className="text-muted-foreground">{t("correctionNoEntries")}</TableCell></TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
+            {onShowImpact ? (
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="correction-view-impact"
+                onClick={() => onShowImpact(preview, toClient)}
+              >
+                {t("correctionViewImpact")}
+              </Button>
+            ) : null}
             <Button
               disabled={busy}
               onClick={() => void run(async () => {

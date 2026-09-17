@@ -11,7 +11,7 @@ import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type {
   AttemptRow, CandidateRow, ClientRow, DocumentExtractResult, DocumentRow, ExtractionRow,
-  FilingRow, JournalEntryRow, RegionRow,
+  FilingRow, JournalEntryRow, RegionRow, SourceDependentsResult, SourceRevisionsResult,
 } from "./types";
 import type { DocumentStateResult } from "./document-state";
 
@@ -216,4 +216,38 @@ export async function getDocumentState(
     { p_document: documentId, p_client: clientId },
     opts,
   );
+}
+
+// --- #646 (migration 0202) --------------------------------------------------------
+
+/** `clara.list_source_revisions(p_document uuid) -> jsonb`, STABLE — read RPC, bookkeeper+.
+ *
+ *  ONE chronological lineage over the TWO identity relations a document's history actually has:
+ *  `clara.document_fact_revisions` (what the document SAYS) and `clara.filing_corrections` (WHOSE
+ *  the document is), joined read-side with the filings a correction retired. No writer ever
+ *  denormalises a wrong-client refile into the revision ledger, so this read is the only place the
+ *  two meet — which is why the surface asks it rather than assembling the join itself.
+ *
+ *  RESOLVES NULL LEGITIMATELY: a document of another firm, and a uuid naming nothing, answer
+ *  identically. The caller renders that as "no source history available here", never as empty. */
+export async function readSourceRevisions(
+  documentId: string, opts: Opts = {},
+): Promise<SourceRevisionsResult | null> {
+  return callDoor<SourceRevisionsResult | null>(
+    "list_source_revisions", { p_document: documentId }, opts);
+}
+
+/** `clara.list_source_dependents(p_document uuid) -> jsonb`, STABLE — read RPC, bookkeeper+.
+ *
+ *  What is STANDING on this document's reading: knowledge records pinned to one of its
+ *  extractions (with `source_superseded` derived, never stored), the open questions about it (with
+ *  `orphaned` derived, so the surface knows which one the narrow dismissal door admits), and the
+ *  parked Work questions whose Work names it. It WRITES NOTHING: automatic re-assessment of a
+ *  corrected basis is accepted-but-deferred (`docs/PRD.md:123`) and owned by #658/#663, so this
+ *  surface offers human review and claims nothing more. */
+export async function readSourceDependents(
+  documentId: string, opts: Opts = {},
+): Promise<SourceDependentsResult | null> {
+  return callDoor<SourceDependentsResult | null>(
+    "list_source_dependents", { p_document: documentId }, opts);
 }

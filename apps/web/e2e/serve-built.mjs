@@ -41,6 +41,11 @@ import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
 import { handleDocumentsViewerRuntime, handleDocumentsViewerSupabase } from "./documents-viewer-mock.mjs";
+// #646's own lane (the C2/B3/C13 source-correction walk). ID-scoped like its siblings — its own
+// client and two document ids under the `c0ee0c0c-` prefix — and hooked in ONE place below. Its
+// RPC half guards on an exact-verb allow-list BEFORE it reads the body, so a sibling lane's POST
+// reaches the next hook with its stream intact whatever the order.
+import { handleDocumentCorrectionSupabase } from "./document-correction-mock.mjs";
 // The Home boards' fixture lane (#557). Consulted LAST among the lane hooks and BEFORE this
 // file's own generic fixtures — see that module's header for why answering with honest EMPTIES
 // cannot starve a lane that owns one of the same routes for its own ids, and why its one
@@ -597,6 +602,7 @@ async function handleSupabase(request, response, url) {
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleDocumentCorrectionSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
   // #644's Knowledge lane. SAFE here for the SAME reason D4 is: every one of its five rpc verbs
   // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
