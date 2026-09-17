@@ -1363,3 +1363,81 @@ test("CORE-handover census · the member reads taken over from serve-built.mjs s
   assert.ok(core.has("client_facts"), "serve-built.mjs must still answer /rest/v1/client_facts, or this control proves nothing");
   assert.equal(claimants.has("client_facts"), false, "no lane mock answers /rest/v1/client_facts today");
 });
+
+// --- THE CLIENT-ID SPACE CENSUS (#652 x #653, wave 2026-09-15) ----------------
+//
+// Every gate above measures what a lane ANSWERS. None of them could see the other half of the
+// same rule: WHICH IDS a lane answers FOR. N5 passes a handler that guards
+// `clientFilter !== eq.${OURS}` no matter what `OURS` is, and the verb census passes two lanes
+// whose verb sets are disjoint — so two lanes that mint the SAME client id look perfectly scoped
+// to both instruments while behaving, at runtime, exactly like the unscoped claim N4 bans: the
+// hook that runs first wins every shared route, and the loser's walk reads the winner's fixtures.
+//
+// THIS IS NOT HYPOTHETICAL. `accrual-mock.mjs` (#652) and `prepayments-mock.mjs` (#653) were
+// built on parallel branches, both derived their id space from `plans-mock.mjs`'s
+// `64c0c0c0-…` by bumping the stem to `65…`, and both landed with
+// `clientId: "65c0c0c0-6500-4650-8650-650650650650"`. Neither branch could see the other, and
+// neither branch's own walk could fail: each was alone on its own tree. On the merged tree
+// `handleAccrualSupabase` is consulted before `handlePrepaymentsSupabase`, so the prepayments
+// walk's authority Select was filled with the ACCRUAL lane's `clara.accounting_work` rows and
+// `prepayments.walk.refusal` timed out on an option that could not be there.
+//
+// A lane mock's client id is its ADDRESS. Two lanes at one address is the collision; this cell
+// is the only thing in the suite that can see it before a walk does.
+//
+// IT READS SOURCE TEXT, like every other census in this file, so a COMMENT that spells the
+// `<key>: "<uuid>"` shape is censused as a real declaration. That is the same property the verb
+// census has and it is left alone for the same reason: the alternative is a comment stripper
+// standing between every gate here and the file it measures. Name an id in prose bare, never as
+// a quoted field.
+const CLIENT_ID_KEY = /([A-Za-z0-9_]*[Cc]lient[A-Za-z0-9_]*)\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/gi;
+
+/** client id -> every lane mock (sorted, deduped) that names it as a client of its own. */
+function clientIdCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, string[]> {
+  const owners = new Map<string, Set<string>>();
+  for (const mock of mocks) {
+    const source = readFileSync(join(E2E_DIR, mock), "utf8");
+    for (const m of source.matchAll(CLIENT_ID_KEY)) {
+      const id = m[2]!.toLowerCase();
+      const set = owners.get(id) ?? new Set<string>();
+      set.add(mock);
+      owners.set(id, set);
+    }
+  }
+  return new Map([...owners].map(([id, set]) => [id, [...set].sort()]));
+}
+
+function clientIdCollisions(census: ReadonlyMap<string, string[]>): string[] {
+  const problems: string[] = [];
+  for (const [id, files] of census) {
+    if (files.length <= 1) continue;
+    problems.push(`${id} is minted as a client by ${files.join(", ")} — one lane must re-mint its own space`);
+  }
+  return problems;
+}
+
+test("client-id census · no two lane mocks mint the SAME client id", () => {
+  const census = clientIdCensus();
+  console.log(`  ${census.size} client id(s) censused across ${LANE_MOCKS.length} lane mocks`);
+
+  assert.deepEqual(clientIdCollisions(census), []);
+
+  // POSITIVE CONTROL on the reader itself, over the REAL files: a lane whose whole walk turns on
+  // FIVE client ids, one per read outcome, must census as five — under-matching would make the
+  // assertion above vacuous, and there is no count here that a passing regex could fake.
+  const d4 = [...census].filter(([, files]) => files.length === 1 && files[0] === "tax-boundary-mock.mjs");
+  assert.equal(d4.length, 5, `tax-boundary-mock.mjs names five client ids; the census found ${d4.length}`);
+  assert.ok(census.size >= 30, `the census recognised only ${census.size} client ids — it is not reading the files`);
+});
+
+test("client-id census POSITIVE CONTROL · two lanes at one address ARE caught", () => {
+  // SYNTHETIC, so the control keeps firing after the real collision is repaired: the gate must
+  // fail on a shared address and stay silent on a private one.
+  const synthetic = new Map<string, string[]>([
+    ["65c0c0c0-6500-4650-8650-650650650650", ["fake-lane-a-mock.mjs", "fake-lane-b-mock.mjs"]],
+    ["65d0d0d0-6500-4650-8650-650650650650", ["fake-lane-a-mock.mjs"]],
+  ]);
+  const problems = clientIdCollisions(synthetic);
+  assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
+  assert.match(problems[0]!, /fake-lane-a-mock\.mjs, fake-lane-b-mock\.mjs/);
+});
