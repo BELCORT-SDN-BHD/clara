@@ -21,10 +21,11 @@
 //      the derived lines, one committed receipt, and one `clara.periodic_adjustments` row.
 //
 //   2. IT MINTS NO claraWork BUNDLE OF ITS OWN — it runs whatever body the IMAGE pins, byte for
-//      byte (written at `clara-work/v2`; `clara-work/v3` since #631 repointed the class in wave 3,
-//      and the assertions read the banner rather than a version). Two independent measurements. The
-//      Work's own `bundle.digest` equals the digest the process logged at world start — the same
-//      bundle a documentless journal entry is served by, no v3, no new closure. AND the run's
+//      byte (written at `clara-work/v2`; #631 repointed the class to v3 in wave 3 and the wave
+//      2026-09-15 cut to v4, and the assertions read the BANNER and the registry's own pin rather
+//      than a version typed here). Two independent measurements. The Work's own `bundle.digest`
+//      equals the digest the process logged at world start — the same bundle a documentless
+//      journal entry is served by, no bundle of its own, no new closure. AND the run's
 //      model never saw the particulars: the child scans every run prompt for `adjustment_basis`,
 //      `particulars_source`, `count_reference`, `inventory_account_code` and `obligation_kind` and
 //      prints one line if it ever finds them. The assertion is that the line never appeared, with
@@ -54,6 +55,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[v19-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -142,7 +153,7 @@ function spawnServe(extra = {}) {
     // admitted Work runs on the image's OWN claraWork bundle, whatever version that is, and the
     // typed particulars never reach its prompt — so the digest is read from the banner rather than
     // pinned to a version here.
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -416,10 +427,13 @@ async function main() {
     assert.equal(String(adjustment.rows[0].entry_id), String(done.work.result.entry_id), "and naming the entry beside it");
     console.log(`[v19-e2e] PASS 1: a real chatTurn_v19 turn admitted a periodic-adjustment Work and the reconciler ran it to a posted entry in ${latencyMs}ms`);
 
-    // ---- 2. the IMAGE's OWN claraWork body, byte for byte (v2 when written, v3 now) ----------
+    // ---- 2. the IMAGE's OWN claraWork body, byte for byte (v2 when written; whatever the
+    //         registry pins now) ---------------------------------------------------------------
     assert.equal(done.work.bundle?.digest, engine.state.banner,
       "the Work records the digest the process logged — the SAME claraWork bundle a documentless journal entry"
-      + " runs on, read from the banner rather than pinned to a version (wave-3: that bundle is now v3)");
+      + " runs on, read from the banner rather than pinned to a version typed here");
+    assert.equal(done.work.bundle?.id, WORK_BUNDLE_ID,
+      "…and it is the bundle the REGISTRY pins, which is what makes 'the image's own body' a measurement rather than a hope");
     assert.equal(engine.state.particularsLeaked, false,
       "the run's model NEVER saw adjustment_basis, particulars_source, count_reference, inventory_account_code or obligation_kind "
       + "— the particulars ride a column the run does not read (the posted entry above is the positive control that the BASIS did reach it)");

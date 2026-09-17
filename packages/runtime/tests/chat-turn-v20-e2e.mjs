@@ -51,6 +51,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[v20-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -140,7 +150,7 @@ function spawnServe(extra = {}) {
     // `workflows.claraWork` v3 -> v4 in the same commit that added this file. The claim the legs
     // below make is UNCHANGED from v19's — a chat-admitted Work runs on the image's OWN claraWork
     // bundle, whatever version that is — so the digest is read from the banner rather than pinned.
-    const m = /\[clara-runtime\] bundle clara-work\/v4 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -496,6 +506,8 @@ async function main() {
     // ---- 3. claraWork_v4's knowledge context, in both places -------------
     assert.equal(done.work.bundle?.digest, engine.state.banner,
       "the Work records the digest the process logged — the SAME claraWork bundle a documentless journal entry runs on");
+    assert.equal(done.work.bundle?.id, WORK_BUNDLE_ID,
+      "…and it is the bundle the REGISTRY pins, read from the pin rather than retyped as a version");
     assert.equal(engine.state.knowledgeSeen, true,
       "claraWork_v4 rendered the client's governed knowledge into the RUN's prompt (#654 stanza (a)) — a trace row without the text would be a read nobody used");
 

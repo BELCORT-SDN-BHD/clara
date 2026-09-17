@@ -57,6 +57,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[work-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -146,7 +156,7 @@ function spawnServe(extra = {}) {
     // #631 REPOINTED IT AGAIN, v2 -> v3 (the egress gate and the execution trace), so the SERVING
     // banner is v3's. v1 and v2 still print for the parked-run census; this captures the one the
     // image DISPATCHES, which is the digest the Work row and the receipt record.
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
 
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
@@ -409,6 +419,8 @@ async function main() {
     assert.ok(done.work.result?.entry_id, "the result names the posted entry");
     assert.ok(done.work.result?.receipt_id, "and its operation receipt");
     assert.equal(done.work.bundle?.digest, first.state.banner, "the Work records the digest the process logged (C88.8/C-70)");
+    assert.equal(done.work.bundle?.id, WORK_BUNDLE_ID,
+      "…and the bundle it NAMES is the one the registry pins — the two halves of the same provenance, read from the pin rather than retyped");
     assert.equal(done.task.workflow_run_id, true, "the read serves run-BOUNDNESS, never the engine's run id");
 
     assert.equal(await countEntries(one.client), 1, "exactly ONE journal entry");

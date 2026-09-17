@@ -31,7 +31,14 @@ import { rootQuery, endPool } from "./rig-fixtures.mjs";
 /** A real rig name from the 2026-09-14 refresh wave — one of the databases three workers lost. */
 const POISONED_DB = "clara_631";
 
-const ENV_KEYS = ["PGDATABASE", "DATABASE_URL", "POSTGRES_URL", "CLARA_ALLOW_DESTRUCTIVE", "CLARA_RIG_ALLOW_RESET"];
+// WORKFLOW_POSTGRES_URL IS IN THIS LIST BECAUSE lib/pg.mjs READS IT AS A DSN URL VAR. urlVar()
+// resolves `env.DATABASE_URL || env.WORKFLOW_POSTGRES_URL` (lib/pg.mjs:40-42), so on a rig that
+// exports it — which every World-bearing rig recipe in this repo now does — deleting the two vars
+// below still leaves a URL target standing. assertDestructiveAllowed() then refuses on
+// assertNoTargetSplit (PGDATABASE=clara_631 against the URL's own database) and cell 1's probe
+// never reaches the NAME check it exists to measure: the cell reds on the wrong guard, and the
+// hole #773 is about goes unread. Buffered and handed back like every other key here.
+const ENV_KEYS = ["PGDATABASE", "DATABASE_URL", "POSTGRES_URL", "WORKFLOW_POSTGRES_URL", "CLARA_ALLOW_DESTRUCTIVE", "CLARA_RIG_ALLOW_RESET"];
 const ambient = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 function restoreEnv() {
@@ -51,6 +58,7 @@ test("#773 T19's reset REFUSES a non-disposable database name on a loopback host
   try {
     delete process.env.DATABASE_URL;
     delete process.env.POSTGRES_URL;
+    delete process.env.WORKFLOW_POSTGRES_URL;
     process.env.PGDATABASE = POISONED_DB;
     process.env.CLARA_ALLOW_DESTRUCTIVE = "1";
     process.env.CLARA_RIG_ALLOW_RESET = "1";

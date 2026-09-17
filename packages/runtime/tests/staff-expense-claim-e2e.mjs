@@ -12,7 +12,8 @@
 // WHAT IT PROVES, and every one of these needs a real Postgres World plus a real HTTP boundary:
 //   1. ADMIT -> RUN -> COMMIT, THROUGH THE UNCHANGED FROZEN BUNDLE. One POST to the new sibling
 //      route produces one Work whose purpose is the UNWIDENED `journal_entry`, one run served by
-//      the SAME `clara-work/v3` body a documentless journal entry is served by, one approved entry
+//      the SAME claraWork body a documentless journal entry is served by — the bundle the
+//      REGISTRY pins, read rather than retyped here — one approved entry
 //      whose expense debits and single non-control payable credit are the claim's own itemisation,
 //      one `clara.operation_receipts` row, one `clara.staff_expense_claims` row — born at
 //      ADMISSION, before any run — and a `posted` row on its status ledger written by the receipt's
@@ -51,6 +52,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[sec-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -135,7 +146,7 @@ function spawnServe(extra = {}) {
   // READ LINE BY LINE, NOT CHUNK BY CHUNK — a `data` event is a slice of a pipe, not a promise of a
   // whole line (wave2-ci-two-build-banner.md).
   const ingest = (line) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -448,8 +459,8 @@ async function main() {
     const settled = await pollWork(workId, one.jwt, (b) => TERMINAL.has(b.work.status), "first commit");
     assert.equal(settled.work.status, "completed",
       `the run settles completed (got ${settled.work.status} / ${JSON.stringify(settled.work.error)})`);
-    assert.equal(settled.work.bundle?.id, "clara-work/v3",
-      "…served by the UNCHANGED frozen bundle: nothing about this lane needed a new workflow version");
+    assert.equal(settled.work.bundle?.id, WORK_BUNDLE_ID,
+      "…served by the image’s PINNED claraWork bundle: nothing about this lane minted a bundle of its own");
 
     assert.equal(await countEntries(one.client), 1, "exactly ONE journal entry");
     assert.equal(await countReceipts(workId), 1, "exactly ONE committed operation receipt");

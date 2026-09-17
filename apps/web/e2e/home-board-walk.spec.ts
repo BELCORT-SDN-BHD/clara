@@ -376,6 +376,13 @@ test("all three boards are clean under the full WCAG 2.1 AA scan", async ({ page
 test("home.facets.drilldown — each count opens its OWN scoped list, and Back restores the home with focus on the control that left it", async ({ page }) => {
   // #706 — one sign-in, one settle, then three navigations and three Backs.
   test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  // THE FIXTURES ARE THIS FILE'S, AND THEY ARRIVE THROUGH `seed(page)` — NOT THROUGH THE SIGN-IN.
+  // #804 (f6aaac73) replaced this file's LOCAL `signInTo`, which called `seed(page)` itself, with
+  // the shared helper, and added `await seed(page);` back at the five call sites that existed then.
+  // These four #650 cells (a948fb8b) were written against the local helper and never got one, so
+  // they ran on home-board-mock.mjs's empty default: `get_client_work_pack` answered zero and
+  // `list_review_queue` was never overlaid, which is why every count below was absent.
+  await seed(page);
   await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
   await settled(page);
   const board = workbench(page);
@@ -438,6 +445,7 @@ test("home.facets.drilldown — each count opens its OWN scoped list, and Back r
 test("home.facets.responsive — 320px, 200% zoom and reduced motion keep every count reachable with no horizontal scroll, and the populated board is axe-clean", async ({ page }) => {
   test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3, scans: 1 }));
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await seed(page);
   await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
 
   for (const [label, width, height] of [
@@ -474,6 +482,7 @@ test("home.facets.states — empty, unknown and denied are three different sente
   test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3 }));
 
   // EMPTY — the door answered zero.
+  await seed(page);
   await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
   await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_work_pack");
   await page.route("**/e2e-supabase/rest/v1/rpc/get_client_work_pack", (route) => json(route, {
@@ -522,6 +531,7 @@ test("home.facets.delayed — a minute with no successful read says the UPDATE i
   // THE CLOCK IS INSTALLED BEFORE ANY NAVIGATION — Playwright's own rule: `install` overrides the
   // native Date/setInterval, so it must precede every clock-related call on the page.
   await page.clock.install();
+  await seed(page);
   await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
   await settled(page);
   await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();

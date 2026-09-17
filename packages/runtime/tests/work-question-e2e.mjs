@@ -47,6 +47,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[wq-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -184,7 +194,7 @@ function spawnServe(port, extra = {}) {
     // #631 REPOINTED IT AGAIN, v2 -> v3 (the egress gate and the execution trace), so the SERVING
     // banner is v3's. v1 and v2 still print for the parked-run census; this captures the one the
     // image DISPATCHES, which is the digest the Work row and the receipt record.
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -455,7 +465,7 @@ async function main() {
   try {
     await waitReady(PORT_A, 60000, a);
     assert.ok(a.state.banner, "C88.8: the world-start banner names the serving bundle digest");
-    console.log(`[wq-e2e] engine A ready on ${PORT_A}; serving clara-work/v3 digest=${a.state.banner}`);
+    console.log(`[wq-e2e] engine A ready on ${PORT_A}; serving ${WORK_BUNDLE_ID} digest=${a.state.banner}`);
 
     // ---- 1. the run asks -------------------------------------------------
     const one = await seedClient("wq-ask");
@@ -546,7 +556,7 @@ async function main() {
       [["1100", 0, CENTS], ["6100", CENTS, 0]],
       "the EXACT answered cents, both sides",
     );
-    assert.equal(settled.work.bundle?.digest, a.state.banner, "the Work records the v2 digest the process logged");
+    assert.equal(settled.work.bundle?.digest, a.state.banner, "the Work records the digest the process logged");
     const receipt = await rig.rootQuery("select bundle_digest from clara.operation_receipts where work_id = $1", [workId]);
     assert.equal(receipt.rows[0].bundle_digest, a.state.banner, "…and so does the receipt — one bundle, one claim");
     console.log("[wq-e2e] PASS 2: one accepted answer, replayed key, typed conflict, converged loser, ONE entry + ONE receipt");

@@ -1,7 +1,8 @@
 // STANDALONE work-egress e2e (#631, seam 4). NOT a `node --test` file: it SPAWNS scripts/serve.mjs
 // (through tests/work-journal-serve.mjs, which installs the scripted model first) as a CHILD
-// process, so the whole run — HTTP admission, the durable World, the frozen `claraWork_v3` body,
-// the egress dispatch and the posting core — is exercised the way the production image runs it.
+// process, so the whole run — HTTP admission, the durable World, the frozen claraWork body the
+// REGISTRY pins, the egress dispatch and the posting core — is exercised the way the production
+// image runs it.
 // Run:
 //
 //   PGHOST=127.0.0.1 PGPORT=5544 PGUSER=postgres PGDATABASE=clara_rt_test \
@@ -40,6 +41,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[egress-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -118,7 +129,7 @@ function spawnServe(extra = {}) {
     // The SERVING bundle is v3's (#631 repointed claraWork v2 -> v3). v1 and v2 still print for the
     // parked-run census; this captures the one the image dispatches, which is the digest the Work
     // row, the receipt and every trace row record.
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -309,7 +320,7 @@ async function main() {
   try {
     await waitReady(90000, engine);
     assert.ok(engine.state.banner, "the world-start banner names the SERVING bundle digest");
-    console.log(`[egress-e2e] engine ready; serving clara-work/v3 digest=${engine.state.banner}`);
+    console.log(`[egress-e2e] engine ready; serving ${WORK_BUNDLE_ID} digest=${engine.state.banner}`);
 
     // =====================================================================
     // LEG A — an authorised run: one effect, one receipt, a complete trace.
@@ -322,7 +333,7 @@ async function main() {
     const workA = admitA.body.work_id;
     const doneA = await pollWork(workA, a.jwt, (b) => TERMINAL.has(b.work?.status), "A settles");
     assert.equal(doneA.work.status, "completed", `A: the Work completes (got ${doneA.work.status} / ${JSON.stringify(doneA.work.error)})`);
-    assert.equal(doneA.work.bundle?.id, "clara-work/v3", "A: served by the v3 bundle");
+    assert.equal(doneA.work.bundle?.id, WORK_BUNDLE_ID, "A: served by the bundle the registry pins");
     assert.equal(await countEntries(a.client), 1, "A: exactly ONE entry");
     assert.equal(await countCommitted(workA), 1, "A: exactly ONE committed receipt");
 
@@ -353,7 +364,7 @@ async function main() {
     assert.ok(modelRow.consent_ref, "A: …with the consent the database derived, not one the runtime asserted");
     assert.ok(modelRow.activation_ref);
     assert.match(modelRow.input_digest, /^[0-9a-f]{64}$/, "A: the input is a DIGEST, never the input");
-    assert.equal(modelRow.bundle_id, "clara-work/v3");
+    assert.equal(modelRow.bundle_id, WORK_BUNDLE_ID);
     assert.equal(modelRow.bundle_digest, engine.state.banner, "A: the trace names the digest the process logged");
     assert.equal(modelRow.registry_version, "clara-capability-registry/v1");
     assert.equal(modelRow.capability_id, "accounting_work.model_segment");

@@ -19,8 +19,8 @@
 //
 // WHAT IT PROVES, and every one of these needs a real World plus a real HTTP boundary:
 //   1. THE ADMISSION BARRIER AND THE COMMIT. One POST to `/api/work/journal` whose basis debits an
-//      ENROLLED fixed-asset cost account produces one Work, one run served by the UNCHANGED frozen
-//      `clara-work/v3` bundle, one approved entry, one committed `clara.operation_receipts` row
+//      ENROLLED fixed-asset cost account produces one Work, one run served by the claraWork bundle
+//      the REGISTRY pins, one approved entry, one committed `clara.operation_receipts` row
 //      AND — the whole point of #639 — exactly ONE `clara.fixed_assets` row, born in the same
 //      transaction, with NO depreciation particulars. Before 0216 this POST could not commit at
 //      all: the deferred belt refused it at COMMIT with CLR40 `fa_belt_unregistered_movement`.
@@ -48,6 +48,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+import { pinnedClaraWorkBannerRe, pinnedClaraWorkBundleId } from "./pinned-work-bundle.mjs";
+
+// THE SERVING claraWork BUNDLE, READ FROM THE REGISTRY'S OWN PIN — never retyped in this file. The
+// pin has moved v1 -> v2 (#629), v2 -> v3 (#631) and v3 -> v4 (the wave 2026-09-15 successor cut),
+// and startWorld logs one banner per RETAINED body, so a version literal here does not fail loudly
+// when the pin moves past it: it matches a banner no run is served by, and compares a digest no run
+// can record. tests/pinned-work-bundle.mjs reads the pin and checks it against that body's own
+// bundle module.
+const WORK_BUNDLE_ID = pinnedClaraWorkBundleId();
+const WORK_BUNDLE_BANNER_RE = pinnedClaraWorkBannerRe();
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[fa-acq-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -130,7 +140,7 @@ function spawnServe(extra = {}) {
   // READ LINE BY LINE, NOT CHUNK BY CHUNK — a `data` event is a slice of a pipe, not a promise of
   // a whole line (the banner incident recorded in wave2-ci-two-build-banner.md).
   const ingest = (line) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    const m = WORK_BUNDLE_BANNER_RE.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -318,6 +328,51 @@ async function main() {
 
   const TERMINAL = new Set(["completed", "refused", "failed", "cancelled", "expired"]);
 
+  // THE DEPENDENT PARTICULARS QUESTION IS NOW PART OF THE SHAPE OF AN ACQUISITION, and that is
+  // what moved under this file. `claraWork_v4` (the wave 2026-09-15 successor cut, #639's AC3)
+  // opens ONE question after a commit whose entry birthed a register row with no method and no
+  // in-service date, PARKS on it, and settles only once it is answered, expires or is cancelled.
+  // So "the acquisition committed" and "the Work is terminal" are no longer the same instant —
+  // which is precisely what this file's own second claim, "the acquisition is complete while the
+  // particulars wait", has always said. Every leg below therefore polls to the COMMIT, reads the
+  // acquisition facts THERE (where they are true and stable), and then answers the question and
+  // polls to the settle. A run that opens no question — every ordinary journal Work — still lands
+  // straight on a terminal status, which `COMMITTED` admits unchanged.
+  const POSTED = (b) => Boolean(b.work.result?.entry_id && b.work.result?.receipt_id);
+  const COMMITTED = (b) => TERMINAL.has(b.work.status) || (b.work.status === "awaiting_input" && POSTED(b));
+
+  const questionsFor = (work) =>
+    rig.rootQuery(
+      "select id, question_version, status, fields, source_ref, answer from clara.agent_interruptions"
+      + " where work_id = $1 order by question_version",
+      [work]).then((r) => r.rows);
+
+  async function pollQuestion(workId, label, deadlineMs = 60000) {
+    const end = Date.now() + deadlineMs;
+    let last = null;
+    while (Date.now() < end) {
+      const rows = await questionsFor(workId);
+      last = rows;
+      const pending = rows.find((r) => r.status === "pending");
+      if (pending) return pending;
+      await sleep(250);
+    }
+    throw new Error(`pollQuestion timeout (${label}); rows=${JSON.stringify(last)}`);
+  }
+
+  const answerQuestion = (sub, question, version, answer, opKey) =>
+    rig.humanQuery(sub, "select clara.answer_work_question($1::uuid,$2::int,$3::jsonb,$4::text) as r",
+      [question, version, JSON.stringify(answer), opKey]).then((r) => r.rows[0].r);
+
+  /** THE ANSWER IN THE DOOR'S OWN GRAMMAR, not the validator's — the successor review's F1.
+   *  `clara._assert_work_answer` (0180:444-486) judges an answer against the DECLARED FIELDS, and
+   *  `useful_life_months` is declared `kind:"text"`: a JSON STRING there and nothing else, while
+   *  `clara._fa_validate_particulars` wants a number. Sending `60` here is refused CLR10
+   *  `{"field":"useful_life_months","constraint":"text"}`; `fromDoorAnswer` in
+   *  lib/fixed-asset-acquisition.ts is the bridge, and this file is the first thing to drive that
+   *  bridge through a real engine. */
+  const PARTICULARS_ANSWER = { method: "straight_line", useful_life_months: "60", start_date: "2026-09-01" };
+
   // =========================================================================
   // 1-3, 5: one long-lived engine.
   // =========================================================================
@@ -336,12 +391,13 @@ async function main() {
     assert.equal(admitted.body.replayed, false);
     const workId = admitted.body.work_id;
 
-    const done = await pollWork(workId, one.jwt, (b) => TERMINAL.has(b.work.status), "acquisition settles");
-    assert.equal(done.work.status, "completed",
-      `the acquisition COMMITS (got ${done.work.status} / ${JSON.stringify(done.work.error)}) — before 0216 this was a `
-      + "CLR40 fa_belt_unregistered_movement at COMMIT and the Work settled failed");
-    assert.equal(done.work.bundle?.id, "clara-work/v3",
-      "…served by the UNCHANGED frozen bundle: closing this lane needed no new workflow version");
+    const done = await pollWork(workId, one.jwt, COMMITTED, "acquisition commits");
+    assert.equal(done.work.status, "awaiting_input",
+      `the acquisition COMMITS and the run PARKS on the dependent particulars question (got ${done.work.status}`
+      + ` / ${JSON.stringify(done.work.error)}) — before 0216 this was a CLR40 fa_belt_unregistered_movement`
+      + " at COMMIT and the Work settled failed");
+    assert.equal(done.work.bundle?.id, WORK_BUNDLE_ID,
+      "…served by the claraWork bundle the REGISTRY pins, read here rather than retyped");
     assert.ok(done.work.result?.entry_id && done.work.result?.receipt_id);
 
     assert.equal(await countEntries(one.client), 1, "exactly ONE journal entry");
@@ -371,6 +427,40 @@ async function main() {
     assert.equal(read.particulars.complete, false, "…while the PARTICULARS block is separately incomplete");
     console.log("[fa-acq-e2e] PASS 1+2: admit -> run -> one entry, one receipt and ONE register row in one commit; particulars wait alone");
 
+    // ---- 2b. THE PARTICULARS ARE ANSWERED, AND ONLY THEN DOES THE WORK SETTLE ------------
+    //
+    // Until this run, #639's `claraWork_v4` half had never been executed anywhere: the wave digest
+    // records it as "a contract only — no run has ever opened the dependent particulars question".
+    // This leg opens it, answers it through the HUMAN door a person actually uses
+    // (`clara.answer_work_question`), and reads what the run then wrote.
+    const asked = await pollQuestion(workId, "particulars question");
+    assert.deepEqual(asked.source_ref, { kind: "fixed_asset", asset_id: asset.id },
+      "the question cites the ASSET it is about — a fixed asset, never a basis line");
+    assert.deepEqual(asked.fields.map((f) => f.key),
+      ["method", "useful_life_months", "rate_bps", "residual_cents", "start_date", "description"],
+      "…and carries the particulars field array, in the order the answering surface renders");
+
+    await answerQuestion(one.owner, asked.id, asked.question_version, PARTICULARS_ANSWER, rig.opk("fa-answer"));
+    const settledOne = await pollWork(workId, one.jwt, (b) => TERMINAL.has(b.work.status), "answered -> Work settles");
+    assert.equal(settledOne.work.status, "completed",
+      `answering settles the Work completed (got ${settledOne.work.status} / ${JSON.stringify(settledOne.work.error)})`);
+    assert.equal(settledOne.work.result?.fixed_asset_particulars?.particulars_complete, true,
+      "…and the result names the register fact the run completed");
+    assert.equal(settledOne.work.result?.fixed_asset_particulars?.asset_id, asset.id);
+
+    const filled = (await rig.rootQuery(
+      "select depreciation_method, useful_life_months, depreciation_start_date::text as start_text"
+      + " from clara.fixed_assets where id = $1", [asset.id])).rows[0];
+    assert.equal(filled.depreciation_method, "straight_line", "the register row now carries the method…");
+    assert.equal(String(filled.useful_life_months), "60",
+      "…the useful life, converted from the STRING the answer door stores into the number the validator takes…");
+    assert.equal(filled.start_text, "2026-09-01", "…and the in-service date, unshifted");
+    const readAfter = (await rig.humanQuery(one.owner, "select clara.get_fixed_asset(p_asset => $1) as r", [asset.id])).rows[0].r;
+    assert.equal(readAfter.particulars.complete, true, "…so the asset's own read stops saying the particulars are missing");
+    assert.equal(await countEntries(one.client), 1, "answering wrote NO second journal — the acquisition posted when it posted");
+    assert.equal(await countReceipts(workId), 1, "…and no second operation receipt");
+    console.log("[fa-acq-e2e] PASS 2b: the dependent question opens on the ASSET, a person answers it, the run applies it through the particulars door and settles — one entry, one receipt, no second journal");
+
     // ---- 3. a lost acknowledgement ------------------------------------------------------
     const tasksBefore = (await tasksFor(workId)).length;
     const replay = await api("POST", "/api/work/journal",
@@ -399,8 +489,11 @@ async function main() {
       { clientId: one.client, intentKey: randomUUID(), basis: acquisitionBasis("lathe purchased", 640_000) },
       bkJwt);
     assert.equal(second.status, 202, `the bookkeeper's admission 202 (got ${second.status} ${JSON.stringify(second.body)})`);
-    const secondDone = await pollWork(second.body.work_id, bkJwt, (b) => TERMINAL.has(b.work.status), "second acquisition settles");
-    assert.equal(secondDone.work.status, "completed", `the bookkeeper's acquisition commits (got ${secondDone.work.status})`);
+    const secondDone = await pollWork(second.body.work_id, bkJwt, COMMITTED, "second acquisition commits");
+    assert.equal(secondDone.work.status, "awaiting_input",
+      `the bookkeeper's acquisition commits and parks on its OWN particulars question (got ${secondDone.work.status})`);
+    assert.ok(secondDone.work.result?.entry_id,
+      "…with its entry already posted — which is why the demotion below lands on an OPEN question, the case the recheck exists for");
     const bkAsset = (await assets(one.client)).find((a) => a.acquisition_entry_id === secondDone.work.result.entry_id);
     assert.ok(bkAsset, "…and births its own register row");
 
@@ -488,7 +581,12 @@ async function main() {
     const respawned = spawnServe();
     try {
       await waitReady(45000, respawned);
-      const settled = await pollWork(workId, crash.jwt, (b) => TERMINAL.has(b.work.status), "crashed work resumes and settles", 120000);
+      const resumed = await pollWork(workId, crash.jwt, COMMITTED, "crashed work resumes and commits", 120000);
+      assert.equal(resumed.work.status, "awaiting_input",
+        `the re-executed step replays the commit and parks on the particulars question (got ${resumed.work.status} / ${JSON.stringify(resumed.work.error)})`);
+      const crashAsked = await pollQuestion(workId, "particulars question after the crash");
+      await answerQuestion(crash.owner, crashAsked.id, crashAsked.question_version, PARTICULARS_ANSWER, rig.opk("fa-answer-crash"));
+      const settled = await pollWork(workId, crash.jwt, (b) => TERMINAL.has(b.work.status), "crashed work settles", 120000);
       assert.equal(settled.work.status, "completed",
         `the resumed run settles completed (got ${settled.work.status} / ${JSON.stringify(settled.work.error)})`);
       assert.equal(settled.work.result?.replayed, true, "the re-executed step's tool call REPLAYED onto the original receipt");
