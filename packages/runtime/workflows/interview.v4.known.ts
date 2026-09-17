@@ -40,6 +40,13 @@
 //      one as an answer would feed a validator a value no person could have typed. `trade_nature`,
 //      `banking_arrangement` and `customer_identity_policy` have no segment at all.
 //
+//      AND TWO OF THE SIX ALSO RIDE THE LEGACY REGISTER. `entity_type` and `msic` are among the
+//      five `clara.client_fact_keys` 0192 carried into `clara.knowledge_keys` BY VALUE, so a pack
+//      can hold a governed knowledge record AND the legacy `clara.client_facts` row under one key
+//      — and the legacy one is the row the estate acts on. `knownFactsFromPack` states that
+//      precedence and the measurement behind it; this wall is about which keys are mapped, that
+//      one is about which row wins.
+//
 // AND THE READ NEVER DECIDES ANYTHING BY FAILING. `readKnowledgePack` answers `unavailable` rather
 // than throwing or returning null, and an unavailable pack yields NO known facts — so every
 // question is asked, exactly as v4 asks them today. A context read that could suppress a question
@@ -110,21 +117,53 @@ function str(v: unknown): string {
  * is the value that SKIPS a question, so getting it from row order would be deciding a client's
  * accounting facts by a database's scan order.
  *
- * MEASURED, NOT ASSERTED. `clara.get_knowledge_pack` aggregates with
- * `coalesce(jsonb_agg(j order by knowledge_key), '[]')` (0192:1502) — by KEY alone, with no
- * tie-break — and then appends the legacy rows as a second, separate concatenation. Its firm arm
- * excludes a firm row only when a client row shares the same `applies_when_digest`
- * (0192:1509-1518), so a firm-wide rule and a narrower client exception under ONE key both reach
- * the pack, in an order nothing defines. That is not hypothetical here:
- * `clara.knowledge_key_firm_eligibility` admits `accounting_basis`, `default_currency` and
- * `reporting_framework`, and `default_currency` is `KNOWN_FACT_KEYS.currency` (the other two are
- * among the object-shaped folds this module deliberately excludes).
+ * MEASURED, NOT ASSERTED. `clara.get_knowledge_pack` builds its answer in TWO steps, and both of
+ * them decide something here:
  *
- * SO THE RULE IS EXPLICIT: a `scope_kind:'client'` row under a key wins over a `'firm'` row under
- * the same key, whatever order they arrive in. Among rows of the SAME scope the first still wins —
- * two client records under one key is a conflict this lane does not resolve, and it simply does not
- * use the later one; the question it might have skipped is still governed by wall 1 (the
- * validator).
+ *   1. THE GOVERNED ROWS, aggregated with `coalesce(jsonb_agg(j order by knowledge_key), '[]')`
+ *      (0192:1502) — by KEY alone, with no tie-break. Its firm arm excludes a firm row only when a
+ *      client row shares the same `applies_when_digest` (0192:1509-1518), so a firm-wide rule and a
+ *      narrower client exception under ONE key both reach the pack, in an order nothing defines.
+ *      That is not hypothetical here: `clara.knowledge_key_firm_eligibility` admits
+ *      `accounting_basis`, `default_currency` and `reporting_framework`, and `default_currency` is
+ *      `KNOWN_FACT_KEYS.currency` (the other two are among the object-shaped folds this module
+ *      deliberately excludes).
+ *
+ *   2. THE LEGACY `clara.client_facts` ROWS, concatenated AFTERWARDS
+ *      (`v_rows := v_rows || clara._knowledge_legacy_rows(...)`, 0192:1524) and flagged
+ *      `'authoritative', true` on every row (0192:1072). 0192 says in that same place what the flag
+ *      means: it "adds a register BESIDE clara.client_facts and does not dual-write, so for every
+ *      one of the five carried keys the value the ESTATE acts on is still the legacy one"
+ *      (0192:1069-1071) — `get_context_pack` (0055:765), the close gate (0056:1283), the name-only
+ *      guard (0062:226) and the bank-registry ledger (0121:4797) each read the legacy row, and a
+ *      knowledge record of the same key NEVER shadows it (`packages/db/tests/
+ *      knowledge-legacy-readers-converge.test.mjs` asserts exactly that, key by key). TWO of those
+ *      five carried keys are in `KNOWN_FACT_KEYS`: measured on the 0224 chain,
+ *      `clara.knowledge_keys` ∩ `clara.client_fact_keys` = entity_type, msic, trade_nature,
+ *      banking_arrangement, customer_identity_policy — and the first two are segments this lane
+ *      may skip.
+ *
+ * SO THE RULE IS EXPLICIT, AND IN THIS ORDER:
+ *
+ *   · A ROW THE ESTATE ACTS ON WINS — `authoritative === true`, equivalently
+ *     `source_kind === 'legacy_client_fact'`. Skipping a question with a value the rest of the
+ *     estate does not obey is the one outcome this lane must never produce, and both rows are
+ *     `scope_kind:'client'`, so the scope rule below cannot tell them apart. The Work lane's own
+ *     knowledge block in this same closure already marks that row "in force"
+ *     (`lib/knowledge-conflicts.mjs`); two lanes of one cut may not disagree about which recorded
+ *     fact governs. There is at most one such row per key (0192's live-row index), so it is final.
+ *
+ *   · THEN a `scope_kind:'client'` row beats a `'firm'` row under the same key, whatever order they
+ *     arrive in.
+ *
+ *   · THEN the first row wins — two client records under one key is a conflict this lane does not
+ *     resolve, and it simply does not use the later one; the question it might have skipped is
+ *     still governed by wall 1 (the validator).
+ *
+ * A LEGACY WINNER CARRIES NO `knowledge_version`, and that is the register's own truth rather than
+ * a gap in this fold: a legacy client_fact "has no knowledge revision to stamp" (0192's own words
+ * at `_knowledge_legacy_rows`), so its row's `knowledge_version` is null, this fold keeps it as the
+ * empty string rather than inventing a `0`, and `knownEcho` renders that case by name.
  */
 export function knownFactsFromPack(pack: unknown): KnownFacts {
   const p = (pack ?? {}) as { status?: unknown; records?: unknown };
@@ -132,6 +171,7 @@ export function knownFactsFromPack(pack: unknown): KnownFacts {
   const bySegment: Record<string, KnownFact> = {};
   for (const [segmentKey, knowledgeKey] of Object.entries(KNOWN_FACT_KEYS)) {
     let chosen: KnownFact | null = null;
+    let chosenInForce = false;
     for (const raw of p.records) {
       const r = (raw ?? {}) as Record<string, unknown>;
       if (r.knowledge_key !== knowledgeKey) continue;
@@ -146,10 +186,23 @@ export function knownFactsFromPack(pack: unknown): KnownFacts {
         sourceKind: str(r.source_kind) || "unknown",
         scopeKind: str(r.scope_kind) || "client",
       };
-      if (chosen === null) chosen = fact;
-      else if (chosen.scopeKind !== "client" && fact.scopeKind === "client") chosen = fact;
-      // The first CLIENT row is final — nothing later can outrank it.
-      if (chosen.scopeKind === "client") break;
+      // BOTH SPELLINGS, because the pack states it twice and a reader of either one should be
+      // right: `authoritative` is the flag 0192 sets, `legacy_client_fact` is the source kind it
+      // sets it on.
+      const inForce = r.authoritative === true || fact.sourceKind === "legacy_client_fact";
+      if (chosen === null) {
+        chosen = fact;
+        chosenInForce = inForce;
+      } else if (!chosenInForce && inForce) {
+        chosen = fact;
+        chosenInForce = true;
+      } else if (!chosenInForce && chosen.scopeKind !== "client" && fact.scopeKind === "client") {
+        chosen = fact;
+      }
+      // A ROW THE ESTATE ACTS ON IS FINAL — nothing later can outrank it, and 0192's live-row index
+      // admits at most one per key. A client row is NOT final any more: the legacy row that governs
+      // it arrives after every governed row, by construction.
+      if (chosenInForce) break;
     }
     if (chosen !== null) bySegment[segmentKey] = chosen;
   }
@@ -352,5 +405,11 @@ export function segmentAsking(seg: SegmentV2, question: string): SegmentV2 {
  *  where the answer came from. The plan item's shape is untouched — it is a DB contract for several
  *  keys and this lane does not widen it — so the stream is where the provenance lives. */
 export function knownEcho(fact: KnownFact, echo: string): string {
-  return `${echo} — taken from the client's recorded knowledge (record ${fact.recordId}, version ${fact.knowledgeVersion}, trust ${fact.trust})`;
+  // A LEGACY WINNER HAS NO REVISION TO NAME (0192: a client_fact "has no knowledge revision to
+  // stamp"), so the transcript names the register the value came from instead of printing an empty
+  // version number beside it.
+  const provenance = fact.knowledgeVersion === ""
+    ? "no knowledge revision — the legacy client-fact register"
+    : `version ${fact.knowledgeVersion}`;
+  return `${echo} — taken from the client's recorded knowledge (record ${fact.recordId}, ${provenance}, trust ${fact.trust})`;
 }

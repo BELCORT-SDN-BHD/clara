@@ -244,6 +244,90 @@ test("v5.known: the CLIENT's own record beats the firm's rule, whichever order t
   assert.equal(twoClient.currency.recordId, "first");
 });
 
+test("v5.known: the LEGACY client_facts row is the one in force — it outranks a GOVERNED record of the same key", () => {
+  // THE PACK CARRIES TWO KINDS OF ROW UNDER ONE KEY, AND THE SECOND KIND IS THE ONE THE ESTATE
+  // ACTS ON. `clara.get_knowledge_pack` aggregates the governed `clara.knowledge_records` rows
+  // first (0192:1502) and then CONCATENATES the legacy `clara.client_facts` rows as a second,
+  // separate step (`v_rows := v_rows || clara._knowledge_legacy_rows(...)`, 0192:1524). The legacy
+  // builder flags every row it emits `'authoritative', true` (0192:1072) and says why in the line
+  // above it: "for every one of the five carried keys the value the ESTATE acts on is still the
+  // legacy one" (0192:1069-1071). Both rows are `scope_kind:'client'`, so the client-over-firm
+  // rule above cannot separate them — the row that does NOT govern simply arrives first.
+  //
+  // IT IS NOT HYPOTHETICAL FOR THIS LANE. Measured on the 0224 chain (rigint3 / clara_int3):
+  // `clara.knowledge_keys` and `clara.client_fact_keys` overlap on entity_type, msic,
+  // trade_nature, banking_arrangement and customer_identity_policy, and the first TWO are
+  // `KNOWN_FACT_KEYS` — questions this lane may skip. `packages/db/tests/
+  // knowledge-legacy-readers-converge.test.mjs`'s c784.04 builds exactly this pack (a legacy
+  // entity_type plus a governed record of the same key) and asserts the estate does not move.
+  //
+  // AND THE SIBLING MODULE IN THIS SAME CUT ALREADY SAYS SO: `lib/knowledge-conflicts.mjs:76`
+  // marks `source_kind === 'legacy_client_fact' || authoritative === true` as "in force" in the
+  // Work lane's knowledge block. Two lanes of one cut may not disagree about which recorded fact
+  // governs.
+  const legacy = (key, value, extra = {}) =>
+    record(key, value, {
+      record_id: `legacy-${key}`,
+      source_kind: "legacy_client_fact",
+      // 0192: a legacy client fact has no knowledge revision to stamp, so its row carries null.
+      knowledge_version: null,
+      authoritative: true,
+      ...extra,
+    });
+
+  // The pack's OWN order: governed first, legacy appended.
+  const asThePackReturnsIt = v4Known.knownFactsFromPack(PACK([
+    record("entity_type", "sdn_bhd", { record_id: "governed-row" }),
+    legacy("entity_type", "llp"),
+  ]));
+  assert.equal(asThePackReturnsIt.entity_type.recordId, "legacy-entity_type",
+    "the authoritative legacy row governs, although the governed row arrived first");
+  assert.equal(asThePackReturnsIt.entity_type.value, "llp");
+  assert.equal(asThePackReturnsIt.entity_type.sourceKind, "legacy_client_fact");
+
+  // …and the value that would SKIP the question is the legacy one, which is the whole point: both
+  // are canonical ENTITY_TYPES_V2 members, so the segment validator (wall 1) accepts either and
+  // cannot catch this.
+  const answered = v4Known.knownAnswer(seg("entity_type"), {}, asThePackReturnsIt);
+  assert.ok(answered, "control: the segment's own validator accepts both spellings");
+  assert.equal(answered.value, "llp", "the plan records the fact the rest of the estate acts on");
+
+  // Order-independent, exactly as the client-over-firm rule is.
+  const legacyFirst = v4Known.knownFactsFromPack(PACK([
+    legacy("msic", "62010"),
+    record("msic", "46900", { record_id: "governed-row" }),
+  ]));
+  assert.equal(legacyFirst.msic.recordId, "legacy-msic");
+  assert.equal(legacyFirst.msic.value, "62010");
+
+  // A legacy row also outranks a FIRM rule of the same key, by the same reason and not by scope.
+  const overFirm = v4Known.knownFactsFromPack(PACK([
+    record("entity_type", "bhd", { record_id: "firm-row", scope_kind: "firm" }),
+    legacy("entity_type", "sole_prop"),
+  ]));
+  assert.equal(overFirm.entity_type.recordId, "legacy-entity_type");
+
+  // CONTROL — with no legacy row in the pack nothing changes: the governed client row still wins,
+  // and a key with no legacy register at all (`default_currency` is not a carried fact key) is
+  // untouched by any of this.
+  const governedOnly = v4Known.knownFactsFromPack(PACK([
+    record("entity_type", "sdn_bhd", { record_id: "governed-row" }),
+    record("entity_type", "bhd", { record_id: "firm-row", scope_kind: "firm" }),
+  ]));
+  assert.equal(governedOnly.entity_type.recordId, "governed-row");
+  const currency = v4Known.knownFactsFromPack(PACK([record("default_currency", "MYR")]));
+  assert.equal(currency.currency.recordId, "rec-default_currency");
+
+  // AND THE TRANSCRIPT SAYS WHERE IT CAME FROM WITHOUT INVENTING A REVISION. A legacy row carries
+  // `knowledge_version: null` — 0192: it "has no knowledge revision to stamp" — so the echo names
+  // the register instead of printing an empty version number.
+  const legacyEcho = v4Known.knownEcho(asThePackReturnsIt.entity_type, "Entity type: llp");
+  assert.match(legacyEcho, /legacy client-fact register/);
+  assert.ok(!/version\s*,/.test(legacyEcho), "no empty version number is printed");
+  assert.match(v4Known.knownEcho(currency.currency, "Currency: MYR"), /version 12/,
+    "control: a governed row still names its knowledge_version");
+});
+
 // ---------------------------------------------------------------------------
 // 4b · #649 item 3's OTHER half: the plan's own answered items
 // ---------------------------------------------------------------------------

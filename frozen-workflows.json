@@ -38,7 +38,7 @@
     },
     "packages/runtime/lib/accrual-basis.ts": {
       "sha256": "f06a82142b6856364097f736d45aee5908b5bcfc176f4cb0e170328f5fffe1b4",
-      "note": "#652 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the accrual schema and `accrualFromInput`, so check-frozen-workflows.mjs's import closure hash-locks this file (the web form imports the same module and is NOT frozen — only this closure membership locks it). DEPLOY ORDER: migration 0222 (clara.create_accrual_adjustment_for) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+      "note": "#652 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the accrual schema and `accrualFromInput`, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — it cannot: nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies (apps/web/lib/checkout/stripe-session.test.ts:444-446 states the same reason for the same app: \"apps/web cannot import @clara/runtime (it is not a dependency; this app builds for Workers off its own set)\"). The browser keeps a hand-maintained MIRROR of this vocabulary instead — ACCRUAL_METHODS / ACCRUAL_FREQUENCIES / ACCRUAL_DAY_RULES / ACCRUAL_TIMEZONE / ACCRUAL_DAY_OF_MONTH_MAX in apps/web/lib/accruals/api.ts, consumed by apps/web/lib/work/accrual-draft.ts — and this hash lock does NOT cover it, nor does any test pin the two to each other, so a change here needs the mirror moved in the same commit. DEPLOY ORDER: migration 0222 (clara.create_accrual_adjustment_for) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/lib/capability-registry.mjs": {
       "sha256": "db98138aa47832da8a31a8f9a51d31ab503d6bb61ab899da2706051b68218c0a",
@@ -47,7 +47,7 @@
     },
     "packages/runtime/lib/fixed-asset-acquisition.ts": {
       "sha256": "9846bdbdf33c374994fb9033ea8765f7b3dd64e9016867b6d2177a544868a6d9",
-      "note": "#639 — frozen BY CLOSURE, not by marker: claraWork_v4 imports FA_PARTICULARS_FIELDS, faParticularsAnswerSchema, particularsFromAnswer, localParticularsRefusal and refusalFieldForAxis, so check-frozen-workflows.mjs's import closure hash-locks this file (the web question form imports the same module and is NOT frozen — only this closure membership locks it). It carries the bridge between the two spellings the DATABASE uses: a `text` field's answer is a JSON string at clara.answer_work_question (0180) and a number at clara._fa_validate_particulars (0041). DEPLOY ORDER: migration 0216 (clara.complete_fixed_asset_particulars_for) must be live BEFORE this image runs any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+      "note": "#639 — frozen BY CLOSURE, not by marker: claraWork_v4 imports FA_PARTICULARS_FIELDS, faParticularsAnswerSchema, particularsFromAnswer, localParticularsRefusal and refusalFieldForAxis, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies. The web question form keeps a hand-maintained MIRROR of the axis→field table in apps/web/lib/registers/fa-refusal-field.ts (which says so in its own header), pinned by fa-refusal-field.test.ts to the DOOR's own axis vocabulary (transcribed there from 0041:2970-3033 + 0216 §D) but not to this file; this hash lock does not cover that mirror, so a change to the axis map here needs it moved in the same commit. It carries the bridge between the two spellings the DATABASE uses: a `text` field's answer is a JSON string at clara.answer_work_question (0180) and a number at clara._fa_validate_particulars (0041). DEPLOY ORDER: migration 0216 (clara.complete_fixed_asset_particulars_for) must be live BEFORE this image runs any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/lib/knowledge-conflicts.mjs": {
       "sha256": "7591e9528503e6a5e5d50ff5047641089a9a97574965e957a5f9d85ff4454a04",
@@ -65,7 +65,7 @@
     },
     "packages/runtime/lib/periodic-adjustment-basis.ts": {
       "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
-      "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file (the web form imports the same module and is NOT frozen — only this closure membership locks it). DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet.",
+      "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies. The periodic-adjustment form keeps a hand-maintained MIRROR of these rules in apps/web/lib/work/periodic-adjustment.ts (its header calls every rule there a mirror of one the database enforces); this hash lock does not cover it. Note corrected 2026-09-17 (wave 2026-09-15, successors re-review R2): the earlier sentence said the web form IMPORTS this module, which it cannot — the file's bytes and sha256 are untouched, only this prose moved. DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet.",
       "deployed": true
     },
     "packages/runtime/lib/staff-expense-claim-basis.ts": {
@@ -1296,7 +1296,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/interview.v4.known.ts": {
-      "sha256": "64f803dea7e3ab2818a0bc95f5277732fac075f8809fd1a97797910927d8afd5",
+      "sha256": "bb904dda982950b9c93b43fba233370d04d4b7f4552c417e20fd52cc60898c48",
       "note": "wave 2026-09-15 — part of the clientOnboarding_v5 closure (#649's successor contract: H-52's `sst_no` gate, the `fye_day` segment, and the known-facts pre-read that makes an answered fact an absent question); registry.ts points clientOnboarding: at clientOnboarding.v5.ts. v1..v4 stay frozen and exported (policy (c)). DEPLOY ORDER: migration 0192 (clara.get_knowledge_pack) must be live BEFORE this image runs an interview — it is already live from the chatTurn_v19 image, so nothing new is owed by this cut; without it the pre-read folds to no known facts and every question is asked, which is v4's behaviour exactly. The fy-end DAY reaches clara.clients through clara.settle_client_onboarding_facts (0219) on the HUMAN lane, never from this body. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/interview.v4.questions.ts": {
