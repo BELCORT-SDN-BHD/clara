@@ -294,7 +294,13 @@ test("v20.identity: the engine stamp is this closure's, and the registry pins th
     "check-workflow-bundle derives the expected stamp from the registry and refuses a bundle without it");
   assert.equal(registry.workflowPins.chatTurn, "chatTurn_v20");
   assert.equal(registry.workflows.chatTurn, registry.chatTurn_v20);
-  for (let n = 1; n <= 19; n += 1) {
+  // THE LADDER STARTS AT v2, and the floor is a MEASURED consequence rather than a convention:
+  // #810 RETIRED chatTurn_v1 (owner ruling 2026-09-15, hosted non-terminal count 0) and its three
+  // files left the tree, so `frozen-workflows.json` records it under `retired` and the registry
+  // exports it no more. Policy (c) is unchanged for every version above it — an export WITH
+  // in-flight runs may never be renamed or deleted; v1 had none.
+  assert.equal(registry.chatTurn_v1, undefined, "#810: chatTurn_v1 is retired, not silently still here");
+  for (let n = 2; n <= 19; n += 1) {
     assert.equal(typeof registry[`chatTurn_v${n}`], "function", `policy (c): chatTurn_v${n} is still exported for parked runs`);
   }
 });
