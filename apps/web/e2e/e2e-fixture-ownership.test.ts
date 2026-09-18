@@ -75,6 +75,7 @@ const LANE_MOCKS = [
   "prepayments-mock.mjs",
   "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
+  "trade-invoice-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
 
@@ -451,6 +452,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // are read by surfaces other lanes drive, and a lane that claimed them would replace their
   // fixtures.
   "staff-expense-claim-mock.mjs": { unscopeable: [], debt: [] },
+  // #655's C1/C3/C6 trade-invoice lane, built to the same shape: every branch names this lane's
+  // own client id or the Work id this module minted before it answers, and falls through
+  // otherwise — the three PostgREST reads (clients by id; coa_accounts and counterparties by
+  // client_id, the last also by kind, because a sales invoice is recorded against a customer and
+  // a supplier bill against a vendor), the ONE RPC it owns exclusively (get_trade_invoice, by
+  // p_work), the RUNTIME admission route by body.clientId, and the CONTROL ENDPOINT by
+  // body.client. The lane answers NEITHER list_accounting_work NOR list_entry_links: both are
+  // read by surfaces other lanes drive, and a lane that claimed them would replace their
+  // fixtures. It reads every POST body through this file's cached reader, so declining another
+  // lane's request leaves that lane's body fully readable.
+  "trade-invoice-mock.mjs": { unscopeable: [], debt: [] },
   // #652's C8 accrual lane, built to that same shape: every branch names this lane's own client id
   // or accrual id before it answers. `list_spoken_for_documents` is SHARED with
   // `periodic-adjustment-mock.mjs` — both lanes mount the same `EvidenceChooser`, which makes the
