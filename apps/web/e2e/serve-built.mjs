@@ -79,6 +79,7 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // #644's own lane (the C13 Knowledge walk). ID-scoped like its siblings — four client ids, one
 // per read outcome, plus its own record/document ids — hooked in ONE place below.
 import { handleKnowledgeSupabase } from "./knowledge-mock.mjs";
+import { handleWorkKnowledgeRuntime, handleWorkKnowledgeSupabase } from "./work-knowledge-mock.mjs";
 // #647's counterparty-identity lane — the C13 identity surface and its routed detail. A
 // file-disjoint sibling scoped to its own four client ids and the counterparty ids it minted; it
 // answers no verb any other lane answers (e2e-fixture-ownership.test.ts measures both).
@@ -665,6 +666,12 @@ async function handleSupabase(request, response, url) {
   // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
   // lane still needs; and every branch is scoped to a #644 id, so it answers for nobody else.
   if (await handleKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
+  // #658, on the same footing as the journal-work hook below and for the SAME measured reason
+  // (DECISIONS §6.1 / the #657 ruling: this chain is SEMANTIC, not sorted): `home-board-mock.mjs`
+  // answers `/rest/v1/coa_accounts` and `/rest/v1/agent_tasks_visible` with an honest `[]` for
+  // EVERY subject, so a Work-detail lane dispatched below it could never read its own run's task.
+  // Every branch here is scoped to this lane's own client or to a work id it minted.
+  if (await handleWorkKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleCounterpartyIdentitySupabase(request, response, path, url, sendJson, cors)) return;
   // AHEAD OF THE HOME BOARD (#623, and still true — NOT a body-drain reason):
   // `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers `/rest/v1/coa_accounts` and
@@ -1064,6 +1071,10 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // while `handleChat` claims the whole `/api/chat/sessions/…/messages` shape and would
   // otherwise serve this lane's thread a canned text message with no Work cards in it.
   if (await handleJournalWorkRuntime(request, response, url)) return true;
+  // #658: ONE control endpoint, scoped to this lane's own client id on the WIRE (a query
+  // parameter, so the fall-through is taken before the body is drained), so nothing another
+  // walk owns can reach it.
+  if (await handleWorkKnowledgeRuntime(request, response, url)) return true;
   // #643, on the same footing: one admission route and one control endpoint, both scoped to this
   // lane's own client id, so nothing another walk owns can reach it.
   if (await handlePeriodicAdjustmentRuntime(request, response, url)) return true;
