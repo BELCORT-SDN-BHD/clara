@@ -1,5 +1,7 @@
 # ToolLoopAgent inside Workflow 4 restart proof
 
+> **Where the rig lives now (2026-09-18).** The working directory and branch named below were never pushed and no longer exist. The rig itself is published in this repository at `docs/plan/active/prototypes/agent-harness-validation/`, with its recorded passes. The commands in this document are kept verbatim as the record of what was actually run; their paths are historical, not instructions.
+
 Date: 2026-09-08
 
 Status: isolated compatibility proof passed; production adoption and issue 607 remain open
