@@ -83,18 +83,34 @@ test.describe("#636 the durable intake batch", () => {
     await expect(card(page)).toContainText("April sources");
   });
 
-  test("`?batch=` is a deep link, and Back restores the identical query", async ({ page }) => {
+  test("`?batch=` is a deep link; the facet is a REPLACE, so filtering never grows history", async ({ page }) => {
+    // The two parameters answer to two different rules, and the walk holds both.
+    //   `?batch=`      — opening a batch is a PUSH, so Back closes it (nothing in this walk opens
+    //                    one from inside the app yet; what IS proven here is that the address
+    //                    alone renders the card, which is what a shared link has to do).
+    //   `?batchFacet=` — a FILTER is a `router.replace`: it rewrites the current entry rather than
+    //                    stacking one, or a person who tried four facets would need four Backs to
+    //                    leave the page.
     await page.goto(DOCUMENTS_URL);
     await expect(card(page)).toHaveCount(0, { timeout: 15_000 });
     await page.goto(BATCH_URL);
     await expect(card(page)).toBeVisible();
-    // The facet filter writes the URL, and Back walks it back.
-    await card(page).getByRole("radio", { name: "Waiting", exact: true }).click()
-      .catch(async () => { await card(page).getByText("Waiting", { exact: true }).first().click(); });
+
+    // Base UI's Toggle renders a BUTTON with `aria-pressed`, not a radio; the facet COUNT above
+    // carries the same word as a span, so the role is what disambiguates them.
+    await card(page).getByRole("button", { name: "Waiting", exact: true }).click();
     await expect(page).toHaveURL(/batchFacet=waiting/);
-    await page.goBack();
     await expect(page).toHaveURL(new RegExp(`batch=${BATCH_ID}`));
+
+    // DURABLE: the filtered view is an address, so it survives a reload.
+    await page.reload();
+    await expect(page).toHaveURL(/batchFacet=waiting/);
+    await expect(card(page)).toBeVisible();
+
+    // …and the filter grew NO history entry: one Back leaves the batch entirely.
+    await page.goBack();
     await expect(page).not.toHaveURL(/batchFacet=/);
+    await expect(page).not.toHaveURL(/batch=/);
   });
 
   test("a facet with NO rows while others have rows is a no-results face, not an Empty", async ({ page }) => {
