@@ -25,6 +25,12 @@ import type { WorkKnowledgeDrift, WorkKnowledgeReadSummary } from "../../lib/wor
 
 enableDomInspection();
 
+/** The harness's stub nodes are `Record<string, unknown>`, so an attribute read needs the
+ *  estate's own cast (journal-composer.test.tsx:113's idiom) — `next build` runs a stricter
+ *  TypeScript than `pnpm typecheck` does and rejects the bare optional call. */
+const attr = (n: unknown, k: string): string | null =>
+  (n as { getAttribute?: (key: string) => string | null }).getAttribute?.(k) ?? null;
+
 const WORK = "11111111-1111-4111-8111-111111111111";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -159,7 +165,7 @@ test("wkb.04 a trace-only observation says the version is known and the records 
       assert.match(text, /Knowledge version 7/, "the version IS known and is shown");
       assert.match(text, /not which records it read/i,
         "…and the sentence says exactly what is missing, rather than rendering an empty key list");
-      assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "work-knowledge-trace-only"));
+      assert.ok(h.find((n) => attr(n, "data-testid") === "work-knowledge-trace-only"));
       assert.ok(!/Required 0/.test(text), "a zero tier count would be a number a reader could act on");
     },
   );
@@ -174,7 +180,7 @@ test("wkb.05 a Work with NOTHING recorded says so, and says that is not the same
     (text, h) => {
       assert.match(text, /has not recorded a knowledge read/);
       assert.match(text, /not the same as a run that read nothing/i);
-      assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "work-knowledge-none"));
+      assert.ok(h.find((n) => attr(n, "data-testid") === "work-knowledge-none"));
     },
   );
 });
@@ -215,7 +221,7 @@ test("wkb.07 the drift banner rides on the block itself, in the wording the door
       assert.match(text, /sst_regime/);
       assert.ok(!/default_currency/.test(text.split("A record this Work read has changed")[1] ?? ""),
         "only the keys the Work READ are named — the intersection the door computed, not every moved key");
-      assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "work-knowledge-drift-relevant"));
+      assert.ok(h.find((n) => attr(n, "data-testid") === "work-knowledge-drift-relevant"));
     },
   );
   await render(
@@ -226,7 +232,7 @@ test("wkb.07 the drift banner rides on the block itself, in the wording the door
     (text, h) => {
       assert.match(text, /changed after this Work last read it/);
       assert.ok(!/unrelated/i.test(text), "never a confident `unrelated` where no read-set was recorded");
-      assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "work-knowledge-drift-unrecorded"));
+      assert.ok(h.find((n) => attr(n, "data-testid") === "work-knowledge-drift-unrecorded"));
     },
   );
 });

@@ -890,8 +890,43 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
       + "source revision affects. Automatic re-assessment is deferred (PRD:123, #658/#663), which is "
       + "exactly why this is a projection and not a writer."],
   ]);
+  // WAVE 2026-09-18 — #658 (0230) ADDS FIVE READS OF THIS RELATION, and they are declared here
+  // rather than folded into the cohort above for the reason the 2026-09-15 entries give: each
+  // states what it does with the relation, and the loop underneath MEASURES the claim on the
+  // live body. All five are STABLE reads that write nothing anywhere and grant nothing; #658's
+  // own non-goals are explicit that it captures nothing, corrects nothing and promotes nothing.
+  //
+  // BIMODAL, unlike the two above: 0230 comes AFTER 0220, so a database carrying this battery's
+  // frontier may legitimately not have them yet. Their presence is asserted only once the lane
+  // is live — but they are excluded from the stray list unconditionally, because a stray census
+  // that only fires on some frontiers is worth less than one that fires on all of them.
+  const RETRIEVAL_0230_CONSUMERS = new Map([
+    ["retrieve_knowledge",
+      "#658 (0230) — the bounded CORE-FIRST read a run takes before it acts. It SELECTs live "
+      + "in-scope records through the same per-applicability shadow both shipped reads use and "
+      + "through the pinned legacy union; it writes nothing and, being clara_runtime-only, "
+      + "grants no human anything (#783)."],
+    ["read_knowledge_record_for",
+      "#658 (0230) — the RUN's inspection of ONE record: the current revision, its source pins "
+      + "and the source document's METADATA. A read, actor-explicit, clara_runtime only."],
+    ["read_knowledge_history_for",
+      "#658 (0230) — the RUN's half of AC5's historical basis: every revision of one record, "
+      + "oldest first. A read, actor-explicit, clara_runtime only."],
+    ["_work_knowledge_drift_core",
+      "#658 (0230) — the ungranted core behind both drift doors. It SELECTs the client's current "
+      + "watermark and the keys that moved past an observed version, and it is reachable by no "
+      + "application role at all."],
+    ["list_work_knowledge_reads_for_record",
+      "#658 (0230, DECISIONS.md:83) — the SEVENTH door. It resolves the record inside the "
+      + "session firm and applies the per-applicability shadow to decide which clients were "
+      + "really reading a firm default. It returns READ METADATA ONLY — no value, no "
+      + "applies_when, no pack content — which is why granting it to clara_authenticated does "
+      + "not breach #783."],
+  ]);
+  const retrievalLive = readers.some((r) => r.proname === "retrieve_knowledge");
   const strays = readers
-    .filter((r) => !COHORT.has(r.proname) && !READ_ONLY_CONSUMERS.has(r.proname))
+    .filter((r) => !COHORT.has(r.proname) && !READ_ONLY_CONSUMERS.has(r.proname)
+      && !RETRIEVAL_0230_CONSUMERS.has(r.proname))
     .map((r) => r.sig);
   assert.deepEqual(strays, [],
     "a function outside the knowledge cohort reads clara.knowledge_records -- a firm preference is becoming an authority somewhere");
@@ -912,7 +947,10 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
   assert.equal(WRITES_KNOWLEDGE.test(writerProbe[0].prosrc), true,
     "the DML predicate below cannot see a real writer -- it would excuse anything");
 
-  for (const [name, reason] of READ_ONLY_CONSUMERS) {
+  const declaredConsumers = retrievalLive
+    ? [...READ_ONLY_CONSUMERS, ...RETRIEVAL_0230_CONSUMERS]
+    : [...READ_ONLY_CONSUMERS];
+  for (const [name, reason] of declaredConsumers) {
     const rows = readers.filter((r) => r.proname === name);
     assert.ok(rows.length > 0,
       `${name} is declared a read-only knowledge consumer (${reason}) but the live catalog has no such reader -- delete the exception rather than carrying a dead one`);

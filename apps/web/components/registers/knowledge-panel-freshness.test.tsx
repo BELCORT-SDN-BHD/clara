@@ -33,6 +33,12 @@ import type { KnowledgeRecordRow } from "../../lib/registers/knowledge";
 
 enableDomInspection();
 
+/** The harness's stub nodes are `Record<string, unknown>`, so an attribute read needs the
+ *  estate's own cast (journal-composer.test.tsx:113's idiom) — `next build` runs a stricter
+ *  TypeScript than `pnpm typecheck` does and rejects the bare optional call. */
+const attr = (n: unknown, k: string): string | null =>
+  (n as { getAttribute?: (key: string) => string | null }).getAttribute?.(k) ?? null;
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -167,11 +173,11 @@ test("kf.03 an out-of-effect record is MARKED and still rendered — never dropp
       assert.match(text, /<RM1M/, "the expired rule is PRESENT — a reader must be able to see it exists");
       assert.match(text, new RegExp(`Not in effect on ${businessToday()}`),
         "…and MARKED, with the date it is not in effect ON");
-      const mark = h.find((n) => n.getAttribute?.("data-testid") === "knowledge-not-in-effect");
+      const mark = h.find((n) => attr(n, "data-testid") === "knowledge-not-in-effect");
       assert.ok(mark, "the mark is a real node, not a class on the row");
       // A WORD, NEVER A COLOUR ALONE (appendix D #7) — and a title that says what the word means.
       assert.match(String(mark?.textContent ?? ""), /Not in effect/);
-      assert.ok((mark?.getAttribute?.("title") ?? "").length > 0,
+      assert.ok((attr(mark, "title") ?? "").length > 0,
         "the mark carries its own explanation for a reader who cannot see the tone");
       // The IN-EFFECT row carries no mark at all.
       assert.match(text, /sales_tax/);

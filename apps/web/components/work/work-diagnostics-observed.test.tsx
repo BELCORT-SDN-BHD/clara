@@ -27,6 +27,12 @@ import type { WorkTraceRead, WorkTraceRow } from "../../lib/work/diagnostics";
 
 enableDomInspection();
 
+/** The harness's stub nodes are `Record<string, unknown>`, so an attribute read needs the
+ *  estate's own cast (journal-composer.test.tsx:113's idiom) — `next build` runs a stricter
+ *  TypeScript than `pnpm typecheck` does and rejects the bare optional call. */
+const attr = (n: unknown, k: string): string | null =>
+  (n as { getAttribute?: (key: string) => string | null }).getAttribute?.(k) ?? null;
+
 const WORK = "11111111-1111-4111-8111-111111111111";
 
 function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<void> {
@@ -148,15 +154,15 @@ test("wdo.03 the versions render inside the rows the section ALREADY loaded — 
         // The step table is behind the section's own disclosure — open it. It is found by its
         // `aria-expanded`, which is the ONE attribute that distinguishes it from the re-read
         // control and is also the thing that makes it a disclosure for a screen reader at all.
-        const toggle = h.find((n) => n.tagName === "BUTTON" && n.getAttribute?.("aria-expanded") != null);
+        const toggle = h.find((n) => n.tagName === "BUTTON" && attr(n, "aria-expanded") != null);
         assert.ok(toggle, "the steps disclosure must be present");
-        assert.equal(toggle?.getAttribute?.("aria-expanded"), "false", "…and it starts closed");
+        assert.equal(attr(toggle, "aria-expanded"), "false", "…and it starts closed");
         await h.fireEvent(toggle!, "click");
         for (let i = 0; i < 4; i++) await h.settle();
         const text = h.text();
         assert.match(text, /knowledge_version 42/,
           "the version deployed claraWork_v4 has been writing since issue 631 is finally READABLE");
-        assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "work-diagnostics-observed"));
+        assert.ok(h.find((n) => attr(n, "data-testid") === "work-diagnostics-observed"));
         assert.equal(traceReads, 1,
           "ONE get_work_execution_trace for the page: a second component would double the request and split the honesty story");
       } finally {

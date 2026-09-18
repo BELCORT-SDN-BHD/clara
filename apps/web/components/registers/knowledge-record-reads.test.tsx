@@ -28,6 +28,12 @@ import type { KnowledgeRecordRow, WorkKnowledgeReadRow } from "../../lib/registe
 
 enableDomInspection();
 
+/** The harness's stub nodes are `Record<string, unknown>`, so an attribute read needs the
+ *  estate's own cast (journal-composer.test.tsx:113's idiom) — `next build` runs a stricter
+ *  TypeScript than `pnpm typecheck` does and rejects the bare optional call. */
+const attr = (n: unknown, k: string): string | null =>
+  (n as { getAttribute?: (key: string) => string | null }).getAttribute?.(k) ?? null;
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -105,9 +111,9 @@ test("kr7.01 each row names the Work, the version, the period, the purpose and t
         assert.match(text, /for 2026-09-19/, "the PERIOD it read for, not the instant it read at");
         assert.match(text, /accounting_work/);
         assert.match(text, /remainder truncated/, "the door's own reason token, verbatim");
-        const link = h.find((n) => n.tagName === "A" && String(n.getAttribute?.("href") ?? "").includes("/work/"));
+        const link = h.find((n) => n.tagName === "A" && String(attr(n, "href") ?? "").includes("/work/"));
         assert.ok(link, "the Work is reachable");
-        assert.equal(link?.getAttribute?.("href"), "/clients/c1/work/w-1");
+        assert.equal(attr(link, "href"), "/clients/c1/work/w-1");
         // READ-ONLY: no act hangs off a row. The only button on this surface is the failed-read
         // re-read, and this render has no failure.
         assert.equal(h.find((n) => n.tagName === "BUTTON"), null,
@@ -132,8 +138,8 @@ test("kr7.02 a firm-scope record links each row to the ROW's own client, not the
       const h = await renderComponent(App({ clientId: "c1" }));
       try {
         for (let i = 0; i < 6; i++) await h.settle();
-        const link = h.find((n) => n.tagName === "A" && String(n.getAttribute?.("href") ?? "").includes("/work/"));
-        assert.equal(link?.getAttribute?.("href"), "/clients/c2/work/w-b",
+        const link = h.find((n) => n.tagName === "A" && String(attr(n, "href") ?? "").includes("/work/"));
+        assert.equal(attr(link, "href"), "/clients/c2/work/w-b",
           "a firm default is read by many clients; a link built from the page's client would point at the wrong workspace");
       } finally {
         await h.unmount();
@@ -158,9 +164,9 @@ test("kr7.03 an empty list says NO WORK HAS RECORDED A READ — not `unused`, an
         assert.match(text, /No Work has recorded a read of this record/);
         assert.ok(!/unused|never used|nothing uses/i.test(text),
           "a run that predates the read-set recorded nothing; calling the record unused would be a claim the estate cannot support");
-        assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "knowledge-record-reads-empty"),
+        assert.ok(h.find((n) => attr(n, "data-testid") === "knowledge-record-reads-empty"),
           "the empty face is its own node, not an error banner");
-        assert.equal(h.find((n) => n.getAttribute?.("role") === "alert"), null,
+        assert.equal(h.find((n) => attr(n, "role") === "alert"), null,
           "…and it is not styled or announced as a failure");
       } finally {
         await h.unmount();
@@ -185,7 +191,7 @@ test("kr7.04 truncated renders the partial line with the door's own hidden count
         const text = h.text();
         assert.match(text, /Showing the 100 most recent/, "the bound is stated, not implied");
         assert.match(text, /47 older read/, "the number is the DOOR's, never a subtraction this surface invents");
-        assert.ok(h.find((n) => n.getAttribute?.("data-testid") === "knowledge-record-reads-truncated"));
+        assert.ok(h.find((n) => attr(n, "data-testid") === "knowledge-record-reads-truncated"));
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();
