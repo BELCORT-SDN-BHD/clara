@@ -374,7 +374,14 @@ export function ClaraThreadView({
           apart from the ref — the live-region boundary below is untouched, which is what
           keeps `thread-live-regions`' zero-nested assertion honest. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={viewportRef} className="flex-1 space-y-3 overflow-y-auto p-3">
+      <div
+        ref={viewportRef}
+        // #642 — a NAMED handle for the one element that scrolls. A browser walk has to be
+        // able to read `scrollTop` off the exact element the hook owns; finding it by
+        // class would pin a Tailwind string, which is a styling decision, not a contract.
+        data-slot="clara-transcript-viewport"
+        className="flex-1 space-y-3 overflow-y-auto p-3"
+      >
         {/* T11: the onboarding checklist card — a stateful card INLINE in the
             message stream (R7, the Manus precedent), never a side panel.
             N5 fix (rev-t11): this is the FIRST child of the SCROLLING region —
@@ -490,7 +497,7 @@ export function ClaraThreadView({
               move — #508 measured the same 2.64 and removed the opacity outright,
               which is the better fix). P6-3's "found, not fixed" line is retired. */}
           {state.pendingUserParts && (
-            <div className="rounded-lg border border-dashed border-border bg-muted p-2 text-sm">
+            <div data-slot="clara-provisional-bubble" className="rounded-lg border border-dashed border-border bg-muted p-2 text-sm">
               <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
               {state.pendingUserParts.map((part, index) => (
                 <PartSlot key={index} part={part} session={auth} />

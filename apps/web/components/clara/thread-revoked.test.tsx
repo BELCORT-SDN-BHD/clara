@@ -115,7 +115,7 @@ test("p642.web.revoked_is_not_reconnecting — a revoked stream renders ONE stat
 
       const lines = statusLines(h);
       assert.equal(lines.length, 1, `exactly one status line must speak; saw ${JSON.stringify(lines)}`);
-      assert.match(lines[0], /You no longer have access to this reply/);
+      assert.match(lines.at(0) ?? "", /You no longer have access to this reply/);
       assert.doesNotMatch(h.text(), /Reconnecting/, "the defect was that this said Reconnecting… forever");
       assert.doesNotMatch(h.text(), /Clara is responding/, "…and it must not still claim the reply is coming");
     } finally {

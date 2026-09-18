@@ -26,8 +26,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { foldLiveToolParts } from "./liveTools";
+import { foldLiveToolParts, type LiveToolStep } from "./liveTools";
 import type { ClaraPart } from "@/lib/parts/types";
+
+/** `noUncheckedIndexedAccess` is on, and that is a good thing here: a cell that read
+ *  `steps[0].state` off an EMPTY fold would crash rather than fail, and the message would
+ *  be about a property of undefined instead of about the behaviour. */
+function one(steps: readonly LiveToolStep[], at = 0): LiveToolStep {
+  const step = steps[at];
+  assert.ok(step, `expected a step at index ${at}; the fold produced ${steps.length}`);
+  return step;
+}
 
 const inputStart = (id: string, toolName: string) => ({ type: "tool-input-start", id, toolName, dynamic: false, title: undefined });
 const inputDelta = (id: string, delta: string) => ({ type: "tool-input-delta", id, delta });
@@ -51,10 +60,10 @@ test("p642.web.live_tool_states — the four states, in the order one real turn 
     inputEnd("v20a"),
     call("v20a", "start_accrual_work"),
   ];
-  assert.equal(foldLiveToolParts(chunks.slice(0, 3))[0].state, "preparing");
-  assert.equal(foldLiveToolParts(chunks)[0].state, "running");
-  assert.equal(foldLiveToolParts([...chunks, result("v20a", "start_accrual_work")])[0].state, "done");
-  assert.equal(foldLiveToolParts([...chunks, error("v20a", "start_accrual_work")])[0].state, "failed");
+  assert.equal(one(foldLiveToolParts(chunks.slice(0, 3))).state, "preparing");
+  assert.equal(one(foldLiveToolParts(chunks)).state, "running");
+  assert.equal(one(foldLiveToolParts([...chunks, result("v20a", "start_accrual_work")])).state, "done");
+  assert.equal(one(foldLiveToolParts([...chunks, error("v20a", "start_accrual_work")])).state, "failed");
 });
 
 test("p642.web.live_tool_states — a tool that REFUSES is not a tool that FAILED", () => {
@@ -66,12 +75,12 @@ test("p642.web.live_tool_states — a tool that REFUSES is not a tool that FAILE
     call("v20c", "start_staff_expense_claim_work"),
     result("v20c", "start_staff_expense_claim_work", { ok: false, code: "CLR04", message: "not permitted" }),
   ]);
-  assert.equal(refused[0].state, "refused");
+  assert.equal(one(refused).state, "refused");
   const done = foldLiveToolParts([
     call("v20c", "start_staff_expense_claim_work"),
     result("v20c", "start_staff_expense_claim_work", { ok: true, work_accepted: null }),
   ]);
-  assert.equal(done[0].state, "done");
+  assert.equal(one(done).state, "done");
 });
 
 test("p642.web.live_tool_states — a settled `refusal` part resolves what the stream left mid-flight, and overwrites nothing it closed", () => {
@@ -113,7 +122,7 @@ test("p642.web.live_tool_states — a reattach replays from index 0 and must not
   const attempt = [inputStart("v1", "trial_balance"), call("v1", "trial_balance"), result("v1", "trial_balance")];
   const steps = foldLiveToolParts([...attempt, ...attempt]);
   assert.equal(steps.length, 1, "one call, one chip");
-  assert.equal(steps[0].state, "done");
+  assert.equal(one(steps).state, "done");
 });
 
 test("p642.web.live_tool_states — `clarify` is excluded: it has its own answerable card", () => {

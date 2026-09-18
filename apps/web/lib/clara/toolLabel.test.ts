@@ -26,9 +26,9 @@ test("UI-32 — no label is the token wearing a costume", () => {
   // A prettified token (`start accrual work`) reads like a label while still being the
   // implementation's own word, which is precisely what UI-32 forbids. The check is
   // mechanical: a label must not be the token with its underscores swapped for spaces.
-  const jargon = CHAT_TOOL_TOKENS.filter((token) => LABELS[token].toLowerCase() === token.replace(/_/g, " "));
+  const jargon = CHAT_TOOL_TOKENS.filter((token) => (LABELS[token] ?? "").toLowerCase() === token.replace(/_/g, " "));
   assert.deepEqual(jargon, [], "these labels are the raw token with the underscores taken out");
-  const withUnderscores = CHAT_TOOL_TOKENS.filter((token) => LABELS[token].includes("_"));
+  const withUnderscores = CHAT_TOOL_TOKENS.filter((token) => (LABELS[token] ?? "").includes("_"));
   assert.deepEqual(withUnderscores, [], "a label carrying an underscore is still an identifier");
 });
 

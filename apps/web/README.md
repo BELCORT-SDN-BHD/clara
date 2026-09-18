@@ -54,6 +54,60 @@ Some of those primitives carry owner-ruled fixes that a plain `shadcn add` would
 
 Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
+## The Clara transcript: live regions, scroll ownership and the intent key (#642)
+
+**ONE log, N exclusive statuses, and nothing nested.** `ClaraThreadView` carries exactly one
+`role="log"`, and it wraps the TRANSCRIPT and only the transcript — the welcome, the message
+map and the provisional bubble. Everything that announces on its own is a SIBLING of it: the
+onboarding checklist card, the clarify group, the live tool group, and the mutually exclusive
+`role="status"` lines (stream status, stopped, a refused stop, lost sight of the run, access
+revoked, a replayed send, a pre-send check). That geometry is not style. A `role="log"` inside
+a `role="log"` has no defined announcement order, and dropping `aria-live` does not fix it
+because `role="log"` carries an implicit polite live region of its own. The statuses are
+exclusive because one event must be one announcement.
+`components/clara/thread-live-regions.test.tsx` and
+`components/clara/thread-live-tool-states.test.tsx` both assert ZERO nested live regions, each
+with a vacuity control proving the tree really does contain live regions — treat
+`nested-live-region` as a gate, not a check.
+
+**The transcript owns its own scroll, and nothing else's.** `lib/clara/useTranscriptScroll.ts`
+holds the whole policy: a reader scrolled up stays put while content arrives (the "is the
+reader following?" answer is sampled from their own scroll events, never recomputed after an
+append — appending moves the bottom); a reader at the bottom follows instantly; a fresh attach
+lands on the newest message, because reopening the rail is a new element with no history. Only
+`scrollTop`/`scrollTo` on the ONE element it owns is ever written — `scrollIntoView` is
+deliberately absent from the whole surface, because it scrolls every scrollable ancestor and
+on the docked rail that means dragging the client's workspace behind it. The labelled
+jump-to-latest is offered only while there is something below, is a real `<Button>` (so it is
+in the tab order and has a word for a name, not an icon), and jumps instantly under
+`prefers-reduced-motion` — the preference is read at the press, not captured at mount.
+
+**The intent key is content-addressed, and memory-only on purpose.**
+`lib/clara/intentKey.ts` derives the `turn_key` a send posts from the conversation, the
+altitude, the trimmed text and the SORTED attachment document ids. A retry of the same intent
+therefore reuses it — the composer keeps text and files on a refused send, so the inputs are
+identical by construction — and lands on `clara.begin_chat_turn`'s replay branch
+(`0006_runtime_core.sql:954-960`), which answers with the ORIGINAL task and `replayed: true`
+on the 202. A CHANGED intent, including a changed attachment set, derives a new key, and that
+half is the sharp one: the door returns from its replay branch BEFORE the user message is
+inserted and never reads `p_user_parts`, so a same-key repost carrying a different invoice
+would return the original task and drop the new file in silence while the screen said
+"already accepted". Nothing persists the key: appendix C rules out promising reload recovery
+from memory-only state, and content addressing makes the reload case work anyway — the same
+sentence with the same files derives the same key after a refresh. On `replayed: true` the
+view says so once and draws NO provisional bubble, because the original user row is already in
+the transcript.
+
+**Live tool state is a fold, not a version cut.** The model's whole `fullStream` reaches the
+browser verbatim (`packages/runtime/README.md` carries the measurement), so
+`lib/clara/liveTools.ts` maps the chunks already on the wire onto four live states —
+*preparing*, *running*, *done*, *failed* — plus *refused* for a tool that ran and declined in
+its own typed vocabulary. It registers NO new part kind. There is no *queued* state and there
+cannot be one without a new frozen `chatTurn` body: nothing on the stream reports admission,
+and *preparing* (the model streaming a tool's arguments) is not *queued*. Every chip's label is
+a next-intl lookup over a measured list of tool tokens with the raw token as the fallback
+(`lib/clara/toolLabel.ts`); a source link belongs on a result card, never on a chip.
+
 ## The document detail's three routed views (#646)
 
 `/clients/:clientId/documents` keeps ONE route and TWO query parameters:

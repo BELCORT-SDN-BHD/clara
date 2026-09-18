@@ -56,8 +56,10 @@ test("p642.web.revoked_is_not_reconnecting — the frame parses off the wire exa
   const raw = `event: revoked\ndata: ${JSON.stringify({ taskId: "t1", reason: "CLR11" })}\n\n`;
   const { events } = parseSseFrames(raw);
   assert.equal(events.length, 1);
-  assert.equal(events[0].event, "revoked");
-  assert.equal(applyClaraStreamEvent(initialClaraStreamState, events[0]).revokedReason, "CLR11");
+  const [event] = events;
+  assert.ok(event, "the frame must parse into exactly one event");
+  assert.equal(event.event, "revoked");
+  assert.equal(applyClaraStreamEvent(initialClaraStreamState, event).revokedReason, "CLR11");
 });
 
 test("p642.web.revoked_is_not_reconnecting — the reattach loop STOPS, and never sleeps, retries or reports a give-up", async () => {

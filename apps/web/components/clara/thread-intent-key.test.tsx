@@ -135,6 +135,15 @@ async function settle(h: { settle: () => Promise<void> }, times = 8): Promise<vo
   for (let i = 0; i < times; i += 1) await h.settle();
 }
 
+/** `noUncheckedIndexedAccess` is on: a cell that read `wire.turns[1].turnKey` off a list
+ *  with one entry would crash rather than fail, and the message would be about a property
+ *  of undefined instead of about the send path. */
+function postedKey(wire: Wire, at: number): string {
+  const turn = wire.turns[at];
+  assert.ok(turn, `expected a POST at index ${at}; the wire saw ${wire.turns.length}`);
+  return turn.turnKey;
+}
+
 const provisionalBubbles = (h: { container: Stub }): number => {
   let n = 0;
   (function walk(node: Stub) {
@@ -165,9 +174,9 @@ test("p642.web.intent_key_survives_a_refusal — a refused send keeps the draft,
       await pressEnter(composer(h));
       await settle(h);
       assert.equal(wire.turns.length, 2, "the retry posted");
-      assert.equal(wire.turns[1].turnKey, wire.turns[0].turnKey,
+      assert.equal(postedKey(wire, 1), postedKey(wire, 0),
         "the retry must carry the ORIGINAL key so the door's replay branch can deduplicate it");
-      assert.match(wire.turns[0].turnKey, /^intent-[0-9a-f]{32}$/, "…and it is a content address, not a uuid");
+      assert.match(postedKey(wire, 0), /^intent-[0-9a-f]{32}$/, "…and it is a content address, not a uuid");
     } finally {
       await h.unmount();
     }
@@ -188,7 +197,7 @@ test("p642.web.intent_key — a CHANGED sentence derives a NEW key, so a new int
       await pressEnter(composer(h));
       await settle(h);
       assert.equal(wire.turns.length, 2);
-      assert.notEqual(wire.turns[1].turnKey, wire.turns[0].turnKey);
+      assert.notEqual(postedKey(wire, 1), postedKey(wire, 0));
     } finally {
       await h.unmount();
     }

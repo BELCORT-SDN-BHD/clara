@@ -139,7 +139,7 @@ test("p642.web.jump_to_latest — reduced motion jumps INSTANTLY, and the prefer
     await h.act(() => { el.scrollTop = 120; el.fireScroll(); });
     await h.act(() => { h.current.jumpToLatest(); });
     assert.equal(el.scrollToCalls.length, 1, "with motion allowed the jump is animated");
-    assert.equal(el.scrollToCalls[0].behavior, "smooth");
+    assert.equal(el.scrollToCalls.at(0)?.behavior, "smooth");
 
     // …and the SAME mounted hook honours a preference that changed under the live page.
     reduce = true;
