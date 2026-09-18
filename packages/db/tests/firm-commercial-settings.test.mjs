@@ -27,8 +27,7 @@ import {
 } from "./rig-fixtures.mjs";
 import {
   firmScene, acceptKind, acceptBothKinds, readLegalBaseline, publishNextVersion,
-  restoreLegalBaseline, consumedPayment, seedUsage, legalStanding, commercialState,
-  aiUsage, documentOf,
+  consumedPayment, seedUsage, legalStanding, commercialState, aiUsage, documentOf,
 } from "./firm-commercial-settings-fixtures.mjs";
 
 const STANDING_DOOR = "clara.get_firm_legal_standing()";
@@ -45,8 +44,23 @@ const MIGRATION = "0233_firm_commercial_settings.sql";
  *  and that the ONLY textual delta is the floor statement. */
 const USAGE_BASE_PREIMAGE_SHA = "51621dea548b02bf9c5e9b1999bc338aee8229f3c8caac11ece911cdff1dd745";
 
-/** The floor statement 0233 adds, and the whole of it. */
+/** The SAME body with every whitespace character removed, measured at the same instant. The
+ *  pair is what makes `p635.db.usage_base_prosrc_delta` an EXACT statement: subtract 0233's
+ *  addition from the live body and the remainder must hash to this. */
+const USAGE_BASE_PREIMAGE_SQUEEZED = "d8a0b939cb1d897a8be96fa16647cbe97c12f2c97ba1dbd99b109f59e1a06968";
+
+/** The floor statement 0233 adds. */
 const FLOOR_STATEMENT = "perform clara._human_ctx(clara.role_rank('admin'));";
+
+/** THE WHOLE OF 0233's addition to that body — its comment lines included. Written out here
+ *  independently of the migration (this battery is the other side of the pair), and compared
+ *  after squeezing whitespace so the comparison is about meaning, not indentation. */
+const FLOOR_BLOCK = `
+  -- #635 (0233): THE RANK FLOOR THIS DOOR NEVER HAD -- the FIRST statement, so an under-ranked
+  -- caller meets CLR04 whatever firm they name and the CLR11 firm wall below stays intact for
+  -- everyone who clears it. See 0233's header for the measurement and the blast radius.
+  perform clara._human_ctx(clara.role_rank('admin'));
+`;
 
 /** The exact ACL text every one of the three NEW doors must carry — grantor included, so a
  *  WITH GRANT OPTION or a PUBLIC grant cannot hide behind a `has_function_privilege` probe
@@ -75,13 +89,7 @@ before(async () => {
   if (ready) baseline = await readLegalBaseline();
 });
 
-after(async () => {
-  // THE SHELF IS GLOBAL. `clara.legal_documents` has no firm column at all (0185), so a version
-  // this battery published would change every OTHER battery's derived egress authority on the
-  // same cluster. Put it back exactly as it was found.
-  if (baseline) await restoreLegalBaseline(baseline);
-  await endPool();
-});
+after(async () => { await endPool(); });
 
 function unready(t) {
   if (!ready) {
@@ -222,9 +230,16 @@ test("p635.db.legal_standing_new_version publishing a new version flips standing
   assert.equal((await legalStanding(sc.owner)).standing_live, true,
     "accepting the new version restores the firm's standing with no other act");
 
-  await restoreLegalBaseline(baseline);
-  assert.equal((await legalStanding(sc.owner)).standing_live, true,
-    "and the shelf is back at the baseline this battery found");
+  // NO RESTORE IS ATTEMPTED, AND THAT IS THE HOUSE PRECEDENT RATHER THAN A SHORTCUT. 0185 makes
+  // the shelf append-only in both directions: `t_legal_documents_append_only` refuses every
+  // DELETE and `_tf_legal_documents_transition` (0185:299-302) allows only draft->published and
+  // published->superseded, so a published row cannot be put back. `checkout-gate-c1.test.mjs:393`
+  // and `checkout-gate-c3.test.mjs:266` already supersede-and-publish the same way and leave the
+  // successor standing, which is why every battery in this estate reads the CURRENT published
+  // version from the catalog instead of assuming 0187's v1 — this one included (see
+  // `acceptKind`, which goes through get_current_legal_documents()).
+  assert.ok(baseline.length >= 2, "the pre-run shelf was recorded for the report: " +
+    baseline.map((b) => `${b.kind} v${b.version} ${b.status}`).join(", "));
 });
 
 test("p635.db.legal_standing_mask_viewer a viewer sees masked==true with no attribution, and firm_accepted intact", async (t) => {
@@ -446,7 +461,13 @@ test("p635.db.usage_base_prosrc_delta the live body is no longer the pinned pre-
   // remains must be 0110's own body under the same normalisation. That is what makes this a
   // "nothing else moved" assertion rather than a "something moved" one.
   const squeeze = (s) => s.replace(/\s+/g, "");
-  const stripped = squeeze(src.replace(FLOOR_STATEMENT, ""));
+  const stripped = squeeze(src).replace(squeeze(FLOOR_BLOCK), "");
+  const remainder = await rootQuery(
+    "select encode(sha256(convert_to($1,'UTF8')),'hex') as sha", [stripped],
+  );
+  assert.equal(remainder.rows[0].sha, USAGE_BASE_PREIMAGE_SQUEEZED,
+    "the live body MINUS 0233's floor block must be exactly the pre-image: a smuggled query " +
+    "change, a dropped bucket, a moved filter or a re-worded refusal all move this hash");
   assert.ok(stripped.includes("TWOBUCKETS,NEVERONEFIGURE"),
     "0110:718's own rule comment is carried verbatim through the recut");
   assert.ok(stripped.includes(squeeze("(pv.created_at at time zone 'utc')::date between v_from and v_to")),
@@ -512,9 +533,15 @@ test("p635.db.usage_buckets_separate the firm bucket and the platform bucket com
   const platformRow = rows.find((r) => r.scope === "platform" && r.call_kind === "chat");
   assert.ok(firmRow, "the firm bucket is present");
   assert.ok(platformRow, "the platform bucket is present");
-  assert.equal(Number(firmRow.calls), 1, "and the door folded NEITHER into the other (R-L10)");
+  assert.equal(Number(firmRow.calls), 1,
+    "the firm bucket counts THIS firm's one row and nothing else -- the platform rows beside it " +
+    "are not folded in (R-L10)");
   assert.equal(Number(firmRow.spend_cents), 200, "1M in @100c/1M + 1M out @100c/1M = 200 cents");
-  assert.equal(Number(platformRow.calls), 1);
+  // THE PLATFORM BUCKET IS ESTATE-GLOBAL BY CONSTRUCTION: a scope='platform' row carries no
+  // firm at all (0110:355-358), so every firm sees every platform row and an ABSOLUTE count
+  // here would couple this cell to whatever else ran on the cluster. What matters is that it
+  // arrives as its OWN row.
+  assert.ok(Number(platformRow.calls) >= 1, "the platform bucket carries at least the row just seeded");
 });
 
 test("p635.db.usage_unpriced a day with no price row publishes unpriced_calls and excludes it from spend", async (t) => {

@@ -357,6 +357,12 @@ export const F_A7_PI_COHORT = [...F_A7_PI_HUMAN_FNS, ...F_A7_PI_UNGRANTED_FNS];
 //     no human writes metering.
 //   get_llm_usage_summary — the monthly rollup (design SS3.7): clara_authenticated ONLY, its
 //     own jwt_firm() wall body-enforced (the estate's floor-body-enforced idiom).
+//     #635 [0233] RECUT IT, BODY ONLY: the rollup is now ADMIN-FLOORED as well — its first
+//     statement is clara._human_ctx(clara.role_rank('admin')), ahead of the same jwt_firm()
+//     wall. Its GRANT LINE IS UNCHANGED (create or replace preserves the ACL; 0233 re-issues
+//     none and its §C asserts the ACL is byte-identical to the pre-image), so this roster entry
+//     and the grant-matrix sweep below are unaffected. The name is ALSO a member of
+//     FIRM_COMMERCIAL_0233_COHORT, which is what makes a half-applied 0233 visible.
 // UNGRANTED: clara._tf_llm_price_no_overlap, the price-table overlap wall's statement-level
 // trigger function — no application role, PUBLIC included, may reach it; the sweep's
 // expected=false on every role IS the assertion (0038's own trigger-fn revoke idiom).
@@ -2311,6 +2317,34 @@ const PREVIEW_INVITE_0224_HUMAN_FNS = ["preview_invite"];
 export const PREVIEW_INVITE_0224_COHORT = [...PREVIEW_INVITE_0224_HUMAN_FNS];
 // #625 END
 
+// #635 [0233, the firm's real legal, commercial and model-usage state] — its own cohort, and
+// the FIRST on this roster that deliberately is NOT "wholly absent" before its migration.
+//
+//   THREE NEW HUMAN DOORS, clara_authenticated ONLY. `get_firm_legal_standing()` (viewer floor,
+//   arity 0 forever) answers whether an ACTIVE OWNER of the caller's firm holds both currently
+//   published legal acceptances — 0195:890-906's limb (a), which is what governs model egress;
+//   `get_firm_commercial_state()` and `get_firm_ai_usage(date)` are admin-floored and answer the
+//   firm's plan, payment record and monthly model usage. clara_runtime, both agent read roles
+//   and all four wake lanes gain ZERO on all three: each is `_human_ctx`-gated, so a lane
+//   carrying no JWT claims could not execute the body even if it held the grant — a DARK grant
+//   in 0057 B6's sense.
+//
+//   THE FOURTH NAME IS THE RECUT, and it is why this cohort needs a sentinel. 0233 recuts
+//   `get_llm_usage_summary` (0110's, body only, adding the admin floor it never had). That name
+//   has existed since 0110 — 123 files earlier — so on a pre-0233 frontier this roster is
+//   PARTIAL by construction, which `cohortFailures()` fails by design. The guard at the call
+//   site therefore arms the check on the FIRST NEW name rather than on emptiness; #652's
+//   accrual cohort takes the same shape for the mirror-image reason (wholly absent before its
+//   own migration).
+const FIRM_COMMERCIAL_0233_HUMAN_FNS = [
+  "get_firm_legal_standing", "get_firm_commercial_state", "get_firm_ai_usage",
+];
+const FIRM_COMMERCIAL_0233_RECUT_FNS = ["get_llm_usage_summary"];
+export const FIRM_COMMERCIAL_0233_COHORT = [
+  ...FIRM_COMMERCIAL_0233_HUMAN_FNS, ...FIRM_COMMERCIAL_0233_RECUT_FNS,
+];
+// #635 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -2523,6 +2557,11 @@ export const ALLOWED = {
     // #625 [0224] the invited person's pre-password preview — see the block above.
     // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
     ...PREVIEW_INVITE_0224_HUMAN_FNS,
+    // #635 [0233] the firm's legal standing (viewer floor), commercial state and model-usage
+    // reads (admin floor) — see the block above. clara_authenticated ONLY; runtime, both agent
+    // read roles and all four wake lanes gain ZERO. The recut `get_llm_usage_summary` is
+    // already on this set through F_A9_PR1A_HUMAN_FNS and its grant did not move.
+    ...FIRM_COMMERCIAL_0233_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2956,6 +2995,12 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("#653 0223 prepayment-amortisation lane", PREPAYMENT_0223_COHORT, liveNames));
   failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
+  // #635 [0233] — ARMED ON THE FIRST NEW NAME, not on emptiness: the cohort's fourth member
+  // (`get_llm_usage_summary`, which 0233 recuts) has existed since 0110, so a pre-0233 frontier
+  // would otherwise report this roster PARTIAL forever. See the block beside the constant.
+  if (liveNames.has("get_firm_legal_standing")) {
+    failures.push(...cohortFailures("#635 0233 firm legal/commercial/usage reads", FIRM_COMMERCIAL_0233_COHORT, liveNames));
+  }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
   // #812

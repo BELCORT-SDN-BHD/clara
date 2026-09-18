@@ -66,9 +66,12 @@ export async function acceptBothKinds(sub) {
   return { terms, dpa };
 }
 
-/** THE BASELINE this battery must leave behind: exactly one PUBLISHED row per kind, at the
- *  version 0187 seeded. Read before anything is published so the restore is a MEASUREMENT of
- *  what was found, never a transcription of what 0187 is believed to hold. */
+/** THE SHELF AS THIS RUN FOUND IT — recorded for the report, not for a restore. 0185 makes
+ *  `legal_documents` append-only in both directions (`t_legal_documents_append_only` refuses
+ *  every DELETE; `_tf_legal_documents_transition`, 0185:299-302, allows only draft->published
+ *  and published->superseded), so a published row CANNOT be put back once superseded.
+ *  `checkout-gate-c1.test.mjs:393` and `checkout-gate-c3.test.mjs:266` already move the shelf
+ *  the same way and leave the successor standing. */
 export async function readLegalBaseline() {
   // LABELLED FIXTURE READ (root): `legal_documents` grants no application role anything at
   // all (0185:229-232), by design — there is no human read of the whole table.
@@ -98,28 +101,6 @@ export async function publishNextVersion(kind) {
     [kind, version, `P635 ${kind} v${version}`, body, `rig/p635/${kind}-v${version}.md`],
   );
   return version;
-}
-
-/** Put the legal shelf back exactly as `readLegalBaseline()` found it. LABELLED FIXTURE DML. */
-export async function restoreLegalBaseline(baseline) {
-  const kinds = [...new Set(baseline.map((r) => r.kind))];
-  for (const kind of kinds) {
-    const keep = baseline.filter((r) => r.kind === kind).map((r) => r.version);
-    await rootQuery(
-      "delete from clara.legal_acceptances a where a.kind = $1 and not (a.version = any($2::int[]))",
-      [kind, keep],
-    );
-    await rootQuery(
-      "delete from clara.legal_documents d where d.kind = $1 and not (d.version = any($2::int[]))",
-      [kind, keep],
-    );
-    for (const row of baseline.filter((r) => r.kind === kind)) {
-      await rootQuery(
-        "update clara.legal_documents set status = $3 where kind = $1 and version = $2",
-        [kind, row.version, row.status],
-      );
-    }
-  }
 }
 
 /** A CONSUMED `firm_registration_payments` row pointing at `firm`. LABELLED FIXTURE DML: the
