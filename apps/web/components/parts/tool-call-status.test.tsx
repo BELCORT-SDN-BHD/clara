@@ -91,7 +91,7 @@ test("a SUCCEEDED and a FAILED call in one message render DIFFERENT chips", asyn
   }
 });
 
-test("UI-32 (#642) — the tool name is a HUMAN label, and the runtime's token never reaches the reader", async () => {
+test("UI-32 (issue 642) — the tool name is a HUMAN label, and the runtime's token never reaches the reader", async () => {
   const h = await renderComponent(App([call("a", "compose_metric_preview"), result("a", "compose_metric_preview")]));
   try {
     await h.settle();
@@ -102,7 +102,7 @@ test("UI-32 (#642) — the tool name is a HUMAN label, and the runtime's token n
   }
 });
 
-test("UI-32 (#642) — a tool this build has NEVER HEARD OF still shows the runtime's own word", async () => {
+test("UI-32 (issue 642) — a tool this build has NEVER HEARD OF still shows the runtime's own word", async () => {
   // The half of C6's original rule that survives, and the one that matters: a newer
   // frozen `chatTurn` body may ship a tool this surface has no label for. Showing its
   // token is honest. A blank chip would hide that a step happened at all, and a
