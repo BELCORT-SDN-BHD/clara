@@ -378,3 +378,43 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## #657 — the /bank Matching tab, and the two laws it changed
+
+**`/bank`'s six-way sub-nav is URL as truth.** `?tab=` addresses the strip (`accounts`,
+`statements`, `matching`, `exceptions`, `reconciliation`, `agency`) and `?line=` addresses the
+Matching tab's detail pane, copied verbatim from `components/registers/registers-workbench.tsx`'s
+shape — a `TABS` tuple, an `isTab` guard, `useSearchParams` and `router.replace`. Before #657 the
+strip was in-page `useState`, whose own comment called that "a deliberate simplification", so a
+reload or a shared link could not reach the Matching tab at all. **No new route and no
+`lib/navigation/tree.ts` row**: `/bank` is still ONE segment, and `?tab=` is a query.
+`router.replace` creates no history entry — the house's existing behaviour on the registers
+workbench, and the right answer for a sub-nav, where a tab is a view of one page rather than a
+place. **A multi-selection stays OUT of the URL**: a selection set is a draft, not an address.
+
+**ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
+key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
+flag}` — the same tuple `clara._reserve_op` hashes server-side — so "same intent ⇒ same key" is a
+property of the DATA rather than of a component's lifecycle, and there is no state to reset. The
+renewal rule is written out in full in that module's header; the short form is: the key renews
+only on an intentional human act that changes WHAT is being submitted, and on nothing else.
+
+This deliberately DIFFERS from the house posture, which is left alone: `lib/members/doors.ts`
+mints a fresh uuid per call on purpose, and `work-cancel-dialog.tsx`'s `useDecisionKey` mints one
+per OPEN DIALOG. Both are right for a decision whose identity lives in a component's lifecycle. A
+bank match's does not — the surface reloads unconditionally after every act, failed or not, so a
+second press after a lost response is a re-render away from the first, and with a per-call uuid
+the database saw two operations and refused the second with `already_matched`: a refusal for
+something that had already succeeded. The other three verbs in `match-doors.ts` keep the uuid.
+
+**A refusal now preserves the draft** — the typed cents, the ticked rows and the ack flag — so a
+human changes one thing and resubmits. Retyping an amount you already typed is how a human ends
+up typing a different one, and an unchanged draft resubmits as the SAME operation.
+
+**MEASURED, and why there is no Combobox** (AC13). `pnpm --filter @clara/web ui:add combobox
+--dry-run` REFUSES on this project: the payload would overwrite `components/ui/button.tsx`, which
+is on `scripts/protected-components.json` because it carries owner-ruled fixes. `ui:add popover
+--dry-run` exits non-zero inside the shadcn CLI itself on this project's `base-nova` style with
+`"registries": {}`. Overriding the guard with `CLARA_UI_ADD_OVERWRITE=1` would clobber an owner
+ruling to buy a picker, so the candidate surface uses a search field over a `Table` instead —
+AC13's own named fallback — and #657 changes neither `apps/web/package.json` nor the lockfile.
