@@ -194,7 +194,12 @@ test("a parked clarify is answered inline, in the thread, and the card shows the
   await answerField.fill("ROME PROPERTIES");
   await page.getByRole("button", { name: "Answer", exact: true }).click();
   await expect(page.getByText("Answered by your firm")).toBeVisible();
-  await expect(page.getByText("ROME PROPERTIES")).toBeVisible();
+  // `{ exact: true }` since #642: the conversation now names its SCOPE beside the
+  // composer, so "ROME PROPERTIES" also appears inside "ROME PROPERTIES · E2E Accounting"
+  // (the band) and in the escalated heading's `sr-only` scope suffix. What THIS assertion
+  // is about is the answered clarify card's own client attribution, which is the node
+  // whose whole text is the client's name.
+  await expect(page.getByText("ROME PROPERTIES", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Answer", exact: true })).toHaveCount(0);
 
   await scan(page, "answered clarify face");
@@ -271,8 +276,14 @@ test("C6: a settled transcript renders the bank act's ledger fields, the pack's 
   // (c) THE TOOL CHIPS, RESOLVED. Two calls in one message: one answered, one errored.
   // Before this train both were the same bare grey name chip, so the assertion that
   // they DIFFER is the discriminating one.
-  await expect(page.getByText("get_bank_pack · done")).toBeVisible();
-  await expect(page.getByText("trial_balance · failed")).toBeVisible();
+  // RE-BASED BY #642 (UI-32): the chip's verb is a HUMAN label now, and the runtime's own
+  // token never reaches the reader — `lib/clara/toolLabel.ts` holds the measured map, and
+  // `components/parts/tool-call-status.test.tsx`'s own header records why C6's original
+  // "never re-worded" rule gave way. The DISCRIMINATING fact is unchanged: the two chips
+  // differ, which is what was false before C6.
+  await expect(page.getByText("Reading the bank pack · done")).toBeVisible();
+  await expect(page.getByText("Reading the trial balance · failed")).toBeVisible();
+  await expect(page.getByText("get_bank_pack")).toHaveCount(0);
 
   // (d) chatTurn_v19's GOVERNED-KNOWLEDGE RECEIPT. It renders the key, the act and the
   // watermark — and NOT the value, which is correctable and withdrawable while this transcript
@@ -746,10 +757,15 @@ test("p642.e2e.long_history_scroll — a reader scrolled up stays put, and the j
   await expect(jump, "the jump control must be reachable and operable from the keyboard").toBeFocused();
   await page.keyboard.press("Enter");
   await expect(jump).toHaveCount(0);
-  expect(
-    await viewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
-    "the jump returns to the bottom",
-  ).toBeLessThanOrEqual(2);
+  // POLLED, because the jump is SMOOTH when motion is allowed — `scrollTo({behavior:
+  // "smooth"})` animates over several frames, so a single synchronous read here measures
+  // the first frame and nothing else. The property is "it returns to the bottom", not
+  // "it teleports"; the INSTANT arm under `prefers-reduced-motion` is
+  // `lib/clara/useTranscriptScroll.test.ts`'s own cell.
+  await expect
+    .poll(async () => viewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+      { message: "the jump returns to the bottom" })
+    .toBeLessThanOrEqual(2);
 
   // AC6/AC7 — the transcript itself at 320px and at 200% zoom, with an axe scan on each.
   await page.setViewportSize({ width: 320, height: 720 });
