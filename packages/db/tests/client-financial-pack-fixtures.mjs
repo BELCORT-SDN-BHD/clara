@@ -99,6 +99,31 @@ export async function makeCarryDownOnly(client) {
   });
 }
 
+/**
+ * LABELLED FIXTURE DML (2c): link a REOPEN MIRROR to the close entry it reverses.
+ *
+ * `clara.reopen_fiscal_year` is the only writer that mints this pair, and it wants a whole
+ * finalised fiscal year to reopen. The entry immutability trigger admits only a COMPLETE
+ * reversal-linkage pair (CLR08 on a half-written one), so both sides move in one transaction under
+ * `session_replication_role = replica` — `clara.journal_entries` is append-only.
+ *
+ * The SHAPE is 0120:797-814's: the mirror swaps debit and credit, points `reversal_of` at the
+ * close, and carries the original's `closing_transfer` THROUGH rather than asserting a fresh true.
+ */
+export async function linkReversal(originalId, mirrorId) {
+  await asRoot(async (c) => {
+    await c.query("begin");
+    try {
+      await c.query("set local session_replication_role = replica");
+      await c.query("update clara.journal_entries set reversal_of = $1 where id = $2",
+        [originalId, mirrorId]);
+      await c.query("update clara.journal_entries set reversed_by = $1 where id = $2",
+        [mirrorId, originalId]);
+      await c.query("commit");
+    } catch (e) { await c.query("rollback"); throw e; }
+  });
+}
+
 /** LABELLED FIXTURE DML (2): retire an account. There is no retire door. */
 export async function deactivate(client, code) {
   await rootQuery(

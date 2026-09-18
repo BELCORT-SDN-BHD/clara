@@ -23,7 +23,8 @@ import assert from "node:assert/strict";
 import { buildWorld, endPool, assertRaises, opk } from "./rig-fixtures.mjs";
 import { markSkip, printSkipCount } from "./wave-a-helpers.mjs";
 import {
-  CHART, financialClient, deactivate, makeCarryDownOnly, postEntry, stampPreFixCloseReceipt, plantBankStatement,
+  CHART, financialClient, deactivate, makeCarryDownOnly, linkReversal, postEntry,
+  stampPreFixCloseReceipt, plantBankStatement,
   pack, propose, publish, members, reasonOf, trialBalanceCash,
   rootQuery, humanQuery,
 } from "./client-financial-pack-fixtures.mjs";
@@ -446,6 +447,37 @@ test("p660.pack.unmarked_history_partial — an approved entry carrying close_re
   assert.equal(BigInt(p.income.value_cents), BigInt(0));
   assert.equal(p.profit.status, "ok", "the read still answers — it discloses rather than refuses");
   assert.notEqual(p.profit.value_cents, null);
+});
+
+test("p660.pack.reopen_mirror_excluded — the reopen mirror carries the original's marker through, so profit does not swing by twice the roll", async (t) => {
+  if (await gate(t)) return;
+  const { client, accounts } = await financialClient(ALICE(), "reopen");
+  await postEntry(ALICE(), BOB(), { client, date: "2026-03-02", lines: sale(rm(1000)) });
+  // The close entry, born MARKED — the post-0120 shape (`0120:514-521`).
+  const close = await postEntry(ALICE(), BOB(), { client, date: "2026-03-31", memo: "year-end close",
+    lines: [{ code: CHART.sales, debit: rm(1000) }, { code: CHART.retained, credit: rm(1000) }],
+    flags: { is_year_end: true, closing_transfer: true } });
+  // THE REOPEN MIRROR, at its exact shape: debit/credit swapped, `reversal_of` naming the close,
+  // and the ORIGINAL'S marker COPIED THROUGH rather than a fresh true (`0120:797-814` — a
+  // single-body fix would have left this false, and the mirror's own income-leg CREDIT would then
+  // have INFLATED profit, inverting task #17's suppression into compounding inflation).
+  const mirror = await postEntry(ALICE(), BOB(), { client, date: "2026-03-31",
+    memo: "Prior-period adjustment: reversal of the year-end close",
+    lines: [{ code: CHART.sales, credit: rm(1000) }, { code: CHART.retained, debit: rm(1000) }],
+    flags: { is_year_end: true, closing_transfer: true } });
+  await linkReversal(close, mirror);
+  await publishBank(client, accounts);
+
+  const p = await pack(CAROL(), client, { month: "2026-03-01" });
+  // BOTH the close and its mirror are excluded, so income is the RM1,000 that was actually earned.
+  // If only the close were excluded, income would read RM2,000; if neither, RM1,000 by accident
+  // (they cancel) — so the cell also asserts the detector did NOT fire, which distinguishes the
+  // two.
+  assert.equal(BigInt(p.income.value_cents), BigInt(rm(1000)),
+    "the reopen mirror moved profit — it carries closing_transfer and must be excluded too");
+  assert.equal(BigInt(p.profit.value_cents), BigInt(rm(1000)));
+  assert.equal(p.unmarked_closing_entries, 0,
+    "a MARKED mirror is excluded by the predicate, not disclosed by the unmarked-history detector");
 });
 
 test("p660.pack.reversal_and_negative_not_clamped — a reversal and a negative correction each move profit by their SIGNED amount", async (t) => {
