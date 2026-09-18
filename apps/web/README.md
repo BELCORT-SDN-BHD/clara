@@ -378,3 +378,44 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## #656 — the opening basis gets a source, and the books say so
+
+Three separate places made the document half of the opening lane unreachable from a browser, and
+all three had to be fixed for any of them to matter.
+
+- **`CreateOpeningSeedDialog` sent `tieDocumentId: null` unconditionally**, so no basis could ever
+  be bound to a document. It now offers this client's ACTIVE VERIFIED filings of the two kinds
+  `clara.create_opening_seed` admits — never `prior_gl`, which is CLR02 today — and sends BOTH the
+  id and the sha, because the door's XOR guard refuses one without the other. "No document — I will
+  key the balances" stays an EXPLICIT second choice with its own words, never an empty first row a
+  person falls into. Both new inputs are `Field`s in one `FieldGroup`, and the pre-`Field` as-of
+  input moved into the same group so the dialog does not carry two compositions. The rest of the
+  opening dialogs keep theirs; a whole-lane retrofit is #900's shape.
+- **The workbench rendered NOTHING for a tied basis** — the keyed panel mounts only when there is no
+  tie document — so a basis bound to a document showed four tie gates over targets nobody could see.
+  `OpeningTargetDocumentPanel` is its sibling: line key, the label AS PRINTED, account, debit,
+  credit and provenance (the document, its sha-12 and the region id the target cites). An unmapped
+  row renders as an ACTION, never a dash.
+- **Nothing called the runtime.** `OpeningParseAction` + `lib/registers/opening-source.ts` post to
+  `/api/runtime/opening/parse-targets` through the same-origin proxy, with the house runtime-wire
+  discipline. It is a PLAIN action: AC5 forbids a second ritual for the document read, and the
+  ceremony this lane has is `approve_opening_seed`'s distinct-checker door.
+
+**The outcome is persistent, never a toast.** A refusal here names rows on a page a professional has
+to go and find — the producer's whole value is that it says which lines it could not read — and a
+message that fades cannot carry that. Every branch of the route's contract renders with the
+database's own words: the named 422 VERBATIM with its counts and failing rows,
+`no_opening_tb_lines` as the honest keyed-fallback signal rather than an error, a 403 as denied
+(naming the restriction, offering no fake retry).
+
+**The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
+labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
+law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure
+worn as a tie figure, and `opening-dryrun-unchanged.test.tsx` re-measures that the totals did not
+resurrect it.
+
+**C3's seam.** `ENTRY_SELECT` now reads `is_opening_balance`, and an opening entry carries a badge
+linking back to `?tab=opening`. An approved opening item posts an ordinary entry with
+`origin='manual'` (0017:3375-3384), so before this the client's own books showed their opening
+position and a journal typed this morning under the same word.

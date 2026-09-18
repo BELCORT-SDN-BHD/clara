@@ -55,6 +55,7 @@ import { handleDocumentCorrectionSupabase } from "./document-correction-mock.mjs
 // below records against L7's module: this lane's handlers never call `readJson`, so a request
 // body some earlier hook already drained costs it nothing. Its RPC branch answers on the PATH
 // alone, and its one relation branch reads the query string.
+import { handleP656Runtime, handleP656Supabase } from "./opening-ledger-source-mock.mjs";
 import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // #623's durable-Work lane. Same file-disjoint shape: every branch is scoped to its own
 // client (or to an id that module minted) and falls through otherwise, it claims no
@@ -717,6 +718,14 @@ async function handleSupabase(request, response, url) {
   // It sits AFTER the plan lane because the two share the four plan lifecycle verbs, each gated on
   // its own plan id — a declared share rather than a collision (see e2e-fixture-ownership.test.ts).
   if (await handlePrepaymentsSupabase(request, response, path, url, sendJson, cors)) return;
+  // #656's opening lane. ABOVE the home board, and that position IS load-bearing (DECISIONS
+  // §6.1's ruling on #657's finding, which is general): `home-board-mock.mjs`'s EMPTY_RELATIONS
+  // answers `/rest/v1/opening_seed_registry` AND `/rest/v1/coa_accounts` with an honest `[]` for
+  // EVERY subject, unconditionally — so this lane dispatched below it would find its own basis
+  // missing and its chart empty, silently, as an empty page rather than an error. Running here
+  // costs that lane nothing: every branch is scoped to this lane's own client, seed or document
+  // id and falls through otherwise, and its five rpc verbs are disjoint from every lane above.
+  if (await handleP656Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
@@ -1070,6 +1079,9 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // #638, on the same footing: one admission route and one control endpoint, both scoped to this
   // lane's own client id, so nothing another walk owns can reach it.
   if (await handleStaffExpenseClaimRuntime(request, response, url)) return true;
+  // #656, on the same footing as its neighbours: ONE route (`POST /api/opening/parse-targets`),
+  // scoped to this lane's own seed id, so nothing another walk owns can reach it.
+  if (await handleP656Runtime(request, response, url)) return true;
   if (await handleChat(request, response, url)) return true;
   return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,

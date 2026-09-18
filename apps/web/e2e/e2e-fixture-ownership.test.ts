@@ -69,6 +69,7 @@ const LANE_MOCKS = [
   "journals-table-mock.mjs",
   "knowledge-mock.mjs",
   "members-lifecycle-mock.mjs",
+  "opening-ledger-source-mock.mjs",
   "operator-support-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
@@ -214,6 +215,13 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
  * The journals lane declares NEITHER, which is the shape a new lane mock should aim for.
  */
 const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] }> = {
+  // #656's own lane, the first fixture set for `?tab=opening`. Every handler is gated on this
+  // lane's own client, seed or document id and falls through otherwise; its five rpc verbs
+  // (`create_opening_seed`, `record_opening_target`, `get_opening_dryrun`, `approve_opening_seed`,
+  // `cancel_opening_seed`) are carried by no other lane, measured across `apps/web/e2e`; and its
+  // ONE runtime route (`POST /api/opening/parse-targets`) is likewise scoped to its own seed id.
+  // It declares NEITHER list, which is the shape a new lane mock should aim for.
+  "opening-ledger-source-mock.mjs": { unscopeable: [], debt: [] },
   // #632's own lane. `list_activity`/`get_activity_event` are brand-new RPCs no other lane ever
   // calls, and each still carries its own `return false;` fall-through on an unmatched
   // `p_client`/`p_source`+`p_id` — the journals lane's shape, declaring neither list.

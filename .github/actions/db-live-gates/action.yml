@@ -362,6 +362,25 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/prepayment-occurrence-e2e.mjs
+        # #656 — THE OPENING LEDGER'S SOURCE, end to end. Every half of this journey was already
+        # tested and the JOIN between them never was: the producer against synthetic geometry with no
+        # database, the consumer against regions a fixture inserted by hand, the DB battery against
+        # regions it persisted itself. This leg runs a real Azure layout payload through the real
+        # `normalizeAzureLayout` (with #656's in-line producer inside it), the real
+        # `clara.persist_document_extraction`, the real authoritative-extraction trigger, the real
+        # `parseOpeningTargets` route core on a real clara_runtime connection, the real
+        # `clara.record_opening_targets_parsed` and the real `approve_opening_seed` ceremony — then
+        # asserts the finalized basis, its append-only approval rows, and that
+        # `clara.trial_balance_as_of` now answers with the printed opening position, cent for cent.
+        # NO WORKFLOW WORLD, measured rather than skipped: no workflow touches the opening lane
+        # (`grep -l "opening_seed\|opening_tb" packages/runtime/workflows/*` is empty), so AC7's
+        # database-boundary clause is the applicable one. It SKIPS CLEANLY (exit 0, printed reason)
+        # when migration 0228 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/opening-ledger-source-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate

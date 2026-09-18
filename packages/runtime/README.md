@@ -892,3 +892,52 @@ shape; the WRITER does not, and the door is the wall. **`claraWork_v4` was cut i
 the existing `observed` object (`claraWork.v4.impl.ts`). Both rows above therefore carry
 forward to the next frozen `claraWork` version, unchanged.
 <!-- #811 -->
+
+## #656 — the `opening_tb.line` producer gets its caller
+
+`lib/opening-tb-cells.mjs` has read a printed trial balance into canonical `opening_tb.line`
+regions since Wave B, and NOTHING called it: every import was a test. The consumer half
+(`lib/opening-parse.mjs` → `clara.record_opening_targets_parsed`, route `src/openingRoutes.ts:32`)
+has been live and unreachable for just as long. #656 joins them.
+
+**`lib/opening-tb-produce.mjs` is the whole new surface**, and it is an adapter plus a containment
+shell: it takes the `tables.N.cells.M` region payloads `normalizeAzureLayout` has just built, hands
+them to `cellsToOpeningTb` unchanged, and returns `{status, reason, regions, refusals, totals}`. It
+adds no grammar of its own, and that is a rule rather than a style — **any future Clara opening tool
+that imports it FREEZES it**, because the freeze lint locks a workflow's whole transitive
+relative-import closure (`lib/periodic-adjustment-basis.ts` is the estate's proof that the trap has
+sprung once). Durable rules therefore live in `0017`/`0228` and in `opening-tb-cells.mjs`'s four
+refusal laws, never here.
+
+**The integration point is IN LINE, at the OCR pass** (`lib/egress.mjs`'s `normalizeAzureLayout`),
+through one appended statement: no new processing lane, no new `engine_kind`, no CHECK widening, no
+facts-router splice. The wiring is kind-blind by construction and that is ACCEPTED, for two measured
+reasons: the reader must POSITIVELY identify a balancing trial balance and returns `null`
+otherwise, and an `opening_tb.line` region is INERT until an opening seed ties that document — at
+which moment `clara.create_opening_seed` re-checks the document's kind (CLR02 for anything but
+`opening_balance_doc` / `management_account`). The worst case of a false positive is a few extra
+evidence rows on a document nobody ever ties, never a number that reaches an accounting effect.
+
+**It never throws.** This runs inside an OCR normalisation that has already succeeded; a producer
+fault must not destroy an extraction the document legitimately earned. Every path is contained and
+reports itself as `producer_error` with a named reason. Fail-quiet HERE is fail-closed DOWNSTREAM,
+because emitting nothing is exactly what the lane did before the module existed.
+
+**Two refusals this slice makes reachable for the first time**, both classified in
+`lib/opening-parse.mjs` rather than left to surface as a 500:
+
+- SQLSTATE 23503 on `fk_opening_tb_targets_account` — a printed account this client's chart has not
+  got. It carries no CLR code and no `detail.reason`, so it fell through to `throw` and the route
+  answered 500. `mapOpeningFkError` makes it a 422 in the `unparseable` family, NAMING the account
+  when Postgres' own structured DETAIL states one and it passes the chart's account-code grammar.
+  The runtime cannot pre-flight this: `clara_runtime` holds no SELECT on `clara.coa_accounts`.
+- CLR10 `op_key reused with different args` — the parse's op key is stable per (seed, document) so a
+  retry cannot double a basis, while the payload it hashes is keyed by region id. Re-reading the
+  tie document therefore makes a second parse a replay CONFLICT, which the generic arm reported as
+  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`. **Named residual**: the
+  answer is honest but still a dead end; re-parsing a re-read document needs either an op key
+  carrying the extraction or a door that re-points existing targets.
+
+`tests/opening-ledger-source-e2e.mjs` is the standalone leg that runs the whole chain on real
+Postgres. It bootstraps **no Workflow World**, measured rather than skipped: no workflow touches the
+opening lane, so AC7's database-boundary clause applies.

@@ -298,3 +298,37 @@ counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37
 
 `prepayment-0223-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.
+
+## `opening-ledger-source.test.mjs` (#656, migration 0228)
+
+Twelve cells over the opening lane's DOCUMENT half, which Wave B modelled completely and nothing
+ever exercised end to end because no producer existed. The premise probe is NOT a
+`to_regprocedure` check — 0228 installs no function — it is the republication itself: the registry
+publishes `registry_version = 2`. Its gate module is
+`opening-ledger-source-preintegration-gate.mjs` and the pairing is by the env-var STRING
+`CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE`, never by a shared file-name stem (at least seven of
+the estate's forty gate modules do not transform their own stem). A FOCUSED run without the gate
+fails loudly; a sweep with it loud-skips all twelve.
+
+Every `opening_tb.line` region fixture is created through `clara.persist_document_extraction`
+(#857's rule, adopted early). A raw INSERT would let a cell prove the database accepts evidence the
+real producer could never have written — the writer's own chain of responsibility
+(`_derive_opening_region_fact` → the monetary corroboration → `ck_document_regions_opening_fact_0017`)
+is part of what is under test, not scaffolding around it.
+
+Three cells record facts that are NOT what their names suggest, each measured on the rig:
+
+- `p656.tie.unmapped_blocks` — on a DOCUMENT-sourced basis an unmapped target is structurally
+  IMPOSSIBLE. `_assert_opening_target_fact` refuses unless the account matches the stored region
+  exactly, and `fk_opening_tb_targets_account` refuses unless it exists in the chart. The nullable
+  `account_code` that `get_opening_dryrun.unmapped_labels` reports belongs to the KEYED lane alone,
+  so a surface reading an empty `unmapped_labels` on a document basis as "everything is mapped"
+  would paint C-25's quiet pass all over again.
+- `p656.tie.approve_rebinds` — the mutation is a SECOND PRODUCER RUN, not an edit.
+  `clara.document_regions` is append-only, so nothing in this estate can change a region after the
+  fact; what happens in production is that the document is read again, the authority trigger moves
+  the pointer, and every target recorded against the older run is refused AT APPROVAL.
+- `p656.period.closed_fy` — the wall that fires is `clara._tf_period_wall_lines()` on
+  `clara.journal_lines`, at the DRAFT. `approve_opening_seed` carries no period guard of its own
+  and never gets the chance to need one. That measurement is why 0228's conditional narrow recut
+  was not written.
