@@ -54,6 +54,20 @@ export interface ClaraThreadUiState {
    *  left alone (a render fault that set it to "error" is precisely the mis-attribution
    *  this flag exists to end — see `markRenderFault`). */
   renderFault: boolean;
+  /** #642 AC3 — TRUE when the runtime answered this thread's LAST turn POST with
+   *  `replayed: true`: the door recognised the content-addressed `turn_key` and returned
+   *  the ORIGINAL task instead of admitting a second one. It is a fact about the SEND,
+   *  not about the turn, and the surface says it ONCE instead of drawing a second bubble
+   *  for one intent. Cleared by the next `beginSend`. */
+  lastSendReplayed: boolean;
+  /** #642 AC3 — TRUE while a DISTINCT resubmit is re-reading run + messages before it
+   *  posts. It exists only for the case appendix C §3's left column names: the previous
+   *  send's outcome is UNKNOWN (`sendStatus === "error"`) and the new intent has a
+   *  DIFFERENT key, so the door's replay branch cannot protect it and this tab reads the
+   *  state first. A SAME-key retry never sets it — the door's own lookup runs under the
+   *  per-firm advisory lock (0006:952) and is strictly better than any client read that
+   *  would race the admission it is meant to protect. */
+  checkingBeforeSend: boolean;
   stream: ClaraStreamState;
 }
 
@@ -76,6 +90,8 @@ const emptyThreadState: ClaraThreadUiState = {
   parkedClarify: null,
   turnLostSight: false,
   renderFault: false,
+  lastSendReplayed: false,
+  checkingBeforeSend: false,
   stream: initialClaraStreamState,
 };
 
@@ -239,7 +255,26 @@ export const claraThreadStore = {
   },
 
   beginSend(threadId: string): void {
-    setThread(threadId, { sendStatus: "sending", sendError: null, pendingUserParts: null, renderFault: false });
+    setThread(threadId, {
+      sendStatus: "sending",
+      sendError: null,
+      pendingUserParts: null,
+      renderFault: false,
+      // #642 — both #642 flags belong to ONE send. A "we already had that one" line left
+      // standing over the NEXT press would be a statement about a turn nobody is looking
+      // at any more, and the checking line is finished by definition once the POST starts.
+      lastSendReplayed: false,
+      checkingBeforeSend: false,
+    });
+  },
+
+  /** #642 — the DISTINCT-resubmit pre-read is in flight. See `checkingBeforeSend`. */
+  beginCheckingBeforeSend(threadId: string): void {
+    setThread(threadId, { checkingBeforeSend: true });
+  },
+
+  endCheckingBeforeSend(threadId: string): void {
+    setThread(threadId, { checkingBeforeSend: false });
   },
 
   /** #734 — A RENDER FAULT IS NOT A FAILED SEND, and this is the whole difference
@@ -255,10 +290,15 @@ export const claraThreadStore = {
     setThread(threadId, { renderFault: true });
   },
 
-  markAccepted(threadId: string, taskId: string): void {
+  markAccepted(threadId: string, taskId: string, replayed = false): void {
     // #630 — a NEW turn is never the one this tab lost sight of.
     setThread(threadId, { turnLostSight: false });
     setThread(threadId, {
+      // #642 — what the DOOR said about this POST, recorded before anything renders. On a
+      // replay the task below is the ORIGINAL task, which is exactly right: the stream
+      // this tab is about to attach is the one already running for that intent.
+      lastSendReplayed: replayed,
+      checkingBeforeSend: false,
       activeTaskId: taskId,
       // The new turn's start is not known until the DB is asked for it (`hydrateRun`).
       // Carrying the PREVIOUS turn's `created_at` forward would time this turn from the
@@ -304,7 +344,7 @@ export const claraThreadStore = {
    *  recorded. Waiting for an authority that is not coming left the composer disabled for the life
    *  of the mount, so `useClaraThread`'s two stop paths call this themselves — and they are the only
    *  callers that may, because they are the only ones holding `postTurn`'s acceptance in hand. */
-  markSent(threadId: string, parts: ClaraPart[]): void {
+  markSent(threadId: string, parts: ClaraPart[] | null): void {
     setThread(threadId, { sendStatus: "sent", pendingUserParts: parts });
   },
 
@@ -312,6 +352,8 @@ export const claraThreadStore = {
     setThread(threadId, {
       sendStatus: "error",
       sendError: message,
+      // #642 — the check, if one was made, is over; nothing may keep announcing it.
+      checkingBeforeSend: false,
       activeTaskId: null,
       turnStartedAt: null,
       turnStatus: null,
@@ -326,9 +368,17 @@ export const claraThreadStore = {
     // discard `applyClaraStreamEvent` already performs on `provisionalChunks`. Leaving them
     // would keep an answered question on screen with a still-ticking timer behind it.
     const settled = event.event === "message";
+    // #642 — A REVOCATION RETIRES THE CLOCK TOO, and for a different reason than a
+    // settle: the turn may well still be running, but this reader has lost access to it,
+    // so an elapsed-time line climbing under "you no longer have access" would be this
+    // tab asserting it is still watching something it cannot see. `activeTaskId` is
+    // kept, exactly as `markTurnStopped` keeps it — the id is still a fact.
+    const revoked = event.event === "revoked";
     setThread(threadId, settled
       ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null }
-      : { stream });
+      : revoked
+        ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null }
+        : { stream });
   },
 
   /** #630 — THE TURN CLOCK RETIRES WHEN A DOOR SAYS THE TURN IS OVER. `hydrateRun(null)`, a

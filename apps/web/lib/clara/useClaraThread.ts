@@ -18,6 +18,8 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
 import { readRunByTaskId, readThreadRunSnapshot, THREAD_RUN_LIVE_STATUSES } from "./turnRun";
+import { deriveIntentKey } from "./intentKey";
+import { FIRM_ALTITUDE } from "./useActiveThread";
 import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
 /** #630 — THE STOP-REPLY STATE MACHINE, as one value.
@@ -221,7 +223,7 @@ export function useClaraThread(
    *  text in the composer beside its own bubble in the transcript is an invitation to send it
    *  twice (`clearDraft`'s caller reads exactly this). A refused POST resolves false, so that
    *  text IS kept for the person to fix and resend. */
-  sendMessage: (text: string, attachments?: AttachmentPart[]) => Promise<boolean>;
+  sendMessage: (text: string, attachments?: AttachmentPart[], opts?: { altitude?: string }) => Promise<boolean>;
   retryConnection: () => Promise<void>;
   retryLoad: () => Promise<void>;
   /** #630 — STOP THE REPLY. Two acts under one press, and both are needed: aborting the SSE read
@@ -246,6 +248,13 @@ export function useClaraThread(
   const sendGenRef = useRef(0);
   /** The send generation a pending stop belongs to, or null when no stop is waiting. */
   const pendingStopRef = useRef<number | null>(null);
+  /** #642 — the intent key this tab last POSTED for this thread, so a resubmit can tell a
+   *  RETRY of the same intent (the door's replay branch protects it) from a DIFFERENT
+   *  intent sent after an unknown outcome (nothing protects that, so this tab reads the
+   *  state first). Memory-only and deliberately not persisted: appendix C §3 rules out
+   *  promising reload recovery from memory-only state, and content addressing makes the
+   *  reload case work anyway — the same sentence with the same files derives the same key. */
+  const lastIntentKeyRef = useRef<string | null>(null);
   /** Set false by the unmount cleanup, so nothing writes state into a closed rail. RE-ARMED on
    *  every mount rather than only initialised: React's StrictMode mounts, unmounts and remounts an
    *  effect in development, and a flag that only ever goes false would leave the machine silent
@@ -265,6 +274,8 @@ export function useClaraThread(
   // conversation it says nothing about.
   useEffect(() => {
     pendingStopRef.current = null;
+    // #642 — and so is the last intent: a key is an address within ONE conversation.
+    lastIntentKeyRef.current = null;
     setStop(STOP_IDLE);
   }, [threadId, setStop]);
 
@@ -391,18 +402,66 @@ export function useClaraThread(
   }, [auth, threadId, loadAttempt]);
 
   const sendMessage = useCallback(
-    async (text: string, attachments: AttachmentPart[] = []) => {
+    async (text: string, attachments: AttachmentPart[] = [], opts: { altitude?: string } = {}) => {
       const trimmed = text.trim();
       if (!trimmed || !threadId) return false;
+
+      // #642 AC3 — ONE INTENT, ONE KEY. This used to be `crypto.randomUUID()`, minted per
+      // PRESS, which is the exact opposite of idempotency: it guaranteed the door saw a
+      // new intent every time, so its `turn_key` replay lookup (0006:954-960) could never
+      // fire from this surface and a retry after a dropped ack was admitted as a SECOND
+      // turn. The key is now a content address over the thread, the altitude, the trimmed
+      // text and the sorted attachment ids — see ./intentKey.ts for why a changed
+      // attachment set MUST derive a new key (the door returns before it reads
+      // `p_user_parts`, so a same-key repost with a different invoice drops it in silence).
+      const altitude = opts.altitude ?? FIRM_ALTITUDE;
+      const turnKey = deriveIntentKey({ threadId, altitude, draft: trimmed, attachments });
+
+      // THE PRE-READ, AND EXACTLY WHEN IT IS OWED (appendix C §3's left column). It is owed
+      // when the previous send's outcome is UNKNOWN (`sendStatus === "error"` — a network
+      // failure or a 5xx tells us nothing about whether the turn landed) AND this is a
+      // DIFFERENT intent, because a different key cannot land on the door's replay branch
+      // and nothing else would stop a second turn. A SAME-key retry deliberately does NOT
+      // gate on it: the door's lookup runs under the per-firm advisory lock (0006:952) and
+      // is strictly better than any client read, which would race the admission it is
+      // meant to protect. Read BEFORE `beginSend`, so the error the reader is looking at
+      // stays on screen while this tab checks rather than being replaced by a blank
+      // "Sending…".
+      const before = claraThreadStore.getThread(threadId);
+      const priorKey = lastIntentKeyRef.current;
+      const outcomeUnknown = before.sendStatus === "error";
+      if (outcomeUnknown && priorKey !== null && priorKey !== turnKey) {
+        claraThreadStore.beginCheckingBeforeSend(threadId);
+        try {
+          const [snapshot, messages] = await Promise.all([
+            readThreadRunSnapshot(threadId, { session: auth }),
+            getMessages(auth, threadId),
+          ]);
+          claraThreadStore.hydrateMessages(threadId, messages);
+          claraThreadStore.hydrateRun(
+            threadId,
+            snapshot.run ? { taskId: snapshot.run.id, status: snapshot.run.status, startedAt: snapshot.run.created_at } : null,
+            snapshot.parkedClarify,
+          );
+        } catch {
+          // Fail-quiet, like the mount's own run read: a check that could not be made is
+          // not evidence of anything, and refusing to send because a read failed would
+          // strand the person with text they cannot post.
+        } finally {
+          claraThreadStore.endCheckingBeforeSend(threadId);
+        }
+      }
+
       // A NEW TURN IS NEVER THE STOPPED ONE, and it is never the turn an older press was for.
       const generation = sendGenRef.current + 1;
       sendGenRef.current = generation;
       pendingStopRef.current = null;
       setStop(STOP_IDLE);
       claraThreadStore.beginSend(threadId);
+      lastIntentKeyRef.current = turnKey;
 
       const parts: ClaraPart[] = [{ type: "text", text: trimmed }, ...attachments];
-      const result = await postTurn(auth, threadId, trimmed, crypto.randomUUID(), attachments);
+      const result = await postTurn(auth, threadId, trimmed, turnKey, attachments);
       if (result.kind !== "accepted") {
         // THE PENDING STOP DIES WITH THE TURN IT WAS FOR. A turn the runtime refused was never
         // admitted, so there is nothing to cancel and nothing to say; carrying the intent forward
@@ -415,7 +474,15 @@ export function useClaraThread(
         claraThreadStore.markSendFailed(threadId, message);
         return false;
       }
-      claraThreadStore.markAccepted(threadId, result.taskId);
+      claraThreadStore.markAccepted(threadId, result.taskId, result.replayed);
+
+      // #642 AC3 — A REPLAY DRAWS NO SECOND BUBBLE. `markSent`'s `pendingUserParts` is
+      // the PROVISIONAL bubble for a turn this tab just admitted; on a replay the door
+      // returned the ORIGINAL task, whose user row is already in the persisted transcript
+      // this thread loaded, so painting a provisional copy beside it would show one
+      // intent twice — which is the very thing the content-addressed key exists to
+      // prevent. `null` (not `[]`) because an empty array still renders the dashed frame.
+      const provisional: ClaraPart[] | null = result.replayed ? null : parts;
 
       // …AND THE STOP THAT ARRIVED WHILE THIS WAS IN FLIGHT IS HONOURED HERE. The turn is admitted
       // — the runtime has a task and a run — so the honest act is to cancel THAT, not to pretend
@@ -428,7 +495,7 @@ export function useClaraThread(
       // `spendStop` records what actually happened, and the view renders THAT.
       if (pendingStopRef.current === generation) {
         pendingStopRef.current = null;
-        claraThreadStore.markSent(threadId, parts);
+        claraThreadStore.markSent(threadId, provisional);
         const settled = await spendStop(result.taskId);
         if (settled.phase === "failed" && settled.cause !== "finished") {
           // A REFUSED STOP LEAVES A LIVE TURN, AND THE TAB MUST NOT ABANDON IT. This arm used to
@@ -459,7 +526,7 @@ export function useClaraThread(
           // reports; it does not call `beginRetry`.
           const admissionCause = settled.cause;
           const { controller, done } = openStream(result.taskId, () => {
-            claraThreadStore.markSent(threadId, parts);
+            claraThreadStore.markSent(threadId, provisional);
             setStop({ phase: "failed", cause: admissionCause, reattach: "reading" });
           });
           void done.catch((err: unknown) => {
@@ -501,7 +568,7 @@ export function useClaraThread(
       return new Promise<boolean>((resolve) => {
         let opened = false;
         const { controller, done } = openStream(result.taskId, () => {
-          claraThreadStore.markSent(threadId, parts);
+          claraThreadStore.markSent(threadId, provisional);
           if (!opened) {
             opened = true;
             resolve(true);
@@ -518,7 +585,7 @@ export function useClaraThread(
             // it — so `markSent` is the true transition, not a cosmetic unlock.
             if (!opened) {
               opened = true;
-              claraThreadStore.markSent(threadId, parts);
+              claraThreadStore.markSent(threadId, provisional);
               // …and TRUE for the same reason the pending arm answers true: the turn was accepted
               // and is in the transcript, so its text must not also stay in the composer.
               resolve(true);

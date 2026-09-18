@@ -17,6 +17,13 @@ import { ClaraMessageBubble } from "@/components/clara/ClaraMessageBubble";
 import { OnboardingChecklistCard } from "@/components/clara/OnboardingChecklistCard";
 import { TurnProgress } from "@/components/clara/TurnProgress";
 import { ComposerAttachmentControl, type ComposerAttachmentState } from "@/components/clara/ComposerAttachmentControl";
+import { ClaraScopeBand, type ClaraScopeDescriptor } from "@/components/clara/ClaraScopeBand";
+import { ClaraLiveToolStates } from "@/components/clara/ClaraLiveToolStates";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { useFirmScopeOrNull } from "@/components/firm-scope-provider";
+import { useClientIdentity } from "@/components/app-shell/scope-context";
+import { foldLiveToolParts } from "@/lib/clara/liveTools";
+import { useTranscriptScroll } from "@/lib/clara/useTranscriptScroll";
 import { claraWelcomeVisible } from "@/lib/clara/welcomeState";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -38,6 +45,8 @@ export function ClaraThreadView({
   onCreateThread,
   creatingThread = false,
   canCreateThread = true,
+  firmName = null,
+  clientName = null,
 }: {
   auth?: SessionTokenAccessor;
   threadId: string | null;
@@ -66,6 +75,15 @@ export function ClaraThreadView({
    *  route), absent at firm altitude. Independent of `threadId`'s own
    *  resolve/load state — the checklist card is not part of the transcript. */
   clientId?: string;
+  /** #642 AC1 — THE SCOPE NAMES, measured SERVER-SIDE by the `(full)` pages and passed
+   *  down. They are props rather than a hook because `app/(full)/layout.tsx` is a bare
+   *  passthrough that never mounts `FirmScopeProvider`, so `useFirmScopeOrNull()` returns
+   *  null on the escalated route and a hook-only band would name nothing exactly where
+   *  the conversation fills the viewport. Inside `(firm)` (the rail) they are absent and
+   *  the two context hooks below supply the same two facts with NO new fetch on the
+   *  rail's critical path. */
+  firmName?: string | null;
+  clientName?: string | null;
 }) {
   const t = useTranslations("Clara.thread");
   /** #630 — the Stop reply / Cancel Work vocabulary lives with the cancellation journey's own words. */
@@ -233,6 +251,54 @@ export function ClaraThreadView({
       ? [state.parkedClarify]
       : [];
 
+  // #642 AC4 — THE SECOND LIVE FOLD, beside the clarify one and on the same buffer. It
+  // needs the settled parts too: a turn that ended in a `refusal` part resolves any step
+  // the stream never closed as *refused* rather than leaving it mid-flight (see
+  // lib/clara/liveTools.ts).
+  const liveToolSteps = useMemo(
+    () => foldLiveToolParts(state.stream.provisionalChunks, state.stream.transcriptParts ?? []),
+    [state.stream.provisionalChunks, state.stream.transcriptParts],
+  );
+
+  // #642 AC1 — THE SCOPE, from whichever source this mount point actually has, and NEVER
+  // a guess. Inside `(firm)` the two shell contexts already hold both names (no new
+  // fetch); on the two `(full)` routes the page measured them server-side and passed them
+  // as props. `useClientIdentity()`'s rule is preserved exactly: its `name` is null unless
+  // the published identity is for the SAME client the URL is on, so a scope switch shows
+  // the neutral placeholder rather than the previous client's name.
+  const firmScope = useFirmScopeOrNull();
+  const clientIdentity = useClientIdentity();
+  const scope: ClaraScopeDescriptor = useMemo(
+    () => ({
+      firmName: firmName ?? firmScope?.firm_name ?? null,
+      clientName: clientId
+        ? clientName ?? (clientIdentity.id === clientId ? clientIdentity.name : null)
+        : null,
+      clientId: clientId ?? null,
+      // #664 fills this one altitude up. #642 builds ONE band and no cross-client
+      // attribution — the slot is empty and the type says so.
+    }),
+    [firmName, firmScope, clientId, clientName, clientIdentity],
+  );
+
+  // #642 AC5 — SCROLL OWNERSHIP. The revision is every content source this region
+  // renders, counted rather than subscribed to: a hook that guessed at them would miss
+  // one silently and stop following. See lib/clara/useTranscriptScroll.ts.
+  const transcriptRevision =
+    state.messages.length
+    + state.stream.provisionalChunks.length
+    + (state.pendingUserParts ? 1 : 0)
+    + clarifyParts.length
+    + liveToolSteps.length;
+  const { viewportRef, hasMoreBelow, jumpToLatest } = useTranscriptScroll<HTMLDivElement>(transcriptRevision);
+
+  // #642 AC5 — A REVOCATION IS ITS OWN TERMINAL, and it silences every other status line.
+  // Before this, `revoked` had no case in the reducer at all: the stream state stayed
+  // "streaming" and a member removed from the firm mid-reply sat in front of
+  // "Reconnecting…" forever. It must never become an EXISTENCE ORACLE — the copy says
+  // what this reader can no longer do, never whether the task or the firm exists.
+  const revoked = state.stream.status === "revoked";
+
   // H-24 — ONE SEND PATH, AND ONE GATE ON IT.
   //
   // The composer had no key handler at all: a `<textarea>` inside a form does not
@@ -247,10 +313,13 @@ export function ClaraThreadView({
   //     this guard, so Enter can never post what the button refuses to post, and the
   //     two cannot drift apart in a later edit. Note it is STRICTLY TIGHTER than the
   //     old inline guard, which omitted `notSignedIn`.
-  // (2) `nativeEvent.isComposing` — the product ships zh/ms locales, and committing a
-  //     candidate in a Chinese or Malay IME fires an Enter keydown whose only meaning
-  //     is "accept this word". Sending on it would post a half-typed sentence, and the
-  //     turn is not retractable.
+  // (2) `nativeEvent.isComposing` — an IME commit fires an Enter keydown whose only
+  //     meaning is "accept this word". Sending on it would post a half-typed sentence,
+  //     and the turn is not retractable. (#642 C-45 correction: this said "the product
+  //     ships zh/ms locales". It does not — `messages/en.json` is the ONLY locale file in
+  //     the tree. The guard is right anyway and for a better reason: an IME is a property
+  //     of the READER's keyboard, not of the app's locale, and a Chinese or Malay speaker
+  //     types into an English UI every day.)
   const sendDisabled = !threadId || notSignedIn || busy || attachments.blocked || !draft.trim();
 
   async function submitDraft() {
@@ -259,7 +328,10 @@ export function ClaraThreadView({
     // the marker, the refusal line and the control's own gate all speak about the turn that is
     // about to start without this component keeping a second copy of the same fact.
     const text = draft;
-    const onRecord = await sendMessage(text, attachments.parts);
+    // #642 AC3 — the ALTITUDE travels with the send, because the intent key is addressed
+    // by it: the same sentence in the same thread at firm altitude and at client altitude
+    // is two intents, and only the view knows which one this is.
+    const onRecord = await sendMessage(text, attachments.parts, { altitude });
     // #614 A7 — the draft is forgotten ONLY on a send the runtime actually took. A REFUSED turn
     // (rate limit, network error) must leave the human's text sitting right there to fix and
     // resend. #630: a turn that was admitted and then STOPPED is on the record too — its bubble
@@ -294,7 +366,15 @@ export function ClaraThreadView({
           than descendants. Visual order and the scroll behaviour are
           byte-unchanged — `space-y-3` still spaces every child, and the
           transcript wrapper below re-declares it for its own children. */}
-      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+      {/* #642 AC5 — THE SCROLL WRAPPER. `relative` so the jump-to-latest control can be
+          positioned over the transcript's own bottom edge without leaving the flex
+          column; `min-h-0` so the scroll child can actually shrink inside it (without it
+          a flex child's default `min-height:auto` makes the region grow instead of
+          scrolling, and the whole rail scrolls). The scroll element itself is unchanged
+          apart from the ref — the live-region boundary below is untouched, which is what
+          keeps `thread-live-regions`' zero-nested assertion honest. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={viewportRef} className="flex-1 space-y-3 overflow-y-auto p-3">
         {/* T11: the onboarding checklist card — a stateful card INLINE in the
             message stream (R7, the Manus precedent), never a side panel.
             N5 fix (rev-t11): this is the FIRST child of the SCROLLING region —
@@ -449,12 +529,42 @@ export function ClaraThreadView({
             ))}
           </div>
         )}
+        {/* #642 AC4 — THE LIVE TOOL STATES, a SIBLING of the clarify group and outside the
+            log for the identical reason: a self-announcing widget inside a `role="log"`
+            is the DS-04 nested-live-region defect, and this group carries an accessible
+            name of its own. Absence renders nothing at all — never a shimmer, never a
+            placeholder chip (AC4: a tool-call COUNT, prose or a shimmer is not accounting
+            completion). */}
+        <ClaraLiveToolStates steps={liveToolSteps} />
         {/* Also outside the log, and it gains its own `role="status"`: it was
             announced before only because it sat inside the log, and moving the
             clarify group out would have left it the last thing in a region it
             does not belong to. It is a connection STATE, not a transcript
             entry. */}
-        {streamStatusLabel(state, t) && !stopped && stopFailedCause === null && !runLostSight && (
+        {/* #642 AC5 — THE REVOCATION LINE. Exclusive with every other `role="status"` here
+            (they each carry `!revoked` below), because one event must be one
+            announcement. It says what this READER can no longer do and stops: it never
+            says the task finished, never says it failed, and never reports whether the
+            task or the session still exists — a revoked stream is exactly the situation
+            in which this surface has no standing to say. The copy gets the care the five
+            Stop-reply refusals got. */}
+        {revoked && (
+          <p role="status" className="text-xs font-medium text-destructive">{t("accessRevoked")}</p>
+        )}
+        {/* #642 AC3 — THE REPLAY, SAID ONCE. The door recognised this exact intent and
+            returned the turn it already admitted, so there is no second bubble and no
+            second run — and the reader is told that rather than left wondering why their
+            press appeared to do nothing. Cleared by the next send. */}
+        {state.lastSendReplayed && !revoked && (
+          <p role="status" className="text-xs text-muted-foreground">{t("alreadyAccepted")}</p>
+        )}
+        {/* #642 AC3 — THE PRE-READ, while it is happening. Only a DISTINCT resubmit after
+            an UNKNOWN outcome reaches this state (see `useClaraThread`'s own note); a
+            same-key retry never gates on a read the door already does better. */}
+        {state.checkingBeforeSend && !revoked && (
+          <p role="status" className="text-xs text-muted-foreground italic">{t("checkingBeforeSend")}</p>
+        )}
+        {streamStatusLabel(state, t) && !revoked && !stopped && stopFailedCause === null && !runLostSight && (
           <p role="status" className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>
         )}
         {/* #630 — THE STOPPED MARKER, and it REPLACES the stream-status line rather than sitting
@@ -462,7 +572,7 @@ export function ClaraThreadView({
             beside "Stopped" is two surfaces disagreeing about the same turn. The partial prose above
             is untouched — a stopped reply is still what Clara said, and deleting it would throw away
             the only record of the turn. */}
-        {stopped && (
+        {stopped && !revoked && (
           <p role="status" className="text-xs font-medium text-muted-foreground">{tw("stoppedMarker")}</p>
         )}
         {/* #630 (review) — A REFUSED STOP IS NOT A STOP, AND IT SAYS WHICH REFUSAL. `clara.
@@ -476,7 +586,7 @@ export function ClaraThreadView({
             this renders: an aborted read never transitions `state.stream.status` away from
             "streaming", so without that gate "Clara is responding…" and this line were two live
             regions announcing one press. */}
-        {stopFailedCause !== null && !stopped && (
+        {stopFailedCause !== null && !stopped && !revoked && (
           <p role="status" className="text-xs font-medium text-destructive">
             {stopFailedCause === "denied"
               ? tw("stopDenied")
@@ -501,7 +611,7 @@ export function ClaraThreadView({
             could observe. One sentence, one `role="status"` — and it is exclusive with the other
             two above for the same reason they are exclusive with each other. The transcript above
             is untouched; the reader is told what this tab knows and what would re-check it. */}
-        {runLostSight && (
+        {runLostSight && !revoked && (
           <p role="status" className="text-xs font-medium text-muted-foreground">{tw("runLostSight")}</p>
         )}
         {/* STOP REPLY. Named in full, everywhere, because the rail also carries "Cancel Work" on a
@@ -571,24 +681,66 @@ export function ClaraThreadView({
           <StateBanner tone="warning">{t("renderFault")}</StateBanner>
         )}
       </div>
-      {/* The honest note the firm altitude gets INSTEAD of the affordance. The intake
-          wall itself would allow a firm-altitude chat intake (origin "chat" is
-          authorised against the SESSION, never a client — intakeRoutes.ts:94), and the
-          attachment-admission trigger is firm+author scoped with no client_id at all.
-          What genuinely needs a client is the act this product performs after adoption:
-          `fileToClient`, so the document lands in a client's own workspace rather than
-          in a firm-wide unassigned lane no client surface would ever show it in. So the
-          control is hidden here and SAYS SO, rather than being silently absent. */}
-      <form
-        onSubmit={handleSubmit}
+      {/* #642 AC5 — JUMP TO LATEST. It exists ONLY while there is something below
+          (`hasMoreBelow` is the same measurement as "at the bottom", inverted), it is a
+          real `<Button>` so it is in the tab order, and its accessible name is WORDS, not
+          an icon. Under `prefers-reduced-motion` the jump is instant — the hook reads the
+          preference at the moment of the press, not at mount, because the setting can
+          change under a live page. The overlay is `pointer-events-none` so it never eats
+          a click meant for the transcript underneath it. */}
+      {hasMoreBelow ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            className="motion-fast pointer-events-auto shadow-sm"
+            onClick={jumpToLatest}
+          >
+            {t("jumpToLatest")}
+          </Button>
+        </div>
+      ) : null}
+      </div>
+      {/* #642 AC1 — THE SCOPE BAND, immediately above the composer at BOTH mount points.
+          The firm-altitude attachment note folds INTO it instead of sitting as a loose
+          `<p>` in the form's grid: both sentences are about the same scope, and the note
+          only ever made sense as the second half of one. */}
+      {threadId && !notSignedIn ? (
+        <ClaraScopeBand
+          scope={scope}
+          note={
+            !clientId ? (
+              /* The honest note the firm altitude gets INSTEAD of the affordance. The
+                 intake wall itself would allow a firm-altitude chat intake (origin "chat"
+                 is authorised against the SESSION, never a client — intakeRoutes.ts:94),
+                 and the attachment-admission trigger is firm+author scoped with no
+                 client_id at all. What genuinely needs a client is the act this product
+                 performs after adoption: `fileToClient`, so the document lands in a
+                 client's own workspace rather than in a firm-wide unassigned lane no
+                 client surface would ever show it in. So the control is hidden here and
+                 SAYS SO, rather than being silently absent. */
+              <p>{t("attachments.firmAltitudeNote")}</p>
+            ) : null
+          }
+        />
+      ) : null}
+      {/* #642 AC7 — THE COMPOSER ON `Field`, following `work-question-form.tsx:70`. What
+          changed is the LABEL/DESCRIPTION/`aria-invalid` wiring, never the control: the
+          raw `<textarea>` stays, because the `Textarea` primitive is
+          `field-sizing-content` (auto-growing) and the rail composer is a deliberate
+          fixed 2/3 rows. The label is `sr-only` rather than an `aria-label` so there is
+          exactly ONE accessible name, and it is the same string as before. */}
+      <form onSubmit={handleSubmit} className="border-t border-border p-2">
+      <FieldGroup className="gap-2">
+      <Field
+        data-slot="clara-composer-field"
         className={cn(
-          "grid items-end gap-2 border-t border-border p-2",
+          "grid items-end gap-2",
           clientId && threadId ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr_auto]",
         )}
       >
-        {!clientId && threadId && !notSignedIn ? (
-          <p className="col-span-full text-xs text-muted-foreground">{t("attachments.firmAltitudeNote")}</p>
-        ) : null}
+        <FieldLabel htmlFor="clara-composer" className="sr-only">{t("composerLabel")}</FieldLabel>
         {clientId && threadId ? (
           <ComposerAttachmentControl
             key={`${clientId}:${threadId}`}
@@ -601,6 +753,7 @@ export function ClaraThreadView({
           />
         ) : null}
         <textarea
+          id="clara-composer"
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -612,12 +765,15 @@ export function ClaraThreadView({
             void submitDraft();
           }}
           placeholder={t("composerPlaceholder")}
-          // One accessible name, not two. #507 and #508 each added this line
-          // independently and the merge kept BOTH — a duplicate JSX attribute the
-          // auto-merge introduced silently, which is why an auto-merged file both sides
-          // touched gets read rather than trusted. Same key, same value: nothing is lost
-          // by collapsing it.
-          aria-label={t("composerLabel")}
+          // ONE accessible name, not two — the rule #507/#508's duplicate `aria-label`
+          // merge taught this file. #642 moved the name onto the `sr-only` `FieldLabel`
+          // above (the same string), so an `aria-label` here would now be the SECOND name
+          // and would silently win over the label it duplicates.
+          aria-describedby="clara-composer-hint"
+          // AC7 — the field carries the invalid state its own error is about. `sendError`
+          // is the only refusal that belongs to THIS control; a load failure is about the
+          // conversation, not about what the person typed.
+          aria-invalid={state.sendStatus === "error" && state.sendError !== null ? true : undefined}
           disabled={!threadId || notSignedIn || busy}
           rows={variant === "rail" ? 2 : 3}
           // Stays a raw <textarea>: the Textarea primitive is `field-sizing-
@@ -637,6 +793,13 @@ export function ClaraThreadView({
         <Button type="submit" disabled={sendDisabled}>
           {busy ? t("sending") : t("send")}
         </Button>
+      </Field>
+      {/* The one thing a reader cannot discover by looking: that Enter sends and
+          Shift+Enter starts a new line (H-24's own contract, now said out loud). It is a
+          `FieldDescription` rather than a placeholder because a placeholder disappears
+          the moment the person starts typing — which is exactly when they need it. */}
+      <FieldDescription id="clara-composer-hint">{t("composerHint")}</FieldDescription>
+      </FieldGroup>
       </form>
       </div>
     </ThreadActionCoordinatorProvider>
