@@ -26,15 +26,15 @@ async function expectAccessible(page: Page, face: string): Promise<void> {
  *  through this lane's OWN control endpoint, scoped on the wire to this lane's client. */
 async function landCorrection(page: Page, keys: string[] | null): Promise<void> {
   const status = await page.evaluate(
-    async ([client, moved]) => {
-      const res = await fetch(`/api/e2e-work-knowledge/control?client=${client as string}`, {
+    async ([client, moved, path]) => {
+      const res = await fetch(`${path as string}?client=${client as string}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(moved === null ? { action: "reset" } : { action: "move", keys: moved }),
       });
       return res.status;
     },
-    [WK.clientId, keys] as const,
+    [WK.clientId, keys, WK.controlPath] as const,
   );
   expect(status, "the lane's control endpoint must answer").toBe(200);
 }
@@ -101,8 +101,9 @@ test("a knowledge correction lands → the banner appears naming the key → the
   await expectAccessible(page, "work detail, drift banner with a live draft");
 
   // RE-ASK: the answer is sent, and the persistent record carries it.
-  await page.getByRole("button", { name: /Send|Submit|Answer/ }).first().click();
-  await expect(page.getByText("Answer recorded", { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Send answer" }).click();
+  await expect(page.getByText("Your answer was accepted", { exact: false }).first())
+    .toBeVisible({ timeout: 15_000 });
 });
 
 test("a key the Work did NOT read moves: the basis drifted, and the surface says nothing about it", async ({ page }) => {

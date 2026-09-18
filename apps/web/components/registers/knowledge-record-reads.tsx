@@ -34,7 +34,7 @@ import { StateBanner } from "@/components/common/state";
 import { SectionHeader } from "@/components/common/section-header";
 import { businessDateTime } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { DoorRefusal } from "@/lib/doors";
+import { DoorError, DoorRefusal } from "@/lib/doors";
 import {
   loadWorkKnowledgeReadsForRecord,
   type KnowledgeReadStatus,
@@ -73,6 +73,13 @@ export function KnowledgeRecordReads({ clientId, recordId }: { clientId: string;
       // way for an absent record — deliberately, so it is not an existence oracle. Both are
       // "you may not see this" to the person looking at the page.
       if (err instanceof DoorRefusal && (err.code === "CLR04" || err.code === "CLR11")) {
+        setState({ kind: "denied" });
+        return;
+      }
+      // …and an HTTP 401/403 is the SAME face by a different road: a grant or an RLS policy said
+      // no before the body could carry a CLR code. `lib/wire-error-kind.ts` already classifies
+      // those two statuses, so this reads its taxonomy rather than inventing a second one.
+      if (err instanceof DoorError && (err.kind === "forbidden" || err.kind === "unauthenticated")) {
         setState({ kind: "denied" });
         return;
       }

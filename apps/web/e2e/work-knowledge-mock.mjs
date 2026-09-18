@@ -40,6 +40,10 @@ export const WK = {
   questionId: "658ff658-6666-4777-8777-658ff6580001",
   runRead: "wrun_01M20WGD9ETKK6RWCBA8CWG1GE",
   runTrace: "wrun_01M20WGD9ETKK6RWCBA8CWG1GF",
+  // The app proxies /api/runtime/* to the runtime leg (app/api/runtime/[...path]/route.ts), which
+  // is where serve-built.mjs consults this module. A spec calls the PROXIED path with the real
+  // session, exactly as journal-work-mock.mjs:126 does, and never an app-origin backdoor.
+  controlPath: "/api/runtime/e2e-work-knowledge/control",
 };
 
 const CLIENT_ROW = {

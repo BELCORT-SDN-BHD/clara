@@ -18,7 +18,7 @@
 //            it read is unknown. Rendering that as `false` would be exactly the null-as-empty
 //            defect #658 exists to kill: the absence of a record read as evidence of absence.
 
-import { callDoor, DoorRefusal } from "@/lib/doors";
+import { callDoor, DoorError, DoorRefusal } from "@/lib/doors";
 import { isUuidShape } from "@/lib/client-id";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { KnowledgeReadStatus } from "@/lib/registers/knowledge";
@@ -81,6 +81,12 @@ export async function readWorkKnowledgeDrift(workId: string, opts: Opts = {}): P
       // way for an absent Work — deliberately, so the read is not an existence oracle.
       if (err.code === "CLR04" || err.code === "CLR11") return { kind: "denied" };
       return { kind: "unreadable", message: err.message };
+    }
+    // …and an HTTP 401/403 is the SAME face by a different road: a grant or an RLS policy said no
+    // before the body could carry a CLR code. `lib/wire-error-kind.ts` already classifies those
+    // two statuses, so this reads its taxonomy rather than inventing a second one.
+    if (err instanceof DoorError && (err.kind === "forbidden" || err.kind === "unauthenticated")) {
+      return { kind: "denied" };
     }
     return { kind: "unreadable", message: err instanceof Error ? err.message : String(err) };
   }

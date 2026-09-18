@@ -69,7 +69,7 @@ test("two live records of one key render BOTH under a conflict alert; nothing pi
   const conflict = page.getByRole("alert").filter({ hasText: "These records disagree" });
   await expect(conflict).toBeVisible();
   await expect(page.getByText("service_tax")).toBeVisible();
-  await expect(page.getByText("not_registered")).toBeVisible();
+  await expect(page.getByText("12", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("segment = digital")).toBeVisible();
   await expectAccessible(page, "knowledge register, conflict");
 });

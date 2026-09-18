@@ -374,22 +374,22 @@ function applicabilityFor(clientId, key) {
 // client has no policy when it has one that stopped applying. Both window ends already ride
 // `_knowledge_row_json` (0192:1013-1036), so this needs no new door and no recut.
 const READS_EMPTY = rec({
-  record_id: KN.recordReadsEmpty, knowledge_key: "sst_regime", value: "service_tax",
-  key_description: "The SST registration status the interview recorded.",
+  record_id: KN.recordReadsEmpty, knowledge_key: "banking_arrangement", value: "has_accounts",
+  key_description: "Whether this client operates bank accounts.",
   knowledge_version: "10",
 });
 
 const READS_DENIED = rec({
-  record_id: KN.recordReadsDenied, knowledge_key: "sst_regime", value: "not_registered",
-  key_description: "The SST registration status the interview recorded.",
+  record_id: KN.recordReadsDenied, knowledge_key: "financial_year_end_month", value: 12,
+  key_description: "The month this client closes its financial year.",
   knowledge_version: "10",
 });
 
 const EXPIRED = rec({
-  record_id: KN.recordExpired, knowledge_key: "sst_regime", value: "sales_tax",
+  record_id: KN.recordExpired, knowledge_key: "mpers_eligibility", value: { eligible: true },
   effective_from: "2020-01-01", effective_to: "2020-12-31",
-  key_description: "The SST registration status the interview recorded.",
-  basis: "the SST de-registration letter", knowledge_version: "9",
+  key_description: "Whether this client may report under MPERS.",
+  basis: "the MPERS eligibility assessment, valid for 2020 only", knowledge_version: "9",
 });
 
 // #658 — WHAT `clara.list_work_knowledge_reads_for_record` ANSWERS, per record. Three faces:
@@ -414,7 +414,9 @@ function readsFor(recordId) {
   }
   if (recordId === KN.recordReadsEmpty || recordId === KN.recordExpired) {
     return {
-      status: "ok", record_id: recordId, knowledge_key: "sst_regime", scope_kind: "client",
+      status: "ok", record_id: recordId,
+      knowledge_key: recordId === KN.recordExpired ? "mpers_eligibility" : "banking_arrangement",
+      scope_kind: "client",
       client_id: KN.clientOk, reads: [], truncated: false, hidden_count: 0,
       computed_at: "2026-09-19T03:00:00.000Z",
     };
@@ -507,6 +509,17 @@ const KEY_DEFINITIONS = {
     validated_against: "enum:ENTITY_TYPES_V2", allowed_values: ["sdn_bhd", "llp"],
     description: "The client's legal form.", authority_bearing: false },
   // #654's own key: the one this lane promotes.
+  // #658's own three, deliberately DISTINCT from every key above so the new records cannot join
+  // #644's sst_regime conflict group.
+  banking_arrangement: { knowledge_key: "banking_arrangement", kind: "assertion", value_shape: "string",
+    validated_against: "enum:BANKING_ARRANGEMENT_V1", allowed_values: ["has_accounts", "no_accounts"],
+    description: "Whether this client operates bank accounts.", authority_bearing: false },
+  financial_year_end_month: { knowledge_key: "financial_year_end_month", kind: "assertion",
+    value_shape: "number", validated_against: "range:month_1_12", allowed_values: null,
+    description: "The month this client closes its financial year.", authority_bearing: false },
+  mpers_eligibility: { knowledge_key: "mpers_eligibility", kind: "assertion", value_shape: "object",
+    validated_against: "shape_only", allowed_values: null,
+    description: "Whether this client may report under MPERS.", authority_bearing: false },
   default_currency: { knowledge_key: "default_currency", kind: "assertion", value_shape: "string",
     validated_against: "enum:CURRENCIES_V1", allowed_values: ["MYR", "USD", "SGD"],
     description: "The default presentation currency the interview recorded.",
