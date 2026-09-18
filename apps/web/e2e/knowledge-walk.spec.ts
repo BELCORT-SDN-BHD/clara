@@ -69,7 +69,7 @@ test("two live records of one key render BOTH under a conflict alert; nothing pi
   const conflict = page.getByRole("alert").filter({ hasText: "These records disagree" });
   await expect(conflict).toBeVisible();
   await expect(page.getByText("service_tax")).toBeVisible();
-  await expect(page.getByText("12", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("not_registered")).toBeVisible();
   await expect(page.getByText("segment = digital")).toBeVisible();
   await expectAccessible(page, "knowledge register, conflict");
 });
@@ -267,7 +267,7 @@ test("a DENIED reads-read gets its own banner and leaves the revision timeline r
   await signInTo(page, `/clients/${KN.clientOk}/knowledge/${KN.recordReadsDenied}`);
   await expect(page.getByText("You do not have access to this list")).toBeVisible();
   // THE OTHER TWO READS ON THIS PAGE ARE UNAFFECTED — this read fails independently.
-  await expect(page.getByText("not_registered")).toBeVisible();
+  await expect(page.getByText("The month this client closes its financial year.").first()).toBeVisible();
   await expect(page.getByText("Revision 1")).toBeVisible();
   await expectAccessible(page, "knowledge detail, reads list denied");
 });

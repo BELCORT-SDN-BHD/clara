@@ -176,10 +176,15 @@ test("reduced motion: the block renders with no animation, and Back returns to t
   await signInTo(page, `/clients/${WK.clientId}/work/${WK.workRead}`);
   await page.getByRole("tab", { name: "Sources" }).click();
   await expect(page.getByTestId("work-knowledge-block")).toBeVisible();
-  const animated = await page.evaluate(() =>
-    [...document.querySelectorAll("*")].filter((el) => {
-      const d = getComputedStyle(el).animationDuration;
-      return d !== "" && d !== "0s" && d !== "auto";
+  // MOVEMENT ONLY. Opacity and colour are allowed under reduced motion; transform and the
+  // geometric properties are not — the token contract's own rule, measured as computed style.
+  // Borrowed from accrual-walk.spec.ts rather than re-invented: a naive
+  // animationDuration-is-not-zero probe counts every Tailwind utility that DECLARES a duration
+  // it never plays, and reported 33 on a page where nothing moves.
+  const transformed = await page.evaluate(() =>
+    [...document.querySelectorAll("main, main *")].filter((el) => {
+      const st = getComputedStyle(el);
+      return st.transform !== "none" && st.transform !== "matrix(1, 0, 0, 1, 0, 0)";
     }).length);
-  expect(animated, "nothing animates under prefers-reduced-motion").toBe(0);
+  expect(transformed, "an element on the Work detail is transformed under reduced motion").toBe(0);
 });
