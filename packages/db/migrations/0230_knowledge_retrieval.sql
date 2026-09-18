@@ -683,6 +683,12 @@ comment on function clara.record_work_knowledge_read(uuid,text,int,text,date,tex
 -- that NAMES the firm. Both delegate to one ungranted core so the two lanes can never answer
 -- differently about the same Work.
 --
+-- THE ENVELOPE ALSO CARRIES WHAT THE LAST ATTEMPT READ (`read`), because B3's Work detail asks
+-- "what did this run read" and "has it moved since" as one question, and an eighth door would be a
+-- second read of one relation for one panel. It is READ METADATA ONLY -- key NAMES, tier counts,
+-- the face word and its reason -- exactly the #783 line the seventh door draws. `read` is null on
+-- the trace arm, because a trace records no read-set.
+--
 -- `relevant` IS NULL, NEVER FALSE, WHEN THE OBSERVED VERSION CAME FROM A TRACE. A v4-shaped run
 -- wrote `observed_revisions.knowledge_version` (claraWork.v4.impl.ts:593) but recorded NO
 -- read-set, so which keys it read is unknown. Answering `false` there -- "nothing relevant moved"
@@ -694,7 +700,7 @@ create function clara._work_knowledge_drift_core(p_firm uuid, p_work uuid) retur
   set plan_cache_mode = force_custom_plan as $core$
 declare
   w record; rd record; v_current bigint; v_observed bigint; v_from text;
-  v_read_keys text[]; v_moved text[]; v_as_of date; v_relevant boolean;
+  v_read_keys text[]; v_moved text[]; v_as_of date; v_relevant boolean; v_read jsonb;
 begin
   select aw.id, aw.firm_id, aw.client_id into w
     from clara.accounting_work aw where aw.id = p_work and aw.firm_id = p_firm;
@@ -708,7 +714,9 @@ begin
    where r.firm_id = w.firm_id and (r.scope_kind = 'firm' or r.client_id = w.client_id);
 
   -- THE RECORDED READ-SET FIRST: it is the only source that knows WHICH keys were read.
-  select k.knowledge_version, k.keys, k.as_of into rd
+  select k.knowledge_version, k.keys, k.as_of, k.status, k.reason, k.purpose, k.tiers,
+         k.records_shown, k.truncated, k.run_id, k.seq, k.read_at
+    into rd
     from clara.work_knowledge_reads k
    where k.work_id = w.id
    order by k.read_at desc, k.seq desc
@@ -718,6 +726,16 @@ begin
     v_read_keys := rd.keys;
     v_as_of := rd.as_of;
     v_from := 'read';
+    -- WHAT THE ATTEMPT ACTUALLY READ, carried on this same envelope rather than behind an eighth
+    -- door. B3's Work detail asks "what did this run read, and did it succeed?" in the same breath
+    -- as "has it moved since?", and a second door would be a second read of one relation for one
+    -- panel. It is READ METADATA only -- key NAMES, tier counts, the face word and its reason --
+    -- exactly what the seventh door returns and for the same #783 reason: no value, no
+    -- applies_when, no pack content.
+    v_read := jsonb_build_object(
+      'status', rd.status, 'reason', rd.reason, 'purpose', rd.purpose,
+      'tiers', rd.tiers, 'records_shown', rd.records_shown, 'truncated', rd.truncated,
+      'run_id', rd.run_id, 'seq', rd.seq, 'read_at', rd.read_at, 'keys', to_jsonb(rd.keys));
   else
     -- FALLBACK: the v4-shaped execution trace. It carries the version and NOTHING about the keys
     -- (claraWork.v4.impl.ts:593 writes knowledge_version and leaves basis_digest null), which is
@@ -734,7 +752,8 @@ begin
   if v_observed is null then
     return jsonb_build_object('observed_version', null, 'current_version', coalesce(v_current,0)::text,
       'observed_from', null, 'drifted', null, 'moved_keys', '[]'::jsonb,
-      'read_keys', null, 'relevant', null, 'as_of', null, 'work_id', w.id, 'client_id', w.client_id);
+      'read_keys', null, 'relevant', null, 'as_of', null, 'read', null,
+      'work_id', w.id, 'client_id', w.client_id);
   end if;
 
   select coalesce(array_agg(distinct r.knowledge_key order by r.knowledge_key), array[]::text[])
@@ -754,7 +773,8 @@ begin
     'observed_from', v_from, 'drifted', coalesce(v_current,0) > v_observed,
     'moved_keys', to_jsonb(v_moved),
     'read_keys', case when v_from = 'trace' then null else to_jsonb(coalesce(v_read_keys, array[]::text[])) end,
-    'relevant', v_relevant, 'as_of', v_as_of, 'work_id', w.id, 'client_id', w.client_id);
+    'relevant', v_relevant, 'as_of', v_as_of, 'read', v_read,
+    'work_id', w.id, 'client_id', w.client_id);
 end $core$;
 alter function clara._work_knowledge_drift_core(uuid,uuid) owner to clara_fn_owner;
 revoke all on function clara._work_knowledge_drift_core(uuid,uuid) from public;

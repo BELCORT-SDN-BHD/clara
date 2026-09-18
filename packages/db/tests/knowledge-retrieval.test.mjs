@@ -581,6 +581,18 @@ cell("p658.drift.relevant — moving a key the run READ is relevant; moving an u
   assert.equal(quiet.drifted, false);
   assert.equal(quiet.relevant, false);
   assert.deepEqual(quiet.read_keys, ["sst_regime"]);
+  // WHAT THE ATTEMPT READ rides on the same envelope -- read METADATA only, the #783 line the
+  // seventh door draws, so B3 needs no eighth door to render its knowledge block.
+  assert.equal(quiet.read.status, "ok");
+  assert.equal(quiet.read.purpose, "accounting_work");
+  assert.deepEqual(quiet.read.keys, ["sst_regime"]);
+  assert.deepEqual(quiet.read.tiers, a.tiers);
+  assert.equal(quiet.read.records_shown, a.records.length);
+  assert.equal(quiet.read.truncated, false);
+  const driftText = JSON.stringify(quiet);
+  for (const forbidden of ["applies_when", "\"value\"", "\"records\"", "\"trust\""]) {
+    assert.ok(!driftText.includes(forbidden), `the drift envelope must not carry ${forbidden}`);
+  }
 
   // AN UNRELATED KEY MOVES: drifted, but not relevant.
   await capture(w.owner, { key: "default_currency", value: "USD", client: w.clientA });
@@ -615,6 +627,7 @@ cell("p658.drift.trace_fallback — with no read-set, `relevant` is NULL and nev
   assert.equal(before.observed_from, "trace");
   assert.equal(before.observed_version, "1");
   assert.equal(before.read_keys, null);
+  assert.equal(before.read, null, "a trace records no read-set, so there is nothing to render");
   assert.equal(before.relevant, null,
     "the absence of a read-set is not evidence that nothing relevant moved -- that is the null-as-empty defect this ticket exists to kill");
   await capture(w.owner, { key: "default_currency", value: "MYR", client: w.clientA });
