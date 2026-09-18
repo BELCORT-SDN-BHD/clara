@@ -54,6 +54,53 @@ Some of those primitives carry owner-ruled fixes that a plain `shadcn add` would
 
 Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
+## Firm home: its URL state and its refresh contract (#659)
+
+`/` is the firm's PORTFOLIO now, not only a dispatcher. It carries four query parameters —
+`?status=&attention=&q=&cursor=` — parsed in exactly ONE place,
+[`lib/firm/portfolio-url-state.ts`](lib/firm/portfolio-url-state.ts), and read by the board through
+`useSearchParams`. `app/(firm)/page.tsx` deliberately reads none of them on the server: nothing on
+this route appears or disappears with the portfolio's filter, so a second parse there would be a
+duplicated contract bought for nothing (contrast `app/(firm)/work/page.tsx`, which does read
+`?view=` on the server because the running-agent-task panel genuinely does not belong on the
+attention view).
+
+`status`, `attention` (`needs_you` | `active` | `failed` | `caught_up`) and `q` are BROWSER-side
+narrowings over the page the door returned — `clara.get_firm_portfolio_pack` takes no filter
+argument at all — which is why the Empty state can tell "nothing matches this view" from "this firm
+has no clients". A malformed value degrades to its empty default and issues no request. `cursor` is
+the door's own opaque keyset cursor, passed through as typed: its grammar (`lower(name)|uuid`,
+base64) belongs to the door, and a browser that re-derived it would be a second spelling of a
+contract this build does not own. **Any filter change drops the cursor**, because a cursor is a
+fence into ONE ordered result set.
+
+**The refresh contract lives in [`lib/firm/use-firm-portfolio.ts`](lib/firm/use-firm-portfolio.ts),
+which COMPOSES `useReviewQueue` rather than editing it.** Four surfaces share that hook and neither
+it nor `use-async-read.ts` registers a listener; adding one there would change three other surfaces'
+request profile. So this hook owns the pack read and the listeners, and calls the shared hook's own
+`reload` after each of its reads, so the needs-you chips are never older than the table beside them.
+Four triggers: `focus` and `visibilitychange` (which double as the live permission recheck), a 30 s
+while-visible interval (the compensation for a missed event — the estate emits no Work lifecycle
+domain event, the only `pg_notify` channels are server-side, and this app holds no realtime
+subscription), a page change, and `CLIENT_RECORD_CHANGED`. The 60-second delayed face is
+`WORK_STALE_AFTER_MS`, IMPORTED from `lib/work/use-work-detail.ts` rather than restated. A denial
+clears the rows and the read instant; a transport failure keeps them, dated.
+
+Two consequences worth stating plainly. **The board renders no money at all** — the firm's home
+shows counts, never client amounts — and that prohibition is enforced by the door's own `prosrc`
+tail assertion, by `lib/firm/portfolio-pack.ts` having no field to put one in, and by
+`components/firm/firm-home/firm-portfolio.test.tsx` asserting the rendered board contains none. And
+**the creation control is mounted BESIDE the portfolio's state machine, never inside its
+zero-client branch** ([`components/firm/add-client-control.tsx`](components/firm/add-client-control.tsx),
+extracted from the client register so both pages mount the same one): its whole draft is memory-only
+React state, and a control hung off the empty branch would be remounted — and silently emptied — by
+the first of those four re-reads that returns a row.
+
+Recent activity on this page reads `clara.list_activity` (not `clara.list_firm_timeline`) so it can
+render WHO did each thing through the one shared actor cell. Both doors floor at bookkeeper, so the
+swap moves no permission. `clara.list_activity`'s kind ladder misfiles several event families under
+`documents` (#861); that is named on the surface and is not corrected in the browser.
+
 ## The document detail's three routed views (#646)
 
 `/clients/:clientId/documents` keeps ONE route and TWO query parameters:

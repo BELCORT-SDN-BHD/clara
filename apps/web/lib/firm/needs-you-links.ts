@@ -28,7 +28,15 @@
 // to select a row from the URL, this map is where that lands.
 
 import type { ReviewQueueRow } from "@/lib/journals/types";
-import { fixedAssetHref } from "@/lib/navigation/tree";
+import { fixedAssetHref, workDetailHref } from "@/lib/navigation/tree";
+
+/** A uuid, shape-checked before it is spliced into a path. A row whose deep id is missing or
+ *  malformed falls back to the destination the kind would have had anyway — the same guard #639's
+ *  `fixed_asset_incomplete` arm already carries, restated once here so both deep arms use it. */
+function isUuidShaped(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
 
 /** The client-workspace tab each row kind belongs to, as a path SUFFIX under
  *  `/clients/<clientId>`. `""` is the workspace root — the honest destination for a row that
@@ -52,8 +60,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   coding_task: "/documents",
   // An open question about a document is settled beside the document.
   open_question: "/documents",
-  // The SST compliance watch renders on the firm admin compliance surface, which is NOT
-  // client-scoped — so this kind deliberately has no client tab and keeps the root.
+  // #659 — REPOINTED. The comment that used to sit here said the SST watch "renders on the firm
+  // admin compliance surface, which is NOT client-scoped", and that stopped being true when
+  // `components/tax/SstWatchSection.tsx:114` began mounting `ComplianceWatchAffordance` on
+  // `/clients/:id/tax`. The three acts (acknowledge, snooze, resolve) are a click away there, on
+  // the client whose turnover crossed. The stale sentence is DELETED rather than softened: a
+  // comment that explains a destination the file no longer chooses is worse than none.
+  compliance_watch: "/tax",
   // A lint finding is raised against the books; the journals workbench is where it is fixed.
   lint_finding: "/journals",
   // Both "incomplete" kinds are register rows missing particulars. `fixed_asset_incomplete` is
@@ -74,9 +87,20 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
  * rather than a broken one.
  */
 export function needsYouRowHref(
-  row: Pick<ReviewQueueRow, "row_kind" | "client_id"> & { id?: string | null },
+  row: Pick<ReviewQueueRow, "row_kind" | "client_id"> & { id?: string | null; task_id?: string | null },
 ): string | null {
   if (!row.client_id) return null;
+  // #659 — THE SECOND DEEP DESTINATION, on #639's own precedent. A `work_question` row is ONE
+  // pending question a running accounting Work is parked on, and the row already carries that
+  // parked run in `task_id` (0180:1068; the field is on the typed row at `lib/firm/needs-you.ts`).
+  // `/clients/:clientId/work/:workId` is a page this checkout really serves (`tree.ts:530`,
+  // proven against the real app/ tree by routes.test.ts), and it is where the question is
+  // answered — the documents tab, where the old fall-through sent it, is not. A missing or
+  // malformed `task_id` falls back to the workspace root rather than building a URL out of
+  // nothing.
+  if (row.row_kind === "work_question" && isUuidShaped(row.task_id)) {
+    return workDetailHref(row.client_id, row.task_id);
+  }
   // #639 — THE ONE DEEP DESTINATION THIS MAP OFFERS, and it is not a fragment: `id` on a
   // `fixed_asset_incomplete` row IS the asset id (0041 S4.9), and `/registers/assets/:assetId` is
   // a page this checkout really serves (routes.test.ts proves it against the real app/ tree). The
@@ -91,8 +115,17 @@ export function needsYouRowHref(
 
 /** True when the row opens something more specific than the workspace root — the label
  *  changes with it ("Open the journals tab" vs "Open the client"), so a human knows where a
- *  click lands before making it. */
-export function hasOwningTab(row: Pick<ReviewQueueRow, "row_kind">): boolean {
+ *  click lands before making it.
+ *
+ *  #659: a `work_question` row has no OWNING_TAB entry — its destination is a RECORD, not a tab,
+ *  so it is built in `needsYouRowHref`'s body like `fixed_asset_incomplete`'s. It still opens
+ *  something more specific than the root, and the label has to say so, which is why this predicate
+ *  now asks about the same field the href builder does. A row whose `task_id` is absent falls back
+ *  to the root AND to the root's own label, so the two can never disagree. */
+export function hasOwningTab(
+  row: Pick<ReviewQueueRow, "row_kind"> & { task_id?: string | null },
+): boolean {
+  if (row.row_kind === "work_question") return isUuidShaped(row.task_id);
   return typeof OWNING_TAB[row.row_kind] === "string";
 }
 

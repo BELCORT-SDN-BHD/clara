@@ -143,6 +143,38 @@ plus the instant the read itself happened. The needs-you number is not in it: th
 review-queue count that owns it.
 _Avoid_: Calling its read instant a watermark; treating it as the needs-you source.
 
+**Firm portfolio pack**:
+The one firm-scoped read behind the firm's home: one row per client the caller may see, each
+carrying counts of DISTINCT Accounting work — what is running, what needs attention (failed and
+refused together, with the split published so a link and its number are the same population), and
+what a committed operation receipt dates inside the last seven `Asia/Kuala_Lumpur` calendar dates —
+plus that row's coverage and a short preview. It is paged by a keyset over the client's own name,
+and it carries **no money figure of any kind**: the firm's home shows counts, never client amounts.
+_Avoid_: A consolidated ledger; a cross-client money total; a sum of facets; calling its read
+instant a watermark.
+
+**Portfolio coverage**:
+A row's or a page's own statement of which part of the answer it is not making — that the attention
+numbers beside it exclude this client, that a finished Work carries no dated receipt, that only part
+of the page's retry labels were asked for, or that the register is longer than this page. It is a
+named condition, and it is never a smaller number presented as a complete one.
+_Avoid_: A percentage; a confidence score; a silent omission.
+
+**Attention source freshness**:
+The statement of WHICH signal dates each number on the firm's home: the review queue's mutation
+watermark, the compliance and lint evaluators' 48-hour staleness flags, the sweep's last-finalized
+instant, and the portfolio pack's own read instant. Reads of different ages are dated separately,
+because a single page-level "last updated" would be true of none of them.
+_Avoid_: One timestamp standing for the whole page; calling a read instant a watermark.
+
+**Watch disposition**:
+What a person has done about a compliance watch and when: acknowledged, snoozed, re-armed or
+resolved, with the actor, the instant, the rationale and — where the act was a resolution — the
+typed conclusion and evidence, over an append-only trail that records each state transition. An
+acknowledgement is an overlay: it never erases the condition it acknowledges. This record carries no
+revision number, so a transition is what names a change.
+_Avoid_: Treating an acknowledgement as a resolution; a dismissal; an invented version number.
+
 **Saved view**:
 A named set of list filters a person keeps, stored against that person rather than the firm. It is a filter on one destination — the same URL, narrowed — never a second destination and never a position in a result set.
 _Avoid_: A separate route or tab; a remembered page of results; a shared firm-level configuration.

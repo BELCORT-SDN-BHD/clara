@@ -28,13 +28,58 @@ test("each row kind opens the tab that owns its verbs", () => {
 });
 
 test("a row with no owning tab keeps the workspace root, and SAYS it is the root", () => {
-  // `seeding_proposal` is one row per CLIENT (裁-17, 0146), not one per object, and
-  // `compliance_watch` is settled on a FIRM admin surface with no client tab at all. Sending
-  // either to a tab would be a guess; the root is the honest destination and the label
-  // follows it, so a click's destination is never oversold.
-  for (const kind of ["seeding_proposal", "compliance_watch"]) {
+  // `seeding_proposal` is one row per CLIENT (裁-17, 0146), not one per object. Sending it to a
+  // tab would be a guess; the root is the honest destination and the label follows it, so a
+  // click's destination is never oversold.
+  for (const kind of ["seeding_proposal"]) {
     assert.equal(needsYouRowHref(row(kind)), `/clients/${CLIENT}`);
     assert.equal(hasOwningTab(row(kind)), false);
+  }
+});
+
+// --- #659: the two repoints ------------------------------------------------------------------
+
+test("ticket 659: a compliance_watch row opens the TAX tab, where the three acts are actually mounted", () => {
+  // The old destination was the workspace root, under a comment claiming the watch "renders on
+  // the firm admin compliance surface, which is NOT client-scoped". That stopped being true when
+  // `components/tax/SstWatchSection.tsx` began mounting `ComplianceWatchAffordance` on
+  // `/clients/:id/tax` — acknowledge, snooze and resolve are one click from there.
+  assert.equal(needsYouRowHref(row("compliance_watch")), `/clients/${CLIENT}/tax`);
+  assert.equal(hasOwningTab(row("compliance_watch")), true, "and the LABEL says which tab it opens");
+});
+
+test("ticket 659: a work_question row opens the parked Work RECORD, and falls back to the root without a usable task_id", () => {
+  const TASK = "33333333-3333-4333-8333-333333333333";
+  assert.equal(
+    needsYouRowHref({ ...row("work_question"), task_id: TASK }),
+    `/clients/${CLIENT}/work/${TASK}`,
+    "the row already carries the parked run in task_id (0180:1068); the documents tab never answered the question",
+  );
+  assert.equal(hasOwningTab({ row_kind: "work_question", task_id: TASK }), true);
+
+  // A missing or malformed id builds no URL out of nothing — and the LABEL degrades with the
+  // destination, so the two can never disagree.
+  for (const bad of [null, undefined, "", "not-a-uuid", "../../etc"]) {
+    assert.equal(
+      needsYouRowHref({ ...row("work_question"), task_id: bad as string | null }),
+      `/clients/${CLIENT}`,
+      `task_id=${String(bad)} falls back to the workspace root`,
+    );
+    assert.equal(hasOwningTab({ row_kind: "work_question", task_id: bad as string | null }), false);
+  }
+});
+
+test("ticket 659: both repointed kinds resolve to REAL message keys, so no raw next-intl path reaches the eye", async () => {
+  // `oldest-waiting-list.tsx` renders `t(\`openTab.${row.row_kind}\`)` whenever `hasOwningTab` is
+  // true. Before this ticket `NeedsYou.openTab` carried seven keys and neither of these two was
+  // among them, so the repoints alone would have shipped a key path to a professional.
+  const messages = (await import("../../messages/en.json", { with: { type: "json" } })).default as {
+    NeedsYou: { openTab: Record<string, string> };
+  };
+  for (const kind of ["compliance_watch", "work_question"]) {
+    const label = messages.NeedsYou.openTab[kind];
+    assert.equal(typeof label, "string", `NeedsYou.openTab.${kind} must exist`);
+    assert.ok((label ?? "").length > 0, `NeedsYou.openTab.${kind} must not be empty`);
   }
 });
 

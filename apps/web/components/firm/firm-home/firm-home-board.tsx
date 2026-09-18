@@ -37,6 +37,8 @@
 //     exist, and `--chart-1…5` existing in the token file is not a licence to invent one.
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 
 import { NotBuiltNote } from "@/components/common/not-built-note";
@@ -46,13 +48,17 @@ import { FIRM_ROLES, loadCallerContext } from "@/lib/firm/caller-context";
 import { clientStatusTally, oldestWaiting } from "@/lib/firm/home-facts";
 import { loadClientRegister } from "@/lib/firm/reads";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
+import { useFirmPortfolio } from "@/lib/firm/use-firm-portfolio";
+import { parsePortfolioUrlState } from "@/lib/firm/portfolio-url-state";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { AddClientControl } from "../add-client-control";
 import { DataState, ErrorMessage } from "../data-state";
 import { SweepStatusPanel } from "../sweep-status-panel";
 import { ClaraWorkingTile } from "./clara-working-tile";
+import { FirmPortfolioSection } from "./firm-portfolio-section";
+import { FirmRecentActivity } from "./firm-recent-activity";
 import { FirmSetupTile } from "./firm-setup-tile";
-import { FirmTimelineSection } from "./firm-timeline-section";
 import { NeedsYouScoreboard } from "./needs-you-scoreboard";
 import { OldestWaitingList } from "./oldest-waiting-list";
 
@@ -78,6 +84,15 @@ export function FirmHomeBoard() {
   const queue = useReviewQueue({});
   const register = useAsyncRead(() => loadClientRegister(sessionTokenAccessor));
 
+  // #659 — THE PORTFOLIO'S OWN READ, and the page's refresh contract. The composing hook owns the
+  // focus / visibilitychange / 30 s / CLIENT_RECORD_CHANGED triggers and calls the SHARED review
+  // queue's own `reload` after each of its reads, so the chips above the table are never older
+  // than the table. `use-review-queue.ts` itself is untouched: four surfaces share it and one of
+  // them is another lane's file this wave.
+  const searchParams = useSearchParams();
+  const portfolioState = parsePortfolioUrlState(searchParams ?? new URLSearchParams());
+  const portfolio = useFirmPortfolio({ cursor: portfolioState.cursor, onRefresh: queue.reload });
+
   // ZERO rows and MORE THAN ONE row are both "this build cannot name the firm" — and neither is
   // silently collapsed into a name. `uq_membership_active_user` makes >1 a structural surprise;
   // the scope spine's own fail-closed reading is copied here rather than reinvented.
@@ -89,6 +104,15 @@ export function FirmHomeBoard() {
   const tally = clientStatusTally(clients);
   const clientNames = new Map(clients.map((client) => [client.id, client.name] as const));
   const triage = oldestWaiting(rows, TRIAGE_ROWS);
+  // Which clients the review queue has something waiting on — derived from the envelope this page
+  // ALREADY read, never a second query. It drives the portfolio's `?attention=needs_you` narrowing
+  // and its designed caught-up state, and it is exactly why that narrowing is applied in the
+  // browser: the pack floors at bookkeeper over every client, the queue floors at viewer over
+  // active ones, and no door owns both populations.
+  const needsYouClients = useMemo(
+    () => new Set(rows.map((row) => row.client_id).filter((id): id is string => id !== null)),
+    [rows],
+  );
 
   // The identity line. The firm's NAME is the h1 once the read resolves; before that the page
   // keeps its own static label so the document always has exactly one h1 and never an h1 that
@@ -187,6 +211,17 @@ export function FirmHomeBoard() {
               </div>
             </section>
 
+            {/* #659 — THE PORTFOLIO. One row per client, counts of DISTINCT Work, every count a
+                link into the list that owns it, and NO money anywhere (Wayfinder: Firm Home does
+                not consolidate client sums). The creation control is handed in rather than mounted
+                inside the section's state machine — see that file's header. */}
+            <FirmPortfolioSection
+              portfolio={portfolio}
+              needsYouClients={needsYouClients}
+              registerEmpty={!register.loading && register.error === null && clients.length === 0}
+              creationControl={<AddClientControl onCreated={() => void register.reload()} />}
+            />
+
             <ClaraWorkingTile />
           </div>
 
@@ -195,7 +230,7 @@ export function FirmHomeBoard() {
                 while required firm facts remain; it GATES NOTHING — see firm-setup-tile.tsx. */}
             <FirmSetupTile />
 
-            <FirmTimelineSection clientNames={clientNames} />
+            <FirmRecentActivity clientNames={clientNames} />
 
             {/* Reused verbatim: it renders the same `sweep` object off the same envelope this
                 page already read, and returns null when the envelope carries none. */}
