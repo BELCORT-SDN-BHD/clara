@@ -1,0 +1,27 @@
+{
+  "name": "clara-agent-harness-validation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "proof:loop": "node tool-loop-proof.mjs",
+    "proof:workflow": "vitest run --config vitest.integration.config.ts",
+    "proof:restart": "node server-rig/process-restart-proof.mjs",
+    "proof:boundaries": "node server-rig/runtime-boundary-proof.mjs",
+    "proof": "npm run proof:loop && npm run proof:workflow"
+  },
+  "dependencies": {
+    "@workflow/vitest": "4.0.20",
+    "@workflow/world-postgres": "4.3.4",
+    "ai": "7.0.77",
+    "express": "5.2.1",
+    "nitro": "3.0.260610-beta",
+    "pg": "8.20.0",
+    "vitest": "3.2.4",
+    "workflow": "4.8.4",
+    "zod": "4.4.3"
+  }
+}

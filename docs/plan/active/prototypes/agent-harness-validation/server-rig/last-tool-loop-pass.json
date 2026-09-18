@@ -1,0 +1,73 @@
+{
+  "result": "PASS",
+  "environment": {
+    "node": "v22.23.2",
+    "postgres": "postgres (PostgreSQL) 17.11",
+    "workflow": "4.8.4",
+    "postgresWorld": "4.3.4"
+  },
+  "processRestart": {
+    "servingPidBefore": 46840,
+    "oldPidExited": true,
+    "servingPidAfter": 4752,
+    "postgresPidBefore": 23128,
+    "postgresPidAfter": 23128
+  },
+  "persistedHooksBeforeKill": [
+    "answer:revoked",
+    "answer:stable",
+    "answer:tool-loop"
+  ],
+  "trustedStateChangedOutsideAnswerPayload": {
+    "role": "viewer",
+    "active": false,
+    "authority_revision": 2,
+    "knowledge_revision": 2
+  },
+  "duplicateAnswerStatuses": [
+    200,
+    200
+  ],
+  "hookConflictGuarded": false,
+  "persistedEffect": {
+    "receipt_id": "1",
+    "operation_key": "stable:stable-answer",
+    "answer_text": "duplicate"
+  },
+  "concurrentInsertCounts": [
+    1,
+    0
+  ],
+  "sseReplayAfterRestart": {
+    "accepted": true,
+    "completed": true
+  },
+  "integratedToolLoopWorkflow": {
+    "runId": "wrun_01M20ST4NPBXV2R5HRD4RFPPT9",
+    "bodyVersion": "v3-tool-loop",
+    "modelCalls": 4,
+    "toolErrors": 1,
+    "receiptId": "3",
+    "operationKey": "tool-loop:tool-loop-answer:synthetic-effect-v1",
+    "duplicateReceiptDeduplicated": true,
+    "effects": 1,
+    "sseReplayAfterRestart": {
+      "accepted": true,
+      "completed": true
+    }
+  },
+  "revokedWork": {
+    "status": "blocked_authority",
+    "effects": 0
+  },
+  "cancellation": {
+    "status": "cancelled",
+    "effects": 0
+  },
+  "limits": [
+    "synthetic trusted-state schema, not Clara roles/RLS/business SQL",
+    "same compiled binary across restart; no old/new deployment version cutover",
+    "loopback scratch PostgreSQL, not hosted infrastructure"
+  ],
+  "logs": "C:\\Users\\zhant\\AppData\\Local\\Temp\\clara-agent-harness-607\\tool-loop-merge\\restart-run-HS1Rig"
+}

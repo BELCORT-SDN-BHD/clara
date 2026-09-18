@@ -6,7 +6,7 @@ Date: 2026-09-08. This supplements [`refresh-2026-09-08-ux-research.md`](./refre
 
 Every Mobbin call used the required task intent: **“Research coherent workflows and interaction patterns for an AI accounting workspace.”** Flow search returned metadata for every screen but rendered only evenly spaced preview images. I used targeted Mobbin screen searches to recover missing positions and visually inspected every screen described below. Chrome and the in-app browser were unavailable through CUA, so Mobbin's interactive flow viewer could not be opened in a separate browser tab. I did not fetch the raw image URLs or treat unrendered metadata as visual evidence.
 
-The historical `ux-pattern-library.md` and `shadcn-mapping.md` under the owner's research folder were used only as pointers. Their parent README says their decisions were withdrawn. Findings here are limited to frames returned in this pass; static frames do not establish motion, elapsed time, keyboard behavior, or backend semantics.
+The historical [`docs/research/ux-pattern-library.md`](../../research/ux-pattern-library.md) and [`docs/research/shadcn-mapping.md`](../../research/shadcn-mapping.md) were used only as pointers. Their parent README says their decisions were withdrawn. Findings here are limited to frames returned in this pass; static frames do not establish motion, elapsed time, keyboard behavior, or backend semantics.
 
 ## Newly inspected flow positions
 

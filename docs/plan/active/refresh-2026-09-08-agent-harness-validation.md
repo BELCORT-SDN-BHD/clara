@@ -19,7 +19,7 @@ The current Node baseline is already outside the declared support range of `ai@7
 
 ## What ran
 
-The throwaway prototype is in `prototypes/agent-harness-validation`. It uses only synthetic identifiers and state. The loop proof uses an AI SDK mock model and in-memory receipt map; the small integration uses Workflow's test Local World; the restart rig uses its own loopback-only PostgreSQL cluster. It has no provider key, production database connection, client data or deployment code.
+The throwaway prototype is preserved in this repository at `docs/plan/active/prototypes/agent-harness-validation` (published 2026-09-18; it was written in a sibling working directory and the commands below still name that original location). It uses only synthetic identifiers and state. The loop proof uses an AI SDK mock model and in-memory receipt map; the small integration uses Workflow's test Local World; the restart rig uses its own loopback-only PostgreSQL cluster. It has no provider key, production database connection, client data or deployment code.
 
 ### Supported-runtime Postgres World process restart
 
