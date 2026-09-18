@@ -50,6 +50,11 @@ components/app-shell/motion-preference-sync.test.tsx
 components/app-shell/scope-switcher.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/bank-money-doors.test.tsx
+components/bank/matching-candidates.test.tsx
+components/bank/matching-exception-face.test.tsx
+components/bank/matching-outcome.test.tsx
+components/bank/matching-refusal.test.tsx
+components/bank/matching-residual.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
@@ -256,7 +261,9 @@ lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts
 lib/bank/exception-doors.test.ts
 lib/bank/match-doors.test.ts
+lib/bank/match-opkey.test.ts
 lib/bank/match-reads.test.ts
+lib/bank/matching-context-types.test.ts
 lib/bank/money.test.ts
 lib/bank/reads.test.ts
 lib/bank/recon-doors.test.ts

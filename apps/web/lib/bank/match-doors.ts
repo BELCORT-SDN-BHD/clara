@@ -21,8 +21,24 @@
 //   complete_pending_match(p_client, p_match, p_op_key)
 
 import { callDoor, type CallDoorOptions } from "../doors";
+import { matchOpKeyFor } from "./match-opkey";
 import type { MatchEntryInput, BankAdjustmentInput, SettleAllocationInput, SettleReceipt } from "./match-types";
+import type { MatchReceipt } from "./matching-context-types";
 
+// #657 · D15 — ONE DECISION, ONE KEY, and only for `match_bank_line`.
+//
+// `opKey()` below is still a fresh uuid per call for the other three verbs, and that is the
+// HOUSE POSTURE, left alone deliberately (`lib/members/doors.ts:58-66` mints a fresh key on
+// purpose; `work-cancel-dialog.tsx`'s `useDecisionKey` mints one per open dialog). Both are
+// right for a decision whose identity lives in a component's lifecycle.
+//
+// `match_bank_line` is the one verb on this lane whose identity does NOT. The surface reloads
+// unconditionally after EVERY act, failed or not, so the human's second press of the same
+// button after a lost response is a re-render away from the first — and with a per-call uuid
+// the database saw two operations and refused the second with `already_matched`, a refusal for
+// something that had in fact already succeeded. So its key is DERIVED from the intent tuple
+// (see `match-opkey.ts` for the renewal rule, written out in full). Same intent, same key, by
+// construction rather than by remembering to hold one.
 const opKey = () => crypto.randomUUID();
 
 export async function matchBankLine(
@@ -31,17 +47,22 @@ export async function matchBankLine(
     adjustments?: BankAdjustmentInput[] | null; ackPeriodExceptions?: boolean;
   },
   opts: CallDoorOptions = {},
-): Promise<{ match_id: string }> {
+): Promise<MatchReceipt & { match_id: string }> {
   const body: Record<string, unknown> = {
     p_client: args.clientId, p_lines: args.lineIds, p_entries: args.entries,
     p_adjustments: args.adjustments ?? null,
     p_ack_period_exceptions: args.ackPeriodExceptions ?? false,
-    p_op_key: opKey(),
+    p_op_key: matchOpKeyFor({
+      clientId: args.clientId,
+      lineIds: args.lineIds,
+      entries: args.entries,
+      ackPeriodExceptions: args.ackPeriodExceptions ?? false,
+    }),
   };
-  const out = (await callDoor("match_bank_line", body, opts)) as { match_id?: string; id?: string } | null;
+  const out = (await callDoor("match_bank_line", body, opts)) as MatchReceipt | null;
   const id = out?.match_id ?? out?.id;
   if (!id) throw new Error("match_bank_line returned no match_id");
-  return { match_id: id };
+  return { ...out, match_id: id } as MatchReceipt & { match_id: string };
 }
 
 export async function unmatchBankMatch(

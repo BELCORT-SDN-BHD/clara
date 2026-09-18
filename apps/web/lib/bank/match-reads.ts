@@ -24,6 +24,7 @@ import {
   toOpenItem, toMatchCandidateEntry, toUnmatchedLine,
   type OpenItemRow, type OpenItemDomain, type MatchCandidateEntryRow, type UnmatchedLineRow,
 } from "./match-types";
+import { toBankLineMatchingContext, type BankLineMatchingContext } from "./matching-context-types";
 
 /** The settle_from_bank_line allocation picker's source — open items by
  *  counterparty. `domain` is resolved client-side from the counterparty's
@@ -55,4 +56,25 @@ export async function listBankMatchCandidates(
 export async function listUnmatchedLines(clientId: string, opts: BankReadOptions = {}): Promise<UnmatchedLineRow[]> {
   const out = await callDoor("list_unmatched_lines", { p_client: clientId }, opts);
   return (Array.isArray(out) ? out : []).map(toUnmatchedLine);
+}
+
+/**
+ * #657 (migration 0226) — everything ONE statement line can say about itself before a match is
+ * decided. Arg name is EXACT: `get_bank_line_matching_context(p_line)`.
+ *
+ * THIS IS THE READ THAT KEEPS AN EXCEPTED LINE ON SCREEN. `list_unmatched_lines` EXCLUDES a
+ * line carrying an open (or bank-corrective-resolved) exception BY DESIGN (0040:4117-4122), so
+ * the report above cannot show it at all. AC12 needs that line visible and PENDING with a
+ * linked recovery, and this read — asked for by id — is how it stays there. The door still
+ * refuses `line_excepted`; nothing on this lane is a bypass.
+ *
+ * NULL is the honest answer for a line outside the caller's firm AND for a line that does not
+ * exist: the DB returns the same NULL for both, deliberately, so this read is no existence
+ * oracle. A caller must render "not available" for null and never infer which of the two it is.
+ */
+export async function getBankLineMatchingContext(
+  lineId: string, opts: BankReadOptions = {},
+): Promise<BankLineMatchingContext | null> {
+  const out = await callDoor("get_bank_line_matching_context", { p_line: lineId }, opts);
+  return toBankLineMatchingContext(out);
 }

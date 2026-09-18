@@ -55,6 +55,7 @@ const LANE_MOCKS = [
   "activity-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
+  "bank-match-mock.mjs",
   "chat-parity-mock.mjs",
   "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
@@ -337,6 +338,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     // rows above — it COULD scope, which is exactly why it is not called unscopeable.
     debt: ["/rest/v1/report_agent_receipts"],
   },
+  // #657 the /bank Matching lane. Its ONE literal-path handler, `/rest/v1/clients`, scopes by
+  // `id=eq.<its own client>` and falls through for every other id; all SEVEN of its RPC verbs
+  // check `p_client` (or, for the line read, that the line id is one of its own three) before
+  // answering, and each returns false otherwise. Nothing here is unscopeable and nothing is debt.
+  "bank-match-mock.mjs": { unscopeable: [], debt: [] },
   // The Home boards' lane (#557). Its ONE literal-path handler, `/rest/v1/clients`, scopes by
   // id and falls through, so nothing is declared here.
   //

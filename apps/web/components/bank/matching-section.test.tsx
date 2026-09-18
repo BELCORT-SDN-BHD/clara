@@ -39,9 +39,14 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf, setNativeValue, setFieldValue } from "../../test/hookHarness";
+import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "@/lib/session-accessor";
 import { MatchingSection } from "./matching-section";
 import messages from "../../messages/en.json";
+
+// #657: the rebuilt tab renders base-ui <Select> selectors and a next/link remedy, both of
+// which need this harness's DOM polyfills to render at all.
+enableDomInspection();
 
 type Node = { tagName?: string; type?: string; checked?: boolean; value?: string; parentNode?: Node | null; childNodes?: Node[] };
 
@@ -67,13 +72,31 @@ function App() {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
-    children: createElement(MatchingSection, { clientId: "c1" }),
+    children: createElement(MatchingSection, { clientId: "c1", selectedLineId: "l1", onSelectLine: () => {} }),
   });
 }
 
-const LINE = { line_id: "l1", statement_id: "s1", bank_account_id: "acc1", entry_date: "2026-04-05", description: "fee", amount_cents: -1500 };
-const CANDIDATE = { entry_id: "e1", posting_date: "2026-04-05", memo: "misc payable", counterparty_name: "Acme", high_stakes: false };
-const OTHER_CANDIDATE = { entry_id: "e0", posting_date: "2026-04-04", memo: "office supplies", counterparty_name: "Beta", high_stakes: false };
+const LINE = { line_id: "l1", statement_id: "s1", bank_account_id: "acc1", entry_date: "2026-04-05", description: "fee", amount_cents: -1500, class_hint: "bank_charges" };
+const ACCOUNT = { id: "acc1", bank_code: "MBB", bank_name_display: "Maybank", account_number: "1044", coa_account_code: "170-C38", active: true };
+const STATEMENT = {
+  id: "s1", bank_account_id: "acc1", document_id: "d1", period_start: "2026-04-01", period_end: "2026-04-30",
+  opening_cents: 0, closing_cents: -1500, total_debit_cents: 1500, total_credit_cents: 0, line_count: 1,
+  status: "live", ingest_mode: "document", superseded_by: null, voided_by: null, voided_at: null, voided_reason: null,
+  tie: { gl_balance_cents: -1500, unmatched_cents: -1500 },
+};
+const CONTEXT = {
+  schema: "clara.bank-line-matching-context/v1",
+  line: { ...LINE, client_id: "c1", bank_account_display: "Maybank 1044", coa_account_code: "170-C38", line_no: 1, value_date: null, running_balance_cents: -1500, group_status: null, match_id: null },
+  statement: { ...STATEMENT, statement_date: "2026-04-30", source_doc_sha256: "abc", original_filename: "maybank.pdf" },
+  coverage: { line_count: 1, total_debit_cents: 1500, total_credit_cents: 0, tie: STATEMENT.tie },
+  exception: null, booking_block: null,
+  candidate_basis: [
+    { entry_id: "e1", amount_exact: true, date_delta_days: 0, counterparty_match: "name", class_hint: "bank_charges" },
+    { entry_id: "e0", amount_exact: false, date_delta_days: -1, counterparty_match: "none", class_hint: "bank_charges" },
+  ],
+};
+const CANDIDATE = { entry_id: "e1", posting_date: "2026-04-05", memo: "misc payable", counterparty_name: "Acme", high_stakes: false, debit_remaining_cents: 0, credit_remaining_cents: 1500, match_history: [] };
+const OTHER_CANDIDATE = { entry_id: "e0", posting_date: "2026-04-04", memo: "office supplies", counterparty_name: "Beta", high_stakes: false, debit_remaining_cents: 0, credit_remaining_cents: 900, match_history: [] };
 
 async function mountAndSettle() {
   const h = await renderComponent(App());
@@ -96,14 +119,18 @@ function checkboxes(h: Awaited<ReturnType<typeof renderComponent>>): Node[] {
 /** The checkbox whose PARENT ROW's rendered text contains `needle` — content-
  *  based, immune to DOM-order assumptions. */
 function checkboxNear(h: Awaited<ReturnType<typeof renderComponent>>, needle: string): Node {
-  const box = checkboxes(h).find((b) => textOf((b.parentNode ?? {}) as never).includes(needle));
+  // #657: the line report is a <Table>, so the checkbox sits in its own <td> and the identifying
+  // text lives on the <tr>. Walk up to the row rather than reading the immediate parent.
+  const box = checkboxes(h).find((b) => textOf((b.parentNode ?? {}) as never).includes(needle))
+    ?? checkboxes(h).find((b) => hasAncestorText(b, needle));
   assert.ok(box, `no checkbox found near "${needle}"`);
   return box!;
 }
 
 function hasAncestorText(node: Node, needle: string): boolean {
   let candidateRow = node.parentNode;
-  while (candidateRow && candidateRow.tagName !== "LI") {
+  // #657: the candidate list is a <Table> now, so the row element is <tr>, not <li>.
+  while (candidateRow && candidateRow.tagName !== "TR") {
     candidateRow = candidateRow.parentNode;
   }
   return candidateRow ? textOf(candidateRow as never).includes(needle) : false;
@@ -114,6 +141,9 @@ test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, an
   await withMockedEnv(
     async (u, init) => {
       const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([STATEMENT]);
+      if (url.includes("/rpc/get_bank_line_matching_context")) return jsonResponse(CONTEXT);
       if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([LINE]);
       if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([OTHER_CANDIDATE, CANDIDATE]);
       if (url.includes("/rpc/match_bank_line")) {
@@ -125,14 +155,17 @@ test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, an
     async () => {
       const h = await mountAndSettle();
       try {
-        assert.equal(checkboxes(h).length, 1, "only the unmatched-line checkbox exists before any line is selected");
+        // #657: the detail pane is addressed by the line query parameter and is open from mount, so
+        // the two candidate checkboxes and the ack checkbox render beside the line row's own.
+        assert.ok(checkboxes(h).length >= 1, "the unmatched-line checkbox renders");
         const lineBox = checkboxNear(h, "fee");
         await h.fireEvent(lineBox as never, "click", (n) => setNativeValue(n as never, "checked", true));
         for (let i = 0; i < 3; i++) await h.settle(); // load candidates for the now-selected line's account
 
-        assert.equal(checkboxes(h).length, 4, "both candidate-entry checkboxes (and the ack checkbox) must now also render");
-        const candidateBox = checkboxNear(h, "misc payable");
-        await h.fireEvent(candidateBox as never, "click", (n) => setNativeValue(n as never, "checked", true));
+        assert.equal(checkboxes(h).length, 4, "both candidate-entry checkboxes, the line checkbox and the ack checkbox render");
+        const candidateBox = checkboxes(h).find((b) => hasAncestorText(b, "misc payable"));
+        assert.ok(candidateBox, "the candidate row checkbox must render");
+        await h.fireEvent(candidateBox! as never, "click", (n) => setNativeValue(n as never, "checked", true));
 
         const centsInput = h.find(
           (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox"
@@ -167,6 +200,10 @@ test("BLOCKER-2: an unmatch_bank_match refusal renders visibly in the unmatch fo
   await withMockedEnv(
     async (u, init) => {
       const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([STATEMENT]);
+      if (url.includes("/rpc/get_bank_line_matching_context")) return jsonResponse(null);
+      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([]);
       if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([]);
       if (url.includes("/rpc/unmatch_bank_match")) {
         seenUnmatchBodies.push(JSON.parse(String(init?.body ?? "{}")));
