@@ -45,6 +45,17 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  *  from someone who never moved. */
 const BOTTOM_EPSILON_PX = 2;
 
+/** How long a programmatic jump is allowed to animate before its own scroll events count
+ *  as the reader's again.
+ *
+ *  WHY THIS EXISTS (measured in the browser walk, #642 `p642.e2e.long_history_scroll`): a
+ *  SMOOTH `scrollTo` fires scroll events all the way down, and every one of them lands in
+ *  the same handler the reader's own scrolling does. Mid-animation the element is NOT at
+ *  the bottom, so the handler read "the reader has scrolled up", set `following` false and
+ *  re-offered the jump control — to someone who had just pressed it. The window below is
+ *  what tells those two apart, and it closes EARLY the moment the scroll arrives. */
+const PROGRAMMATIC_WINDOW_MS = 1000;
+
 export interface TranscriptScrollHandle<T extends HTMLElement = HTMLDivElement> {
   /** Attach to the ONE scrollable element this hook owns.
    *
@@ -110,6 +121,16 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
    *  BEFORE the new content's geometry exists. A ref, not the state above, because the
    *  effect runs in the same commit as the append and must not see a stale render. */
   const followingRef = useRef(true);
+  /** `Date.now()` until which a scroll this module ITSELF started may still be animating.
+   *  Zero when nothing programmatic is in flight. */
+  const programmaticUntilRef = useRef(0);
+
+  /** The pending landing correction, cleared on unmount so a closed rail cannot write
+   *  state (or scroll a detached element) a second after it went away. */
+  const landingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (landingTimerRef.current !== null) clearTimeout(landingTimerRef.current);
+  }, []);
 
   const measure = useCallback(() => {
     const el = viewport;
@@ -133,7 +154,19 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     const el = viewport;
     if (!el) return;
     followingRef.current = true;
-    const onScroll = () => measure();
+    const onScroll = () => {
+      // A jump this module started is not the reader changing their mind. Its intermediate
+      // positions say nothing about what they want; only its ARRIVAL does, and that closes
+      // the window early so the very next real scroll is read normally.
+      if (Date.now() < programmaticUntilRef.current) {
+        if (el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_EPSILON_PX) {
+          programmaticUntilRef.current = 0;
+          measure();
+        }
+        return;
+      }
+      measure();
+    };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, [viewport, measure]);
@@ -156,14 +189,31 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
   const jumpToLatest = useCallback(() => {
     const el = viewport;
     if (!el) return;
-    scrollToBottom(el, !prefersReducedMotion());
-    // The intent is "follow from here on", and it is recorded immediately rather than
-    // waiting for a scroll event that a smooth animation delivers several frames later —
-    // a delta arriving mid-animation must not find `following` still false and strand the
+    // The intent is "follow from here on", and it is recorded BEFORE the scroll starts
+    // rather than waiting for an event a smooth animation delivers several frames later —
+    // a delta arriving mid-animation must not find `following` false and strand the
     // reader halfway.
     followingRef.current = true;
     setAtBottom(true);
     setHasMoreBelow(false);
+    const smooth = !prefersReducedMotion();
+    programmaticUntilRef.current = smooth ? Date.now() + PROGRAMMATIC_WINDOW_MS : 0;
+    scrollToBottom(el, smooth);
+    if (!smooth) return;
+    // AND IT LANDS. A smooth scroll animates towards the height it was GIVEN, and the
+    // content can grow underneath it (a card finishing its enter transition, a font
+    // swapping, a delta arriving) — measured 36px short in the browser walk. One
+    // correction at the end of the window puts the reader where they asked to be instead
+    // of a few pixels above it, and it is skipped if they have taken the scroll back.
+    if (landingTimerRef.current !== null) clearTimeout(landingTimerRef.current);
+    landingTimerRef.current = setTimeout(() => {
+      landingTimerRef.current = null;
+      programmaticUntilRef.current = 0;
+      if (!followingRef.current) return;
+      scrollToBottom(el, false);
+      setAtBottom(true);
+      setHasMoreBelow(false);
+    }, PROGRAMMATIC_WINDOW_MS);
   }, [viewport]);
 
   return { viewportRef, atBottom, hasMoreBelow, jumpToLatest, measure };

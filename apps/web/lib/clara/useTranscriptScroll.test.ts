@@ -172,3 +172,42 @@ test("p642.web.scroll_holds_position — a REOPENED region lands on the LATEST, 
     await h.unmount();
   }
 });
+
+test("p642.web.jump_to_latest — a SMOOTH jump's own scroll events are not the reader changing their mind", async () => {
+  // MEASURED IN THE BROWSER FIRST (`p642.e2e.long_history_scroll`, before this fix): a
+  // smooth `scrollTo` fires scroll events all the way down, and mid-animation the element
+  // is NOT at the bottom — so the handler read "the reader has scrolled up", dropped
+  // following, and re-offered the jump control to the person who had just pressed it. The
+  // walk saw the same defect from the other side: the scroll landed 36px short and stayed
+  // there, because the content grew while the animation was targeting an older height.
+  const originalMatchMedia = globalThis.window?.matchMedia;
+  Object.defineProperty(globalThis.window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({ matches: false, media: query }),
+  });
+  const el = scrolledUp();
+  const { h } = await mount(el);
+  try {
+    await h.act(() => { el.scrollTop = 120; el.fireScroll(); });
+    assert.equal(h.current.hasMoreBelow, true);
+
+    await h.act(() => { h.current.jumpToLatest(); });
+    // The animation's intermediate frames, delivered as real scroll events.
+    await h.act(() => { el.scrollTop = 400; el.fireScroll(); });
+    await h.act(() => { el.scrollTop = 550; el.fireScroll(); });
+    assert.equal(h.current.hasMoreBelow, false, "the control must not come back at the person who pressed it");
+    assert.equal(h.current.atBottom, true, "…and they are still following");
+
+    // The content grew while the scroll was animating, so the animation landed short.
+    el.scrollHeight += 240;
+    await new Promise((r) => setTimeout(r, 1100));
+    await h.act(() => {});
+    assert.equal(el.scrollTop, el.scrollHeight, "the jump LANDS, even when the content grew underneath it");
+  } finally {
+    await h.unmount();
+    if (originalMatchMedia) {
+      Object.defineProperty(globalThis.window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    }
+  }
+});
