@@ -2311,6 +2311,32 @@ const PREVIEW_INVITE_0224_HUMAN_FNS = ["preview_invite"];
 export const PREVIEW_INVITE_0224_COHORT = [...PREVIEW_INVITE_0224_HUMAN_FNS];
 // #625 END
 
+// #656 [0228, the opening general ledger gets a source] — COMMENT-ONLY, deliberately, and the
+// comment IS the cohort's content.
+//
+//   0228_opening_ledger_source.sql INSTALLS NO FUNCTION AND RECUTS NONE. Its whole content is a
+//   republication of `clara.document_capabilities`: an UPDATE that raises every row's
+//   `registry_version` from 1 to 2 (never DELETE-then-INSERT, #846 — 0207's BEFORE UPDATE
+//   monotone trigger permits the raise and refuses a decrease with CLR08), plus a content
+//   correction on thirteen of the 240 rows. So there is no granted name to roster, no ungranted
+//   closure to pin, and `cohortFailures` has nothing to compare: a cohort array would be empty and
+//   an empty array asserted against a live catalog proves nothing at all. The file's own tail
+//   re-reads THIRTEEN opening-lane bodies at their measured pre-image shas — five of them splices
+//   — and raises CLR10 if any has moved, which is the same claim from the migration's side.
+//
+//   THE ONE FACT WORTH RE-AFFIRMING HERE, because it is a GRANT fact and this file is the grant
+//   estate's map: `clara.document_capabilities` carries NO app-role write, before or after the
+//   republication. `clara_authenticated` holds SELECT alone; `clara_runtime`, both agent read
+//   roles and every wake lane hold NOTHING on the table and reach the vocabulary only through
+//   `clara._document_capability(text,text)` (0165's ruling, pinned by 0191's tail and re-proved by
+//   0228's). `packages/db/tests/opening-ledger-source.test.mjs`'s `p656.registry.no_app_write` is
+//   the executable half of that sentence, driven through real least-privileged personas.
+//
+//   The runtime half of #656 — the `opening_tb.line` producer wired in line at the OCR pass — adds
+//   no database object either: it writes through `clara.persist_document_extraction`, which has
+//   been granted and rostered since 0007.
+// #656 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
