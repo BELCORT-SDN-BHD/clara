@@ -16,6 +16,7 @@ import {
   mapRegionsToLines,
   openingOpKey,
   mapOpeningDbError,
+  mapOpeningFkError,
   parseOpeningTargets,
 } from "../lib/opening-parse.mjs";
 import { AuthError } from "../lib/authz.mjs";
@@ -239,4 +240,91 @@ test("REVOCATION (F-H7): a reassert that no longer holds refuses BEFORE the writ
   );
   const rows = await rig.rootQuery("select count(*)::int as n from clara.opening_tb_targets where seed_id=$1", [fx.seed]);
   assert.equal(rows.rows[0].n, 0, "the audited write never ran once authz lapsed");
+});
+
+// ---------------------------------------------------------------------------
+// #656 — the two arms the in-line producer makes reachable for the first time.
+// ---------------------------------------------------------------------------
+
+test("#656 mapOpeningFkError: the chart foreign key becomes a NAMED 422, never a 500", () => {
+  // MEASURED shape (packages/db/tests/opening-ledger-source.test.mjs, p656.tie.unmapped_blocks):
+  // clara.opening_tb_targets carries fk_opening_tb_targets_account -> clara.coa_accounts, so a
+  // printed account this client's chart has not got is refused by the KEY — SQLSTATE 23503, no
+  // CLR code, no detail.reason. Before this arm it fell through to `throw err` and the route
+  // answered 500, which tells a professional nothing about a situation they can fix in a minute.
+  const fk = Object.assign(new Error('insert or update on table "opening_tb_targets" violates foreign key constraint'), {
+    code: "23503",
+    constraint: "fk_opening_tb_targets_account",
+    detail: 'Key (client_id, account_code)=(3f6e2a7c-0000-4000-8000-000000000001, 777-XYZ) is not present in table "coa_accounts".',
+  });
+  const out = mapOpeningFkError(fk);
+  assert.equal(out.http, 422);
+  assert.equal(out.body.status, "unparseable");
+  assert.deepEqual(out.body.unmapped_accounts, ["777-XYZ"], "the failing account is NAMED (D13.2)");
+  assert.match(out.body.reason, /777-XYZ/);
+
+  // A detail that does not state a code the CHART'S OWN GRAMMAR admits is never quoted: the
+  // answer degrades to the honest general sentence rather than echoing database text.
+  const vague = { ...fk, detail: "Key (client_id, account_code)=(x, <script>alert(1)</script>) is not present" };
+  const out2 = mapOpeningFkError(Object.assign(new Error("fk"), vague));
+  assert.deepEqual(out2.body.unmapped_accounts, []);
+  assert.doesNotMatch(out2.body.reason, /script/);
+
+  // Every other foreign key, and every non-FK error, stays unclassified here — this arm must not
+  // become a catch-all that swallows a genuine fault as a parse failure.
+  assert.equal(mapOpeningFkError({ code: "23503", constraint: "fk_opening_tb_targets_document" }), null);
+  assert.equal(mapOpeningFkError({ code: "42601" }), null);
+  assert.equal(mapOpeningFkError(new Error("boom")), null);
+});
+
+test("#656 RE-READ: a second read of the tie document supersedes the cited run, and the re-parse refuses as a CONFLICT (not as malformed rows)", { skip }, async () => {
+  const fx = await buildOpeningFixture("p656-stale", {
+    regionTexts: [
+      "1000 Cash and bank RM 105,000.00 DR",
+      "900-RE Retained earnings RM 65,747.97 CR",
+      "910-000 Share capital RM 39,252.03 CR",
+    ],
+  });
+  const first = await rig.asRuntime((c) => parseOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.equal(first.http, 202, JSON.stringify(first.body));
+
+  // The document is READ AGAIN — the ordinary production event. `_tf_set_authoritative_extraction_0017`
+  // hands the pointer to the newest done extraction, KIND-BLIND, so the first run's regions stop
+  // being authoritative. The selector in this module deliberately takes the newest extraction that
+  // CARRIES `opening_tb.line` rows, so a re-parse follows the document rather than starving.
+  const second = await rig.asRoot((c) =>
+    c.query("insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count) values ($1,$2,'rig-ocr:2','ocr',2,'done',1) returning id",
+      [fx.firm, fx.documentId]));
+  for (const text of [
+    "1000 Cash and bank RM 105,000.00 DR",
+    "900-RE Retained earnings RM 65,747.97 CR",
+    "910-000 Share capital RM 39,252.03 CR",
+  ]) {
+    await rig.asRoot((c) =>
+      c.query("insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content) values ($1,$2,'page_polygon','{\"page\":1}'::jsonb,'opening_tb.line',$3)",
+        [fx.firm, second.rows[0].id, text]));
+  }
+
+  // AND THE RE-PARSE IS A DEAD END TODAY — measured, not assumed, and this is the cell that says
+  // so. The op key is stable per (seed, document) so a retried POST cannot double a basis, but the
+  // payload it hashes is keyed by REGION ID, and the re-read minted new regions. `_reserve_op`
+  // therefore refuses the same key with different args (CLR10, no detail.reason), which #656
+  // classifies as the CONFLICT it is rather than as "malformed_lines".
+  const again = await rig.asRuntime((c) => parseOpeningTargets(c, { seedId: fx.seed, firmId: fx.firm }));
+  assert.equal(again.http, 409, JSON.stringify(again.body));
+  assert.equal(again.body.status, "conflict");
+  assert.equal(again.body.reason, "source_reread_since_parse",
+    "the human must learn that the SOURCE moved, not that its rows are malformed");
+
+  // Nothing was written by the refused re-parse, and the basis still carries exactly the three
+  // targets the first read authored — now citing a run that is no longer authoritative, which is
+  // what `approve_opening_seed`'s own re-assertion refuses at approval
+  // (packages/db/tests/opening-ledger-source.test.mjs, p656.tie.approve_rebinds).
+  const rows = await rig.rootQuery(
+    "select extraction_ref from clara.opening_tb_targets where seed_id=$1", [fx.seed]);
+  assert.equal(rows.rowCount, 3, "the refused re-parse authored nothing and doubled nothing");
+  for (const r of rows.rows) {
+    assert.notEqual(r.extraction_ref.extraction_id, second.rows[0].id,
+      "the stale citation stands until a human reopens the basis -- the residual #656's report files");
+  }
 });

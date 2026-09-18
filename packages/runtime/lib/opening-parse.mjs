@@ -149,6 +149,53 @@ export async function readTieRegions(client, { documentId, firmId }) {
 export function isClaraError(err) {
   return typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
 }
+
+/** The account-code grammar `clara.coa_accounts` enforces, mirrored so nothing that fails it can
+ *  ever be quoted out of a database error string and into a caller's face. */
+const ACCOUNT_CODE_RE = /^(?:[0-9]{4,8}|[0-9]{3}-[0-9A-Z]{2,4})$/;
+/** Postgres' own structured DETAIL for a foreign-key violation. Reading it is reading OUR OWN
+ *  database's machine-generated shape, not third-party text — and the one field pulled out is
+ *  re-validated against the grammar above before it reaches anybody. */
+const FK_DETAIL_RE = /=\((?:[^,]+),\s*([^)]+)\)\s+is not present/;
+
+/**
+ * #656 — THE ACCOUNT A PRINTED TRIAL BALANCE NAMES AND THE CHART HAS NOT GOT.
+ *
+ * MEASURED on the rig (`packages/db/tests/opening-ledger-source.test.mjs`,
+ * `p656.tie.unmapped_blocks`): `clara.opening_tb_targets` carries
+ * `fk_opening_tb_targets_account (client_id, account_code) -> clara.coa_accounts`, so a parsed
+ * target naming an account this client's chart does not carry is refused by the KEY — SQLSTATE
+ * 23503, with no CLR code and no `detail.reason`. `mapOpeningDbError` classified only CLR codes,
+ * so that refusal fell through `parseOpeningTargets`'s `throw err` and the route answered **500
+ * internal**.
+ *
+ * That is the single likeliest outcome of reading a REAL trial balance: a firm's chart rarely
+ * carries every code the client's previous accountant printed. A 500 tells the professional
+ * nothing, which is the opposite of this lane's whole value — D13.2: the refusal must NAME every
+ * failing row. So it is classified here, as a 422 in the same `unparseable` family as the other
+ * honest no-result answers, carrying the account code when the database's own detail states one
+ * and it passes the chart's own grammar.
+ *
+ * The runtime CANNOT pre-flight this: `clara_runtime` holds no SELECT on `clara.coa_accounts`
+ * (measured), and adding a granted door for it is out of #656's scope. Classifying the refusal
+ * after the fact is therefore the whole of what this lane can honestly do; creating the missing
+ * account stays a human act on the Chart of Accounts register.
+ */
+export function mapOpeningFkError(err) {
+  if (err?.code !== "23503" || err?.constraint !== "fk_opening_tb_targets_account") return null;
+  const m = FK_DETAIL_RE.exec(String(err.detail ?? ""));
+  const code = m && ACCOUNT_CODE_RE.test(m[1].trim()) ? m[1].trim() : null;
+  return {
+    http: 422,
+    body: {
+      status: "unparseable",
+      reason: code
+        ? `account ${code} is printed on this document but is not in this client's chart of accounts`
+        : "this document prints an account that is not in this client's chart of accounts",
+      unmapped_accounts: code ? [code] : [],
+    },
+  };
+}
 function claraReason(err) {
   try {
     return JSON.parse(err?.detail || "{}").reason ?? null;
@@ -168,6 +215,27 @@ export function mapOpeningDbError(err) {
   const reason = claraReason(err);
   if (err.code === "CLR11") return { http: 404, body: { error: "not_found", message: "not found" } };
   if (err.code === "CLR10") {
+    // #656 — THE RE-READ CONFLICT, told honestly instead of as "malformed".
+    //
+    // MEASURED: this lane's op key is stable per (seed, document) — `openingOpKey`, deliberately,
+    // so a retried POST cannot double a basis — while the payload it hashes is keyed by REGION ID
+    // (`mapRegionsToLines` mints `line_key: r:<region_id>`). So when the tie document is READ
+    // AGAIN, the second parse arrives with the same op key and a different payload, and
+    // `clara._reserve_op` (0002) refuses it CLR10 'op_key reused with different args' with NO
+    // `detail.reason`. The generic CLR10 arm below then reported that as `malformed_lines`, which
+    // is not what happened and sends a professional to look at the document's rows.
+    //
+    // Classified here as the CONFLICT it is. The narrow discriminator is `_reserve_op`'s own
+    // message — a house function of ours, not third-party text — and it is deliberately narrow:
+    // every other CLR10 keeps the unparseable answer it always had.
+    //
+    // NAMED RESIDUAL, recorded rather than silently fixed: this refusal is honest but it is still
+    // a DEAD END. Re-parsing a re-read document would need either an op key that carries the
+    // extraction (a change to a pinned, load-bearing idempotency shape) or a door that re-points
+    // existing targets; #656's report files it.
+    if (reason === null && /op_key reused with different args/.test(String(err.message ?? ""))) {
+      return { http: 409, body: { status: "conflict", reason: "source_reread_since_parse" } };
+    }
     return { http: 422, body: { status: "unparseable", reason: reason ?? "malformed_lines" } };
   }
   if (err.code === "CLR31" && reason === "registry_not_open") {
@@ -242,7 +310,7 @@ export async function parseOpeningTargets(client, { seedId, firmId, reassert }) 
     const recorded = Number(r.rows[0]?.r?.targets_recorded ?? lines.length);
     return { http: 202, body: { status: "parsed", lines: recorded } };
   } catch (err) {
-    const mapped = mapOpeningDbError(err);
+    const mapped = mapOpeningDbError(err) ?? mapOpeningFkError(err);
     if (mapped) return mapped;
     throw err;
   }
