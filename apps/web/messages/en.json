@@ -851,8 +851,8 @@
         "never": "Nothing has been read yet."
       },
       "freshness": {
-        "read": "Read at {at}.",
-        "never": "Not read yet.",
+        "read": "Money figures read at {at}.",
+        "never": "Money figures not read yet.",
         "cadence": "These figures refresh at most every 30 seconds while this tab is open.",
         "booksFrom": "This client’s books start on {day}."
       },

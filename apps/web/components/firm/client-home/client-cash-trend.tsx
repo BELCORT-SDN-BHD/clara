@@ -80,7 +80,14 @@ export function ClientCashTrend({
       {/* THE PICTURE. Hidden from assistive technology because the table below IS these rows. */}
       <div aria-hidden="true" className="hidden max-[640px]:hidden sm:block">
         <ChartContainer config={CHART_CONFIG} className="h-40 w-full">
-          <LineChart data={data} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
+            {/* ACCESSIBILITY LAYER OFF, and this is the other half of `aria-hidden` above.
+                Recharts' own layer puts `role="application" tabindex="0"` on its root `<svg>`
+                (`recharts/es6/container/RootSurface.js:44-53`), and a FOCUSABLE element inside an
+                aria-hidden subtree is a serious WCAG failure — a keyboard user lands on a node a
+                screen reader has been told does not exist. The readable TABLE below is this
+                chart's accessible rendering, so the picture is hidden AND unfocusable rather
+                than half of each. */}
+          <LineChart data={data} accessibilityLayer={false} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
             <CartesianGrid vertical={false} />
             <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} />
             <YAxis tickLine={false} axisLine={false} width={72} />

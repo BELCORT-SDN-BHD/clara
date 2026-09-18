@@ -325,7 +325,7 @@ test("the freshness sentence makes the SMALLER, true promise — there is no com
   const h = await mount();
   try {
     assert.match(text(h), /refresh at most every 30 seconds while this tab is open/);
-    assert.match(text(h), /Read at /);
+    assert.match(text(h), /Money figures read at /);
   } finally { await h.unmount(); }
 });
 

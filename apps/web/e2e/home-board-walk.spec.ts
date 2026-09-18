@@ -690,7 +690,10 @@ test("p660.money.period_switch — the selector writes ?period= into the URL, an
   await settled(page);
 
   const board = workbench(page);
-  const selector = board.getByLabel("Period");
+  // BY ROLE, not by label alone: the drilldown table is named "Accounts behind this period…", so a
+  // bare label match is ambiguous — and a strict-mode failure here would be the locator being
+  // wrong rather than the page.
+  const selector = board.getByRole("combobox", { name: "Period" });
   await expect(selector).toBeVisible();
   await selector.click();
   // The list is month-to-date plus thirteen whole months; picking a whole month is the change.
@@ -783,7 +786,10 @@ test("p660.money.denied — a mid-session CLR04 clears the money while the Work 
   await settled(page);
 
   const board = workbench(page);
-  await expect(board.getByText("Your role does not include this client’s financial figures.")).toBeVisible();
+  // THE BAND'S OWN BANNER. The same sentence also stands in for each cleared figure, which is
+  // the point — three renderings of one permission, not three different states — so this names
+  // the banner rather than counting them.
+  await expect(board.getByRole("status").getByText(/Your role does not include/)).toBeVisible();
   await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
   // A DENIED CALLER IS NOT OFFERED THE ADMIN-FLOORED AUTHORING DOOR.
   await expect(board.getByRole("button", { name: "Choose cash accounts" })).toHaveCount(0);

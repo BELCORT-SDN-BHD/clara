@@ -157,4 +157,13 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "b0e7bb8b94ff7b2cc85da610a87d25105287a61ed1cfcb060ff0fa206830e93c",
     },
   ],
+  // #660 [0232] — the client financial pack's own RLS loop, appended at the sorted position.
+  [
+    "0232_client_financial_pack.sql",
+    {
+      reason:
+        "Reviewed: the ONLY dynamic SQL in 0232 is a two-iteration do-block that enables and FORCES row level security and creates an owner policy and a firm-scoped human policy on the file's OWN two new relations (clara.cash_account_set_versions, clara.cash_account_set_members) — the same execute-format loop 0003:505-518 uses for the core tables. It emits ALTER TABLE and CREATE POLICY only and contains no CREATE VIEW of any kind, so neither P4 scope view can be a target; the two relation names it interpolates are string literals in the array beside it.",
+      sha256: "80d5977ccbefdc0d3a0a83cc2b8ffaba702b702e5a30ea4a266cbbf005e41c5f",
+    },
+  ],
 ]);

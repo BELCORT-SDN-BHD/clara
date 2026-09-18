@@ -51,6 +51,8 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
+import { isDoorRefusal } from "@/lib/doors";
+import { businessDateTime } from "@/lib/business-date";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import {
   proposeClientCashAccounts,
@@ -59,7 +61,6 @@ import {
 } from "@/lib/dashboard/financial-pack";
 import { useFinancialPack } from "@/lib/dashboard/use-financial-pack";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { ErrorMessage } from "../data-state";
 import { ClientCashSetDialog } from "./client-cash-set-dialog";
 import { ClientCashSummary } from "./client-cash-summary";
 import { ClientCashTrend } from "./client-cash-trend";
@@ -67,6 +68,15 @@ import { ClientIncomeExpenseChart } from "./client-income-expense-chart";
 import { ClientPeriodSelector } from "./client-period-selector";
 import { ClientProfitSummary } from "./client-profit-summary";
 import { formatDay } from "./client-financial-figure";
+
+/** A failure's own words, WITHOUT a second live region. A governed refusal renders verbatim (its
+ *  code rides the banner's own chip); anything else renders its message. This is deliberately not
+ *  `ErrorMessage`: that component IS a banner, and nesting one live region inside another makes
+ *  announcement order undefined (WCAG 4.1.3). */
+function failureText(error: unknown): string {
+  if (isDoorRefusal(error)) return error.message;
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function ClientFinancialSummary({
   clientId,
@@ -149,14 +159,22 @@ export function ClientFinancialSummary({
       ) : null}
 
       {/* A FIRST FAILURE SHOWS NO NUMBER AT ALL. There is no dated value to keep, and a zero here
-          would be a fabrication. A LATER failure keeps the dated numbers and adds Retry. */}
+          would be a fabrication. A LATER failure keeps the dated numbers and adds Retry.
+          THE TITLE AND THE ERROR ARE ONE BANNER, NOT A BANNER INSIDE A BANNER. `ErrorMessage`
+          renders its own `StateBanner`, and a live region nested inside another has undefined
+          announcement order — a screen reader can read the same failure twice or attribute it to
+          the wrong region (WCAG 4.1.3). So this owns the announcement and renders the error's own
+          text beside its title. */}
       {failedFirstRead ? (
         <StateBanner
           tone="error"
           title={t("failed.title")}
+          code={isDoorRefusal(staleError)
+            ? `${staleError.code}${staleError.reason ? ` · ${staleError.reason}` : ""}`
+            : undefined}
           action={<Button type="button" variant="outline" size="sm" onClick={reload}>{t("retry")}</Button>}
         >
-          <ErrorMessage error={staleError} />
+          {failureText(staleError)}
         </StateBanner>
       ) : null}
       {staleError && !failedFirstRead ? (
@@ -165,14 +183,14 @@ export function ClientFinancialSummary({
           title={t("stale.title")}
           action={<Button type="button" variant="outline" size="sm" onClick={reload}>{t("retry")}</Button>}
         >
-          <ErrorMessage error={staleError} />
+          {failureText(staleError)}
         </StateBanner>
       ) : null}
       {delayed ? (
         <StateBanner tone="warning" title={t("delayed.title")} data-testid="client-money-delayed">
           {readAt === null
             ? t("delayed.never")
-            : t("delayed.body", { at: new Date(readAt).toLocaleTimeString("en-MY") })}
+            : t("delayed.body", { at: businessDateTime(new Date(readAt)) })}
         </StateBanner>
       ) : null}
 
@@ -211,7 +229,7 @@ export function ClientFinancialSummary({
       <p className="text-xs text-muted-foreground" data-testid="client-money-freshness">
         {readAt === null
           ? t("freshness.never")
-          : t("freshness.read", { at: new Date(readAt).toLocaleTimeString("en-MY") })}
+          : t("freshness.read", { at: businessDateTime(new Date(readAt)) })}
         {" "}
         {t("freshness.cadence")}
         {pack.coverageFloor ? ` ${t("freshness.booksFrom", { day: formatDay(pack.coverageFloor) })}` : ""}
