@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import {
   CLR,
   CLR13,
+  COMPUTE_STATUSES,
   PG,
   ROLES,
   assertRaises,
@@ -27,6 +28,7 @@ import {
   endPool,
   seedFreshFirm,
   human,
+  humanQuery,
   sha,
   ingestDocument,
   readRow,
@@ -463,4 +465,99 @@ test("S4-AB12 parts validation: non-array / non-object element / missing type �
   );
 
   await finishTask(task); // cap hygiene
+});
+
+// ===========================================================================
+// #642 §3.5 — THE turn_key REPLAY BRANCH of `clara.begin_chat_turn`.
+//
+// Nothing in the estate drove it before this pair. `uq_agent_task_one_live_turn`
+// (0006:165-166) is PARTIAL on `(session_id)` for queued/running/awaiting_input/
+// cancel_requested, so it stops the common double-press and STOPS WORKING the moment
+// the first turn reaches a terminal — after which the only thing standing between a
+// re-pressed Send and a SECOND admitted turn is the replay lookup over
+// `(session_id, turn_key, role='user')`. These two cells are the estate's evidence
+// that the lookup answers, that it answers with the ORIGINAL task rather than a new
+// one, and that the two arms (replay vs CLR13) are never confused.
+//
+// #642 SHIPS NO MIGRATION: the door is unchanged, these cells characterise what it
+// already does, and the defect this ticket closes is above the database (the 202 never
+// carried `replayed`, and the web client minted a fresh uuid per press).
+// ===========================================================================
+
+test("p642.db.begin_chat_turn_replay — one key, two calls: the SAME task id, replayed:true, exactly ONE user row, the compute cap unmoved", async (t) => {
+  if (unready(t)) return;
+  const session = await createChatSession({ firm: W.firm, author: W.owner, visibility: "private" });
+  const turnKey = opk("p642replay");
+
+  const first = await beginChatTurn({ session, author: W.owner, turnKey, parts: [{ type: "text", text: "book the invoice" }] });
+  const task = taskIdOf(first);
+  assert.ok(task, "the first call admitted a task");
+  assert.equal(first.replayed, false, "the FIRST call reports replayed:false — the receipt's own discriminant");
+
+  const capBefore = await rootQuery(
+    "select count(*)::int as n from clara.agent_tasks where firm_id = $1 and kind = 'chat_turn' and status = any($2::text[])",
+    [W.firm, COMPUTE_STATUSES],
+  );
+
+  // The SAME key, with DELIBERATELY DIFFERENT parts. The door returns at 0006:957-960
+  // BEFORE the insert at :995-996 and never reads `p_user_parts`, so the second payload
+  // is dropped in silence — which is exactly why the web key is content-addressed
+  // (`lib/clara/intentKey.ts`): a changed attachment set must derive a NEW key or the
+  // second invoice never reaches the books and nothing anywhere says so.
+  const second = await beginChatTurn({ session, author: W.owner, turnKey, parts: [{ type: "text", text: "a DIFFERENT sentence" }] });
+  assert.equal(taskIdOf(second), task, "the replay returns the ORIGINAL task id");
+  assert.equal(second.replayed, true, "the replay reports replayed:true (0006:954-960)");
+  assert.ok(typeof second.status === "string" && second.status.length > 0, "the replay receipt carries the original task's live status");
+
+  const capAfter = await rootQuery(
+    "select count(*)::int as n from clara.agent_tasks where firm_id = $1 and kind = 'chat_turn' and status = any($2::text[])",
+    [W.firm, COMPUTE_STATUSES],
+  );
+  assert.equal(capAfter.rows[0].n, capBefore.rows[0].n, "the compute-cap counter is unmoved by a replay");
+
+  // AC8's least-privileged arm: the AUTHOR reads their own transcript as an ordinary
+  // authenticated human, not as clara_runtime.
+  const asAuthor = await humanQuery(
+    W.owner,
+    "select id, parts from clara.chat_messages where session_id = $1 and role = 'user' and turn_key = $2 order by seq",
+    [session, turnKey],
+  );
+  assert.equal(asAuthor.rowCount, 1, "exactly ONE user row exists for the key, read under the author's own role");
+  assert.equal(
+    asAuthor.rows[0].parts[0].text,
+    "book the invoice",
+    "the surviving row carries the FIRST payload — the replay dropped the second in silence, which is the hazard the web key addresses",
+  );
+
+  await finishTask(task); // cap hygiene
+});
+
+test("p642.db.replay_is_not_a_second_live_turn — a replay while the original is STILL LIVE returns the original; a DIFFERENT key on the same live session raises CLR13", async (t) => {
+  if (unready(t)) return;
+  const session = await createChatSession({ firm: W.firm, author: W.owner, visibility: "private" });
+  const turnKey = opk("p642live");
+  const task = taskIdOf(await beginChatTurn({ session, author: W.owner, turnKey }));
+  await driveTaskStatus(task, ["running"]); // live, and NOT terminal
+
+  const replay = await beginChatTurn({ session, author: W.owner, turnKey });
+  assert.equal(taskIdOf(replay), task, "the live replay returns the original task rather than raising");
+  assert.equal(replay.replayed, true, "…and says so");
+
+  // THE TWO ARMS ARE NEVER CONFUSED. A different key IS a second intent, and
+  // `uq_agent_task_one_live_turn` refuses it as CLR13 while the first is live.
+  await assertRaises(
+    CLR13,
+    () => beginChatTurn({ session, author: W.owner, turnKey: opk("p642live2") }),
+    "a DIFFERENT key while the first turn is live",
+  );
+
+  // AFTER THE TERMINAL — the case the partial unique index does NOT cover — the replay
+  // branch is the only thing left, and it still holds.
+  await settleChatTurn({ task, tokens: 1, outcome: "completed" });
+  const afterTerminal = await beginChatTurn({ session, author: W.owner, turnKey });
+  assert.equal(taskIdOf(afterTerminal), task, "after the turn settled, the same key STILL replays the original task");
+  assert.equal(afterTerminal.replayed, true, "…and still says so — this is the arm uq_agent_task_one_live_turn cannot reach");
+
+  const rows = await readRowsWhere("chat_messages", "session_id", session);
+  assert.equal(rows.filter((r) => r.role === "user").length, 1, "three calls, ONE user row");
 });
