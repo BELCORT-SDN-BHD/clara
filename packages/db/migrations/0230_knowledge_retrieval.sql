@@ -227,6 +227,12 @@ begin
   raise notice '#658 prestate: clean -- none of the eight function names and no work_knowledge_reads relation exists; no non-runtime role holds EXECUTE on get_knowledge_pack (#783 base state); the eight non-regression bodies are at their measured pre-0230 sha256; the CORE tier enumerates % key(s).', v_n;
 end $p658_pre$;
 
+-- Everything §A-§H creates is created AS clara_fn_owner (0195:1264's idiom), so the relation and
+-- every function belong to the role whose policy is the only one a FORCE-RLS relation carries.
+-- Creating the table as the migration's login role would leave it owned by a superuser, and the
+-- owner policy below would then govern nobody.
+set role clara_fn_owner;
+
 -- =====================================================================================
 -- §A — clara.retrieve_knowledge. THE BOUNDED, CORE-FIRST, PERIOD-AWARE RUNTIME READ.
 --
@@ -887,6 +893,8 @@ grant execute on function clara.record_work_knowledge_read(uuid,text,int,text,da
 grant execute on function clara.work_knowledge_drift_for(uuid,uuid) to clara_runtime;
 grant execute on function clara.work_knowledge_drift(uuid) to clara_authenticated;
 grant execute on function clara.list_work_knowledge_reads_for_record(uuid) to clara_authenticated;
+
+reset role;
 
 -- =====================================================================================
 -- §Z — TAIL. Fail-closed, re-read from the catalog, never asserted from this file's own text.
