@@ -4,7 +4,7 @@ Date: 2026-09-08. Decision: [确定客户知识、身份与 agent context 的维
 
 ## Inputs and accepted choices
 
-The owner's Claude KB assessment and `research-branches/okf-mapping.md` supplied useful leads. Their proposed withdrawn-map adoption and verification rules were not inherited. The earlier [reconciliation](refresh-2026-09-08-prior-research-reconciliation.md) remains relevant, with corrections below.
+The owner's Claude KB assessment and [`docs/research/okf-mapping.md`](../../research/okf-mapping.md) supplied useful leads. Their proposed withdrawn-map adoption and verification rules were not inherited. The earlier [reconciliation](refresh-2026-09-08-prior-research-reconciliation.md) remains relevant, with corrections below.
 
 Q10 already establishes explicit information autosave, source-linked extraction, unverified inference, material-conflict questions and correction/withdrawal. Q22 now confirms current-client preference scope unless firm-wide scope is explicit, preserving client exceptions. Q23 confirms automatic source-linked experience from completed work and corrections as reference, never automatic policy or future-plan authority. Default autonomy and the complete downstream accounting contract continue to govern actions.
 

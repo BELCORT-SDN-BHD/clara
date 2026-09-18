@@ -63,11 +63,11 @@ Publication and separately preserved prototype branches:
 | Purpose | Branch / location | Evidence limit |
 |---|---|---|
 | Reviewed SOT, research and formal spec | Versioned repository files, published through `codex/research-ui-contract`; exact merge and checks in the map's publication checkpoint | Includes reviewed documents, retained evidence artifacts and tracked skill restoration; unrelated main runtime/config candidate is excluded. |
-| A+B visual prototype | `codex/prototype-clara-visual` at `8f72de0dd39fca702eb0c9cacd8fab5de8982223`, sibling `clara-rebuild-prototype-clara-visual` | Synthetic data/local interactions; no production API/persistence proof. |
-| Durable-agent proof | `codex/research-agent-harness` at `2d34cd3ef5bdd84e86ffba9e3c23cd596acf7960`, sibling `clara-rebuild-agent-harness` | Real PG/process restart and synthetic business-state ordering; not real Clara RLS or two deployments. |
-| Accounting Work prototype | `codex/prototype-accounting-work` at `4121d9edcc783f254574b545d03c014b1bcaf58d`, sibling `clara-rebuild-prototype-accounting-work` | Throwaway synthetic interaction model. |
+| A+B visual prototype | `docs/plan/active/prototypes/clara-visual` (published 2026-09-18 from `codex/prototype-clara-visual` at `8f72de0dd39fca702eb0c9cacd8fab5de8982223`) | Synthetic data/local interactions; no production API/persistence proof. |
+| Durable-agent proof | `docs/plan/active/prototypes/agent-harness-validation` (published 2026-09-18 from `codex/research-agent-harness` at `2d34cd3ef5bdd84e86ffba9e3c23cd596acf7960`) | Real PG/process restart and synthetic business-state ordering; not real Clara RLS or two deployments. |
+| Accounting Work prototype | `docs/plan/active/prototypes/accounting-work-interaction.html`, already in this repository | Throwaway synthetic interaction model. |
 
-The formal build contract and acceptance appendices are readable from GitHub. Research documents and the retained artifacts in this repository travel with its publication. The separate executable visual and agent-runtime prototype branches remain local: a new clone cannot fetch their unpushed hashes. Transfer/publish those prototype branches before relying on their full experiments elsewhere. Same-machine work can read the existing directories immediately. Original dated evidence describes what was observed at the time; later publication does not upgrade that evidence into production verification.
+The formal build contract and acceptance appendices are readable from GitHub. Research documents and the retained artifacts in this repository travel with its publication. **Resolved 2026-09-18**: the separate executable visual and agent-runtime prototypes, which this paragraph recorded as unpushed and unfetchable by a new clone, are now published in this repository under `docs/plan/active/prototypes/`, together with the four research documents under `docs/research/`. A clone carries them; the original branches are no longer needed. Original dated evidence describes what was observed at the time; later publication does not upgrade that evidence into production verification.
 
 ## Matt skill setup
 
