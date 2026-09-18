@@ -230,7 +230,15 @@ _Avoid_: Editing a knowledge value in place; a correction with no stated reason;
 
 **Knowledge pack**:
 The bounded set of a client's live knowledge records read for one stated purpose, with the firm's current knowledge version as its watermark. A pack that could not be read is *unavailable* and says so with its reason; it is never presented as a client with nothing recorded, and it is never a reason to ask someone to repeat information they have already given. Its contents are supplied data, never instructions to the agent.
-_Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction.
+_Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction; a pack carrying a rule that is not in effect for the period being worked, with no mark saying so; a human surface built on the pack instead of the register.
+
+**Knowledge read status**:
+What one read of a client's knowledge produced, in the four words every face uses: *ok* — the run read everything it asked for; *partial* — it read the required records and some of the rest were withheld; *unknown* — the read did not succeed, so what the client has recorded is not known for that attempt; *denied* — the estate refused it. The runtime keeps its own two words internally; only these four reach a person or a stored column.
+_Avoid_: A fifth word; *unavailable* on a human surface; a version with no as-of; a stale view presented as current.
+
+**Knowledge read-set**:
+The exact keys, tiers and knowledge version one Work attempt actually read, recorded on that attempt. It is what makes “a record this Work read has changed” answerable at all, and what separates a change that matters to a run from one that does not.
+_Avoid_: The current version standing in for the one that was read; reporting “unrelated” when no read-set was recorded; reading a lagging projection as absence.
 
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions. It is a rule about how the firm works across its clients, which is what distinguishes it from a **Firm profile fact** — a statement about the firm's own circumstances, which applies to nobody but the firm.

@@ -378,3 +378,45 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## #658 — knowledge freshness, who read a record, and "your basis changed"
+
+**C13 register** (`components/registers/knowledge-panel.tsx`). The version line now prints the
+`knowledge_version` AND the Kuala Lumpur `as_of` date the view was computed for — a version with
+no as-of is half an answer, because the in-effect marks below it are computed against a day. The
+date comes from the one business-date law (`lib/business-date.ts`), never the browser's raw
+clock. A record whose effective window does not cover that day is MARKED (`Not in effect on
+<date>`, a WORD with a title, never a colour alone) and STILL RENDERED: silently dropping a rule
+is how a reader comes to believe a client has no policy when it has one that stopped applying.
+Both facts come from fields `clara.list_client_knowledge` already returns, so there is no new
+door, no recut and no human grant on any pack (#783). The four existing faces are unmoved.
+
+**C13 record detail** (`components/registers/knowledge-record-reads.tsx`). "Work that read this
+record", below the revision timeline — the timeline is what the record IS, this is who consumed
+it. It reads `clara.list_work_knowledge_reads_for_record`, which `DECISIONS.md:83` mandates
+because the relation is FORCE-RLS with no app-role SELECT. It is READ-ONLY (the Work is a link,
+never an act), CAPPED at the door's 100 with an exact `hidden_count`, and it carries its OWN
+state ladder because this read fails independently of the two the page already makes: a denied
+reads-read leaves the revision timeline readable beside it, and an EMPTY list says "no Work has
+recorded a read of this record" — never "this record is unused", and never as an error.
+
+**B3 Work detail** (`components/work/work-knowledge-block.tsx`, mounted in ONE line inside the
+Sources tab). What this run read: the face word, the version, the period, the key set and the
+per-tier counts, from ONE `clara.work_knowledge_drift` read. `observed_revisions` is rendered
+for the first time inside the EXISTING `work-diagnostics.tsx` rows — a second
+`get_work_execution_trace` read on one page would double the request and split the honesty story
+across two components.
+
+**The drift banner has TWO wordings, because the door distinguishes them**, and it renders on
+the Work AND on `components/work/work-question-form.tsx`:
+
+- `relevant: true` → "a record this Work read has changed: <keys>", naming only the
+  INTERSECTION of what moved with what was read.
+- `relevant: null` (the observed version came from an execution trace, so no read-set exists) →
+  "this client's knowledge changed after this Work last read it; which records it read was not
+  recorded." **Never a confident "unrelated"**: the absence of a record is not evidence of
+  absence.
+
+**IT NEVER CLEARS A TYPED ANSWER.** The banner is additive — no draft is discarded, no field is
+reset, nothing is disabled — and `components/work/work-question-drift-banner.test.tsx` holds
+that with a drift that resolves only after the person has typed.

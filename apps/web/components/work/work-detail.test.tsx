@@ -1618,6 +1618,13 @@ function claimOriginCalls(calls: DoorCall[]): DoorCall[] {
   return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_work_claim_origin"));
 }
 
+/** #658 — the Sources tab's knowledge block reads `clara.work_knowledge_drift` once on mount. It
+ *  is a READ that happens to be a POST (every door on this app is), so the two cells below exclude
+ *  it BY NAME and PIN its count rather than widening their mutating-request test into uselessness. */
+function driftCalls(calls: DoorCall[]): DoorCall[] {
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/work_knowledge_drift"));
+}
+
 /** The four states are announced BY NAME — `role="group"` with an `aria-label` of
  *  "<axis>: <state>" — which is what a listener hears instead of eight adjacent fragments. A cell
  *  that matched the rendered TEXT would pass on a build that printed the four words with no
@@ -1664,10 +1671,15 @@ test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Doc
       // #638 — the identity block's one claim-origin read is excluded by name and pinned, so the
       // exclusion cannot hide a second one.
       assert.equal(claimOriginCalls(calls).length, 1, "exactly one get_work_claim_origin read, on mount");
+      // #658 — the Sources tab's knowledge block reads clara.work_knowledge_drift ONCE on mount,
+      // and it is excluded by name and PINNED for the same reason the claim-origin read above is:
+      // an unpinned exclusion is a hole a second read could hide in.
+      assert.equal(driftCalls(calls).length, 1, "exactly one work_knowledge_drift read, on mount");
       assert.equal(
         calls.filter((c) =>
           c.url.includes("/rest/v1/rpc/")
           && !c.url.includes("get_document_state")
+          && !c.url.includes("work_knowledge_drift")
           && !c.url.includes("get_work_claim_origin")).length,
         0,
         "the Sources tab opens no other door",
@@ -1740,6 +1752,7 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
         "the source document's states to render");
       const doorsBefore = stateDoorCalls(calls).length;
       const originsBefore = claimOriginCalls(calls).length;
+      const driftBefore = driftCalls(calls).length;
 
       const sources = h.find((n) =>
         n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Sources");
@@ -1754,10 +1767,16 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
       // tab press is not a mount.
       assert.equal(claimOriginCalls(calls).length, originsBefore,
         "and a tab press does not re-ask the Work's claim origin");
+      // #658 — nor does it re-ask whether the knowledge basis has moved: that read is a MOUNT
+      // effect too, and a tab press is not a mount. Excluded by name AND pinned to its
+      // before-count, so the exclusion cannot hide a second one.
+      assert.equal(driftCalls(calls).length, driftBefore,
+        "and a tab press does not re-read the Work's knowledge drift");
       assert.equal(
         calls.filter((c) =>
           c.method !== "GET"
           && !c.url.includes("get_document_state")
+          && !c.url.includes("work_knowledge_drift")
           && !c.url.includes("get_work_claim_origin")).length,
         0,
         "no mutating request of any kind left this page",

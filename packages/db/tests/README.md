@@ -298,3 +298,32 @@ counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37
 
 `prepayment-0223-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.
+
+## `knowledge-retrieval.test.mjs` (#658, migration 0230)
+
+23 cells over the bounded core-first read, the recorded read-set, the drift doors and
+`DECISIONS.md:83`'s seventh door. Every assertion under test runs through
+`humanQuery`/`roleQuery` at the least privilege that should succeed; `rootQuery` appears only
+to mint a world or to read a catalog back for a census.
+
+- `p658.retrieve.*` — core-first tiering with an exact `hidden_count`, an out-of-effect row
+  MARKED and returned rather than dropped, the runtime lane's tenancy refusals with no
+  existence oracle, the **#783** negative-grant cell, the two-persona `shadow_parity` cell that
+  proves "one register, one pack, one answer" without a shared grant, the five legacy-carried
+  keys riding in as core with `authoritative:true`, the `1..200` bound and the unknown-key
+  refusal, and the C7 cell that holds `p_purpose` to RECORDED-not-filtered.
+- `p658.inspect.*` — the two runtime twins return source metadata and **no document bytes**.
+- `p658.reads.*` — no FK to `clara.accounting_work` (with the positive join proved to carry the
+  binding instead), replay-idempotence on `(work_id, run_id, seq)`, UPDATE/DELETE refused even
+  as `clara_fn_owner`, and the four-word status vocabulary with `unavailable` refused.
+- `p658.record_reads.*` — the seventh door: it lists, it floors at viewer and answers a foreign
+  record and a random uuid identically, it EXCLUDES a client whose own live record shadows a
+  firm-scope key, it caps at 100 with an exact `hidden_count`, and it carries no record value.
+- `p658.drift.*` — relevance from the read-set, `relevant: null` on the trace fallback, the two
+  lanes' floors, and cross-firm isolation.
+- `p658.census.no_recut` — the eight pinned bodies byte-identical, `get_context_pack` at exactly
+  one overload, one `pg_proc` row per installed name, and the CORE tier small and enumerable.
+
+Fixtures: `knowledge-retrieval-fixtures.mjs`. Gate: `knowledge-retrieval-preintegration-gate.mjs`
+(preloaded, the battery SKIPS loudly below 0230; a FOCUSED run without it FAILS loudly — both
+arms were measured by renaming the cohort's objects on the rig and restoring them).
