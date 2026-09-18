@@ -1,4 +1,9 @@
 import { createReadStream } from "node:fs";
+// #656 (orchestrator ruling D13.1): the `opening_tb.line` producer is wired IN-LINE here, at the
+// OCR pass, through ONE non-frozen adapter — no new processing lane, no new engine_kind, no
+// facts-router splice. See `opening-tb-produce.mjs` for why that is safe when the wiring is
+// kind-blind, and for the freeze-by-closure warning that keeps rules out of it.
+import { produceOpeningTbRegions } from "./opening-tb-produce.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-layout";
@@ -169,6 +174,20 @@ export function normalizeAzureLayout(payload, task) {
       }
     }
   }
+  // #656 — THE ONE NEW STATEMENT IN THIS FUNCTION. The trial-balance reader has existed,
+  // tested, since Wave B with NO production caller; `clara.record_opening_targets_parsed` and
+  // `POST /api/opening/parse-targets` have been live and unreachable for just as long. This
+  // appends the reader's `opening_tb.line` regions to the SAME array the cells above went into,
+  // so the existing consumer picks them up unchanged.
+  //
+  // It cannot fail this pass: `produceOpeningTbRegions` never throws and returns an EMPTY region
+  // set with a named reason both when the document is not a trial balance and when it is one the
+  // reader refuses (all-or-nothing, F-H5 — a partial opening basis is worse than none). Nothing
+  // above this line changes: both page-key spellings and every existing `field_path` stay
+  // byte-identical, because 0191's `_assert_field_path` grammar and the whole F-A1 witness estate
+  // read them.
+  for (const region of produceOpeningTbRegions(regions).regions) regions.push(region);
+
   return {
     pageCount: pages.length || 1,
     vendorOpRef: payload?.operationId || null,
