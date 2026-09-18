@@ -80,6 +80,30 @@ foreign-firm and out-of-client-scope, 403 `no_membership`, 409 `custody_pending`
 `ETag` (the content address), `Content-Length`, `Cache-Control: private, no-store` and
 `X-Content-Type-Options: nosniff`. No SQL text and no vendor response body reach the client.
 
+### The chat turn's 202 and what the live stream carries (#642)
+
+`POST /api/chat/:sessionId/turns` answers **`202 {task_id, replayed}`**. `replayed` is read straight
+off `clara.begin_chat_turn`'s receipt — `true` from the door's `turn_key` replay branch
+(`0006_runtime_core.sql:954-960`), `false` from the fresh admission at `:999` — and it is the only
+thing on the wire that distinguishes "we already have this turn" from "we just admitted this turn".
+It is additive: a client that ignores it is unaffected. A receipt that does not carry the field at
+all is reported as a fresh admission (fail-closed towards drawing the turn, never towards swallowing
+it). The route is otherwise unchanged and **#642 ships no migration**: the idempotency arm is already
+in 0006 and every defect that ticket closed is above the database.
+
+**The model's whole `fullStream` reaches the browser verbatim**, so a question about live tool state
+is a WEB question, not a version cut. `consumeChatTurnModelResult` writes every part of the AI SDK
+stream to the run's writable (`workflows/chatTurn.v10.impl.ts:216-221`, called at
+`chatTurn.v20.impl.ts:148-157`) and `src/streamRoute.ts:139` relays each one as `event: chunk` with
+no filter. Measured on this repo's own `ai@7.0.77` + the `MockLanguageModelV4` script the World legs
+use, the part names a turn actually emits are `start`, `start-step`, `text-start`, `text-delta`,
+`text-end`, `tool-input-start`, `tool-input-delta`, `tool-input-end`, `tool-call`, `tool-result`,
+`tool-error`, `finish-step`, `finish` — and the identifier field is **`id` on the three
+`tool-input-*` parts but `toolCallId` on `tool-call`/`tool-result`/`tool-error`**, which is the one
+fact a reader who took the vocabulary from the SDK docs would get wrong. There is **no admission
+event on the stream**: nothing in that vocabulary says "queued", so a live *queued* chip cannot be
+built without a new frozen `chatTurn` cut.
+
 ### The prepayment-amortisation lane (#653) — one non-frozen module and two owed successors
 
 `lib/prepayment-schedule-basis.ts` is NOT imported by any workflow body and must not be until the
