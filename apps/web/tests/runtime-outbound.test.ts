@@ -179,7 +179,13 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   it("VACUITY CONTROL: the parser actually read the runtime's route table", () => {
     assert.deepEqual(
       routes.map((r) => r.call).sort(),
-      ["POST intake/documents", "POST intake/documents/*/finalize", "PUT intake/documents/*/bytes"],
+      // #636 added the two batch routes. Neither is capability-guarded: both authenticate a
+      // SESSION JWT (`authenticate(`) and pass the human on as the door's actor argument, exactly
+      // like the begin leg — see the capability cells below, which stay a three-way equality.
+      [
+        "POST intake/batches", "POST intake/batches/*/cancel",
+        "POST intake/documents", "POST intake/documents/*/finalize", "PUT intake/documents/*/bytes",
+      ],
       "the runtime's intake route table changed — re-read packages/runtime/src/intakeRoutes.ts before touching the registry",
     );
   });
