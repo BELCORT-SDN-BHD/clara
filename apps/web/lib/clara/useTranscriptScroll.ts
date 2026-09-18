@@ -46,8 +46,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 const BOTTOM_EPSILON_PX = 2;
 
 export interface TranscriptScrollHandle<T extends HTMLElement = HTMLDivElement> {
-  /** Attach to the ONE scrollable element this hook owns. */
-  viewportRef: React.RefObject<T | null>;
+  /** Attach to the ONE scrollable element this hook owns.
+   *
+   *  A CALLBACK ref, not a `RefObject`, and that is a correctness choice rather than a
+   *  style one: a ref object is filled BETWEEN renders, so an effect that runs before the
+   *  element exists (a conditionally rendered region, a region that mounts after its
+   *  first paint) would attach no scroll listener and never attach one later. A callback
+   *  ref makes the attachment itself a state change the effects depend on. */
+  viewportRef: (node: T | null) => void;
   /** True when the reader is parked at the bottom (and therefore following). */
   atBottom: boolean;
   /** True when there is content below the fold — the ONLY condition under which a
@@ -96,7 +102,8 @@ function scrollToBottom(el: HTMLElement, smooth: boolean): void {
 export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
   revision: number,
 ): TranscriptScrollHandle<T> {
-  const viewportRef = useRef<T | null>(null);
+  const [viewport, setViewport] = useState<T | null>(null);
+  const viewportRef = useCallback((node: T | null) => setViewport(node), []);
   const [atBottom, setAtBottom] = useState(true);
   const [hasMoreBelow, setHasMoreBelow] = useState(false);
   /** The LAST SAMPLED answer to "is the reader following?", read by the append effect
@@ -105,30 +112,36 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
   const followingRef = useRef(true);
 
   const measure = useCallback(() => {
-    const el = viewportRef.current;
+    const el = viewport;
     if (!el) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const bottom = distance <= BOTTOM_EPSILON_PX;
     followingRef.current = bottom;
     setAtBottom(bottom);
     setHasMoreBelow(!bottom);
-  }, []);
+  }, [viewport]);
 
   // The reader's own movement is the ONLY thing that changes whether they are following.
+  //
+  // A FRESH ATTACH STARTS AT THE LATEST, and that is deliberate: `ClaraRail` really
+  // unmounts the view at `presence === "closed"`, so reopening it is a new element with
+  // no history, and a conversation opens on its newest message rather than wherever the
+  // previous element happened to be parked. `followingRef` is therefore re-armed here
+  // rather than inherited, and the layout effect below performs the jump on the same
+  // commit. Everything after that is the reader's own decision, read from their scroll.
   useEffect(() => {
-    const el = viewportRef.current;
+    const el = viewport;
     if (!el) return;
+    followingRef.current = true;
     const onScroll = () => measure();
     el.addEventListener("scroll", onScroll, { passive: true });
-    // Mount-time read: a reopened rail knows nothing until it looks (see the header).
-    measure();
     return () => el.removeEventListener("scroll", onScroll);
-  }, [measure]);
+  }, [viewport, measure]);
 
   // CONTENT ARRIVED. Follow only if the reader was already at the bottom, then re-measure
   // so the jump control appears for a reader who was not.
   useLayoutEffect(() => {
-    const el = viewportRef.current;
+    const el = viewport;
     if (!el) return;
     if (followingRef.current) {
       scrollToBottom(el, false); // following is always instant — see the header
@@ -138,10 +151,10 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     setHasMoreBelow(distance > BOTTOM_EPSILON_PX);
-  }, [revision]);
+  }, [revision, viewport]);
 
   const jumpToLatest = useCallback(() => {
-    const el = viewportRef.current;
+    const el = viewport;
     if (!el) return;
     scrollToBottom(el, !prefersReducedMotion());
     // The intent is "follow from here on", and it is recorded immediately rather than
@@ -151,7 +164,7 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     followingRef.current = true;
     setAtBottom(true);
     setHasMoreBelow(false);
-  }, []);
+  }, [viewport]);
 
   return { viewportRef, atBottom, hasMoreBelow, jumpToLatest, measure };
 }
