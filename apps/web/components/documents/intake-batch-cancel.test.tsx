@@ -72,8 +72,8 @@ test("one confirm performs EXACTLY ONE governed call, never N calls from the dia
   await clickButton(confirmButton());
   for (let i = 0; i < 3; i += 1) await h.settle();
   assert.equal(calls.length, 1, "one press, one governed decision — the fan-out is the SERVER's");
-  assert.equal(calls[0].batchId, BATCH);
-  assert.match(calls[0].opKey, /^[0-9a-f-]{36}$/i, "the decision carries its own key");
+  assert.equal(calls[0]!.batchId, BATCH);
+  assert.match(calls[0]!.opKey, /^[0-9a-f-]{36}$/i, "the decision carries its own key");
   await h.unmount();
 });
 
@@ -90,7 +90,7 @@ test("ONE op key per open decision: a retry of the same decision reuses it", asy
   await clickButton(confirmButton());
   for (let i = 0; i < 3; i += 1) await h.settle();
   assert.equal(calls.length, 2, "both attempts reached the door");
-  assert.equal(calls[0].opKey, calls[1].opKey,
+  assert.equal(calls[0]!.opKey, calls[1]!.opKey,
     "an unobserved first attempt and its retry are ONE operation to the database (_reserve_op replays the stored result)");
   await h.unmount();
 });

@@ -184,11 +184,19 @@ export function intakeRoutes(): express.Router {
         }));
         return;
       }
+      // NO OBJECT SPREAD: `check-parts-parity.mjs` refuses one anywhere in this file. Every field
+      // of the decision is named, which also documents the wire shape the browser reads.
+      const decision = out.decision ?? {};
       res.status(202).json({
-        ...out.decision,
-        fanned_out: out.cancelled.length,
-        deferred: out.deferred.length,
-        refused: out.refused.length,
+        batch_id: decision.batch_id ?? batchId,
+        state: decision.state ?? null,
+        cancel_op_key: decision.cancel_op_key ?? null,
+        cancel_requested_by: decision.cancel_requested_by ?? null,
+        children: decision.children ?? [],
+        replayed: decision.replayed ?? false,
+        fanned_out: (out.cancelled ?? []).length,
+        deferred: (out.deferred ?? []).length,
+        refused: (out.refused ?? []).length,
       });
     } catch (err) {
       sendError(res, err);

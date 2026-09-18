@@ -140,9 +140,7 @@ async function main() {
   // Windows. Let it finish before the first upload rather than racing it.
   await sleep(Number(process.env.CLARA_P636_BOOT_SETTLE_MS || 8000));
 
-  const {
-    openBatch, cancelBatch, resumeCancel, childCancelKey,
-  } = await import("../lib/intake-batches.mjs");
+  const { openBatch, cancelBatch, childCancelKey } = await import("../lib/intake-batches.mjs");
   const { reconcileIntakeBatchCancellations } = await import("../lib/reconciler-batches.mjs");
   const { withRuntime } = await import("../lib/pools.mjs");
 

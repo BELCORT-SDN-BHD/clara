@@ -24,6 +24,27 @@
 
 import { readIntakeMeta } from "./spool.mjs";
 
+/**
+ * THE ONE ANSWER SHAPE, declared so a TypeScript caller can read a field without narrowing a union
+ * of eight literal object types. `status` is the discriminant every caller checks first; the rest
+ * are present-or-absent by arm, exactly as each function's own comment says.
+ *
+ * @typedef {object} BatchAnswer
+ * @property {"ok"|"refused"|"unavailable"|"skipped"} status
+ * @property {string|null} [code]        the SQLSTATE, on a refusal
+ * @property {string|null} [reason]      the typed `detail.reason`, on a refusal
+ * @property {string} [message]          the database's own sentence, verbatim
+ * @property {Record<string, unknown>|null} [detail]
+ * @property {any} [batch]               `openBatch`
+ * @property {any} [member]              `attachIntake` / `setMemberDependency`
+ * @property {any} [worklist]            `sweepBatchCancellations`
+ * @property {any} [decision]            `cancelBatch`
+ * @property {string} [batch_id]         `resumeCancel`
+ * @property {{work_id: string, status: string|null, replayed: boolean|null}[]} [cancelled]
+ * @property {{work_id: string, reason: string}[]} [deferred]
+ * @property {{work_id: string, code: string|null, reason: string|null}[]} [refused]
+ */
+
 const NOOP_LOG = /** @type {(message: string) => void} */ (() => {});
 
 /** The SQLSTATE class the estate uses for its own refusals. Anything else is infrastructure. */
@@ -61,6 +82,7 @@ async function callDoor(client, sql, params) {
 // §1  The four write doors, each one statement on a clara_runtime connection.
 // ---------------------------------------------------------------------------------------------
 
+/** @returns {Promise<BatchAnswer>} */
 export async function openBatch(client, { actor, origin = "documents_tab", label, sessionId = null, opKey }) {
   try {
     const batch = await callDoor(client,
@@ -72,6 +94,7 @@ export async function openBatch(client, { actor, origin = "documents_tab", label
   }
 }
 
+/** @returns {Promise<BatchAnswer>} */
 export async function attachIntake(client, { actor, batchId, intakeId, opKey }) {
   try {
     const member = await callDoor(client,
@@ -83,6 +106,7 @@ export async function attachIntake(client, { actor, batchId, intakeId, opKey }) 
   }
 }
 
+/** @returns {Promise<BatchAnswer>} */
 export async function setMemberDependency(client, { actor, intakeId, dependency, reason = null, opKey }) {
   try {
     const member = await callDoor(client,
@@ -94,6 +118,7 @@ export async function setMemberDependency(client, { actor, intakeId, dependency,
   }
 }
 
+/** @returns {Promise<BatchAnswer>} */
 export async function sweepBatchCancellations(client, { limit = 20 } = {}) {
   try {
     const worklist = await callDoor(client,
@@ -126,6 +151,12 @@ export async function sweepBatchCancellations(client, { limit = 20 } = {}) {
 // `recoverPendingDocumentIntakes` every sweep until its 15-minute TTL expired it.
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * @param {{ client: any, principal: any, input: any, batchId: string, opKey: string,
+ *           begin: (c: any, p: any, i: any) => Promise<any>,
+ *           cleanup?: ((id: string) => unknown) | null, log?: (m: string) => void }} args
+ * @returns {Promise<{intake_id: string, upload_token: string, expires_at: string|null, batch_id: string, member_id: string|null}>}
+ */
 export async function beginIntakeInBatch({ client, principal, input, batchId, opKey, begin, cleanup = null, log = NOOP_LOG }) {
   await client.query("begin");
   let intakeId = null;
@@ -142,7 +173,16 @@ export async function beginIntakeInBatch({ client, principal, input, batchId, op
       throw err;
     }
     await client.query("commit");
-    return { ...started, batch_id: batchId, member_id: attached.member?.member_id ?? null };
+    // NO OBJECT SPREAD ANYWHERE IN THIS MODULE. `check-parts-parity.mjs` refuses one in any file
+    // it can reach, because a spread is a shape it cannot classify statically — and this module is
+    // reachable from `src/intakeRoutes.ts`. Every field is named.
+    return Object.freeze({
+      intake_id: started.intake_id,
+      upload_token: started.upload_token,
+      expires_at: started.expires_at ?? null,
+      batch_id: batchId,
+      member_id: attached.member?.member_id ?? null,
+    });
   } catch (err) {
     try {
       await client.query("rollback");
@@ -182,6 +222,7 @@ export async function beginIntakeInBatch({ client, principal, input, batchId, op
 // not "something exploded".
 // ---------------------------------------------------------------------------------------------
 
+/** @returns {Promise<BatchAnswer>} */
 export async function recordCapacityWait(withRuntimeFn, intakeId, err, { log = NOOP_LOG, readMeta = readIntakeMeta } = {}) {
   if (String(err?.code || "") !== "CLR18") return { status: "skipped", reason: "not_a_capacity_refusal" };
   let actor = null;
@@ -243,7 +284,7 @@ async function fanOutCancel(withRuntimeFn, { actor, cancelOpKey, children, log =
     const workId = child?.work_id;
     if (!workId) continue;
     try {
-      // eslint-disable-next-line no-await-in-loop -- one call per transaction, by design (see §4)
+      // AWAITED IN A LOOP, DELIBERATELY: one call per transaction, by design (see §4)
       const out = await withRuntimeFn((client) => callDoor(client,
         "select clara.cancel_accounting_work($1::uuid,$2::uuid,$3::text) as result",
         [workId, actor, childCancelKey(cancelOpKey, workId)]));
@@ -266,6 +307,7 @@ async function fanOutCancel(withRuntimeFn, { actor, cancelOpKey, children, log =
  * The decision's own answer carries the child list and the actor/key the fan-out must use, which
  * is what makes a replay of this whole function produce identical calls.
  */
+/** @returns {Promise<BatchAnswer>} */
 export async function cancelBatch(withRuntimeFn, { actor, batchId, opKey, log = NOOP_LOG }) {
   let decision;
   try {
@@ -281,7 +323,10 @@ export async function cancelBatch(withRuntimeFn, { actor, batchId, opKey, log = 
     children: decision?.children ?? [],
     log,
   });
-  return { status: "ok", decision, ...fan };
+  return {
+    status: "ok", decision,
+    cancelled: fan.cancelled, deferred: fan.deferred, refused: fan.refused,
+  };
 }
 
 /**
@@ -289,6 +334,7 @@ export async function cancelBatch(withRuntimeFn, { actor, batchId, opKey, log = 
  * so the actor and the key are the STORED ones by construction — this function cannot use its own
  * identity even by accident, because it has none.
  */
+/** @returns {Promise<BatchAnswer>} */
 export async function resumeCancel(withRuntimeFn, parent, { log = NOOP_LOG } = {}) {
   if (!parent?.cancel_requested_by || !parent?.cancel_op_key) {
     return { status: "refused", code: null, reason: "missing_stored_decision", message: "a resumed fan-out needs the STORED actor and key" };
@@ -299,5 +345,8 @@ export async function resumeCancel(withRuntimeFn, parent, { log = NOOP_LOG } = {
     children: parent.live ?? [],
     log,
   });
-  return { status: "ok", batch_id: parent.batch_id, ...fan };
+  return {
+    status: "ok", batch_id: parent.batch_id,
+    cancelled: fan.cancelled, deferred: fan.deferred, refused: fan.refused,
+  };
 }

@@ -378,3 +378,39 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## The durable batch card vs the live upload queue (#636)
+
+Two components on one surface answer two different questions, and conflating them is the defect
+`intake-receipts.tsx:5-10` was written to close.
+
+- `upload-panel.tsx` is the LIVE transfer view: what THIS browser is doing right now. It carries
+  the only legitimate `Progress` on the tab — a MEASURED byte transfer, with `value={null}` for the
+  unmeasurable case.
+- `intake-batch-card.tsx` is the DURABLE parent: what the firm's books know happened. Every number
+  and every row is read back through `clara.get_intake_batch`, so it survives a reload, a new tab
+  and a different device.
+
+**NO `Progress` AND NO PERCENTAGE ON THE CARD, IN ANY STATE.** The door supplies no denominator
+(0229 asserts it in its own tail); appendix D item 44 permits `Progress` only for a known
+numerator/denominator and says "Indeterminate agent Work keeps its durable named state instead";
+`work-detail.tsx:6-12` already forbids one for a single Work. The card renders labelled facet counts
+with their coverage word. The five facets OVERLAP — a member can be admitted AND waiting — so they
+legitimately exceed the member count and are never summed.
+
+**THE CAPACITY COPY SAYS 08:00, NEVER "MIDNIGHT" AND NEVER "TOMORROW".** The daily document window
+is `date_trunc('day', now() at time zone 'utc')` (0007:1644), whose boundary is 08:00
+`Asia/Kuala_Lumpur` — MEASURED on a migrated rig. The card renders the DOOR's own
+`resets_at_local`, so the string cannot drift from the wall it describes, and
+`lib/documents/batch-url-state.test.ts` fails if either word is ever written into the catalogue.
+
+**NO NEW ROUTE AND NO NAVIGATION LEAF.** The batch is `?batch=<uuid>` URL state on the two
+Documents leaves that already exist, on `lib/documents/url-state.ts`'s own idiom: `router.push` to
+open so Back closes, `router.replace` when the page was loaded directly at it, every other
+parameter preserved, and a malformed id answered as not-found rather than folded into "nothing is
+open".
+
+**ONE CONFIRM, ONE GOVERNED CALL.** `intake-batch-cancel-dialog.tsx` performs exactly one
+`POST /api/runtime/intake/batches/:id/cancel`; the fan-out — one `clara.cancel_accounting_work` per
+live child — is the server's. One op key per open decision, minted with `work-cancel-dialog.tsx`'s
+`useDecisionKey` idiom copied with its source named.

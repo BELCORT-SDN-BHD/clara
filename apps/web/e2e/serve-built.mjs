@@ -22,6 +22,10 @@ import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } f
 // branch is id-scoped and returns false otherwise, so chat-parity's single-row poll and
 // its own three intake legs are untouched.
 import { DOCS_INTAKE, handleDocumentsIntakeRuntime, handleDocumentsIntakeSupabase } from "./documents-intake-mock.mjs";
+// #636's batch lane. It answers ONE new RPC verb and two id-carrying runtime routes, all scoped to
+// its own batch ids, and it reuses the documents-intake lane's CLIENT so the workbench around the
+// card stays that lane's — see intake-batch-mock.mjs's own header.
+import { handleIntakeBatchRuntime, handleIntakeBatchSupabase } from "./intake-batch-mock.mjs";
 // P6-5's own lane, the same file-disjoint shape, consulted through the three hooks below.
 // Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
 // beside the chat-parity lane without either starving the other's fixtures.
@@ -648,6 +652,10 @@ async function handleSupabase(request, response, url) {
   // would have starved the chat-parity thread of its `chat_sessions` row, which #507's new
   // client/thread pairing check turns into a 404.
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
+  // #636, BEFORE the documents-intake lane and safe there: it gates on `get_intake_batch` plus its
+  // own three batch ids and falls through for every other verb and every other id, so it cannot
+  // swallow anything that lane owns.
+  if (await handleIntakeBatchSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleDocumentsIntakeSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   // #649 — BEFORE the P6-5 lane, and that position IS load-bearing: `agentic-finish-mock.mjs`
@@ -1055,6 +1063,10 @@ await new Promise((resolveListen, rejectListen) => {
 // the shared session list. `handleChat` is last of the three and now returns false on a
 // miss, so FS-4 C-6's confirm route still reaches its own handler.
 const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, url) => {
+  // #636, BEFORE the documents-intake runtime lane: its two routes live under
+  // /api/intake/batches, a prefix that lane never claims, and the cancel route falls through on a
+  // batch id it did not mint.
+  if (await handleIntakeBatchRuntime(request, response, url)) return true;
   if (await handleDocumentsIntakeRuntime(request, response, url)) return true;
   if (await handleChatParityRuntime(request, response, url)) return true;
   if (await handleP6_5Runtime(request, response, url)) return true;

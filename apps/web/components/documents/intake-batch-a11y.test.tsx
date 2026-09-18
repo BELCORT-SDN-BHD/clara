@@ -81,8 +81,9 @@ test("intake batch card: forty rows, and EXACTLY ONE live region on the whole ca
   const nodes = collect(h.container as Stub);
   const live = nodes.filter((n) => attrOf(n, "aria-live") !== null);
   assert.equal(live.length, 1, `exactly one aria-live region (found ${live.length})`);
-  assert.equal(attrOf(live[0], "aria-live"), "polite");
-  assert.equal(attrOf(live[0], "role"), "status");
+  const region = live[0] as Stub;
+  assert.equal(attrOf(region, "aria-live"), "polite");
+  assert.equal(attrOf(region, "role"), "status");
   const rows = nodes.filter((n) => n.tagName === "TR");
   assert.ok(rows.length > 10, `the fixture really renders many rows (${rows.length})`);
   for (const row of rows) {

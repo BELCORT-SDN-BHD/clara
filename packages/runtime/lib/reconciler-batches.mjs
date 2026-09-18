@@ -74,7 +74,7 @@ export async function reconcileIntakeBatchCancellations(client, { log = NOOP_LOG
 
   for (const parent of worklist.batches ?? []) {
     try {
-      // eslint-disable-next-line no-await-in-loop -- per-parent isolation, by design
+      // AWAITED IN A LOOP, DELIBERATELY: per-parent isolation, by design
       const out = await resumeCancel(runInTxn, parent, { log });
       children += (out.cancelled?.length ?? 0);
       if ((out.refused?.length ?? 0) > 0) failed += out.refused.length;

@@ -124,26 +124,31 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/reconciler-wake.mjs","reconcileWakeEngineTasks","...a","3ede989171f7d26660abc37f7818e34db641c3601fb9f70583fdb24e8187b59a","0"],
   ["packages/runtime/lib/reconciler-wake.mjs","reconcileWakeEngineTasks","...b","3ede989171f7d26660abc37f7818e34db641c3601fb9f70583fdb24e8187b59a","0"],
   ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...deps","81708a9233752a17848ce1af02f37620eaab87f435dd5f7b7f8d1b8ecffa3a57","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...adj","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...adj","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
   // #640 RE-FINGERPRINTED the fifteen entries above and below: `runReconcilerSweep`'s summary
   // statement gained `...plans` (the accounting-plan occurrence belt), so the STATEMENT sha moved
   // for every spread inside it. Each spread itself is unchanged — a per-lane result bag folded
   // into one sweep summary, reviewed at its own original landing — and re-pinning rather than
   // widening keeps the ledger's property: a tuple invalidates itself when its statement changes.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  // #636 — the intake-batch cancellation belt joins the SAME reviewed return statement. Adding a
+  // spread to it re-fingerprints every sibling tuple above (the fingerprint is the sha of the
+  // whole normalised statement), which is why this block moved in one piece rather than gaining
+  // a line: the spread itself is the belt's own counters, the same shape every sibling carries.
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...batchCancels","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.DATABASE_URL)","b7fac4efda9fec1f95de524d660835ef17527255af69ad9dd7265e7ba2ba9af3","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL)","d0fce5da9b74af277287fa27a5f72d05e08862412c14ba9094b890c334abad93","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...pg","314c243f644ce3eb9f984091d1f53d513440baeaf360b08bd57dd99785a6a2e6","0"],

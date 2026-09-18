@@ -70,6 +70,21 @@ runs:
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
           node tests/intake-admission-e2e.mjs
 
+    # #636 THE DURABLE INTAKE BATCH, on the same throwaway DB and the same bootstrapped world. Five
+    # legs: the headline batch at the MEASURED N (100 <=1MB PDFs is exactly what a fresh firm admits
+    # in one UTC day - re-derived on a migrated rig, not quoted), where N-5 reach a committed
+    # receipt while 5 independently wait on a declared fact, wait on the quota, fail their upload
+    # and stay unassigned; cancel-remaining keeping every committed receipt; the RESUMABLE fan-out
+    # (the decision made, the fan-out abandoned half way, the reconciler belt finishing it with the
+    # STORED actor and key, no child cancelled twice, the parent terminal exactly once); cross-firm
+    # poison isolation; and the capacity wall end to end through the real route, on its own firm.
+    # Standalone (not collected by `node --test`), so it is wired explicitly like the two above.
+    - name: "#636 intake batch e2e (same isolated DB + world)"
+      shell: bash -e {0}
+      run: |
+        cd packages/runtime
+        PGDATABASE=clara_intake_ci         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci"           node tests/intake-batch-e2e.mjs
+
     # Wave-B rig-confined fault gates (§4 of the contract): the four STANDALONE runtime e2es
     # (NOT collected by `node --test`, so wired explicitly like intake-e2e above). Gate 3 —
     # interview cancel/kill/complete through the REAL WDK engine (interview-e2e.mjs boots the

@@ -248,14 +248,18 @@ export async function getWorkBatchOrigin(
   const members = await getRows<{ batch_id: string }>("intake_batch_members", {
     session: opts.session,
     signal: opts.signal,
-    query: { work_id: `eq.${workId}`, select: "batch_id", limit: "1" },
+    select: "batch_id",
+    filters: { work_id: `eq.${workId}` },
+    limit: 1,
   });
   const batchId = members[0]?.batch_id;
   if (!batchId) return null;
   const batches = await getRows<{ id: string; label: string | null; state: string | null }>("intake_batches", {
     session: opts.session,
     signal: opts.signal,
-    query: { id: `eq.${batchId}`, select: "id,label,state", limit: "1" },
+    select: "id,label,state",
+    filters: { id: `eq.${batchId}` },
+    limit: 1,
   });
   const row = batches[0];
   if (!row) return null;

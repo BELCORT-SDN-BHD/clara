@@ -73,8 +73,8 @@ test("the five facets are the door's own populations plus `all` — the card nev
 test("the capacity copy says 08:00 and never 'midnight' or 'tomorrow'", async () => {
   // The STRING, read from the shipped message catalogue rather than from a component render, so
   // this cell fails if the copy is edited even when no component test happens to mount that state.
-  const messages = (await import("../../messages/en.json", { with: { type: "json" } })).default as
-    Record<string, Record<string, Record<string, string>>>;
+  const messages = (await import("../../messages/en.json", { with: { type: "json" } })).default as unknown as
+    { IntakeBatch: { capacity: { body: string }; residual: { preIntakeRefusal: string } } };
   const body = messages.IntakeBatch.capacity.body;
   assert.match(body, /\{at\}/, "the reset moment comes from the DOOR, never from a local constant");
   assert.ok(!/midnight/i.test(body), "the daily window is a UTC day, which is 08:00 MYT — never midnight");

@@ -50,7 +50,7 @@ import {
   INTAKE_BATCH_FACET_KINDS, type IntakeBatchFacetKind, type IntakeBatchMemberRow,
   type IntakeBatchPack,
 } from "@/lib/documents/intake-batch";
-import { BATCH_FACETS, type BatchFacet } from "@/lib/documents/batch-url-state";
+import { BATCH_FACETS, isBatchFacet, type BatchFacet } from "@/lib/documents/batch-url-state";
 import { IntakeBatchCancelDialog } from "./intake-batch-cancel-dialog";
 
 /** The read's ANSWER, as the card sees it — the five list states told apart by what the read
@@ -285,10 +285,14 @@ export function IntakeBatchCard({
 
       <div className="flex flex-wrap items-center gap-2">
         <ToggleGroup
-          type="single"
-          value={facet}
-          onValueChange={(next) => { if (next) onFacetChange(next as BatchFacet); }}
           aria-label={t("facetFilterLabel")}
+          value={[facet]}
+          onValueChange={(next) => {
+            // A CHECKED read, never a cast: a value this build does not know leaves the filter
+            // where it is rather than writing a facet the card cannot render.
+            const chosen = next[0];
+            if (typeof chosen === "string" && isBatchFacet(chosen)) onFacetChange(chosen);
+          }}
         >
           {BATCH_FACETS.map((value) => (
             <ToggleGroupItem key={value} value={value} aria-label={t(`facet.${value === "all" ? "all" : value}`)}>
