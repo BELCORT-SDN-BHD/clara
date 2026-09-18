@@ -378,3 +378,48 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## `/settings/firm` — the firm's commercial destination (#635)
+
+This is where a firm reads its own legal, commercial and model-usage state. Five cards over
+migration 0233's three governed reads, on the one existing address — there is no new route, so
+`tests/firm-scope-fourth-entrance.test.ts` and `tests/firm-scope-surfaces.test.ts` stay green
+(verified, not assumed), and the page still makes exactly ZERO extra `requireFirmScope()` calls: the
+identity card reads the scope the layout already provided.
+
+**ACCEPTING A NEW LEGAL VERSION HERE IS THE ONLY REMEDY IN THE PRODUCT** for a withdrawn derived
+model-egress authority. `clara._accounting_work_egress_live` (0195:875) requires ONE active OWNER
+holding acceptances of BOTH currently published legal kinds; a newer publication withdraws that the
+moment it lands (0195:890-892), with no sweep and no second switch. Until this page, the sentence
+`WorkDetail.egressNotAuthorized.body` shows a person standing in front of blocked Work — "an owner
+must accept the current versions" — had no destination: the only accept surface was `(entry)`'s
+signup stage, which a signed-in owner never sees again. `components/firm-admin/accept-legal-dialog.tsx`
+is that destination, and it imports `lib/registration/legal-reads.ts` and `legal-doors.ts`
+UNCHANGED rather than forking them, so the op-key, verbatim-digest and stale-re-read properties are
+the same ones the signup journey already proves.
+
+**What this page deliberately does not have**, each because the estate cannot honestly offer it:
+no price while `billing_plans.amounts_ruled` is false (the flag is the render condition, so an
+owner ruling shows a figure with no code change); no "Manage billing" control at any rank (nothing
+in this estate can change a firm's commercial arrangement — `billing_plans` has no door, and
+`firm_registration_payments` is written only by the Stripe webhook lane); no editor for the
+processing caps (`clara.firm_document_limits` has no human writer at all, 0196:36-40); no seat
+count; no chart; and no firm identity fact — the registered name, registration number and address
+live on `/settings/setup`, which this page links to and owns none of.
+
+**Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
+governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:
+the `denied` state has no `data` field, so a live demotion cannot leave a stale plan or payment
+behind a disabled control. It does NOT re-read `clara.caller_context` to notice the demotion — that
+is the child-side re-read P4-6 rules out, and it would make the surface trust a mirrored rank
+instead of the wall. NAMED RESIDUAL: a tab that is never refocused and never navigated keeps its
+last payload until one of those happens; closing that needs a server-push channel this estate does
+not have.
+
+**The model-usage window is UTC, and the page says so.** `clara.get_llm_usage_summary` filters rows
+by `(created_at at time zone 'utc')::date` (0110:750), so the month the card labels is a UTC month
+and not an `Asia/Kuala_Lumpur` one. `lib/firm/usage-period.ts` derives the bounds the way the door
+does and the card prints them. The CSV is client-side only — no route, no door, no byte path — and
+its first two lines carry the firm, that exact window and the currency, so a spreadsheet cannot lose
+the unit or the timezone the screen carried.
+

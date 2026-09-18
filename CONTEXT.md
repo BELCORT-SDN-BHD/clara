@@ -348,6 +348,31 @@ _Avoid_: A placeholder as a signable agreement; one "current agreement" that sta
 The append-only record that one person accepted one published legal document at one exact version and hash, with its instant and the operation key that made it idempotent. Both kinds must be accepted at their current versions before checkout opens; the intent pins the versions it was opened against.
 _Avoid_: A checkbox state kept in the browser; acceptance of one kind counting for the other.
 
+<!-- #635 -->
+**Firm legal standing**:
+Whether ONE active OWNER of a firm holds acceptances of the currently published version of BOTH
+legal kinds. It is the firm's fact, not a person's: it goes false the moment a newer version is
+published, with no sweep, and it is what the model-egress basis reads before Clara may use a model
+on any client's books. An owner accepts the current versions in-app to put it back.
+_Avoid_: One person's own acceptance as the firm's; "we signed it once" as a standing state;
+a firm-level switch that can be turned on.
+
+**Billing plan**:
+The one current commercial arrangement a firm is on, held in the database with its amount, its
+currency and — separately — whether that amount has been RULED. An unruled plan has no price at
+all, and that is stated rather than shown as zero.
+_Avoid_: A price nobody decided rendered as RM 0.00; a plan as a per-seat licence; a subscription
+invoice, which Clara collects for no firm.
+
+**Model usage summary**:
+A firm's monthly roll-up of what Clara's models were asked to do, counted in UTC, in two buckets
+that are never added together: calls made for this firm, and platform-wide calls Clara makes for
+everyone. A call whose day has no price on record is COUNTED and published as unpriced rather than
+guessed at. Any money on it is the provider's price in USD, never converted and never posted to a
+ledger.
+_Avoid_: One combined spend figure; a firm's model cost as a client's expense; a calendar month in
+Asia/Kuala_Lumpur; a missing price rendered as a zero.
+
 **Checkout intent**:
 One applicant's one attempt to pay for one registration: opened, then bound to one live Stripe Checkout Session, then processing (the bank has not answered yet), paid, consumed by the firm claim, or ended as expired, failed or cancelled. One registration has at most one live session at a time; every move is written by one database trigger, and a settled payment is the authority over any earlier terminal state.
 _Avoid_: A browser redirect as proof of payment; a Stripe event as a substitute for the intent's own state; cancelling as a refund.

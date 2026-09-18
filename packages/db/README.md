@@ -646,3 +646,58 @@ list-form) `apps/web` caller, and the batteries in `tests/` that pin them are na
 `grant select … to clara_authenticated` (0182:360) under FORCE RLS
 `firm_id = clara.jwt_firm()` (:358-359); a SECURITY DEFINER wrapper would REMOVE that
 guarantee and force a hand re-implementation of it, for zero new capability.
+
+## 0233 — the firm's own legal, commercial and model-usage state (#635)
+
+THREE new `security definer` reads, granted to `clara_authenticated` and to nobody else, plus ONE
+body-only recut. Nothing else: 0233 creates, alters and drops no relation, issues no table grant,
+adds no trigger, CHECK or policy, and takes no row lock of any kind.
+
+| door | floor | answers |
+|---|---|---|
+| `clara.get_firm_legal_standing()` | `viewer` | one entry per legal kind on the shelf (0185:653-659's own `distinct on (kind)` selection, so a draft-only kind appears as a draft), whether an ACTIVE OWNER of the caller's firm accepted each current version, the caller's own acceptance, and whether the CALLER may accept for the firm |
+| `clara.get_firm_commercial_state()` | `admin` | the firm, the CURRENT billing plan (amount AND `amounts_ruled` together), whether a registration payment is recorded, the declared absence of subscription invoices, and the firm's stored processing caps or NULLs |
+| `clara.get_firm_ai_usage(date)` | `admin` | the caller's own firm's monthly model usage, bound to `clara.jwt_firm()` INSIDE the database, with `price_currency` |
+
+**`get_firm_legal_standing` is ARITY 0 FOREVER.** `clara._accounting_work_egress_live(p_firm,
+p_client)` is ungranted (0195:911) precisely because a per-client answer is an existence oracle for
+another firm's books (0195:871-874). This door answers that basis's limb (a) ONLY — the firm's legal
+standing — and takes no client argument. §C asserts the arity; `p635.db.legal_standing_no_client_arg`
+asserts it again from the other side. It carries neither the legal `body` nor its digest: those stay
+`clara.get_current_legal_documents()`'s (0185:634-671), so no second surface can render bytes a
+third digest was taken over. The attribution triple (`accepted_by` / `accepted_at` /
+`accepted_by_name`) is masked to NULL below bookkeeper, mirroring `0141:526`; `firm_accepted` is
+never masked, so a viewer reads WHETHER without WHO.
+
+**`get_firm_commercial_state` publishes booleans, not identifiers.**
+`clara.firm_registration_payments` carries `stripe_customer_id` and `stripe_subscription_id`; this
+door projects `... is not null` and the `recorded_at` date, and §C reads that off the door's own
+RETURN expression. It also forwards `amounts_ruled` beside the amount, which is what lets a surface
+use the flag as its RENDER CONDITION: the beta plan is seeded UNRULED (`0163:214-215`), so no
+figure appears at all today and a later owner ruling shows one with no code change.
+
+**IT WIDENS C-3's MONEY-STORE ROSTER, AND THAT IS A REVIEWED ACT.** `get_firm_commercial_state`
+reads `clara.firm_registration_payments` — it is the FIRST firm-scoped reader of that relation (the
+only reader outside the checkout chain until now was the operator console, `0188:304`). The name is
+added to `packages/db/tests/checkout-gate-c3.test.mjs`'s `c3.53` closed-world census with the reason
+beside it, exactly as `0164`'s and `0188`'s widenings were. It also READS `pages_per_day`, so it
+enters `f-a9-pr-1b.test.mjs`'s gate-7 roster too — classified there, in writing, as a READER and not
+a live usage gate.
+
+**THE RECUT: `clara.get_llm_usage_summary(uuid,date,uuid)` gains the rank floor it never had.**
+Created at `0110:706` and never spliced, that door's only wall was `p_firm is distinct from
+clara.jwt_firm()` — so before 0233 a VIEWER could read the firm's entire model spend (measured on
+the #635 rig). 0233 adds `perform clara._human_ctx(clara.role_rank('admin'));` as the FIRST
+statement of the body, ahead of that wall, so an under-ranked caller meets CLR04 whatever firm they
+name and a correctly-ranked caller naming a FOREIGN firm still meets CLR11 `client_not_in_firm`.
+Everything else is carried verbatim, and that is PROVEN rather than promised: §C squeezes the live
+body, subtracts 0233's floor block and requires the remainder to hash to the pre-image squeezed the
+same way. The grant is NOT re-issued — `create or replace` preserves the ACL, and §C asserts the
+live ACL is byte-identical to the pre-image, which is what makes that claim a measurement.
+
+**`clara.firm_document_limits` IS UNTOUCHED.** Its viewer-readable SELECT (`0007:810-811`,
+`:2742-2744`) is unmoved in both directions, asserted in the prestate and again in the tail. The
+capacity numbers ride door 2 only so a settings card can render them beside the plan; that is an
+AFFORDANCE, not a wall. The residual stands: that relation still has NO human writer anywhere
+(`0196:36-40`).
+

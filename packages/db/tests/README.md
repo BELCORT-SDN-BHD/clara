@@ -298,3 +298,33 @@ counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37
 
 `prepayment-0223-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.
+
+## `firm-commercial-settings.test.mjs` — #635 / migration 0233 (cell prefix `p635.db.`)
+
+24 cells, every assertion through a `humanQuery` persona under a real least-privileged role.
+`rootQuery` appears only for LABELLED fixture arrangement (`firm-commercial-settings-fixtures.mjs`)
+and for reading catalog facts a masked door deliberately never returns — ACLs, `prosrc`, table
+grants.
+
+`buildWorld()` HAS NO ADMIN PERSONA, so the battery mints its own firms through
+`createFirm`/`addMember` rather than raw DML: a fresh firm per cell, because `legal_acceptances` is
+keyed on the PERSON and `legal_documents` is GLOBAL, so two cells sharing a firm would each be
+reading the other's arrangement.
+
+**THE SHELF IS NOT RESTORED, AND THAT IS THE HOUSE PRECEDENT.** `p635.db.legal_standing_new_version`
+publishes a successor version, and 0185 makes that irreversible in both directions:
+`t_legal_documents_append_only` refuses every DELETE and `_tf_legal_documents_transition`
+(0185:299-302) allows only `draft→published` and `published→superseded`, so a superseded row cannot
+be put back. `checkout-gate-c1.test.mjs:393` and `checkout-gate-c3.test.mjs:266` already
+supersede-and-publish the same way and leave the successor standing — which is why every battery
+here reads the CURRENT published version out of the catalog instead of assuming 0187's v1. The
+pre-run shelf is RECORDED (`readLegalBaseline`) for the report rather than for a restore.
+
+**The platform usage bucket is estate-global by construction** (a `scope='platform'` row carries no
+firm at all, 0110:355-358), so `p635.db.usage_buckets_separate` asserts the FIRM bucket's absolute
+count and only the PRESENCE of the platform one — an absolute count there would couple the cell to
+whatever else ran on the cluster.
+
+`firm-commercial-settings-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
+does not preload it and fails loudly on a database without 0233, because a skip is not evidence.
+

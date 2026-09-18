@@ -200,7 +200,7 @@ test("p635.web.usage_separation the card says these are not a client's figures a
   const h = await mount({ status: "ready", data: [row()] }, sink);
   try {
     assert.match(h.text(), /These are Clara's own model costs\. They are not a client's figures and they never post to a ledger/,
-      "C55.21's separation sentence — #660 owns the money on the client dashboards");
+      "C55.21's separation sentence — ticket 660 owns the money on the client dashboards (spelled without the hash: the token lint reads a three-digit ticket number as a hex colour)");
     assert.ok(h.find((n) => (n as Stub).tagName === "A" && textOf(n as Stub).includes("Go to clients")));
   } finally { await h.unmount(); }
 });
