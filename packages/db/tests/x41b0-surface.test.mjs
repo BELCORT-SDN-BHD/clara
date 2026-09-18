@@ -36,7 +36,7 @@ import {
   refuses, caught, T, ACCUM, EXPENSE, BANK, AR1, AP1, OTHER, mon, dayIn, disposeAsset,
   runPeriod, runDueAsHuman, listFixedAssets, getFixedAsset, listDepreciationRuns, getAuthority,
   faRegisterTie, faWorld, faRow, entryRowOf, manualRes, liveRanges, assertNoOverlaps,
-  freshFaClient, buyAsset, approvedEntry, approvedControlEntry, completeSL, liveAuthority,
+  freshFaClient, buyAsset, approvedEntry, approvedControlEntry, completeSL, liveAuthority, fnExists,
   earnRamp, runAndSettle,
 } from "./x41-fa-world.mjs";
 import {
@@ -304,6 +304,14 @@ test("x41.l2 grants: the run verb is executable by clara_runtime and green under
     "clara_authenticated may execute depreciation_run_due (the /assets advisory)");
   assert.equal(await roleCanExecute(ROLES.runtime, "run_depreciation_manual"), false,
     "clara_runtime may NOT execute the MANUAL verb — that lane is human-only");
+  // #651 [0227]: the OBO run door is the MACHINE half of that same law — a NEW NAME granted to
+  // clara_runtime alone, precisely so run_depreciation_manual never has to be.
+  if (await fnExists("run_depreciation_period_for")) {
+    assert.equal(await roleCanExecute(ROLES.runtime, "run_depreciation_period_for"), true,
+      "clara_runtime may execute the OBO run door (#651) — the machine lane's own name");
+    assert.equal(await roleCanExecute(ROLES.authenticated, "run_depreciation_period_for"), false,
+      "…and clara_authenticated may NOT: a browser runs depreciation through run_depreciation_manual");
+  }
   for (const fn of [
     "upsert_fa_account_profile", "retire_fa_account_profile", "complete_fixed_asset_particulars",
     "revise_fixed_asset_particulars", "propose_depreciation_authority", "sign_depreciation_authority",
@@ -317,6 +325,18 @@ test("x41.l2 grants: the run verb is executable by clara_runtime and green under
   for (const fn of ["list_fixed_assets", "get_fixed_asset", "list_depreciation_runs",
     "get_depreciation_run", "get_depreciation_authority", "fa_register_tie"]) {
     assert.equal(await roleCanExecute(ROLES.authenticated, fn), true, `clara_authenticated may execute the read RPC clara.${fn}`);
+  }
+  // #651 [0227]: the preview read joins that list — clara_authenticated yes, every agent lane no,
+  // and its ungranted arithmetic core stays ungranted (asserted in the same census below).
+  if (await fnExists("preview_depreciation_run")) {
+    assert.equal(await roleCanExecute(ROLES.authenticated, "preview_depreciation_run"), true,
+      "clara_authenticated may execute the depreciation PREVIEW (#651)");
+    for (const role of [ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.runtime]) {
+      assert.equal(await roleCanExecute(role, "preview_depreciation_run"), false,
+        `${role} must NOT execute clara.preview_depreciation_run — it is a human read`);
+    }
+    assert.equal(await roleCanExecute(ROLES.authenticated, "_fa_compute_charges"), false,
+      "…and the arithmetic core it wraps is still ungranted: the WRAPPER is granted, never the core");
   }
   const wake = await rootQuery(
     "select count(*)::int as n from clara.wake_fn_allowlist where function_name = any($1)",

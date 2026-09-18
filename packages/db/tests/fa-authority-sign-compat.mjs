@@ -42,9 +42,16 @@ export async function signTakesAuthorityRef() {
 }
 
 /** A `{kind:'chat_task', id}` reference that RESOLVES for this client — a labelled fixture
- *  `clara.agent_tasks` row in the client's own firm. `kind='chat_turn'` is the chat lane's own
- *  value in `ck_agent_tasks_kind_0011`; the authority ref's `kind` word (`chat_task`) names the
- *  RELATION the id lives in, which is what 0193:1500-1510's ladder resolves against. */
+ *  `clara.agent_tasks` row in the client's own firm.
+ *
+ *  THE ROW KIND IS `autodraft`, MEASURED RATHER THAN CHOSEN. `clara._tf_agent_task_insert`'s
+ *  `chat_turn` arm requires a real `clara.chat_sessions` row (`chat_turn task requires
+ *  session_id`) and its `wake` arm requires a `wake_intents` row; `autodraft` is the one arm whose
+ *  whole precondition is "a prevalidated firm and an ACTIVE client, born queued, with a model
+ *  snapshot" — the `f-a4-pr1c-fixtures.mjs:60` shape. The authority reference's own `kind` word
+ *  (`chat_task`) names the RELATION the id lives in, and 0227's ladder resolves it against
+ *  `clara.agent_tasks` by id, firm and client without reading `kind` — so this fixture is a real
+ *  row of the real relation rather than a shape the ladder would never see in production. */
 export async function mintChatTaskRef(client) {
   const c = await rootQuery("select firm_id from clara.clients where id = $1", [client]);
   const firm = c.rows[0]?.firm_id;
@@ -52,11 +59,52 @@ export async function mintChatTaskRef(client) {
   const u = await rootQuery(
     "select user_id from clara.firm_memberships where firm_id = $1 and status = 'active' order by created_at limit 1",
     [firm]);
-  const t = await rootQuery(
-    `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot, created_by)
-       values ($1, $2, 'chat_turn', 'completed', 'p651-fixture', $3) returning id`,
-    [firm, client, u.rows[0]?.user_id ?? null]);
-  return { kind: "chat_task", id: t.rows[0].id };
+  const insert = `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot, created_by)
+       values ($1, $2, 'autodraft', 'queued', 'p651-fixture', $3) returning id`;
+  const params = [firm, client, u.rows[0]?.user_id ?? null];
+  try {
+    const t = await rootQuery(insert, params);
+    return { kind: "chat_task", id: t.rows[0].id };
+  } catch (e) {
+    // …EXCEPT for a client that is not yet ACTIVE. Every arm of the insert trigger demands
+    // something a carry-down/onboarding fixture does not have: `autodraft` and `close_prep` demand
+    // an ACTIVE client, `chat_turn` a chat session, `wake` a wake intent, `accounting_work` a Work
+    // row. An instruction naming a client still in onboarding is a real shape (a firm agrees the
+    // depreciation policy while the client is being set up) that no audited verb can reach here, so
+    // the fixture writes it directly, LABELLED, with the trigger off for exactly that statement.
+    await rootQuery("alter table clara.agent_tasks disable trigger t_agent_task_insert");
+    try {
+      const t = await rootQuery(insert, params);
+      return { kind: "chat_task", id: t.rows[0].id };
+    } finally {
+      await rootQuery("alter table clara.agent_tasks enable trigger t_agent_task_insert");
+    }
+  }
+}
+
+/** LABELLED FIXTURE DML, and the ONE shape no audited verb can reach: an authority signed in a
+ *  PAST month.
+ *
+ *  0227's D8 stamps `authority_from` as the first day of the SIGNING month and freezes it, so a
+ *  fixture that signs today can only ever produce a floor of "this month" — and since a period is
+ *  due only once it has ENDED, NOTHING is ever due for such a client. That is correct product
+ *  behaviour (`p651.authority.floor` proves it against the real door), and it would silently
+ *  re-aim every pre-existing cell that asks the due oracle what to charge: those cells measure the
+ *  ARITHMETIC, not the window.
+ *
+ *  `clara._tf_fa_authority_transition` refuses both a non-transition UPDATE and any write outside
+ *  its sign/retire allowlist, so the trigger is disabled for exactly this one statement and
+ *  re-enabled in a `finally`. This is fixture DML, never the thing under test. */
+export async function backdateAuthorityFloor(authorityId, floorDate) {
+  try {
+    await rootQuery("alter table clara.fa_depreciation_authorities disable trigger t_fa_authorities_transition");
+    await rootQuery(
+      "update clara.fa_depreciation_authorities set authority_from = $2::date where id = $1",
+      [authorityId, floorDate]);
+  } finally {
+    await rootQuery("alter table clara.fa_depreciation_authorities enable trigger t_fa_authorities_transition");
+  }
+  return floorDate;
 }
 
 /** Sign an authority at whichever frontier this database sits on.

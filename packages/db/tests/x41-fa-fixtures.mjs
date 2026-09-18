@@ -23,11 +23,11 @@ import {
   rootQuery, humanQuery, roleQuery, namedCall, opk, ROLES,
   noteLane, markSkip, a21EnsureReady, idOf, mytMonthStart,
 } from "./a21-helpers.mjs";
-import { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef }
+import { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef, backdateAuthorityFloor }
   from "./fa-authority-sign-compat.mjs";
 
 export * from "./a21-helpers.mjs";
-export { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef };
+export { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef, backdateAuthorityFloor };
 
 // ---------------------------------------------------------------------------
 // Suite-scoped COA codes. Grammar '^[0-9]{4,8}$|^[0-9]{3}-[0-9A-Z]{2,4}$' (0009 O9).
@@ -263,11 +263,26 @@ export const completeParticulars = (sub, { client, asset, particulars, opKey = n
     { name: "p_client" }, { name: "p_asset" }, { name: "p_particulars", cast: "jsonb" }, { name: "p_op_key" },
   ], [client, asset, JSON.stringify(particulars), opKey ?? opk("x41complete")]);
 
-export const reviseParticulars = (sub, { client, asset, particulars, effectiveFrom, opKey = null }) =>
-  humanCall(sub, "revise_fixed_asset_particulars", [
+/** #651 [0227]: EVERY revision now names what KIND of change it is and why (AC1 / D10), and the
+ *  door refuses CLR37 `fa_change_class_required` without it. The classification travels INSIDE
+ *  `p_particulars` (measurement M1's green arm), so the five-argument signature is unmoved. This
+ *  rig defaults to `estimate` with a fixture reason — the only class 0227 implements, and the one
+ *  every pre-0227 x41 cell was implicitly making — so those cells keep measuring the SUPERSEDE
+ *  ARITHMETIC. The requirement itself is proven against the real door by `p651.class.required`,
+ *  and `policy` / `error` by `p651.class.policy_refused` / `p651.class.error_refused`. A cell may
+ *  pass `changeClass: null` to drive the refusal. */
+export const reviseParticulars = (sub, {
+  client, asset, particulars, effectiveFrom, opKey = null,
+  changeClass = "estimate", changeReason = "x41 rig: prospective estimate revision",
+}) => {
+  const p = { ...particulars };
+  if (changeClass !== null) p.change_class = changeClass;
+  if (changeReason !== null) p.change_reason = changeReason;
+  return humanCall(sub, "revise_fixed_asset_particulars", [
     { name: "p_client" }, { name: "p_asset" }, { name: "p_particulars", cast: "jsonb" },
     { name: "p_effective_from", cast: "date" }, { name: "p_op_key" },
-  ], [client, asset, JSON.stringify(particulars), effectiveFrom, opKey ?? opk("x41revise")]);
+  ], [client, asset, JSON.stringify(p), effectiveFrom, opKey ?? opk("x41revise")]);
+};
 
 export const proposeAuthority = (sub, { client, cadence = "monthly", opKey = null }) =>
   humanCall(sub, "propose_depreciation_authority", [
