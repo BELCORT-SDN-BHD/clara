@@ -191,8 +191,11 @@ test("an owner lands on /settings/firm and reads five cards, with a live legal s
   await page.goto("/settings/firm");
 
   await expect(page.getByRole("heading", { name: "Firm settings", level: 1 })).toBeVisible();
+  // `.first()` on purpose: "This firm" is BOTH the identity card's h2 and the usage table's own
+  // scope heading once rows render, and a bare locator matching two nodes is a strict-mode error
+  // rather than a finding about the page.
   for (const heading of ["This firm", "Legal standing", "Plan and payment", "Model usage", "Processing capacity"]) {
-    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
   }
   await expect(page.getByText("An owner of this firm has accepted the current versions")).toBeVisible();
   // D1 — NOT ONE PRICE while amounts_ruled is false.
@@ -301,7 +304,11 @@ test("a bookkeeper sees the legal standing but no commercial or usage figures, a
   await page.goto("/settings/firm?period=2026-08");
 
   await expect(page.getByRole("heading", { name: "Legal standing", exact: true })).toBeVisible();
-  await expect(page.getByText("Accepted for this firm").first()).toBeVisible();
+  // A BOOKKEEPER IS NOT MASKED. The door masks the attribution triple BELOW bookkeeper
+  // (0141:526 is the row floor it mirrors), so rank 1 reads WHO accepted and WHEN — the masked
+  // "Accepted for this firm" face belongs to a viewer, and asserting it here was this cell's own
+  // error, caught by the first browser run.
+  await expect(page.getByText(/Accepted by E2E Owner on/).first()).toBeVisible();
   // 裁-187 — ABSENT, not disabled: no figures, no download, no accept control.
   await expect(page.getByText("Clara Beta")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download CSV" })).toHaveCount(0);
