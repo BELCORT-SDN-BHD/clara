@@ -11,6 +11,7 @@ import {
   accountingHref,
   canOpenClientLeaf,
   journalComposerHref,
+  tradeInvoiceHref,
   visibleAccountingItems,
   type NavigationScope,
 } from "@/lib/navigation/tree";
@@ -55,18 +56,32 @@ export function AccountingHubView({
   // is 裁-187's rule, and typing the address still reaches the composer's own
   // denied state rather than a blank.
   const canCompose = canOpenClientLeaf(scope, "journalComposer");
+  // #655 — THE HUB'S SECOND PRIMARY ACT. Recording what a client invoiced, or was billed, is
+  // the other thing a bookkeeper comes to Accounting to DO, and it is a different operation
+  // through a different door rather than a mode of the journal composer. Shaped by the SAME one
+  // predicate, for the same reason: the write door behind it (`clara.admit_trade_invoice_work`,
+  // bookkeeper+) can only ever refuse a viewer, and typing the address still reaches the form's
+  // own denied state rather than a blank.
+  const canRecordInvoice = canOpenClientLeaf(scope, "tradeInvoice");
 
-  if (items.length === 0 && !canCompose) {
+  if (items.length === 0 && !canCompose && !canRecordInvoice) {
     return <p className="text-sm text-muted-foreground">{t("noSections")}</p>;
   }
 
   return (
     <div className="flex flex-col gap-6">
-      {canCompose ? (
-        <div>
-          <Button render={<Link href={journalComposerHref(clientId)} />}>
-            {tShell("clientLeaf.journalComposer")}
-          </Button>
+      {canCompose || canRecordInvoice ? (
+        <div className="flex flex-wrap gap-3">
+          {canCompose ? (
+            <Button render={<Link href={journalComposerHref(clientId)} />}>
+              {tShell("clientLeaf.journalComposer")}
+            </Button>
+          ) : null}
+          {canRecordInvoice ? (
+            <Button variant="outline" render={<Link href={tradeInvoiceHref(clientId)} />}>
+              {tShell("clientLeaf.tradeInvoice")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {items.length === 0 ? (

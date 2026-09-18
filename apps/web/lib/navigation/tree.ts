@@ -118,7 +118,7 @@ export type AccountingItemId =
  * a page that is only ever reached with an intent.
  */
 export type ClientLeafId =
-  | "journalComposer" | "periodicAdjustment" | "staffExpenseClaim" | "workDetail"
+  | "journalComposer" | "periodicAdjustment" | "staffExpenseClaim" | "tradeInvoice" | "workDetail"
   | "knowledgeRecord" | "counterpartyIdentity";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
@@ -455,6 +455,13 @@ export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   // as the DENIED state rather than as a form. The HISTORY row above it is viewer, because reading
   // the client's own claims is the same class of act as reading their journals.
   { id: "staffExpenseClaim", parent: "accounting", labelKey: "clientLeaf.staffExpenseClaim", minimumRole: "bookkeeper" },
+  // #655 — BOOKKEEPER, for `journalComposer`'s own reason: the write door behind it
+  // (`clara.admit_trade_invoice_work`, bookkeeper+) can only ever refuse a viewer, and offering a
+  // control that can only refuse is 裁-187's rule. The route still renders for a viewer as the
+  // DENIED state rather than as a form. There is no history row beside it: the invoices a client
+  // has recorded are read on /registers (the aging surface) and on /journals, both already built,
+  // and #669 owns the outstanding tiles.
+  { id: "tradeInvoice", parent: "accounting", labelKey: "clientLeaf.tradeInvoice", minimumRole: "bookkeeper" },
   { id: "workDetail", parent: "work", labelKey: "clientLeaf.workDetail", minimumRole: "viewer" },
   // #644 — /…/knowledge/:recordId names ONE knowledge record, so it is a leaf for the same
   // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
@@ -508,6 +515,13 @@ export function periodicAdjustmentHref(clientId: string): string {
 /** `/clients/:clientId/accounting/claims` — the C3/C6 staff-expense-claim register (#638). */
 export function staffExpenseClaimsHref(clientId: string): string {
   return `${clientBase(clientId)}/accounting/claims`;
+}
+
+/** `/clients/:clientId/accounting/invoices/new` — the C1/C3 trade-invoice form (#655). A SIBLING
+ *  address of the journal composer and the claim form, never a tab on either: the three admit
+ *  different operations through different doors, and a preparer arrives with an intent formed. */
+export function tradeInvoiceHref(clientId: string): string {
+  return `${clientBase(clientId)}/accounting/invoices/new`;
 }
 
 /** `/clients/:clientId/accounting/claims/new` — the C1/C3 claim form (#638). */
