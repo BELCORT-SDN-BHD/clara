@@ -1,5 +1,7 @@
 # Current Clara runtime on Node 22 — local build checkpoint
 
+> **Where the rig lives now (2026-09-18).** The working directory and branch named below were never pushed and no longer exist. The rig itself is published in this repository at `docs/plan/active/prototypes/agent-harness-validation/`, with its recorded passes. The commands in this document are kept verbatim as the record of what was actually run; their paths are historical, not instructions.
+
 Date: 2026-09-08. Isolated local compatibility evidence, not a runtime migration or deployment.
 
 The current Clara runtime source in `C:/Users/zhant/Desktop/clara-rebuild-agent-harness/packages/runtime` built with Node `v22.23.2`; its TypeScript check also returned zero. This complements the [compiled ToolLoopAgent/Workflow restart experiment](refresh-2026-09-08-tool-loop-workflow-merge-proof.md). The runtime source itself was not changed for this check.
