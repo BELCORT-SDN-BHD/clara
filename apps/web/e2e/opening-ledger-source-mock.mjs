@@ -135,7 +135,6 @@ const NAMED_REFUSAL =
 const EMPTY_RELATIONS = new Set([
   "/rest/v1/opening_items",
   "/rest/v1/counterparties",
-  "/rest/v1/client_resolutions",
   "/rest/v1/journal_entries",
   "/rest/v1/lint_findings",
 ]);
@@ -214,8 +213,16 @@ export async function handleP656Supabase(request, response, path, url, sendJson,
     }], cors);
     return true;
   }
-  // The reads this tab makes that this lane deliberately answers EMPTY for its own client, and
-  // falls through for everybody else's.
+  // The keyed-resolution read is scoped by the SEED, not by the client — `loadOpeningKeyedResolution`
+  // filters on `bound_scope_id` (lib/registers/opening.ts:180). A tied basis has none, and saying
+  // so is what lets the workbench settle instead of hanging on an unanswered read.
+  if (request.method === "GET" && path === "/rest/v1/client_resolutions") {
+    if (eq("bound_scope_id") !== P656.seedId) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+  // The other reads this tab makes that this lane deliberately answers EMPTY for its own client,
+  // and falls through for everybody else's.
   if (request.method === "GET" && EMPTY_RELATIONS.has(path) && mine()) {
     sendJson(response, 200, [], cors);
     return true;
