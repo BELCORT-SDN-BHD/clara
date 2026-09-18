@@ -10,6 +10,19 @@
 // THE DISCRIMINATING PAIR is the first cell: one call succeeded and one failed IN THE
 // SAME MESSAGE, and the assertion is that the two chips differ. Before this change both
 // rendered the identical bare grey name chip, so that assertion was false.
+//
+// RE-BASED BY #642 (UI-32), and the reason is on the record rather than in a diff. This
+// file used to pin "the tool NAME is the runtime's own token and is never re-worded".
+// That was C6's deliberate reading — the chip's verb is the receipt's claim about what
+// was called — and UI-32 ("no implementation jargon on a human surface") is the OWNER
+// ruling that outranks it: `start_accrual_work` and `compose_metric_preview` reached the
+// reader verbatim, which is the defect UI-32 was filed against, fixed once, and reopened
+// the moment this chip came back. The honesty C6 was protecting is KEPT, in the one place
+// it is actually load-bearing: a tool this build has no label for still shows the
+// runtime's own token (the fallback cell below), because inventing a friendly name for a
+// step this build cannot describe would be worse than the jargon. The token ↔ label map
+// is `lib/clara/toolLabel.ts`, measured by calling `buildToolsV20`, and
+// `lib/clara/toolLabel.test.ts` is the gate that keeps it from drifting.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -68,7 +81,9 @@ test("a SUCCEEDED and a FAILED call in one message render DIFFERENT chips", asyn
     await h.settle();
     const rendered = chips(h);
     assert.equal(rendered.length, 2, "one chip per call — the resolvers themselves still render nothing of their own");
-    assert.deepEqual(rendered, ["trial_balance · done", "read_document · failed"]);
+    assert.deepEqual(rendered, ["Reading the trial balance · done", "Reading a document · failed"]);
+    // UI-32 — and neither runtime token reaches the reader at all.
+    assert.doesNotMatch(h.text(), /trial_balance|read_document/);
     // THE DEFECT, named: before the resolver these two were the same string.
     assert.notEqual(rendered[0], rendered[1]);
   } finally {
@@ -76,11 +91,27 @@ test("a SUCCEEDED and a FAILED call in one message render DIFFERENT chips", asyn
   }
 });
 
-test("the tool NAME is the runtime's own token and is never re-worded", async () => {
+test("UI-32 (#642) — the tool name is a HUMAN label, and the runtime's token never reaches the reader", async () => {
   const h = await renderComponent(App([call("a", "compose_metric_preview"), result("a", "compose_metric_preview")]));
   try {
     await h.settle();
-    assert.match(h.text(), /compose_metric_preview/, "the verb is the receipt's claim about what was called");
+    assert.match(h.text(), /Previewing a measure/, "the reader is told what happened, in words");
+    assert.doesNotMatch(h.text(), /compose_metric_preview/, "…and not in the implementation's own identifier");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("UI-32 (#642) — a tool this build has NEVER HEARD OF still shows the runtime's own word", async () => {
+  // The half of C6's original rule that survives, and the one that matters: a newer
+  // frozen `chatTurn` body may ship a tool this surface has no label for. Showing its
+  // token is honest. A blank chip would hide that a step happened at all, and a
+  // prettified token ("a tool from the future") would read like a label while still being
+  // the implementation's word.
+  const h = await renderComponent(App([call("a", "a_tool_from_the_future"), result("a", "a_tool_from_the_future")]));
+  try {
+    await h.settle();
+    assert.deepEqual(chips(h), ["a_tool_from_the_future · done"]);
   } finally {
     await h.unmount();
   }
@@ -91,7 +122,7 @@ test("a call with NO recorded outcome says so — it never reads as done", async
   try {
     await h.settle();
     const rendered = chips(h);
-    assert.deepEqual(rendered, ["trial_balance · no outcome recorded"]);
+    assert.deepEqual(rendered, ["Reading the trial balance · no outcome recorded"]);
     assert.doesNotMatch(h.text(), /done/, "a missing sibling must never be reported as success");
     // And deliberately not "running": a tool_call only ever reaches a screen from the
     // SETTLED transcript, so a running claim would be this UI asserting a state the DB
@@ -110,7 +141,7 @@ test("two calls to the SAME tool keep their own outcomes — the map keys on the
   ]));
   try {
     await h.settle();
-    assert.deepEqual(chips(h), ["read_document · done", "read_document · failed"]);
+    assert.deepEqual(chips(h), ["Reading a document · done", "Reading a document · failed"]);
   } finally {
     await h.unmount();
   }
