@@ -423,3 +423,69 @@ export function promoteKnowledgeToFirm(
     p_source: {},
   }, opts);
 }
+
+// =============================================================================
+// #658 — WHO READ THIS RECORD (0230_knowledge_retrieval.sql, the SEVENTH door).
+//
+// `clara.work_knowledge_reads` is FORCE-RLS with NO app-role SELECT, so
+// `clara.list_work_knowledge_reads_for_record` is the ONLY human path into it —
+// DECISIONS.md:83 mandates exactly that door for exactly that reason, and a
+// `grant select` is not an alternative (0230's tail refuses one).
+//
+// IT RETURNS READ METADATA AND NEVER A VALUE: which Work, at which
+// `knowledge_version` and `as_of`, under which `purpose`, with which face word.
+// No record value, no `applies_when`, no source bytes, no pack content — which
+// is why granting it to `clara_authenticated` does not breach #783
+// (.out-of-scope/human-read-of-knowledge-pack.md).
+// =============================================================================
+
+/** The estate's coverage vocabulary, and the four values `work_knowledge_reads.status`
+ *  admits. The runtime's own `unavailable` is REFUSED by the CHECK and never appears
+ *  here; `packages/runtime/lib/knowledge-retrieval.mjs`'s `faceStatusOf` is the one
+ *  mapping between the two. */
+export type KnowledgeReadStatus = "ok" | "partial" | "unknown" | "denied";
+
+export type WorkKnowledgeReadRow = {
+  work_id: string;
+  client_id: string;
+  run_id: string;
+  seq: number;
+  read_at: string;
+  purpose: string;
+  /** The period the run read FOR — not the instant it read at. */
+  as_of: string;
+  /** TEXT, and nothing may coerce it: it is the watermark a resumed run compares. */
+  knowledge_version: string;
+  status: KnowledgeReadStatus;
+  reason: string | null;
+};
+
+export type WorkKnowledgeReadsEnvelope = {
+  status: "ok";
+  record_id: string;
+  knowledge_key: string;
+  scope_kind: "client" | "firm";
+  client_id: string | null;
+  reads: WorkKnowledgeReadRow[];
+  /** The door caps the list at 100 newest-first. The C13 register is unbounded and this
+   *  list is not, deliberately: an unbounded list on a detail page is how a record page
+   *  quietly becomes a Work directory. */
+  truncated: boolean;
+  hidden_count: number;
+  computed_at: string;
+};
+
+/** clara.list_work_knowledge_reads_for_record(p_record uuid) — viewer+, firm from the
+ *  session, scope taken from the RECORD. A `scope_kind='firm'` record lists every client
+ *  in the firm EXCEPT those whose own live record shadows the key, so the list never
+ *  claims a client was reading the firm default when it was reading its own exception. */
+export function loadWorkKnowledgeReadsForRecord(
+  recordId: string,
+  opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},
+): Promise<WorkKnowledgeReadsEnvelope> {
+  return callDoor<WorkKnowledgeReadsEnvelope>(
+    "list_work_knowledge_reads_for_record",
+    { p_record: recordId },
+    opts,
+  );
+}

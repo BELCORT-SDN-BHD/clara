@@ -45,6 +45,14 @@ export const KN = {
   recordFirmSource: "654bb654-2222-4777-8777-654bb6540001",
   recordFirmRaced: "654bb654-2222-4777-8777-654bb6540002",
   recordFirmException: "654bb654-2222-4777-8777-654bb6540003",
+  // #658's OWN ids, again deliberately disjoint. The out-of-effect row rides #644's `clientOk`
+  // register (an expired rule BESIDE live ones is the whole point of the mark); the two records
+  // below are the reads-list lane's, because that list is a PERSISTENT-ish read whose truncated
+  // and empty faces must not depend on which other walk ran first.
+  recordExpired: "658bb658-2222-4777-8777-658bb6580001",
+  recordReadsEmpty: "658bb658-2222-4777-8777-658bb6580002",
+  recordReadsDenied: "658bb658-2222-4777-8777-658bb6580003",
+  workReader: "658cc658-3333-4777-8777-658cc6580001",
 };
 
 const CLIENT_NAMES = {
@@ -361,6 +369,59 @@ function applicabilityFor(clientId, key) {
   };
 }
 
+// #658 — AN OUT-OF-EFFECT RULE, BESIDE LIVE ONES. `effective_to` is in the past, so the register
+// must MARK it and still render it: silently dropping a rule is how a reader comes to believe a
+// client has no policy when it has one that stopped applying. Both window ends already ride
+// `_knowledge_row_json` (0192:1013-1036), so this needs no new door and no recut.
+const READS_EMPTY = rec({
+  record_id: KN.recordReadsEmpty, knowledge_key: "sst_regime", value: "service_tax",
+  key_description: "The SST registration status the interview recorded.",
+  knowledge_version: "10",
+});
+
+const READS_DENIED = rec({
+  record_id: KN.recordReadsDenied, knowledge_key: "sst_regime", value: "not_registered",
+  key_description: "The SST registration status the interview recorded.",
+  knowledge_version: "10",
+});
+
+const EXPIRED = rec({
+  record_id: KN.recordExpired, knowledge_key: "sst_regime", value: "sales_tax",
+  effective_from: "2020-01-01", effective_to: "2020-12-31",
+  key_description: "The SST registration status the interview recorded.",
+  basis: "the SST de-registration letter", knowledge_version: "9",
+});
+
+// #658 — WHAT `clara.list_work_knowledge_reads_for_record` ANSWERS, per record. Three faces:
+//   recordMsic        — ONE Work read it, `partial`, and the list is TRUNCATED (the door caps at
+//                       100 and says how many it withheld).
+//   recordReadsEmpty  — a real read with no rows: "no Work has recorded a read of this record".
+//   recordReadsDenied — 403, the refusal face, which must leave the revisions readable beside it.
+function readsFor(recordId) {
+  if (recordId === KN.recordMsic) {
+    return {
+      status: "ok", record_id: recordId, knowledge_key: "msic", scope_kind: "client",
+      client_id: KN.clientOk,
+      reads: [{
+        work_id: KN.workReader, client_id: KN.clientOk,
+        run_id: "wrun_01M20WGD9ETKK6RWCBA8CWG1GE", seq: 1,
+        read_at: "2026-09-18T02:00:00.000Z", purpose: "accounting_work",
+        as_of: "2026-09-18", knowledge_version: "11", status: "partial",
+        reason: "remainder truncated",
+      }],
+      truncated: true, hidden_count: 12, computed_at: "2026-09-19T03:00:00.000Z",
+    };
+  }
+  if (recordId === KN.recordReadsEmpty || recordId === KN.recordExpired) {
+    return {
+      status: "ok", record_id: recordId, knowledge_key: "sst_regime", scope_kind: "client",
+      client_id: KN.clientOk, reads: [], truncated: false, hidden_count: 0,
+      computed_at: "2026-09-19T03:00:00.000Z",
+    };
+  }
+  return null;
+}
+
 function registerFor(clientId) {
   // #654 — the promotion's persistent outcome, read back.
   if (clientId === KN.clientFirmSource || clientId === KN.clientFirmRaced
@@ -387,7 +448,8 @@ function registerFor(clientId) {
     return {
       client_id: clientId,
       knowledge_version: "11",
-      records: [msicLive(), INFERRED, FIRM_DEFAULT, CONFLICT_A, CONFLICT_B, LEGACY],
+      records: [msicLive(), INFERRED, FIRM_DEFAULT, CONFLICT_A, CONFLICT_B, LEGACY, EXPIRED,
+        READS_EMPTY, READS_DENIED],
     };
   }
   if (clientId === KN.clientSourceGone) {
@@ -406,6 +468,9 @@ function recordById(id) {
   if (id === KN.recordFirmSource) return FIRM_SOURCE;
   if (id === KN.recordFirmException) return FIRM_EXCEPTION;
   if (id === KN.recordFirmRaced) return FIRM_RACED;
+  if (id === KN.recordExpired) return EXPIRED;
+  if (id === KN.recordReadsEmpty) return READS_EMPTY;
+  if (id === KN.recordReadsDenied) return READS_DENIED;
   return null;
 }
 
@@ -515,6 +580,22 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
       key: KEY_DEFINITIONS[row.knowledge_key],
       revision_count: historyFor(row.record_id).length,
     }, cors);
+    return true;
+  }
+
+  // #658 — THE SEVENTH DOOR (DECISIONS.md:83). Exclusive to this lane and ID-SCOPED, so it needs
+  // no `unscopeable` entry beside `list_firm_knowledge`: every id it answers was minted here.
+  if (verb === "list_work_knowledge_reads_for_record") {
+    const body = await readJson(request);
+    const id = body?.p_record ?? null;
+    if (id === KN.recordReadsDenied) {
+      sendJson(response, 403,
+        refusalBody("permission denied for function list_work_knowledge_reads_for_record"), cors);
+      return true;
+    }
+    const answer = readsFor(id);
+    if (!answer) return false;
+    sendJson(response, 200, answer, cors);
     return true;
   }
 

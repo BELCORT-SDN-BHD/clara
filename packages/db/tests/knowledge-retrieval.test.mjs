@@ -60,7 +60,6 @@ function cell(name, fn) {
 
 const RUN = (n) => `wrun_P658${String(n).padStart(4, "0")}ABCDEFGHJKMNPQ`.slice(0, 31);
 const byKey = (answer, key) => answer.records.filter((r) => r.knowledge_key === key);
-const tierOf = (answer, key) => byKey(answer, key).map((r) => r.tier);
 
 // =============================================================================================
 // 1 · clara.retrieve_knowledge

@@ -38,6 +38,7 @@ import {
 import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { ArApCounterpartyDoorDialog } from "./ArApCounterpartyDoorDialog";
 import { KnowledgePromoteDialog } from "./knowledge-promote-dialog";
+import { KnowledgeRecordReads } from "./knowledge-record-reads";
 import {
   KnowledgeApplicability,
   KnowledgeBadges,
@@ -292,6 +293,14 @@ export function KnowledgeDetail({ clientId, recordId }: { clientId: string; reco
           </ol>
         </DataState>
       </section>
+
+      {/* #658 — THE OTHER HALF OF AC5's "historical basis": who CONSUMED this record. It sits
+          BELOW the revision timeline because the timeline is what the record IS and this is who
+          read it; a reader who came to find out what the record says must not scroll past a Work
+          directory first. It carries its OWN state ladder because this read (the seventh door,
+          DECISIONS.md:83) fails independently of the two above it — a denied reads-read must
+          leave the revisions readable beside it. */}
+      <KnowledgeRecordReads clientId={clientId} recordId={recordId} />
     </div>
   );
 }
