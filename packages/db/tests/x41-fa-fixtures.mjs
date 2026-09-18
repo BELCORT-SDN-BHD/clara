@@ -23,8 +23,11 @@ import {
   rootQuery, humanQuery, roleQuery, namedCall, opk, ROLES,
   noteLane, markSkip, a21EnsureReady, idOf, mytMonthStart,
 } from "./a21-helpers.mjs";
+import { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef }
+  from "./fa-authority-sign-compat.mjs";
 
 export * from "./a21-helpers.mjs";
+export { signAuthorityCompat, signTakesAuthorityRef, mintChatTaskRef };
 
 // ---------------------------------------------------------------------------
 // Suite-scoped COA codes. Grammar '^[0-9]{4,8}$|^[0-9]{3}-[0-9A-Z]{2,4}$' (0009 O9).
@@ -271,10 +274,14 @@ export const proposeAuthority = (sub, { client, cadence = "monthly", opKey = nul
     { name: "p_client" }, { name: "p_cadence" }, { name: "p_op_key" },
   ], [client, cadence, opKey ?? opk("x41prop")]);
 
-export const signAuthority = (sub, { client, authority, opKey = null }) =>
-  humanCall(sub, "sign_depreciation_authority", [
-    { name: "p_client" }, { name: "p_authority" }, { name: "p_op_key" },
-  ], [client, authority, opKey ?? opk("x41sign")]);
+/** #651 [0227]: the sign door's instruction reference became REQUIRED, which moved the arity from
+ *  three to four. The shared compat helper feature-detects the signature off `to_regprocedure` so
+ *  the WHOLE x41 suite runs unchanged at both frontiers; `ref` lets a cell supply its own
+ *  reference instead of the minted fixture one. */
+export const signAuthority = (sub, { client, authority, opKey = null, ref = null }) =>
+  signAuthorityCompat(humanQuery, sub, {
+    client, authority, opKey: opKey ?? opk("x41sign"), ref,
+  });
 
 export const retireAuthorityVerb = (sub, { client, authority, reason = "x41 retire", opKey = null }) =>
   humanCall(sub, "retire_depreciation_authority", [

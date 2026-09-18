@@ -25,6 +25,7 @@ import {
   has0056, caught, cleanCloseableFY, plainEntry,
   beginClose, finalizeClose, BANK1, REVN, EXPN, addDaysStr,
 } from "./x56-fixtures.mjs";
+import { signAuthorityCompat } from "./fa-authority-sign-compat.mjs";
 
 let ready = false;
 let has56 = false;
@@ -84,8 +85,9 @@ async function liveFaAuthority(proposer, signer, { client, cadence = "monthly" }
     [client, cadence, opk("x56fa-authprop")])).rows[0].r;
   const authorityId = proposed.authority_id ?? proposed.id;
   assert.ok(authorityId, `mandatory setup: propose_depreciation_authority names the authority (got ${JSON.stringify(proposed)})`);
-  await humanQuery(signer, "select clara.sign_depreciation_authority(p_client => $1, p_authority => $2, p_op_key => $3) as r",
-    [client, authorityId, opk("x56fa-authsign")]);
+  // #651 [0227]: sign takes a required, RESOLVED instruction reference — see the compat helper.
+  await signAuthorityCompat(humanQuery, signer,
+    { client, authority: authorityId, opKey: opk("x56fa-authsign") });
   return authorityId;
 }
 

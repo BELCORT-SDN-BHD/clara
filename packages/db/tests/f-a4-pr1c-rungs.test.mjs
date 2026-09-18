@@ -24,6 +24,7 @@ import {
   RATIONALE, MODEL, caught, derivedOpKey, callWake, mintClosePrepSession, VERBS,
   receiptById, tokens, inPeriodDraft, ensureLimb, limbGate, scene,
 } from "./f-a4-pr1c-fixtures.mjs";
+import { signAuthorityCompat } from "./fa-authority-sign-compat.mjs";
 
 const gate = (t) => limbGate(t, markSkip);
 
@@ -291,9 +292,9 @@ test("fa4c.R5 (FIX-10/C-5 + FIX-1) the with-authority catch-up ACTS, and leaves 
     t.skip("no depreciation authority could be proposed for this client");
     return;
   }
-  await humanQuery(sc.alice,
-    "select clara.sign_depreciation_authority(p_client => $1, p_authority => $2, p_op_key => $3) as r",
-    [sc.client, authId, opk("fa4c-r5-sign")]);
+  // #651 [0227]: sign takes a required, RESOLVED instruction reference — see the compat helper.
+  await signAuthorityCompat(humanQuery, sc.alice,
+    { client: sc.client, authority: authId, opKey: opk("fa4c-r5-sign") });
   const live = await rootQuery(
     "select count(*)::int as n from clara.fa_depreciation_authorities where client_id=$1 and status='live'",
     [sc.client]);

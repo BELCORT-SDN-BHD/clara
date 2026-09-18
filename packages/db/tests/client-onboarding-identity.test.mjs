@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import {
   CLR, PG, asHuman, asRoot, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery, ROLES,
 } from "./rig-fixtures.mjs";
+import { signAuthorityCompat } from "./fa-authority-sign-compat.mjs";
 
 /** Postgres' own deadlock SQLSTATE. Named here rather than in `rig-helpers.mjs`'s shared `PG`
  *  table: eleven other lanes are editing that file in this wave, and this constant has exactly two
@@ -470,9 +471,10 @@ cell("p649.settle.clr38 — under a live ANNUAL depreciation authority the door 
   const proposed = await humanQuery(w.bookkeeper,
     "select clara.propose_depreciation_authority(p_client => $1, p_cadence => 'annual', p_op_key => $2) as r",
     [client, opk("p649_prop")]).then((r) => r.rows[0].r);
-  await humanQuery(w.admin,
-    "select clara.sign_depreciation_authority(p_client => $1, p_authority => $2, p_op_key => $3) as r",
-    [client, proposed.authority_id, opk("p649_sign")]);
+  // #651 [0227]: the sign door's instruction reference is REQUIRED and the arity moved to four.
+  // The shared compat helper feature-detects the signature, so this cell runs at both frontiers.
+  await signAuthorityCompat(humanQuery, w.admin,
+    { client, authority: proposed.authority_id, opKey: opk("p649_sign") });
 
   const err = await assertRaises(CLR38, () => settleAs(w.admin, p, null, 30, opk("p649_locked")),
     "settling while a live ANNUAL depreciation authority stands");
