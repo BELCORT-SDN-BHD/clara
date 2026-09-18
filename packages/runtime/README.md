@@ -892,3 +892,59 @@ shape; the WRITER does not, and the door is the wall. **`claraWork_v4` was cut i
 the existing `observed` object (`claraWork.v4.impl.ts`). Both rows above therefore carry
 forward to the next frozen `claraWork` version, unchanged.
 <!-- #811 -->
+
+## The intake batch lane (#636)
+
+`lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:
+`openBatch`, `attachIntake`, `beginIntakeInBatch`, `setMemberDependency`, `recordCapacityWait`,
+`cancelBatch`, `resumeCancel`, `sweepBatchCancellations`. Every one returns a typed
+`{status:'ok'|'refused'|'unavailable', …}` — never null, never a raw throw — because a timeout and
+a refusal are different facts and a retry loop that conflates them turns a permanent no into an
+infinite one.
+
+**WHY IT IS NOT IN `lib/intake.mjs`.** That file is ONE manifest line from freezing: five real
+reverse importers already point at it (`invoiceFacts.v1.services.mjs:9`,
+`statementFacts.v1.services.mjs:19`, `statementFacts.v2.services.mjs:31`,
+`witnessFacts.v1.services.mjs:27`, `witnessFacts.v2.services.mjs:38`), none of which is in
+`frozen-workflows.json` today. MEASURED on the rig with
+`node scripts/check-frozen-workflows.mjs --print-closure`: 288 @frozen entry files lock 296
+modules, and `lib/intake.mjs`, `src/intakeRoutes.ts`, `lib/reconciler.mjs` and `lib/spool.mjs` are
+all OUTSIDE it. Nothing frozen imports `lib/intake-batches.mjs`; it may IMPORT `lib/spool.mjs`,
+because an import edge pointing INTO a closure does not pull the importer in.
+
+**WHY THERE IS NO `documentIngest_v3`.** The batch id never enters the workflow's step IO. A begun
+intake and its membership commit together in an EXPLICIT transaction opened by
+`beginIntakeInBatch` (`withRuntime` is autocommit — `checkout()` in `lib/pools.mjs` issues no
+BEGIN), and the membership is read back from the database by the read door. Changing the step IO
+would be a new frozen body for a fact the database already holds.
+
+**THE FAN-OUT, and why the parent stores its decision.** `POST /api/intake/batches/:id/cancel`
+makes ONE governed decision and then issues one `clara.cancel_accounting_work` per live child, ONE
+CALL PER TRANSACTION — that is the acceptance criterion, not an optimisation: a child that already
+posted answers `already_completed` and keeps its receipt (0199:230-272), and one transaction around
+all of them would make the first refusal roll the others back. Each child's key is DERIVED
+(`<cancel_op_key>:<work_id>`) and the author is the STORED `cancel_requested_by`. MEASURED on the
+rig: `clara._work_door_ctx` hashes `{work, author}` (0184:262-264), so a resumed fan-out carrying
+the reconciler's own identity would raise CLR10 `op_key_conflict` on every child. CLR13
+`operation_in_flight` is not a failure — the child is left for the next sweep.
+
+**The belt.** `lib/reconciler-batches.mjs` is one contained belt in `runReconcilerSweep`, after the
+accounting-work belt and before the trace prune. It feature-detects
+`clara.sweep_intake_batch_cancellations(integer)` per cycle, so an image older than 0229 boots
+dormant and lights on the next leader cycle with no restart. The worklist is a DOOR rather than a
+query because `clara_runtime` holds no SELECT and no policy on `clara.operation_receipts`
+(0178:1619-1630 asserts both) and none on the batch parent.
+
+**The capacity wait.** MEASURED (0229's header, M2): a post-custody capacity refusal comes out of
+`clara._resize_document_reservation` as SQLSTATE `CLR18`, and `lib/intake.mjs:155-159` maps eight
+LITERAL codes with everything else to `internal` — so the intake lands at `failure_code='internal'`
+and 0229's trigger arm never fires in production. `recordCapacityWait` is therefore the production
+path to `awaiting_capacity`: CLR18 only, actor from the upload sidecar's `uploadedBy` (the finalize
+route carries a capability token and no principal), and its own refusal swallowed into a log line
+so the route's honest 429 never becomes a 500.
+
+**The World leg.** `tests/intake-batch-e2e.mjs` is standalone (not collected by `node --test`) and
+needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
+MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
+rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
+reads and `writeIntakeMeta`'s `rename` (the #693 family).

@@ -77,6 +77,9 @@ import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { purposeLabel } from "@/lib/work/purpose-label";
 import { getWorkClaimOrigin, type WorkClaimOrigin } from "@/lib/work/staff-expense-claim-reads";
+// #636 — the reverse row. NO `list_accounting_work` recut (that body is #905's and the Work-list
+// projection is frozen this wave): the LIST says nothing about batches; DETAIL gets ONE line.
+import { getWorkBatchOrigin, type WorkBatchOrigin } from "@/lib/documents/intake-batch";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -170,6 +173,7 @@ export function WorkDetailView({
   storage,
   loadLinks = listEntryLinks,
   loadClaimOrigin = getWorkClaimOrigin,
+  loadBatchOrigin = getWorkBatchOrigin, // #636
 }: {
   clientId: string;
   workId: string;
@@ -192,6 +196,7 @@ export function WorkDetailView({
    *  call a claim "Journal entry" and stop. `clara.get_work_claim_origin` answers NULL for every
    *  Work that is not a claim, so this read costs one round trip and never invents an origin. */
   loadClaimOrigin?: typeof getWorkClaimOrigin;
+  loadBatchOrigin?: typeof getWorkBatchOrigin; // #636
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
@@ -263,6 +268,21 @@ export function WorkDetailView({
       live = false;
     };
   }, [addressable, workId, loadClaimOrigin, session]);
+  /** #636 — the batch this Work belongs to, or null. Read under the caller's OWN JWT through the
+   *  relation's FORCE-RLS grant, the same shape `entry_evidence_links` is read with. A FAILED read
+   *  is indistinguishable from "not in a batch" on purpose: both leave the row absent, and the page
+   *  never says a Work is NOT in a batch, only that it IS in one. Nothing here is blocked by it. */
+  const [batchOrigin, setBatchOrigin] = useState<WorkBatchOrigin | null>(null);
+  useEffect(() => {
+    if (!addressable) return;
+    let live = true;
+    void (async () => {
+      const origin = await loadBatchOrigin(workId, { session }).catch(() => null);
+      if (live) setBatchOrigin(origin);
+    })();
+    return () => { live = false; };
+  }, [addressable, workId, loadBatchOrigin, session]);
+
   const postedEntryId = state.data?.entry?.id ?? null;
   const reloadLinks = useCallback(async () => {
     if (postedEntryId === null) return;
@@ -423,6 +443,7 @@ export function WorkDetailView({
         committed={committed}
         reloadLinks={reloadLinks}
         claimOrigin={claimOrigin}
+        batchOrigin={batchOrigin}
         reloadWork={() => state.reload()}
         session={session}
       />
@@ -661,6 +682,7 @@ function PostedEntrySection({
   committed,
   reloadLinks,
   claimOrigin,
+  batchOrigin,
   reloadWork,
   session,
 }: {
@@ -673,6 +695,7 @@ function PostedEntrySection({
   committed: OperationReceiptRow | null;
   reloadLinks: () => Promise<unknown>;
   claimOrigin: WorkClaimOrigin | null;
+  batchOrigin: WorkBatchOrigin | null;
   reloadWork: () => Promise<unknown>;
   session: SessionTokenAccessor;
 }) {
@@ -737,6 +760,21 @@ function PostedEntrySection({
                     claimant: claimOrigin.claimant_label,
                     settlement: tsec(`settlement.options.${claimOrigin.settlement}`),
                   })}
+                </dd>
+              </>
+            )}
+            {/* #636 — ONE row, and the started-vs-posted divergence is STATED rather than fixed.
+                The batch card's `admitted` facet counts Work that has been ADMITTED; its `settled`
+                facet counts Work that holds a COMMITTED receipt. Those are different numbers on
+                purpose, and #905 (not this ticket) owns the Work-list projection that would
+                otherwise have to agree with them. */}
+            {batchOrigin === null ? null : (
+              <>
+                <dt className="text-muted-foreground">{t("batchOrigin.label")}</dt>
+                <dd className="text-foreground" data-testid="work-batch-origin">
+                  <Link href={`${clientBase(clientId)}/documents?batch=${batchOrigin.batchId}`} className="underline">
+                    {t("batchOrigin.value", { label: batchOrigin.label ?? batchOrigin.batchId })}
+                  </Link>
                 </dd>
               </>
             )}

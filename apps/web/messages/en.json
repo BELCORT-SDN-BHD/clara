@@ -1621,6 +1621,10 @@
     "amountUnreadable": "unreadable",
     "presentationSumLabel": "Requested totals",
     "entryStatus": "Entry status",
+    "batchOrigin": {
+      "label": "Source batch",
+      "value": "Part of the batch “{label}”"
+    },
     "receiptId": "Receipt",
     "receiptVia": "Recorded through",
     "viewInJournals": "View in Journals",
@@ -6242,5 +6246,118 @@
     "capacityReasonPlaceholder": "Why is the limit changing?",
     "capacitySave": "Save capacity",
     "capacityReceipt": "Admission capacity is now {limit}, with {count} firms admitted."
+  },
+  "IntakeBatch": {
+    "heading": "Source batch",
+    "headingNamed": "Source batch — {label}",
+    "untitled": "Untitled batch",
+    "loading": "Loading this source batch…",
+    "liveLabel": "Source batch updates",
+    "announce": "Batch {label} is {state}.",
+    "computedAt": "Read at {at}",
+    "refresh": "Refresh",
+    "retry": "Try again",
+    "showAll": "Show all",
+    "unknownCount": "Not known",
+    "unnamedFile": "Unnamed file",
+    "openWork": "Open the work",
+    "openDocument": "Open the document",
+    "noAddressYet": "No address yet",
+    "facetFilterLabel": "Filter the batch",
+    "uncountedCompletions": "{n} finished without a receipt this read could date",
+    "waitingBasis": "Waiting: {question} on an open question, {fact} awaiting a fact, {attribution} awaiting attribution, {capacity} awaiting the daily quota, {unfiled} not yet filed to a client.",
+    "residual": {
+      "preIntakeRefusal": "A file refused by the daily quota before it was accepted never joins a batch — look for it in the upload list above, which shows the database's own message and remedy."
+    },
+    "state": {
+      "open": "open",
+      "cancelling": "stopping",
+      "cancelled": "stopped"
+    },
+    "empty": {
+      "firstUse": "No sources have joined this batch yet. Files uploaded on this tab while the batch is open will appear here with their own state and their own link.",
+      "noResults": "No sources in this batch are {facet} right now. Other groups still have rows."
+    },
+    "denied": {
+      "title": "You cannot read this batch",
+      "body": "Reading a source batch needs a bookkeeper role in this firm. Ask an owner or admin to change your role, then reload."
+    },
+    "failed": {
+      "title": "This batch could not be read",
+      "body": "The read did not answer, so nothing is known about this batch right now — this is not an empty batch."
+    },
+    "pollExhausted": {
+      "title": "No longer watching for changes",
+      "body": "Some sources are still moving, but this page has stopped checking. Press Refresh to read again."
+    },
+    "stopping": {
+      "title": "正在停止 · Stopping this batch",
+      "body": "Operations already admitted are finishing. {settled} have already been committed and their receipts are kept."
+    },
+    "cancelled": {
+      "title": "This batch was stopped",
+      "body": "No new operations were admitted after the decision. Everything that had already been committed kept its receipt."
+    },
+    "capacity": {
+      "title": "Waiting for the daily document quota",
+      "body": "The firm's daily document allowance resets at {at} {zone}. Sources blocked by the quota keep their place and continue after the reset."
+    },
+    "column": {
+      "file": "File",
+      "state": "State",
+      "detail": "Detail",
+      "open": "Open"
+    },
+    "facet": {
+      "all": "All",
+      "admitted": "Admitted",
+      "settled": "Committed",
+      "waiting": "Waiting",
+      "failed": "Failed",
+      "unassigned": "Unassigned"
+    },
+    "coverage": {
+      "ok": "Complete",
+      "partial": "Partial",
+      "unknown": "Not known",
+      "denied": "Withheld"
+    },
+    "coverageReason": {
+      "retry_label_preview_only": "the preview only",
+      "completions_without_receipt": "some completions carry no receipt",
+      "preview_only": "the preview only"
+    },
+    "rowState": {
+      "awaiting_fact": "Awaiting a fact",
+      "awaiting_attribution": "Awaiting attribution",
+      "awaiting_capacity": "Awaiting the daily quota",
+      "settled": "Committed",
+      "extractionFailed": "Extraction failed",
+      "intakeFailed": "Upload failed",
+      "unassigned": "Not filed to a client",
+      "inCustody": "In custody",
+      "retrying": "Retried",
+      "work": {
+        "queued": "Queued",
+        "running": "Running",
+        "awaiting_input": "Awaiting your answer",
+        "stopping": "Stopping",
+        "completed": "Finished",
+        "refused": "Refused",
+        "failed": "Failed",
+        "cancelled": "Stopped",
+        "expired": "Expired"
+      }
+    },
+    "cancel": {
+      "trigger": "Stop this batch",
+      "title": "Stop the batch “{label}”?",
+      "body": "{n} operations are still running. Each will be asked to stop, one at a time.",
+      "receiptsKept": "Anything already committed keeps its receipt. Nothing that has posted is undone.",
+      "confirm": "Stop the batch",
+      "pending": "Stopping…",
+      "dismiss": "Keep going",
+      "refusedTitle": "The batch was not stopped"
+    }
   }
 }

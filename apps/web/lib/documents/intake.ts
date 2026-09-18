@@ -24,7 +24,15 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { INTAKE_ADOPTED, type IntakeOrigin, type IntakeRow, type ProcessingTaskRow } from "./types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
-type BeginOpts = Opts & { origin?: IntakeOrigin; sessionId?: string };
+type BeginOpts = Opts & {
+  origin?: IntakeOrigin;
+  sessionId?: string;
+  /** #636 — the durable batch this upload joins, if any. The runtime commits the begun intake and
+   *  its membership TOGETHER when it is present (an explicit transaction, because `withRuntime` is
+   *  autocommit), so a file can never be uploading with no batch to show it in. Absent means the
+   *  path is byte-unchanged. Nothing about the batch enters `documentIngest`'s step IO. */
+  batchId?: string;
+};
 
 async function requireToken(opts: Opts): Promise<string> {
   const session = opts.session ?? sessionTokenAccessor;
@@ -56,6 +64,7 @@ export async function beginIntake(req: BeginIntakeRequest, opts: BeginOpts = {})
     declared_bytes: req.declaredBytes,
     origin,
     ...(origin === "chat" ? { session_id: opts.sessionId } : {}),
+    ...(opts.batchId ? { batch_id: opts.batchId } : {}), // #636
   };
   const res = await safeRuntimeFetch(
     "/api/runtime/intake/documents",

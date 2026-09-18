@@ -32,6 +32,7 @@ import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
 import { reconcilePlanOccurrences } from "./plan-occurrences.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
 import { cancelSettleForWork, reconcileAccountingWorkTasks, settleWorkTerminal, workResultForTask } from "./reconciler-work.mjs";
+import { reconcileIntakeBatchCancellations } from "./reconciler-batches.mjs"; // #636 belt (0229)
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -752,11 +753,19 @@ export async function runReconcilerSweep(client, deps) {
   // #623 belt — unconditional, like the autodraft and wake reconciles. Pre-0178 the kind CHECK
   // excludes 'accounting_work', so every query inside returns empty and this costs one round trip.
   const work = await belt("accounting work reconcile", () => reconcileAccountingWorkTasks(client, deps));
+  // #636 belt (0229) — unconditional, like the accounting-work reconcile above: the module
+  // feature-detects its own door per cycle, so an image that predates 0229 boots dormant and
+  // lights on the next leader cycle after the migration applies, with no restart. It runs AFTER
+  // the accounting-work belt because a child settled there is a child this belt must no longer
+  // see as live, and BEFORE the trace prune, which owns no lane state.
+  const batchCancels = await belt("intake batch cancellations",
+    () => reconcileIntakeBatchCancellations(client, { log, withRuntime: deps.withRuntime ?? null }),
+    { batchCancelOk: false });
   const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
   // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
   // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...plans, ...wake, ...work, ...prune };
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...plans, ...wake, ...work, ...batchCancels, ...prune };
 }

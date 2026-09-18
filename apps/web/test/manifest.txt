@@ -2,6 +2,10 @@
 #
 #
 #
+# #770
+# #770
+# #809
+# #809
 # (`Array.prototype.sort()`'s own default — the same comparator
 # AGENTS.md: the Node 20 test runner does NOT directory-scan for
 # Blank lines and lines starting with # are ignored by both scripts above.
@@ -108,6 +112,10 @@ components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/documents-url-state.test.tsx
 components/documents/documents-workbench-refresh.test.tsx
+components/documents/intake-batch-a11y.test.tsx
+components/documents/intake-batch-cancel.test.tsx
+components/documents/intake-batch-card.test.tsx
+components/documents/intake-batch-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
@@ -240,9 +248,7 @@ components/ui/pagination.test.tsx
 components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/egress-reactivate-action.test.tsx
-# #770
 components/work/work-activity-view.test.tsx
-# #770
 components/work/work-cancel-dialog.test.tsx
 components/work/work-detail.test.tsx
 components/work/work-diagnostics.test.tsx
@@ -285,6 +291,7 @@ lib/coding/reads.test.ts
 lib/command/do-action-floors.test.ts
 lib/command/do-actions.test.ts
 lib/command/routes.test.ts
+lib/documents/batch-url-state.test.ts
 lib/documents/bytes.test.ts
 lib/documents/capability-registry.test.ts
 lib/documents/copy.test.ts
@@ -347,9 +354,7 @@ lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
 lib/parts/thread-action-coordinator.test.ts
 lib/parts/toolStatus.test.ts
-# #809
 lib/plans/api.test.ts
-# #809
 lib/plans/schedule.test.ts
 lib/prepayments/schedule.test.ts
 lib/rate-wall-courier.test.ts
