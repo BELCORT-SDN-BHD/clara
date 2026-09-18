@@ -883,11 +883,25 @@ begin
        where e.client_id = p_client and e.status = 'approved';
       -- A client activated on a DEFERRED carry-down (0017:2812-2821) knowingly has no captured
       -- opening. Say so rather than letting the earliest posted entry look like inception.
+      --
+      -- AND `first_year_zero_opening` OUTRANKS IT, which is the estate's OWN precedence rather
+      -- than a new one: `components/registers/opening-position-gate.tsx:85, :95-97` returns the
+      -- first-year-zero face BEFORE it ever looks at the deferred row, because a first-year zero
+      -- opening has nothing to carry down -- the opening position is KNOWN, and known to be zero.
+      -- A plan can legitimately carry both rows (the rig's own legacy-activation bridge answers
+      -- `first_year_zero_opening` and resolves `carry_down_deferred` together,
+      -- `tests/rig-fixtures.mjs:88-96`), so a detector that asked only about the carry-down row
+      -- would report an absent opening for every client whose opening is fully known.
       select exists (
         select 1 from clara.onboarding_plans pl
           join clara.onboarding_plan_items it on it.plan_id = pl.id
          where pl.client_id = p_client and it.item_key = 'carry_down_deferred'
-           and it.state in ('deferred','resolved')) into v_carry_down;
+           and it.state in ('deferred','resolved'))
+        and not exists (
+        select 1 from clara.onboarding_plans pl
+          join clara.onboarding_plan_items it on it.plan_id = pl.id
+         where pl.client_id = p_client and it.item_key = 'first_year_zero_opening'
+           and it.state in ('answered','resolved')) into v_carry_down;
     end if;
   end if;
 
@@ -934,13 +948,22 @@ begin
 
       v_cash_status := 'ok'; v_cash_cov := 'ok'; v_cash_reason := null;
 
-      -- A POINT OUTSIDE THE RESOLVED VERSION'S WINDOW is disclosed, not silently recomputed
-      -- under a different membership.
-      if v_points[1] < v_set_from then
+      -- THE TWO COVERAGE FACTS, AND WHY THIS IS THE ORDER.
+      --
+      -- A point outside the resolved version's window is disclosed, not silently recomputed under
+      -- a different membership -- but ONLY where there are books to be wrong about. A point before
+      -- the coverage floor is outside EVERY version's window by construction (a first version is
+      -- stamped at the books' own start), so checking the window first would make
+      -- `cash_set_version_changed_in_series` the standing answer for every client whose books are
+      -- younger than six months -- and it would be FALSE there, because in those series the set
+      -- never changed at all. The window check therefore asks only about points that are IN
+      -- COVERAGE; `pre_coverage` carries the rest. Both facts stay visible per point either way
+      -- (`points[].reason`); this is which one the GROUP names when both are true of the series.
+      if v_floor is not null
+         and exists (select 1 from unnest(v_points) d where d >= v_floor and d < v_set_from) then
         v_cash_cov := 'partial'; v_cash_reason := 'cash_set_version_changed_in_series';
-      end if;
-      if v_floor is not null and v_points[1] < v_floor then
-        v_cash_cov := 'partial'; v_cash_reason := coalesce(v_cash_reason, 'pre_coverage');
+      elsif v_floor is not null and v_points[1] < v_floor then
+        v_cash_cov := 'partial'; v_cash_reason := 'pre_coverage';
       end if;
       if v_carry_down then
         v_cash_cov := 'partial'; v_cash_reason := coalesce(v_cash_reason, 'opening_carry_down_deferred');

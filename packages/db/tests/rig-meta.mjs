@@ -2311,6 +2311,30 @@ const PREVIEW_INVITE_0224_HUMAN_FNS = ["preview_invite"];
 export const PREVIEW_INVITE_0224_COHORT = [...PREVIEW_INVITE_0224_HUMAN_FNS];
 // #625 END
 
+// #660 [0232, the client home's money band] — the CLIENT FINANCIAL PACK lane, its own cohort for
+// the same "wholly present or wholly absent" reason the 0214 block carries.
+//
+//   THREE doors, and ALL THREE are clara_authenticated ONLY. `get_client_financial_pack` and
+//   `propose_client_cash_accounts` are SECURITY INVOKER over relations already granted to
+//   clara_authenticated behind forced firm-scoped RLS, floored at VIEWER in their own bodies;
+//   `publish_client_cash_account_set` is SECURITY DEFINER, floored at ADMIN through
+//   clara._human_ctx. clara_runtime, clara_agent_ro and every clara_wake_* role gain ZERO on ALL
+//   THREE — 0232 ships NO agent twin, no wake wrapper and no allowlist row, a deliberate
+//   departure from clara.wake_create_account_set (0115:79-97) that 0232's header argues: that
+//   precedent belongs to the metric lane 0059:251 walls off from journal_entries/journal_lines,
+//   and petty cash has no derivable structural basis at all (0121:4749). The same fact is proven
+//   behaviourally by `p660.pack.no_agent_reach`, door by door and role by role.
+//
+//   FUNCTION NAMES ONLY. `liveNames` below is built from pg_proc rows, so a cohort covers
+//   functions and nothing else: 0232's two new RELATIONS are asserted by the migration's own tail
+//   and by the battery, never here. clara._tf_cash_account_set_integrity is an ungranted trigger
+//   function and is covered by the grant-matrix sweep rather than by this roster.
+const CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS = [
+  "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
+];
+export const CLIENT_FINANCIAL_PACK_0232_COHORT = [...CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS];
+// #660 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -2523,6 +2547,10 @@ export const ALLOWED = {
     // #625 [0224] the invited person's pre-password preview — see the block above.
     // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
     ...PREVIEW_INVITE_0224_HUMAN_FNS,
+    // #660 [0232] the client home's money band — see the block above. All three doors are
+    // clara_authenticated ONLY (viewer floor on both reads, admin floor on the publish door);
+    // clara_runtime, clara_agent_ro and every clara_wake_* role gain ZERO on all three.
+    ...CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2960,6 +2988,13 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
   // #812
   failures.push(...cohortFailures("#650 0214 client work-pack read lane", CLIENT_WORK_PACK_0214_COHORT, liveNames));
+  // #660 [0232] — bimodal like the 0222/0217 lanes': wholly present once 0232 applies, wholly
+  // absent before it, because the `db-slice-frontiers` matrix runs this package against earlier
+  // frontiers. A PARTIAL cohort is a half-applied lane, which cohortFailures() fails by design.
+  const financialPackLive = CLIENT_FINANCIAL_PACK_0232_COHORT.filter((n) => liveNames.has(n));
+  if (financialPackLive.length !== 0) {
+    failures.push(...cohortFailures("#660 0232 client financial-pack read lane", CLIENT_FINANCIAL_PACK_0232_COHORT, liveNames));
+  }
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));
