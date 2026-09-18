@@ -319,3 +319,54 @@ test("junk-env fallback: a NaN CLARA_FA_RECONCILE_MS falls back to a FINITE 24h 
   assert.equal(depreciationRunDue(now, now + DAY + 1), true, "default interval is ~24h → due a day later");
   assert.equal(depreciationRunDue(now, now + 1000), false, "default interval is finite → guarded moments later");
 });
+
+// ---------------------------------------------------------------------------------------------
+// #651 [0227] — THE BELT IS UNTOUCHED BY THE AUTHORITY FLOOR AND THE CLOSED-PERIOD SKIP.
+//
+// 0227 put both new laws in the DATABASE: `clara.fa_depreciation_authorities.authority_from` floors
+// the due oracle, and the recut oracle skips a period whose fiscal year is closing or closed and
+// offers the next open one, reporting what it skipped under `skipped_closed`. The point of this
+// cell is that NO CLIENT-SIDE MIRROR APPEARED — this module's own law is "the DB owns every number"
+// (lib/reconciler-fa.mjs:15-20), and a floor re-derived here would be the drift surface the whole
+// design avoids.
+// ---------------------------------------------------------------------------------------------
+
+test("p651.belt.unchanged the floor and the closed-period skip are DB-side: the belt makes no run call when the oracle says not-due, and it neither reads nor recomputes authority_from", async () => {
+  // A client with two years of visibly uncharged assets whose authority was signed THIS month:
+  // after 0227 the oracle answers not-due, and the belt must simply move on.
+  const floored = recordingClient({ ids: ["c1"], dueFor: () => ({ due: false, reason: "period_not_ended", skipped_closed: [] }) });
+  const logs = [];
+  const out = await reconcileFaRuns(floored, { log: (m) => logs.push(m) });
+  assert.equal(out.faOk, true, "a floored client is not a failure — there is simply nothing to run");
+  assert.equal(out.faPosted, 0);
+  assert.equal(out.faFailed ?? 0, 0, "…and nothing anomalous is logged: not-due is an ordinary answer");
+  assert.ok(!floored.queries.some((q) => /^select clara\.run_depreciation_period\(/.test(q.sql)),
+    "the belt makes NO run call on a not-due answer");
+
+  // …and when the oracle DOES offer a period, the belt runs exactly the one it named, carrying no
+  // opinion about the periods the oracle skipped for a closed financial year.
+  const skipping = recordingClient({
+    ids: ["c1"],
+    dueFor: (id, i) => (i === 1
+      ? {
+        due: true, period_start: "2026-07-01", period_end: "2026-07-31", cadence: "monthly",
+        skipped_closed: [{ period_start: "2026-06-01", period_end: "2026-06-30", fy_label: "2026", fy_status: "closed" }],
+      }
+      : { due: false, skipped_closed: [] }),
+    runFor: () => ({ status: "posted", entry_id: "e1", charged_cents: 1000, entries: 1, skipped: [] }),
+  });
+  const out2 = await reconcileFaRuns(skipping, { log: () => {} });
+  const runCalls = skipping.queries.filter((q) => /^select clara\.run_depreciation_period\(/.test(q.sql));
+  assert.equal(runCalls.length, 1, "exactly the period the oracle named");
+  assert.deepEqual(runCalls[0].params.slice(0, 3), ["c1", "2026-07-01", "2026-07-31"],
+    "…the OPEN one, never the closed month the oracle reported skipping");
+  assert.equal(out2.faPosted, 1);
+
+  // THE POINT OF THE WHOLE CELL: no client-side mirror appeared. The belt never reads the authority
+  // table, never names authority_from, and never asks about a fiscal year.
+  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../lib/reconciler-fa.mjs", import.meta.url), "utf8"));
+  for (const forbidden of ["authority_from", "fa_depreciation_authorities", "fiscal_years", "skipped_closed"]) {
+    assert.equal(src.includes(forbidden), false,
+      `lib/reconciler-fa.mjs must not name \`${forbidden}\` — the DB owns every number (its own law, :15-20)`);
+  }
+});
