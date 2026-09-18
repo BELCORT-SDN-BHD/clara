@@ -41,8 +41,8 @@
 // registers already use, rendered as a plain list. Nothing here installs a primitive.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { JournalBasisFields, fieldElementId, type FieldNode } from "@/components/accounting/journal-basis-fields";
@@ -51,7 +51,6 @@ import { StateBanner } from "@/components/common/state";
 import { MoneyInput } from "@/components/common/money-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -64,7 +63,6 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { listCoaAccounts } from "@/lib/journals/api";
-import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadCounterparties, type CounterpartyRow } from "@/lib/registers/counterparty";
 import {
   canOpenClientLeaf,
@@ -131,7 +129,14 @@ type Outcome =
   | { kind: "unavailable"; message: string };
 
 export function TradeInvoiceForm({ clientId }: { clientId: string }) {
-  return <TradeInvoiceFormView clientId={clientId} scope={useFirmScope()} />;
+  const router = useRouter();
+  return (
+    <TradeInvoiceFormView
+      clientId={clientId}
+      scope={useFirmScope()}
+      navigate={(href) => router.push(href)}
+    />
+  );
 }
 
 /** Exported for the unit, a11y and keyboard harnesses; production gets scope from context and the
@@ -139,21 +144,38 @@ export function TradeInvoiceForm({ clientId }: { clientId: string }) {
 export function TradeInvoiceFormView({
   clientId,
   scope,
-  session = sessionTokenAccessor(),
+  navigate,
+  session = sessionTokenAccessor,
   storage = defaultDraftStorage(),
+  submit = submitTradeInvoiceWork,
+  loadAccounts,
+  loadParties,
 }: {
   clientId: string;
-  scope: NavigationScope;
+  scope: NavigationScope & { firm_id?: string; user_id?: string };
+  navigate: (href: string) => void;
   session?: SessionTokenAccessor;
   storage?: DraftStorage | null;
+  /** The ONE write this form makes, open as a seam for the reason the composer's is: a cell must be
+   *  able to drive the DECISION — accepted, refused, conflicted, lost — without a socket. */
+  submit?: typeof submitTradeInvoiceWork;
+  /** The two reads, INDEPENDENTLY injectable, because they degrade independently: the chart read
+   *  failing and the party read failing are different states with different next actions, and a
+   *  cell must be able to produce either one alone. */
+  loadAccounts?: () => Promise<CoaAccountRow[]>;
+  loadParties?: (kind: "vendor" | "customer") => Promise<CounterpartyRow[]>;
 }) {
   const t = useTranslations("TradeInvoice");
-  const router = useRouter();
   const canRecord = canOpenClientLeaf(scope, "tradeInvoice");
 
-  const draftScope: JournalDraftScope = useMemo(
-    () => ({ userId: scope.userId, firmId: scope.firmId, clientId }),
-    [scope.userId, scope.firmId, clientId],
+  // A draft filed under a GUESSED scope is worse than a draft that was never saved
+  // (lib/work/journal-draft.ts's own rule), so a missing half means no persistence at all.
+  const draftScope: JournalDraftScope | null = useMemo(
+    () =>
+      scope.firm_id && scope.user_id
+        ? { userId: scope.user_id, firmId: scope.firm_id, clientId }
+        : null,
+    [scope.firm_id, scope.user_id, clientId],
   );
 
   const [draft, setDraft] = useState<TradeInvoiceDraft>(() => emptyTradeInvoiceDraft());
@@ -166,7 +188,7 @@ export function TradeInvoiceFormView({
 
   // ---- the draft, restored once per scope -----------------------------------------------------
   useEffect(() => {
-    const box = readTradeInvoiceDraft(draftScope, storage);
+    const box = draftScope === null ? null : readTradeInvoiceDraft(draftScope, storage);
     if (box) {
       setDraft(box.draft);
       setIntentKey(box.intentKey);
@@ -182,30 +204,59 @@ export function TradeInvoiceFormView({
 
   // ---- the draft, persisted on every edit -----------------------------------------------------
   useEffect(() => {
-    if (!restored) return;
+    if (!restored || draftScope === null) return;
     writeTradeInvoiceDraft(draftScope, { intentKey, draft, documentId: null }, storage);
   }, [restored, draftScope, intentKey, draft, storage]);
 
   // ---- the reads, each degrading INDEPENDENTLY (the partial-stale state) ------------------------
-  const accountsRead = useAsyncRead<CoaAccountRow[]>(
-    useCallback((signal) => listCoaAccounts(session, clientId, { signal }), [session, clientId]),
-  );
   const partyKind = counterpartyKindFor(draft.kind);
-  const partiesRead = useAsyncRead<CounterpartyRow[]>(
-    useCallback(
-      (signal) => loadCounterparties(session, clientId, partyKind, { signal }),
-      [session, clientId, partyKind],
-    ),
-  );
+  const readAccounts = loadAccounts ?? (() => listCoaAccounts(session, clientId));
+  const readParties = loadParties
+    ?? ((kind: "vendor" | "customer") => loadCounterparties(session, clientId, kind));
 
-  const accounts = accountsRead.data ?? [];
+  const [accounts, setAccounts] = useState<CoaAccountRow[] | null>(null);
+  const [accountsFailed, setAccountsFailed] = useState(false);
+  const [parties, setParties] = useState<CounterpartyRow[] | null>(null);
+  const [partiesFailed, setPartiesFailed] = useState(false);
+
+  // TWO READS, TWO EFFECTS, TWO FAILURE FLAGS — the partial-stale state is not a styling choice:
+  // a failed party read and a failed chart read have different next actions, and a single combined
+  // status would make the form claim one when it hit the other.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const rows = await readAccounts();
+        if (live) { setAccounts(rows); setAccountsFailed(false); }
+      } catch {
+        if (live) { setAccounts([]); setAccountsFailed(true); }
+      }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+  useEffect(() => {
+    let live = true;
+    setParties(null);
+    void (async () => {
+      try {
+        const rows = await readParties(partyKind);
+        if (live) { setParties(rows ?? []); setPartiesFailed(false); }
+      } catch {
+        if (live) { setParties([]); setPartiesFailed(true); }
+      }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, partyKind]);
+
   const knownCodes = useMemo(
-    () => (accountsRead.data === null ? null : new Set(accounts.map((a) => a.account_code))),
-    [accountsRead.data, accounts],
+    () => (accounts === null || accountsFailed ? null : new Set(accounts.map((a) => a.account_code))),
+    [accounts, accountsFailed],
   );
   const liveParties = useMemo(
-    () => (partiesRead.data ?? []).filter((p) => p.merged_into === null && p.retired_at === null),
-    [partiesRead.data],
+    () => (parties ?? []).filter((p) => p.merged_into === null && p.retired_at === null),
+    [parties],
   );
   const matches = useMemo(() => {
     const q = draft.counterpartyQuery.trim().toLowerCase();
@@ -249,14 +300,14 @@ export function TradeInvoiceFormView({
   async function send(key: string): Promise<SubmitTradeInvoiceWorkResult> {
     const wire = toTradeInvoiceWire(draft, knownCodes);
     if (wire === null) return { kind: "invalid_basis", field: null, reason: "invalid_basis" };
-    return submitTradeInvoiceWork(session, {
+    return submit(session, {
       clientId, intentKey: key, kind: wire.kind, invoice: wire.invoice, basis: wire.basis,
     });
   }
 
   function applyResult(res: SubmitTradeInvoiceWorkResult) {
     if (res.kind === "accepted") {
-      clearTradeInvoiceDraft(draftScope, storage);
+      if (draftScope !== null) clearTradeInvoiceDraft(draftScope, storage);
       setOutcome({
         kind: "accepted",
         workId: res.workId,
@@ -270,9 +321,15 @@ export function TradeInvoiceFormView({
       const field = fieldForServerPath(res.field);
       // D12(a): `party_ambiguous` carries its candidates VERBATIM, and they are rendered INLINE as
       // a choice rather than announced and thrown away.
-      const candidates = Array.isArray((res as { detail?: { candidates?: unknown } }).detail?.candidates)
-        ? ((res as { detail: { candidates: PartyCandidate[] } }).detail.candidates)
-        : [];
+      // D12(a)'s candidate list rides the refusal's own detail. `lib/wire.ts` surfaces
+      // `detail.reason` and discards every other detail key today, so this reads DEFENSIVELY
+      // through unknown: when the list is there it is rendered verbatim, and when it is not the
+      // banner is the door's sentence alone. Named as a residual in the report rather than faked.
+      const detail = (res as unknown as { detail?: unknown }).detail;
+      const raw = detail && typeof detail === "object"
+        ? (detail as { candidates?: unknown }).candidates
+        : undefined;
+      const candidates: PartyCandidate[] = Array.isArray(raw) ? (raw as PartyCandidate[]) : [];
       setOutcome({ kind: "refused", reason: res.reason ?? "invalid_basis", field, candidates });
       focusField(field);
       return;
@@ -317,7 +374,7 @@ export function TradeInvoiceFormView({
   }
 
   // ---- loading: a skeleton FITTED TO THE FORM, never a placeholder zero -------------------------
-  if (!restored || accountsRead.status === "loading") {
+  if (!restored || accounts === null) {
     return (
       <div className="flex flex-col gap-4" aria-busy="true" data-testid="trade-invoice-loading">
         <div className="h-9 w-64 animate-pulse rounded-md bg-muted" />
@@ -338,7 +395,7 @@ export function TradeInvoiceFormView({
           page beside the control that caused it, and it carries the door's OWN code. */}
       {outcome.kind === "accepted" ? (
         <StateBanner
-          tone="success"
+          tone="info"
           title={t("accepted.title")}
           action={
             <Button size="sm" render={<Link href={workDetailHref(clientId, outcome.workId)} />}>
@@ -426,7 +483,7 @@ export function TradeInvoiceFormView({
 
       {/* THE PARTIAL-STALE STATE. The party read degrades INDEPENDENTLY of the chart read, and says
           which half is missing rather than blanking the form. */}
-      {partiesRead.status === "error" ? (
+      {partiesFailed ? (
         <StateBanner tone="warning" title={t("partiesUnavailable.title")}>
           {t("partiesUnavailable.body")}
         </StateBanner>
@@ -474,7 +531,7 @@ export function TradeInvoiceFormView({
                 ? ` · ${t("party.terms", { days: picked.payment_terms_days })}`
                 : ` · ${t("party.noTerms")}`}
             </p>
-          ) : partiesRead.status === "ready" && matches.length === 0 ? (
+          ) : parties !== null && matches.length === 0 ? (
             // THE NO-RESULTS STATE preserves the query and offers Clear — it never silently empties
             // what somebody typed. And it never offers "create": this lane writes no party.
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -568,7 +625,12 @@ export function TradeInvoiceFormView({
             mode="unsigned"
             disabled={busy}
             aria-invalid={issueFor("totalCents") ? true : undefined}
-            onValueChange={(cents) => patch({ totalCents: cents })}
+            // The house MoneyInput answers a PARSE RESULT, never a number: a refusal keeps the
+            // last good value rather than silently writing a wrong one.
+            onValueChange={(change) => {
+              if (change.ok && change.cents !== null) patch({ totalCents: change.cents });
+              else if (change.ok) patch({ totalCents: 0 });
+            }}
           />
           {issueFor("totalCents") ? (
             <FieldError>{t(`issues.${issueFor("totalCents")?.code}`)}</FieldError>
@@ -632,7 +694,7 @@ export function TradeInvoiceFormView({
           <JournalBasisFields
             lines={draft.lines}
             onChange={(lines) => patch({ lines })}
-            accounts={accounts}
+            accounts={accounts ?? []}
             issues={submitted
               ? issues
                 .filter((i) => i.field.startsWith("line") || i.field === "lines")
@@ -653,13 +715,13 @@ export function TradeInvoiceFormView({
           variant="ghost"
           disabled={busy}
           onClick={() => {
-            clearTradeInvoiceDraft(draftScope, storage);
+            if (draftScope !== null) clearTradeInvoiceDraft(draftScope, storage);
             setDraft(emptyTradeInvoiceDraft());
             setIntentKey(newIntentKey());
             setSubmitted(false);
             setOutcome({ kind: "idle" });
             lostOnce.current = false;
-            router.refresh();
+            navigate(`/clients/${clientId}/accounting`);
           }}
         >
           {t("discard")}

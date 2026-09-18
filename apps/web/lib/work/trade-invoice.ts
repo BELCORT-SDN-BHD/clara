@@ -190,7 +190,7 @@ export function validateTradeInvoiceDraft(
   // client's chart to know which account is the control account, and that is the door's answer
   // (`invalid_total`, with the measured control net beside it).
   const totals = totalsOf(draft.lines);
-  if (totals.balanced && draft.totalCents > 0 && draft.totalCents > totals.debit) {
+  if (totals.balanced && draft.totalCents > 0 && draft.totalCents > totals.debitCents) {
     issues.push({ field: "totalCents", code: "invalid_total" });
   }
 

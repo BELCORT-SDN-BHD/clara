@@ -56,6 +56,9 @@ export function tradeInvoiceDraftKey(scope: JournalDraftScope): string {
 }
 
 const isString = (v: unknown): v is string => typeof v === "string";
+// EXACT INTEGERS ONLY. A draft restored from session storage is untrusted input like any other
+// persisted payload, and a non-integer cent is a wrong ledger — so it is REJECTED, never rounded.
+const isInteger = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v);
 
 function parseLines(raw: unknown): TradeInvoiceDraft["lines"] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
@@ -63,11 +66,14 @@ function parseLines(raw: unknown): TradeInvoiceDraft["lines"] | null {
   for (const item of raw) {
     if (!item || typeof item !== "object") return null;
     const l = item as Record<string, unknown>;
-    if (!isString(l.accountCode) || !isString(l.debit) || !isString(l.credit) || !isString(l.description)) {
-      return null;
-    }
+    if (!isString(l.account_code)) return null;
+    if (!isInteger(l.debit_cents) || !isInteger(l.credit_cents)) return null;
+    if (l.description !== null && l.description !== undefined && !isString(l.description)) return null;
     out.push({
-      accountCode: l.accountCode, debit: l.debit, credit: l.credit, description: l.description,
+      account_code: l.account_code,
+      debit_cents: l.debit_cents,
+      credit_cents: l.credit_cents,
+      description: (l.description ?? "") as string,
     });
   }
   return out;
@@ -78,10 +84,11 @@ function parseDraft(raw: unknown): TradeInvoiceDraft | null {
   const d = raw as Record<string, unknown>;
   if (!isString(d.kind) || !(TRADE_INVOICE_KINDS as readonly string[]).includes(d.kind)) return null;
   if (d.counterpartyId !== null && !isString(d.counterpartyId)) return null;
-  for (const key of ["counterpartyQuery", "documentDate", "dueDate", "reference", "totalCents",
+  for (const key of ["counterpartyQuery", "documentDate", "dueDate", "reference",
     "postingDate", "memo", "taxFactsJson"]) {
     if (!isString(d[key])) return null;
   }
+  if (!isInteger(d.totalCents)) return null;
   const lines = parseLines(d.lines);
   if (lines === null) return null;
   return {
@@ -91,7 +98,7 @@ function parseDraft(raw: unknown): TradeInvoiceDraft | null {
     documentDate: d.documentDate as string,
     dueDate: d.dueDate as string,
     reference: d.reference as string,
-    totalCents: d.totalCents as string,
+    totalCents: d.totalCents as number,
     postingDate: d.postingDate as string,
     memo: d.memo as string,
     lines: lines.length >= 2 ? lines : [...lines, emptyTradeInvoiceLine()],

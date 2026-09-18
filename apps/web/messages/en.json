@@ -79,6 +79,7 @@
       "journalComposer": "Record journal entry",
       "periodicAdjustment": "Record periodic adjustment",
       "staffExpenseClaim": "Record staff expense claim",
+      "tradeInvoice": "Record invoice or bill",
       "workDetail": "Journal entry",
       "knowledgeRecord": "Knowledge record",
       "counterpartyIdentity": "Counterparty identity",
@@ -1520,6 +1521,179 @@
       "advance": "Advance discharged",
       "corrects": "Corrects",
       "correctedBy": "Corrected by"
+    }
+  },
+  "TradeInvoice": {
+    "heading": "Record an invoice or bill",
+    "body": "What the document says, and the journal it posts. Clara records the receivable or payable it creates, and never invents a due date.",
+    "loading": "Loading this client's chart and parties",
+    "discard": "Discard this draft",
+    "kind": {
+      "legend": "What is this document?",
+      "description": "A sales invoice is money a customer owes this client. A supplier bill is money this client owes a vendor. A credit note is neither — record it against the invoice it corrects.",
+      "sales_invoice": "Sales invoice",
+      "supplier_bill": "Supplier bill"
+    },
+    "domain": {
+      "ar": "Receivable",
+      "ap": "Payable"
+    },
+    "party": {
+      "label": "Counterparty",
+      "matchesLabel": "Matching counterparties",
+      "picked": "{name}",
+      "terms": "agreed terms: {days} days",
+      "noTerms": "no agreed payment terms",
+      "clear": "Clear",
+      "manage": "Manage parties",
+      "noResults": "No party of this client answers to that.",
+      "emptyClient": "This client has no counterparties of that kind yet.",
+      "description": {
+        "vendor": "The supplier who issued the bill. Pick the party this client already has — Clara does not create one from here.",
+        "customer": "The customer who was invoiced. Pick the party this client already has — Clara does not create one from here."
+      }
+    },
+    "documentDate": {
+      "label": "Document date",
+      "description": "The date the document itself states. Not today, and not the posting date."
+    },
+    "dueDate": {
+      "label": "Due date",
+      "description": "Leave it blank if the document does not state one. Clara will use the party's agreed payment terms if they have any, and otherwise record it as having no due date rather than inventing one."
+    },
+    "reference": {
+      "label": "Document number",
+      "description": "The number printed on the document, exactly as printed."
+    },
+    "total": {
+      "label": "Stated total",
+      "description": "The total the document states, in ringgit. It must equal the {accountClass} leg below, to the sen."
+    },
+    "taxFacts": {
+      "label": "Tax facts stated on the document",
+      "description": "Optional, as JSON. Clara carries these verbatim and recomputes nothing from them."
+    },
+    "postingDate": {
+      "label": "Posting date",
+      "description": "The date the books record it."
+    },
+    "memo": {
+      "label": "What this is"
+    },
+    "basis": {
+      "legend": "The journal this posts",
+      "description": "Exactly one {accountClass} control leg, carrying the stated total.",
+      "viewportLabel": "Journal lines"
+    },
+    "submit": {
+      "label": "Record it",
+      "busy": "Recording…"
+    },
+    "accepted": {
+      "title": "Queued",
+      "body": "Clara has admitted this and will post it in a moment. The entry, the receivable or payable and the receipt will all name each other when it lands.",
+      "open": "Open the work"
+    },
+    "checking": {
+      "title": "Checking",
+      "body": "The connection dropped before Clara answered. She is asking whether that submission landed — nothing is being submitted twice."
+    },
+    "refused": {
+      "title": "Clara did not record this"
+    },
+    "candidates": {
+      "label": "Which party do you mean?"
+    },
+    "conflict": {
+      "title": "That draft was already submitted",
+      "body": "This intent was already recorded with different figures. Open what was recorded rather than submitting a second one.",
+      "open": "Open the work"
+    },
+    "sourceConflict": {
+      "title": "That document already backs a posted entry",
+      "body": "Open the entry that already stands there. Correcting a posted effect is a different act."
+    },
+    "denied": {
+      "title": "You cannot record invoices for this client",
+      "body": "Recording a trade invoice needs a bookkeeper's authority or above. Ask an administrator of this firm."
+    },
+    "notFound": {
+      "title": "Client not found",
+      "body": "This client is not one of your firm's."
+    },
+    "unavailable": {
+      "title": "That did not go through",
+      "body": "{message}",
+      "retry": "Try again"
+    },
+    "partiesUnavailable": {
+      "title": "Parties could not be loaded",
+      "body": "The chart loaded, but this client's counterparties did not. You can still fill the rest in, and pick the party once it loads."
+    },
+    "dueBasis": {
+      "stated": "Due {date}, as the document states.",
+      "counterparty_terms": "Due {date}, from the party's agreed payment terms.",
+      "absent": "No due date — neither the document nor the party's terms state one."
+    },
+    "refusals": {
+      "party_ambiguous": "More than one party answers to that name. Say which one.",
+      "party_unresolved": "No party of this client answers to that.",
+      "credit_shape_not_admitted": "A credit note is not recorded here. Record it as a credit against the invoice it corrects.",
+      "invalid_total": "The stated total does not match the control leg's signed amount.",
+      "unbalanced_basis": "The journal does not balance.",
+      "control_leg_missing": "This carries no control-account leg.",
+      "wrong_control_domain": "The party and the control account disagree about which way the money runs.",
+      "invalid_due_date": "The due date precedes the document date.",
+      "source_already_posted": "That document already backs a posted journal entry.",
+      "client_inactive": "This client is not active, so no new work is admitted.",
+      "insufficient_role": "Recording a trade invoice needs a bookkeeper's authority or above.",
+      "invalid_intent_key": "That submission carried no idempotency key.",
+      "intent_payload_conflict": "That intent was already recorded with different figures.",
+      "period_locked": "The fiscal year containing that posting date is closed.",
+      "invalid_kind": "A trade invoice is either a sales invoice or a supplier bill.",
+      "invalid_basis": "Clara could not read that submission."
+    },
+    "issues": {
+      "party_unresolved": "Pick the counterparty this document names.",
+      "documentDateRequired": "State the date the document itself carries.",
+      "documentDateInvalid": "That is not a calendar date.",
+      "invalid_due_date": "A due date cannot precede the document date.",
+      "referenceTooLong": "That document number is too long.",
+      "invalid_total": "State the total the document carries, and make the control leg match it.",
+      "taxFactsNotAnObject": "Tax facts are a JSON object, or nothing at all.",
+      "taxFactsTooLong": "Those tax facts are too long to carry.",
+      "postingDateRequired": "State the date the books record it.",
+      "postingDateInvalid": "That is not a calendar date.",
+      "memoRequired": "Say what this is.",
+      "memoTooLong": "That is too long.",
+      "accountRequired": "Pick an account for this line.",
+      "accountUnknown": "This client's chart has no such account.",
+      "descriptionTooLong": "That description is too long.",
+      "amountNotExact": "Amounts are exact ringgit and sen.",
+      "amountBothSides": "A line is a debit or a credit, not both.",
+      "amountRequired": "State an amount.",
+      "tooFewLines": "A journal needs at least two lines.",
+      "unbalanced": "The debits and the credits do not agree."
+    },
+    "link": {
+      "heading": "Invoice or bill",
+      "kind": {
+        "sales_invoice": "Sales invoice",
+        "supplier_bill": "Supplier bill"
+      },
+      "party": "Party",
+      "documentDate": "Document date",
+      "dueDate": "Due",
+      "noDueDate": "No due date",
+      "reference": "Reference",
+      "total": "Total",
+      "entry": "Journal entry",
+      "openEntry": "Open the entry",
+      "openItem": "Open item",
+      "outstanding": "Outstanding",
+      "receipt": "Receipt",
+      "document": "Source document",
+      "admitted": "Admitted — not posted yet"
     }
   },
   "WorkDiagnostics": {
