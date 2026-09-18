@@ -36,16 +36,19 @@
 -- `clara._human_ctx`, which demands a human JWT. Nothing at runtime fails if only one of the
 -- two moves, which is exactly the drift class `0040 FIX WAVE A5` already paid for once.
 --
--- So this file does not type the projection twice. It writes it ONCE, inside the public read,
--- between the sentinel comments `/* P657-CAND-BEGIN */` and `/* P657-CAND-END */`; then §3
--- EXTRACTS that exact text out of the freshly recut catalog body and SPLICES it into the pack
--- core in place of the pack's own (positionally located, occurrence-asserted) old projection.
--- The pack's copy is therefore the public read's copy, by construction rather than by care.
--- The tail re-reads both marked regions and asserts they are identical modulo whitespace —
--- Q4/J3's "field-identical modulo the firm/ctx binding", made executable. The firm binding is
--- NOT inside the marked region: the public read filters `je.firm_id = c.firm` and the pack
--- filters `je.firm_id = v_firm`, both OUTSIDE the projection, which is why the projection can
--- be byte-identical at all.
+-- So the projection is written between the sentinel comments `/* P657-CAND-BEGIN */` and
+-- `/* P657-CAND-END */` in BOTH bodies, and §8 extracts both marked regions out of the CATALOG
+-- and asserts they are identical modulo whitespace — Q4/J3's "field-identical modulo the
+-- firm/ctx binding", made executable rather than promised. The firm binding is NOT inside the
+-- marked region: the public read filters `je.firm_id = c.firm` and the pack filters
+-- `je.firm_id = v_firm`, both OUTSIDE the projection, which is what lets the projection itself
+-- be byte-identical. A future change edits both copies; the tail refuses this file if it edits
+-- only one.
+--
+-- A FIRST CUT SPLICED THE COPY OUT OF THE CATALOG instead (take it, do not type it) and had to
+-- be reverted: apps/web/test/sqlFunctionCensus.ts refuses a dynamic statement it cannot resolve
+-- to exactly one function definition, and a positional splice is unresolvable by construction.
+-- §4 carries the measurement.
 --
 -- NO SHARED CORE THIS WAVE (Q4/J3, binding). Extracting a third body that both call would move
 -- `_human_ctx`'s layering — 0119-scale surgery — and #657 is not that ticket.
@@ -349,73 +352,148 @@ begin
 end $list_bank_match_candidates$;
 
 -- -------------------------------------------------------------------------------------
--- §4 · SPLICE THE SAME PROJECTION INTO clara._agent_get_bank_pack_core's INLINED COPY.
+-- §4 · RECUT clara._agent_get_bank_pack_core WITH THE SAME CANDIDATE PROJECTION.
 --
---      The replacement text is READ OUT of §3's freshly committed catalog body rather than
---      typed a second time (§A). The old copy is located POSITIONALLY -- from 0121's own
---      comment `-- list_bank_match_candidates' own body, verbatim predicates.` to the
---      `as row_j` that closes it -- and each locator is asserted to occur exactly once, so a
---      drifted body refuses rather than being spliced blind. The prestate sha already refused
---      a drifted body; this is the second belt on the same hazard, and it is here because a
---      positional splice is the one operation where "it compiled" is not evidence.
+--      A STATIC create-or-replace of the whole body, not a dynamic splice, and the reason is a
+--      LIVE GATE rather than taste: apps/web/test/sqlFunctionCensus.ts reads every migration
+--      and refuses a dynamic statement it cannot resolve to exactly one function definition
+--      (sql_function_census_unresolved_execute). It models a header variable concatenated with
+--      a dollar tag, a body operand that is a tracked variable or a `replace(...)` over one,
+--      and the same tag again — 0129:1063-1106 fits because its body operand IS a replace over
+--      the tracked prosrc. A first cut of this file took the projection OUT of §3's freshly
+--      recut catalog body and spliced it into the pack positionally, which is prettier (the
+--      copy is TAKEN rather than typed) and is unresolvable by construction: it red five web
+--      census cells (do-action-floors, firm/capabilities, members-doors and two in
+--      firm-scope-db-pins). Measured, then conformed — the house gate wins over the nicer shape.
+--
+--      SO THE PROJECTION IS TYPED TWICE, AND THE TAIL IS WHAT KEEPS THE TWO HONEST. Both copies
+--      are bracketed by the sentinel comments /* P657-CAND-BEGIN */ and /* P657-CAND-END */;
+--      §8 extracts both marked regions out of the CATALOG and asserts they are identical modulo
+--      whitespace (Q4 / SYNTHESIS J3), and `p657.db.pack-parity` asserts the same fact from the
+--      test side. A future change to the candidate projection edits BOTH copies, and this file's
+--      tail refuses the migration if it edits only one — which is the drift class 0040 FIX WAVE
+--      A5 already paid for once.
+--
+--      Everything outside the marked region is 0121's body byte-for-byte: the same firm binding
+--      (v_firm, where the public read uses c.firm — the ONLY difference between the two copies,
+--      and it lives OUTSIDE the projection, which is what lets the projection be identical), the
+--      same tier-A gate, the same inlined list_unmatched_lines copy, the same literal
+--      not_implemented payers/terms, the same whole-pack digest and the same receipt call.
 -- -------------------------------------------------------------------------------------
-do $p657_pack_splice$
+create or replace function clara._agent_get_bank_pack_core(p_client uuid, p_bank_account uuid, p_rationale text, p_model jsonb, p_op_key text)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp
+  as $packcore657$
 declare
-  v_proj text; v_src text; v_def text; v_head text; v_new text;
-  v_b int; v_e int; v_marker text := '-- list_bank_match_candidates'' own body, verbatim predicates.';
-  v_oid oid; v_occ int;
+  v_firm uuid; v_acct jsonb; v_stmt jsonb; v_lines jsonb; v_cands jsonb; v_coa text;
+  v_items jsonb; v_proposals jsonb; v_digest text; v_pack jsonb;
 begin
-  -- 1 · take the projection out of the public read we just recut, markers excluded.
-  select p.prosrc into v_src from pg_proc p
-   where p.oid='clara.list_bank_match_candidates(uuid,uuid)'::regprocedure;
-  if (length(v_src) - length(replace(v_src, '/* P657-CAND-BEGIN */', ''))) / length('/* P657-CAND-BEGIN */') <> 1
-     or (length(v_src) - length(replace(v_src, '/* P657-CAND-END */', ''))) / length('/* P657-CAND-END */') <> 1 then
-    raise exception '#657 splice: the recut list_bank_match_candidates does not carry exactly one marked candidate projection' using errcode='CLR10';
-  end if;
-  v_b := strpos(v_src, '/* P657-CAND-BEGIN */') + length('/* P657-CAND-BEGIN */');
-  v_e := strpos(v_src, '/* P657-CAND-END */');
-  v_proj := btrim(substr(v_src, v_b, v_e - v_b));
-
-  -- 2 · locate the pack's own old copy, positionally, with every locator asserted.
-  v_oid := to_regprocedure('clara._agent_get_bank_pack_core(uuid,uuid,text,jsonb,text)');
-  if v_oid is null then
-    raise exception '#657 splice: clara._agent_get_bank_pack_core does not resolve at its pinned signature' using errcode='CLR10';
-  end if;
-  v_def := pg_get_functiondef(v_oid);
-  select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
-  v_head := left(v_def, position(E'\nAS $function$' in v_def));
-  if v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n' then
-    raise exception '#657 splice: clara._agent_get_bank_pack_core does not split at the AS $function$ boundary' using errcode='CLR10';
-  end if;
-  v_occ := (length(v_src) - length(replace(v_src, v_marker, ''))) / length(v_marker);
-  if v_occ <> 1 then
-    raise exception '#657 splice: the pack core carries 0121''s candidate-copy comment % time(s), expected exactly 1', v_occ using errcode='CLR10';
-  end if;
-  v_b := strpos(v_src, v_marker);
-  v_b := strpos(substr(v_src, v_b), 'jsonb_build_object(') + v_b - 1;
-  if v_b <= 0 then
-    raise exception '#657 splice: no jsonb_build_object( follows the pack core''s candidate-copy comment' using errcode='CLR10';
-  end if;
-  v_occ := (length(v_src) - length(replace(v_src, ' as row_j', ''))) / length(' as row_j');
-  if v_occ <> 1 then
-    raise exception '#657 splice: the pack core carries " as row_j" % time(s), expected exactly 1 -- the old copy cannot be bounded', v_occ using errcode='CLR10';
-  end if;
-  v_e := strpos(v_src, ' as row_j');
-  if v_e <= v_b then
-    raise exception '#657 splice: the pack core''s " as row_j" precedes its candidate projection -- refusing to splice' using errcode='CLR10';
-  end if;
-
-  -- 3 · splice, markers included, so the tail can re-read both regions.
-  v_new := substr(v_src, 1, v_b - 1)
-        || '/* P657-CAND-BEGIN */ ' || v_proj || ' /* P657-CAND-END */'
-        || substr(v_src, v_e);
-  if position('$p657cand$' in v_new) > 0 then
-    raise exception '#657 splice: the new pack body already contains the dollar tag this file quotes with' using errcode='CLR10';
-  end if;
-  execute v_head || 'AS $p657cand$' || v_new || '$p657cand$';
-  raise notice '#657 splice: the pack core''s inlined candidate projection is now the public read''s own text (% chars).', length(v_proj);
-end
-$p657_pack_splice$;
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+  select to_jsonb(a) into v_acct from clara.bank_accounts a
+    where a.id = p_bank_account and a.client_id = p_client and a.firm_id = v_firm;
+  if v_acct is null then raise exception 'bank account not found for this client' using errcode='CLR11'; end if;
+  v_coa := v_acct->>'coa_account_code';
+  select to_jsonb(s) into v_stmt from clara.bank_statements s
+    where s.bank_account_id = p_bank_account and s.status = 'live'
+    order by s.period_end desc limit 1;
+  -- list_unmatched_lines' own body, verbatim predicates, scoped additionally to p_bank_account.
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'line_id', l.id, 'statement_id', l.statement_id, 'bank_account_id', l.bank_account_id,
+      'bank_account_display', ba.bank_name_display || ' ' || ba.account_number,
+      'line_no', l.line_no, 'entry_date', l.entry_date, 'value_date', l.value_date,
+      'description', l.description, 'amount_cents', l.amount_cents,
+      'class_hint', clara._bank_line_class_hint(l.description))
+      order by l.entry_date, l.id), '[]'::jsonb) into v_lines
+    from clara.bank_statement_lines l
+    join clara.bank_statements s on s.id = l.statement_id
+    join clara.bank_accounts ba on ba.id = l.bank_account_id
+    where l.firm_id = v_firm and l.client_id = p_client and l.bank_account_id = p_bank_account
+      and s.status = 'live'
+      and not exists (select 1 from clara.bank_match_line_members m
+        where m.line_id = l.id and m.group_status in ('pending', 'live'))
+      and not coalesce((select (e.status = 'open'
+                                or e.resolution_disposition = 'bank_corrective_line')
+                          from clara.bank_line_exceptions e
+                         where e.line_id = l.id
+                         order by (e.status = 'open') desc, e.created_at desc, e.id desc
+                         limit 1), false);
+  -- list_bank_match_candidates' own body, verbatim predicates.
+  select coalesce(jsonb_agg(t.row_j order by t.posting_date desc), '[]'::jsonb) into v_cands
+    from (
+      select je.posting_date, /* P657-CAND-BEGIN */ jsonb_build_object(
+      'entry_id', je.id, 'posting_date', je.posting_date, 'memo', je.memo,
+      'coding_kind', je.coding_kind,
+      'counterparty_id', (select min(jl2.counterparty_id::text)::uuid from clara.journal_lines jl2
+         where jl2.entry_id = je.id and jl2.counterparty_id is not null),
+      'counterparty_name', (select cp.name from clara.counterparties cp
+         where cp.client_id = p_client
+           and cp.id = clara._canonical_counterparty(p_client,
+             (select min(jl3.counterparty_id::text)::uuid from clara.journal_lines jl3
+                where jl3.entry_id = je.id and jl3.counterparty_id is not null))),
+      'high_stakes', coalesce(clara.is_high_stakes(je.id), false),
+      'match_history', coalesce((select jsonb_agg(h.row_h order by h.acted_at desc) from (
+         select coalesce(bm.completed_at, bm.created_at) as acted_at,
+           jsonb_build_object('match_id', bm.id, 'status', bm.status,
+             'matched_cents', em.matched_cents,
+             'acted_at', coalesce(bm.completed_at, bm.created_at)) as row_h
+         from clara.bank_match_entry_members em
+         join clara.bank_matches bm on bm.id = em.match_id
+         join clara.bank_accounts ba3 on ba3.id = bm.bank_account_id
+         where em.entry_id = je.id and ba3.client_id = p_client
+           and ba3.coa_account_code = v_coa
+         order by coalesce(bm.completed_at, bm.created_at) desc, bm.id desc
+         limit 5) h), '[]'::jsonb),
+      'debit_remaining_cents', greatest(0,
+        (select coalesce(sum(jl.debit_cents), 0) from clara.journal_lines jl
+          where jl.entry_id = je.id and jl.account_code = v_coa)
+        - (select coalesce(sum(em.matched_cents), 0)
+           from clara.bank_match_entry_members em
+           join clara.bank_matches bm on bm.id = em.match_id
+           join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+           where em.entry_id = je.id and em.matched_cents > 0
+             and bm.status in ('pending','live')
+             and ba2.coa_account_code = v_coa and ba2.client_id = p_client)),
+      'credit_remaining_cents', greatest(0,
+        (select coalesce(sum(jl.credit_cents), 0) from clara.journal_lines jl
+          where jl.entry_id = je.id and jl.account_code = v_coa)
+        - (select coalesce(sum(-em.matched_cents), 0)
+           from clara.bank_match_entry_members em
+           join clara.bank_matches bm on bm.id = em.match_id
+           join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+           where em.entry_id = je.id and em.matched_cents < 0
+             and bm.status in ('pending','live')
+             and ba2.coa_account_code = v_coa and ba2.client_id = p_client))) /* P657-CAND-END */ as row_j
+      from clara.journal_entries je
+      where je.firm_id = v_firm and je.client_id = p_client
+        and je.status = 'approved' and je.reversed_by is null and je.reversal_of is null
+        and exists (select 1 from clara.journal_lines jl
+          where jl.entry_id = je.id and jl.account_code = v_coa
+            and (jl.debit_cents <> 0 or jl.credit_cents <> 0))
+    ) t where (t.row_j->>'debit_remaining_cents')::bigint > 0
+           or (t.row_j->>'credit_remaining_cents')::bigint > 0;
+  select coalesce(jsonb_agg(to_jsonb(i) order by i.item_date), '[]'::jsonb) into v_items
+    from clara.open_items i where i.client_id = p_client;
+  select coalesce(jsonb_agg(jsonb_build_object('id', pr.id, 'kind', pr.kind,
+           'subject_id', pr.subject_id, 'payload', pr.payload, 'created_at', pr.created_at)), '[]'::jsonb)
+    into v_proposals
+    from clara.bank_agent_proposals pr where pr.client_id = p_client and pr.status = 'open';
+  v_pack := jsonb_build_object('schema', 'clara.bank-pack/v1',
+    'bank_account', v_acct, 'statement', v_stmt, 'lines', v_lines, 'candidates', v_cands,
+    'open_items', v_items,
+    'learned_payers', jsonb_build_object('not_implemented', true),
+    'recon_terms', jsonb_build_object('not_implemented', true),
+    'open_proposals', v_proposals,
+    'budget', jsonb_build_object('lines', jsonb_array_length(v_lines), 'candidates', jsonb_array_length(v_cands), 'truncated', false));
+  v_digest := encode(clara._hash(v_pack), 'hex');
+  v_pack := v_pack || jsonb_build_object('digest', v_digest);
+  perform clara._agent_bank_receipt(v_firm, p_client, 'pack_read', 'admitted', p_bank_account,
+    coalesce(nullif(btrim(p_rationale),''), 'bank pack read'),
+    coalesce(p_model, '{"provider":"unspecified","model":"unspecified","version":"unspecified"}'::jsonb),
+    v_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  return v_pack;
+end $packcore657$;
 
 -- -------------------------------------------------------------------------------------
 -- §5 · clara.get_bank_line_matching_context(p_line uuid) -> jsonb.  THE NEW HUMAN READ.

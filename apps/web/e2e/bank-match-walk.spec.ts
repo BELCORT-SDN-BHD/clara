@@ -120,11 +120,16 @@ test("matching a unique sufficient candidate states 'no new cash entry was creat
 });
 
 test("an over-capacity pick shows the refusal VERBATIM with its code · reason, the typed cents survive, and the retry carries the SAME op key", async ({ page }) => {
+  // The op keys are read off the REQUESTS rather than by intercepting them: a route handler
+  // that re-issues the call would be proving something about Playwright request replay, and this
+  // leg is about what the app sends. `page.on("request")` observes and changes nothing.
   const keys: string[] = [];
-  await page.route("**/rest/v1/rpc/match_bank_line", async (route) => {
-    const body = route.request().postDataJSON() as { p_op_key?: string };
-    if (body?.p_op_key) keys.push(body.p_op_key);
-    await route.fallback();
+  page.on("request", (req) => {
+    if (!req.url().includes("/rest/v1/rpc/match_bank_line")) return;
+    try {
+      const body = req.postDataJSON() as { p_op_key?: string } | null;
+      if (body?.p_op_key) keys.push(body.p_op_key);
+    } catch { /* a body this leg cannot parse is not a key it can assert on */ }
   });
 
   await signInTo(page, MATCHING);
@@ -138,8 +143,14 @@ test("an over-capacity pick shows the refusal VERBATIM with its code · reason, 
 
   // VERBATIM, with the discriminant beside it. `lib/doors.ts` parses `details` into
   // DoorRefusal.reason and action-refusal.tsx renders `code · reason` in the chip.
-  await expect(page.getByText(P657.refusalOverCapacity)).toBeVisible();
-  await expect(page.getByText("CLR10 · already_matched")).toBeVisible();
+  //
+  // SCOPED TO THE DETAIL PANE ON PURPOSE. match_bank_line and unmatch_bank_match act through the
+  // SAME part, so BLOCKER-2's fix paints the refusal in every card that acts on it — three of
+  // them here. An unscoped getByText is a strict-mode violation, and `.first()` would assert
+  // only that SOME card has it; the claim is that the card the human is standing in does.
+  const pane = page.getByTestId("matching-detail");
+  await expect(pane.getByText(P657.refusalOverCapacity)).toBeVisible();
+  await expect(pane.getByText("CLR10 · already_matched")).toBeVisible();
 
   // THE DRAFT SURVIVES — the typed cents and both ticks. Retyping an amount you already typed
   // is how a human ends up typing a different one.
@@ -149,7 +160,7 @@ test("an over-capacity pick shows the refusal VERBATIM with its code · reason, 
 
   // …and the resubmit is the SAME operation (D15), because the key is derived from the intent.
   await page.getByRole("button", { name: "Match", exact: true }).click();
-  await expect(page.getByText(P657.refusalOverCapacity)).toBeVisible();
+  await expect(pane.getByText(P657.refusalOverCapacity)).toBeVisible();
   expect(keys.length, "both submissions reached the door").toBeGreaterThanOrEqual(2);
   expect(keys[0], "an unchanged draft resubmits under the SAME p_op_key").toBe(keys[1]);
 

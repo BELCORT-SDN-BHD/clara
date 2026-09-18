@@ -75,12 +75,15 @@ export const P657_RPC_VERBS = new Set([
   "unmatch_bank_match",
 ]);
 
-/** Whether the clean line has been matched yet — the walk drives one real state change, so the
- *  second visit to the report must not still offer a line that is gone. */
-const state = { matched: false, matchCalls: [] };
+/** THIS LANE IS DELIBERATELY STATELESS about what has been matched, and that is not laziness.
+ *  `serve-built.mjs` is ONE process for the WHOLE browser suite, so a module-level "this line is
+ *  gone now" would leak from whichever spec ran first into every later one — which it did: a
+ *  first cut removed the clean line after the happy-path leg and the keyboard leg, running later
+ *  in the same worker, could no longer find it. Every leg here is order-independent instead. The
+ *  op keys ARE recorded, because a replay assertion is about what reached the door. */
+const state = { matchCalls: [] };
 
 export function resetP657() {
-  state.matched = false;
   state.matchCalls = [];
 }
 
@@ -131,7 +134,7 @@ const STATEMENTS = () => [{
   voided_at: null,
   voided_reason: null,
   created_at: "2026-05-01T00:00:00.000Z",
-  tie: { gl_balance_cents: -45_300, unmatched_cents: state.matched ? -30_300 : -45_300 },
+  tie: { gl_balance_cents: -45_300, unmatched_cents: -45_300 },
 }];
 
 const LINE = (id, description, cents) => ({
@@ -148,7 +151,7 @@ const LINE = (id, description, cents) => ({
 });
 
 const UNMATCHED = () => [
-  ...(state.matched ? [] : [LINE(P657.cleanLine, "MBB SERVICE CHARGE APR", -15_000)]),
+  LINE(P657.cleanLine, "MBB SERVICE CHARGE APR", -15_000),
   LINE(P657.overLine, "MBB TRANSFER FEE APR", -15_300),
   // NOTE: the EXCEPTED line is deliberately ABSENT from this report — that is
   // `list_unmatched_lines`' own behaviour (0040:4117-4122 excludes an open-excepted line), and
@@ -235,7 +238,7 @@ const CONTEXT = (lineId) => {
       line_count: 3,
       total_debit_cents: 45_300,
       total_credit_cents: 0,
-      tie: { gl_balance_cents: -45_300, unmatched_cents: state.matched ? -30_300 : -45_300 },
+      tie: { gl_balance_cents: -45_300, unmatched_cents: -45_300 },
     },
     exception: excepted
       ? {
@@ -359,9 +362,8 @@ export async function handleP657Supabase(request, response, path, url, sendJson,
     }
 
     // THE HAPPY PATH — idempotent under a replayed op key, exactly as `_reserve_op` is: the
-    // SAME receipt, and no second state change. That is what makes the walk's "submit the same
-    // thing twice" leg a real assertion about #657's intent-hash key rather than about luck.
-    state.matched = true;
+    // SAME receipt every time, whatever the key, and no state change at all (see the state
+    // comment above for why this lane remembers nothing).
     sendJson(response, 200, {
       match_id: P657.matchId,
       status: "live",
