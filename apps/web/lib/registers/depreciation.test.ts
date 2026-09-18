@@ -8,7 +8,14 @@ import {
   listDepreciationRuns,
   getDepreciationRun,
   runDepreciationManual,
+  previewDepreciationRun,
+  depreciationIntent,
+  useDepreciationDecisionKey,
+  faSkipListStartsOpen,
+  FA_SKIP_REASONS,
+  FA_BENIGN_SKIP_REASONS,
 } from "./depreciation";
+import { renderHook } from "../../test/hookHarness";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function fakeSession(token: string | null): SessionTokenAccessor {
@@ -63,14 +70,21 @@ test("proposeDepreciationAuthority: posts p_client + p_cadence with a fresh op_k
   assert.equal(typeof calls[0]!.body.p_op_key, "string");
 });
 
-test("signDepreciationAuthority: posts p_client + p_authority — no client-side role gate on this call", async () => {
+test("signDepreciationAuthority: posts p_client + p_authority + the REQUIRED instruction reference — no client-side role gate on this call", async () => {
   const { impl, calls } = captureFetch({ authority_id: "au1", status: "live" });
   await withMockedFetch(impl, async () => {
-    await signDepreciationAuthority(fakeSession("tok"), { clientId: "c1", authorityId: "au1" });
+    await signDepreciationAuthority(fakeSession("tok"), {
+      clientId: "c1", authorityId: "au1",
+      authorityRef: { kind: "accounting_work", id: "w-1" },
+    });
   });
   assert.match(calls[0]!.url, /\/rpc\/sign_depreciation_authority$/);
   assert.equal(calls[0]!.body.p_client, "c1");
   assert.equal(calls[0]!.body.p_authority, "au1");
+  // #651 [0227] — the fourth argument. It is REQUIRED and the door RESOLVES it against
+  // clara.accounting_work / clara.agent_tasks in the same firm AND client, so a signature can no
+  // longer be a bare assertion of authority.
+  assert.deepEqual(calls[0]!.body.p_authority_ref, { kind: "accounting_work", id: "w-1" });
 });
 
 test("retireDepreciationAuthority: posts p_reason alongside p_client/p_authority", async () => {
@@ -105,16 +119,21 @@ test("getDepreciationRun: posts p_run (NOT p_client — the live signature is pe
   assert.deepEqual(resolved, run);
 });
 
-test("runDepreciationManual: posts the exact cadence-window arguments with a fresh op_key", async () => {
+test("runDepreciationManual: posts the exact cadence-window arguments with the CALLER'S op key", async () => {
   const { impl, calls } = captureFetch({ status: "posted", entry_id: "e1", charged_cents: 12000, entries: 3, skipped: [] });
   await withMockedFetch(impl, async () => {
-    await runDepreciationManual(fakeSession("tok"), { clientId: "c1", periodStart: "2026-01-01", periodEnd: "2026-01-31" });
+    await runDepreciationManual(fakeSession("tok"), {
+      clientId: "c1", periodStart: "2026-01-01", periodEnd: "2026-01-31", opKey: "decision-1",
+    });
   });
   assert.match(calls[0]!.url, /\/rpc\/run_depreciation_manual$/);
   assert.equal(calls[0]!.body.p_client, "c1");
   assert.equal(calls[0]!.body.p_period_start, "2026-01-01");
   assert.equal(calls[0]!.body.p_period_end, "2026-01-31");
-  assert.equal(typeof calls[0]!.body.p_op_key, "string");
+  // #651 — the key is the CALLER'S, and that is the whole fix: this wrapper used to mint
+  // crypto.randomUUID() inside itself, so the retry a person makes after a lost response was a
+  // DIFFERENT operation and the door answered it with a refusal instead of the original receipt.
+  assert.equal(calls[0]!.body.p_op_key, "decision-1");
 });
 
 test("runDepreciationManual: a CLR38 not_cadence_aligned refusal surfaces verbatim as a DoorRefusal", async () => {
@@ -127,7 +146,7 @@ test("runDepreciationManual: a CLR38 not_cadence_aligned refusal surfaces verbat
     async () => {
       const { isDoorRefusal } = await import("../doors");
       await assert.rejects(
-        runDepreciationManual(fakeSession("tok"), { clientId: "c1", periodStart: "2026-01-05", periodEnd: "2026-01-31" }),
+        runDepreciationManual(fakeSession("tok"), { clientId: "c1", periodStart: "2026-01-05", periodEnd: "2026-01-31", opKey: "decision-2" }),
         (e: unknown) => {
           assert.ok(isDoorRefusal(e));
           return true;
@@ -135,4 +154,85 @@ test("runDepreciationManual: a CLR38 not_cadence_aligned refusal surfaces verbat
       );
     },
   );
+});
+
+// =================================================================================================
+// #651 [0227] — THE PREVIEW READ, THE MEASURED SKIP VOCABULARY, AND ONE DECISION / ONE KEY.
+// =================================================================================================
+
+test("previewDepreciationRun: posts p_client alone and resolves the envelope VERBATIM — it names no period, because the period is the database's", async () => {
+  const envelope = {
+    client_id: "c1", due: true, period_start: "2026-07-01", period_end: "2026-07-31",
+    cadence: "monthly", authority_from: "2026-03-01",
+    charges: [{ asset_id: "a1", description: "Compressor", period_start: "2026-07-01", period_end: "2026-07-31", amount_cents: 7500 }],
+    skipped: [{ asset_id: "a2", reason: "incomplete" }],
+    legs: [
+      { account_code: "6510", debit_cents: 7500, credit_cents: 0 },
+      { account_code: "1519", debit_cents: 0, credit_cents: 7500 },
+    ],
+    charged_cents: 7500, entries: 1, mode_would_be: "draft", ramp_earned: false,
+    skipped_closed: [{ period_start: "2026-06-01", period_end: "2026-06-30", fiscal_year_id: "fy1", fy_label: "2026", fy_status: "closed" }],
+  };
+  const { impl, calls } = captureFetch(envelope);
+  let resolved: unknown = null;
+  await withMockedFetch(impl, async () => {
+    resolved = await previewDepreciationRun(fakeSession("tok"), "c1");
+  });
+  assert.match(calls[0]!.url, /\/rpc\/preview_depreciation_run$/);
+  assert.deepEqual(calls[0]!.body, { p_client: "c1" },
+    "ONE argument: a caller cannot name a period, and there is no op key because the read writes nothing");
+  assert.deepEqual(resolved, envelope, "the envelope is reported verbatim, never re-shaped");
+});
+
+test("the skip vocabulary is the FIVE names measured off the live catalog, and the benign ones are the three that describe a settled fact", () => {
+  assert.deepEqual([...FA_SKIP_REASONS].sort(),
+    ["disposal_draft_outstanding", "fully_depreciated", "incomplete", "none_method", "not_in_service"],
+    "four from clara._fa_asset_charges plus disposal_draft_outstanding, which clara._fa_compute_charges writes itself");
+  assert.deepEqual([...FA_BENIGN_SKIP_REASONS].sort(),
+    ["fully_depreciated", "none_method", "not_in_service"]);
+
+  // Appendix D row 17: a collapsible may never hide an unresolved question by default.
+  assert.equal(faSkipListStartsOpen([{ reason: "fully_depreciated" }, { reason: "none_method" }]), false,
+    "a list of settled facts may collapse");
+  assert.equal(faSkipListStartsOpen([{ reason: "fully_depreciated" }, { reason: "incomplete" }]), true,
+    "…but one asset waiting on its particulars opens the whole list");
+  assert.equal(faSkipListStartsOpen([{ reason: "disposal_draft_outstanding" }]), true,
+    "…and so does a disposal draft somebody still has to approve or withdraw");
+  assert.equal(faSkipListStartsOpen([{ reason: "some_sixth_reason" }]), true,
+    "an UNKNOWN reason opens it too: a vocabulary that grew is not a reason to hide the row");
+});
+
+test("depreciationIntent is exactly the tuple clara._fa_run_period_core hashes into its own key", () => {
+  assert.equal(depreciationIntent({ clientId: "c1", periodStart: "2026-07-01", periodEnd: "2026-07-31" }),
+    "c1|2026-07-01|2026-07-31");
+  assert.notEqual(
+    depreciationIntent({ clientId: "c1", periodStart: "2026-07-01", periodEnd: "2026-07-31" }),
+    depreciationIntent({ clientId: "c1", periodStart: "2026-08-01", periodEnd: "2026-08-31" }),
+    "a different period is a different decision");
+});
+
+test("useDepreciationDecisionKey: ONE key per decision — stable across retries, renewed on a new decision", async () => {
+  const h = await renderHook(() => useDepreciationDecisionKey());
+  try {
+    const intentA = depreciationIntent({ clientId: "c1", periodStart: "2026-07-01", periodEnd: "2026-07-31" });
+    const first = h.current.key(intentA);
+    // THE RETRY IS THE WHOLE POINT. A person whose response never arrived presses Confirm again;
+    // with a fresh uuid that second press was a DIFFERENT operation and the door refused it
+    // instead of handing back the receipt it had already earned.
+    assert.equal(h.current.key(intentA), first, "a retry of the SAME decision reuses the key");
+    assert.equal(h.current.key(intentA), first, "…however many times it is retried");
+
+    const intentB = depreciationIntent({ clientId: "c1", periodStart: "2026-08-01", periodEnd: "2026-08-31" });
+    const second = h.current.key(intentB);
+    assert.notEqual(second, first, "a DIFFERENT intent is a different decision and mints its own key");
+
+    // …and an explicit end (the dialog closed) renews it, because a run that was withdrawn and is
+    // being made again must not be answered with the withdrawn run's receipt.
+    h.current.renew();
+    const third = h.current.key(intentB);
+    assert.notEqual(third, second, "renew() ends the decision");
+    assert.match(third, /^[0-9a-f-]{16,}$/i, "…and the key is still a real opaque identity");
+  } finally {
+    await h.unmount();
+  }
 });

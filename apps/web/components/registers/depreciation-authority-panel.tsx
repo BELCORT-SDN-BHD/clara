@@ -32,7 +32,7 @@ export function DepreciationAuthorityPanel({ clientId, onPosted }: { clientId: s
         err ? <StateBanner tone="error" className="text-xs">{String(err)}</StateBanner> : null
       ) : (
         <>
-          <AuthorityCeremony clientId={clientId} data={data} busy={busy} act={act} />
+          <AuthorityCeremony clientId={clientId} data={data} busy={busy} act={act} error={err} />
           <DepreciationRunsPanel clientId={clientId} hasLiveAuthority={data.authority?.status === "live"} onPosted={onPosted} />
         </>
       )}

@@ -3772,6 +3772,7 @@
     "tabs": {
       "acquisition": "Acquisition",
       "particulars": "Particulars & policy",
+      "revisions": "Policy & effective revisions",
       "schedule": "Schedule",
       "history": "History"
     },
@@ -3807,7 +3808,41 @@
       "periodEnd": "Period end",
       "projected": "Projected charge"
     },
+    "revisions": {
+      "empty": "This asset's estimate has never been revised. A prospective revision supersedes the row forward and appears here.",
+      "tableCaption": "Policy-effective revisions, oldest first",
+      "effectiveFrom": "Effective from",
+      "changeClass": "Change class",
+      "life": "Useful life (months)",
+      "rate": "Rate (bps)",
+      "residual": "Residual",
+      "reason": "Why",
+      "current": "Current",
+      "note": "A revision is prospective: it supersedes the row forward and never restates a period already charged.",
+      "class": {
+        "estimate": "Estimate change",
+        "policy": "Policy change",
+        "error": "Error correction",
+        "notRecorded": "Not recorded"
+      }
+    },
+    "ledger": {
+      "heading": "Charge ledger",
+      "empty": "No depreciation has been charged for this asset yet.",
+      "emptyBlockedByParticulars": "No depreciation has been charged yet because this asset's depreciation particulars are still outstanding.",
+      "tableCaption": "Depreciation charges, oldest period first",
+      "period": "Period",
+      "amount": "Amount",
+      "effectiveDate": "Effective",
+      "entry": "Journal entry",
+      "kind": "State",
+      "live": "Charged",
+      "unwind": "Unwinding",
+      "unwound": "Unwound",
+      "note": "This ledger is append-only: a correction is a new unwinding row beside the charge it reversed, never an erasure."
+    },
     "history": {
+      "relationsHeading": "Related register rows",
       "asset": "Asset",
       "relation": "Relation",
       "derivedFrom": "Derived from",
@@ -3857,6 +3892,19 @@
       "reviseTitle": "Revise particulars (prospective)",
       "reviseDescription": "Mints a new register row effective from the date below; the current row is superseded. Cannot take effect on or before a period already charged.",
       "effectiveFromLabel": "Effective from",
+      "effectiveFromHelp": "The first day the revised estimate applies from. It must be after every period already charged.",
+      "changeClassLabel": "Change class",
+      "changeClassHelp": "What KIND of change this is. The register keeps it beside the revision.",
+      "changeClassUnsupported": "not available yet",
+      "changeClassRestatementNote": "A policy change or an error correction is a retrospective restatement — ticket #680 owns that lane, under #679's lock law. Only a prospective estimate change can be recorded here.",
+      "changeClass": {
+        "estimate": "Estimate change",
+        "policy": "Policy change",
+        "error": "Error correction"
+      },
+      "changeReasonLabel": "Why this estimate changed",
+      "changeReasonHelp": "One sentence a reviewer can act on. It is stored with the revision.",
+      "changeReasonRequired": "A reason is required.",
       "dispose": "Dispose",
       "disposeTitle": "Dispose this asset",
       "disposeDescription": "Books the disposal entry — stub depreciation through the disposal month, cost/accumulated relief, proceeds and any gain or loss.",
@@ -3932,6 +3980,18 @@
       "proposeDescription": "An admin must sign this before any period can be run.",
       "signTrigger": "Sign",
       "signTitle": "Sign this depreciation authority",
+      "windowFrom": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
+      "instructionKindLabel": "Where the instruction lives",
+      "instructionKindHelp": "The Work or chat task in this client that carries the firm's instruction to depreciate.",
+      "instructionKind": {
+        "accounting_work": "Accounting work",
+        "chat_task": "Chat task"
+      },
+      "instructionIdLabel": "Instruction id",
+      "instructionIdHelp": "Paste the id of that row. The register resolves it against this client before signing.",
+      "instructionIdRequired": "An instruction id is required.",
+      "instructionIdMalformed": "That is not an id.",
+      "instructionAbsent": "Signed before instruction references were recorded, so none is on file.",
       "signDescription": "Signing is admin-only — the autopost ramp derives from this signature.",
       "retireTrigger": "Retire authority",
       "retireTitle": "Retire this depreciation authority",
@@ -3951,10 +4011,54 @@
       "entriesCol": "Entries",
       "runTrigger": "Run depreciation",
       "runTitle": "Run depreciation for a period",
-      "runDescription": "The period must exactly match the live authority's own cadence window, and must have already ended.",
+      "runConfirm": "Run this period",
+      "entryCol": "Journal entry",
+      "skippedCol": "Skipped",
+      "skippedCount": "{count} skipped",
+      "runDescription": "Clara reads the exact period from the register before anything is written. Check it, then confirm.",
       "periodStartLabel": "Period start",
       "periodEndLabel": "Period end",
       "runNoop": "Nothing was due for this period — no entry was posted."
+    },
+    "preview": {
+      "unavailable": "The preview is not available for this client.",
+      "periodIsTheDatabases": "The period is the register's, not yours: it follows the signed authority's cadence and must already have ended.",
+      "wouldPost": "Will post",
+      "wouldDraft": "Will wait for approval",
+      "cadence": {
+        "monthly": "Monthly",
+        "annual": "Annual"
+      },
+      "chargesCaption": "Assets this run will charge",
+      "legsCaption": "The two general-ledger legs this run will write",
+      "assetCol": "Asset",
+      "periodCol": "Period",
+      "amountCol": "Amount",
+      "accountCol": "Account",
+      "debitCol": "Debit",
+      "creditCol": "Credit",
+      "total": "{amount} across {entries} charge row(s).",
+      "floor": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
+      "skippedHeading": "{count} asset(s) will be skipped",
+      "skippedClosedHeading": "{count} period(s) were skipped because their financial year is closed",
+      "skippedClosedNote": "A closed period is never run in its own right. Its arrears are charged by the next open period, and each charge row still carries the month it belongs to.",
+      "skip": {
+        "incomplete": "waiting on depreciation particulars",
+        "not_in_service": "not yet in service",
+        "fully_depreciated": "fully depreciated",
+        "none_method": "stated as not depreciated",
+        "disposal_draft_outstanding": "a disposal draft is waiting on this asset",
+        "unknown": "skipped by the register ({reason})"
+      },
+      "notDue": {
+        "period_not_ended": "Nothing is due yet: the next period has not ended.",
+        "nothing_due": "Nothing is due: every ended period is charged.",
+        "authority_not_live": "Nothing can be run: this client has no signed depreciation authority.",
+        "period_draft_outstanding": "A depreciation draft is already waiting for approval. Approve or withdraw it first.",
+        "period_correction_unsound": "A charge in range was reversed on a different date, so the period never cleared. A human finishes this one by hand.",
+        "period_unreachable": "No lawful period could be reached for this client.",
+        "generic": "Nothing is due ({reason})."
+      }
     },
     "needsYou": {
       "heading": "Complete this asset's particulars",

@@ -205,8 +205,14 @@ components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/counterparty-hygiene-kinds.test.tsx
 components/registers/counterparty-identity-correct.test.tsx
 components/registers/counterparty-identity-panel.test.tsx
+components/registers/fa-charge-ledger.test.tsx
+components/registers/fa-detail-tab-url.test.tsx
 components/registers/fa-particulars-fields.test.tsx
 components/registers/fa-register-tie.test.tsx
+components/registers/fa-revision-timeline.test.tsx
+components/registers/fa-row-actions.test.tsx
+components/registers/fa-run-preview.test.tsx
+components/registers/fa-runs-panel.test.tsx
 components/registers/fixed-asset-detail.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx

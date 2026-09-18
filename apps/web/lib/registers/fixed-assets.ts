@@ -63,7 +63,24 @@ export type FixedAssetRow = {
   acquisition_entry_id: string | null;
   acquisition_line_id: string | null;
   acquisition_document_id: string | null;
+  /** #651 (migration 0227) — WHAT KIND OF CHANGE minted this generation, and why. Set by
+   *  `clara.revise_fixed_asset_particulars` on the SUCCESSOR row only and never back-filled, so a
+   *  root row and every revision minted before 0227 answer `null` — which the revision timeline
+   *  renders as "not recorded" rather than inventing a class. Three classes are recorded;
+   *  only `estimate` is implemented, and `policy` / `error` refuse by name (#680 owns that lane,
+   *  under #679's lock law). */
+  change_class?: "estimate" | "policy" | "error" | null;
+  change_reason?: string | null;
 };
+
+/** The three classes `ck_fixed_assets_change_class` admits. */
+export const FA_CHANGE_CLASSES = ["estimate", "policy", "error"] as const;
+export type FaChangeClass = (typeof FA_CHANGE_CLASSES)[number];
+
+/** The ONE class migration 0227 implements. The other two are rendered as VISIBLY DISABLED
+ *  options carrying the reason in words, rather than hidden: a person learns the rule instead of
+ *  wondering where it went. */
+export const FA_IMPLEMENTED_CHANGE_CLASSES: readonly FaChangeClass[] = ["estimate"];
 
 export type FixedAssetRegisterEnvelope = {
   client_id: string;
@@ -294,14 +311,35 @@ export function completeFixedAssetParticulars(
  *  date. */
 export function reviseFixedAssetParticulars(
   session: SessionTokenAccessor,
-  args: { clientId: string; assetId: string; particulars: FaParticularsInput; effectiveFrom: string },
+  args: {
+    clientId: string;
+    assetId: string;
+    particulars: FaParticularsInput;
+    effectiveFrom: string;
+    /** #651 [0227] — REQUIRED. Without it the door refuses CLR37 `fa_change_class_required`, and
+     *  that is the point: the register cannot tell an estimate revision (prospective, which is
+     *  what this door has always done) from a policy change or an error correction (both
+     *  retrospective, and neither of them this door's act). */
+    changeClass: FaChangeClass;
+    changeReason: string;
+  },
 ): Promise<unknown> {
   return callDoor(
     "revise_fixed_asset_particulars",
     {
       p_client: args.clientId,
       p_asset: args.assetId,
-      p_particulars: args.particulars,
+      // THE CLASSIFICATION TRAVELS INSIDE `p_particulars`. Measurement M1 (recorded in 0227 §C)
+      // proved that widening `clara._fa_validate_particulars`' closed key set with these two keys
+      // breaks neither the p639 battery nor the frozen mirror in
+      // packages/runtime/lib/fixed-asset-acquisition.ts, so the five-argument signature — granted
+      // by exact signature at 0041:4414 and censused by name — is unmoved. They are REVISION-ONLY:
+      // both completion doors refuse them by name (CLR37 `fa_change_class_on_completion`).
+      p_particulars: {
+        ...args.particulars,
+        change_class: args.changeClass,
+        change_reason: args.changeReason,
+      },
       p_effective_from: args.effectiveFrom,
       p_op_key: crypto.randomUUID(),
     },

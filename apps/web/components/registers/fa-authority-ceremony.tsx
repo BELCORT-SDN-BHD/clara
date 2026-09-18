@@ -5,16 +5,24 @@
 // convention write-off-form.tsx's own header names).
 
 import { useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldTitle,
+} from "@/components/ui/field";
 import { NativeSelect } from "@/components/common/native-select";
+import { toDialogRefusal } from "@/components/common/dialog-refusal";
+import { workDetailHref } from "@/lib/navigation/tree";
 import { FaDoorDialog } from "./FaDoorDialog";
 import {
   proposeDepreciationAuthority,
   signDepreciationAuthority,
   retireDepreciationAuthority,
+  type FaAuthorityRef,
   type FaDepreciationAuthorityEnvelope,
 } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -33,11 +41,17 @@ export function AuthorityCeremony({
   data,
   busy,
   act,
+  error,
 }: {
   clientId: string;
   data: FaDepreciationAuthorityEnvelope;
   busy: boolean;
   act: (fn: () => Promise<void>) => Promise<boolean>;
+  /** #651 — the panel's standing failure, so a sign refusal travels INTO the dialog with the human
+   *  instead of standing behind the modal backdrop (CB-AE2E-004's own reasoning). The four
+   *  instruction-reference refusals are exactly the kind this matters for: each one is asking the
+   *  person to change ONE value in the form they are looking at. */
+  error?: unknown;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const au = data.authority;
@@ -59,8 +73,37 @@ export function AuthorityCeremony({
           {au.status === "live" ? (
             <p className="text-xs text-muted-foreground">{data.ramp_earned ? t("rampEarned") : t("rampNotEarned")}</p>
           ) : null}
+          {/* #651 [0227] — THE WINDOW, AND THE HONEST SENTENCE UNDER IT. `authority_from` is the
+              first day of the month this authority was signed and it never moves: the belt runs
+              forward only from there, and anything earlier needs an explicit catch-up by hand.
+              A person reading "nothing is due" on a client with two years of uncharged assets must
+              be able to find that out HERE rather than from a refusal. */}
+          {au.status === "live" && au.authority_from ? (
+            <p className="text-xs text-muted-foreground" data-testid="fa-authority-window">
+              {t("windowFrom", { from: au.authority_from })}
+            </p>
+          ) : null}
+          {/* …and the instruction it was signed under, as a link to the row that carries it. */}
+          {au.authority_ref ? (
+            <p className="text-xs text-muted-foreground" data-testid="fa-authority-ref">
+              {t(`instructionKind.${au.authority_ref.kind}`)}{" "}
+              {au.authority_ref.kind === "accounting_work" ? (
+                <Link
+                  href={workDetailHref(clientId, au.authority_ref.id)}
+                  className="font-mono break-all underline-offset-4 hover:underline"
+                >
+                  {au.authority_ref.id.slice(0, 8)}
+                </Link>
+              ) : (
+                <span className="font-mono break-all" title={au.authority_ref.id}>{au.authority_ref.id.slice(0, 8)}</span>
+              )}
+            </p>
+          ) : au.status === "live" ? (
+            // An authority signed before 0227 carries no instruction and none can be invented.
+            <p className="text-xs text-muted-foreground" data-testid="fa-authority-ref-absent">{t("instructionAbsent")}</p>
+          ) : null}
           <div className="flex gap-2">
-            {au.status === "proposed" ? <SignDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} /> : null}
+            {au.status === "proposed" ? <SignDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} error={error} /> : null}
             <RetireDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} />
           </div>
         </div>
@@ -92,8 +135,25 @@ function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolea
   );
 }
 
-function SignDialog({ clientId, authorityId, busy, act }: { clientId: string; authorityId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
+/** #651 [0227] — SIGNING NOW NAMES THE INSTRUCTION IT EXECUTES.
+ *
+ *  AC5's "under explicit instruction" stopped being a comment and became a door: the reference is
+ *  REQUIRED and RESOLVED against `clara.accounting_work` / `clara.agent_tasks` in the SAME firm and
+ *  client. A Knowledge preference, a calculation policy or a repeated debit resolves to nothing and
+ *  is refused by name. All four refusals (`authority_ref_invalid` constraint object | kind | id,
+ *  and `authority_ref_unresolved`) render VERBATIM with their code — this form re-words none of
+ *  them, and validates only the one thing it can know without the database: that the id is shaped
+ *  like a uuid. */
+function SignDialog({ clientId, authorityId, busy, act, error }: {
+  clientId: string; authorityId: string; busy: boolean;
+  act: (fn: () => Promise<void>) => Promise<boolean>; error?: unknown;
+}) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
+  const [refKind, setRefKind] = useState<FaAuthorityRef["kind"]>("accounting_work");
+  const [refId, setRefId] = useState("");
+  const idBlank = refId.trim() === "";
+  const idMalformed = !idBlank && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(refId.trim());
+
   return (
     <FaDoorDialog
       triggerLabel={t("signTrigger")}
@@ -101,8 +161,53 @@ function SignDialog({ clientId, authorityId, busy, act }: { clientId: string; au
       description={t("signDescription")}
       confirmLabel={t("signTrigger")}
       busy={busy}
-      onConfirm={() => act(async () => { await signDepreciationAuthority(sessionTokenAccessor, { clientId, authorityId }); })}
-    />
+      refusal={toDialogRefusal(error)}
+      confirmDisabled={idBlank || idMalformed}
+      onConfirm={() => act(async () => {
+        await signDepreciationAuthority(sessionTokenAccessor, {
+          clientId, authorityId, authorityRef: { kind: refKind, id: refId.trim() },
+        });
+      })}
+    >
+      <FieldGroup>
+        <Field>
+          <FieldContent>
+            <FieldLabel htmlFor={`fa-sign-kind-${authorityId}`}>
+              <FieldTitle>{t("instructionKindLabel")}</FieldTitle>
+              <FieldDescription>{t("instructionKindHelp")}</FieldDescription>
+            </FieldLabel>
+          </FieldContent>
+          <NativeSelect
+            id={`fa-sign-kind-${authorityId}`}
+            value={refKind}
+            onChange={(e) => setRefKind(e.target.value as FaAuthorityRef["kind"])}
+          >
+            <option value="accounting_work">{t("instructionKind.accounting_work")}</option>
+            <option value="chat_task">{t("instructionKind.chat_task")}</option>
+          </NativeSelect>
+        </Field>
+        <Field data-invalid={idBlank || idMalformed ? true : undefined}>
+          <FieldContent>
+            <FieldLabel htmlFor={`fa-sign-ref-${authorityId}`}>
+              <FieldTitle>{t("instructionIdLabel")}</FieldTitle>
+              <FieldDescription>{t("instructionIdHelp")}</FieldDescription>
+            </FieldLabel>
+          </FieldContent>
+          <Input
+            id={`fa-sign-ref-${authorityId}`}
+            value={refId}
+            aria-invalid={idBlank || idMalformed || undefined}
+            aria-describedby={idBlank || idMalformed ? `fa-sign-ref-${authorityId}-error` : undefined}
+            onChange={(e) => setRefId(e.target.value)}
+          />
+          {idBlank || idMalformed ? (
+            <FieldError id={`fa-sign-ref-${authorityId}-error`} data-testid={`fa-sign-ref-error-${authorityId}`}>
+              {idBlank ? t("instructionIdRequired") : t("instructionIdMalformed")}
+            </FieldError>
+          ) : null}
+        </Field>
+      </FieldGroup>
+    </FaDoorDialog>
   );
 }
 

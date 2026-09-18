@@ -112,7 +112,7 @@ test("completeFixedAssetParticulars: posts the exact door body shape, with a fre
   assert.ok((body.p_op_key as string).length > 0);
 });
 
-test("reviseFixedAssetParticulars: posts p_effective_from alongside the particulars", async () => {
+test("reviseFixedAssetParticulars: posts p_effective_from AND the change classification alongside the particulars", async () => {
   const { impl, calls } = captureFetch({ asset_id: "a1", successor_asset_id: "a2" });
   await withMockedFetch(impl, async () => {
     await reviseFixedAssetParticulars(fakeSession("tok"), {
@@ -120,6 +120,8 @@ test("reviseFixedAssetParticulars: posts p_effective_from alongside the particul
       assetId: "a1",
       particulars: { method: "none", start_date: "2026-01-01" },
       effectiveFrom: "2026-09-01",
+      changeClass: "estimate",
+      changeReason: "the plant survey revised the life",
     });
   });
   const body = calls[0]!.body;
@@ -127,6 +129,14 @@ test("reviseFixedAssetParticulars: posts p_effective_from alongside the particul
   assert.equal(body.p_effective_from, "2026-09-01");
   assert.equal(body.p_client, "c1");
   assert.equal(body.p_asset, "a1");
+  // #651 [0227] — THE FIVE-ARGUMENT SIGNATURE IS UNMOVED and the classification travels INSIDE
+  // p_particulars (measurement M1's green arm). The door refuses CLR37 fa_change_class_required
+  // without it, so a revision can no longer be recorded without saying what kind of change it is.
+  assert.deepEqual(body.p_particulars, {
+    method: "none", start_date: "2026-01-01",
+    change_class: "estimate", change_reason: "the plant survey revised the life",
+  });
+  assert.equal(Object.keys(body).length, 5, "…and the door still takes exactly five arguments");
 });
 
 test("disposeFixedAsset: posts every door argument by exact p_ name, cost portion defaults to null", async () => {
