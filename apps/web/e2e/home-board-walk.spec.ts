@@ -47,9 +47,70 @@ const ENVELOPE = {
   rows: [DRAFT_ROW], next_cursor: null,
 };
 
-const TIMELINE = [
-  { seq: 9, event_type: "entry_posted", event_description: "An entry was posted.", client_id: CLIENT_ACTIVE, actor: "u1", on_behalf_of: null, via_wake_kind: null, created_at: "2026-09-04T01:12:00Z" },
-];
+// #659 (D18.f) — Recent activity reads `clara.list_activity` now, so the board can render WHO did
+// each thing. This lane MUST overlay it: `activity-mock.mjs` answers a firm-wide `list_activity`
+// unconditionally on the shared server (serve-built.mjs:609, far above the home-board hook at
+// :720), so without a `page.route` here this walk would be asserting #632's fixtures.
+const ACTIVITY_MEMBER = "11111111-1111-4111-8111-111111111111";
+const ACTIVITY = {
+  rows: [{
+    id: "ev-9", source: "event", event_type: "entry_posted", description: "An entry was posted.",
+    client_id: CLIENT_ACTIVE, actor: ACTIVITY_MEMBER, on_behalf_of: null, via_wake_kind: null,
+    occurred_at: "2026-09-04T01:12:00Z", object_kind: "entry", object_id: "e1", work_id: null,
+    receipt_id: null, document_id: null, original_entry_id: null, replacement_entry_id: null,
+    status: "approved", kind: "journal",
+  }],
+  next_cursor: null, truncated: false,
+};
+
+const MEMBERS = [{
+  membership_id: "m1", user_id: ACTIVITY_MEMBER, display_name: "Tao Belcort",
+  email: "owner@example.test", role: "owner", status: "active",
+  created_at: "2026-01-01T00:00:00Z", removed_at: null,
+}];
+
+/**
+ * #659 — THE PORTFOLIO. A MIXED fixture on purpose: an active client with Work in all three
+ * columns, an active client that is caught up, and an ONBOARDING client whose Work is counted here
+ * while the needs-you chips above structurally exclude it. The counts are the ones `listWorkPage`
+ * can actually serve, so each drilldown lands on the population its number described.
+ */
+const PORTFOLIO = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 3,
+  page_limit: 50,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  rows: [
+    {
+      client_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Bee Creative Solution",
+      status: "active", active: 0, attention_failed: 0, failed: 0, refused: 0, recent_success: 0,
+      uncounted_completions: 0, coverage: "ok", coverage_reason: null, preview: [],
+    },
+    {
+      client_id: CLIENT_ONBOARDING, name: "Kuching Kopitiam", status: "onboarding",
+      active: 1, attention_failed: 0, failed: 0, refused: 0, recent_success: 0,
+      uncounted_completions: 0, coverage: "partial",
+      coverage_reason: "onboarding_client_excluded_from_queue", preview: [],
+    },
+    {
+      client_id: CLIENT_ACTIVE, name: "Rome Properties", status: "active",
+      active: 3, attention_failed: 2, failed: 1, refused: 1, recent_success: 1,
+      uncounted_completions: 0, coverage: "ok", coverage_reason: null, preview: [],
+    },
+  ],
+  next_cursor: null, truncated: false, coverage: "ok", coverage_reason: null,
+  sources: {
+    work: { computed_at: "2026-09-16T02:00:00.000Z" },
+    review_queue: { signal: "watermark", excludes: ["onboarding", "archived"] },
+    compliance: { signal: "stale_evaluator", window_hours: 48 },
+    lint: { signal: "stale_evaluator" },
+    sweep: { signal: "last_finalized_at" },
+  },
+  needs_you_ref: { source: "list_review_queue.counts", floor: "viewer", excludes: ["onboarding", "archived"] },
+};
 
 const PLAN = {
   id: "plan-1", firm_id: "f1", scope_kind: "client", client_id: CLIENT_ONBOARDING, state: "open",
@@ -190,7 +251,11 @@ function json(route: Route, body: unknown): Promise<void> {
 /** Overlay a populated firm on top of the shared mock, for THIS page only. */
 async function seed(page: Page): Promise<void> {
   await page.route("**/e2e-supabase/rest/v1/rpc/list_review_queue", (route) => json(route, ENVELOPE));
-  await page.route("**/e2e-supabase/rest/v1/rpc/list_firm_timeline", (route) => json(route, TIMELINE));
+  // #659 — the three reads Firm Home gained. `list_activity` REPLACES `list_firm_timeline` here
+  // (D18.f); the roster is what turns the actor uuid into a name; the pack is the portfolio.
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_activity", (route) => json(route, ACTIVITY));
+  await page.route("**/e2e-supabase/rest/v1/firm_members_visible**", (route) => json(route, MEMBERS));
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) => json(route, PORTFOLIO));
   await page.route("**/e2e-supabase/rest/v1/clients**", (route) => {
     const url = route.request().url();
     if (url.includes("fy_end_month")) {
@@ -253,10 +318,11 @@ test("Firm Home names the firm, scores the queue from the envelope, and every ti
   // The triage row is link-only at this altitude.
   await expect(board.getByText("high stakes")).toBeVisible();
   await expect(board.getByRole("button", { name: "Resolve" })).toHaveCount(0);
-  // The timeline prints the DB's own sentence.
+  // Recent activity prints the DB's own sentence — and, since #659, the PERSON beside it.
   await expect(board.getByText("An entry was posted.")).toBeVisible();
+  await expect(board.getByText("Tao Belcort")).toBeVisible();
   // The close roll-up stays an honest note.
-  await expect(board.getByText(/A firm-wide close status per client is not built/)).toBeVisible();
+  await expect(board.getByText(/A firm-wide close status per client is still not built/)).toBeVisible();
 
   // A tile, then back — the journey the map's own test obligation names.
   // #614: the tile now lands on Work's saved "Needs you" view rather than a
@@ -547,4 +613,213 @@ test("home.facets.delayed — a minute with no successful read says the UPDATE i
   await page.clock.fastForward("01:05");
   await expect(workbench(page).getByText(/Update delayed/)).toBeVisible();
   await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+// =================================================================================================
+// #659 (journey B1) — THE PORTFOLIO. Appended beside #650's client-altitude cells; nothing above is
+// restructured, and `home-board-mock.mjs` keeps its dispatch position and its EMPTY_RPCS arm.
+// =================================================================================================
+
+test("p659.home.portfolio — one row per client with the door's own counts, and the onboarding disclosure is on screen BEFORE any click", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 1 }));
+  await seed(page);
+  await signInTo(page, "/");
+  await settled(page);
+  const board = workbench(page);
+
+  await expect(board.getByRole("heading", { name: "Client portfolio", level: 2 })).toBeVisible();
+  const table = board.getByRole("table", { name: "Clients, with the Work waiting on each" });
+  await expect(table).toBeVisible();
+  // One row per client the door returned, in the door's own name order.
+  for (const name of ["Bee Creative Solution", "Kuching Kopitiam", "Rome Properties"]) {
+    await expect(table.getByRole("link", { name, exact: true })).toBeVisible();
+  }
+
+  // THE COUNTS ARE THE DOOR'S OWN, and each one is a link with a full noun phrase for its name.
+  await expect(board.getByRole("link", { name: "3 Work running for Rome Properties" })).toBeVisible();
+  await expect(board.getByRole("link", { name: "2 Work needing attention for Rome Properties" })).toBeVisible();
+  await expect(board.getByRole("link", { name: "1 Work posted for Rome Properties in the last seven days" })).toBeVisible();
+
+  // THE DISCLOSURE, BEFORE THE CLICK — both halves.
+  await expect(board.getByText(/cover active clients only/)).toBeVisible();
+  await expect(board.getByText(/dated by when each Work posted/)).toBeVisible();
+  await expect(board.getByText(/exclude this client/)).toBeVisible();
+
+  // AND NO MONEY ANYWHERE ON THE FIRM'S HOME.
+  const text = (await board.innerText()).replace(/\s+/g, " ");
+  expect(text, "Firm Home consolidates no client sums").not.toMatch(/RM\s?\d|MYR|\d+\.\d{2}/);
+});
+
+test("p659.home.drilldown — each count opens /work narrowed to exactly its population, and Back restores the home's own URL with focus on the control that left it", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  await seed(page);
+  await signInTo(page, "/?attention=active");
+  await settled(page);
+  const board = workbench(page);
+  const table = () => page.getByRole("table", { name: "Durable work" });
+
+  const legs = [
+    ["3 Work running for Rome Properties",
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=queued%2Crunning$`),
+      async () => {
+        await expect(table().getByRole("link", { name: "Office rent" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Payroll run" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+      }],
+    ["2 Work needing attention for Rome Properties",
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=failed%2Crefused$`),
+      // BOTH tokens, because the column counted both and the door published the split. A link
+      // carrying only `failed` would open a smaller set than the number the person clicked.
+      async () => { await expect(table()).toHaveCount(0); }],
+    ["1 Work posted for Rome Properties in the last seven days",
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=completed&since=2026-09-10&until=2026-09-16$`),
+      async () => { await expect(table().getByRole("link", { name: "Rates accrual" })).toBeVisible(); }],
+  ] as const;
+
+  for (const [name, expected, landed] of legs) {
+    const link = board.getByRole("link", { name });
+    await expect(link, `${name} must be on the board as a link`).toBeVisible();
+    await link.focus();
+    await link.press("Enter");
+    await expect(page).toHaveURL(expected);
+    await landed();
+
+    await page.goBack();
+    // THE HOME'S OWN URL, WITH ITS FILTER INTACT — not merely "/" with the narrowing lost. That is
+    // the whole of AC2's second half, and a Back that dropped `?attention=` would satisfy a
+    // "returns to the home" assertion and fail the person.
+    await expect(page).toHaveURL(/\/\?attention=active$/);
+    await expect
+      .poll(async () => page.evaluate(() => document.activeElement?.textContent?.trim() ?? ""))
+      .toContain("3");
+  }
+});
+
+test("p659.home.responsive — 320px, 200% zoom and reduced motion keep every count reachable with no horizontal scroll, and the populated board is axe-clean", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3, scans: 1 }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await seed(page);
+  await signInTo(page, "/");
+
+  for (const [label, width, height] of [
+    ["320px", 320, 720],
+    ["200% zoom (a halved 1280x720 viewport)", 640, 360],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await settled(page);
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `Firm Home must not scroll horizontally at ${label}`).toBeLessThanOrEqual(1);
+    for (const name of [
+      "3 Work running for Rome Properties",
+      "2 Work needing attention for Rome Properties",
+      "1 Work posted for Rome Properties in the last seven days",
+    ]) {
+      await expect(workbench(page).getByRole("link", { name }), `${name} at ${label}`).toBeVisible();
+    }
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await settled(page);
+  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).include("[data-firm-workbench]").analyze();
+  expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+});
+
+test("p659.home.states — an EMPTY register, a caught-up firm and a DENIED read are three different sentences, and the board dates its own read", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3 }));
+  await seed(page);
+  await signInTo(page, "/");
+  await settled(page);
+  // The populated board dates its read rather than looking permanently live.
+  await expect(workbench(page).getByText(/^Read at /)).toBeVisible();
+
+  // ZERO CLIENTS — the first-use Empty, with the creation affordance BESIDE it.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, { ...PORTFOLIO, rows: [] }));
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) => json(route, []));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText("No clients yet", { exact: true })).toBeVisible();
+  await expect(workbench(page).getByText(/This firm has no clients yet\. Start with the first one\./)).toBeVisible();
+
+  // ZERO WORKLOAD — a firm WITH clients and no Work. A DIFFERENT sentence from the queue's own.
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) => json(route, CLIENTS));
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, {
+      ...PORTFOLIO,
+      rows: PORTFOLIO.rows.map((r) => ({ ...r, active: 0, attention_failed: 0, failed: 0, refused: 0 })),
+    }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText(/Every client is clear/)).toBeVisible();
+  await expect(workbench(page).getByText("No clients yet", { exact: true })).toHaveCount(0);
+
+  // DENIED — a permission, not a failure, and the viewer-floored chips above it still render.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    route.fulfill({
+      status: 400, contentType: "application/json",
+      body: JSON.stringify({ code: "CLR04", message: "insufficient role", details: null }),
+    }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText(/Work records need a bookkeeper role/)).toBeVisible();
+  await expect(workbench(page).getByText(/read at a lower floor and are still yours/)).toBeVisible();
+  await expect(workbench(page).getByRole("link", { name: "Needs you: 3" })).toBeVisible();
+  await expect(workbench(page).getByText("No clients yet", { exact: true })).toHaveCount(0);
+});
+
+test("p659.home.zero_client_create — a firm with no clients reaches creation from the home and lands on the id the DATABASE returned; the draft survives a re-read", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  const BORN = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  await seed(page);
+  // A firm with NO clients, which is the state this page ships in on day one.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, { ...PORTFOLIO, rows: [] }));
+  let registerCalls = 0;
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) => {
+    registerCalls += 1;
+    // The FIRST read is empty; every later one carries a row — the transition that would unmount a
+    // control hung off the zero-client branch and silently discard a typed name.
+    return json(route, registerCalls === 1
+      ? []
+      : [{ id: BORN, name: "Penang Roastery", status: "onboarding", created_at: "2026-09-19T00:00:00.000Z" }]);
+  });
+  await page.route("**/e2e-supabase/rest/v1/rpc/client_identity_candidates", (route) =>
+    json(route, { name: "Penang Roastery", arity: 0, candidates: [] }));
+  await page.route("**/e2e-supabase/rest/v1/rpc/begin_client_onboarding", (route) =>
+    json(route, { client_id: BORN, plan_id: "plan-659" }));
+
+  await signInTo(page, "/");
+  await settled(page);
+  const board = workbench(page);
+  await expect(board.getByText("No clients yet", { exact: true })).toBeVisible();
+
+  await board.getByRole("button", { name: "Add client" }).click();
+  const name = page.getByLabel("Client name");
+  await expect(name).toBeVisible();
+  await name.fill("Penang Roastery");
+
+  // THE DRAFT SURVIVES A RE-READ. `focus` is one of this page's four re-read triggers, and the
+  // register now answers with a row — exactly the frame in which a remounted control would lose
+  // the typed name without a word.
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForLoadState("networkidle");
+  await expect(name, "the typed name must stand across a re-read that filled the register").toHaveValue("Penang Roastery");
+
+  await page.getByRole("button", { name: "Begin onboarding" }).click();
+  // AND THE HUMAN LANDS ON THE ID THE DATABASE RETURNED, never a guessed path.
+  await expect(page).toHaveURL(new RegExp(`/clients/${BORN}$`));
+});
+
+test("p659.home.zero_client_create (bookkeeper) — no control, and no greyed promise in its place", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 1 }));
+  await seed(page);
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, { ...PORTFOLIO, rows: [] }));
+  await signInTo(page, "/", "bookkeeper@example.test");
+  await settled(page);
+  const board = workbench(page);
+  await expect(board.getByText("No clients yet", { exact: true })).toBeVisible();
+  // NOT OFFERED AT ALL, rather than offered and refused — `firm-setup-tile.tsx`'s own precedent.
+  await expect(board.getByRole("button", { name: "Add client", includeHidden: true })).toHaveCount(0);
 });

@@ -98,6 +98,46 @@ const EMPTY_WORK_PACK = {
   needs_you_ref: { source: "list_review_queue.counts.work_questions" },
 };
 
+/**
+ * #659 — THE HONEST-EMPTY FIRM PORTFOLIO PACK, and the second handler in this file the ownership
+ * census can see.
+ *
+ * `clara.get_firm_portfolio_pack` returns a scalar JSONB OBJECT, not a SETOF, so `[]` would be a
+ * malformed body rather than an empty answer — the browser would degrade the whole board and every
+ * walk that merely LANDS on `/` (the axe walk's `FACES` list starts there) would grow a "could not
+ * be read" portfolio. This is the empty ENVELOPE instead: a register that was read and found empty.
+ *
+ * IT CANNOT BE SCOPED, and that is a fact about the door rather than a convenience. The pack takes
+ * NO client argument at all — its subject is the caller's own firm, which arrives as a JWT claim,
+ * not as a discriminant in the request — so there is nothing in the body to gate on. It holds no
+ * fixture either: zero rows, so nothing in it can be resolved by a sibling walk as its own.
+ *
+ * The dates are fixed rather than derived from `Date.now()` so two runs of one spec see the same
+ * board; nothing asserts on them, because there is nothing in this envelope to count.
+ */
+const EMPTY_PORTFOLIO_PACK = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 3,
+  page_limit: 50,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  rows: [],
+  next_cursor: null,
+  truncated: false,
+  coverage: "ok",
+  coverage_reason: null,
+  sources: {
+    work: { computed_at: "2026-09-16T02:00:00.000Z" },
+    review_queue: { signal: "watermark", excludes: ["onboarding", "archived"] },
+    compliance: { signal: "stale_evaluator", window_hours: 48 },
+    lint: { signal: "stale_evaluator" },
+    sweep: { signal: "last_finalized_at" },
+  },
+  needs_you_ref: { source: "list_review_queue.counts", floor: "viewer", excludes: ["onboarding", "archived"] },
+};
+
 /** Read RPCs the two boards (and the Tax tab) call. Every one returns a SETOF/TABLE, so an
  *  empty array is the shape the wire really carries — never `null`, which several of the typed
  *  wrappers would report as a malformed body rather than as an empty result. */
@@ -134,6 +174,12 @@ export async function handleHomeBoardSupabase(request, response, path, url, send
   }
   if (request.method === "POST" && path === "/rest/v1/rpc/get_client_work_pack") {
     sendJson(response, 200, EMPTY_WORK_PACK, cors);
+    return true;
+  }
+  // #659 — APPENDED beside its client-altitude sibling, and deliberately NOT folded into
+  // `EMPTY_RPCS` below: that arm answers `[]`, which is the wrong shape for a scalar JSONB door.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_portfolio_pack") {
+    sendJson(response, 200, EMPTY_PORTFOLIO_PACK, cors);
     return true;
   }
   if (request.method === "POST" && EMPTY_RPCS.includes(path)) {
