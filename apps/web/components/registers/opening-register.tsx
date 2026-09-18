@@ -32,6 +32,7 @@ import { loadCounterparties } from "@/lib/registers/counterparty";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { SectionHeader } from "@/components/common/section-header";
 import { DataState, ErrorMessage } from "@/components/firm/data-state";
+import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { NoOpeningSeedState } from "./opening-position-gate";
 import { OpeningSeedWorkbench } from "./opening-seed-workbench";
 
@@ -100,6 +101,7 @@ export function OpeningRegister({ clientId }: { clientId: string }) {
             plan={preferredPlan ? { id: preferredPlan.id } : null}
             plansLoading={plansRead.loading}
             busy={seedsRead.busy}
+            refusal={toDialogRefusal(seedsRead.error)}
             act={seedsRead.act}
           />
         )}

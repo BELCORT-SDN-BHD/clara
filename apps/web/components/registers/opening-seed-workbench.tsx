@@ -22,6 +22,9 @@ import { OpeningDryrunStrip } from "./opening-dryrun-strip";
 import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { OpeningItemsPanel } from "./opening-items-panel";
 import { OpeningTargetKeyedPanel } from "./opening-target-keyed-panel";
+import { OpeningTargetDocumentPanel } from "./opening-target-document-panel";
+import { OpeningParseAction } from "./opening-parse-action";
+import { OpeningSourceHeader } from "./opening-source-header";
 import { OpeningFixedAssetDialog } from "./opening-fixed-asset-dialog";
 import { ApproveOpeningSeedDialog, ApproveOpeningCorrectionDialog } from "./opening-approve-dialogs";
 import type { OpeningSeedRow } from "@/lib/registers/opening-types";
@@ -87,9 +90,15 @@ export function OpeningSeedWorkbench({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <SectionHeader level={2}>{t("heading")}</SectionHeader>
-          <OpeningSeedBadge state={seed.state} />
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <SectionHeader level={2}>{t("heading")}</SectionHeader>
+            <OpeningSeedBadge state={seed.state} />
+          </div>
+          {/* #656: WHERE THIS BASIS CAME FROM, on the basis itself. A professional asked to
+              approve an opening position must be able to see, without opening anything, whether
+              the figures were read off a document this firm holds or keyed by a person. */}
+          <OpeningSourceHeader seed={seed} targets={data?.targets ?? []} />
         </div>
         <div className="flex flex-wrap gap-2">
           {/* F8 (fix round, rev-t2): un-hid — cancel_opening_seed's live
@@ -135,9 +144,26 @@ export function OpeningSeedWorkbench({
                 the write added, updated, or left the row count unchanged. */}
             <OpeningDryrunStrip key={`${seed.id}:${actEpoch}`} seedId={seed.id} targets={data?.targets ?? []} />
 
-            {!seed.tie_document_id ? (
+            {/* #656: a TIED basis used to render NOTHING here — the keyed panel was the only
+                target surface and it is mounted only for an untied seed, so a basis bound to a
+                document showed its tie gates over targets nobody could see. The two lanes now
+                each have their own panel, and which one mounts is still decided by the one fact
+                that decides everything else about this basis: whether it carries a tie document. */}
+            {seed.tie_document_id ? (
+              <div className="flex flex-col gap-3">
+                {seed.state === "open" ? (
+                  <OpeningParseAction seedId={seed.id} busy={busy} onParsed={async () => { await act(async () => {}); }} />
+                ) : null}
+                <OpeningTargetDocumentPanel
+                  clientId={clientId}
+                  seed={seed}
+                  targets={data.targets}
+                  documentName={null}
+                />
+              </div>
+            ) : (
               <OpeningTargetKeyedPanel clientId={clientId} seed={seed} targets={data.targets} keyedResolutionId={keyedResolutionId} accounts={accounts} busy={busy} act={act} />
-            ) : null}
+            )}
 
             <OpeningItemsPanel clientId={clientId} seed={seed} items={items} accounts={accounts} counterparties={counterparties} keyedResolutionId={keyedResolutionId} busy={busy} act={act} />
           </div>
