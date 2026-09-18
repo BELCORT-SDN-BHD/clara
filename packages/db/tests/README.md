@@ -107,6 +107,24 @@ which `uq_agent_interruptions_work_version` permits but `open_work_question` ref
 cell proves that refusal first, so the reader can tell a defence-in-depth assertion from a
 verb-reachable one).
 
+`firm-portfolio-pack.test.mjs` and `compliance-watch-disposition.test.mjs` (#659, journey B1) are
+TWO batteries behind ONE stem, ONE gate module (`firm-portfolio-pack-preintegration-gate.mjs`) and
+ONE `rig-meta.mjs` cohort (`FIRM_PORTFOLIO_PACK_0231_COHORT`), because 0231 installs two doors in
+one file: they are wholly present or wholly absent together. Each takes owner-level fixture DML
+twice, labelled at the call site: it archives a client (the only door that archives one,
+`clara.cancel_client_onboarding`, needs an open onboarding plan and an admin — a four-verb detour to
+set one column the battery only reads) and it backdates an `operation_receipts` instant under
+`session_replication_role = replica`, the same shape `client-work-pack.test.mjs` uses.
+
+`firm-portfolio-pack.test.mjs` is also the one battery in this package that builds a FRESH FIRM PER
+CELL rather than sharing a world. Its subject is a FIRM-WIDE read with no client argument, so a
+shared firm would make every cell's row set depend on every cell that ran before it; each cell
+therefore mints its own owner/bookkeeper/viewer and exactly the clients it means to count. The
+cross-firm cell needs a second firm with a second member for the same reason
+`compliance-watch-disposition.test.mjs` adds one to firm B — the approval door enforces
+maker-checker distinctness, so a one-member firm cannot produce the foreign fixture the cell
+contrasts against.
+
 `firm-setup.test.mjs` (#648, journey A5) needs the 0218 cohort — `clara.firm_setup_keys`, the four
 firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
 against a chain below that frontier FAILS by name; the package run preloads

@@ -103,6 +103,54 @@ CALLS it and its own safety argument depends on that helper's 101-id ceiling and
 bookkeeper floor; the pin is what forces a later recut of the helper to re-derive this door's
 argument rather than discover it at 102 running Works.
 
+[0231_firm_portfolio_pack.sql](migrations/0231_firm_portfolio_pack.sql) owes no consumer-first
+obligation for the same narrow reason, one altitude up. It adds exactly TWO read doors and nothing
+else — no relation, column, policy, index or trigger, and no recut.
+
+`clara.get_firm_portfolio_pack(p_limit, p_cursor, p_preview)` is SECURITY INVOKER over
+`clara.clients`, `clara.accounting_work` and `clara.operation_receipts` (all three already granted
+to `clara_authenticated` behind forced firm-scoped RLS), floored at bookkeeper by 0189's own three
+inline predicates restated in the body — the idiom every INVOKER door in this estate uses, because
+an INVOKER body cannot call the ungranted `clara._human_ctx`. EXECUTE goes to `clara_authenticated`
+alone; `clara_runtime`, the agent role and both wake roles gain nothing. The firm comes from
+`clara.jwt_firm()` and there is no client argument at all, so the only channel a client identity can
+enter through is the `lower(name)|uuid` pair inside `p_cursor` — which the body compares as a SORT
+KEY and never resolves against the register. A cursor naming another firm's real client and one
+naming an invented pair answer identically (`p659.portfolio.cross_firm`), which is deliberately
+UNLIKE `clara.list_review_queue`: that door takes an explicit client scope and raises CLR10 off a
+cross-firm existence probe. The preview ids are assembled across the whole page and **cut at 101**
+before `clara._work_run_attempts` is called, because at firm altitude 100 clients x 5 preview ids
+would exceed that helper's ceiling and make the whole board refuse in order to report a row label;
+rows past the cut carry 0214's own `retry_label_preview_only`. **The tail asserts, from `prosrc`,
+that the body names no money or sum key anywhere — in code or in comment** — because Firm Home
+consolidates no client figures and a portfolio table is the easiest place in the product to reduce
+rows into a false cross-client one.
+
+`clara.get_compliance_watch_disposition(p_watch)` is SECURITY **DEFINER** for one reason, and the
+tail proves it: `clara.compliance_watches` and `clara.compliance_watch_events` FORCE RLS with a
+single `clara_fn_owner` policy and **no application role holds any privilege on either**, so an
+INVOKER body would see nothing. It grants nothing on either relation. It returns no revision
+number, because the table carries none — each event's `state_before -> state_after` is what the
+receipt names instead. Measured on clara_659 after 0231: the only non-owner privilege on either
+relation is 0131's `clara_freeform_ro` SELECT on the watch table (the freeform analytics identity,
+which reaches no PostgREST surface); the event trail has no non-owner grantee at all.
+
+Its five prestate pins recut nothing — `clara.list_review_queue`, `clara.list_accounting_work`,
+`clara.get_client_work_pack`, `clara._work_run_attempts` and `clara.list_activity` are read-only
+dependencies, pinned so that "0231 recut nothing" is a checked fact and so a later recut of any of
+them has to re-derive this door's arguments. **No supporting index is owed, and that is a
+measurement**: on a seeded 300-client / 20 100-Work firm the client page plans `Index Scan using
+uq_clients_firm_name` (102 rows, 7 buffers, 0.080 ms) with only an *Incremental* Sort above it, and
+the per-client aggregate plans `GroupAggregate` over `Index Scan using uq_accounting_work_intent`
+(6 700 rows, 2.3 ms; 4.7 ms for the whole join). No sequential scan appears anywhere. End to end the
+door answers a 100-client page in 17-18 ms at `p_preview=3` and 7-8 ms at `p_preview=0`.
+
+One sentence in 0231's own header is sharpened here rather than in the file, which is append-only:
+the disclosure token `onboarding_client_excluded_from_queue` covers `onboarding` **and** `archived`
+because the 0017 join excludes both, but its only door-reachable subject today is the ARCHIVED
+client — `clara.admit_accounting_work` refuses a client that is not `active`, so an onboarding
+client cannot accumulate Work in the first place.
+
 Two sentences in 0214's own header are corrected here rather than in the file, which is
 append-only. **The planner does not use `ix_accounting_work_client` for the active facet.** Forced
 RLS adds `firm_id = clara.jwt_firm()` to every read of `clara.accounting_work`, which makes
