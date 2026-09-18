@@ -298,3 +298,38 @@ counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37
 
 `prepayment-0223-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.
+
+## #660 — `client-financial-pack.test.mjs` (0232)
+
+Frontier-gated on the `client_financial_pack$` stem. Its escape is
+`client-financial-pack-preintegration-gate.mjs`, registered in `packages/db/package.json`'s `"test"`
+chain at its MIGRATION-order position (after `preview-invite-preintegration-gate.mjs`, 0224). A
+FOCUSED run does not preload it and FAILS loudly on a database without the lane, because a skip is
+not evidence — proven both ways on a rig: dropped-lane focused run without the module errors with
+its own message; with the module preloaded, 29 cells skip and none fail.
+
+`rig-meta.mjs` carries `CLIENT_FINANCIAL_PACK_0232_COHORT` at the three sites the 0214 cohort uses.
+It is bimodal (asserted only once any of its names is live) because the `db-slice-frontiers` matrix
+runs this package against earlier frontiers. Cohorts are FUNCTION-name lists — `liveNames` is built
+from `pg_proc` rows — so 0232's two new RELATIONS are asserted by the migration's own tail and by
+this battery, never by the cohort.
+
+FOUR FIXTURE SHORTCUTS, EACH LABELLED in `client-financial-pack-fixtures.mjs`'s header, because
+each builds a condition no live writer can produce:
+
+- `coa_accounts.is_bank_account` — minted only by `add_bank_account` / `remap_bank_account_coa`
+  (0121:4721-4722), both of which want a whole bank-account registration.
+- `coa_accounts.is_active = false` — there is no retire door (the same gap
+  `work-journal-fixtures.mjs:196-201` states for its own retired account).
+- `journal_entries.close_receipt_id` on an entry whose `closing_transfer` is still false — the
+  exact shape a PRE-0120 close left behind, which `finalize_close` can no longer produce. Runs
+  under `session_replication_role = replica` because `clara.journal_entries` is append-only by
+  trigger, and every `close_receipts` column is stated BY NAME rather than derived from the
+  catalogue: a receipt row assembled by guessing from column names is a fixture that can silently
+  mean something else after a schema change.
+- withdrawing a plan's `first_year_zero_opening` answer, so the opening is GENUINELY uncaptured.
+  The estate's own precedence (`components/registers/opening-position-gate.tsx:85, :95-97`) ranks
+  that row ABOVE `carry_down_deferred`, and the rig's legacy-activation bridge plants both, so a
+  client carrying both has a KNOWN opening. This is the only way to build the shape
+  `opening_carry_down_deferred` is actually about — and the red cell that forced it found a real
+  defect in the door, which 0232 now fixes by respecting that same precedence.

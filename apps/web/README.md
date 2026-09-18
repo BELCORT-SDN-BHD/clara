@@ -378,3 +378,63 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## #660 — the client home's money band
+
+`lib/dashboard/financial-pack.ts` IS THE ENVELOPE MODULE, and it is exported as one on purpose:
+#669's receivable/payable tiles are a later ticket over the SAME door and the SAME parser, so they
+inherit the hydration rules rather than re-deriving them. Two rules carry the whole file:
+
+- **Unknown is not zero.** A figure this build could not read is `{status:'unknown',
+  valueCents:null}`. "This client's cash is zero" and "I could not find out what this client's cash
+  is" are different sentences; a `?? 0` anywhere in that module would be the bug.
+- **A number never arrives without its period.** A figure group missing ANY of its ten envelope
+  fields hydrates as `unknown`, not as a number with a hole in it — an amount whose interval the
+  reader cannot see is an unanswerable claim rather than a smaller truth.
+
+NO CENTS ARITHMETIC HAPPENS IN THE BROWSER, and two source-reading cells keep it that way
+(`financial-pack.test.ts`, `period.test.ts`). Every delta, percentage, cap and series point is
+computed in `clara.get_client_financial_pack` (0232), once, so the browser, a later report and
+#669's tiles cannot disagree about what "down 12%" means.
+
+**ONE SECTION, ONE READ, FOUR FACES — and that satisfies the board's law rather than breaking it.**
+`client-workspace-overview.tsx:16-19` says every SECTION reads for itself, because a board that
+blanks on a single failure reads as "this client has nothing outstanding". Cash, profit and the two
+trends are not four sections: they are four faces of ONE envelope that are only true together —
+they share a period, a definition version and a SOURCE WATERMARK, which four reads could not
+guarantee. So the money band is one section with one hook instance, and a failure there darkens
+exactly that band.
+
+**THE ADDRESS IS THE ONLY SOURCE OF TRUTH FOR THE PERIOD.** `?period=YYYY-MM` names a whole natural
+month and its absence means month-to-date; the route reads it on the SERVER (`journals/page.tsx`'s
+own precedent) and the selector `router.push`es — push, not replace — so Back restores the period a
+reader came from. A malformed value falls back to month-to-date and the face SAYS so, because
+silently rewriting an address would let a reader screenshot one month under another month's label.
+
+**COMMIT-EVENT INVALIDATION IS A NAMED RESIDUAL, NOT AN OMISSION.** `lib/command/bus.ts` carries
+exactly two events (`clara:focus-rail`, `clara:client-record-changed`) and NEITHER is a posting or
+an approval — there is no commit event in this app to subscribe to. Rather than promise a freshness
+this build cannot deliver, the band's footer says what it actually does: these figures refresh at
+most every 30 seconds while the tab is open, and here is the last successful read. The 60-second
+"delayed" rule is IMPORTED from `lib/work/use-work-detail.ts` (C77.12: one contract, one owner,
+extended by reference rather than copied), and a source-reading cell refuses a second literal.
+
+### Recharts, and the table that is never a fallback
+
+`recharts@3.8.0` and `components/ui/chart.tsx` arrived through `pnpm --filter @clara/web ui:add
+chart` and its guard's own resolution. The payload also names `components/ui/card.tsx` as an
+OVERWRITE and the guard does not block it (`scripts/protected-components.json` holds only
+`button.tsx` and `pagination.tsx`), so the overwrite was refused at the CLI's own per-file prompt
+and `card.tsx` is byte-identical
+(`sha256 d8113cbf964f8d1aadf2649d2944d8bbc6e3cfd49d36746f76868cbc4dde3cfe`, unchanged).
+
+**The readable table is ALWAYS in the DOM**, beside the chart and not instead of it. Appendix D
+admits a chart only "for a defined time series or comparison … plus a readable value/table
+disclosure", and a disclosure that renders only when something fails is not one. The chart is
+`aria-hidden` because the table IS those rows, and announcing both would read the same six numbers
+twice. At 640px and below the chart is out and the table is the whole disclosure — which is exactly
+why it could never be failure-only. `prefers-reduced-motion` disables the animation at the source
+(`isAnimationActive` is off), so it is never started rather than started and overridden.
+
+`packages/reporting-render/lib/chart.mjs` is the FROZEN PDF chart runtime. It is never referenced,
+never imported and shares no code with this; nothing here hand-rolls a second SVG chart.

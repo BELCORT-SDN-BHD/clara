@@ -548,3 +548,356 @@ test("home.facets.delayed — a minute with no successful read says the UPDATE i
   await expect(workbench(page).getByText(/Update delayed/)).toBeVisible();
   await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
 });
+
+// =============================================================================================
+// #660 — THE MONEY BAND. Appended after #650's legs; nothing above is restructured.
+//
+// The fixtures are overlaid PER PAGE, exactly as #650's are: `e2e/home-board-mock.mjs` answers the
+// three money verbs with the honest-empty (unpublished cash set) shape for every OTHER walk, and
+// these cells `page.route` a populated envelope on top for their own page only.
+// =============================================================================================
+
+const MONEY_PERIOD_MTD = {
+  start: "2026-09-01", end: "2026-09-30", as_of: "2026-09-18", timezone: "Asia/Kuala_Lumpur",
+};
+
+/** The ten-field envelope every figure group owes, so no fixture below can accidentally omit one
+ *  and make the face's `unknown` arm look like the component's own bug. */
+function moneyGroup(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    value_cents: 18_234_055,
+    status: "ok",
+    unit: "minor_units",
+    currency: "MYR",
+    period: MONEY_PERIOD_MTD,
+    computed_at: "2026-09-18T02:00:00.000Z",
+    definition_version: "clara.client-financial-pack/v1",
+    source_watermark: "100:100:",
+    coverage: "ok",
+    coverage_reason: null,
+    comparison: null,
+    composition: [],
+    ...overrides,
+  };
+}
+
+const MONEY_ENTRY = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
+
+/** A POPULATED money band: cash over a published two-account set, a LOSS for the period, six cash
+ *  points with the oldest before the client's books, and a six-month series whose last month is
+ *  partial. */
+function financialPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    computed_at: "2026-09-18T02:00:00.000Z",
+    period: { ...MONEY_PERIOD_MTD, month: "2026-09-01", is_mtd: true },
+    coverage_floor: "2026-05-02",
+    cash: moneyGroup({
+      comparison: {
+        value_cents: 1_700_000, delta_cents: 16_534_055, delta_pct: 972.59, sign_change: false,
+        period: { start: "2026-08-31", end: "2026-08-31" },
+      },
+      set: {
+        version_id: "00000000-0000-4000-8000-00000000c5e7", revision: 1,
+        effective_from: "2026-05-02", member_count: 2, applied_to_all_points: true,
+      },
+      points: [
+        { as_of: "2026-04-30", value_cents: null, available: false, reason: "pre_coverage" },
+        { as_of: "2026-05-31", value_cents: 1_000_000, available: true, reason: null },
+        { as_of: "2026-06-30", value_cents: 1_200_000, available: true, reason: null },
+        { as_of: "2026-07-31", value_cents: 1_500_000, available: true, reason: null },
+        { as_of: "2026-08-31", value_cents: 1_700_000, available: true, reason: null },
+        { as_of: "2026-09-18", value_cents: 18_234_055, available: true, reason: null },
+      ],
+      composition: [{
+        account_id: "aaaa0000-0000-4000-8000-000000000010", account_code: "1010",
+        name: "Maybank Current", member_reason: "bank_registry",
+        opening_cents: 1_700_000, movement_cents: 16_534_055, closing_cents: 18_234_055,
+        entries: [], entries_total: 0, entries_truncated: false,
+      }],
+    }),
+    profit: moneyGroup({
+      value_cents: -123_456,
+      composition: [{
+        account_id: "aaaa0000-0000-4000-8000-000000000050", account_code: "5000",
+        name: "Office Rent", account_type: "expense",
+        opening_cents: 0, movement_cents: 623_456, closing_cents: 623_456,
+        entries: [{
+          entry_id: MONEY_ENTRY, posting_date: "2026-09-03", memo: "September rent",
+          amount_cents: 623_456,
+        }],
+        entries_total: 1, entries_truncated: false,
+      }],
+    }),
+    income: moneyGroup({ value_cents: 500_000 }),
+    expense: moneyGroup({ value_cents: 623_456 }),
+    series: [
+      { month: "2026-04-01", income_cents: 100_000, expense_cents: 40_000, profit_cents: 60_000, partial: false, as_of: "2026-04-30" },
+      { month: "2026-05-01", income_cents: 120_000, expense_cents: 50_000, profit_cents: 70_000, partial: false, as_of: "2026-05-31" },
+      { month: "2026-06-01", income_cents: 140_000, expense_cents: 60_000, profit_cents: 80_000, partial: false, as_of: "2026-06-30" },
+      { month: "2026-07-01", income_cents: 160_000, expense_cents: 70_000, profit_cents: 90_000, partial: false, as_of: "2026-07-31" },
+      { month: "2026-08-01", income_cents: 180_000, expense_cents: 80_000, profit_cents: 100_000, partial: false, as_of: "2026-08-31" },
+      { month: "2026-09-01", income_cents: 500_000, expense_cents: 623_456, profit_cents: -123_456, partial: true, as_of: "2026-09-18" },
+    ],
+    profit_composition: [],
+    unmarked_closing_entries: 0,
+    excluded_by_design: ["receivable", "payable", "statement_balance"],
+    ...overrides,
+  };
+}
+
+/** Overlay a POPULATED money band on top of `seed()`, for THIS page only. */
+async function seedMoney(page: Page, pack: Record<string, unknown> = financialPack()): Promise<void> {
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => json(route, pack));
+  await page.route("**/e2e-supabase/rest/v1/rpc/propose_client_cash_accounts", (route) => json(route, {
+    computed_at: "2026-09-18T02:00:00.000Z", as_of: "2026-09-18", timezone: "Asia/Kuala_Lumpur",
+    unit: "minor_units", currency: "MYR",
+    definition_version: "clara.client-financial-pack/v1", published_version_id: null,
+    candidates: [{
+      account_id: "aaaa0000-0000-4000-8000-000000000010", account_code: "1010",
+      name: "Maybank Current", is_active: true, member_reason: "bank_registry",
+      balance_cents: 18_234_055, already_member: false,
+    }],
+    never_proposed: ["declared_cash", "declared_petty_cash"],
+    never_proposed_reason: "no structural marker exists for declared cash or petty cash; a human declares it (0121:4749)",
+  }));
+}
+
+test("p660.money.arrive — book cash and period profit land with their exact amounts, their currency and their as-of", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByRole("heading", { name: "Money", level: 2 })).toBeVisible();
+  // EXACT minor units, with the currency. A figure rendered at the wrong scale is the defect a
+  // "contains a number" assertion would never catch.
+  await expect(board.getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+  // A LOSS is printed as a loss. Nothing on this band clamps at zero.
+  await expect(board.getByTestId("client-money-profit-value")).toHaveText("-RM 1,234.56");
+  await expect(board.getByTestId("client-money-income-value")).toHaveText("RM 5,000.00");
+  await expect(board.getByTestId("client-money-expense-value")).toHaveText("RM 6,234.56");
+  // And the period is on the face, not only in a tooltip.
+  await expect(board.getByText("For 1 Sept 2026 to 18 Sept 2026")).toBeVisible();
+  // THE WORK BAND BESIDE IT IS UNTOUCHED — the money band has a period axis and that band does not.
+  await expect(board.getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+test("p660.money.period_switch — the selector writes ?period= into the URL, and Back restores the previous period", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  const selector = board.getByLabel("Period");
+  await expect(selector).toBeVisible();
+  await selector.click();
+  // The list is month-to-date plus thirteen whole months; picking a whole month is the change.
+  const option = page.getByRole("option").nth(1);
+  const label = (await option.textContent())?.trim() ?? "";
+  await option.click();
+
+  await expect(page).toHaveURL(/\?period=\d{4}-\d{2}$/);
+  await expect(selector).toContainText(label);
+  // FOCUS STAYS ON THE CONTROL the reader just used.
+  await expect(selector).toBeFocused();
+
+  // BACK RESTORES THE PREVIOUS PERIOD — which is the whole reason the address holds it (push, not
+  // replace).
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}$`));
+});
+
+test("p660.money.drilldown — a composition row opens the EXISTING journals address, and Back returns", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const link = workbench(page).getByRole("link", { name: /September rent/ });
+  await expect(link).toHaveAttribute(
+    "href", `/clients/${CLIENT_ACTIVE}/journals?tab=posted&entry=${MONEY_ENTRY}`);
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}/journals\\?tab=posted&entry=${MONEY_ENTRY}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}$`));
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+});
+
+test("p660.money.partial — the unmarked-history face KEEPS the number and names the reason", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page, financialPack({
+    profit: moneyGroup({
+      value_cents: -123_456, coverage: "partial",
+      coverage_reason: "closing_transfer_unmarked_history",
+    }),
+    unmarked_closing_entries: 2,
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByTestId("client-money-profit-value")).toHaveText("-RM 1,234.56");
+  await expect(board.getByTestId("client-money-profit-partial"))
+    .toContainText("2 year-end closing entries in this period are not marked");
+  await expect(board.getByText("The figures are otherwise as posted.")).toBeVisible();
+});
+
+test("p660.money.unpublished — no published cash set shows the FACE and its entrance, and never RM 0.00", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page, financialPack({
+    cash: moneyGroup({
+      value_cents: null, status: "unknown", coverage: "unknown",
+      coverage_reason: "cash_set_unpublished", set: null, points: [], composition: [],
+    }),
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByText("Nobody has said which accounts count as cash")).toBeVisible();
+  await expect(board.getByText("This is not a figure of zero.")).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
+  // The entrance to the fix, and the dialog's own sentence about what it will never suggest.
+  await board.getByRole("button", { name: "Choose cash accounts" }).click();
+  await expect(page.getByRole("dialog")).toContainText("Petty cash and other cash on hand are never suggested here");
+  // CANCEL RESTORES NOTHING BECAUSE IT COMMITTED NOTHING — and the board behind it is unchanged.
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(board.getByText("Nobody has said which accounts count as cash")).toBeVisible();
+});
+
+test("p660.money.denied — a mid-session CLR04 clears the money while the Work band beside it is untouched", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => route.fulfill({
+    status: 403, contentType: "application/json",
+    body: JSON.stringify({ code: "CLR04", message: "insufficient role" }),
+  }));
+  await page.reload();
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByText("Your role does not include this client’s financial figures.")).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
+  // A DENIED CALLER IS NOT OFFERED THE ADMIN-FLOORED AUTHORING DOOR.
+  await expect(board.getByRole("button", { name: "Choose cash accounts" })).toHaveCount(0);
+  // AND THE WORK BAND IS UNTOUCHED — every section reads for itself.
+  await expect(board.getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+test("p660.money.first_failure — a first read that fails shows NO number at all", async ({ page }) => {
+  await seed(page);
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ message: "upstream" }),
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByText("These figures could not be read")).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
+  await expect(board.getByTestId("client-money-profit-value")).toHaveCount(0);
+  // The Work band is still there, with its own numbers.
+  await expect(board.getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+test("p660.money.delayed — a minute with no successful read says the connection is delayed, and KEEPS the dated numbers", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  await page.clock.install();
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ message: "upstream" }),
+  }));
+
+  await page.clock.fastForward("01:05");
+  await expect(workbench(page).getByText("This connection is delayed")).toBeVisible();
+  // THE NUMBERS STAY, DATED. They were true when they were read.
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+});
+
+test("p660.money.chart_fallback — the readable table is in the DOM beside the chart, every time", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  // Both disclosure tables, named, with their own rows — not a fallback that waits for a failure.
+  const cashTable = board.getByRole("table", { name: "Book cash at each of the last six month ends" });
+  await expect(cashTable).toBeVisible();
+  await expect(cashTable.getByText("RM 17,000.00")).toBeVisible();
+  // A PRE-COVERAGE POINT IS A GAP, NOT A ZERO.
+  await expect(cashTable.getByText("Before the books begin")).toBeVisible();
+
+  const seriesTable = board.getByRole("table", { name: "Income and expense by calendar month" });
+  await expect(seriesTable).toBeVisible();
+  await expect(seriesTable.getByText("September 2026")).toBeVisible();
+  // The partial month is labelled with its exact as-of, in the table and above it.
+  await expect(board.getByTestId("client-money-partial-month"))
+    .toContainText("September 2026 is a part month");
+});
+
+test("p660.money.narrow — 320px, 200% zoom and reduced motion: the table stands alone with no horizontal page scroll", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await page.setViewportSize({ width: 320, height: 720 });
+  await settled(page);
+
+  const board = workbench(page);
+  // At 320px the chart is out and the table is the whole disclosure — which is why it was never
+  // allowed to be a fallback.
+  await expect(board.getByRole("table", { name: "Income and expense by calendar month" })).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  // 200% zoom is the same 640-CSS-pixel viewport at twice the scale; assert the same two
+  // properties there rather than assuming they carry.
+  await page.setViewportSize({ width: 640, height: 512 });
+  await page.evaluate(() => { document.documentElement.style.zoom = "200%"; });
+  await settled(page);
+  await expect(board.getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+  const zoomedOverflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(zoomedOverflow).toBeLessThanOrEqual(1);
+  await page.evaluate(() => { document.documentElement.style.zoom = ""; });
+});
+
+test("p660.money.axe — WCAG 2.1 AA over the money band, populated and denied", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 2 }));
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  const populated = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(populated.violations).toEqual([]);
+
+  // THE UNPUBLISHED FACE IS A DIFFERENT TREE — a banner, a button and a dialog entrance — so it is
+  // scanned on its own rather than assumed to inherit the populated one's result.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack");
+  await seedMoney(page, financialPack({
+    cash: moneyGroup({
+      value_cents: null, status: "unknown", coverage: "unknown",
+      coverage_reason: "cash_set_unpublished", set: null, points: [], composition: [],
+    }),
+  }));
+  await page.reload();
+  await settled(page);
+  const unpublished = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(unpublished.violations).toEqual([]);
+});

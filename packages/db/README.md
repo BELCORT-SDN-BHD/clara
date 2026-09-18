@@ -646,3 +646,77 @@ list-form) `apps/web` caller, and the batteries in `tests/` that pin them are na
 `grant select … to clara_authenticated` (0182:360) under FORCE RLS
 `firm_id = clara.jwt_firm()` (:358-359); a SECURITY DEFINER wrapper would REMOVE that
 guarantee and force a hand re-implementation of it, for zero new capability.
+
+## #660 — the client home's money band (0232)
+
+TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
+allowlist row: `clara_runtime`, `clara_agent_ro` and every `clara_wake_*` role hold ZERO on all
+three, asserted door by door and role by role in 0232's own tail and again behaviourally by
+`p660.pack.no_agent_reach`.
+
+- `clara.cash_account_set_versions` / `clara.cash_account_set_members` — a client's governed,
+  versioned CASH ACCOUNT SET. Exactly one `published` row per client (a partial unique index) and
+  contiguous, non-overlapping windows (`clara._tf_cash_account_set_integrity`, one trigger function
+  serving two triggers on 0058:362's pattern). Members are SEALED to the creating transaction.
+  `member_reason` is `bank_registry` | `declared_cash` | `declared_petty_cash`. FORCE RLS, two
+  policies each, `select` to `clara_authenticated` and ZERO INSERT/UPDATE/DELETE to any non-owner
+  role — which is what keeps the read doors honestly `SECURITY INVOKER`.
+
+  **There is NO `is_active` predicate on this family or on any read of it, and that is the whole
+  reason it exists rather than riding `clara.account_set_versions`.** That family resolves
+  membership through `clara._metric_selector_account_ids` (0058:344-358), which filters `is_active`
+  TWICE and REFUSES an explicitly named inactive account — exactly the population a cash set must
+  contain, since a retired bank account still holds the balance it held. Relaxing that resolver
+  would change membership semantics for every account set in the estate silently, because the
+  freeze checks re-derive from stored shas.
+
+- `clara.publish_client_cash_account_set(p_client, p_members, p_effective_from, p_op_key)` —
+  SECURITY DEFINER, **admin** floor (`clara._human_ctx(clara.role_rank('admin'))`, the floor
+  `create_account_set_v1` uses), op-key idempotent over all three payload arguments. `p_members` is
+  ONE jsonb array of `{account_id, member_reason}` and ITS ORDER IS THE ORDINAL. A first version
+  with a null `p_effective_from` is stamped at the books' own start; a first version dated AFTER
+  that start is refused `first_version_after_books_start`, because it would make every historic
+  month unreadable.
+
+- `clara.propose_client_cash_accounts(p_client)` — STABLE SECURITY INVOKER, **viewer** floor. Lists
+  every `is_bank_account` row of the client, ACTIVE OR INACTIVE, with its cumulative approved
+  balance and whether it is already a member. It NEVER proposes declared cash or petty cash under
+  any account name or code: neither has a structural marker in this schema and `0121:4749` is house
+  law — structure and declared facts only. A human declares them.
+
+- `clara.get_client_financial_pack(p_client, p_as_of, p_month)` — STABLE SECURITY INVOKER,
+  **viewer** floor, `plan_cache_mode` pinned. Book cash with six points, period profit with income
+  and expense, a six-calendar-month series, per-account composition with capped entry lists, and a
+  ten-field envelope plus a comparison on every figure group. `status`/`coverage` take only
+  `ok | partial | unknown`; the door never says `denied` about itself (it raises CLR04) and never
+  says `unavailable`. A client the caller cannot see and an invented uuid answer IDENTICALLY.
+
+THE VIEWER FLOOR IS STRUCTURAL, not a judgement call: `journal_entries`, `journal_lines` and
+`coa_accounts` are table-SELECT-granted to the whole `clara_authenticated` role (0003:522-525)
+behind a FIRM-ONLY RLS predicate (0003:514). A viewer can already `SELECT` every row these reads
+aggregate, so flooring higher would protect nothing and only take the money band away from the
+people who read it most.
+
+THE COMPUTE SHAPE IS A MEASUREMENT, recorded in 0232's header. Seven `clara.trial_balance_as_of`
+calls cost 18.12 ms / 2,008 shared buffer hits against 2.04 ms / 176 for one filtered pass with six
+`filter (where posting_date <= point_k)` aggregates, on a 6,000-line corpus on a rig cluster
+(8.87x). The cash arm is therefore ONE scan — and because that is a SECOND spelling of a shared
+definition, the tail asserts from `prosrc` that it is still the same one: `status = 'approved'`
+present, a cumulative `posting_date <=` bound present, `is_opening_balance` ABSENT and `fiscal_year`
+ABSENT. `p660.pack.matches_trial_balance` is the behavioural half.
+
+### KNOWN COVERAGE LIMIT — pre-0120 unmarked closing transfers
+
+Entries finalised before 0120 stayed `closing_transfer = false` "forever" (0120:518-521), and
+0016:211-219's `closing_transfer_review` notification was never discharged by any migration. The
+pack DISCLOSES this and repairs none of it: an approved entry inside the period with
+`closing_transfer = false` AND (its own `close_receipt_id` — only `finalize_close` births one,
+0056:3010-3024 — OR a `reversal_of` naming an entry that has one, the reopen mirror 0120:797-814)
+drives `coverage = 'partial'` with reason `closing_transfer_unmarked_history`.
+
+**The detected rows are NOT also excluded.** A second, wider exclusion inside one read would make
+two reads of one ledger disagree; the exclusion predicate stays the estate's one definition
+(`not (is_year_end and closing_transfer)`, 0016:602, asserted verbatim in the tail) and the read
+says what it cannot vouch for. **The detector's own limit**: a close finalised before
+`close_receipt_id` existed (pre-0056) carries neither marker and is undetectable. The affected
+hosted row count is a release-time read, not an assumption.

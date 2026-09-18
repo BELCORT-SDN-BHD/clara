@@ -60,7 +60,17 @@ export function ClientPeriodSelector({
       }}
     >
       <SelectTrigger id={id} size="sm" aria-label={t("period.label")} className="w-[13rem]">
-        <SelectValue />
+        {/* THE TRIGGER RENDERS THE LABEL ITSELF rather than letting the primitive look it up from
+            the mounted popup's items. The popup is not mounted until the control is opened, so a
+            lookup would show the raw value ("mtd") on first paint — and "mtd" is not a period a
+            reader can check a number against. */}
+        <SelectValue>
+          {(current: unknown) => {
+            const value = current === MTD_VALUE || current == null ? null : String(current);
+            const option = list.find((o) => o.value === value) ?? list[0];
+            return option ? label(option) : "";
+          }}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {list.map((option) => (

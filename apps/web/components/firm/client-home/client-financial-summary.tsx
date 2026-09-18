@@ -52,7 +52,11 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
-import { proposeClientCashAccounts } from "@/lib/dashboard/financial-pack";
+import {
+  proposeClientCashAccounts,
+  type CashProposal,
+  type ClientFinancialPack,
+} from "@/lib/dashboard/financial-pack";
 import { useFinancialPack } from "@/lib/dashboard/use-financial-pack";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { ErrorMessage } from "../data-state";
@@ -70,6 +74,9 @@ export function ClientFinancialSummary({
   pathname,
   search,
   malformedPeriod,
+  load,
+  now,
+  loadProposal,
 }: {
   clientId: string;
   /** `YYYY-MM-01` from the server-read `?period=`, or null for month-to-date. */
@@ -79,10 +86,14 @@ export function ClientFinancialSummary({
   /** True when the address carried a `?period=` this build could not read. The face SAYS so
    *  rather than silently showing a different month under the label the reader chose. */
   malformedPeriod: boolean;
+  /** Injected by the cells so a test drives the band directly; production reads the doors. */
+  load?: (clientId: string, month: string | null) => Promise<ClientFinancialPack>;
+  now?: () => number;
+  loadProposal?: (clientId: string) => Promise<CashProposal>;
 }) {
   const t = useTranslations("ClientFinancial");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const state = useFinancialPack({ clientId, month: period });
+  const state = useFinancialPack({ clientId, month: period, load, now });
   const { pack, loading, staleError, denied, failedFirstRead, readAt, delayed, reload } = state;
 
   // The proposal is read ONLY when the dialog is opened: it is a second door, and the band must
@@ -90,16 +101,19 @@ export function ClientFinancialSummary({
   const proposal = useAsyncRead(
     useCallback(
       () => (dialogOpen
-        ? proposeClientCashAccounts(clientId, { session: sessionTokenAccessor })
+        ? (loadProposal ?? ((id: string) => proposeClientCashAccounts(id, { session: sessionTokenAccessor })))(clientId)
         : Promise.resolve(null)),
-      [clientId, dialogOpen],
+      [clientId, dialogOpen, loadProposal],
     ),
   );
+  // OPENING THE DIALOG IS THE READ. `useAsyncRead`'s own contract is that a new loader identity
+  // ALONE never re-triggers a load (`lib/firm/use-async-read.ts:26-30`) — the caller must either
+  // re-key the subtree or call `reload()` explicitly. This is that explicit call, bound to a const
+  // so the effect's dependency list is honest rather than suppressed.
+  const reloadProposal = proposal.reload;
   useEffect(() => {
-    if (dialogOpen) void proposal.reload();
-    // `proposal.reload` is stable by `useAsyncRead`'s own contract.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialogOpen]);
+    if (dialogOpen) void reloadProposal();
+  }, [dialogOpen, reloadProposal]);
 
   const headingId = "client-home-money";
   // A DENIED CALLER IS NOT OFFERED THE AUTHORING DOOR. The publish door floors at admin and
