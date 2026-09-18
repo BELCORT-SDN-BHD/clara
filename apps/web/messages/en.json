@@ -762,6 +762,113 @@
     "delayedSince": "Update delayed: no successful read for over a minute.",
     "refreshing": "Refreshing…"
   },
+    "ClientFinancial": {
+      "heading": "Money",
+      "retry": "Retry",
+      "period": {
+        "label": "Period",
+        "monthToDate": "{month} (month to date)",
+        "malformedTitle": "That period could not be read",
+        "malformedBody": "The address named a period this page could not understand, so it is showing the current month to date instead."
+      },
+      "cash": {
+        "heading": "Book cash",
+        "notStatementBalance": "Book cash is what the ledger says the cash accounts hold. It is not a bank statement balance and not an available balance."
+      },
+      "profit": {
+        "heading": "Profit",
+        "forPeriod": "For {start} to {asOf}"
+      },
+      "income": {
+        "heading": "Income"
+      },
+      "expense": {
+        "heading": "Expense"
+      },
+      "comparison": {
+        "line": "{delta} ({pct}) against {prior}",
+        "signChange": "{delta} — from a loss of {prior} to a profit",
+        "against": "compared with {start} to {end}"
+      },
+      "cashTrend": {
+        "heading": "Cash over six months",
+        "oneMembership": "All six points use the same {n} cash accounts.",
+        "tableLabel": "Book cash at each of the last six month ends",
+        "colAsOf": "As at",
+        "colCash": "Book cash"
+      },
+      "series": {
+        "heading": "Income and expense over six months",
+        "partialMonth": "{month} is a part month — figures run to {asOf}.",
+        "tableLabel": "Income and expense by calendar month",
+        "colMonth": "Month",
+        "toAsOf": "to {asOf}"
+      },
+      "drilldown": {
+        "heading": "What is behind this period",
+        "tableLabel": "Accounts behind this period, with their entries",
+        "colAccount": "Account",
+        "colMovement": "Movement",
+        "colEntries": "Entries",
+        "truncated": "Showing {shown} of {total} entries."
+      },
+      "cashSet": {
+        "missingTitle": "Nobody has said which accounts count as cash",
+        "missingBody": "Book cash cannot be worked out until somebody chooses the cash and bank accounts for this client. This is not a figure of zero.",
+        "chooseAccounts": "Choose cash accounts",
+        "adminOnly": "An administrator or owner can choose them.",
+        "basis": "Over {n} cash accounts (version {revision}).",
+        "change": "Change",
+        "dialogTitle": "Which accounts count as cash?",
+        "dialogBody": "Choose the accounts whose balances make up book cash for this client. The choice is versioned, so past figures keep the membership they were worked out under.",
+        "candidatesLabel": "Bank accounts on this client’s chart",
+        "noCandidates": "This client has no registered bank accounts yet.",
+        "inactive": "(retired)",
+        "pettyCashNote": "Petty cash and other cash on hand are never suggested here: nothing in the chart of accounts marks them, and a name or a code is not evidence. Add them yourself if this client holds any.",
+        "pickOne": "Choose at least one account.",
+        "publish": "Publish",
+        "publishing": "Publishing…",
+        "cancel": "Cancel",
+        "refused": "That could not be published",
+        "proposalFailed": "The account list could not be read"
+      },
+      "denied": {
+        "title": "You cannot see this client’s figures",
+        "body": "Your role does not include this client’s financial figures."
+      },
+      "unknown": {
+        "body": "This figure could not be read."
+      },
+      "failed": {
+        "title": "These figures could not be read"
+      },
+      "stale": {
+        "title": "The figures below may be out of date"
+      },
+      "delayed": {
+        "title": "This connection is delayed",
+        "body": "The last successful read was at {at}.",
+        "never": "Nothing has been read yet."
+      },
+      "freshness": {
+        "read": "Read at {at}.",
+        "never": "Not read yet.",
+        "cadence": "These figures refresh at most every 30 seconds while this tab is open.",
+        "booksFrom": "This client’s books start on {day}."
+      },
+      "reason": {
+        "cashSetUnpublished": "Nobody has said which accounts count as cash for this client.",
+        "cashSetVersionChanged": "The cash accounts changed during these six months, so earlier points use the membership in force at the as-of rather than their own.",
+        "preCoverage": "Some of these months are before this client’s books begin.",
+        "preCoveragePoint": "Before the books begin",
+        "openingCarryDownDeferred": "This client’s opening position has not been captured, so figures start from the first posted entry.",
+        "closingTransferUnmarked": "A year-end closing entry in this period is not marked as one, so profit may include a roll that should be excluded.",
+        "closingTransferUnmarkedCount": "{n} year-end closing entries in this period are not marked as such, so profit may include a roll that should be excluded. The figures are otherwise as posted.",
+        "noPostedEntries": "No entries have been posted for this client yet.",
+        "clientNotVisible": "This figure could not be read.",
+        "generic": "Part of this figure could not be covered."
+      }
+    },
   "ClientWorkspace": {
     "heading": "Client workspace",
     "clientIdLabel": "Client ID",
@@ -794,6 +901,7 @@
     "bankEmpty": "No bank accounts recorded for this client.",
     "bankLatestStatement": "Latest statement to {period}",
     "bankNoStatement": "No statement recorded",
+    "bankNotBookCash": "A statement balance is the bank’s figure at the date they chose. Book cash above is what the ledger says the same accounts hold.",
     "bankStatementUnreadable": "Statements could not be read for this account",
     "bankProposals": "{n, plural, one {# account proposal pending} other {# account proposals pending}}",
     "bankOpenTab": "Open the bank tab",

@@ -91,6 +91,12 @@ export function ClientBankSummary({ clientId }: { clientId: string }) {
           ))}
         </dl>
       </DataState>
+      {/* #660 — ONE SENTENCE, and it is the other half of the money band's own label. The band
+          above says "book cash"; this says why the two numbers may differ. A statement balance is
+          a THIRD PARTY's claim about an account at a date they chose; book cash is what this
+          ledger says the same accounts hold, cumulative, at the as-of the reader picked. Neither
+          substitutes for the other and neither is summed into the other. */}
+      <p className="text-xs text-muted-foreground">{t("bankNotBookCash")}</p>
       {proposals.error ? <ErrorMessage error={proposals.error} /> : null}
       {(proposals.data?.length ?? 0) > 0 ? (
         <p className="text-xs text-muted-foreground">
