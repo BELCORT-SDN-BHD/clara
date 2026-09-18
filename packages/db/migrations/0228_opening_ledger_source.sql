@@ -159,54 +159,94 @@
 -- =====================================================================================
 do $w656_pre$
 declare
-  v_sha text; v_sig text; v_expected text; v_n int; v_def text;
-  v_pins text[][] := array[
-    ['clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',
-     'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132'],
-    ['clara.approve_opening_correction(uuid,jsonb,text,text)',
-     '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4'],
-    ['clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text)',
-     '642967d213f75b3d92f3259ee273657c8870e63dd3a4a81663d8a94d421d368f'],
-    ['clara._approve_opening_entry(uuid,uuid,uuid,text,int)',
-     '314aae614a21a9e28c55e6f9f7e57f53ef746b327d166bc541493df290bd2bd7'],
-    ['clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)',
-     'b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8'],
-    ['clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)',
-     'f3ffd4b07b33756f7f04f9a18d22d3092b1f84eca4d061d7609c2c235b0671c1'],
-    ['clara.record_opening_target(uuid,jsonb,text)',
-     '290ee6e8cd41d35fd6a3739e49850b14d1ef106c28b32d1284a32702784839cc'],
-    ['clara.create_opening_seed(uuid,uuid,date,uuid,text,text)',
-     '7300cf1285fb252b34bbcf45037e27b319425fad7b72e4be004bbc11e44edbce'],
-    ['clara._assert_opening_target_fact(uuid,uuid,jsonb,text,bigint,bigint)',
-     'b4c505b418f8bc676048b0da3cded0f9565a547487a7ce8a5a9ad5b16d3c0305'],
-    ['clara._assert_opening_extraction_ref(uuid,uuid,jsonb)',
-     'a8b48e14895295e1dcd22d9245d4b96f0f12538daecc22bf0b2cc4332e67fae0'],
-    ['clara._assert_opening_tie(uuid)',
-     'afa141b3bf2c5f7dd04a0a73dfe21221405fe18d3d94b72d197f5d8eb07cca30'],
-    ['clara._tf_period_wall()',
-     '44602ba87026be692993950d7c809512bf6087a20bf928dfac3f99d3a62867b0'],
-    -- The instrument p656.m3 actually met: the LINES wall, which refuses an opening DRAFT into a
-    -- closed fiscal year long before the approval is reached. Pinned because the whole "no recut"
-    -- verdict rests on this body doing what it does today.
-    ['clara._tf_period_wall_lines()',
-     '68c7d2b0db657f8ce92af74f4a9da1582970cdb6e4fe97d2849b37a1ebf5bafe']
-  ];
+  v_sha text; v_n int; v_def text;
 begin
-  for i in 1 .. array_length(v_pins, 1) loop
-    v_sig := v_pins[i][1];
-    v_expected := v_pins[i][2];
-    if to_regprocedure(v_sig) is null then
-      raise exception '#656 prestate: % does not resolve -- the opening lane this file republishes is not present', v_sig
-        using errcode = 'CLR10';
-    end if;
-    execute format(
-      'select encode(sha256(convert_to(p.prosrc,''UTF8'')),''hex'') from pg_proc p where p.oid = %L::regprocedure', v_sig)
-      into v_sha;
-    if v_sha is distinct from v_expected then
-      raise exception '#656 prestate: % has DRIFTED from its measured live body (sha %, expected %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body',
-        v_sig, v_sha, v_expected using errcode = 'CLR10';
-    end if;
-  end loop;
+  -- WRITTEN OUT ONE BODY AT A TIME, never through dynamic SQL. The first cut used a
+  -- loop over an array of (signature, sha) pairs, which is shorter and is REFUSED by this
+  -- estate: `apps/web/test/sqlFunctionCensus.ts` reconstructs every statement a migration
+  -- issues and FAILS CLOSED on dynamic SQL it cannot reconstruct
+  -- (`sql_function_census_unresolved_execute`), which redded eight cells across four census
+  -- suites. That is the right posture for a census that has to know what every migration
+  -- touched, and 0195:390-409 -- the idiom this file was told to copy -- writes its pins out
+  -- longhand for the same reason.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
+  if v_sha is distinct from 'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132' then
+    raise exception '#656 prestate: clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.approve_opening_correction(uuid,jsonb,text,text)'::regprocedure;
+  if v_sha is distinct from '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4' then
+    raise exception '#656 prestate: clara.approve_opening_correction(uuid,jsonb,text,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text)'::regprocedure;
+  if v_sha is distinct from '642967d213f75b3d92f3259ee273657c8870e63dd3a4a81663d8a94d421d368f' then
+    raise exception '#656 prestate: clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._approve_opening_entry(uuid,uuid,uuid,text,int)'::regprocedure;
+  if v_sha is distinct from '314aae614a21a9e28c55e6f9f7e57f53ef746b327d166bc541493df290bd2bd7' then
+    raise exception '#656 prestate: clara._approve_opening_entry(uuid,uuid,uuid,text,int) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure;
+  if v_sha is distinct from 'b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8' then
+    raise exception '#656 prestate: clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)'::regprocedure;
+  if v_sha is distinct from 'f3ffd4b07b33756f7f04f9a18d22d3092b1f84eca4d061d7609c2c235b0671c1' then
+    raise exception '#656 prestate: clara.record_opening_targets_parsed(uuid,jsonb,uuid,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.record_opening_target(uuid,jsonb,text)'::regprocedure;
+  if v_sha is distinct from '290ee6e8cd41d35fd6a3739e49850b14d1ef106c28b32d1284a32702784839cc' then
+    raise exception '#656 prestate: clara.record_opening_target(uuid,jsonb,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.create_opening_seed(uuid,uuid,date,uuid,text,text)'::regprocedure;
+  if v_sha is distinct from '7300cf1285fb252b34bbcf45037e27b319425fad7b72e4be004bbc11e44edbce' then
+    raise exception '#656 prestate: clara.create_opening_seed(uuid,uuid,date,uuid,text,text) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._assert_opening_target_fact(uuid,uuid,jsonb,text,bigint,bigint)'::regprocedure;
+  if v_sha is distinct from 'b4c505b418f8bc676048b0da3cded0f9565a547487a7ce8a5a9ad5b16d3c0305' then
+    raise exception '#656 prestate: clara._assert_opening_target_fact(uuid,uuid,jsonb,text,bigint,bigint) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._assert_opening_extraction_ref(uuid,uuid,jsonb)'::regprocedure;
+  if v_sha is distinct from 'a8b48e14895295e1dcd22d9245d4b96f0f12538daecc22bf0b2cc4332e67fae0' then
+    raise exception '#656 prestate: clara._assert_opening_extraction_ref(uuid,uuid,jsonb) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._assert_opening_tie(uuid)'::regprocedure;
+  if v_sha is distinct from 'afa141b3bf2c5f7dd04a0a73dfe21221405fe18d3d94b72d197f5d8eb07cca30' then
+    raise exception '#656 prestate: clara._assert_opening_tie(uuid) has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._tf_period_wall()'::regprocedure;
+  if v_sha is distinct from '44602ba87026be692993950d7c809512bf6087a20bf928dfac3f99d3a62867b0' then
+    raise exception '#656 prestate: clara._tf_period_wall() has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._tf_period_wall_lines()'::regprocedure;
+  if v_sha is distinct from '68c7d2b0db657f8ce92af74f4a9da1582970cdb6e4fe97d2849b37a1ebf5bafe' then
+    raise exception '#656 prestate: clara._tf_period_wall_lines() has DRIFTED from its measured live body (sha %) -- re-measure on the rig before applying; this file recuts nothing and must not apply over a moved body', v_sha
+      using errcode = 'CLR10';
+  end if;
 
   -- THE FACTS THE REPUBLICATION'S ARITHMETIC RESTS ON. If any of these is false, the "+1 from a
   -- uniform 1" reading is wrong and this file must refuse rather than guess.
@@ -329,48 +369,88 @@ reset role;
 -- =====================================================================================
 do $w656_tail$
 declare
-  v_sha text; v_sig text; v_expected text; v_n int; v_def text; v_row record;
-  v_pins text[][] := array[
-    ['clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',
-     'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132'],
-    ['clara.approve_opening_correction(uuid,jsonb,text,text)',
-     '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4'],
-    ['clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text)',
-     '642967d213f75b3d92f3259ee273657c8870e63dd3a4a81663d8a94d421d368f'],
-    ['clara._approve_opening_entry(uuid,uuid,uuid,text,int)',
-     '314aae614a21a9e28c55e6f9f7e57f53ef746b327d166bc541493df290bd2bd7'],
-    ['clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)',
-     'b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8'],
-    ['clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)',
-     'f3ffd4b07b33756f7f04f9a18d22d3092b1f84eca4d061d7609c2c235b0671c1'],
-    ['clara.record_opening_target(uuid,jsonb,text)',
-     '290ee6e8cd41d35fd6a3739e49850b14d1ef106c28b32d1284a32702784839cc'],
-    ['clara.create_opening_seed(uuid,uuid,date,uuid,text,text)',
-     '7300cf1285fb252b34bbcf45037e27b319425fad7b72e4be004bbc11e44edbce'],
-    ['clara._assert_opening_target_fact(uuid,uuid,jsonb,text,bigint,bigint)',
-     'b4c505b418f8bc676048b0da3cded0f9565a547487a7ce8a5a9ad5b16d3c0305'],
-    ['clara._assert_opening_extraction_ref(uuid,uuid,jsonb)',
-     'a8b48e14895295e1dcd22d9245d4b96f0f12538daecc22bf0b2cc4332e67fae0'],
-    ['clara._assert_opening_tie(uuid)',
-     'afa141b3bf2c5f7dd04a0a73dfe21221405fe18d3d94b72d197f5d8eb07cca30'],
-    ['clara._tf_period_wall()',
-     '44602ba87026be692993950d7c809512bf6087a20bf928dfac3f99d3a62867b0'],
-    ['clara._tf_period_wall_lines()',
-     '68c7d2b0db657f8ce92af74f4a9da1582970cdb6e4fe97d2849b37a1ebf5bafe']
-  ];
+  v_sha text; v_n int; v_def text; v_row record;
 begin
-  -- 1 · NOTHING WAS RECUT. The same thirteen bodies, at the same thirteen shas.
-  for i in 1 .. array_length(v_pins, 1) loop
-    v_sig := v_pins[i][1];
-    v_expected := v_pins[i][2];
-    execute format(
-      'select encode(sha256(convert_to(p.prosrc,''UTF8'')),''hex'') from pg_proc p where p.oid = %L::regprocedure', v_sig)
-      into v_sha;
-    if v_sha is distinct from v_expected then
-      raise exception '#656 tail: % MOVED during this migration (sha %) -- 0228 recuts nothing', v_sig, v_sha
-        using errcode = 'CLR10';
-    end if;
-  end loop;
+  -- 1 · NOTHING WAS RECUT. The same thirteen bodies, at the same thirteen shas -- written out
+  --     longhand for the reason the prestate states.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
+  if v_sha is distinct from 'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132' then
+    raise exception '#656 tail: clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.approve_opening_correction(uuid,jsonb,text,text)'::regprocedure;
+  if v_sha is distinct from '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4' then
+    raise exception '#656 tail: clara.approve_opening_correction(uuid,jsonb,text,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text)'::regprocedure;
+  if v_sha is distinct from '642967d213f75b3d92f3259ee273657c8870e63dd3a4a81663d8a94d421d368f' then
+    raise exception '#656 tail: clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._approve_opening_entry(uuid,uuid,uuid,text,int)'::regprocedure;
+  if v_sha is distinct from '314aae614a21a9e28c55e6f9f7e57f53ef746b327d166bc541493df290bd2bd7' then
+    raise exception '#656 tail: clara._approve_opening_entry(uuid,uuid,uuid,text,int) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure;
+  if v_sha is distinct from 'b94260ab1999db379c79a6ad2ad44f07445f019c1e7c8640bb5699725f74d7a8' then
+    raise exception '#656 tail: clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)'::regprocedure;
+  if v_sha is distinct from 'f3ffd4b07b33756f7f04f9a18d22d3092b1f84eca4d061d7609c2c235b0671c1' then
+    raise exception '#656 tail: clara.record_opening_targets_parsed(uuid,jsonb,uuid,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.record_opening_target(uuid,jsonb,text)'::regprocedure;
+  if v_sha is distinct from '290ee6e8cd41d35fd6a3739e49850b14d1ef106c28b32d1284a32702784839cc' then
+    raise exception '#656 tail: clara.record_opening_target(uuid,jsonb,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.create_opening_seed(uuid,uuid,date,uuid,text,text)'::regprocedure;
+  if v_sha is distinct from '7300cf1285fb252b34bbcf45037e27b319425fad7b72e4be004bbc11e44edbce' then
+    raise exception '#656 tail: clara.create_opening_seed(uuid,uuid,date,uuid,text,text) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._assert_opening_target_fact(uuid,uuid,jsonb,text,bigint,bigint)'::regprocedure;
+  if v_sha is distinct from 'b4c505b418f8bc676048b0da3cded0f9565a547487a7ce8a5a9ad5b16d3c0305' then
+    raise exception '#656 tail: clara._assert_opening_target_fact(uuid,uuid,jsonb,text,bigint,bigint) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._assert_opening_extraction_ref(uuid,uuid,jsonb)'::regprocedure;
+  if v_sha is distinct from 'a8b48e14895295e1dcd22d9245d4b96f0f12538daecc22bf0b2cc4332e67fae0' then
+    raise exception '#656 tail: clara._assert_opening_extraction_ref(uuid,uuid,jsonb) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._assert_opening_tie(uuid)'::regprocedure;
+  if v_sha is distinct from 'afa141b3bf2c5f7dd04a0a73dfe21221405fe18d3d94b72d197f5d8eb07cca30' then
+    raise exception '#656 tail: clara._assert_opening_tie(uuid) MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._tf_period_wall()'::regprocedure;
+  if v_sha is distinct from '44602ba87026be692993950d7c809512bf6087a20bf928dfac3f99d3a62867b0' then
+    raise exception '#656 tail: clara._tf_period_wall() MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._tf_period_wall_lines()'::regprocedure;
+  if v_sha is distinct from '68c7d2b0db657f8ce92af74f4a9da1582970cdb6e4fe97d2849b37a1ebf5bafe' then
+    raise exception '#656 tail: clara._tf_period_wall_lines() MOVED during this migration (sha %) -- 0228 recuts nothing', v_sha
+      using errcode = 'CLR10';
+  end if;
 
   -- 2 · THE REGISTRY PUBLISHES EXACTLY ONE VERSION, AND IT IS 2.
   select count(distinct registry_version)::int into v_n from clara.document_capabilities;
