@@ -89,6 +89,25 @@ export type FirmCapabilities = {
    *  in force at the effective date, which no human read exposes, so the DB decides it and its
    *  refusal renders verbatim. */
   readonly canClassifyTurnover: boolean;
+  /** Read the firm's own commercial state on /settings/firm: the current billing plan, whether a
+   *  registration payment is on record, and the firm's stored processing caps.
+   *
+   *  THIS IS AN AFFORDANCE OVER A REAL WALL FOR TWO OF THE THREE, AND OVER NOTHING FOR THE
+   *  THIRD — said out loud because the difference matters (#635). `clara.get_firm_commercial_state`
+   *  itself floors at admin (`0233:342`), so the plan and the payment record genuinely are
+   *  admin-only. The CAPACITY numbers it also returns come from `clara.firm_document_limits`,
+   *  which every member of the firm may already SELECT directly (0007:810-811, :2742-2744 — a
+   *  written, reviewed grant this ticket does not touch). Rendering the capacity card behind
+   *  admin+ is therefore a choice about what belongs on a commercial card, NOT a wall: a viewer
+   *  who reads that relation another way is not doing anything the estate forbids. Moving that
+   *  grant would be a relation-level migration and its own ticket.
+   *
+   *  THERE IS NO CAPABILITY FOR ACCEPTING A LEGAL VERSION, deliberately. `accept_legal_document`
+   *  carries no `_human_ctx` at all (it must not: an `(entry)` applicant accepts before any
+   *  membership exists), so neither a FLOOR row nor a conjunct row could describe it. The DOOR
+   *  answers that question instead, through `get_firm_legal_standing()`'s own
+   *  `can_accept_for_firm`, re-derived on every call from 0195:905's membership predicate. */
+  readonly canReadFirmCommercialState: boolean;
 };
 
 /**
@@ -202,6 +221,17 @@ export const FIRM_CAPABILITY_FLOORS = [
     migration: "0016_a21_compliance_watch.sql",
     line: 916,
   },
+  {
+    // #635's ONE new row. `clara.get_firm_commercial_state()` is created at 0233 and never
+    // replaced or dropped — the census below proves that rather than this comment asserting it.
+    // The cited line is the `clara._human_ctx(clara.role_rank('admin'))` statement in the
+    // FINISHED file, re-read off disk rather than predicted while writing it.
+    capability: "canReadFirmCommercialState",
+    door: "get_firm_commercial_state",
+    role: "admin",
+    migration: "0233_firm_commercial_settings.sql",
+    line: 342,
+  },
 ] as const satisfies readonly {
   capability: keyof FirmCapabilities;
   door: string;
@@ -244,6 +274,7 @@ const NOTHING: FirmCapabilities = {
   canRevokeVendorBinding: false,
   canSignVendorBinding: false,
   canClassifyTurnover: false,
+  canReadFirmCommercialState: false,
 };
 
 /** `>= floor`, fail-closed on a NULL/unknown rank — the SQL's own
@@ -271,6 +302,7 @@ export function firmCapabilities(scope: CapabilityScope | null): FirmCapabilitie
     canRevokeVendorBinding: atLeast(rank, "bookkeeper"),
     canSignVendorBinding: atLeast(rank, "admin"),
     canClassifyTurnover: atLeast(rank, "bookkeeper"),
+    canReadFirmCommercialState: atLeast(rank, "admin"),
   };
 }
 
