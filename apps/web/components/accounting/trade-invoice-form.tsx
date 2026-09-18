@@ -45,7 +45,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import { JournalBasisFields, fieldElementId, type FieldNode } from "@/components/accounting/journal-basis-fields";
+import { JournalBasisFields, type FieldNode } from "@/components/accounting/journal-basis-fields";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { StateBanner } from "@/components/common/state";
 import { MoneyInput } from "@/components/common/money-input";
@@ -210,8 +210,15 @@ export function TradeInvoiceFormView({
 
   // ---- the reads, each degrading INDEPENDENTLY (the partial-stale state) ------------------------
   const partyKind = counterpartyKindFor(draft.kind);
-  const readAccounts = loadAccounts ?? (() => listCoaAccounts(session, clientId));
-  const readParties = loadParties
+  // HELD IN REFS, so the two effects below depend on the FACTS they read for (the client, the
+  // party kind) rather than on a closure identity that changes every render — which would re-fire
+  // both reads on every keystroke. The ref always holds the CURRENT loader, so an injected seam is
+  // honoured without being a dependency.
+  const readAccounts = useRef<() => Promise<CoaAccountRow[]>>(() => listCoaAccounts(session, clientId));
+  const readParties = useRef<(k: "vendor" | "customer") => Promise<CounterpartyRow[]>>(
+    (kind) => loadCounterparties(session, clientId, kind));
+  readAccounts.current = loadAccounts ?? (() => listCoaAccounts(session, clientId));
+  readParties.current = loadParties
     ?? ((kind: "vendor" | "customer") => loadCounterparties(session, clientId, kind));
 
   const [accounts, setAccounts] = useState<CoaAccountRow[] | null>(null);
@@ -226,28 +233,26 @@ export function TradeInvoiceFormView({
     let live = true;
     void (async () => {
       try {
-        const rows = await readAccounts();
+        const rows = await readAccounts.current();
         if (live) { setAccounts(rows); setAccountsFailed(false); }
       } catch {
         if (live) { setAccounts([]); setAccountsFailed(true); }
       }
     })();
     return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
   useEffect(() => {
     let live = true;
     setParties(null);
     void (async () => {
       try {
-        const rows = await readParties(partyKind);
+        const rows = await readParties.current(partyKind);
         if (live) { setParties(rows ?? []); setPartiesFailed(false); }
       } catch {
         if (live) { setParties([]); setPartiesFailed(true); }
       }
     })();
     return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, partyKind]);
 
   const knownCodes = useMemo(
@@ -283,14 +288,12 @@ export function TradeInvoiceFormView({
     else fields.current.set(field, node);
   }, []);
 
+  /** THE MAP IS THE ONE LOOKUP. A control that registered no ref cannot be focused — which is a
+   *  real defect this way, rather than one papered over by a document lookup that happens to work
+   *  in a browser and silently does nothing in a harness. `journal-composer.tsx`'s own posture. */
   const focusField = useCallback((field: TradeInvoiceFieldId | null) => {
     if (field === null) return;
-    const node = fields.current.get(field);
-    if (node) { node.focus(); return; }
-    const el = typeof document === "undefined"
-      ? null
-      : document.getElementById(tradeInvoiceFieldId(field)) ?? document.getElementById(fieldElementId(field as never));
-    if (el && typeof (el as HTMLElement).focus === "function") (el as HTMLElement).focus();
+    fields.current.get(field)?.focus();
   }, []);
 
   const patch = (next: Partial<TradeInvoiceDraft>) => setDraft((d) => ({ ...d, ...next }));
@@ -519,6 +522,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t(`party.description.${partyKind}`)}</FieldDescription>
           <Input
             id={tradeInvoiceFieldId("counterparty")}
+            ref={(node) => registerField("counterparty", node)}
             value={draft.counterpartyQuery}
             disabled={busy}
             aria-invalid={issueFor("counterparty") ? true : undefined}
@@ -571,6 +575,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t("documentDate.description")}</FieldDescription>
           <Input
             id={tradeInvoiceFieldId("documentDate")}
+            ref={(node) => registerField("documentDate", node)}
             type="date"
             value={draft.documentDate}
             disabled={busy}
@@ -589,6 +594,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t("dueDate.description")}</FieldDescription>
           <Input
             id={tradeInvoiceFieldId("dueDate")}
+            ref={(node) => registerField("dueDate", node)}
             type="date"
             value={draft.dueDate}
             disabled={busy}
@@ -605,6 +611,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t("reference.description")}</FieldDescription>
           <Input
             id={tradeInvoiceFieldId("reference")}
+            ref={(node) => registerField("reference", node)}
             value={draft.reference}
             maxLength={REFERENCE_MAX_CHARS}
             disabled={busy}
@@ -621,6 +628,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t("total.description", { accountClass: controlClass })}</FieldDescription>
           <MoneyInput
             id={tradeInvoiceFieldId("totalCents")}
+            ref={(node) => registerField("totalCents", node)}
             cents={draft.totalCents}
             mode="unsigned"
             disabled={busy}
@@ -644,6 +652,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t("taxFacts.description")}</FieldDescription>
           <Textarea
             id={tradeInvoiceFieldId("taxFacts")}
+            ref={(node) => registerField("taxFacts", node)}
             rows={2}
             value={draft.taxFactsJson}
             disabled={busy}
@@ -660,6 +669,7 @@ export function TradeInvoiceFormView({
           <FieldDescription>{t("postingDate.description")}</FieldDescription>
           <Input
             id={tradeInvoiceFieldId("postingDate")}
+            ref={(node) => registerField("postingDate", node)}
             type="date"
             value={draft.postingDate}
             disabled={busy}
@@ -675,6 +685,7 @@ export function TradeInvoiceFormView({
           <FieldLabel htmlFor={tradeInvoiceFieldId("memo")}>{t("memo.label")}</FieldLabel>
           <Textarea
             id={tradeInvoiceFieldId("memo")}
+            ref={(node) => registerField("memo", node)}
             rows={2}
             value={draft.memo}
             disabled={busy}

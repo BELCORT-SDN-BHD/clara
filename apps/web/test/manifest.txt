@@ -35,6 +35,9 @@
 components/accounting/journal-composer.test.tsx
 components/accounting/periodic-adjustment-form.test.tsx
 components/accounting/staff-expense-claim-form.test.tsx
+components/accounting/trade-invoice-form-a11y.test.tsx
+components/accounting/trade-invoice-form-keyboard.test.tsx
+components/accounting/trade-invoice-form.test.tsx
 components/accruals/accrual-form.test.tsx
 components/accruals/accruals-list.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
@@ -397,6 +400,8 @@ lib/work/questions.test.ts
 lib/work/reads.test.ts
 lib/work/staff-expense-claim-draft.test.ts
 lib/work/staff-expense-claim.test.ts
+lib/work/trade-invoice-draft.test.ts
+lib/work/trade-invoice.test.ts
 lib/work/use-client-work-pack.test.ts
 lib/work/work-list-url-state.test.ts
 lib/work/work-list.test.ts

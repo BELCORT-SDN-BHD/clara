@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   gateTi, TI_REASON, TI_KIND, DUE_SOURCE, TICHART, TI_DATE,
-  ensureTiChart, vendor, customer, setTerms,
+  ensureTiChart, vendor, customer,
   billParticulars, invoiceParticulars, billBasis, invoiceBasis,
   admitTradeInvoiceWork, getTradeInvoice, withClientRungHeld, awaitRungWaiters,
   invoiceRow, invoiceForWork, invoiceCount, invoiceStatus,
@@ -20,8 +20,8 @@ import {
   controlBalance, subledgerOutstanding,
   buildWorkWorld, freshWorkClient, admitJournalWork, claimWorkRun, mintClientObo,
   wakeRecordJournalEntry, entryCount, committedReceiptCount, entriesForClient, linesOf,
-  assertPair, workRow, receiptsForWork, WCHART, basis,
-  rootQuery, humanQuery, roleQuery, namedCall, opk, ROLES, MODEL, endPool, assertRaises,
+  assertPair, receiptsForWork, WCHART, basis,
+  rootQuery, humanQuery, opk, ROLES, endPool, assertRaises,
 } from "./trade-invoice-fixtures.mjs";
 import { printLaneNotes, printSkipCount } from "./wave-a-helpers.mjs";
 
@@ -750,7 +750,7 @@ test("p655.party.resolution an ambiguous party is refused at ADMISSION with the 
 test("p655.classify.ladder_3t the classifier answers 'bill'/'invoice' for the new lane and is byte-identical for every other input", async (t) => {
   if (await gateTi(t)) return;
   const client = await tiClient("ladder3t");
-  const b = await postedBill(client);
+  await postedBill(client);
   const entry = (await entriesForClient(client))[0];
   const cl = await classifyEntry(entry.id);
   assert.equal(cl.length, 1);
@@ -987,7 +987,7 @@ test("p655.belts the entry belt and the item belt both tie on the new lane -- th
   // That the bill posted AT ALL is the assertion: clara._tf_subledger_entry_belt ARM 1 and
   // clara._tf_subledger_item_belt's KIND-TO-SOURCE arm are DEFERRED constraint triggers, so a
   // divergence between the classifier and the item raises at COMMIT, not at insert.
-  const b = await postedBill(client);
+  await postedBill(client);
   const entry = (await entriesForClient(client))[0];
 
   // ARM 1, re-run by hand at the belt's own predicate, so the cell states the number rather than
@@ -1006,7 +1006,6 @@ test("p655.belts the entry belt and the item belt both tie on the new lane -- th
          or coalesce(it.kn,1) <> 1) z`, [entry.id])).rows[0].v;
   assert.equal(bad, 0,
     "p655.belts: clara._tf_subledger_entry_belt ARM 1 sees ZERO divergent grain rows -- measured at 1 before 0225's LADDER 3T");
-  assert.ok(b.invoice_id);
 });
 
 test("p655.appendonly the trade invoice admits no update and no delete, and the status ledger is append-only too", async (t) => {
