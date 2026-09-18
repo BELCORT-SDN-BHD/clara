@@ -2311,6 +2311,37 @@ const PREVIEW_INVITE_0224_HUMAN_FNS = ["preview_invite"];
 export const PREVIEW_INVITE_0224_COHORT = [...PREVIEW_INVITE_0224_HUMAN_FNS];
 // #625 END
 
+// #655 [0225, trade invoices, supplier bills and the open item they birth] — its own cohort for
+// the same "wholly present or wholly absent" reason 0221's carries. The NUMBER lives on the
+// cohort, never on the migration's stem, which is what lets 0225 be renumbered at integration
+// without touching a gate module's filename.
+//
+//   ONE RUNTIME DOOR. Work admission on this lane is a runtime act OBO a named human
+//   (0194:1316-1318; 0221:1202-1206 states the law). There is NO clara_authenticated twin and no
+//   `_for` sibling: a second door with a different authority model would be a second answer to
+//   "who admitted this", and admission also ENQUEUES a run, which PostgREST cannot produce.
+const TRADE_INVOICES_0225_RUNTIME_FNS = ["admit_trade_invoice_work"];
+//   ONE READ — clara_authenticated (viewer-floored in its own body, the get_work_claim_origin
+//   precedent) AND clara_runtime, because the run needs to echo what it posted. It is what lets a
+//   Work row read "Supplier bill · Alpha Supplies · AP" without a purpose value.
+const TRADE_INVOICES_0225_HUMAN_FNS = ["get_trade_invoice"];
+//   …and the UNGRANTED closure: the payload/world predicate the door and a later reader share, the
+//   canonical form the replay probe compares, the party resolver, the due-date derivation, the ONE
+//   shared entry->kind resolver that clara._subledger_classify_entry LADDER 3T and
+//   clara._tf_subledger_item_belt both call, and the three trigger bodies (the append-only belt,
+//   the posted stamp and the lane-agnostic open-item birth). Listed so `cohortFailures` reports a
+//   half-applied 0225 rather than a silently narrower boundary.
+const TRADE_INVOICES_0225_UNGRANTED_FNS = [
+  "_assert_trade_invoice_basis", "_trade_invoice_canonical", "_trade_invoice_resolve_party",
+  "_trade_invoice_due", "_trade_invoice_kind_of_entry",
+  "_tf_trade_invoice_append_only", "_tf_trade_invoice_posted", "_tf_je_open_item_birth",
+];
+export const TRADE_INVOICES_0225_COHORT = [
+  ...TRADE_INVOICES_0225_RUNTIME_FNS, ...TRADE_INVOICES_0225_HUMAN_FNS,
+  ...TRADE_INVOICES_0225_UNGRANTED_FNS,
+];
+// #655 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -2496,6 +2527,10 @@ export const ALLOWED = {
     // ONLY, viewer-floored in their own bodies; clara_runtime, the agent role and both wake roles
     // gain ZERO.
     ...STAFF_EXPENSE_CLAIMS_0221_HUMAN_FNS,
+    // #655 [0225] the trade-invoice read — see the block above. Viewer-floored in its own body;
+    // clara_runtime holds it too (it echoes what the run posted), the agent role and both wake
+    // roles gain ZERO.
+    ...TRADE_INVOICES_0225_HUMAN_FNS,
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
@@ -2696,6 +2731,10 @@ export const ALLOWED = {
     // [#638, 0221] the staff-expense-claim admission door — clara_runtime ONLY, the same lane
     // clara.admit_journal_work sits in, acting OBO a named human.
     ...STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS,
+    // [#655, 0225] the trade-invoice admission door and its read — the door is clara_runtime ONLY
+    // (the same lane clara.admit_journal_work sits in, acting OBO a named human); the read is held
+    // by BOTH lanes because the run echoes what it posted.
+    ...TRADE_INVOICES_0225_RUNTIME_FNS, ...TRADE_INVOICES_0225_HUMAN_FNS,
     ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
@@ -2981,6 +3020,10 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#649 0219 client-onboarding facts lane", CLIENT_ONBOARDING_FACTS_0219_COHORT, liveNames));
   // #649 END
   failures.push(...cohortFailures("#625 0224 invite preview door", PREVIEW_INVITE_0224_COHORT, liveNames));
+  // #655 [0225] — the door, the read and the eight internals ship as one lane; half of them is an
+  // admission door whose open item has no birth instrument, which is a narrower boundary nobody
+  // chose.
+  failures.push(...cohortFailures("#655 0225 trade-invoice lane", TRADE_INVOICES_0225_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

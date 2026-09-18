@@ -601,6 +601,7 @@ declare
   v_kind text; v_class text; v_other text; v_ctl_n int; v_other_n int;
   v_net bigint; v_total bigint; v_dr bigint; v_cr bigint;
   v_doc date; v_due date; v_src text; v_posting date; v_fy_status text; v_type text;
+  v_msg text; v_detail text;
 begin
   if p_particulars is null or jsonb_typeof(p_particulars) <> 'object' then
     raise exception 'a trade invoice requires its typed particulars' using errcode='CLR10',
@@ -633,7 +634,24 @@ begin
   -- 2 · THE JOURNAL BASIS, through the estate's OWN predicate (0178:693) -- posting_date, memo,
   -- currency, lines. Nothing about a party, a reference or a due date lives there, which is the
   -- whole reason this lane needed a typed object at all.
-  perform clara._assert_journal_basis(p_basis);
+  --
+  -- ITS UNBALANCED REFUSAL IS RE-BADGED INTO THIS DOOR'S OWN LADDER, and that is a door's job
+  -- rather than a liberty: `clara._assert_journal_basis` raises CLR10 with
+  -- `reason:'invalid_basis', constraint:'balanced'` (MEASURED on clara_655), while this lane's
+  -- contract -- the one the runtime module and the chatTurn_v21 stanza carry -- names it
+  -- `unbalanced_basis`. Every other refusal it raises is re-raised VERBATIM, detail and message
+  -- intact, so nothing else is reshaped on the way out.
+  begin
+    perform clara._assert_journal_basis(p_basis);
+  exception when sqlstate 'CLR10' then
+    get stacked diagnostics v_msg = message_text, v_detail = pg_exception_detail;
+    if coalesce(nullif(btrim(coalesce(v_detail,'')),''),'{}') ~ '^\s*\{'
+       and coalesce(v_detail::jsonb->>'constraint','') = 'balanced' then
+      raise exception '%', v_msg using errcode='CLR10',
+        detail=(v_detail::jsonb || jsonb_build_object('reason','unbalanced_basis'))::text;
+    end if;
+    raise exception '%', v_msg using errcode='CLR10', detail=v_detail;
+  end;
   v_posting := (p_basis->>'posting_date')::date;
 
   -- 3 · THE TOTAL. POSITIVE, INTEGER SEN, and refused as a typed CLR10 BEFORE the column CHECK
@@ -967,9 +985,9 @@ revoke all on function clara._trade_invoice_due(jsonb,jsonb,integer) from public
  *
  * BODY ORDER, AND EVERY STEP IS THERE FOR A MEASURED REASON (0221:1207-1220's eight steps):
  *   1. the intent key, first, so a blank key can never own a Work;
- *   2. the PAYLOAD half, before anything durable;
- *   3. the authority preamble (the core re-checks it, but step 8 writes durably and must never
- *      run for a caller the core would refuse) -- including the no-existence-oracle rule;
+ *   2. the AUTHORITY preamble -- including the no-existence-oracle rule. It runs BEFORE the
+ *      payload half, which is a MEASURED correction to 0221's order: see the body comment;
+ *   3. the PAYLOAD half, before anything durable;
  *   4. the REPLAY probe, BEFORE ANY WRITE -- and the world half is NOT re-asked (0182's lesson:
  *      a property of the world may not refuse a lost-response retry);
  *   5. the WORLD half, asked cheaply;
@@ -1002,14 +1020,23 @@ begin
       detail='{"reason":"invalid_intent_key","constraint":"nonempty"}';
   end if;
 
-  -- 2 · THE PAYLOAD HALF.
-  perform clara._assert_trade_invoice_basis(p_client, p_kind, p_particulars, p_basis, false);
-  v_canon := clara._trade_invoice_canonical(p_kind, p_particulars, p_basis);
-
-  -- 3 · THE AUTHORITY PREAMBLE. The core asks these again; they are asked HERE because step 8
-  -- writes durably. The arms, their order and their tokens are the core's own (0194:1089-1116),
-  -- so the two can never disagree -- INCLUDING the no-existence-oracle rule: an unknown firm and
-  -- a non-member both answer `client_not_found`.
+  -- 2 · THE AUTHORITY PREAMBLE, BEFORE THE PAYLOAD HALF — and the order is a MEASURED correction
+  -- to the eight-step shape #638 established, not a preference.
+  --
+  -- 0221:1207-1220 puts the payload half at step 2 and authority at step 3, whose stated reason is
+  -- that step 8 writes durably and must never run for a caller the core would refuse. That reason
+  -- is satisfied by ANY order in which authority precedes the write — and putting the payload half
+  -- first reopens the very oracle this preamble exists to close. MEASURED on clara_655 with the
+  -- payload half first: an UNKNOWN client id left as CLR10 `control_leg_missing` (the chart lookup
+  -- inside `clara._assert_trade_invoice_basis` is client-scoped, so an unknown client has no
+  -- control account), while a REAL client of another firm left as CLR11 `client_not_found`. The
+  -- difference between those two answers tells an unauthorised caller whether the client exists,
+  -- which is exactly what 0194's no-existence-oracle rule forbids. Asking authority first makes
+  -- BOTH answer `client_not_found`, indistinguishably — `p655.authority.floors` asserts the two
+  -- messages are byte-equal.
+  --
+  -- The arms, their order and their tokens are the core's own (0194:1089-1116), so the two can
+  -- never disagree.
   select c.firm_id, c.status into v_firm, v_client_status from clara.clients c where c.id = p_client;
   if v_firm is null then
     raise exception 'client not found in your firm' using errcode='CLR11',
@@ -1034,6 +1061,11 @@ begin
     raise exception 'client is not active -- no new accounting work' using errcode='CLR10',
       detail='{"reason":"client_inactive"}';
   end if;
+
+  -- 3 · THE PAYLOAD HALF, now that the caller has been proved entitled to hear about this client
+  -- at all. Still before anything durable, which is 0221's own requirement.
+  perform clara._assert_trade_invoice_basis(p_client, p_kind, p_particulars, p_basis, false);
+  v_canon := clara._trade_invoice_canonical(p_kind, p_particulars, p_basis);
 
   -- 4 · THE REPLAY PROBE, BEFORE ANY WRITE. The unique is 0178:336
   -- `uq_accounting_work_intent (firm_id, client_id, intent_key)`. A Work already under this key
