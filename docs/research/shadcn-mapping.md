@@ -233,7 +233,7 @@ Why not `form`: base-nova ships no file for it (§1) — it's the react-hook-for
 **Token consumption mechanism** (read from the full fetched `chart.tsx`, `apps/web/../scratchpad/chart-base-nova.tsx`):
 - `ChartContainer` takes a `config: ChartConfig` where each series key maps to `{ label, icon, color }` (or a per-theme `{ light, dark }` pair).
 - `ChartStyle` (an inline child) walks `config`, and for every key with a `color`/`theme` entry emits a literal `<style>` tag: `` [data-chart=<id>] { --color-<key>: <value>; } `` scoped to that specific chart instance's `data-chart` attribute — i.e. it does **not** read `--chart-1..5` directly; the *config* passed by the call site decides what CSS value backs `--color-<key>`, and that value is typically written as `"var(--chart-1)"` etc. by the caller. The token only enters the picture if the call site's `ChartConfig` says so.
-- The dark/light split is baked in (`THEMES = { light: "", dark: ".dark" }`), but `apps/web/AGENTS.md`'s house rule is light-theme-only, no `dark:` (already enforced by hand edits stripping `dark:` from `dropdown-menu.tsx` and `tabs.tsx` — see §5) — so a Clara adoption of `chart` should ignore/strip the `.dark` branch the same way those two files did, rather than carrying dead dark-mode CSS.
+- The dark/light split is baked in (`THEMES = { light: "", dark: ".dark" }`), but the web app's house rule at the time was light-theme-only, no `dark:` (already enforced by hand edits stripping `dark:` from `dropdown-menu.tsx` and `tabs.tsx` — see §5) — so a Clara adoption of `chart` should ignore/strip the `.dark` branch the same way those two files did, rather than carrying dead dark-mode CSS.
 
 **Current token state** (`apps/web/app/globals.css:322-326`, read directly):
 ```css
