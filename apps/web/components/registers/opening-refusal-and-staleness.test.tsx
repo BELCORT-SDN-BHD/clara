@@ -277,7 +277,7 @@ test("F6-2: a refused record_opening_target does NOT wipe the typed line key —
   });
 });
 
-test("#987: drafting an opening item into a CLOSED fiscal year names the OPENING BASIS, never a raw journal-entry id", async () => {
+test("987: drafting an opening item into a CLOSED fiscal year names the OPENING BASIS, never a raw journal-entry id", async () => {
   // clara._tf_period_wall_lines (0056_wave_e_close_model.sql:746-749) refuses at the DRAFT with
   // CLR19 write_into_closed_period, naming the ENTRY it would have created and the fiscal year's
   // label — the estate's one generic period-wall message, correct for every OTHER lane (the
@@ -329,9 +329,9 @@ test("#987: drafting an opening item into a CLOSED fiscal year names the OPENING
       const text = textOf(body as never);
       assert.match(text, /CLR19/, "AC1: the same governed code still surfaces");
       assert.match(text, /write_into_closed_period/, "AC1: the same reason token still surfaces");
-      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "#987: the raw journal-entry id the person never created must never reach them");
-      assert.doesNotMatch(text, /sits in closed fiscal year/, "#987: the raw entry-centric sentence must not render inside the opening-basis flow");
-      assert.match(text, /opening basis/i, "#987: the message must speak in terms of the opening basis being worked on");
+      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "the raw journal-entry id the person never created must never reach them");
+      assert.doesNotMatch(text, /sits in closed fiscal year/, "the raw entry-centric sentence must not render inside the opening-basis flow");
+      assert.match(text, /opening basis/i, "the message must speak in terms of the opening basis being worked on");
 
       // CB-AE2E-004's own law, unaffected by this ticket: a refusal never closes the dialog nor
       // wipes what the human typed.
