@@ -402,9 +402,25 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `p_client` is right there and simply not used. It holds no fixture either (zero rows), so the
   // N4/N5 property that makes the rest of this file safe holds for it too, and a walk that wants a
   // POPULATED portfolio overlays its own `page.route`.
+  // #660 appends THREE more to the same lane, for the same reason and with the same property.
+  // `get_client_financial_pack` and `propose_client_cash_accounts` both carry `p_client`, so both
+  // COULD be scoped and are not: their job is to give EVERY client route an honest answer, and the
+  // pack verb returns a scalar object, so an unanswered 404 would grow a "could not be read" money
+  // band on every walk that merely lands on `/clients/:id`. Neither holds a fixture — the pack is
+  // the UNPUBLISHED-cash-set face (`status:'unknown'`, a NULL value, reason
+  // `cash_set_unpublished`; never a fabricated `RM 0.00`) and the proposal has no candidates — so
+  // there is nothing in either for a sibling walk to resolve as its own.
+  // `publish_client_cash_account_set` is a WRITE this lane has nothing to write to; it echoes the
+  // receipt shape and changes no state, and a walk that wants the published board overlays its own
+  // pack with `page.route`.
   "home-board-mock.mjs": {
     unscopeable: ["/rest/v1/rpc/get_firm_portfolio_pack"],
-    debt: ["/rest/v1/rpc/get_client_work_pack"],
+    debt: [
+      "/rest/v1/rpc/get_client_financial_pack",
+      "/rest/v1/rpc/get_client_work_pack",
+      "/rest/v1/rpc/propose_client_cash_accounts",
+      "/rest/v1/rpc/publish_client_cash_account_set",
+    ],
   },
   // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
   // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs

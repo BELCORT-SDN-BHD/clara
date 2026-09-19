@@ -1156,3 +1156,135 @@ images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window is
 `date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. **08:00 Asia/Kuala_Lumpur** — the
 read reports that in its `capacity` block so the surface can say 08:00 rather than "midnight".
 Moving the window to MYT is #635's ticket.
+## #660 — the client home's money band (0232)
+
+TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
+allowlist row: `clara_runtime`, `clara_agent_ro` and every `clara_wake_*` role hold ZERO on all
+three, asserted door by door and role by role in 0232's own tail and again behaviourally by
+`p660.pack.no_agent_reach`.
+
+- `clara.cash_account_set_versions` / `clara.cash_account_set_members` — a client's governed,
+  versioned CASH ACCOUNT SET. Exactly one `published` row per client (a partial unique index) and
+  contiguous, non-overlapping windows (`clara._tf_cash_account_set_integrity`, one trigger function
+  serving two triggers on 0058:362's pattern). Members are SEALED to the creating transaction
+  against INSERT, UPDATE **and** DELETE: the version row's `member_count` / `members_sha256` are
+  computed once, by the deferred trigger on the versions table, and are never re-checked
+  afterwards — so a member removed later would leave the frozen sha describing a membership that
+  no longer exists. A version is superseded, never edited.
+  `member_reason` is `bank_registry` | `declared_cash` | `declared_petty_cash`. FORCE RLS, two
+  policies each, `select` to `clara_authenticated` and ZERO INSERT/UPDATE/DELETE to any non-owner
+  role — which is what keeps the read doors honestly `SECURITY INVOKER`.
+
+  **There is NO `is_active` predicate on this family or on any read of it, and that is the whole
+  reason it exists rather than riding `clara.account_set_versions`.** That family resolves
+  membership through `clara._metric_selector_account_ids` (0058:344-358), which filters `is_active`
+  TWICE and REFUSES an explicitly named inactive account — exactly the population a cash set must
+  contain, since a retired bank account still holds the balance it held. Relaxing that resolver
+  would change membership semantics for every account set in the estate silently, because the
+  freeze checks re-derive from stored shas.
+
+- `clara.publish_client_cash_account_set(p_client, p_members, p_effective_from, p_op_key)` —
+  SECURITY DEFINER, **admin** floor (`clara._human_ctx(clara.role_rank('admin'))`, the floor
+  `create_account_set_v1` uses), op-key idempotent over all three payload arguments. `p_members` is
+  ONE jsonb array of `{account_id, member_reason}` and ITS ORDER IS THE ORDINAL. A first version
+  with a null `p_effective_from` is stamped at the books' own start; a first version dated AFTER
+  that start is refused `first_version_after_books_start`, because it would make every historic
+  month unreadable. Two admins superseding at once SERIALISE (the current version row is taken
+  `for update`) and the loser is refused CLR11 `cash_set_version_raced` — a typed refusal the face
+  can turn into a sentence, never a raw 23505 naming an internal constraint.
+
+  **AND THE LOCK ALONE IS NOT ENOUGH, WHICH IS A MEASURED FACT.** Under READ COMMITTED the waiter's
+  statement snapshot is taken BEFORE it blocks, so when the winner commits, EvalPlanQual re-checks
+  the row the waiter was queued on against its LATEST version — now `superseded` — the
+  `state = 'published'` predicate fails, the row drops out, and the winner's new published row is
+  invisible to that same pre-block snapshot. The waiter therefore reads NO current version at all.
+  The door does not read that null as "this client has never had one": it RE-READS in a separate
+  statement (a fresh snapshot) and, if any version row exists, refuses `cash_set_version_raced`.
+  Without the re-read the loser was refused CLR10 `first_version_after_books_start` — a true
+  sentence about a different mistake, which would send an admin off to check a books-start date
+  that had nothing to do with what happened. Cell: `p660.set.publish_race_loser_code`, two real
+  backends, the block proved from `pg_blocking_pids` rather than slept through.
+
+- `clara.propose_client_cash_accounts(p_client)` — STABLE SECURITY INVOKER, **viewer** floor. Lists
+  every `is_bank_account` row of the client, ACTIVE OR INACTIVE, with its cumulative approved
+  balance and whether it is already a member. It NEVER proposes declared cash or petty cash under
+  any account name or code: neither has a structural marker in this schema and `0121:4749` is house
+  law — structure and declared facts only. A human declares them.
+
+- `clara.get_client_financial_pack(p_client, p_as_of, p_month)` — STABLE SECURITY INVOKER,
+  **viewer** floor, `plan_cache_mode` pinned. Book cash with six points, period profit with income
+  and expense, a six-calendar-month series, per-account composition with capped entry lists, and a
+  ten-field envelope plus a comparison on every figure group. `status`/`coverage` take only
+  `ok | partial | unknown`; the door never says `denied` about itself (it raises CLR04) and never
+  says `unavailable`. A client the caller cannot see and an invented uuid answer IDENTICALLY.
+
+  **The comparison is TWO rules, not one.** A COMPLETE month (a historic month read to its own last
+  day, or an MTD read on the last day of the month) compares against the prior month IN FULL; an
+  in-progress month-to-date compares against the same ELAPSED stretch of the prior month, capped at
+  that month's last day. Applying the elapsed rule to a complete month truncates a LONGER
+  predecessor to the selected month's length — February against January drops three days — and the
+  same response's series row for that month then contradicts the comparison beside the headline.
+  `p660.pack.historic_comparison_full_prior_month` holds both arms to it.
+
+  **A comparison period the books cannot answer for is UNKNOWN, not zero.** When the comparison
+  interval ends before the coverage floor, every amount on it is null and it carries
+  `available:false, reason:'pre_coverage'` — the same answer `points[]` already gives that date.
+  The alternative is one read saying two different things about one date, and a whole balance
+  printed as growth from nothing.
+
+  **Each composition carries its own `composition_total` + `composition_truncated`,** beside the
+  entry level's `entries_total` + `entries_truncated`, and both live INSIDE the figure group they
+  are about (`cash.composition`, `profit.composition`). A top-level spelling is a key no consumer
+  of the envelope reaches: the browser hydrates each group through one parser, so the drilldown
+  renders nothing against the real door while a hand-written fixture stays green.
+
+  **A version window a point precedes means one of two things, and the read names the true one.**
+  More than one revision → `cash_set_version_changed_in_series` (the definition really changed
+  inside the trend). Exactly one revision → `cash_set_published_after_books_start`: nothing changed,
+  the set was DECLARED after those months were booked, which is the ordinary onboarding order and
+  the one case `first_version_after_books_start` cannot refuse.
+
+THE VIEWER FLOOR IS STRUCTURAL, not a judgement call: `journal_entries`, `journal_lines` and
+`coa_accounts` are table-SELECT-granted to the whole `clara_authenticated` role (0003:522-525)
+behind a FIRM-ONLY RLS predicate (0003:514). A viewer can already `SELECT` every row these reads
+aggregate, so flooring higher would protect nothing and only take the money band away from the
+people who read it most.
+
+THE COMPUTE SHAPE IS A MEASUREMENT, recorded in 0232's header. Seven `clara.trial_balance_as_of`
+calls cost 18.12 ms / 2,008 shared buffer hits against 2.04 ms / 176 for one filtered pass with six
+`filter (where posting_date <= point_k)` aggregates, on a 6,000-line corpus on a rig cluster
+(8.87x). The cash arm is therefore ONE scan — and because that is a SECOND spelling of a shared
+definition, the tail asserts from `prosrc` that it is still the same one: `status = 'approved'`
+present, a cumulative `posting_date <=` bound present, `is_opening_balance` ABSENT and `fiscal_year`
+ABSENT. `p660.pack.matches_trial_balance` is the behavioural half.
+
+AND THE WHOLE DOOR WAS MEASURED, not only that arm. On a 160-entry / 320-line / 19-account client
+with a three-member cash set (rig `clara_660`, PostgreSQL 17.11), `explain (analyze, buffers)` over
+`clara.get_client_financial_pack` reported **36.4-40.4 ms / 28,886 shared hits** while the two
+compositions each re-read their account's lines through six correlated subqueries. Collapsing the
+cash composition to ONE scan per member account with three FILTERED aggregates brought the same
+call to **18.9-21.7 ms / 12,134 shared hits** with a BYTE-IDENTICAL payload (14,558 bytes). The
+read is polled every thirty seconds while the client home is visible, so that is the number that
+matters rather than the cash arm's alone.
+
+### KNOWN COVERAGE LIMIT — pre-0120 unmarked closing transfers
+
+Entries finalised before 0120 stayed `closing_transfer = false` "forever" (0120:518-521), and
+0016:211-219's `closing_transfer_review` notification was never discharged by any migration. The
+pack DISCLOSES this and repairs none of it: an approved entry inside the period with
+`closing_transfer = false` AND (its own `close_receipt_id` — only `finalize_close` births one,
+0056:3010-3024 — OR a `reversal_of` naming an entry that has one, the reopen mirror 0120:797-814)
+drives `coverage = 'partial'` with reason `closing_transfer_unmarked_history`.
+
+**The detected rows are NOT also excluded.** A second, wider exclusion inside one read would make
+two reads of one ledger disagree; the exclusion predicate stays the estate's one definition
+(`not (is_year_end and closing_transfer)`, 0016:602, asserted verbatim in the tail) and the read
+says what it cannot vouch for. **The detector's own limit**: a close finalised before
+`close_receipt_id` existed (pre-0056) carries neither marker and is undetectable. The affected
+hosted row count is a release-time read, not an assumption.
+
+**The disclosure covers every month the chart draws.** `unmarked_closing_entries` is scoped to the
+SELECTED period; `unmarked_closing_entries_series` and `series_coverage_reason` run the identical
+detector over the six calendar months the series carries, because an unmarked close three months
+back is counted into that month's bar and the period-scoped count cannot see it
+(`p660.pack.unmarked_history_series_disclosed`).

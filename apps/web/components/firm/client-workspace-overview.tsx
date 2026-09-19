@@ -46,10 +46,12 @@ import { listSessionsForCaller } from "@/lib/clara/api";
 import { selectOwnSession } from "@/lib/clara/useActiveThread";
 import { focusRail, onClientRecordChanged } from "@/lib/command/bus";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
+import { parsePeriodParam } from "@/lib/dashboard/period";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { ClientBankSummary } from "./client-home/client-bank-summary";
 import { ClientCloseSummary } from "./client-home/client-close-summary";
 import { ClientDocsBacklog } from "./client-home/client-docs-backlog";
+import { ClientFinancialSummary } from "./client-home/client-financial-summary";
 import { ClientIdentityBand } from "./client-home/client-identity-band";
 import { ClientLastActivity } from "./client-home/client-last-activity";
 import { ClientNeedsYou } from "./client-home/client-needs-you";
@@ -112,10 +114,20 @@ function ContinueOnboardingCard({ clientId }: { clientId: string }) {
   );
 }
 
-export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
+export function ClientWorkspaceOverview({
+  clientId,
+  periodParam,
+}: {
+  clientId: string;
+  /** #660 — the raw `?period=` the route read on the server. Parsed once here and handed to the
+   *  money band alone; nothing else on this board has a period axis. */
+  periodParam?: string | string[];
+}) {
   const t = useTranslations("ClientWorkspace");
   const client = useAsyncRead(() => loadClientById(sessionTokenAccessor, clientId));
   const queue = useReviewQueue({ client_id: clientId });
+  const pathname = usePathname();
+  const period = parsePeriodParam(periodParam);
 
   // H-50 (#546) — `useAsyncRead` reads ONCE by contract (its own header: "a NEW loader identity
   // ALONE never re-triggers a reload… must either React-key itself by those ids or call
@@ -173,6 +185,21 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
                 stays the ONE entrance to that governed run. */}
             {client.data.status === "onboarding" ? <ContinueOnboardingCard clientId={clientId} /> : null}
             <ClientOnboardingProgress clientId={clientId} status={client.data.status} />
+
+            {/* #660 — SECTION C1, THE MONEY BAND. FULL-WIDTH and ABOVE the two-column grid, so
+                the period control in its own header is visibly scoped to money and the Work band
+                is never under it. It is ONE section with ONE read on purpose: cash, profit and
+                the two trends are four faces of one envelope that must agree about their period,
+                their definition version and the snapshot they were computed in, which four reads
+                could not guarantee. Every other section on this board still reads for itself, so
+                this file's own law (:16-19) holds — a failure here darkens exactly this band. */}
+            <ClientFinancialSummary
+              clientId={clientId}
+              period={period.month}
+              pathname={pathname}
+              search={period.param === null ? "" : `period=${period.param}`}
+              malformedPeriod={period.malformed}
+            />
 
             <div className="@container">
               <div className="grid grid-cols-1 gap-6 @3xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">

@@ -721,3 +721,23 @@ takes the line out of the unmatched report by design and blocks matching by name
 resolved through its own door — not by matching around it, not by a suspense account and not by
 a write-off.
 _Avoid_: A line that is merely unmatched; a way to make a statement tie; an adjustment.
+<!-- #660 -->
+**Cash account set / 现金科目集合**:
+The governed, versioned list of which chart accounts count as a client's cash, decided by a human and by no other path. Each member carries WHY it is cash — a bank-registry marker, or a person's declaration of cash or petty cash — because petty cash has no structural marker in the chart at all and a name or a code is never evidence. Membership includes INACTIVE accounts: an account retired last year still holds the balance it held. A version is sealed when it is published and superseded rather than edited, so a figure computed last month keeps the membership it was computed under.
+_Avoid_: An account-type filter; a metric account set (that family refuses inactive accounts by design); anything derived from an account's name or code.
+
+**Book cash / 账面现金**:
+What the LEDGER says a client's cash accounts hold: every approved debit minus every approved credit over the published cash account set, cumulative from inception with no fiscal-year reset and an approved opening counted exactly once. It is a balance at an as-of date, not a flow over a period.
+_Avoid_: Statement balance; available balance; cleared balance — all three are a bank's claim at a date the bank chose, and they may legitimately differ from this by everything that has not cleared.
+
+**Period profit / 期间利润**:
+Income minus expense over one interval of approved entries, excluding the year-end closing transfer — the entries that carry BOTH the year-end mark and the closing-transfer mark. A year-end revenue CORRECTION carries only the first and still counts. Reversals and negative corrections move the figure by their signed amount; the figure is never clamped at zero, so a month the books say went backwards reads as a loss.
+_Avoid_: Net profit as a synonym for a statutory or tax figure; a figure with the year-end roll left in; anything floored at zero.
+
+**Source watermark / 来源水位**:
+The database snapshot a read actually saw, carried on the answer in text form so a later question — "had this figure already seen that posting?" — is answerable rather than guessed. Every figure produced by one read shares one watermark, which is what makes four faces of one envelope provably about one instant.
+_Avoid_: A timestamp (two transactions with the same clock reading can be on either side of a snapshot); a cache key; a freshness promise.
+
+**Definition version / 定义版本**:
+The named rule a published figure was computed under, carried on the figure itself so a number and the definition behind it travel together. A change of rule is a new version rather than a silent recomputation of old answers.
+_Avoid_: Metric definition version — that belongs to the delta-metric lane and is a different object; a schema or migration number; an API version.

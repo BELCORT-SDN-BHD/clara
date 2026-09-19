@@ -25,6 +25,8 @@
 // server at all. That is the right instrument for "this walk needs a populated firm", and it is
 // why this module stays empty rather than growing a persona.
 
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 /**
  * THE ONE FIXTURE ROW THIS LANE OWNS, and why it cannot be a `page.route` overlay like every
  * other row the walk needs.
@@ -151,6 +153,77 @@ const EMPTY_RPCS = [
 ];
 
 /**
+ * #660 — the money band's default envelope: a client with NO published cash account set.
+ *
+ * That is the honest default for a mock estate with no seeded data, and it is deliberately not a
+ * zero: `clara.get_client_financial_pack` answers `status:'unknown'` with a NULL `value_cents` and
+ * reason `cash_set_unpublished` for exactly this condition, because "nobody has said which
+ * accounts count as cash" and "this client has no cash" are different sentences. A walk that
+ * wants real figures overlays them with its own per-page `page.route`.
+ */
+const MONEY_PERIOD = {
+  start: "2026-09-01", end: "2026-09-30", as_of: "2026-09-18", timezone: "Asia/Kuala_Lumpur",
+};
+const MONEY_ENVELOPE = {
+  unit: "minor_units",
+  currency: "MYR",
+  period: MONEY_PERIOD,
+  computed_at: "2026-09-18T02:00:00.000Z",
+  definition_version: "clara.client-financial-pack/v1",
+  source_watermark: "100:100:",
+};
+const EMPTY_FINANCIAL_PACK = {
+  computed_at: "2026-09-18T02:00:00.000Z",
+  period: { ...MONEY_PERIOD, month: "2026-09-01", is_mtd: true },
+  coverage_floor: null,
+  cash: {
+    ...MONEY_ENVELOPE,
+    value_cents: null, status: "unknown", coverage: "unknown",
+    coverage_reason: "cash_set_unpublished",
+    comparison: null, set: null, points: [], composition: [],
+    composition_total: 0, composition_truncated: false,
+  },
+  profit: {
+    ...MONEY_ENVELOPE,
+    value_cents: 0, status: "ok", coverage: "ok", coverage_reason: "no_posted_entries",
+    // THE COMPOSITION LIVES IN THE GROUP, because that is where the door puts it and where the
+    // parser reads it. A mock that invents a second spelling is a mock that can keep a dead
+    // drilldown green (0232's `profit.composition`, not a top-level `profit_composition`).
+    comparison: null, composition: [], composition_total: 0, composition_truncated: false,
+  },
+  income: {
+    ...MONEY_ENVELOPE,
+    value_cents: 0, status: "ok", coverage: "ok", coverage_reason: "no_posted_entries",
+    comparison: null, composition: [], composition_total: 0, composition_truncated: false,
+  },
+  expense: {
+    ...MONEY_ENVELOPE,
+    value_cents: 0, status: "ok", coverage: "ok", coverage_reason: "no_posted_entries",
+    comparison: null, composition: [], composition_total: 0, composition_truncated: false,
+  },
+  series: [],
+  unmarked_closing_entries: 0,
+  unmarked_closing_entries_series: 0,
+  series_coverage_reason: null,
+  excluded_by_design: ["receivable", "payable", "statement_balance"],
+};
+
+/** The proposal read with nothing to propose — this estate registers no bank account. */
+const EMPTY_CASH_PROPOSAL = {
+  computed_at: "2026-09-18T02:00:00.000Z",
+  as_of: "2026-09-18",
+  timezone: "Asia/Kuala_Lumpur",
+  unit: "minor_units",
+  currency: "MYR",
+  definition_version: "clara.client-financial-pack/v1",
+  published_version_id: null,
+  candidates: [],
+  never_proposed: ["declared_cash", "declared_petty_cash"],
+  never_proposed_reason:
+    "no structural marker exists for declared cash or petty cash; a human declares it (0121:4749)",
+};
+
+/**
  * Answer one request, or return false to let `serve-built.mjs` fall through to its 404.
  *
  * `list_firm_timeline` is DELIBERATELY NOT HANDLED. This mock exercises the compatibility arm
@@ -180,6 +253,38 @@ export async function handleHomeBoardSupabase(request, response, path, url, send
   // `EMPTY_RPCS` below: that arm answers `[]`, which is the wrong shape for a scalar JSONB door.
   if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_portfolio_pack") {
     sendJson(response, 200, EMPTY_PORTFOLIO_PACK, cors);
+    return true;
+  }
+  // #660 — THE MONEY BAND'S THREE VERBS, APPENDED after the existing arms and ABOVE the
+  // `EMPTY_RPCS` array arm, which answers unconditionally (DECISIONS §6.1: `serve-built.mjs`'s
+  // dispatch chain is SEMANTIC, not sorted — a lane whose verbs another arm answers
+  // unconditionally must dispatch ABOVE that arm). These three are not in `EMPTY_RPCS` today, so
+  // the placement is belt rather than a live fix; it is stated here so a later editor does not
+  // "sort" them below it. The `EMPTY_RPCS` arm and its dispatch position are NOT moved.
+  //
+  // THE PACK'S DEFAULT IS THE UNPUBLISHED-CASH-SET FACE, which is the honest answer for a mock
+  // estate with no seeded data and no published cash set: `unknown` with a NULL value, never a
+  // fabricated `RM 0.00`. A walk that wants figures overlays them with its own `page.route`.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_client_financial_pack") {
+    sendJson(response, 200, EMPTY_FINANCIAL_PACK, cors);
+    return true;
+  }
+  if (request.method === "POST" && path === "/rest/v1/rpc/propose_client_cash_accounts") {
+    sendJson(response, 200, EMPTY_CASH_PROPOSAL, cors);
+    return true;
+  }
+  // The authoring door is a WRITE. This lane has nothing to write to, so it answers the shape a
+  // successful publish returns and nothing else changes — a walk that wants the published state
+  // afterwards overlays its own pack.
+  if (request.method === "POST" && path === "/rest/v1/rpc/publish_client_cash_account_set") {
+    const body = await readCachedJson(request);
+    sendJson(response, 200, {
+      cash_account_set_version_id: "00000000-0000-4000-8000-00000000c5e7",
+      revision: 1,
+      member_count: Array.isArray(body?.p_members) ? body.p_members.length : 0,
+      effective_from: "2026-01-01",
+      definition_version: "clara.cash-account-set/v1",
+    }, cors);
     return true;
   }
   if (request.method === "POST" && EMPTY_RPCS.includes(path)) {

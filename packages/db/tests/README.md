@@ -598,3 +598,56 @@ to mint a world or to read a catalog back for a census.
 Fixtures: `knowledge-retrieval-fixtures.mjs`. Gate: `knowledge-retrieval-preintegration-gate.mjs`
 (preloaded, the battery SKIPS loudly below 0230; a FOCUSED run without it FAILS loudly — both
 arms were measured by renaming the cohort's objects on the rig and restoring them).
+## #660 — `client-financial-pack.test.mjs` (0232)
+
+Frontier-gated on the `client_financial_pack$` stem. Its escape is
+`client-financial-pack-preintegration-gate.mjs`, registered in `packages/db/package.json`'s `"test"`
+chain at its MIGRATION-order position (after `preview-invite-preintegration-gate.mjs`, 0224). A
+FOCUSED run does not preload it and FAILS loudly on a database without the lane, because a skip is
+not evidence — proven both ways on a rig: dropped-lane focused run without the module errors with
+its own message; with the module preloaded, 29 cells skip and none fail.
+
+`rig-meta.mjs` carries `CLIENT_FINANCIAL_PACK_0232_COHORT` at the three sites the 0214 cohort uses.
+It is bimodal (asserted only once any of its names is live) because the `db-slice-frontiers` matrix
+runs this package against earlier frontiers. Cohorts are FUNCTION-name lists — `liveNames` is built
+from `pg_proc` rows — so 0232's two new RELATIONS are asserted by the migration's own tail and by
+this battery, never by the cohort.
+
+SEVEN CELLS WERE ADDED IN THE FIX ROUND, each for a defect a review found and each red before its
+fix: `historic_comparison_full_prior_month` (a complete month compares against the WHOLE prior
+month), the `pre_coverage_point` extension (an unavailable month-end produces no comparison amount),
+the `composition_bounded` extension (`profit.composition` lives in the profit group, where the
+browser's parser reads it), `composition_account_cap_disclosed` (51 accounts; the 50-row cap reports
+itself), `cash_set_published_after_books_start` (one revision plus a backdated import is not a
+version change), `unmarked_history_series_disclosed` (the disclosure covers all six drawn months)
+and the `cash_set_members_sealed` extension (sealed against UPDATE and DELETE, not only INSERT).
+
+FIX ROUND 2 ADDED ONE MORE, `p660.set.publish_race_loser_code` (recheck NF-1), and it is the only
+cell in this battery that needs TWO REAL BACKENDS: `select … for update` is the mechanism under
+test and a lock is only a lock when a second transaction actually waits on it. The local
+`twoSessions` / `asHumanSession` / `waitBlockedByOrThrow` helpers in
+`client-financial-pack-fixtures.mjs` are copies of `binding-proposal-pr-1-helpers.mjs:22-67` and
+`checkout-convergence-fixtures.mjs:364-384` — the house idiom is a LOCAL copy per lane, and the
+block is proved from `pg_blocking_pids` rather than slept through. The cell was red first for the
+exact shape the recheck measured: the loser was refused CLR10 `first_version_after_books_start`
+instead of CLR11 `cash_set_version_raced`.
+
+FOUR FIXTURE SHORTCUTS, EACH LABELLED in `client-financial-pack-fixtures.mjs`'s header, because
+each builds a condition no live writer can produce:
+
+- `coa_accounts.is_bank_account` — minted only by `add_bank_account` / `remap_bank_account_coa`
+  (0121:4721-4722), both of which want a whole bank-account registration.
+- `coa_accounts.is_active = false` — there is no retire door (the same gap
+  `work-journal-fixtures.mjs:196-201` states for its own retired account).
+- `journal_entries.close_receipt_id` on an entry whose `closing_transfer` is still false — the
+  exact shape a PRE-0120 close left behind, which `finalize_close` can no longer produce. Runs
+  under `session_replication_role = replica` because `clara.journal_entries` is append-only by
+  trigger, and every `close_receipts` column is stated BY NAME rather than derived from the
+  catalogue: a receipt row assembled by guessing from column names is a fixture that can silently
+  mean something else after a schema change.
+- withdrawing a plan's `first_year_zero_opening` answer, so the opening is GENUINELY uncaptured.
+  The estate's own precedence (`components/registers/opening-position-gate.tsx:85, :95-97`) ranks
+  that row ABOVE `carry_down_deferred`, and the rig's legacy-activation bridge plants both, so a
+  client carrying both has a KNOWN opening. This is the only way to build the shape
+  `opening_carry_down_deferred` is actually about — and the red cell that forced it found a real
+  defect in the door, which 0232 now fixes by respecting that same precedence.
