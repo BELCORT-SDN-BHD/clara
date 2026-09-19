@@ -2417,6 +2417,37 @@ export const BANK_MATCH_EVIDENCE_0226_COHORT = [
 //   no database object either: it writes through `clara.persist_document_extraction`, which has
 //   been granted and rostered since 0007.
 // #656 END
+// #636 [0229, the durable intake batch] — its own cohort for the same "wholly present or wholly
+// absent" reason 0221's and 0224's carry. SIX granted names, not five: the sixth,
+// `sweep_intake_batch_cancellations`, exists because clara_runtime holds NO SELECT and NO policy
+// on clara.operation_receipts (0178:1619-1630 asserts both) and none on the batch PARENT, so the
+// reconciler belt can find neither the live children of a `cancelling` parent nor the parent
+// itself without a definer worklist door. Orchestrator ruling, DECISIONS §6.1 (2026-09-19).
+//
+//   FIVE RUNTIME DOORS — clara_runtime ONLY, the same lane clara.create_document_intake sits in
+//   (0007:2780-2799). Reached by a human through the runtime's own authenticated route, never by
+//   PostgREST: each takes its actor as an ARGUMENT and rechecks that human's live membership at
+//   bookkeeper rank, because clara._human_ctx reads a JWT the pool does not carry (0004:299-309).
+const INTAKE_BATCHES_0229_RUNTIME_FNS = [
+  "open_intake_batch", "attach_intake_to_batch", "set_intake_batch_member_dependency",
+  "cancel_intake_batch", "sweep_intake_batch_cancellations",
+];
+//   ONE HUMAN READ — clara_authenticated ONLY. The batch board is a human read (0214's own
+//   argument); the pool gets its worklist from the sweep verb instead, so granting the board to
+//   clara_runtime would be a second, unfloored way to read a firm's attention surface.
+const INTAKE_BATCHES_0229_HUMAN_FNS = ["get_intake_batch"];
+//   …and the ungranted closure: the three shared helpers and the two stamp triggers.
+//   _intake_batch_pending_members joined in fix round 1 (ADV-636-01): it is what makes the
+//   terminal flip mean "nothing live AND nothing that can still become live".
+const INTAKE_BATCHES_0229_UNGRANTED_FNS = [
+  "_intake_batch_actor_ctx", "_intake_batch_live_children", "_intake_batch_pending_members",
+  "_tf_intake_batch_member_intake_stamp", "_tf_intake_batch_member_work_stamp",
+];
+export const INTAKE_BATCHES_0229_COHORT = [
+  ...INTAKE_BATCHES_0229_RUNTIME_FNS, ...INTAKE_BATCHES_0229_HUMAN_FNS,
+  ...INTAKE_BATCHES_0229_UNGRANTED_FNS,
+];
+// #636 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2639,6 +2670,10 @@ export const ALLOWED = {
     // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
     // core it wraps (clara._fa_compute_charges) stays in FA_0041_UNGRANTED_FNS with no role at all.
     ...FA_DEPRECIATION_0227_HUMAN_FNS,
+    // #636 [0229] the durable batch board — clara_authenticated ONLY; clara_runtime reaches it
+    // nowhere (its worklist is clara.sweep_intake_batch_cancellations), and both agent read roles
+    // and all four wake lanes gain ZERO.
+    ...INTAKE_BATCHES_0229_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2821,6 +2856,11 @@ export const ALLOWED = {
     // (the same lane clara.admit_journal_work sits in, acting OBO a named human); the read is held
     // by BOTH lanes because the run echoes what it posted.
     ...TRADE_INVOICES_0225_RUNTIME_FNS, ...TRADE_INVOICES_0225_HUMAN_FNS,
+    // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
+    // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
+    // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
+    // clara.operation_receipts.
+    ...INTAKE_BATCHES_0229_RUNTIME_FNS,
     ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
@@ -3120,6 +3160,7 @@ export async function grantMatrixFailures() {
   // of them is a wrapper with nothing to publish, or a parser nothing calls.
   failures.push(...cohortFailures("#657 0226 bank match evidence lane", BANK_MATCH_EVIDENCE_0226_COHORT, liveNames));
   // #657 END
+  failures.push(...cohortFailures("#636 0229 intake-batch lane", INTAKE_BATCHES_0229_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

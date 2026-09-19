@@ -685,3 +685,56 @@ internally inconsistent.
 linking back to `?tab=opening`. An approved opening item posts an ordinary entry with
 `origin='manual'` (0017:3375-3384), so before this the client's own books showed their opening
 position and a journal typed this morning under the same word.
+## The durable batch card vs the live upload queue (#636)
+
+Two components on one surface answer two different questions, and conflating them is the defect
+`intake-receipts.tsx:5-10` was written to close.
+
+- `upload-panel.tsx` is the LIVE transfer view: what THIS browser is doing right now. It carries
+  the only legitimate `Progress` on the tab — a MEASURED byte transfer, with `value={null}` for the
+  unmeasurable case.
+- `intake-batch-card.tsx` is the DURABLE parent: what the firm's books know happened. Every number
+  and every row is read back through `clara.get_intake_batch`, so it survives a reload, a new tab
+  and a different device.
+
+**NO `Progress` AND NO PERCENTAGE ON THE CARD, IN ANY STATE.** The door supplies no denominator
+(0229 asserts it in its own tail); appendix D item 44 permits `Progress` only for a known
+numerator/denominator and says "Indeterminate agent Work keeps its durable named state instead";
+`work-detail.tsx:6-12` already forbids one for a single Work. The card renders labelled facet counts
+with their coverage word. The five facets OVERLAP — a member can be admitted AND waiting — so they
+legitimately exceed the member count and are never summed.
+
+**THE CAPACITY COPY SAYS 08:00, NEVER "MIDNIGHT" AND NEVER "TOMORROW".** The daily document window
+is `date_trunc('day', now() at time zone 'utc')` (0007:1644), whose boundary is 08:00
+`Asia/Kuala_Lumpur` — MEASURED on a migrated rig. The card renders the DOOR's own
+`resets_at_local`, so the string cannot drift from the wall it describes, and
+`lib/documents/batch-url-state.test.ts` fails if either word is ever written into the catalogue.
+
+**NO NEW ROUTE AND NO NAVIGATION LEAF.** The batch is `?batch=<uuid>` URL state on the two
+Documents leaves that already exist, on `lib/documents/url-state.ts`'s own idiom: `router.push` to
+open so Back closes, `router.replace` when the page was loaded directly at it, every other
+parameter preserved, and a malformed id answered as not-found rather than folded into "nothing is
+open".
+
+**THE TWO MOUNTS DIFFER ONLY BY `clientId`.** `components/firm/documents/unassigned-sources.tsx`
+mounts the same card with `clientId={null}`; `documents-workbench.tsx` mounts it with the real
+client's id. Nothing gates Cancel on either mount — the rows carry navigation, not acts, so there was
+never a second job for a read-only flag to do, and Stop is reachable on both for the same reason a
+person looking at a firm-wide board is exactly the person who needs to stop a batch.
+A TERMINAL batch offers no Stop on either mount — an affordance that could only refuse.
+
+**THE STOP DIALOG COUNTS WHAT IS STILL ARRIVING, NOT ONLY WHAT IS RUNNING.** `get_intake_batch`
+returns `pending_members` (members with no Work yet whose intake is still arriving or whose document
+is still being read), and the dialog says so. Without it, a batch stopped during ingest — the moment
+a hundred-file batch is most likely to be stopped — read "0 operations are still running" while a
+hundred were.
+
+**A STOP THAT CANNOT FINISH SAYS SO.** When the door answers `cancel_blocked`, the card renders a
+banner naming the reason and the remedy instead of showing "stopping" for ever. Today the one value
+is `canceller_not_active`: the fan-out must re-issue with the stored actor, so if that person leaves
+the firm, the remaining children cannot be stopped under that decision.
+
+**ONE CONFIRM, ONE GOVERNED CALL.** `intake-batch-cancel-dialog.tsx` performs exactly one
+`POST /api/runtime/intake/batches/:id/cancel`; the fan-out — one `clara.cancel_accounting_work` per
+live child — is the server's. One op key per open decision, minted with `work-cancel-dialog.tsx`'s
+`useDecisionKey` idiom copied with its source named.

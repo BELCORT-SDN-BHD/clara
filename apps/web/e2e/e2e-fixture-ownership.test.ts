@@ -67,6 +67,7 @@ const LANE_MOCKS = [
   "fixed-asset-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
+  "intake-batch-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
   "knowledge-mock.mjs",
@@ -324,6 +325,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `p_candidate` before it dispatches at all — so there is nothing to declare in either
   // column, which is the state a lane mock should be in.
   "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
+  // #636's intake-batch lane. Its ONE PostgREST verb gates on `p_batch` being one of its own three
+  // batch ids BEFORE it answers, so there is nothing to declare in either column.
+  //
+  // THE SAME COVERAGE LIMIT `journal-work-mock.mjs`'s row names, and it is recorded rather than
+  // hidden: this lane's TWO runtime routes — `POST /api/intake/batches` and
+  // `POST /api/intake/batches/:id/cancel` — are matched with a REGEX because the second carries an
+  // id, so this census cannot see either of them at all. The cancel route returns false on a batch
+  // id this lane did not mint; the open route is unconditional, because a batch it opens IS its own
+  // by construction (it answers with this lane's id and nobody else's walk posts to that path). A
+  // green on this row means "every handler the reader can see is scoped", not "this file is clean".
+  "intake-batch-mock.mjs": { unscopeable: [], debt: [] },
   // #646's source-correction lane. Every literal-path handler names its own client or its own
   // `c0ee0c0c-` document prefix before it answers, and the RPC half guards on an exact-verb
   // allow-list BEFORE `readJson` and then on its own document/question/correction id — so there is

@@ -604,6 +604,18 @@ _Avoid_: A log; a span with an attribute bag; anything that stores what was sent
 The durable per-upload record a file's arrival leaves behind, in its own right and independent of the browser session that made it: who uploaded it, from which entrance (documents tab or chat), the declared name, type and size, the status it has reached and — once custody happens — the document it became. It is recoverable at mount, so closing the tab mid-batch loses the QUEUE and not the answer; and it carries no client, because attribution is a separate act on the document rather than a property of the upload.
 _Avoid_: Treating `finalizeIntake`'s own advisory return as the receipt (only a subsequent read is DB-confirmed); the upload queue's in-memory row; a record that implies the file was filed to anyone.
 
+**Intake batch**:
+A firm-scoped, durable grouping of admitted sources opened by one person in one act. It holds no client, no counts and no transaction: the members that WAIT are precisely the unattributed ones, every number is derived at read time from the members themselves, and the children fail, finish and are cancelled independently of one another. Its three states are open, cancelling and cancelled — an open batch is never "settled", because nothing closes one and a new member may always join.
+_Avoid_: A transaction; a client-scoped object; the browser's upload queue; a synonym for a Work; a stored progress counter.
+
+**Batch member**:
+One admitted source's membership of an intake batch, carrying up to three identities IN ORDER — its intake always, its document once the bytes are in custody, its Work once some lane admits one — and at most one declared dependency. A second attach of the same intake is absorbed rather than duplicated, and an attach to a different batch is refused by name. The three populations are reported separately, because an unattributed file can never be a child Work.
+_Avoid_: Calling an unattributed source a Work; calling a processing task a child; a percentage; a total; a page length.
+
+**Member dependency**:
+The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at 08:00 `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
+_Avoid_: Treating a quota block as a failure; treating the declared value as the only source of "waiting".
+
 **Unassigned source**:
 An adopted document with no live filing: the firm holds it and its bytes are sealed and readable, but no client's shelf has claimed it. It is firm-visible, awaits exactly ONE attribution act, and leaves the population the moment that act lands. A document that is unassigned is not a document that failed — it is a document nobody has answered a question about yet.
 _Avoid_: An unprocessed or failed upload; a document whose filing was retired (that one has a history); a per-person inbox — the population is the firm's, not the uploader's.

@@ -121,6 +121,10 @@ components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/documents-url-state.test.tsx
 components/documents/documents-workbench-refresh.test.tsx
+components/documents/intake-batch-a11y.test.tsx
+components/documents/intake-batch-cancel.test.tsx
+components/documents/intake-batch-card.test.tsx
+components/documents/intake-batch-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
@@ -315,6 +319,7 @@ lib/coding/reads.test.ts
 lib/command/do-action-floors.test.ts
 lib/command/do-actions.test.ts
 lib/command/routes.test.ts
+lib/documents/batch-url-state.test.ts
 lib/documents/bytes.test.ts
 lib/documents/capability-registry.test.ts
 lib/documents/copy.test.ts

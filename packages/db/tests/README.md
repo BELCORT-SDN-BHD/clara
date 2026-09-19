@@ -511,3 +511,31 @@ Three cells were corrected in the fix-round, each because a cell must assert wha
   and value grammar, so a `toRegion` drift reds there instead of leaving this whole family green
   while production breaks — and the World leg drives the real producer's bytes into the real
   writer end to end.
+### The intake-batch battery (#636)
+
+`intake-batch.test.mjs` is frontier-gated on the `intake_batches$` stem, never on a migration
+number, and `intake-batches-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED
+run does not preload it and fails loudly on a database without the lane, because a skip is not
+evidence (measured: 27/27 fail with the lane absent, 27/27 pass with 0229 applied).
+
+Its 0229 cohort in `rig-meta.mjs` (`INTAKE_BATCHES_0229_COHORT`) counts **SIX** granted names, not
+five. The sixth, `sweep_intake_batch_cancellations`, exists because `clara_runtime` holds neither a
+grant nor a policy on `clara.operation_receipts` (0178:1619-1630 asserts both) and none on the
+batch parent, so the reconciler belt cannot otherwise find the live children of a `cancelling`
+parent. Orchestrator ruling, refresh-wave-2026-09-18 DECISIONS §6.1.
+
+The battery joins TWO existing worlds rather than building a third: `work-journal-fixtures.mjs`
+supplies the Work half (admission, runs, the wake posting verb, the committed receipt) and
+`rig-docs-fixtures.mjs` supplies the intake half. `seedIntake` is LABELLED fixture DML — the estate
+has no single door that drives bytes from `uploading` to `verified` without a real upload — but
+`clara.finalize_document_intake` (the REAL door) is what creates the document, which is what the
+custody trigger keys on, and `clara.file_document` is what makes a Work's `source_refs` admissible.
+
+Three things a later hand will trip over. `clara.document_ingest_reservations.created_at` is
+IMMUTABLE (`_tf_reservation_update` raises CLR08), so `p636.batch.capacity_window_utc` pins the
+window by evaluating the reservation body's OWN predicate over crafted instants rather than by
+back-dating a row. `clara.firm_memberships.status` admits only `active` / `removed`, so the
+mid-batch revocation cell flips to `removed`. And a child whose run is merely STOPPING is still
+live: `p636.batch.sweep_settles` proves the sweep does NOT settle its parent until the engine
+settles that run, which is `appendix-C-journeys.md:82`'s "do not show terminal cancellation early"
+as an executable cell.

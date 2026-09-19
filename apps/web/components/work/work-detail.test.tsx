@@ -152,6 +152,9 @@ function App(props: {
    *  socket. Undefined leaves the component's own read in place, which is what the door-census
    *  cells above measure. */
   loadTradeInvoice?: (workId: string, opts?: unknown) => Promise<unknown>;
+  /** #636 — the batch this Work belongs to. DEFAULTED to null so no cell reaches a socket; the
+   *  two cells that care inject a row. */
+  loadBatchOrigin?: (workId: string, deps: unknown) => Promise<unknown>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -172,6 +175,7 @@ function App(props: {
       storage: props.storage ?? null,
       loadLinks: (props.loadLinks ?? (async () => [])) as never,
       ...(props.loadTradeInvoice === undefined ? {} : { loadTradeInvoice: props.loadTradeInvoice as never }),
+      loadBatchOrigin: (props.loadBatchOrigin ?? (async () => null)) as never,
     }),
   });
 }
@@ -1925,4 +1929,30 @@ test("631 + 641: Diagnostics renders INSIDE the Activity tab, and opening that t
       await h.unmount();
     }
   });
+});
+
+test("p636.work_detail.batch_row — the 'part of batch' row renders for a Work that has NOT posted (V636R-2)", async () => {
+  // It used to live inside PostedEntrySection, which renders only when `entry !== null`
+  // (`work.result?.entry_id`), so the reverse address was missing for every queued, running,
+  // waiting, refused or cancelled child — precisely the children AC5's recovery language is about.
+  const h = await renderComponent(App({
+    load: async () => data({ work: workRow({ status: "refused" }), entry: null }),
+    loadBatchOrigin: async () => ({ batchId: "b1111111-1111-4111-8111-111111111111", label: "April sources" }),
+  }));
+  for (let i = 0; i < 4; i += 1) await h.settle();
+  const text = (h.container as { textContent: string | null }).textContent ?? "";
+  assert.match(text, /Part of the batch/, "a refused Work still shows which batch it came from");
+  assert.match(text, /April sources/, "…and names it");
+  await h.unmount();
+});
+
+test("p636.work_detail.batch_row — a Work in no batch shows no row, and a FAILED read is the same absence", async () => {
+  const h = await renderComponent(App({
+    load: async () => data({ work: workRow({ status: "refused" }), entry: null }),
+    loadBatchOrigin: async () => { throw new Error("read failed"); },
+  }));
+  for (let i = 0; i < 4; i += 1) await h.settle();
+  assert.ok(!((h.container as { textContent: string | null }).textContent ?? "").includes("Part of the batch"),
+    "the page never says a Work is NOT in a batch — it only says it IS in one");
+  await h.unmount();
 });

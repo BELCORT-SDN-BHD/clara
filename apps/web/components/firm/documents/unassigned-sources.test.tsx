@@ -15,6 +15,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
+// #636 — this leaf now mounts the intake-batch card, which reads `?batch=` out of the URL, so the
+// component depends on the App Router the way `documents-workbench.tsx` already did. Without these
+// three contexts `useRouter()` throws "invariant expected app router to be mounted" and every cell
+// below measures that crash instead of what it claims to.
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { renderComponent, textOf } from "../../../test/hookHarness";
 import { enableDomInspection } from "../../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../../lib/session-accessor";
@@ -63,9 +69,22 @@ function leafFetch(script: Script, calls: string[]): typeof fetch {
   }) as typeof fetch;
 }
 
+const NAV_ROUTER = {
+  push: () => {}, replace: () => {}, back: () => {}, forward: () => {}, refresh: () => {}, prefetch: () => {},
+};
+
 function wrap(node: ReturnType<typeof createElement>) {
   return createElement(NextIntlClientProvider, {
-    locale: "en", messages, timeZone: "Asia/Kuala_Lumpur", children: node,
+    locale: "en", messages, timeZone: "Asia/Kuala_Lumpur",
+    children: createElement(
+      SearchParamsContext.Provider as never,
+      { value: new URLSearchParams("") as never },
+      createElement(
+        AppRouterContext.Provider as never,
+        { value: NAV_ROUTER as never },
+        createElement(PathnameContext.Provider as never, { value: "/documents" as never }, node as never),
+      ),
+    ),
   });
 }
 

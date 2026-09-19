@@ -908,3 +908,89 @@ account this client's chart has not got with a bare SQLSTATE 23503; and `clara._
 on `clara.journal_lines` refuses an opening DRAFT into a closed fiscal year with CLR19
 `write_into_closed_period`, long before `approve_opening_seed` is reached. The runtime classifies
 the first (`lib/opening-parse.mjs`'s `mapOpeningFkError`); the second is why 0228 writes no recut.
+## The intake batch relation family (#636, 0229)
+
+`0229_intake_batches.sql` adds a firm-scoped, durable parent over client-attributed child Work, so
+a hundred uploaded sources can be watched as one thing while each child keeps its own address.
+It **recuts nothing**: twelve live bodies are pinned by `sha256(prosrc)` in the prestate and
+re-read byte-identical in the tail, which is the file's own machine-checkable proof.
+
+**Three relations.** `clara.intake_batches` (the parent: firm-scoped, **no `client_id`** because the
+members that wait are the unattributed ones, **no stored counts**, three states `open` /
+`cancelling` / `cancelled`), `clara.intake_batch_members` (one admitted source, carrying up to three
+identities **in order** — intake always, document once in custody, Work once admitted — and at most
+one declared dependency) and `clara.intake_batch_member_events` (the append-only history, with the
+`_tf_append_only` / `_tf_no_truncate` pair). All three are FORCE RLS with an owner policy and a
+`clara_authenticated` SELECT predicated on `clara.jwt_firm()`; **no application role holds DML on
+any of them**. `clara_runtime` gets SELECT on the two CHILDREN only — the reconciler belt needs to
+see them — and nothing at all on the parent.
+
+**DERIVE, NEVER STORE.** The shape copied is `clara.seeding_batches` (0017:1252, facets derived at
+read time by live counts, 0017:4602-4610); the shape rejected by name is
+`clara.sales_backfill_batches` (0046:496) whose `admitted_count` is a stored counter a verb
+increments (0046:2287). A counter drifts from its children the moment one is cancelled.
+
+**Six granted names.** Five write/sweep doors are `clara_runtime` ONLY, actor-explicit, SECURITY
+DEFINER, `_reserve_op`/`_finish_op` + `_audit`, with no `_human_ctx` twin (the pool carries no JWT,
+0004:299-309) — `open_intake_batch`, `attach_intake_to_batch`,
+`set_intake_batch_member_dependency`, `cancel_intake_batch` and
+`sweep_intake_batch_cancellations`. One read, `get_intake_batch`, is `clara_authenticated` ONLY and
+SECURITY INVOKER with the inline bookkeeper floor (0214:262-274's reason).
+
+**Why the sixth name exists.** `clara.operation_receipts` carries no `clara_runtime` grant and no
+`clara_runtime` policy — 0178's own tail asserts both (0178:1619-1630) — and the runtime holds no
+SELECT on the batch parent. So the pool can read neither the committed receipts that decide which
+children are still live nor the `cancelling` parent itself. `sweep_intake_batch_cancellations` is
+the bounded, oldest-first, op-key-less worklist door on the `release_held_document_tasks(int)`
+precedent, and it performs the terminal flip.
+
+**The fan-out cancel, and why the parent STORES its decision.** `cancel_intake_batch` is NOT one
+transaction and must not be: it returns the live child list and the caller invokes
+`clara.cancel_accounting_work` once per child, one call per transaction, so a child that already
+posted answers `already_completed` and KEEPS its receipt (0199:230-272). Each child's key is
+derived as `<cancel_op_key>:<work_id>`, and the author is the STORED `cancel_requested_by` —
+`clara._work_door_ctx` hashes `{work, author}` (0184:262-264), so a resumed fan-out that passed the
+sweep's own identity would raise CLR10 `op_key_conflict` on every child. Measured on the rig, not
+argued.
+
+**Two lane-agnostic stamp triggers.** `_tf_intake_batch_member_intake_stamp` (AFTER UPDATE on
+`clara.document_intakes`) stamps custody on the `document_id` NULL → non-NULL transition and, as a
+belt, declares `awaiting_capacity` when an intake fails with `failure_code='limit'`.
+`_tf_intake_batch_member_work_stamp` (AFTER INSERT on `clara.accounting_work`) joins whatever Work
+names the member's document — at most one document per Work is possible (0182:520-527) — so #655's
+invoice lane and the autodraft lane stamp it without knowing this table exists. Both open with a
+cheap negative; the Work-side one reads `ix_intake_batch_members_open`, which is empty on a firm
+with no open batch.
+
+**What "cancelled" means, exactly.** A batch reaches `cancelled` only when nothing is live AND
+nothing can still become live: `_intake_batch_live_children` is the fan-out's worklist (members
+holding a Work that is neither terminal nor already carrying a committed receipt) and
+`_intake_batch_pending_members` is the other half — members with no Work yet whose intake is still
+arriving or whose document still has a queued/running processing task. Both the door and the sweep
+require both to be empty. Without the second, a batch stopped during ingest — which is exactly when
+a hundred-file batch gets stopped — flipped terminal at once, the sweep never looked at it again,
+and every one of its files went on to be admitted and posted. A member merely sitting in custody
+with nothing running is NOT pending: a Work another lane admits for it afterwards is that lane's
+own new decision, taken after the stop.
+
+**A stop that can never finish is NAMED.** The fan-out must re-issue with the stored
+`cancel_requested_by`; if that person's membership goes away, every child refuses CLR04 on every
+sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'` from the live
+membership rather than storing a fourth state, the card renders the remedy, and the reconciler belt
+counts that parent as `batchCancelBlocked` rather than as one more transient failure.
+
+**`settled` and `failed` are NOT compatible facets.** The five facets overlap by construction and
+are never summed, but a member holding a committed receipt is business-complete and is excluded
+from `failed` outright; the task-error arm looks only at the CURRENT attempt per lane
+(`distinct on (lane)` by descending `version_n`), because a retry is a new row
+(`unique (document_id, engine_id, version_n)`) and a terminally-failed row is immutable. Measured
+on the World leg's own data before the fix: 31 of 35 members reported "failed" held a committed
+receipt.
+
+**The capacity wall is a WAITING state, not a raised limit.** #636 changes no default and touches
+none of the three reservation bodies. Measured on a migrated rig: 100 ≤1MB PDFs are admitted and
+the 101st is refused CLR18 on the DOCS guard with both ceilings flush (docs 100 / pages 1000); 100
+images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window is
+`date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. **08:00 Asia/Kuala_Lumpur** — the
+read reports that in its `capacity` block so the surface can say 08:00 rather than "midnight".
+Moving the window to MYT is #635's ticket.

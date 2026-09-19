@@ -82,6 +82,9 @@ import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { purposeLabel } from "@/lib/work/purpose-label";
 import { getWorkClaimOrigin, type WorkClaimOrigin } from "@/lib/work/staff-expense-claim-reads";
 import { getTradeInvoice, type TradeInvoiceRead } from "@/lib/work/trade-invoice-reads";
+// #636 — the reverse row. NO `list_accounting_work` recut (that body is #905's and the Work-list
+// projection is frozen this wave): the LIST says nothing about batches; DETAIL gets ONE line.
+import { getWorkBatchOrigin, type WorkBatchOrigin } from "@/lib/documents/intake-batch";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -176,6 +179,7 @@ export function WorkDetailView({
   loadLinks = listEntryLinks,
   loadClaimOrigin = getWorkClaimOrigin,
   loadTradeInvoice = getTradeInvoice,
+  loadBatchOrigin = getWorkBatchOrigin, // #636
 }: {
   clientId: string;
   workId: string;
@@ -202,6 +206,7 @@ export function WorkDetailView({
    *  answers NULL for every Work that does not, so this read costs one round trip and never
    *  invents an origin — the same discipline `loadClaimOrigin` is held to. */
   loadTradeInvoice?: typeof getTradeInvoice;
+  loadBatchOrigin?: typeof getWorkBatchOrigin; // #636
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
@@ -277,6 +282,11 @@ export function WorkDetailView({
    *  from "not a trade invoice" on purpose: both leave the block absent, and the page never says
    *  a Work is NOT one, only that it IS. Nothing on this page is blocked by it. */
   const [tradeInvoice, setTradeInvoice] = useState<TradeInvoiceRead | null>(null);
+  /** #636 — the batch this Work belongs to, or null. Read under the caller's OWN JWT through the
+   *  relation's FORCE-RLS grant, the same shape `entry_evidence_links` is read with. A FAILED read
+   *  is indistinguishable from "not in a batch" on purpose: both leave the row absent, and the page
+   *  never says a Work is NOT in a batch, only that it IS in one. Nothing here is blocked by it. */
+  const [batchOrigin, setBatchOrigin] = useState<WorkBatchOrigin | null>(null);
   useEffect(() => {
     if (!addressable) return;
     let live = true;
@@ -288,6 +298,16 @@ export function WorkDetailView({
       live = false;
     };
   }, [addressable, workId, loadTradeInvoice, session]);
+  useEffect(() => {
+    if (!addressable) return;
+    let live = true;
+    void (async () => {
+      const origin = await loadBatchOrigin(workId, { session }).catch(() => null);
+      if (live) setBatchOrigin(origin);
+    })();
+    return () => { live = false; };
+  }, [addressable, workId, loadBatchOrigin, session]);
+
   const postedEntryId = state.data?.entry?.id ?? null;
   const reloadLinks = useCallback(async () => {
     if (postedEntryId === null) return;
@@ -457,6 +477,25 @@ export function WorkDetailView({
   return (
     <div className="flex flex-col gap-6">
       <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} clientId={clientId} />
+
+      {/* #636 — ONE row, "part of batch X", and it renders WHATEVER the Work's state is.
+          FIX ROUND 1, V636R-2: it used to live inside PostedEntrySection, which renders only once
+          a journal entry exists (`entry === null ? null : …`), so the reverse address was absent
+          for exactly the children AC5's recovery language is about — queued, running, waiting on
+          a dependency, refused, cancelled. A read that FAILED is still indistinguishable from
+          "not in a batch": both leave the row absent, and the page never says a Work is NOT in a
+          batch. The started-vs-posted divergence is STATED rather than fixed: the batch card's
+          `admitted` facet counts Work that has been ADMITTED, its `settled` facet counts Work
+          that holds a COMMITTED receipt, and #905 (not this ticket) owns the Work-list
+          projection that would otherwise have to agree with them. */}
+      {batchOrigin === null ? null : (
+        <p className="text-muted-foreground text-sm" data-testid="work-batch-origin">
+          {t("batchOrigin.label")}{" "}
+          <Link href={`${clientBase(clientId)}/documents?batch=${batchOrigin.batchId}`} className="underline">
+            {t("batchOrigin.value", { label: batchOrigin.label ?? batchOrigin.batchId })}
+          </Link>
+        </p>
+      )}
 
       {/* DELAYED IS ABOUT THE READ, not about the Work. It says the page has not
           managed a successful read since a named time, which is a fact about the

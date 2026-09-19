@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { start } from "workflow/api";
 import { assertSessionAccess, authenticate, AuthError } from "../lib/authz.mjs";
@@ -9,6 +10,14 @@ import {
   mapIntakeError,
   uploadDocumentBytes,
 } from "../lib/intake.mjs";
+import { removeIntakeSpool } from "../lib/spool.mjs";
+// #636 — the intake-batch lane. Every line of batch logic lives in this NEW, non-frozen module:
+// `lib/intake.mjs` is one manifest line from freezing (five real reverse importers, none frozen
+// today), so logic written inside it would become unamendable the day one of them is frozen.
+import {
+  beginIntakeInBatch, cancelBatch as cancelIntakeBatch, openBatch as openIntakeBatch,
+  recordCapacityWait,
+} from "../lib/intake-batches.mjs";
 import { withRuntime } from "../lib/pools.mjs";
 import { workflows } from "../workflows/registry.js";
 
@@ -88,13 +97,107 @@ export function intakeRoutes(): express.Router {
       res.status(503).json({ error: "shutting_down" });
       return;
     }
+    // #636: an OPTIONAL batch id. When present the begin and the attach commit TOGETHER (the
+    // helper opens an explicit transaction, because withRuntime is autocommit); when absent this
+    // path is byte-unchanged.
+    const batchId = typeof req.body?.batch_id === "string" ? req.body.batch_id : null;
+    if (batchId !== null && !UUID_RE.test(batchId)) {
+      res.status(400).json({ error: "bad_request", message: "batch_id must be a uuid" });
+      return;
+    }
     try {
       const out = await withRuntime(async (client) => {
         const principal = await authenticate(client, req.header("authorization"));
         if (req.body?.origin === "chat") await assertSessionAccess(client, req.body?.session_id, principal);
-        return beginDocumentIntake(client, principal, req.body ?? {});
+        if (batchId === null) return beginDocumentIntake(client, principal, req.body ?? {});
+        return beginIntakeInBatch({
+          client,
+          principal,
+          input: req.body ?? {},
+          batchId,
+          opKey: `intake-batch-attach:${batchId}:${randomUUID()}`,
+          begin: beginDocumentIntake,
+          cleanup: removeIntakeSpool,
+        });
       });
       res.status(201).json(out);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // #636: open a durable intake batch. The governed door is clara_runtime-only and takes its
+  // actor as an ARGUMENT, so the JWT is decoded here and the human is passed on — the
+  // create_document_intake precedent (0007:2780-2799), and the reason there is no PostgREST verb.
+  router.post("/api/intake/batches", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down" });
+      return;
+    }
+    try {
+      const out = await withRuntime(async (client) => {
+        const principal = await authenticate(client, req.header("authorization"));
+        if (req.body?.origin === "chat") await assertSessionAccess(client, req.body?.session_id, principal);
+        return openIntakeBatch(client, {
+          actor: principal.sub,
+          origin: typeof req.body?.origin === "string" ? req.body.origin : "documents_tab",
+          label: typeof req.body?.label === "string" ? req.body.label : "",
+          sessionId: typeof req.body?.session_id === "string" ? req.body.session_id : null,
+          opKey: typeof req.body?.opKey === "string" ? req.body.opKey : "",
+        });
+      });
+      if (out.status !== "ok") {
+        sendError(res, Object.assign(new Error(out.message ?? "batch refused"), {
+          code: out.code, detail: JSON.stringify(out.detail ?? {}),
+        }));
+        return;
+      }
+      res.status(201).json(out.batch);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // #636: stop a batch. ONE confirm performs exactly ONE governed decision; the FAN-OUT is the
+  // server's, one clara.cancel_accounting_work per live child, one call per transaction — never N
+  // calls from the browser (DocumentsDoorDialog.tsx:8-9's house rule).
+  router.post("/api/intake/batches/:id/cancel", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down" });
+      return;
+    }
+    const batchId = req.params.id;
+    if (typeof batchId !== "string" || !UUID_RE.test(batchId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    try {
+      const principal = await withRuntime((client) => authenticate(client, req.header("authorization")));
+      const out = await cancelIntakeBatch(withRuntime, {
+        actor: principal.sub,
+        batchId,
+        opKey: typeof req.body?.opKey === "string" ? req.body.opKey : "",
+      });
+      if (out.status !== "ok") {
+        sendError(res, Object.assign(new Error(out.message ?? "cancellation refused"), {
+          code: out.code, detail: JSON.stringify(out.detail ?? {}),
+        }));
+        return;
+      }
+      // NO OBJECT SPREAD: `check-parts-parity.mjs` refuses one anywhere in this file. Every field
+      // of the decision is named, which also documents the wire shape the browser reads.
+      const decision = out.decision ?? {};
+      res.status(202).json({
+        batch_id: decision.batch_id ?? batchId,
+        state: decision.state ?? null,
+        cancel_op_key: decision.cancel_op_key ?? null,
+        cancel_requested_by: decision.cancel_requested_by ?? null,
+        children: decision.children ?? [],
+        replayed: decision.replayed ?? false,
+        fanned_out: (out.cancelled ?? []).length,
+        deferred: (out.deferred ?? []).length,
+        refused: (out.refused ?? []).length,
+      });
     } catch (err) {
       sendError(res, err);
     }
@@ -143,6 +246,12 @@ export function intakeRoutes(): express.Router {
       });
       res.status(202).json(out);
     } catch (err) {
+      // #636: a CAPACITY refusal after custody is a WAITING state, not a death. The DB's own
+      // CLR18 becomes an explicit `awaiting_capacity` dependency on this intake's batch member,
+      // reached through the governed door with the actor read off the upload sidecar (this route
+      // carries a capability token and no principal). Best-effort and self-swallowing: it must
+      // never turn the honest 429 below into a 500.
+      await recordCapacityWait(withRuntime, intakeId, err, { log: (m: string) => console.error(m) });
       sendError(res, err);
     }
   });
