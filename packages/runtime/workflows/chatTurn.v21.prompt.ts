@@ -73,7 +73,9 @@ import {
   KNOWLEDGE_CONTEXT_MAX_VALUE_CHARS,
 } from "./chatTurn.v19.prompt.js";
 import { START_TRADE_INVOICE_WORK_TOOL, RUN_DEPRECIATION_PERIOD_TOOL } from "./chatTurn.v21.tools.js";
-import { DEPRECIATION_HUMAN_DOOR, floorSentence } from "../lib/depreciation-run.js";
+import {
+  DEPRECIATION_HUMAN_DOOR, DEPRECIATION_PROMPT_STANZA, floorSentence,
+} from "../lib/depreciation-run.js";
 
 export {
   CLARIFY_FRAMING,
@@ -177,7 +179,12 @@ export const TRADE_INVOICE_CHAT_GUIDANCE = [
 ].join("\n");
 
 export const DEPRECIATION_CHAT_GUIDANCE = [
-  "RUNNING DEPRECIATION — YOU EXECUTE AN AUTHORITY; YOU NEVER SIGN ONE.",
+  "RUNNING DEPRECIATION — THE RULE IN ONE BREATH:",
+  // THE CARRIER'S OWN STANZA, BY IMPORT AND BYTE FOR BYTE (review SP-3). #651 calls these three
+  // sentences the successor's prompt stanza "verbatim"; the expanded paragraphs below say the same
+  // things at length and are what the model reasons from, but the wave's own words are the ones
+  // the contract fixed, and a cell can only hold a string that is actually there.
+  DEPRECIATION_PROMPT_STANZA,
   "",
   `${RUN_DEPRECIATION_PERIOD_TOOL} clears this client's DUE depreciation periods against the`,
   "authority an admin already signed. If there is no live authority, say so and say that an admin",

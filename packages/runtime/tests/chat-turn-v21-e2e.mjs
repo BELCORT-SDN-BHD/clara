@@ -107,6 +107,7 @@ const FETCH_TIMEOUT_MS = 15000;
 const CHAT_KNOWLEDGE_LINE = "[v21-serve] KNOWLEDGE BLOCK REACHED THE CHAT PROMPT";
 const RUN_KNOWLEDGE_LINE = "[v21-serve] KNOWLEDGE BLOCK REACHED THE RUN PROMPT";
 const RECORD_READ_LINE = "[v21-serve] READ_KNOWLEDGE_SOURCE ANSWERED";
+const BLOCK_NAMES_RECORD_LINE = "[v21-serve] THE BLOCK NAMES THE RECORD";
 
 const WATCHDOG_MS = 12 * 60 * 1000;
 setTimeout(() => {
@@ -144,7 +145,7 @@ function spawnServe(extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
   const state = {
     exited: false, banner: null, serving: null,
-    chatKnowledge: false, runKnowledge: false, recordReads: new Map(),
+    chatKnowledge: false, runKnowledge: false, recordReads: new Map(), blockNamedRecord: null,
     stdout: "", stderr: "",
   };
   child.on("exit", () => {
@@ -162,6 +163,10 @@ function spawnServe(extra = {}) {
     }
     if (line.includes(CHAT_KNOWLEDGE_LINE)) state.chatKnowledge = true;
     if (line.includes(RUN_KNOWLEDGE_LINE)) state.runKnowledge = true;
+    if (line.includes(BLOCK_NAMES_RECORD_LINE)) {
+      state.blockNamedRecord = line.slice(line.indexOf(BLOCK_NAMES_RECORD_LINE) + BLOCK_NAMES_RECORD_LINE.length).trim();
+      process.stdout.write(`[child] ${line}\n`);
+    }
     if (line.includes(RECORD_READ_LINE)) {
       // KEYED BY RECORD, never "the first one seen". These databases are shared throwaways and an
       // engine's reconciler will dispatch an EARLIER run's Work; that run reads the same env-supplied
@@ -514,6 +519,13 @@ async function main() {
     console.log(`[v21-e2e] PASS 3: the block reached BOTH prompts, the read-set row carries keys=${JSON.stringify(read.keys)} at status=${read.status}, and the preload traced under registry v2`);
 
     // ---- 4. read_knowledge_source actually returned the record ----------
+    // THE ID CAME FROM THE BLOCK, not only from this leg's env (review ADV-S-1). A tool whose
+    // only identifier is a `record_id` is unreachable if the block does not print one, and the
+    // out-of-band `CLARA_V21_RECORD_ID` is exactly what hid that: the leg passed while the
+    // renderer printed no id at all, for three tools that need one.
+    assert.equal(engine.state.blockNamedRecord, one.recordId,
+      "the knowledge block the RUN was shown names the record by id — the model could have learnt "
+      + `it from its own context (saw ${JSON.stringify(engine.state.blockNamedRecord)})`);
     const mine = engine.state.recordReads.get(one.recordId);
     assert.ok(mine,
       `the run called read_knowledge_source for THIS leg's record (saw ${JSON.stringify([...engine.state.recordReads.keys()])})`);

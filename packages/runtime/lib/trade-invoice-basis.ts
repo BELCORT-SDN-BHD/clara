@@ -409,8 +409,17 @@ export function basisFromTradeInvoice(input: StartTradeInvoiceWorkInput): {
 //   2. In `execute`: the client pin (`if (!ctx.clientId) return noClientRefusal()`), then
 //      `const local = localTradeInvoiceRefusal(input); if (local) return local;`.
 //   3. `const intentKey = stableOpKey(ctx.taskId, START_TRADE_INVOICE_WORK_TOOL, input);`
-//      — the SAME identity discipline `start_journal_work` uses, so a re-run turn resolves to the
-//      Work it already admitted instead of admitting a second one.
+//      — the SAME identity discipline `start_journal_work` uses. WHAT IT GUARANTEES, EXACTLY
+//      (fix round 1, review ADV-S-11): a REPLAYED CALL under one turn resolves to the Work it
+//      already admitted, because the key is `task + tool + canonical(input)` and a replayed step
+//      re-executes the same call with the same bytes. It does NOT make a RE-SAMPLED segment
+//      idempotent: `runModelSegmentStepV21` is a `"use step"` whose checkpoint runs after it
+//      returns, so a crash between the door's commit and the checkpoint re-executes the MODEL,
+//      and a re-sampled call that re-words a `memo` mints a different key — a second Work for one
+//      human request. Two TURNS are likewise two requests and correctly admit two. The narrower
+//      claim is the one the World leg measures (`chat-turn-v21-e2e`, the two-call control inside
+//      one turn); tightening this to a turn-stable ordinal is a successor's decision, not a
+//      sentence to be widened here.
 //   4. ONE query. THE ARGUMENT ORDER IS FIXED HERE:
 //
 //        select clara.admit_trade_invoice_work(

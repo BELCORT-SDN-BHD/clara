@@ -51,7 +51,7 @@
       "deployed": true
     },
     "packages/runtime/lib/depreciation-run.ts": {
-      "sha256": "91fdb91e98363a2d1b56b6c3a6cb1bb4b1fdb1c713899cb7af4b75401ed6363e",
+      "sha256": "24b44be1ef3a56ef0399bac1287e81f9aa43e82dc5eb3b36346311459ca9cfdf",
       "note": ""
     },
     "packages/runtime/lib/fixed-asset-acquisition.ts": {
@@ -89,7 +89,7 @@
       "deployed": true
     },
     "packages/runtime/lib/trade-invoice-basis.ts": {
-      "sha256": "753a6a50f9221bd31eae81d0c72ebcf4de369a889369bbaaba718b0b8ccc09f5",
+      "sha256": "a6e1a045d093b221025df38a0b29c0f0dbe35c2c433df7f2bd787ec3e84ea993",
       "note": ""
     },
     "packages/runtime/lib/work-trace-bounds.mjs": {
@@ -826,7 +826,7 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.prompt.ts": {
-      "sha256": "2fbdc84748113238ee9ce57b2c8d615c371541221f158d8928fa3d19fc9892e5",
+      "sha256": "ecc1344b55283c42c40d80a89cbf2bcb524736bdcc45b5d2d5f9bd9f60adae97",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.tools.ts": {
@@ -1187,7 +1187,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/claraWork.v5.bundle.ts": {
-      "sha256": "a18657e06d17a160dd916ba10e468fb265ac9962ab08abf24160cebaed6b84c2",
+      "sha256": "959296f5104c02c2d28ef6bfdfc5de1c27df31e910fa2635b0be277cebc715a1",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.errors.ts": {

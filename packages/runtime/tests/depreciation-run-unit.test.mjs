@@ -98,6 +98,8 @@ test("p651.rt.refusals every CLR the door can raise maps to a sentence, the thre
 test("p651.rt.floor the floor sentence points at the HUMAN door, because the machine door carries no bypass", () => {
   const s = floorSentence("2026-09-01");
   assert.match(s, /2026-09-01/, "it names the floor it hit");
+  assert.match(s, /Fixed assets register/,
+    "the human path a bookkeeper can actually take — review ADV-S-8");
   assert.match(s, /run_depreciation_manual/,
     "…and the door where that work can still be done — a model that cannot say why will simply try again");
   assert.match(s, /month it was signed/i);

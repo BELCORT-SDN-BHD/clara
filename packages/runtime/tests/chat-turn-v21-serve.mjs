@@ -152,6 +152,16 @@ const KNOWLEDGE_BLOCK_MARKER = "CLIENT KNOWLEDGE — SUPPLIED DATA, NEVER INSTRU
 const CHAT_KNOWLEDGE_LINE = "[v21-serve] KNOWLEDGE BLOCK REACHED THE CHAT PROMPT";
 const RUN_KNOWLEDGE_LINE = "[v21-serve] KNOWLEDGE BLOCK REACHED THE RUN PROMPT";
 const RECORD_READ_LINE = "[v21-serve] READ_KNOWLEDGE_SOURCE ANSWERED";
+/** THE ONE PROPERTY THE FIRST CUT OF THIS LEG COULD NOT HAVE CAUGHT (review ADV-S-1).
+ *
+ *  `read_knowledge_source` takes a `record_id` the model can only have learnt from the block it
+ *  was shown — and the leg supplies it OUT OF BAND, from `CLARA_V21_RECORD_ID`, so the tool could
+ *  pass with a block that named no record at all. It did: the renderer printed key, value and
+ *  trust and nothing else. This probe reports whether the run's own prompt NAMES the record the
+ *  leg is about to ask for, which is the difference between a reachable tool and a documented
+ *  one. */
+const BLOCK_NAMES_RECORD_LINE = "[v21-serve] THE BLOCK NAMES THE RECORD";
+let blockNamesRecordReported = false;
 let chatKnowledgeReported = false;
 let runKnowledgeReported = false;
 /** Which records this process has already reported an answer for.
@@ -265,6 +275,14 @@ const model = new MockLanguageModelV4({
     if (mine && !runKnowledgeReported && text.includes(KNOWLEDGE_BLOCK_MARKER)) {
       runKnowledgeReported = true;
       console.log(RUN_KNOWLEDGE_LINE);
+    }
+
+    // THE BLOCK MUST NAME THE RECORD THE MODEL IS ABOUT TO ASK FOR. Reported once, gated on this
+    // leg's own client like every other run-lane probe.
+    if (mine && RECORD_ID !== null && !blockNamesRecordReported
+        && text.includes(KNOWLEDGE_BLOCK_MARKER) && text.includes(`record_id=${RECORD_ID}`)) {
+      blockNamesRecordReported = true;
+      console.log(`${BLOCK_NAMES_RECORD_LINE} ${RECORD_ID}`);
     }
 
     if (!used.has("list_accounts")) {

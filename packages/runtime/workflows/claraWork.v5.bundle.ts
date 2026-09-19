@@ -22,7 +22,21 @@
 //   · `dependencies` — each tool's declared doors, from `CLARA_WORK_TOOL_DEPENDENCIES_V5`.
 // A tool that tightens a bound, adds a field, drops `.strict()`, re-words a `.describe()` the
 // model reads, or is repointed at a different verb now MOVES THE DIGEST. No hand-bumped id, no
-// reviewer's memory, no trust required.
+// reviewer's memory, no trust required. (Fix round 1 spent that claim on its first real edit: a
+// re-worded `.describe()` on `read_knowledge_source`'s `reason` moved the digest from
+// `b9f25a81…1cc17114` to `fe641982…2bedc698`.)
+//
+// AND WHAT IT STILL CANNOT SEE, MEASURED RATHER THAN ASSUMED (review ADV-S-4). `z.toJSONSchema`
+// renders a zod schema's STRUCTURE; it erases `.refine` / `.superRefine` entirely, so a rule that
+// lives in a check contributes NOTHING to the hashed text. The roster carries exactly one such
+// rule today — `ask_question`'s `fields[]` superRefine ("`options` is required for `choice` and
+// forbidden for everything else"), which is #791's own example of a schema changing under an
+// unchanged name — and relaxing it would ship under an unchanged digest. Two cells stand where
+// the digest cannot: `v5.bundle` asserts the JSON Schema is byte-identical with and without that
+// rule (the limit, as a measurement), censuses which roster schemas carry an unrepresentable
+// check so a NEW one must be declared, and drives the rule's behaviour directly so a relaxation
+// reds. The general sentence above is true of every item it lists; it is not true of everything a
+// schema can say.
 //
 // WHY `z.toJSONSchema` AND NOT A HAND-ROLLED WALK. zod 4.4.3 ships the converter (`z.toJSONSchema`,
 // zod 4's own API — v3 had none and needed `zod-to-json-schema`), it is what the AI SDK's own

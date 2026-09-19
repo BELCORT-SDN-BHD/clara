@@ -39,8 +39,34 @@ export const RUN_DEPRECIATION_PERIOD_TOOL = "run_depreciation_period_for_client"
 export const DEPRECIATION_RUN_DOOR = "clara.run_depreciation_period_for";
 
 /** The HUMAN catch-up door — bookkeeper+, `clara_authenticated` only, caller-named period. It is
- *  the ONE way a pre-floor period is ever charged, and every floor sentence names it. */
+ *  the ONE way a pre-floor period is ever charged. */
 export const DEPRECIATION_HUMAN_DOOR = "clara.run_depreciation_manual";
+
+/**
+ * THE SUCCESSOR'S PROMPT STANZA, VERBATIM — as a constant rather than as a line in a comment.
+ *
+ * #651's contract calls these three sentences "PROMPT STANZA (verbatim, for the successor's system
+ * prompt)". The first cut of `chatTurn_v21` conveyed all three ideas in expanded prose and the
+ * exact string appeared nowhere, which no cell could catch and no reviewer could check without
+ * reading both texts side by side (review SP-3). Exported here so the successor FOLDS the stanza
+ * in rather than restating it, and so a cell can assert the wave's own words are in the prompt the
+ * model is served.
+ */
+export const DEPRECIATION_PROMPT_STANZA =
+  "You execute an authority; you never sign one. The period is the database's, never yours. "
+  + "Say you have QUEUED/POSTED exactly what the receipt says, including how many assets were "
+  + "skipped and why.";
+
+/** WHERE A PERSON ACTUALLY REACHES THAT DOOR. A bookkeeper cannot call a database function, and a
+ *  sentence that hands one a verb has pointed them nowhere (review ADV-S-8). The surface exists:
+ *  `apps/web/components/registers/fa-depreciation-runs-panel.tsx` drives
+ *  `runDepreciationManual` (`apps/web/lib/registers/depreciation.ts:161-175`) from the client's
+ *  Fixed assets register, under the heading "Depreciation runs" with a "Run depreciation" action.
+ *  The verb stays in the sentence beside it because the wave digest's #651 stanza says the map
+ *  "points the person at the human door" and because a firm's own operator may well want the
+ *  name — but the human path comes first. */
+export const DEPRECIATION_HUMAN_SURFACE =
+  "the client's Fixed assets register, in the Depreciation runs panel (\"Run depreciation\")";
 
 const isoDate = z
   .string()
@@ -120,6 +146,17 @@ export function localRunRefusal(input: RunDepreciationInput): LocalRefusal | nul
  * The two `period_request_invalid` entries key on the AXIS, not on the reason alone, because 0227
  * added `period_closed` to a reason that already carried `not_cadence_aligned` and `not_ended` —
  * three different facts a person must be able to tell apart.
+ *
+ * THREE ROWS ARE FORWARD-LOOKING AND THIS SAYS SO (review SP-1). `authority_already_live`,
+ * `authority_ref_invalid` and `authority_ref_unresolved` are raised by 0227's
+ * `clara.sign_depreciation_authority` (0227:1164-1209), a door this lane never calls:
+ * `run_depreciation_period_for` raises only `obo_not_active`, `client_not_found`,
+ * `insufficient_role` and `client_inactive` locally and delegates the CLR38 family to
+ * `_fa_run_period_core` / `_depreciation_run_due_core`. They are kept because this module is the
+ * lane's ONE sentence map for 0227's authority vocabulary and a signing surface reaching for it
+ * should find the sentence already reviewed — not because the tool can produce them. An
+ * unreachable row cannot misfire: `refusalSentence` falls through to the door's own message for
+ * anything it does not recognise.
  */
 export const DEPRECIATION_REFUSAL_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   "CLR38:authority_not_live":
@@ -185,8 +222,8 @@ export function floorSentence(authorityFrom?: string | null): string {
   const from = authorityFrom ? ` (${authorityFrom})` : "";
   return (
     `This client's depreciation authority only reaches periods from the month it was signed${from} onward, `
-    + `so I cannot charge anything earlier. A bookkeeper can still run an earlier month by hand through `
-    + `${DEPRECIATION_HUMAN_DOOR}.`
+    + `so I cannot charge anything earlier. A bookkeeper can still run an earlier month by hand from `
+    + `${DEPRECIATION_HUMAN_SURFACE} — the ${DEPRECIATION_HUMAN_DOOR} door.`
   );
 }
 
@@ -275,10 +312,13 @@ export function runSummary(receipt: DepreciationRunReceipt): string {
 //   8. NO `clara.wake_fn_allowlist` row: the allowlist is keyed by BARE NAME, and there is no bare
 //      name here a wake lane should reach.
 //
-// PROMPT STANZA (verbatim, for the successor's system prompt):
+// PROMPT STANZA (verbatim, for the successor's system prompt): the exported constant
+// `DEPRECIATION_PROMPT_STANZA` above. It reads:
 //   "You execute an authority; you never sign one. The period is the database's, never yours. Say
 //    you have QUEUED/POSTED exactly what the receipt says, including how many assets were skipped
 //    and why."
+// A stanza that lives only in a comment cannot be folded in by import and cannot be asserted, so
+// this block now points at the constant instead of being the source of it.
 //
 // WHAT v21 MUST NOT DO: call `clara.run_depreciation_manual`. That body is `_human_ctx`-fronted at
 // bookkeeper, granted to `clara_authenticated` and to no machine role, and
