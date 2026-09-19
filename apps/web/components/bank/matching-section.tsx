@@ -46,6 +46,7 @@ import { useReloadOnChange } from "@/lib/bank/reload-on-change";
 import { listUnmatchedLines, listBankMatchCandidates, getBankLineMatchingContext } from "@/lib/bank/match-reads";
 import { listBankAccounts, listBankStatements } from "@/lib/bank/reads";
 import { matchBankLine, unmatchBankMatch } from "@/lib/bank/match-doors";
+import { entryGeneration } from "@/lib/bank/match-opkey";
 import { formatMyr } from "@/lib/bank/money";
 import type { MatchReceipt } from "@/lib/bank/matching-context-types";
 import { Button } from "@/components/ui/button";
@@ -188,11 +189,22 @@ export function MatchingSection({
       setMatchFormError(t("selectLinesAndEntries"));
       return;
     }
+    // #657 fix-round (review SP1 / A1) — each selected entry's WORLD GENERATION, read off the
+    // candidate row the human is looking at. It is key material only and never reaches the wire
+    // body: it is what makes `match -> unmatch -> re-decide the same selection` a NEW operation
+    // instead of a replay of the dead match's receipt. An entry the current candidate read does
+    // not carry contributes `null` — a value, so the key stays stable.
+    const entryGenerations: Record<string, string | null> = {};
+    for (const e of entries) {
+      entryGenerations[e.entry_id] = entryGeneration(
+        (candidates.data ?? []).find((c) => c.entry_id === e.entry_id) ?? null,
+      );
+    }
     let receipt: MatchReceipt | null = null;
     await unmatchedLines.act(
       async () => {
         receipt = await matchBankLine(
-          { clientId, lineIds: [...selectedLineIds], entries, ackPeriodExceptions },
+          { clientId, lineIds: [...selectedLineIds], entries, ackPeriodExceptions, entryGenerations },
           { session: sessionTokenAccessor },
         );
       },

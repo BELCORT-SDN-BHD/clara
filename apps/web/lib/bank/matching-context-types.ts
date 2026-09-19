@@ -62,6 +62,12 @@ export type MatchReceipt = Record<string, unknown> & {
   new_journal_entries?: number;
   settlement_objects?: number;
   period_exceptions?: number;
+  /** The operation key this decision was submitted under, attached by `matchBankLine` (review
+   *  A6). It is NOT a door field — `_finish_op`'s payload (0038:4233-4238, widened by 0226 §6)
+   *  carries no op_key — but it IS the key `clara._reserve_op` stored the receipt under, so the
+   *  outcome block can name it for a human to quote. Optional, because a receipt read back from
+   *  anywhere other than that door call has no key to attach. */
+  op_key?: string;
 };
 
 export type MatchBasisRow = {

@@ -16,7 +16,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchOpKeyFor, canonicalMatchIntent, type MatchIntent } from "./match-opkey";
+import { matchOpKeyFor, canonicalMatchIntent, entryGeneration, type MatchIntent } from "./match-opkey";
 import { matchBankLine } from "./match-doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -140,4 +140,93 @@ test("p657.web.opkey-does-not-renew-on-noise · selection order, a dismissed ref
     canonicalMatchIntent(INTENT),
     "cents are integers; a fractional cents value cannot mint a second key for one decision",
   );
+});
+
+// ===========================================================================
+// p657.web.opkey-renews-after-unmatch — THE FIX-ROUND CELL (review SP1 / A1).
+//
+// The blocker both review lenses measured on the live rig: `match -> unmatch -> resubmit the
+// IDENTICAL selection` is an ordinary re-decision, and a key that is a PURE function of
+// {client, lines, entries, cents, ack} cannot tell it from a lost-response retry. The database
+// is right to replay — `clara._reserve_op` keys on (firm, fn, op_key) and knows nothing about
+// whether the match it describes is still live — so the second submission returns the DEAD
+// match's receipt, the face renders "no new cash entry was created" naming a match the database
+// has recorded as `unmatched`, and the line never leaves the unmatched report.
+//
+// So the intent tuple carries each selected entry's WORLD GENERATION: the shape of the
+// `match_history` the recut `list_bank_match_candidates` already puts on the wire (0226 §3). An
+// unmatch flips that entry's newest history row from `live` to `unmatched`, so the re-decision
+// hashes differently, while a lost response, a reload and a re-render — which write nothing —
+// leave it byte-identical. The key still renews on a property of the DATA, never on a
+// component's lifecycle (D15).
+// ===========================================================================
+
+const LIVE_HISTORY = [{ match_id: "bbbbbbb1-1111-4111-8111-111111111111", status: "live", matched_cents: 128_000, acted_at: "2026-09-18T00:00:00Z" }];
+const UNMATCHED_HISTORY = [{ match_id: "bbbbbbb1-1111-4111-8111-111111111111", status: "unmatched", matched_cents: 128_000, acted_at: "2026-09-18T00:00:00Z" }];
+
+test("p657.web.opkey-renews-after-unmatch · the same selection re-decided after an unmatch is a DIFFERENT operation", async () => {
+  const keys: unknown[] = [];
+  await withMockedFetch(
+    async (_u, init) => {
+      const body = JSON.parse(String(init?.body));
+      keys.push(body.p_op_key);
+      // The wire body must stay EXACTLY the door's arity: a generation is key material, never
+      // an argument. `clara._reserve_op` re-hashes the real arguments and refuses a key whose
+      // request hash disagrees, so smuggling a field into p_entries would break every replay.
+      assert.deepEqual(
+        Object.keys(body).sort(),
+        ["p_ack_period_exceptions", "p_adjustments", "p_client", "p_entries", "p_lines", "p_op_key"],
+        "the door body carries no extra field",
+      );
+      for (const e of body.p_entries) {
+        assert.deepEqual(Object.keys(e).sort(), ["entry_id", "matched_cents"],
+          "p_entries carries the door's two fields and nothing else");
+      }
+      return jsonResponse({ match_id: "m1" });
+    },
+    async () => {
+      const args = () => ({
+        clientId: INTENT.clientId,
+        lineIds: [...INTENT.lineIds],
+        entries: INTENT.entries.map((e) => ({ ...e })),
+        ackPeriodExceptions: false,
+      });
+      // 1 · the first decision, against an entry whose history ends `live`.
+      await matchBankLine(
+        { ...args(), entryGenerations: { [INTENT.entries[0]!.entry_id]: entryGeneration({ match_history: LIVE_HISTORY }) } },
+        { session: fakeSession("tok") },
+      );
+      // 2 · the human unmatches it and re-decides the SAME selection. The candidate read has
+      //     been re-read (the surface reloads after every act), so that entry's newest history
+      //     row now reads `unmatched`.
+      await matchBankLine(
+        { ...args(), entryGenerations: { [INTENT.entries[0]!.entry_id]: entryGeneration({ match_history: UNMATCHED_HISTORY }) } },
+        { session: fakeSession("tok") },
+      );
+      assert.equal(keys.length, 2);
+      assert.notEqual(keys[0], keys[1],
+        "a re-decision after an unmatch must NOT replay the dead match's receipt");
+    },
+  );
+});
+
+test("p657.web.opkey-generation-is-data-not-lifecycle · a reload that changes nothing leaves the generation, and the key, unchanged", () => {
+  // The generation is read off the wire shape, so two reads of an unchanged world produce the
+  // same string — a reload is not a decision.
+  assert.equal(entryGeneration({ match_history: LIVE_HISTORY }), entryGeneration({ match_history: LIVE_HISTORY.map((h) => ({ ...h })) }));
+  assert.notEqual(entryGeneration({ match_history: LIVE_HISTORY }), entryGeneration({ match_history: UNMATCHED_HISTORY }));
+  // An entry nobody has ever matched has no generation, and that is a value, not an absence of
+  // one: it must be stable across reads too.
+  assert.equal(entryGeneration({ match_history: [] }), null);
+  assert.equal(entryGeneration(null), null);
+  assert.equal(entryGeneration(undefined), null);
+
+  const withGen: MatchIntent = {
+    ...INTENT,
+    entries: [{ ...INTENT.entries[0]!, generation: "1:bbbbbbb1-1111-4111-8111-111111111111:live" }],
+  };
+  assert.notEqual(matchOpKeyFor(withGen), matchOpKeyFor(INTENT),
+    "an entry carrying a generation is a different decision from the same entry carrying none");
+  assert.equal(matchOpKeyFor(withGen), matchOpKeyFor({ ...withGen, entries: withGen.entries.map((e) => ({ ...e })) }),
+    "the generation is part of the canonical form, so it is stable across a rebuilt object graph");
 });

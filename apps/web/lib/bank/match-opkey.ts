@@ -4,10 +4,17 @@
 // sentence and nothing else:
 //
 //   The key renews only on an intentional human act that changes WHAT is being submitted —
-//   the set of selected line ids, the set of selected entry ids, or a typed cents value; it
+//   the set of selected line ids, the set of selected entry ids, or a typed cents value —
+//   OR on a change to the WORLD the submission is deciding about: a selected entry's own
+//   match history moving on (a match landing on it, or an existing one being unmatched). It
 //   renews on nothing else: not on a failed or timed-out submit, not on the unconditional
 //   `act()` reload (matching-section.tsx's post-act reload), not on a re-render, not on a tab
 //   switch, not on a dismissed refusal.
+//
+// THE SECOND CLAUSE IS THE FIX-ROUND AMENDMENT (review SP1 / A1) and it needs ratifying: the
+// brief's D15 wrote the first clause verbatim and stopped there, which left `match -> unmatch ->
+// resubmit the identical selection` replaying the dead match's receipt. See `entryGeneration`
+// below for the measurement, the mechanism and the residual.
 //
 // WHY THIS VERB DIFFERS FROM THE HOUSE POSTURE. `lib/members/doors.ts:58-66` mints a FRESH key
 // per call ON PURPOSE, and `work-cancel-dialog.tsx`'s `useDecisionKey` mints one per OPEN
@@ -40,16 +47,61 @@
 export type MatchIntent = {
   clientId: string;
   lineIds: readonly string[];
-  entries: readonly { entry_id: string; matched_cents: number }[];
+  entries: readonly { entry_id: string; matched_cents: number; generation?: string | null }[];
   ackPeriodExceptions: boolean;
 };
+
+/**
+ * THE WORLD GENERATION of one candidate entry — the fix-round clause of the renewal rule.
+ *
+ * WHY IT EXISTS (review SP1 / A1, both measured on a live rig). `match -> unmatch -> resubmit
+ * the identical selection` is an ordinary re-decision, and a key that is a pure function of the
+ * selection cannot tell it from a lost-response retry. `clara._reserve_op` (0004:46-60) keys on
+ * (firm, fn, op_key) and knows nothing about whether the match its stored result describes is
+ * still live, so the second submission REPLAYED the dead match's receipt: the face rendered a
+ * persistent "no new cash entry was created" block naming a match the database had already
+ * recorded as `unmatched`, beside a line that visibly never left the unmatched report.
+ *
+ * WHAT IT IS. The shape of the entry's own `match_history` — the bounded array the recut
+ * `list_bank_match_candidates` already puts on the wire (migration 0226 §3): how many groups it
+ * has ridden on this bank account's COA, and the identity AND STATUS of the newest one. An
+ * unmatch flips that newest row from `live` to `unmatched`; a new match prepends a row. A lost
+ * response, a reload, a re-render and a dismissed refusal write nothing, so they leave the
+ * string byte-identical.
+ *
+ * WHY IT KEEPS D15. The generation is read off the DATA, not off a component's lifecycle;
+ * nothing has to be remembered, reset or renewed by hand. It is key material only: it is never
+ * sent to the door, because `_reserve_op` re-hashes the real arguments and refuses a key whose
+ * request hash disagrees.
+ *
+ * ITS RESIDUAL, STATED. The generation is only as fresh as the read it came from. If another
+ * session unmatches this entry between this surface's last candidate read and this submit, the
+ * key is computed against a stale world and the replay is still reachable. The surface re-reads
+ * the candidates after EVERY act (success or refusal) and on every `?line=` change, which is a
+ * mitigation and not a proof; the proof would have to live in the door, which #657 does not
+ * open (`_match_bank_line_core` is recut for its receipt payload only).
+ */
+export function entryGeneration(
+  candidate: { match_history?: readonly { match_id?: string; status?: string | null }[] | null } | null | undefined,
+): string | null {
+  const history = candidate?.match_history;
+  if (!Array.isArray(history) || history.length === 0) return null;
+  const head = history[0];
+  return `${history.length}:${head?.match_id ?? ""}:${head?.status ?? ""}`;
+}
 
 /** The canonical serialisation the key hashes. Exported so a test can assert the ORDERING
  *  rules directly rather than inferring them from two hashes being equal. */
 export function canonicalMatchIntent(intent: MatchIntent): string {
   const lines = [...intent.lineIds].sort();
   const entries = [...intent.entries]
-    .map((e) => ({ entry_id: e.entry_id, matched_cents: Math.trunc(e.matched_cents) }))
+    .map((e) => ({
+      entry_id: e.entry_id,
+      matched_cents: Math.trunc(e.matched_cents),
+      // The world generation (see `entryGeneration`). `?? null` so an absent generation and an
+      // explicit null are ONE value: a caller that cannot see the history must be stable.
+      gen: e.generation ?? null,
+    }))
     .sort((a, b) => (a.entry_id < b.entry_id ? -1 : a.entry_id > b.entry_id ? 1 : 0));
   return JSON.stringify({
     v: 1,

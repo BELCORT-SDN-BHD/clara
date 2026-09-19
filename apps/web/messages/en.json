@@ -2645,7 +2645,8 @@
       "outcomeAmount": "Amount",
       "outcomeAccountCode": "GL account",
       "outcomeCounterparty": "Counterparty",
-      "outcomeSource": "Source file"
+      "outcomeSource": "Source file",
+      "outcomeOpKey": "Operation key"
     },
     "exceptions": {
       "proposalsHeading": "Open exception proposals",

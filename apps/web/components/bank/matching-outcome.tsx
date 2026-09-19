@@ -75,6 +75,17 @@ export function MatchingOutcome({
 
           <dt className="text-muted-foreground">{t("outcomeSource")}</dt>
           <dd className="break-all">{filename ?? "—"}</dd>
+
+          {/* The operation key this decision was submitted under (review A6). It is what a
+              human quotes to name "the operation I already ran" — to a colleague, to support,
+              or to themselves after a lost response — and it is the key the receipt is stored
+              under in clara.op_receipts. It is the key the CLIENT sent, not a field the door
+              echoes: `_finish_op`'s payload carries no op_key, and the label says "operation
+              key" rather than claiming the receipt reported it. */}
+          <dt className="text-muted-foreground">{t("outcomeOpKey")}</dt>
+          <dd className="break-all font-mono" data-testid="matching-outcome-op-key">
+            {typeof receipt.op_key === "string" && receipt.op_key.length > 0 ? receipt.op_key : "—"}
+          </dd>
         </dl>
       </AlertDescription>
     </Alert>

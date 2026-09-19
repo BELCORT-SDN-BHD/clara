@@ -96,3 +96,26 @@ test("p657.web.outcome · absent facts render as absent, never as an invented va
     await h.unmount();
   }
 });
+
+test("p657.web.outcome-op-key · the block names the operation key the decision was submitted under, and an absent one as absent (review A6)", async () => {
+  // AC10's half of "a human must be able to quote the operation they already ran". The key is
+  // the CLIENT's, attached by matchBankLine, and the receipt is stored under it — so it is the
+  // one string that identifies this act in clara.op_receipts and in a refusal.
+  const h = await mount({ ...RECEIPT, op_key: "match_bank_line:0123456789abcdef0123456789abcdef" });
+  try {
+    const text = h.text();
+    assert.match(text, /Operation key/, "the block labels the key rather than printing a bare hash");
+    assert.match(text, /match_bank_line:0123456789abcdef0123456789abcdef/,
+      "the key itself is on screen, in full, so it can be quoted");
+  } finally {
+    await h.unmount();
+  }
+  const bare = await mount({ ...RECEIPT });
+  try {
+    assert.match(bare.text(), /Operation key/, "the row is present even when the key is not");
+    assert.equal(/undefined|null|NaN/.test(bare.text()), false,
+      "a receipt with no key renders an honest em dash, never a raw JS value");
+  } finally {
+    await bare.unmount();
+  }
+});
