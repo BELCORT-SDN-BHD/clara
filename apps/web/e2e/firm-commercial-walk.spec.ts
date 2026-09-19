@@ -87,8 +87,15 @@ const USAGE_AUG = [
  *  acceptance against the CURRENT version, and a REPLAY under the same op key answers the
  *  ORIGINAL instant (0185:766-775) rather than a fresh one. "Reload persists" is therefore proven
  *  against a fixture that behaves like the database, not one that echoes a canned success. */
-async function installStandingPair(page: Page, initial: { terms: Doc; dpa: Doc; live: boolean; canAccept: boolean }) {
-  const state = { ...initial };
+async function installStandingPair(
+  page: Page,
+  initial: { terms: Doc; dpa: Doc; live: boolean; canAccept: boolean; mode?: "prompt" | "enforce" },
+) {
+  // #1008: the platform's legal enforcement mode. `enforce` is the DEFAULT here, not because that
+  // is what hosted answers (0234 lands at `prompt`), but because every scenario written before the
+  // mode existed asserts the ENFORCE copy and must keep asserting it rather than be weakened. The
+  // scenario that is ABOUT `prompt` passes it explicitly.
+  const state = { mode: "enforce" as "prompt" | "enforce", ...initial };
   const acceptances = new Map<string, string>(); // op_key -> accepted_at
   await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_legal_standing", (route) =>
     fulfillJson(route, 200, {
@@ -96,6 +103,7 @@ async function installStandingPair(page: Page, initial: { terms: Doc; dpa: Doc; 
       standing_live: state.live,
       can_accept_for_firm: state.canAccept,
       masked: false,
+      enforcement_mode: state.mode,
     }));
   await page.route("**/e2e-supabase/rest/v1/rpc/get_current_legal_documents", (route) =>
     fulfillJson(route, 200, [
@@ -243,6 +251,34 @@ test("a newly published version withdraws standing, the owner accepts in-app, an
 
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/settings/firm after accepting").toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// (2b) #1008 — the SAME outstanding agreement under the BETA mode: the card asks, and never says
+//      the model is switched off. `standing_live` is still false, which is the fact that lets it
+//      ask; what changes is the sentence a firm reads underneath.
+// ---------------------------------------------------------------------------
+test("in prompt mode an outstanding agreement is asked for, not reported as switching the model off", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
+  await installStandingPair(page, {
+    mode: "prompt",
+    terms: doc({ kind: "terms", version: 2, firm_accepted: false, accepted_at: null, accepted_by: null, accepted_by_name: null, my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00.000Z" }),
+    dpa: doc({ kind: "dpa" }),
+    live: false,
+    canAccept: true,
+  });
+  await installCommercial(page, { status: 200, body: COMMERCIAL });
+  await installUsage(page, {});
+  await signIn(page, OWNER);
+  await page.goto("/settings/firm");
+
+  await expect(page.getByText(/Please accept the current versions of both agreements/)).toBeVisible();
+  await expect(page.getByText(/Clara cannot use a model on any client's books/)).toHaveCount(0);
+  // The remedy is still offered, and it is still the same control.
+  await expect(page.getByRole("button", { name: "Accept for this firm" })).toBeVisible();
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "/settings/firm in prompt mode").toEqual([]);
 });
 
 // ---------------------------------------------------------------------------

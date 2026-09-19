@@ -58,11 +58,33 @@ export type LegalStandingDocument = {
   readonly myAcceptedAt: string | null;
 };
 
+/** #1008 — the PLATFORM's legal enforcement mode (migration 0234), as the standing door reports
+ *  it. `prompt` is the beta: agreement state is shown and asked for, and never withdraws Work's
+ *  model authority. `enforce` is 0195's rule. */
+export const LEGAL_ENFORCEMENT_MODES = ["prompt", "enforce"] as const;
+export type LegalEnforcementMode = (typeof LEGAL_ENFORCEMENT_MODES)[number];
+
+/** THE STRICTER READING IS THE DEFAULT. A web build deployed ahead of migration 0234 reads a
+ *  payload with no `enforcement_mode` at all; rendering the `prompt` copy there would tell a firm
+ *  that its Work can use the model when the database has not been taught that yet. `enforce`
+ *  renders exactly what a pre-0234 estate is actually enforcing — the same fail-closed choice
+ *  `clara._legal_enforcement_mode()` makes on an absent configuration row. It is a DEFAULT and not
+ *  a requirement: an unreadable mode never drops the whole read, because the three scalars this
+ *  module has always required carry the facts the card cannot do without. */
+export function decodeLegalEnforcementMode(raw: unknown): LegalEnforcementMode {
+  return LEGAL_ENFORCEMENT_MODES.includes(raw as LegalEnforcementMode)
+    ? (raw as LegalEnforcementMode)
+    : "enforce";
+}
+
 export type FirmLegalStanding = {
   readonly documents: readonly LegalStandingDocument[];
   readonly standingLive: boolean;
   readonly canAcceptForFirm: boolean;
   readonly masked: boolean;
+  /** #1008: which rule is in force. NEVER a re-derivation of `standingLive`, which is 0195's
+   *  limb (a) in BOTH modes — the card needs that fact in order to ASK. */
+  readonly enforcementMode: LegalEnforcementMode;
 };
 
 function isNullableString(v: unknown): v is string | null {
@@ -123,6 +145,7 @@ export function decodeFirmLegalStanding(raw: unknown): FirmLegalStanding | null 
     standingLive: r.standing_live,
     canAcceptForFirm: r.can_accept_for_firm,
     masked: r.masked,
+    enforcementMode: decodeLegalEnforcementMode(r.enforcement_mode),
   };
 }
 

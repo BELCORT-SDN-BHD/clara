@@ -7122,6 +7122,7 @@
     "legalDraftNote": "This is a draft. It cannot be accepted, and nothing in Clara depends on it yet.",
     "legalNotLiveHeading": "This firm's legal standing is not current",
     "legalNotLiveBody": "Clara cannot use a model on any client's books until an owner of this firm accepts the current versions of both agreements.",
+    "legalNotLivePromptBody": "Please accept the current versions of both agreements. During the beta this does not stop Clara working on your clients' books — it will be required before the official launch.",
     "legalNotLiveOwnerHint": "An owner of this firm must accept the current versions.",
     "legalNotLiveOwnerNamed": "An owner of this firm must accept the current versions. The most recent acceptance on record was made by {name}.",
     "legalLive": "An owner of this firm has accepted the current versions of both agreements.",

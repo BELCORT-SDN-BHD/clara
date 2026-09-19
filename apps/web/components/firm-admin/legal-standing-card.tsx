@@ -83,8 +83,15 @@ export function LegalStandingCard({ view, onRetry, onAccepted, dialogProps }: Le
             {standing.standingLive ? (
               <StateBanner tone="info">{t("legalLive")}</StateBanner>
             ) : (
+              // #1008 — THE COPY IS CHOSEN BY THE PLATFORM'S MODE, and by nothing this component
+              // derives. `standingLive` is false in both modes when an agreement is outstanding,
+              // which is exactly the fact that lets the card ASK; what changes is whether the
+              // consequence sentence is TRUE. Under `prompt` it is not — migration 0234 makes the
+              // derived basis live on any real acceptance the firm's active owner holds — so
+              // saying it would be the estate telling a firm its work is switched off when it is
+              // not (the owner's ruling of 2026-09-20).
               <StateBanner tone="warning" title={t("legalNotLiveHeading")}>
-                {t("legalNotLiveBody")}
+                {standing.enforcementMode === "prompt" ? t("legalNotLivePromptBody") : t("legalNotLiveBody")}
                 <span className="block pt-1">
                   {standing.canAcceptForFirm ? null : ownerHint(standing, t)}
                 </span>
