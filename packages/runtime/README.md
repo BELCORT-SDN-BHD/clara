@@ -19,6 +19,46 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The two pins the wave 2026-09-18 cut moved
+
+`chatTurn → chatTurn_v21`, `claraWork → claraWork_v5`. Every superseded body stays exported and in
+`workflowBodies` — the boot census refuses to start the world database-wide if a body a parked run
+needs is missing, and that is policy (c) enforced rather than promised. What each new body carries,
+and nothing more:
+
+* **`chatTurn_v21`** — exactly two tools over v20's map plus ONE step.
+  `start_trade_invoice_work` (#655) admits a sales invoice or a supplier bill through
+  `clara.admit_trade_invoice_work` (nine arguments, an eighteen-token refusal map, a deterministic
+  op key); it ADMITS and posts nothing. `run_depreciation_period_for_client` (#651) clears a
+  client's DUE periods through `clara.run_depreciation_period_for(uuid,date,text,uuid)` — a NEW
+  verb name, because `rig-meta.mjs:691-693` is an executable census that fails the moment
+  `run_depreciation_manual` reaches a machine role. And `loadClientBasisStepV21` (#658) repoints
+  the chat knowledge preload from `clara.get_knowledge_pack`'s recency dump to the bounded
+  `clara.retrieve_knowledge`, surfacing a read failure as a typed status instead of the null that
+  reads as "this client has nothing recorded". NO new wire kind and NO widened
+  `WORK_ACCEPTED_PURPOSES` — a trade invoice is a `journal_entry` Work and the depreciation run
+  mints no card at all, which is also why it is deliberately OUT of `hasCodingIntent_v21`.
+  `clara.get_context_pack` is not recut and not repointed. Deploy 0225, 0227 and 0230 first.
+* **`claraWork_v5`** — the same repointed read on the Work lane, plus the RECORD of it:
+  `clara.record_work_knowledge_read` writes the read-set row that makes "what did Clara actually
+  see?" answerable. A read that does not succeed is now TERMINAL (`knowledge_read_failed`,
+  recoverable, nothing posted) — the one place v5 is stricter than v4, ratified by DECISIONS
+  §6.2.0 R-D, and all-or-nothing because the door decides all three tiers in one statement and
+  catches nothing. Two new READS, `read_knowledge_source` and `read_knowledge_history`, neither of
+  which writes a row or mints a part kind. A resumed run asks `clara.work_knowledge_drift_for`
+  once; a `relevant:true` drift spends ONE EXISTING `budget.replans` and `relevant:null` is
+  surfaced rather than coerced. The roster goes from five names to seven and the bundle id moves to
+  `clara-work-tools/v5` — whose digest now covers **each tool's JSON Schema and its declared
+  dependencies** (ARCHITECTURE:435-445, below). Riders: #847's writer-side trace bounds through the
+  new sibling `lib/work-trace-bounds.mjs`, and #882(a)'s one-row CLR40 reclassification. Deploy
+  0230 first — without it EVERY Work stops, which is the correct failure for a deploy-order
+  mistake.
+
+TWO CONTRACTS THIS CUT DID NOT DELIVER, both by ruling rather than by wall: #656's
+`read_opening_source` belongs to a FUTURE `chatTurn_vN` (its own stanza says so, and it appears in
+no row of DECISIONS §1.2), and #636's `open_intake_batch` stays contract-only (D5). #653's and
+#647's remain where the 2026-09-15 note left them.
+
 ### The three pins the wave 2026-09-15 cut moved
 
 `chatTurn → chatTurn_v20`, `claraWork → claraWork_v4`, `clientOnboarding → clientOnboarding_v5`.
@@ -129,7 +169,13 @@ deliberately narrow and each absence is a rule: no amount, no period count, no t
 no authority id — all of them are derived by the frozen `clara.prepayment_schedule_v1` or are
 human-only by law (`clara.record_document_service_period` has no wake wrapper and never will).
 
-TWO SUCCESSOR CONTRACTS ARE WRITTEN IN THAT FILE'S FOOTER AND NEITHER IS CUT:
+TWO SUCCESSOR CONTRACTS ARE WRITTEN IN THAT FILE'S FOOTER AND NEITHER IS CUT. They were owed on
+`chatTurn_v20` / `claraWork_v4` when this section was written; **`chatTurn_v21` and `claraWork_v5`
+have since been cut and took neither**, for the same measured reason rather than by oversight —
+every prepayment door and read is granted to `clara_authenticated` alone (0223 §D.1), so the tool
+could only ever return a grant refusal, and a workflow cut does not write migrations. The version
+names below are therefore the contracts' ORIGINAL addressees, kept as written; the live reading is
+"the next `chatTurn_vN` / `claraWork_vN` cut AFTER the grant exists".
 
 * **`chatTurn_v20` — `start_prepayment_schedule_work`.** Four lines: the tool, the local refusal,
   a `stableOpKey`, one `clara.create_prepayment_schedule` call with `{kind:"chat_task", id:
@@ -464,7 +510,7 @@ to. The same four facts appear in one boot line, so a log and an HTTP read can b
 trusting either alone:
 
 ```
-[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v20 claraWork=claraWork_v4 clientOnboarding=clientOnboarding_v5 …
+[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v21 claraWork=claraWork_v5 clientOnboarding=clientOnboarding_v5 …
 ```
 
 `git_sha=<unset>` and `frontier=<unavailable: reason>` are the honest readings when the build arg
@@ -937,13 +983,17 @@ between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
 spawned-engine shape `interview-kill-resume-e2e.mjs` uses.
 <!-- #811 -->
-### #658 — three NEW non-frozen modules the `claraWork_v5` cut will import
+### #658 — three NEW modules, **now frozen**, that the `claraWork_v5` cut imports
 
-All three sit OUTSIDE every frozen closure today (`node scripts/check-frozen-workflows.mjs
---print-closure` shows the union at 296 modules, with nine `lib/` members, and none of these
-three among them). **Each one freezes the moment `claraWork_v5` imports it**, exactly as
-`lib/knowledge.mjs` froze when `chatTurn_v19` imported it and `lib/knowledge-conflicts.mjs` when
-`claraWork_v4` did — so DURABLE RULES LIVE IN MIGRATION 0230, never in these files. None of the
+When this section was written all three sat OUTSIDE every frozen closure (the union was 296
+modules with nine `lib/` members, and none of these three among them). **The wave 2026-09-18 cut
+imported them and they are frozen now**: the union is 312, and `--compare-base origin/main` reports
+296 entries unchanged plus 16 additions — the eleven closure files and these three plus
+`lib/trade-invoice-basis.ts` and `lib/depreciation-run.ts`, every one of them entering BY CLOSURE
+rather than by a marker somebody added. That is exactly the trajectory `lib/knowledge.mjs` took
+when `chatTurn_v19` imported it and `lib/knowledge-conflicts.mjs` when `claraWork_v4` did. A
+behavioural change to any of them is now a `claraWork_v6`, so DURABLE RULES LIVE IN MIGRATION 0230,
+never in these files. None of the
 three carries a module-level `node:` import, which is `lib/knowledge.mjs:44-64`'s measured
 constraint: the Workflow DevKit compiles a frozen closure into a VM script where `require` is
 undefined, and the failure is a RUN-TIME one no build gate sees.
@@ -993,7 +1043,7 @@ Batteries: `tests/knowledge-retrieval.test.mjs` (19 cells) and `tests/work-trace
 read-set write and its acknowledgement and proves the replay lands on the SAME
 `(work_id, run_id, seq)` row. It bootstraps NO Workflow World, so it leaves
 `packages/db/tests/rig-isolation.test.mjs` T10b green (#866).
-## Requirements carried by the next frozen `claraWork` version (was `claraWork_v4`; it took neither)
+## Requirements carried by the next frozen `claraWork` version — **ALL THREE TAKEN BY `claraWork_v5`**
 
 `packages/runtime/lib/work-trace.mjs` is inside `claraWork_v3`'s frozen closure and hash-locked in
 `frozen-workflows.json`; a comment edit breaks that lock exactly as a code edit does. The owner's
@@ -1019,10 +1069,16 @@ until that version is cut.
   surface the refusal, because today a run bound that is too tight loses trace rows silently
   rather than raising. Whichever it does, the writer's clause must stay NO TIGHTER than the door's.
 
-Until a version takes them, the honest sentence about both fields is: the DOOR bounds them in
-shape; the WRITER does not, and the door is the wall. **`claraWork_v4` was cut in the wave
-2026-09-15 integration and took NEITHER requirement** — it only feeds `knowledge_version` into
-the existing `observed` object (`claraWork.v4.impl.ts`).
+**`claraWork_v4` was cut in the wave 2026-09-15 integration and took NEITHER requirement** — it
+only fed `knowledge_version` into the existing `observed` object (`claraWork.v4.impl.ts`).
+**`claraWork_v5` was cut in the wave 2026-09-18 integration and took BOTH**, so the sentence above
+has been spent: from v5 the honest one is *the door bounds these two fields in shape, and so does
+the writer.* `claraWork.v5.impl.ts` runs every NUMERIC observed revision through
+`boundedRevisionNumber` before `traceSafely` (a refused number drops its KEY, which is
+`observedRevisions`' own existing contract) and every `runId` through `boundedRunId` (a refused id
+skips the WHOLE row, because the door would refuse it anyway and a skipped write cannot poison the
+settle's open transaction). Both clauses are mirrors of 0210's and stay **no tighter** than it;
+`lib/work-trace.mjs` was not opened.
 
 **BOTH ROWS ARE NOW OWED ON `claraWork_v5`, AND THEIR CODE EXISTS (#658, filed as #847).**
 `packages/runtime/lib/work-trace-bounds.mjs` is a NEW, non-frozen SIBLING module that mirrors
@@ -1037,8 +1093,17 @@ writer stricter than the door loses rows the database would have accepted, and `
 swallows the loss. From v5 the honest sentence becomes: *the door bounds these two fields in
 shape, and from v5 so does the writer.*
 
-**#791 likewise carries forward to v5 rather than v4**, unchanged in substance: it is a
-requirement on the next frozen `claraWork` body, and v4 did not take it either.
+**#791 carried forward to v5, and v5 TOOK IT.** ARCHITECTURE:435-445 has been binding since v4
+and v4 shipped `tools: {id, names}` — a digest that could not see a tool whose SCHEMA changed while
+its name did not, which is exactly how `ask_question`'s v1→v2 change escaped with nothing but a
+hand-bumped id. `claraWork.v5.bundle.ts` hashes `tools: {id, names, schemas, dependencies}`:
+`schemas` is each tool's input JSON Schema, derived with zod 4's own `z.toJSONSchema` from the very
+object the builder hands to `tool({inputSchema})` (`target: "draft-07"` and `io: "input"` both
+PINNED rather than defaulted, so a library default moving cannot move a digest that is supposed to
+change only when a CONTRACT changes); `dependencies` is each tool's declared doors. A cell in
+`tests/clara-work-v5.test.mjs` tightens one bound on one schema, leaves the roster and the tools id
+untouched, and proves the digest moves — and that the v4-shaped projection of the same change is
+byte-identical, which is the measurement of what was missed rather than an assertion about it.
 <!-- #811 -->
 
 ## #655 — the trade-invoice lane, and the `chatTurn_v21` contract it hands over

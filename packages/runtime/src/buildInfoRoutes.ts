@@ -40,6 +40,7 @@ import { claraWorkBundleIdentity } from "../workflows/claraWork.v1.bundle.js";
 import { claraWorkBundleIdentityV2 } from "../workflows/claraWork.v2.bundle.js";
 import { claraWorkBundleIdentityV3 } from "../workflows/claraWork.v3.bundle.js";
 import { claraWorkBundleIdentityV4 } from "../workflows/claraWork.v4.bundle.js";
+import { claraWorkBundleIdentityV5 } from "../workflows/claraWork.v5.bundle.js";
 
 export function buildInfoRoutes(): express.Router {
   const router = express.Router();
@@ -64,7 +65,14 @@ export function buildInfoRoutes(): express.Router {
         names: workflowNames,
         bodies: workflowBodies,
         pins: workflowPins,
-        bundles: [claraWorkBundleIdentityV4(), claraWorkBundleIdentityV3(), claraWorkBundleIdentityV2(), claraWorkBundleIdentity()],
+        // NEWEST FIRST, and EVERY retained body — the same roster the world-start banners log and
+        // the rollback preflight enumerates. A payload that named only the pin would leave an
+        // operator unable to tell, from an HTTP read alone, which bodies this process can still
+        // run for a parked Work.
+        bundles: [
+          claraWorkBundleIdentityV5(), claraWorkBundleIdentityV4(), claraWorkBundleIdentityV3(),
+          claraWorkBundleIdentityV2(), claraWorkBundleIdentity(),
+        ],
       }),
     );
   });

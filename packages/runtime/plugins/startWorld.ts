@@ -44,6 +44,7 @@ import { CLARA_WORK_BUNDLE_V1_BANNER } from "../workflows/claraWork.v1.bundle.js
 import { CLARA_WORK_BUNDLE_V2_BANNER } from "../workflows/claraWork.v2.bundle.js";
 import { CLARA_WORK_BUNDLE_V3_BANNER } from "../workflows/claraWork.v3.bundle.js";
 import { CLARA_WORK_BUNDLE_V4_BANNER } from "../workflows/claraWork.v4.bundle.js";
+import { CLARA_WORK_BUNDLE_V5_BANNER } from "../workflows/claraWork.v5.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -290,6 +291,21 @@ export default definePlugin(() => {
       // bodies this process has; the pinned digest is the SAME constant /api/build-info serves and
       // `clara.claim_work_run` writes onto every Work row.
       console.log(CLARA_WORK_BUNDLE_V4_BANNER);
+      // WAVE 2026-09-18 — THE FIFTH LINE. Same reason as the second, third and fourth: v5 is what
+      // `workflows.claraWork` now dispatches, and v1..v4 are still carried for runs parked on their
+      // hooks.
+      //
+      // AND THIS LINE IS LOAD-BEARING FOR THE TEST ESTATE, NOT ONLY FOR AN OPERATOR, which the cut
+      // that added it learned the direct way. Every spawned-engine e2e reads the PINNED bundle's
+      // banner through `tests/pinned-work-bundle.mjs` and will not proceed until it appears
+      // (`waitBooted`). When v5 was cut and this line was not added, the engine booted perfectly —
+      // /health 200, /ready 200, `stranded bodies n=0`, the provenance line naming
+      // `claraWork=claraWork_v5` — and SIX work-lane e2es still failed, every one of them
+      // reporting "serve child did not become ready", because `waitBooted`'s throw is swallowed by
+      // the caller's own retry loop and only the outer deadline's message survives. A missing
+      // banner is therefore a silent, misattributed failure of the whole work-lane battery: add the
+      // line in the SAME commit as the pin.
+      console.log(CLARA_WORK_BUNDLE_V5_BANNER);
       // #637 (C88.8 / C-70) — the ONE MORE LINE this comment used to promise here (which commit
       // built this image, which schema it is talking to, which body each class dispatches to, and
       // how many bodies it carries for parked runs) is `emitProvenanceLine()`, ABOVE, at the top of
