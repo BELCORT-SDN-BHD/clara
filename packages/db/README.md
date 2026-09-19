@@ -921,6 +921,23 @@ owners/privileges. Do not start a restored diagnostic snapshot as an application
 `workflow_drizzle` and `graphile_worker`. Its globals dump is supporting evidence;
 [deploy/roles-bootstrap.sql](deploy/roles-bootstrap.sql) recreates custom roles on a fresh target.
 
+A hosted ceremony's full backup goes through `scripts/ops/dsn-pipe.mjs`, which pins the ceremony
+CA onto the DSN and never lets the DSN itself reach argv or disk. PostgreSQL 17 client tools live
+only in WSL on the Windows release rig, and the committed CA's path is written in the Windows
+spelling, which a WSL child cannot open — pass `--child-os wsl` (or simply invoke `wsl` as the
+child command; it is auto-detected too) and dsn-pipe respells the DSN's `sslrootcert` plus
+`PGSSLROOTCERT`/`NODE_EXTRA_CA_CERTS` to the `/mnt/<drive>/…` form, and sets `WSLENV` so those two
+vars and the six PG identity vars actually cross the Windows/WSL boundary (`DATABASE_URL` is
+deliberately never listed there — only the WSL-side client tools need the PG\* vars):
+
+```sh
+<dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- \
+  wsl -u root -- bash -c 'node packages/db/scripts/backup.mjs --profile full'
+```
+
+The CA fingerprint check always runs against the original Windows-spelled file; only the emitted
+values are respelled (#917).
+
 `restore:full` runs role bootstrap before the transactional dump restore, then prints manual
 follow-ups. Complete those follow-ups against the current estate: private Storage bucket/policies
 and bytes, every configured login and credential, public-schema ACL baseline, and engine migration

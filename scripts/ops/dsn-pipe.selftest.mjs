@@ -49,7 +49,8 @@ const { testCase, asyncTestCase, skipHere, reportFail, reportSkip, summarize } =
 // ---------------------------------------------------------------------------
 console.log("unit level -- withVerifyFull / buildChildEnv / splitArgv:");
 
-const { withVerifyFull, buildChildEnv, splitArgv, nodeDebugEnablesChildProcess, isEntryPoint, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
+const { withVerifyFull, buildChildEnv, splitArgv, nodeDebugEnablesChildProcess, isEntryPoint, DEFAULT_CA_PATH, toWslPath, resolveChildOs } =
+  await import("./dsn-pipe.mjs");
 
 testCase("withVerifyFull forces sslmode=verify-full even when the input carries a different mode", () => {
   const out = withVerifyFull(fakeDsn({ hostport: "h:5432", query: "sslmode=require" }));
@@ -246,11 +247,132 @@ testCase("(C3) splitArgv requires `--` to be the FIRST token — a leading token
   if (ok.cmd !== "echo" || ok.cmdArgs.join(",") !== "hi") throw new Error(`unexpected split: ${JSON.stringify(ok)}`);
 });
 
+// ---------------------------------------------------------------------------
+// (#917) --child-os wsl: respelling the CA path for a WSL child.
+// ---------------------------------------------------------------------------
+console.log("\n(#917) --child-os wsl -- CA respelling for a WSL child:");
+
+testCase("(#917) toWslPath respells a Windows drive path to /mnt/<drive>/…, forward slashes and lower-cased drive letter", () => {
+  if (toWslPath("C:\\Users\\ops\\tls\\pooler-ca.crt") !== "/mnt/c/Users/ops/tls/pooler-ca.crt") {
+    throw new Error(`got: ${toWslPath("C:\\Users\\ops\\tls\\pooler-ca.crt")}`);
+  }
+  if (toWslPath("D:/ops/tls/pooler-ca.crt") !== "/mnt/d/ops/tls/pooler-ca.crt") {
+    throw new Error(`got: ${toWslPath("D:/ops/tls/pooler-ca.crt")}`);
+  }
+});
+testCase("(#917) toWslPath leaves an already-POSIX path unchanged (the CI/Linux shape) -- it only ever ADDS the /mnt/<drive> prefix, never invents one", () => {
+  if (toWslPath("/home/runner/work/clara/ops/tls/pooler-ca.crt") !== "/home/runner/work/clara/ops/tls/pooler-ca.crt") {
+    throw new Error(`got: ${toWslPath("/home/runner/work/clara/ops/tls/pooler-ca.crt")}`);
+  }
+});
+testCase("(#917) resolveChildOs: an explicit --child-os always wins; absent, a literal `wsl` child command is auto-detected; every other command is untouched", () => {
+  if (resolveChildOs("wsl", "psql") !== "wsl") throw new Error("explicit --child-os must win regardless of cmd");
+  if (resolveChildOs(null, "wsl") !== "wsl") throw new Error("a `wsl` child command must be auto-detected when --child-os is absent");
+  if (resolveChildOs(null, "psql") !== null) throw new Error("a non-wsl command with no explicit flag must not trigger respelling");
+});
+testCase("(#917) splitArgv accepts `--child-os wsl` before `--` and reports it", () => {
+  const ok = splitArgv(["--child-os", "wsl", "--", "wsl", "-u", "root", "--", "bash", "-c", "x"]);
+  if (ok.childOs !== "wsl") throw new Error(`expected childOs "wsl", got ${JSON.stringify(ok.childOs)}`);
+  if (ok.cmd !== "wsl" || ok.cmdArgs.join(",") !== "-u,root,--,bash,-c,x") throw new Error(`unexpected split: ${JSON.stringify(ok)}`);
+});
+testCase("(#917) splitArgv without --child-os reports childOs: null (unchanged default shape)", () => {
+  const ok = splitArgv(["--", "echo", "hi"]);
+  if (ok.childOs !== null) throw new Error(`expected childOs null, got ${JSON.stringify(ok.childOs)}`);
+});
+testCase("(#917) splitArgv refuses an unsupported --child-os value, with no ambiguity about what it means (fail-closed, not a guess)", () => {
+  for (const bad of [["--child-os", "macos", "--", "echo"], ["--child-os", "--", "echo"]]) {
+    let threw = null;
+    try {
+      splitArgv(bad);
+    } catch (e) {
+      threw = e;
+    }
+    if (!threw) throw new Error(`expected a throw for argv=${JSON.stringify(bad)}`);
+  }
+});
+testCase("(#917 AC3) the unit cell: given a Windows CA path respelled for --child-os wsl, the pinned DSN's sslrootcert carries the /mnt/c/… spelling and NOTHING ELSE about the DSN changes", () => {
+  const winCa = "C:\\Users\\ops\\tls\\pooler-ca.crt";
+  const wslCa = toWslPath(winCa);
+  const dsn = fakeDsn({ hostport: "h:5432", user: "u", pass: "p", db: "d" });
+  const withoutRespell = new URL(withVerifyFull(dsn, winCa));
+  const withRespell = new URL(withVerifyFull(dsn, wslCa));
+  if (withRespell.searchParams.get("sslrootcert") !== wslCa) {
+    throw new Error(`expected sslrootcert=${wslCa}, got ${withRespell.searchParams.get("sslrootcert")}`);
+  }
+  withoutRespell.searchParams.delete("sslrootcert");
+  withRespell.searchParams.delete("sslrootcert");
+  if (withoutRespell.toString() !== withRespell.toString()) {
+    throw new Error(`respelling the CA path changed something ELSE about the DSN:\n  before: ${withoutRespell}\n  after:  ${withRespell}`);
+  }
+});
+testCase("(#917) buildChildEnv with a WSL-respelled caPath carries it into PGSSLROOTCERT and NODE_EXTRA_CA_CERTS identically (both env vars, not just the DSN)", () => {
+  const wslCa = toWslPath("C:\\ops\\tls\\pooler-ca.crt");
+  const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: wslCa, baseEnv: {} });
+  if (env.PGSSLROOTCERT !== wslCa) throw new Error(`PGSSLROOTCERT: got ${env.PGSSLROOTCERT}`);
+  if (env.NODE_EXTRA_CA_CERTS !== wslCa) throw new Error(`NODE_EXTRA_CA_CERTS: got ${env.NODE_EXTRA_CA_CERTS}`);
+});
+
 // (C1) validateCa's own structural-validation battery lives in the sibling
 // dsn-pipe.ca.selftest.mjs (kept separate so neither file crosses the file-size convention).
 
 const harnessForOpenssl = { reportFail, reportSkip };
 const SYNTHETIC_DSN = fakeDsn({ user: "selftest_" + MARKER, pass: "pw_" + MARKER, hostport: "127.0.0.1:59999", db: "selftestdb" });
+
+await asyncTestCase("(#917) through the REAL CLI with --child-os wsl: WSLENV names exactly the six PG identity vars plus the two CA vars, the two CA vars carry the /mnt/<drive> spelling of the REAL committed CA, and DATABASE_URL is deliberately absent from WSLENV", async () => {
+  // The "child" here is a plain `node` process standing in for `wsl` -- this cell proves what
+  // dsn-pipe.mjs ITSELF builds and hands to its child's env, hermetically (no real wsl.exe
+  // needed, so this runs on the Linux CI runners too). The literal `wsl.exe` end-to-end shape
+  // (AC1) is proved separately, live, against this rig's real WSL install -- see this ticket's
+  // report for that transcript; a live wsl.exe dependency does not belong in the CI-run battery.
+  const grandchildScript =
+    "console.log('REPORT:' + JSON.stringify({wslenv: process.env.WSLENV, cert: process.env.PGSSLROOTCERT, nodeCa: process.env.NODE_EXTRA_CA_CERTS, dburl: process.env.DATABASE_URL}));";
+  const r = await runDsnPipe({
+    scriptPath: DSN_PIPE_SRC,
+    dsn: SYNTHETIC_DSN,
+    args: ["--child-os", "wsl", "--", "node", "-e", grandchildScript],
+  });
+  const line = r.stdout.split("\n").find((l) => l.startsWith("REPORT:"));
+  if (!line) throw new Error(`grandchild never reported; stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
+  const report = JSON.parse(line.slice("REPORT:".length));
+  const expectedWslEnv = "PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS";
+  if (report.wslenv !== expectedWslEnv) throw new Error(`WSLENV: expected ${expectedWslEnv}, got ${report.wslenv}`);
+  const expectedCa = toWslPath(COMMITTED_CA);
+  if (report.cert !== expectedCa) throw new Error(`PGSSLROOTCERT: expected ${expectedCa}, got ${report.cert}`);
+  if (report.nodeCa !== expectedCa) throw new Error(`NODE_EXTRA_CA_CERTS: expected ${expectedCa}, got ${report.nodeCa}`);
+  if (report.dburl.includes(COMMITTED_CA)) throw new Error(`DATABASE_URL must carry the RESPELLED path, not the raw Windows one: ${report.dburl}`);
+  if (!report.dburl.includes(encodeURIComponent(expectedCa))) throw new Error(`DATABASE_URL must still carry sslrootcert=${expectedCa}, got: ${report.dburl}`);
+});
+
+await asyncTestCase("(#917 AC2) the Windows-side fingerprint refusal for a SWAPPED CA still fires under --child-os wsl, before the child ever starts", async () => {
+  if (!opensslAvailableForCaFixtures()) {
+    reportOpensslMissing(harnessForOpenssl, "(#917) swapped-CA-under-child-os-wsl refusal", 1);
+    return;
+  }
+  const root = freshDir("dsnpipe-childos-wsl-swapped-ca-");
+  const realScriptsDir = join(root, "real", "scripts", "ops");
+  const realTlsDir = join(root, "real", "ops", "tls");
+  mkdirSync(realScriptsDir, { recursive: true });
+  mkdirSync(realTlsDir, { recursive: true });
+  writeFileSync(join(realScriptsDir, "dsn-pipe.mjs"), readFileSync(DSN_PIPE_SRC, "utf8"));
+  // A structurally-valid CA (CA:TRUE, in-window) but NOT the pinned one -- a different
+  // fingerprint, exactly the swap validateCa exists to catch. mintCert's own naming already
+  // writes it to <dir>/pooler-ca.crt -- the exact filename DEFAULT_CA_PATH resolves to.
+  mintCert(realTlsDir, "pooler-ca", { ca: true });
+  const rmMinted = () => rmSync(root, { recursive: true, force: true });
+  let r;
+  try {
+    r = await runDsnPipe({
+      scriptPath: join(realScriptsDir, "dsn-pipe.mjs"),
+      dsn: SYNTHETIC_DSN,
+      args: ["--child-os", "wsl", "--", "node", "-e", "console.log('MUST-NOT-RUN')"],
+    });
+  } finally {
+    rmMinted();
+  }
+  assertCleanRefusal(r);
+  if (r.stdout.includes("MUST-NOT-RUN")) throw new Error("the child must never start when the CA fingerprint does not match, --child-os wsl included");
+  if (!/fingerprint/i.test(r.stderr)) throw new Error(`expected a fingerprint-shaped refusal, got stderr: ${r.stderr}`);
+});
 
 // ---------------------------------------------------------------------------
 // Failure modes -- HONEST (D1): every refusal is checked for spawnError/signal/timeout too.
