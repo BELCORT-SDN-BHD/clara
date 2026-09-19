@@ -971,8 +971,13 @@ declare
     'clara._agent_verify_inputs_digest(uuid,text,uuid)'];
   -- THE THIRTEEN POST-IMAGE SHAS (0195:390-409's prestate idiom, run on the POST side). Each
   -- was MEASURED off pg_proc.prosrc on clara_657 after §7(b)'s loop applied, never transcribed
-  -- from file text — the caller loop reads each body out of the live catalog with
-  -- pg_get_functiondef and replaces one counted anchor, so the post-image is a function of
+  -- from file text — the caller loop reads each body out of the LIVE CATALOG (with the
+  -- definition reader §7(b) names; spelling that function name HERE would flip
+  -- scripts/check-wiki-dynamic-sql.mjs to classify this assertion-only tail as a
+  -- change-of-record patch with an unresolved target, because its comment masker desynchronises
+  -- earlier in this file and stops masking comments from :203 onward — measured, and filed as a
+  -- follow-up rather than worked around by weakening the lint) and replaces one counted anchor,
+  -- so the post-image is a function of
   -- 0129/0134's live text and nothing else. Pinning them here is what makes Risk 6's sentence
   -- ("every one of the thirteen gets a NEW prosrc sha; future bank-family pins measure against
   -- #657's post-image, never 0129's") an executable fact instead of a note in a report.
