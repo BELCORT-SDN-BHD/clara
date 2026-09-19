@@ -46,6 +46,19 @@ pnpm --filter @clara/web e2e -- --no-build documents-viewer-walk
 - **The flag is the runner's own and never reaches Playwright.** [`run-args.mjs`](run-args.mjs) matches it by exact equality: `--no-builds` or a spec filter that merely reads like the flag is forwarded untouched, because a loose match would silently widen a one-spec gate into the whole suite (the failure #630 recorded for a stray `--`).
 - **Use it for a REPEAT measurement, never for the first run after an edit.** A stale `.next/` proves the app as it was. Three consecutive runs of one walk, or #804's five cold-start runs, are what it is for.
 
+### One sign-in, and the census that holds it (#804, #851)
+
+Every spec takes its sign-in from [`helpers.ts`](helpers.ts) — `signIn(page, email?)` or `signInTo(page, destination, email?)`. #804's fourth acceptance criterion said so in prose and, by 2026-09-17, fourteen spec files written during that wave had each grown a local copy again, several with a hand-picked 30 s or 60 s wait and one (`intake-batch-walk.spec.ts`) with regex locators and the wrong fixture password. Nothing went red.
+
+[`sign-in-census.test.ts`](sign-in-census.test.ts) is that rule with a cell behind it. It reads the login FORM — a Password fill plus the "Sign in" submit, in either the string or the regex spelling — rather than a function name, so a local helper called anything at all is caught and a thin wrapper that delegates is not. Two short lists, each entry carrying its reason in source:
+
+| List | Entries | What it permits |
+|---|---|---|
+| `FORM_EXCEPTIONS` | `entry-faces-walk.spec.ts`, `reports-download-walk.spec.ts` | driving the login form itself — one because that face is its subject, one because it is the live-stack lane #804 named out of scope |
+| `WRAPPERS` | `chat-parity-walk.spec.ts`, `documents-intake-walk.spec.ts`, `members-invite-walk.spec.ts` | declaring a sign-in function, provided it imports the shared helper |
+
+A third cell keeps both lists live: an entry that no longer offends fails, so the lists can shrink but cannot rot. A fourth is the vacuity control — the detector is driven over synthetic offenders (including the variable-then-click and regex spellings) and over compliant and signup sources, so an empty census is evidence rather than an instrument that never fired.
+
 ## One worker, one host (#706)
 
 The harness is single-worker by construction and it must not share a machine with another test suite while it runs.

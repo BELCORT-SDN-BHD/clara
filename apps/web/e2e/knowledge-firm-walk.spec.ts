@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInTo } from "./helpers";
 import { KN } from "./knowledge-mock.mjs";
 
 // #654 — journeys C13 ("show current scope, source, status and applicability… corrections show
@@ -29,14 +30,6 @@ const FIRM_REGISTER = "/settings/knowledge";
 const SOURCE_RECORD = `/clients/${KN.clientFirmSource}/knowledge/${KN.recordFirmSource}`;
 const RACED_RECORD = `/clients/${KN.clientFirmRaced}/knowledge/${KN.recordFirmRaced}`;
 const EXCEPTION_REGISTER = `/clients/${KN.clientFirmException}/knowledge`;
-
-async function signInTo(page: Page, destination: string, email = "owner@example.test"): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
-}
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();

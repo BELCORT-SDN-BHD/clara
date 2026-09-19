@@ -298,6 +298,7 @@ components/work/work-saved-views.test.tsx
 e2e/e2e-fixture-ownership.test.ts
 e2e/mock-dispatch.test.ts
 e2e/run-args.test.ts
+e2e/sign-in-census.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts

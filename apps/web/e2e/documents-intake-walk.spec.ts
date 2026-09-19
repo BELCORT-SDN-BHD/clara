@@ -20,7 +20,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { settleForScan, watchReactFaults } from "./helpers";
+import { settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
 
 const CLIENT_ID = "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e";
 const WORK_ID = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
@@ -37,21 +37,20 @@ async function scan(page: Page, what: string): Promise<void> {
   expect(results.violations, `${what}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([]);
 }
 
-/** The harness's own credentials and the same already-signed-in short circuit every other
- *  walk uses (`chat-parity-walk.spec.ts:63-71`) — copied rather than re-invented, because a
- *  second spelling of the fixture password is a second thing to keep in step. */
+/** THE IDEMPOTENCY GUARD, and nothing else (#851). The form itself is the SHARED helper's
+ *  (`helpers.ts`, #804), which is where the fixture password, the post-login landmark wait and its
+ *  measured `CELL_BUDGET.signIn` bound live — a second spelling of any of those is a second thing
+ *  to keep in step, which is the drift #851 exists to end.
+ *
+ *  What stays here is the short circuit `chat-parity-walk.spec.ts` keeps for the same reason: this
+ *  walk signs in from `openDocuments` on every cell AND directly in several, always as the same
+ *  persona, so a second real sign-in would be pure wall-clock. It is NOT folded into the shared
+ *  helper, because a caller that deliberately re-authenticates as a DIFFERENT persona
+ *  (`agentic-finish-walk.spec.ts`'s bookkeeper → owner switch) must not have its sign-in skipped. */
 async function signIn(page: Page): Promise<void> {
   const alreadySignedIn = (await page.context().cookies()).some((c) => c.name === "__Host-clara-auth");
   if (alreadySignedIn) return;
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // The SHELL'S OWN LANDMARK, not a URL shape — the wait every other documents walk uses
-  // (documents-viewer-walk.spec.ts). A URL assertion carries a 5 s default and passes or
-  // fails on a redirect this walk does not actually care about; what it needs to know is
-  // that the authenticated shell has rendered.
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: 30_000 });
+  await sharedSignIn(page);
 }
 
 async function openDocuments(page: Page): Promise<void> {

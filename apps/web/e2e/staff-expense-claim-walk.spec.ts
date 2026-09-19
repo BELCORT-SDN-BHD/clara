@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget } from "./helpers";
+import { CELL_BUDGET, grantCellBudget, signInTo } from "./helpers";
 import { SEC } from "./staff-expense-claim-mock.mjs";
 
 // #638 — "完整处理员工报销、垫款与应付明细".
@@ -28,32 +28,6 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CLIENT = SEC.clientId;
 const FORM_URL = `/clients/${CLIENT}/accounting/claims/new`;
 const REGISTER_URL = `/clients/${CLIENT}/accounting/claims`;
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  // #706 — EVERY cell in this walk signs in (the `beforeEach` below), and the flat 30 s Playwright
-  // gives a cell is the whole budget for a real round trip through the mock auth server plus the
-  // destination's own server render. MEASURED on this host, 2026-09-16, twelve lanes live and the
-  // CPU pinned at 100 %: the `/login` navigation ALONE exceeded 30 s and timed out the
-  // `beforeEach` hook. The grant lives here rather than on each cell so a cell that signs in twice
-  // gets twice the headroom — the shape `agentic-finish-walk.spec.ts:53` already uses.
-  grantCellBudget(CELL_BUDGET.signIn);
-
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // The sign-in POST, the caller-context read and the destination's own server render all happen
-  // before the URL settles, and the FIRST of them in a run also pays `next start`'s lazy route
-  // compilation. MEASURED 2026-09-17: the first cell of an isolated two-cell run sat on
-  // "Signing in…" past the 20 s the house gives ONE sign-in and red on the deadline rather than on
-  // anything about claims. The wait is therefore the cell's base budget, which is still well
-  // inside the budget the grant above just bought — so a genuinely broken sign-in still fails
-  // loudly, and only a slow one survives.
-  await expect(page).toHaveURL(
-    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
-    { timeout: CELL_BUDGET.base },
-  );
-}
 
 /** Drive the fixture through the app's OWN proxy — the same instrument the sibling walks use, and
  *  for the same reason: it carries the real session through the real firm-scope guard. Every call
@@ -129,6 +103,13 @@ async function fillClaim(page: Page): Promise<void> {
   await field(page, "instruction").fill("Farah's March travel claim, the receipt she emailed in.");
 }
 
+// #851 — the sign-in is the SHARED helper's (`helpers.ts`), not this file's own copy. The copy it
+// retired carried one measurement worth keeping: on 2026-09-17, twelve lanes live on this host and
+// the CPU pinned at 100 %, the first cell of an isolated two-cell run sat on "Signing in…" past
+// `CELL_BUDGET.signIn` (20 s) and red on the deadline rather than on anything about claims, so that
+// copy had widened its own post-login wait to `CELL_BUDGET.base` (30 s). The shared helper waits
+// 20 s. Raising it is the helper's own decision and #851 put it out of scope, so if this walk ever
+// reds on a "Signing in…" deadline again, that is the measurement talking — not a claims defect.
 test.beforeEach(async ({ page }) => {
   await signInTo(page, REGISTER_URL);
   await control(page, { op: "reset" });
