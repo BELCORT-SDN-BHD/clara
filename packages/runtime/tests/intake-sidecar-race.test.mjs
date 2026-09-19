@@ -438,7 +438,7 @@ test("p966.budget: a settled LIVE upload DOES spend one of the ten — the carve
   // THE CEILING, which corrupt junk has not got: a live sidecar carries a 15-minute capability,
   // and the belt's expiry arm is an action it always takes. So the blind window ends by itself
   // within the capability's life — where `{corrupt}` junk blinds the belt until `sweepSpoolTtl`.
-  const stale = live.map((e) => {
+  const stale = Array.from({ length: live.length }, () => {
     const id = randomUUID();
     return entryDouble(id, { ageMs: 60_000, body: sidecar(id, 1, { status: "uploading", expiresAt: new Date(Date.now() - 1000).toISOString() }) });
   });
