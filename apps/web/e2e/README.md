@@ -8,6 +8,8 @@ pnpm --filter @clara/web e2e
 
 [`run.mjs`](run.mjs) builds `@clara/web`, starts the production Next.js server behind a local HTTPS proxy, and runs every `*.spec.ts` in this directory with Chromium. [`playwright.config.ts`](../playwright.config.ts) fixes the suite at one worker, no retries, no reused server, and retained traces on failure. OpenSSL must be available so the harness can create its temporary local certificate.
 
+**Two runners share this directory.** `*.spec.ts` is Playwright's; `*.test.ts` is `node:test`'s, declared in [`../test/manifest.txt`](../test/manifest.txt) and run by `pnpm --filter @clara/web test`. Playwright's stock `testMatch` takes both suffixes, so until #851 a filterless run also `import`-ed the `node:test` files and executed their assertions inside the Playwright process, where no reporter ever read them — a broken census assertion printed `not ok` into that stream and the run still exited 0. `playwright.config.ts` now pins `testMatch: /.*\.spec\.ts$/`, and [`spec-discovery.test.ts`](spec-discovery.test.ts) holds it with Playwright's stock pattern re-typed as its vacuity control.
+
 ## Fixture boundary
 
 The default suite uses [`serve-built.mjs`](serve-built.mjs). The browser and production bundle are real; Supabase, PostgREST responses, Stripe, and most runtime responses are deterministic local fixtures. The suite is suitable for route behavior, client state, accessibility, responsive layout, same-origin proxying, and request-shape checks. It does not prove live RLS, a deployed workflow, Cloudflare streaming, mail delivery, Stripe, or production configuration.
