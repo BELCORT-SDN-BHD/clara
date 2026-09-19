@@ -154,7 +154,13 @@ function OpeningTieGates({ data, targets, asOf }: { data: OpeningDryrun; targets
               {g.key === "obeNil" && !g.passed
                 ? t("gate.obeNilFailed", { amount: fmtCents(data.obe_net_cents, tc("centsUnsafe")) })
                 : t(`gate.${g.key}`)}
-              <span className="ml-1.5 font-mono text-xs opacity-70">{g.reason}</span>
+              {/* NO `opacity-70` (fix-round, browser leg): dimming the token to 70% took
+                  `text-warning` on `bg-warning-muted` down to 3.33:1, under WCAG AA's 4.5:1 for
+                  12px text — axe caught it on three legs of the walk. An opacity utility escapes
+                  `scripts/check-token-contrast.mjs` entirely, which only reads the tokens in
+                  globals.css, so the gate could never have seen it. The token a professional must
+                  quote back to us is the last thing to render faintly. */}
+              <span className="ml-1.5 font-mono text-xs">{g.reason}</span>
             </span>
           </li>
         ))}

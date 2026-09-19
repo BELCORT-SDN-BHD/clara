@@ -1,0 +1,36 @@
+{
+  "ticket": 658,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "branch": "impl/658-knowledge-retrieval",
+  "head": "33b99b83be80e99f8d76def0fac5ab6eac29c656",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/658-review-spec.json",
+  "verdict": "accept",
+  "measured": {
+    "eight_prestate_pins_match_rig": true,
+    "core_tier_key_count": 7,
+    "core_tier_keys": ["accounting_basis", "banking_arrangement", "customer_identity_policy", "entity_type", "msic", "reporting_framework", "trade_nature"],
+    "db_battery_knowledge_retrieval": "23/23 pass (re-run independently)",
+    "runtime_unit_knowledge_retrieval": "18/18 pass (re-run independently)",
+    "runtime_unit_work_trace_bounds": "9/9 pass (re-run independently)",
+    "web_unit_five_new_files": "28/28 pass (re-run independently, matches 5+5+7+4+7)",
+    "e2e_fixture_ownership_test": "18/18 pass (re-run independently)",
+    "typecheck": "exit 0 (re-run independently, apps/web + packages/runtime)",
+    "lint": "exit 0 (re-run independently)",
+    "frozen_workflow_closure": "296 modules, matches report exactly; new modules (knowledge-retrieval.mjs, capability-registry-v2.mjs, work-trace-bounds.mjs) confirmed absent from closure",
+    "no_body_cut": "confirmed — no claraWork.v5.*, no chatTurn.v21.*, no registry.ts diff",
+    "no_forbidden_files_touched": "confirmed — grep for tree.ts/registry.ts/lib/parts/ClaraThreadView/settings/bank/client-workspace-overview/client-home/firm-home/accounting-hub/journals-api/documents-workbench/useUploadQueue returned zero diffed files",
+    "context_md_terms": "exactly the two ratified terms (Knowledge read status, Knowledge read-set) plus the approved Knowledge pack _Avoid_ extension — no extra terms"
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "minor",
+      "category": "unverified-claim",
+      "where": "packages/runtime/lib/knowledge-retrieval.mjs:25,176-190; packages/runtime/tests/knowledge-retrieval.test.mjs:133-141",
+      "what": "The runtime module's header comment claims the reason set is 'that same five plus ONE the new door introduces — `core_unreadable`, D16's required-read arm', and `retrieveKnowledge` branches on `answer.core_readable !== false` to produce a `core_unreadable` reason. But migration 0230's `clara.retrieve_knowledge` (packages/db/migrations/0230_knowledge_retrieval.sql:265-413) never emits a `core_readable`/`core_readable:false` field in its returned jsonb (grep for `core_readable` across the whole migration file returns zero hits) — confirmed by reading the full function body and by `grep -n \"core_readable\" packages/db/migrations/0230_knowledge_retrieval.sql` returning nothing. The SQL door is one atomic SELECT, so it cannot independently fail on the core tier while the rest succeeds; any failure (lock timeout, refusal, etc.) already throws and is caught by the existing try/catch, landing on `refused`/`read_failed`/`malformed` (all of which already map to `denied`/`unknown` through `faceStatusOf`, satisfying D16's 'if the core cannot be read the whole answer is unavailable' by construction). The `core_readable`/`core_unreadable`/`core_ok` code path is therefore dead code against the real production door: it is exercised only by test `kr.07` (knowledge-retrieval.test.mjs:133-141), which fabricates a synthetic answer object `{ ...ANSWER, core_readable: false }` that `retrieve_knowledge` can never actually produce. This does not cause incorrect behaviour today (the atomic door already yields the D16-correct outcome through the ordinary failure paths), and the final report correctly labels the D16 terminal as 'contract-only', but the comment overclaims what the door does and the test gives false confidence that a real door capability was exercised.",
+      "failure_scenario": "A future implementer (e.g. at the claraWork_v5 cut) reads the `core_unreadable` branch and its test and concludes the SQL door already distinguishes 'core failed' from 'everything failed', then designs the v5 required-read terminal assuming that signal exists and is meaningful, when in fact it will never fire from the real door as built — wasted design/debugging time, or a false sense that D16's core-tier distinction is more granular than it actually is.",
+      "fix": "Either (a) correct the comment to state plainly that the door is atomic and cannot signal a core-only failure today, so `core_readable` is speculative/defensive code with no live producer, and drop or clearly mark `kr.07` as testing a hypothetical future door shape rather than current behaviour; or (b) remove the dead `core_readable` branch entirely until a future migration actually needs to distinguish tier-level failure, relying instead on the already-correct fact that any door exception already yields `unknown`/`denied` (which is sufficient for D16 given the door's current atomic shape)."
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "ticket": 655,
+  "role": "recheck",
+  "recheck_round": 2,
+  "recheck_model": "claude-sonnet-5 (recheck reviewer, workflow harness)",
+  "head_checked": "0911f7b8c40d1b61b1c4121097e72e9a7fc159b3",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "rig": "127.0.0.1:55705 / clara_655",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\655-recheck-2.json",
+  "inputs_read": [
+    "DECISIONS.md \u00a76.2 (\u00a76.2.0 R-A, \u00a76.2.1 #655 rows, \u00a76.2.2 fix-round-2 work order)",
+    "reports/655-fixround-1.md (the \"Fix round 2\" section, commit 0911f7b8, round entered at 067f84a1)",
+    "reports/655-recheck-1.json (source of F1 and ADV-655-2, the two open items fix round 2 was scoped to close)",
+    "packages/db/migrations/0225_trade_invoices.sql (the edited _trade_invoice_due body and its comment block)"
+  ],
+  "verdict": "accept",
+  "summary": "Fix round 2's single commit (0911f7b8) does exactly what reports/655-fixround-1.md's \"Fix round 2\" section claims, and every cell that section cites for #655 is independently re-verified green at HEAD: the parity cell p655.parity.source_vs_direct, the retitled anchor cell p655.due.terms_fallback, and the new sibling p655.due.anchor_document_date all pass inside the full 41-gate-flag battery (29/29, matching the report's post-re-apply count exactly). typecheck and lint are both green. The migration's ledger row for 0225 matches the file's current sha256 byte-for-byte, so the DB the report describes as re-applied under 'route (2)' is genuinely running the edited file's own checksum, not a re-pointed one. One item named in this task's brief could not be located in #655's own report or worktree: 'the race cell with two real sessions for #660' is not cited anywhere in 655-fixround-1.md's Fix round 2 section (grepped, zero hits) or in 655-recheck-1.json; it belongs to DECISIONS.md \u00a76.2.2's separate #660 row (NF-1: cash_set_version_race) and to ticket #660's own worktree/rig (C:\\Users\\zhant\\Desktop\\clara-wt\\660, clara_660 on 55710), which already has its own completed second recheck at reports/660-recheck-2.json (verdict accept, NF-1 and NF-2 both re-verified there independently). clara_655 has no cash_account_set_versions relation (confirmed: to_regclass returns null) so that cell cannot run, and should not be run, on this rig. Treated as an out-of-scope item carried over from a different ticket's fix-round-2 text rather than as a missed cell.",
+  "not_applicable": [
+    {
+      "item": "the race cell with two real sessions for #660 (p660.set.publish_race_loser_code)",
+      "reason": "Not cited by reports/655-fixround-1.md's Fix round 2 section (verified by grep: no '660' occurrence anywhere in that file) or by 655-recheck-1.json. It is DECISIONS.md \u00a76.2.2's #660 row (NF-1), scoped to ticket #660's own worktree/rig/migration (clara_660 on 55710, 0232_client_financial_pack.sql), not to #655's. clara_655 has no clara.cash_account_set_versions relation (to_regclass('clara.cash_account_set_versions') = null on this rig), so the cell cannot be run here. It has already been independently re-verified in reports/660-recheck-2.json (verdict: accept)."
+    }
+  ],
+  "cells_reverified": {
+    "p655.parity.source_vs_direct": "PASS (test #24 of 29 in the 41-gate battery) \u2014 fixture now dates the document on its posting day; both lanes derive 2026-04-30, and the cell asserts the fixture's own premise (stored document_date IS TI_DATE.posting) rather than assuming it",
+    "p655.due.terms_fallback": "PASS (test #10 of 29) \u2014 retitled cell, asserts document_date + 30 = 2026-04-03 with due_date_source='counterparty_terms' on both the trade_invoices row and the open_items row",
+    "p655.due.anchor_document_date": "PASS (test #11 of 29) \u2014 NEW cell, drives one bill down both lanes on a fixture 27 days apart (document 2026-03-04, posted 2026-03-31, 30-day terms): Work lane 2026-04-03, legacy coding/upload lane 2026-04-30 (named divergence for #665); opens with assert.notEqual so neither half is vacuous"
+  },
+  "commands_rerun": {
+    "pnpm_typecheck": "exit 0 (apps/web tsc --noEmit Done; packages/runtime tsc --noEmit Done)",
+    "pnpm_lint": "exit 0, including check-message-keys.selftest and check-ui-add-guard.selftest inline",
+    "trade_invoice_battery_41_gates": "node --test --test-concurrency=1 with all 41 --import gate flags (counted: delta, rs-guard, theta, epsilon, zeta, eta, statutory-deadlines, f-a7-alpha, f-a7-beta, f-a7b-pr-a, proposal-basis, promotion-dup-open-wall, coa-template-pr-a, coa-template-pr-b, f-t3-pr-1, client-identifiers-unique, mdrw, checkout-gate-c1, f-a4-pr2c-close-chat, checkout-gate-c2, checkout-gate-c3, checkout-gate-c6, web-reads, counterparty-alias-kind, document-capability, knowledge-0192, accounting-plans, firm-document-limits, document-regions-unique, client-work-pack, counterparty-identity, fixed-asset-acquisition, document-source-revision, firm-setup, client-onboarding-identity, knowledge-firm-defaults, staff-expense-claim, accrual-adjustments, prepayment-0223, preview-invite, trade-invoice = 41), cwd packages/db, tests/trade-invoice.test.mjs: 29 tests, 29 pass, 0 fail, 0 skip \u2014 matches the fixround-1 report's post-re-apply count exactly",
+    "packages/runtime tests/trade-invoice-unit.test.mjs": "23 pass, 0 fail (node --test)",
+    "packages/runtime tests/trade-invoice-e2e.mjs (World leg, run from packages/runtime/)": "PASS \u2014 all 5 legs green, leg 5 asserts due_date === '2026-04-03' on both the 202 body and clara.open_items.due_date (packages/runtime/tests/trade-invoice-e2e.mjs:456-464)",
+    "apps/web/components/accounting/trade-invoice-form.test.tsx (node --import ./apps/web/test/bootstrap.mjs --import tsx --test)": "13 pass, 0 fail",
+    "db_migration_ledger_reapply_check": "node scripts/migrate.mjs (implicit via ledger check below) not re-run destructively; ledger row confirmed present and consistent instead (see migration_ledger_verification)"
+  },
+  "function_reverification": {
+    "clara._trade_invoice_due('{\"document_date\":\"2026-03-04\"}', '{\"posting_date\":\"2026-03-31\"}', 30)": "{ due_date: '2026-04-03', due_date_source: 'counterparty_terms' } \u2014 matches report verbatim",
+    "clara._trade_invoice_due('{}', '{\"posting_date\":\"2026-03-31\"}', 30)": "{ due_date: '2026-04-30', due_date_source: 'counterparty_terms' } \u2014 the belt with no document date, matches report verbatim"
+  },
+  "migration_ledger_verification": {
+    "query": "select version, checksum, applied_at from clara.schema_migrations where version like '%0225%'",
+    "result_version": "0225_trade_invoices",
+    "result_checksum": "4e99ae6fc1aa01c9b973e64dc594133b45ed57fd5e7c8e21dc09e83dee77a658",
+    "applied_at": "2026-09-19T07:11:24.285Z",
+    "file_sha256": "4e99ae6fc1aa01c9b973e64dc594133b45ed57fd5e7c8e21dc09e83dee77a658",
+    "match": true,
+    "total_migrations_on_rig": 220,
+    "note": "Checksums are byte-identical. The ledger row's checksum is the edited file's own hash (the fixround-1 report's 'route (2)' re-apply via node scripts/migrate.mjs, not a re-pointed/stale row)."
+  },
+  "commits_confirmed": {
+    "round_range": "067f84a1..0911f7b8",
+    "commits_in_range": ["0911f7b8"],
+    "commit_count_matches_report": true,
+    "diff_stat_files_changed": 14,
+    "note": "Matches the report's 'Round entered at 067f84a1 (15 commits) \u00b7 HEAD 0911f7b8 \u2014 16 commits, 1 in this round.'"
+  },
+  "worktree_hygiene": "git status --short clean before and after this recheck; HEAD unchanged at 0911f7b8c40d1b61b1c4121097e72e9a7fc159b3 throughout; no tracked file modified (read-only honoured)",
+  "new_defects_introduced_by_fixes": [],
+  "observations": [
+    "reports/655-fixround-1.md's own '41 gate flags' count was independently recounted from packages/db/package.json's test script and confirmed to be exactly 41 --import flags (trade-invoice-preintegration-gate.mjs is the 41st, added by this ticket).",
+    "The fixround-1 report's 'Route (1) rejected' reasoning (18 clara* roles measured on this cluster vs 0154's hardcoded 14) was read but not independently re-measured in this round; it is orthogonal to the cells this task was scoped to re-run and was not touched again since fix round 1."
+  ]
+}

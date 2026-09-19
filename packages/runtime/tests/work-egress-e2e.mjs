@@ -352,11 +352,46 @@ async function main() {
     for (const want of ["dispatch", "model_call", "tool_call", "settle"]) {
       assert.ok(phases.includes(want), `A: the trace carries a ${want} row (got ${phases.join(" → ")})`);
     }
+    // THE ORDER, WITH THE KNOWLEDGE PRELOAD IN IT. Until claraWork_v5 this filtered list was
+    // exactly `model_call → tool_call → settle`, because the run's knowledge read wrote NO trace
+    // row at all — v4's header says why: the seq scheme gave a segment three rows from `2 + i*3`
+    // and there was no free number between the claim's dispatch and the first segment's.
+    //
+    // v5 WIDENED THE SCHEME rather than wedging the read in (seq 1 claim, seq 2 the PRELOAD, then
+    // four rows per segment, settle past the last), so the run now traces one `tool_call` BEFORE
+    // its first dispatch. That is not a reordering of the segment — the segment's own three rows
+    // are in the same order they always were — it is one new row for an act that genuinely
+    // happens first: `clara.retrieve_knowledge` is a `modelBound` capability
+    // (`accounting_work.retrieve_knowledge`, `lib/capability-registry-v2.mjs`), it puts a client's
+    // recorded facts into a model's context, and an egress-adjacent act with no trace row is
+    // exactly what this relation exists to record. The richer record of WHAT was read is
+    // `clara.work_knowledge_reads`; this row is what makes `capability(id)` answerable about it.
+    //
+    // ASSERTED AS A SUFFIX so the cell keeps testing the thing it was written to test — that a
+    // segment's model call precedes its tool call and the settle is last — without re-pinning the
+    // number of rows a future body may legitimately add ahead of them.
+    const afterDispatches = phases.filter((p) => p !== "dispatch");
     assert.deepEqual(
-      phases.filter((p) => p !== "dispatch"),
+      afterDispatches.slice(-3),
       ["model_call", "tool_call", "settle"],
       `A: the run's steps are traced IN ORDER (got ${phases.join(" → ")})`,
     );
+    // EVERY ROW AHEAD OF THEM IS A KNOWLEDGE READ, and the count is NOT pinned — which is what the
+    // comment above says this assertion does, and what it did not do until fix round 1 (review
+    // ADV-S-10). A run with a resume writes a DRIFT row as well, so pinning `["tool_call"]`
+    // exactly would have red on a resumed run for a row the body is designed to write.
+    const ahead = afterDispatches.slice(0, -3);
+    assert.ok(ahead.length >= 1, `A: at least the preload precedes the segment (got ${phases.join(" → ")})`);
+    assert.deepEqual(
+      Array.from(new Set(ahead)),
+      ["tool_call"],
+      `A: and every row ahead of the segment is a knowledge read (got ${phases.join(" → ")})`,
+    );
+    const preload = rowsA.find((r) => r.capability_id === "accounting_work.retrieve_knowledge");
+    assert.ok(preload, "A: the preload row names the v2 registry's own capability id");
+    assert.equal(preload.registry_version, "clara-capability-registry/v2",
+      "A: …under the registry that knows it — v1 would answer a null purpose for this id");
+    assert.equal(preload.purpose, "accounting_work", "A: …and the purpose it read FOR");
     const modelRow = rowsA.find((r) => r.phase === "model_call");
     assert.equal(modelRow.outcome, "ok");
     assert.equal(modelRow.purpose, "accounting_work", "A: the model call records the purpose it spent");
@@ -366,10 +401,25 @@ async function main() {
     assert.match(modelRow.input_digest, /^[0-9a-f]{64}$/, "A: the input is a DIGEST, never the input");
     assert.equal(modelRow.bundle_id, WORK_BUNDLE_ID);
     assert.equal(modelRow.bundle_digest, engine.state.banner, "A: the trace names the digest the process logged");
-    assert.equal(modelRow.registry_version, "clara-capability-registry/v1");
+    // THE REGISTRY VERSION IS v2 FROM claraWork_v5 ON, and on EVERY row of the run rather than only
+    // the two that need it. That is the truthful record: `lib/capability-registry-v2.mjs` carries
+    // v1's five entries BY REFERENCE and adds two, so a v5 run is served by v2 in its entirety, and
+    // a row claiming v1 while the run could exercise `accounting_work.inspect_knowledge_source`
+    // would be naming a different contract than the one that ran. Read from the pinned body rather
+    // than retyped, so this cell follows the pin instead of failing at the next cut.
+    // Derived from the PINNED bundle id, which this file already reads from the registry, so the
+    // cell follows the pin instead of failing at the next cut.
+    const pinnedRegistryVersion = ["clara-work/v1", "clara-work/v2", "clara-work/v3", "clara-work/v4"].includes(WORK_BUNDLE_ID)
+      ? "clara-capability-registry/v1"
+      : "clara-capability-registry/v2";
+    assert.equal(modelRow.registry_version, pinnedRegistryVersion);
     assert.equal(modelRow.capability_id, "accounting_work.model_segment");
-    const toolRow = rowsA.find((r) => r.phase === "tool_call");
-    assert.equal(toolRow.capability_id, "accounting_work.record_journal_entry");
+    // BY CAPABILITY, NOT BY PHASE. Until v5 there was exactly one `tool_call` row in a run, so
+    // `find(phase === "tool_call")` and "the segment's tool row" were the same thing; v5's knowledge
+    // preload is also a `tool_call` and it comes FIRST, so the phase test now finds the wrong row.
+    // Naming the capability says which row this cell has always been about.
+    const toolRow = rowsA.find((r) => r.capability_id === "accounting_work.record_journal_entry");
+    assert.ok(toolRow, `A: the run traced its recording tool call (phases=${phases.join(" → ")})`);
     assert.equal(toolRow.receipt_id, doneA.work.result.receipt_id, "A: the tool row names the receipt it produced");
     const settleRow = rowsA.find((r) => r.phase === "settle");
     assert.equal(settleRow.outcome, "ok");

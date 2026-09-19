@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 
 import { purposeLabel } from "@/lib/work/purpose-label";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,7 @@ import { FormattedDate } from "@/components/journals/formatted-date";
 import { EntryStatusBadge } from "@/components/journals/entry-status-badge";
 import { EntryDiffPanel } from "@/components/journals/entry-diff-panel";
 import { journalEntryHref, workDetailHref } from "@/lib/navigation/tree";
+import { isOpeningEntry, openingBasisHref } from "@/lib/journals/opening-badge";
 import type { EntryTableRow } from "@/lib/journals/entries-table";
 import type { EntryLinkRow } from "@/lib/work/evidence";
 import type { CoaAccountRow, JournalLineRow } from "@/lib/journals/types";
@@ -117,6 +119,14 @@ export function EntryRows({
         <TableCell className="text-muted-foreground">
           {originLabel(entry.origin, to)}
           {entry.coding_kind ? <span className="block text-xs">{entry.coding_kind}</span> : null}
+          {/* #656 — an opening entry posts with origin='manual' exactly like a hand-keyed one, so
+              the source cell said the same word for two very different facts. The badge links back
+              to the basis it came from; `?tab=opening` is a real, reload-stable URL. */}
+          {isOpeningEntry(entry) ? (
+            <Link href={openingBasisHref(clientId)} className="mt-0.5 block w-fit">
+              <Badge variant="secondary">{t("openingBalanceBadge")}</Badge>
+            </Link>
+          ) : null}
         </TableCell>
         <TableCell className="text-right">
           <span className="flex flex-wrap items-center justify-end gap-1">

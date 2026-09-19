@@ -1,0 +1,161 @@
+{
+  "ticket": 651,
+  "lens": "recheck",
+  "lens_model": "claude-sonnet-5",
+  "head": "9d96ad450bc50f02241202d6baa3a0e2d23c6982",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/651-recheck-1.json",
+  "inputs_read": [
+    "docs/plan/active/refresh-wave-2026-09-18/reports/651-fixround-1.md",
+    "docs/plan/active/refresh-wave-2026-09-18/reports/651-final.md",
+    "docs/plan/active/refresh-wave-2026-09-18/reports/651-review-adversarial.json",
+    "docs/plan/active/refresh-wave-2026-09-18/reports/651-review-spec.json",
+    "docs/plan/active/refresh-wave-2026-09-18/reports/651-review-standards.json",
+    "docs/plan/active/refresh-wave-2026-09-18/DECISIONS.md",
+    "docs/plan/active/refresh-wave-2026-09-18/WORK-ORDER.md",
+    "docs/plan/active/refresh-wave-2026-09-18/RIG.md"
+  ],
+  "verdict": "accept",
+  "verdict_reasoning": "All 8 findings the fix round marks 'applied' with a code change were opened at their citing commit, re-run on the rig (clara_651), and shown non-vacuous and correct. Both 'deliberately left' findings hold against DECISIONS/WORK-ORDER. The two 'ratification requested' scope widenings are real widenings but correctly escalated rather than silently taken, per WORK-ORDER rule 6 -- they need an orchestrator ruling, not a recheck rejection. No new defect was found in the fix-round diff: typecheck and lint are clean, every battery the fix round touched or could disturb was independently re-run and matches or exceeds the reported counts, and the one apps/web whole-suite discrepancy (my re-run shows 0 fail where the report shows 1) is the report's own named flake NOT reproducing, which is consistent with 'load flake' rather than a new problem.",
+  "findings_applied": [
+    {
+      "id": "ADV-651-1",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "2aa00f24",
+      "evidence": "Read the 0227 diff (section B.3): the retire UPDATE now carries authority_from = coalesce(au.authority_from, clara._fa_month_start(clara._fa_today())) in the same statement as the pre-existing signed_by/signed_at coalesce, pinned by anchor-count and postcheck. Independently queried the LIVE body on clara_651 via pg_get_functiondef and confirmed the coalesce clause is present in the installed function, not just in the migration source. Ran node --test --import ./tests/depreciation-history-preintegration-gate.mjs tests/depreciation-history.test.mjs from packages/db: cell 11 p651.authority.retire_unsigned passes and asserts (a) the authority starts proposed/never-signed, (b) the admin door accepts the withdrawal, (c) the retired row now carries authority_from = mon(0).start (a real value assertion, not existence), (d) the read renders 'none proposed' honestly, (e) a corrected cadence can be re-proposed. Non-vacuous: it asserts specific values, not just 'no throw'.",
+      "battery_result": "19 pass / 0 fail / 0 skip (whole depreciation-history.test.mjs)"
+    },
+    {
+      "id": "ADV-651-4",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "2aa00f24",
+      "evidence": "Read the rewritten p651.authority.floor_sequencing cell: the old tautology assert.ok(earlier === null || reasonToken(earlier) !== null) is gone, replaced by five separate assertions -- earlierErr===null (a real equality, not an or-branch), receipt.status==='noop', entry_id===null, chargeset deepEqual unchanged, run-row id list deepEqual unchanged. This shape cannot pass under both 'the guard binds' and 'the guard does not bind' outcomes the way the original could, so it is no longer a tautology over the two exhaustive branches. Ran the cell: ok 10, and the diagnostic notice logs the same residual as before, now as a passed assertion rather than a logged aside. Did not re-run the fix worker's own mutation proof (that requires editing the tracked test file and this session is read-only on tracked files), but the code inspection independently establishes non-vacuity without needing to re-mutate.",
+      "battery_result": "cell 10 passes; whole file 19/19"
+    },
+    {
+      "id": "ADV-651-5",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "2aa00f24",
+      "evidence": "Same cell as ADV-651-4 (they share one fix). The report's characterization -- out-of-order pre-floor run is admitted, and it is a noop because charges sweep to period end -- is now the literal content of the assertions, not a narrative gloss on a tautology. The residual is pinned as measured fact.",
+      "battery_result": "same as ADV-651-4"
+    },
+    {
+      "id": "ADV-651-6",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "2aa00f24",
+      "evidence": "Read 0227 section B.2's splice: it inserts the write-once wall (raising CLR38 authority_immutable, naming the column) ahead of the existing transition-legality raise, on its own anchor, with a postcheck that fails the migration if the two are in the wrong order. Independently re-read the LIVE trigger body on clara_651 via pg_get_functiondef: confirmed the string 'written once and never moved' appears at byte offset 1558 and 'authority_transition_illegal' at byte offset 2791 -- the wall genuinely precedes the legality raise in the installed function, which is the load-bearing property the fix round claims. Ran p651.authority.floor_frozen (cell 12): attempts a labelled root UPDATE on both authority_from and authority_ref on a live authority, gets CLR38 authority_immutable naming the correct column each time, confirms nothing moved, and confirms retiring a SIGNED authority carries both values through untouched. All assertions check real values, not just refusal-or-not.",
+      "battery_result": "cell 12 passes; whole file 19/19"
+    },
+    {
+      "id": "ADV-651-7",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "2aa00f24",
+      "evidence": "Read the fa-authority-sign-compat.mjs diff: both trigger-off fixtures (mintChatTaskRef, backdateAuthorityFloor) now go through a new withTriggerOff helper built on withActor({ transaction: true }, ...), which BEGINs, runs disable/write inside it, and COMMITs (or rolls back on throw) on one pooled connection -- confirmed by reading withActor in rig-helpers.mjs, which genuinely issues begin/commit around the callback when transaction: true. This is the correct fix for the finding (ACCESS EXCLUSIVE DDL inside one transaction scopes the disabled window to that transaction). rootQuery remains imported and used for other calls in the same file (no dead import; lint confirms). This is a property the batteries verify rather than a cell that asserts it directly, as the fix round's report itself says -- and the batteries that exercise these two fixtures (p651.authority.ref_resolves, p651.authority.floor, p651.authority.floor_frozen, and the wider x41/runtime suites that write against the same rig) all pass.",
+      "battery_result": "depreciation-history.test.mjs 19/19; runtime battery 26/26; x41 family 103/105 (1 pre-existing unrelated fail, 1 skip)"
+    },
+    {
+      "id": "ADV-651-8",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "1abf48db, 9d96ad45",
+      "evidence": "Read both web commits. depreciation.ts: proposeDepreciationAuthority/signDepreciationAuthority/retireDepreciationAuthority now take opKey from the caller instead of minting crypto.randomUUID() internally; authorityIntent() and reviseIntent() are new exported intent-tuple builders; useDepreciationDecisionKey is unchanged and reused. fa-authority-ceremony.tsx and fa-row-actions.tsx: all four dialogs (Propose/Sign/Retire/Revise) now call decision.key(...) and pass it as opKey. The second commit (9d96ad45) adds onClosed={() => decision.renew()} to all four dialogs; read FaDoorDialog.tsx and confirmed onClosed is a real, wired lifecycle hook fired both on Cancel/Escape/backdrop (via onOpenChange) AND on a confirmed success (an explicit second call site, because the success path sets open directly rather than through onOpenChange) -- so the key genuinely dies with the dialog on every closing path, not just some. completeFixedAssetParticulars (fixed-assets.ts:301) and disposeFixedAsset (fixed-assets.ts:412) were independently grepped and still mint their own crypto.randomUUID() -- confirming the claimed, deliberate non-widening. Ran lib/registers/depreciation.test.ts + fixed-assets.test.ts: 22/22. Ran the FA component suite (fa-*, fixed-asset*, register-refresh-siblings): 55/55. Both match the fix round's reported counts exactly.",
+      "battery_result": "22/22 (unit) + 55/55 (components) = 77/77, matching the report"
+    },
+    {
+      "id": "S1",
+      "recheck_verdict": "CONFIRMED",
+      "commit": "1abf48db",
+      "evidence": "Read the diff to e2e-fixture-ownership.test.ts and serve-built.mjs: both comments now say FIVE / five and name all five verbs (get_fixed_asset, get_depreciation_authority, list_depreciation_runs, list_fixed_assets, fa_register_tie), and both point at SHARED_RPC_VERBS as the source of truth. Exactly the fix the finding asked for."
+    }
+  ],
+  "findings_report_only": [
+    {
+      "id": "ADV-651-2",
+      "recheck_verdict": "CONFIRMED as a comment/report correction; the code narrowing itself is correctly NOT applied and correctly left as a cross-lane residual",
+      "evidence": "Read 0227 section F's new header and the in-body comment at the resolution check: both now state explicitly that the ladder proves PROVENANCE (a real row in this firm/client) and not INSTRUCTION (kind/status/author unread), name it the estate's position (0193:1500-1514 is byte-for-byte the same test for accounting plans), and name it a residual. Verified against DECISIONS.md D7 (#651 does not move into the plan lane's shared scheduler; firmly assigns the plan lane's own tooling to the plan lane) and section 5's non-goals line ('#651 implements no policy/error restatement...') -- nothing in DECISIONS authorizes a unilateral FA-lane-only narrowing of a ladder shared byte-for-byte with create_accounting_plan, and DECISIONS section 4 Evidence Law explicitly accepts a NAMED residual as a valid closure alongside a red-first cell. The reasoning holds."
+    },
+    {
+      "id": "ADV-651-3",
+      "recheck_verdict": "CONFIRMED, and independently reproduced",
+      "evidence": "Queried clara.schema_migrations on clara_651 directly: version 0227_depreciation_history, checksum d55113b5b956f69bc0fc07f2688a91916442408b13238bbb557a4ce5b636e424, applied_at 2026-09-18T19:50:37.880Z -- exactly the values the fixround report cites as the ledger's third in-place repair. Independently extracted and ran the migration's own p651_tail block (18,661 chars, matching the report's stated length) inside a rolled-back transaction: green, no exception. Independently extracted and ran the p651_pre block the same way: refused as designed with CLR10 'clara._fa_assert_period_open(uuid,date) already exists', matching the report's claim verbatim. This confirms the finding's core claim (0227 has never applied end-to-end from a clean base on this cluster) remains true after the fix round, and confirms the report's mitigation evidence is real rather than asserted."
+    },
+    {
+      "id": "ADV-651-9",
+      "recheck_verdict": "CONFIRMED",
+      "evidence": "Independently re-ran the whole x41 family (20 files, node --test --test-concurrency=1): 105 tests, 103 pass, 1 fail, 1 skip -- the one failure is x41.s4 by name (grepped 'not ok' in the run output), matching the report exactly. Did not re-derive the timestamp attribution directly (that would require reading fixture internals well beyond the recheck's evidence-checking scope) but the reproduced failure signature and count match the report's claim precisely, and nothing in this fix round touched x41.b3 or the acquisition/reversal belt (confirmed by the file list in 'Files touched this round', none of which is an x41 file)."
+    },
+    {
+      "id": "ADV-651-10",
+      "recheck_verdict": "CONFIRMED as correctly left to the owner",
+      "evidence": "This is an owner question, not a defect with a code fix available -- the report correctly moves it to 'Owner questions' rather than claiming a resolution. No action needed to accept this disposition."
+    },
+    {
+      "id": "SPEC-651-N1",
+      "recheck_verdict": "CONFIRMED",
+      "evidence": "Not re-measured (a rig-measured row count is explicitly non-reproducible across sessions per the review's own finding and DECISIONS' evidence law); the report's framing (divergence is 0 and reproducible, raw count is not and should not be quoted) is the correct, defensible framing and matches SPEC-651-N1's own fix recommendation verbatim."
+    },
+    {
+      "id": "SPEC-651-N2",
+      "recheck_verdict": "CONFIRMED",
+      "evidence": "Covered by the same x41-family re-run as ADV-651-9: the failure signature is stable in shape (x41_b3_* clients at account 200-D41, cost_diff=77000) even though the exact client count keeps drifting on a persistent rig, exactly as the report says it will."
+    }
+  ],
+  "deliberately_left_reviewed": [
+    {
+      "item": "ADV-651-2's narrowing of the resolution ladder (reading agent_tasks.kind / a Work row's author) is not applied; only the comment is softened",
+      "verdict": "REASON HOLDS",
+      "against": "DECISIONS.md D7 (depreciation stays out of the plan lane's shared scheduler and its recuts), DECISIONS section 5 non-goals, and DECISIONS section 4 Evidence Law's acceptance of a NAMED residual as a valid closure. The ladder is byte-for-byte the plan lane's own existence test (0193:1500-1514, confirmed by the standards review's own measured read); narrowing #651's copy alone would create two meanings for one existence check across two lanes sharing the same underlying vocabulary, which is a cross-lane product decision no single ticket's brief authorizes unilaterally. Correctly escalated as a follow-up (final report Follow-up 6) with an owner-question framing, not silently dropped."
+    },
+    {
+      "item": "ADV-651-8 for completeFixedAssetParticulars / disposeFixedAsset -- not widened to take a caller key",
+      "verdict": "REASON HOLDS",
+      "against": "WORK-ORDER rule 6 (do not widen or narrow the brief silently; take the most conservative reading; state the assumption). The finding's own where field names exactly four call sites (depreciation.ts:74/95/114 and fixed-assets.ts:344), none of which is complete/dispose; those two doors are #639's own pre-existing shape, untouched by any #651 commit before this fix round (confirmed: their randomUUID-minting lines are unchanged in the diff). Widening them would be an unrequested, unreviewed scope increase into another ticket's territory. Filed as Follow-up 7 instead, which is the correct move."
+    }
+  ],
+  "ratification_items_reviewed": [
+    {
+      "item": "0227 now recuts two bodies outside the brief's RECUTS roster (clara.retire_depreciation_authority section B.3, a second splice of clara._tf_fa_authority_transition section B.2)",
+      "assessment": "This is a real scope widening beyond the brief's DECISIONS-table roster for migration 0227, but it is not a rule violation: WORK-ORDER rule 8 forbids editing a MERGED migration, and 0227 is unmerged (this branch's own, still under review). Both recuts repair damage 0227 ITSELF would otherwise introduce (a raw 23514 on a previously-lawful act; an allowlist masquerading as a freeze), carry the full house apparatus (pre-image pin, anchor count, postcheck, tail ACL/owner row, name-purity census row), and the alternative for section B.3 (weakening the brief's verbatim CHECK) was considered and rejected with reasons given. This is exactly the WORK-ORDER rule 6 protocol -- do the safe thing, state the assumption, ask the orchestrator to ratify or overrule -- rather than a silent widening. Recommend ratifying, or naming the CHECK-weakening alternative explicitly if the orchestrator disagrees; either way this is not a recheck-blocking defect."
+    },
+    {
+      "item": "ADV-651-2's narrowing is not applied and needs a cross-lane ruling",
+      "assessment": "Same conclusion as the deliberately-left review above -- correctly escalated, not silently resolved either way."
+    }
+  ],
+  "new_defects_introduced_by_fix_round": [],
+  "measured_evidence": {
+    "head_commit": "9d96ad450bc50f02241202d6baa3a0e2d23c6982 (2026-09-19 14:44:16 +0800)",
+    "files_changed_since_93579e4c": "16 files, 564 insertions(+), 84 deletions(-) -- matches 651-fixround-1.md's 'Files touched this round' list exactly, nothing extra",
+    "packages/db_depreciation-history.test.mjs": "19 pass / 0 fail / 0 skip (re-run, matches report)",
+    "packages/db_fixed-asset-acquisition.test.mjs_M1_GREEN_arm_check": "21 pass / 0 fail (re-run, matches report; confirms revise_fixed_asset_particulars_classified does not exist anywhere in tree except explanatory migration comment -- Assumption 1 holds)",
+    "packages/db_operation-census.test.mjs": "10 pass / 0 fail (re-run, matches report)",
+    "packages/db_rig-isolation.test.mjs": "20 pass / 0 fail / 1 skip (re-run, matches report)",
+    "packages/db_whole_x41_family_20_files": "105 tests / 103 pass / 1 fail (x41.s4, confirmed by name) / 1 skip (re-run, matches report exactly)",
+    "packages/runtime_depreciation-run-unit_reconcile-fa-unit_reconcile-fa": "26 pass / 0 fail (re-run, matches report)",
+    "apps/web_lib_registers_depreciation_fixed-assets_test": "22 pass / 0 fail (re-run, matches report)",
+    "apps/web_FA_component_suite": "55 pass / 0 fail (re-run, matches report)",
+    "apps/web_firm-scope-db-pins_test": "22 pass / 0 fail (re-run, matches report's re-pinned census)",
+    "apps/web_whole_unit_suite": "4168 tests / 4166 pass / 0 fail / 2 skip (re-run) -- report claimed 4165 pass / 1 fail (the named lib/clara/use-clara-thread-stop.test.ts load flake, unrelated lane). This run shows the flake NOT reproducing, which is consistent with it being a flake rather than evidence of a new regression: this branch touches nothing under apps/web/lib/clara/ (confirmed by the fix round's own file list and by this recheck's own file-list diff)",
+    "apps/web_e2e_depreciation-walk": "4 passed (26.3s) (re-run, matches report)",
+    "root_pnpm_typecheck": "exit 0 (re-run, matches report)",
+    "root_pnpm_lint": "exit 0, including check-wiki-dynamic-sql.mjs and check-frozen-workflows.mjs selftest suites (re-run, matches report)",
+    "rig_0227_tail_block_in_rolled_back_transaction": "green, independently re-run this session (matches report)",
+    "rig_0227_prestate_block_in_rolled_back_transaction": "refuses CLR10 clara._fa_assert_period_open(uuid,date) already exists, independently re-run this session (matches report)",
+    "rig_schema_migrations_for_0227": "checksum d55113b5b956f69bc0fc07f2688a91916442408b13238bbb557a4ce5b636e424, applied_at 2026-09-18T19:50:37.880Z, 220 total migrations (independently queried, matches report's third-repair state)",
+    "rig_live_trigger_body_authority_transition": "independently read via pg_get_functiondef; write-once wall present at byte offset 1558, transition-illegality raise at byte offset 2791 -- wall correctly precedes the raise",
+    "rig_live_body_retire_depreciation_authority": "independently read via pg_get_functiondef; contains the authority_from floor-stamping coalesce clause",
+    "D10_refusal_naming_check": "grepped 0227 for #676/#679/#680: refusal text and detail object name #680 and #679 only; a postcheck at the tail (position('#676' in v_def) <> 0 raises CLR10) actively guards against #676 ever appearing -- matches the orchestrator ruling given in this recheck's brief exactly, and the p651.class.policy_refused/.error_refused cell (ok 2) independently confirms the detail object names #680 and #679 at runtime"
+  },
+  "orchestrator_rulings_cross_checked": [
+    {
+      "ruling": "0227 backfill uses clara._fa_month_start((signed_at at time zone 'Asia/Kuala_Lumpur')::date) -- APPROVED",
+      "status": "Confirmed shipped verbatim at 0227:334-336 (also independently confirmed by the standards review's own measured read); unaffected by and unrelated to this fix round's changes."
+    },
+    {
+      "ruling": "On M1's RED arm, keep the 5-arg revise_fixed_asset_particulars door WORKING as a thin delegate to revise_fixed_asset_particulars_classified(...) rather than refusal-only",
+      "status": "Moot on this branch, correctly recorded as such: M1 measured GREEN (fixed-asset-acquisition.test.mjs 21/21, re-confirmed this session), so the RED arm was never entered and no classified verb was ever minted (grep confirms). Nothing to recheck here beyond confirming the GREEN-arm claim, which holds."
+    },
+    {
+      "ruling": "D10's refusal names #680 (and #679's lock law), never #676",
+      "status": "Confirmed shipped correctly, with its own self-guarding postcheck in the migration tail. See measured_evidence.D10_refusal_naming_check."
+    }
+  ]
+}

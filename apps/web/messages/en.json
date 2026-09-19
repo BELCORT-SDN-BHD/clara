@@ -79,6 +79,7 @@
       "journalComposer": "Record journal entry",
       "periodicAdjustment": "Record periodic adjustment",
       "staffExpenseClaim": "Record staff expense claim",
+      "tradeInvoice": "Record invoice or bill",
       "workDetail": "Journal entry",
       "knowledgeRecord": "Knowledge record",
       "counterpartyIdentity": "Counterparty identity",
@@ -153,13 +154,58 @@
     "seeAgentActivity": "See all agent activity",
     "activityHeading": "Recent activity",
     "activityEmpty": "No firm activity recorded yet.",
-    "activityNotDeployed": "The firm activity timeline is not available yet. When it is, this column will show what happened across the firm — who did what, for which client, and when. Clara's own runs are on the activity page meanwhile.",
+    "activityKindResidual": "Some events are still filed under the wrong kind by the activity door (#861). The sentence and the person are right; the category may not be.",
+    "portfolio": {
+      "heading": "Client portfolio",
+      "seeRegister": "Open the client register",
+      "tableLabel": "Clients, with the Work waiting on each",
+      "columnClient": "Client",
+      "columnStatus": "Status",
+      "columnActive": "Running",
+      "columnAttention": "Needs attention",
+      "columnRecent": "Recent success",
+      "statusUnknown": "Status not recorded",
+      "countUnknown": "could not be read",
+      "countLabel": {
+        "active": "{count, plural, one {# Work running for {client}} other {# Work running for {client}}}",
+        "attention_failed": "{count, plural, one {# Work needing attention for {client}} other {# Work needing attention for {client}}}",
+        "recent_success": "{count, plural, one {# Work posted for {client} in the last seven days} other {# Work posted for {client} in the last seven days}}"
+      },
+      "coverage": {
+        "onboarding_client_excluded_from_queue": "The Needs you chips above exclude this client — the review queue counts active clients only.",
+        "completions_without_receipt": "{count, plural, one {# finished Work carries no dated receipt, so it is not in Recent success.} other {# finished Work carry no dated receipt, so they are not in Recent success.}}",
+        "retry_label_preview_only": "Retry labels cover only part of this page. The counts are whole.",
+        "unknownReason": "Part of this row could not be made ({reason})."
+      },
+      "queueExcludes": "The Needs you chips above cover active clients only ({statuses} are excluded from them, while their Work is still counted here).",
+      "recentDatedBy": "Recent success is dated by when each Work posted, between {from} and {to} — not by when it started. The Work list it opens is not narrowed to those seven days: it shows every completed Work for that client, because a Work list can only be narrowed by when work started.",
+      "recentUndated": "Recent success could not be dated for this read, so its links carry no week.",
+      "emptyRegisterTitle": "No clients yet",
+      "emptyRegisterBody": "Add the first client and this table fills in: one row per client, with what is running, what needs attention, and what posted in the last seven days.",
+      "emptyFilteredTitle": "No client matches this view",
+      "emptyFilteredBody": "No client on this page of the register matches the narrowing in the address bar.",
+      "emptyFilteredMorePages": "This firm has more clients than fit on one page — clear the filters and use Next to look further along the register.",
+      "clearFilters": "Clear the filters",
+      "firstClientPrompt": "This firm has no clients yet. Start with the first one.",
+      "zeroWorkload": "Every client is clear: nothing is running and nothing needs attention. That is a different answer from the review queue above, which is about what is waiting on a person.",
+      "denied": "Work records need a bookkeeper role.",
+      "deniedWhy": "The Needs you numbers above are read at a lower floor and are still yours.",
+      "error": "The portfolio could not be read.",
+      "retry": "Try again",
+      "readAt": "Read at {at}.",
+      "neverRead": "This portfolio has not been read yet.",
+      "delayed": "This read is taking longer than usual — the numbers are from the time above, not from now.",
+      "pageTruncated": "This is the first {count} clients by name. Use Next for the rest.",
+      "paginationLabel": "Portfolio pages",
+      "firstPage": "First page",
+      "nextPage": "Next page"
+    },
     "seeInbox": "See the full inbox",
     "seeActivity": "See all activity",
     "clientsEmpty": "No clients yet.",
     "clientsLine": "{active} active · {onboarding} onboarding · {archived} archived",
     "clientsOther": "{count, plural, one {# client has another status} other {# clients have another status}}",
-    "notBuilt": "A firm-wide close status per client is not built. Close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one."
+    "notBuilt": "A firm-wide close status per client is still not built: close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one. And organising work in batches across clients does not exist at this altitude — the portfolio counts Work per client and links into the list that owns it."
   },
   "NeedsYou": {
     "heading": "Needs you",
@@ -195,6 +241,7 @@
       "uncoded_filing": "Open the documents tab",
       "coding_task": "Open the documents tab",
       "open_question": "Open the documents tab",
+      "compliance_watch": "Open the tax tab",
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
       "staff_advance_incomplete": "Open the registers tab"
@@ -372,7 +419,7 @@
     "sectionsLabel": "Settings sections",
     "navLabel": "Settings sections",
     "noSections": "No settings sections are available at your rank.",
-    "unbuiltNote": "Usage summaries, plan details, and billing management are not available yet.",
+    "unbuiltNote": "Model usage, the firm's billing plan and its payment record are on Firm settings. No subscription invoice is collected for this firm anywhere in Clara. There is no billing-management control here or on any other page \u2014 a commercial arrangement is changed by writing to support.",
     "sections": {
       "account": {
         "title": "Account",
@@ -380,7 +427,7 @@
       },
       "firm": {
         "title": "Firm settings",
-        "purpose": "Review the firm-wide authority controls."
+        "purpose": "Legal standing, the billing plan, model usage and this firm's processing caps."
       },
       "members": {
         "title": "Members",
@@ -762,6 +809,118 @@
     "delayedSince": "Update delayed: no successful read for over a minute.",
     "refreshing": "Refreshing…"
   },
+    "ClientFinancial": {
+      "heading": "Money",
+      "retry": "Retry",
+      "period": {
+        "label": "Period",
+        "monthToDate": "{month} (month to date)",
+        "malformedTitle": "That period could not be read",
+        "malformedBody": "The address named a period this page could not understand, so it is showing the current month to date instead."
+      },
+      "cash": {
+        "heading": "Book cash",
+        "notStatementBalance": "Book cash is what the ledger says the cash accounts hold. It is not a bank statement balance and not an available balance."
+      },
+      "profit": {
+        "heading": "Profit",
+        "forPeriod": "For {start} to {asOf}"
+      },
+      "income": {
+        "heading": "Income"
+      },
+      "expense": {
+        "heading": "Expense"
+      },
+      "comparison": {
+        "line": "{delta} ({pct}) against {prior}",
+        "signChange": "{delta} — from a loss of {prior} to a profit",
+        "against": "compared with {start} to {end}",
+        "beforeBooks": "No comparison for {start} to {end}: that period is before this client’s books begin.",
+        "unavailable": "No comparable figure for the previous period."
+      },
+      "cashTrend": {
+        "heading": "Cash over six months",
+        "oneMembership": "All six points use the same {n} cash accounts.",
+        "tableLabel": "Book cash at each of the last six month ends",
+        "colAsOf": "As at",
+        "colCash": "Book cash"
+      },
+      "series": {
+        "heading": "Income and expense over six months",
+        "partialMonth": "{month} is a part month — figures run to {asOf}.",
+        "tableLabel": "Income and expense by calendar month",
+        "colMonth": "Month",
+        "toAsOf": "to {asOf}",
+        "unmarkedHistory": "{n} year-end closing entries in these six months are not marked as such, so the months they fall in may include a roll that should be excluded."
+      },
+      "drilldown": {
+        "heading": "What is behind this period",
+        "tableLabel": "Accounts behind this period, with their entries",
+        "colAccount": "Account",
+        "colMovement": "Movement",
+        "colEntries": "Entries",
+        "truncated": "Showing {shown} of {total} entries.",
+        "accountsTruncated": "Showing {shown} of {total} accounts, largest first."
+      },
+      "cashSet": {
+        "missingTitle": "Nobody has said which accounts count as cash",
+        "missingBody": "Book cash cannot be worked out until somebody chooses the cash and bank accounts for this client. This is not a figure of zero.",
+        "chooseAccounts": "Choose cash accounts",
+        "adminOnly": "An administrator or owner can choose them.",
+        "basis": "Over {n} cash accounts (version {revision}).",
+        "change": "Change",
+        "dialogTitle": "Which accounts count as cash?",
+        "dialogBody": "Choose the accounts whose balances make up book cash for this client. The choice is versioned, so past figures keep the membership they were worked out under.",
+        "candidatesLabel": "Bank accounts on this client’s chart",
+        "noCandidates": "This client has no registered bank accounts yet.",
+        "inactive": "(retired)",
+        "pettyCashNote": "Petty cash and other cash on hand are never suggested here: nothing in the chart of accounts marks them, and a name or a code is not evidence. Add them yourself if this client holds any.",
+        "pickOne": "Choose at least one account.",
+        "publish": "Publish",
+        "publishing": "Publishing…",
+        "cancel": "Cancel",
+        "refused": "That could not be published",
+        "proposalFailed": "The account list could not be read"
+      },
+      "denied": {
+        "title": "You cannot see this client’s figures",
+        "body": "Your role does not include this client’s financial figures."
+      },
+      "unknown": {
+        "body": "This figure could not be read."
+      },
+      "failed": {
+        "title": "These figures could not be read"
+      },
+      "stale": {
+        "title": "The figures below may be out of date"
+      },
+      "delayed": {
+        "title": "This connection is delayed",
+        "body": "The last successful read was at {at}.",
+        "never": "Nothing has been read yet."
+      },
+      "freshness": {
+        "read": "Money figures read at {at}.",
+        "never": "Money figures not read yet.",
+        "cadence": "These figures refresh at most every 30 seconds while this tab is open.",
+        "booksFrom": "This client’s books start on {day}."
+      },
+      "reason": {
+        "cashSetUnpublished": "Nobody has said which accounts count as cash for this client.",
+        "cashSetVersionChanged": "The cash accounts changed during these six months, so earlier points use the membership in force at the as-of rather than their own.",
+        "cashSetPublishedAfterBooks": "The cash accounts were chosen after some of these months were booked, so earlier points use today’s membership.",
+        "preCoverage": "Some of these months are before this client’s books begin.",
+        "preCoveragePoint": "Before the books begin",
+        "openingCarryDownDeferred": "This client’s opening position has not been captured, so figures start from the first posted entry.",
+        "closingTransferUnmarked": "A year-end closing entry in this period is not marked as one, so profit may include a roll that should be excluded.",
+        "closingTransferUnmarkedCount": "{n} year-end closing entries in this period are not marked as such, so profit may include a roll that should be excluded. The figures are otherwise as posted.",
+        "noPostedEntries": "No entries have been posted for this client yet.",
+        "clientNotVisible": "This figure could not be read.",
+        "generic": "Part of this figure could not be covered."
+      }
+    },
   "ClientWorkspace": {
     "heading": "Client workspace",
     "clientIdLabel": "Client ID",
@@ -794,6 +953,7 @@
     "bankEmpty": "No bank accounts recorded for this client.",
     "bankLatestStatement": "Latest statement to {period}",
     "bankNoStatement": "No statement recorded",
+    "bankNotBookCash": "A statement balance is the bank’s figure at the date they chose. Book cash above is what the ledger says the same accounts hold.",
     "bankStatementUnreadable": "Statements could not be read for this account",
     "bankProposals": "{n, plural, one {# account proposal pending} other {# account proposals pending}}",
     "bankOpenTab": "Open the bank tab",
@@ -901,6 +1061,67 @@
       "role": {
         "user": "You",
         "assistant": "Clara"
+      },
+      "jumpToLatest": "Jump to latest",
+      "accessRevoked": "You no longer have access to this reply. Ask an owner or an administrator at your firm if you think that is wrong.",
+      "alreadyAccepted": "Clara already had that message — this is the same request, not a second one.",
+      "checkingBeforeSend": "Checking what happened to your last message…",
+      "composerHint": "Enter sends. Shift+Enter starts a new line.",
+      "scope": {
+        "label": "Conversation scope",
+        "atFirm": "Firm-wide · {firm}",
+        "atClient": "{client} · {firm}",
+        "firmPlaceholder": "Your firm",
+        "clientPlaceholder": "This client"
+      },
+      "liveTools": {
+        "label": "What Clara is doing",
+        "state": {
+          "preparing": "preparing",
+          "running": "running",
+          "done": "done",
+          "failed": "failed",
+          "refused": "refused"
+        }
+      },
+      "tools": {
+        "add_bank_account": "Adding a bank account",
+        "assess_report_claim": "Checking a figure in the report",
+        "clarify": "Asking you a question",
+        "complete_bank_reconciliation": "Completing the bank reconciliation",
+        "compose_metric_preview": "Previewing a measure",
+        "draft_journal_entry": "Drafting a journal entry",
+        "draft_report_spec": "Drafting the report layout",
+        "get_bank_pack": "Reading the bank pack",
+        "get_context_pack": "Reading the client's context",
+        "get_journal_entry": "Reading a journal entry",
+        "list_journal_entries": "Listing journal entries",
+        "list_metric_catalog": "Listing the available measures",
+        "list_unassigned_documents": "Listing documents not yet filed",
+        "match_bank_line": "Matching a bank line",
+        "open_client_question": "Opening a question for the client",
+        "open_report_run": "Opening a report run",
+        "post_journal_entry": "Posting a journal entry",
+        "propose_bank_identifier_promotion": "Proposing a counterparty identifier",
+        "propose_bank_line_exception": "Proposing a bank-line exception",
+        "read_books_freeform": "Reading the books",
+        "read_document": "Reading a document",
+        "remember_client_information": "Recording something about the client",
+        "request_report_preview": "Requesting a report preview",
+        "resolve_and_book_bank_line": "Resolving and booking a bank line",
+        "resolve_bank_line_exception": "Resolving a bank-line exception",
+        "save_metric_definition_draft": "Saving a measure definition",
+        "seal_report_dataset": "Sealing the report dataset",
+        "settle_from_bank_line": "Settling from a bank line",
+        "start_accrual_work": "Configuring an accrual",
+        "start_journal_work": "Queueing journal Work",
+        "start_periodic_adjustment_work": "Queueing a periodic adjustment",
+        "start_staff_expense_claim_work": "Queueing a staff expense claim",
+        "trial_balance": "Reading the trial balance",
+        "unmatch_bank_match": "Undoing a bank match",
+        "upsert_bank_coa_account": "Adding an account for the bank line",
+        "void_bank_reconciliation": "Voiding a bank reconciliation",
+        "void_bank_statement": "Voiding a bank statement"
       }
     },
     "parts": {
@@ -1522,6 +1743,246 @@
       "correctedBy": "Corrected by"
     }
   },
+  "TradeInvoice": {
+    "heading": "Record an invoice or bill",
+    "body": "What the document says, and the journal it posts. Clara records the receivable or payable it creates, and never invents a due date.",
+    "loading": "Loading this client's chart and parties",
+    "discard": "Discard this draft",
+    "kind": {
+      "legend": "What is this document?",
+      "description": "A sales invoice is money a customer owes this client. A supplier bill is money this client owes a vendor. A credit note is neither — record it against the invoice it corrects.",
+      "sales_invoice": "Sales invoice",
+      "supplier_bill": "Supplier bill"
+    },
+    "domain": {
+      "ar": "Receivable",
+      "ap": "Payable"
+    },
+    "party": {
+      "label": "Counterparty",
+      "matchesLabel": "Matching counterparties",
+      "picked": "{name}",
+      "terms": "agreed terms: {days} days",
+      "noTerms": "no agreed payment terms",
+      "clear": "Clear",
+      "manage": "Manage parties",
+      "noResults": "No party of this client answers to that.",
+      "emptyClient": "This client has no counterparties of that kind yet.",
+      "description": {
+        "vendor": "The supplier who issued the bill. Pick the party this client already has — Clara does not create one from here.",
+        "customer": "The customer who was invoiced. Pick the party this client already has — Clara does not create one from here."
+      }
+    },
+    "documentDate": {
+      "label": "Document date",
+      "description": "The date the document itself states. Not today, and not the posting date."
+    },
+    "dueDate": {
+      "label": "Due date",
+      "description": "Leave it blank if the document does not state one. Clara will count the party's agreed payment terms from the document date if they have any, and otherwise record it as having no due date rather than inventing one."
+    },
+    "reference": {
+      "label": "Document number",
+      "description": "The number printed on the document, exactly as printed."
+    },
+    "total": {
+      "label": "Stated total",
+      "description": "The total the document states, in ringgit. It must equal the {accountClass} leg below, to the sen."
+    },
+    "taxFacts": {
+      "label": "Tax facts stated on the document",
+      "description": "Optional, as JSON. Clara carries these verbatim and recomputes nothing from them."
+    },
+    "postingDate": {
+      "label": "Posting date",
+      "description": "The date the books record it."
+    },
+    "memo": {
+      "label": "What this is"
+    },
+    "basis": {
+      "legend": "The journal this posts",
+      "description": "Exactly one {accountClass} control leg, carrying the stated total.",
+      "viewportLabel": "Journal lines"
+    },
+    "submit": {
+      "label": "Record it",
+      "busy": "Recording…"
+    },
+    "accepted": {
+      "title": "Queued",
+      "body": "Clara has admitted this and will post it in a moment. The entry, the receivable or payable and the receipt will all name each other when it lands.",
+      "open": "Open the work"
+    },
+    "checking": {
+      "title": "Checking",
+      "body": "The connection dropped before Clara answered. She is asking whether that submission landed — nothing is being submitted twice."
+    },
+    "refused": {
+      "title": "Clara did not record this"
+    },
+    "candidates": {
+      "label": "Which party do you mean?"
+    },
+    "conflict": {
+      "title": "That draft was already submitted",
+      "body": "This intent was already recorded with different figures. Open what was recorded rather than submitting a second one.",
+      "open": "Open the work"
+    },
+    "sourceConflict": {
+      "title": "That document already backs a posted entry",
+      "body": "Open the entry that already stands there. Correcting a posted effect is a different act."
+    },
+    "denied": {
+      "title": "You cannot record invoices for this client",
+      "body": "Recording a trade invoice needs a bookkeeper's authority or above. Ask an administrator of this firm."
+    },
+    "notFound": {
+      "title": "Client not found",
+      "body": "This client is not one of your firm's."
+    },
+    "unavailable": {
+      "title": "That did not go through",
+      "body": "{message}",
+      "retry": "Try again"
+    },
+    "partiesUnavailable": {
+      "title": "Parties could not be loaded",
+      "body": "The chart loaded, but this client's counterparties did not. You can still fill the rest in, and pick the party once it loads."
+    },
+    "dueBasis": {
+      "stated": "Due {date}, as the document states.",
+      "counterparty_terms": "Due {date}, from the party's agreed payment terms counted from the document date.",
+      "absent": "No due date — neither the document nor the party's terms state one."
+    },
+    "refusals": {
+      "party_ambiguous": "More than one party answers to that name. Say which one.",
+      "party_unresolved": "No party of this client answers to that.",
+      "credit_shape_not_admitted": "A credit note is not recorded here. Record it as a credit against the invoice it corrects.",
+      "invalid_total": "The stated total does not match the control leg's signed amount.",
+      "unbalanced_basis": "The journal does not balance.",
+      "control_leg_missing": "This carries no control-account leg.",
+      "wrong_control_domain": "The party and the control account disagree about which way the money runs.",
+      "invalid_due_date": "The due date precedes the document date.",
+      "source_already_posted": "That document already backs a posted journal entry.",
+      "client_inactive": "This client is not active, so no new work is admitted.",
+      "insufficient_role": "Recording a trade invoice needs a bookkeeper's authority or above.",
+      "invalid_intent_key": "That submission carried no idempotency key.",
+      "intent_payload_conflict": "That intent was already recorded with different figures.",
+      "period_locked": "The fiscal year containing that posting date is closed.",
+      "invalid_kind": "A trade invoice is either a sales invoice or a supplier bill.",
+      "invalid_particulars": "Clara could not read the document's particulars as a record.",
+      "invalid_currency": "This estate records trade invoices in MYR only.",
+      "invalid_tax_facts": "Tax facts are carried as a record, exactly as the document states them.",
+      "invalid_basis": "Clara could not read that submission."
+    },
+    "issues": {
+      "party_unresolved": "Pick the counterparty this document names.",
+      "documentDateRequired": "State the date the document itself carries.",
+      "documentDateInvalid": "That is not a calendar date.",
+      "invalid_due_date": "A due date cannot precede the document date.",
+      "referenceTooLong": "That document number is too long.",
+      "invalid_total": "State the total the document carries, and make the control leg match it.",
+      "taxFactsNotAnObject": "Tax facts are a JSON object, or nothing at all.",
+      "taxFactsTooLong": "Those tax facts are too long to carry.",
+      "postingDateRequired": "State the date the books record it.",
+      "postingDateInvalid": "That is not a calendar date.",
+      "memoRequired": "Say what this is.",
+      "memoTooLong": "That is too long.",
+      "accountRequired": "Pick an account for this line.",
+      "accountUnknown": "This client's chart has no such account.",
+      "descriptionTooLong": "That description is too long.",
+      "amountNotExact": "Amounts are exact ringgit and sen.",
+      "amountBothSides": "A line is a debit or a credit, not both.",
+      "amountRequired": "State an amount.",
+      "tooFewLines": "A journal needs at least two lines.",
+      "unbalanced": "The debits and the credits do not agree."
+    },
+    "link": {
+      "heading": "Invoice or bill",
+      "kind": {
+        "sales_invoice": "Sales invoice",
+        "supplier_bill": "Supplier bill"
+      },
+      "domain": {
+        "ar": "Receivable",
+        "ap": "Payable"
+      },
+      "party": "Party",
+      "documentDate": "Document date",
+      "dueDate": "Due",
+      "noDueDate": "No due date",
+      "reference": "Reference",
+      "total": "Total",
+      "entry": "Journal entry",
+      "openEntry": "Open the entry",
+      "openItem": "Open item",
+      "outstanding": "Outstanding",
+      "receipt": "Receipt",
+      "document": "Source document",
+      "admitted": "Admitted — not posted yet"
+    }
+  },
+  "WorkKnowledge": {
+    "asOfLabel": "As of {date} (Kuala Lumpur)",
+    "notInEffect": "Not in effect on {date}",
+    "notInEffectHint": "This record exists, but its effective window does not cover the date this view is for.",
+    "readsHeading": "Work that read this record",
+    "readsLede": "Which Work recorded a read of this record's key, at which version, and what the read produced. Read-only: opening a Work from here is a link, never an act.",
+    "readsEmpty": "No Work has recorded a read of this record.",
+    "readsEmptyHint": "Runs before this record's key was recorded do not appear here, and a Work that read it without recording a read-set cannot be listed.",
+    "readsDeniedTitle": "You do not have access to this list",
+    "readsDeniedBody": "Reading which Work used a record needs a viewer role in this firm. The record and its revisions above are unaffected.",
+    "readsFailedTitle": "The list of Work that read this record could not be read",
+    "readsFailedBody": "This is a read that did not succeed, not a record nothing has used. The revisions above are unaffected.",
+    "readsTruncated": "Showing the 100 most recent reads. {hidden} older read(s) are not shown.",
+    "readsReread": "Re-read list",
+    "readsLoading": "Reading which Work used this record",
+    "readVersion": "Read at version {version}",
+    "readAsOf": "for {asOf}",
+    "readPurpose": "Purpose: {purpose}",
+    "readWhen": "Recorded {at}",
+    "openWork": "Open this Work",
+    "status": {
+      "ok": "Read complete",
+      "partial": "Read partial",
+      "unknown": "Read status unknown",
+      "denied": "Read refused"
+    },
+    "statusHint": {
+      "ok": "The run read everything it asked for.",
+      "partial": "The run read the required records, and some of the rest were withheld.",
+      "unknown": "The read did not succeed, so what this client has recorded is not known for this attempt.",
+      "denied": "The estate refused this read."
+    },
+    "statusReason": "Reason: {reason}",
+    "blockHeading": "Knowledge this Work read",
+    "blockLede": "What this run read before it acted, at which version and for which period. The records themselves are on the client's Knowledge register.",
+    "blockNoRead": "This Work has not recorded a knowledge read.",
+    "blockNoReadHint": "A run that finished before read-sets were recorded shows nothing here. That is not the same as a run that read nothing.",
+    "blockTraceOnly": "This Work recorded a knowledge version but not which records it read.",
+    "blockVersion": "Knowledge version {version}",
+    "blockAsOf": "Read for {asOf}",
+    "blockKeys": "Keys read: {keys}",
+    "blockKeysNone": "No keys were recorded on this read.",
+    "blockTiers": "Required {core} · requested {requested} · other {remainder}",
+    "blockShown": "{shown} record(s) reached the run",
+    "blockTruncated": "Some records beyond the required set were withheld from this read.",
+    "blockDeniedTitle": "You do not have access to this Work's knowledge read",
+    "blockDeniedBody": "Reading what a Work read needs a viewer role in this firm. Everything else on this page is unaffected.",
+    "blockFailedTitle": "What this Work read could not be determined",
+    "blockFailedBody": "This is a read that did not succeed, not a Work that read nothing.",
+    "blockLoading": "Reading what this Work read",
+    "blockReread": "Re-read",
+    "observedHeading": "Versions this step observed",
+    "observedEmpty": "This step recorded no observed versions.",
+    "observedLede": "The revision numbers and digests the run had in hand when it took this step. Re-reading them here is a READ, never a write.",
+    "driftRelevantTitle": "A record this Work read has changed",
+    "driftRelevantBody": "Changed since this Work read: {keys}. The answer below is still yours to give — nothing has been cleared — but check it against the new value before you send it.",
+    "driftUnrecordedTitle": "This client's knowledge changed after this Work last read it",
+    "driftUnrecordedBody": "Which records this Work read was not recorded, so whether the change affects it is not known. Nothing has been cleared.",
+    "driftKeysNone": "the affected records were not named"
+  },
   "WorkDiagnostics": {
     "title": "Diagnostics",
     "lede": "What actually ran for this Work: the versioned bundle, the capability each step used, the purpose it was authorised under, and how long it took. No prompts, no transcripts and no client figures are recorded here.",
@@ -1621,6 +2082,10 @@
     "amountUnreadable": "unreadable",
     "presentationSumLabel": "Requested totals",
     "entryStatus": "Entry status",
+    "batchOrigin": {
+      "label": "Source batch",
+      "value": "Part of the batch “{label}”"
+    },
     "receiptId": "Receipt",
     "receiptVia": "Recorded through",
     "viewInJournals": "View in Journals",
@@ -1949,6 +2414,7 @@
       "colCredit": "Credit (presentation sum)",
       "colStatus": "Status",
       "colSource": "Source",
+      "openingBalanceBadge": "Opening balance",
       "colActions": "Actions",
       "viewDetail": "View",
       "hideDetail": "Hide",
@@ -2560,7 +3026,93 @@
       "emptyUnmatchedLines": "Every line on this statement is matched. Nothing is waiting for a decision here.",
       "emptyCandidates": "No match candidate was found for this line. Settle it against an open item, or raise it as an exception.",
       "emptyCounterparties": "No counterparty of this kind is recorded for this client yet. Add one in the counterparty register first.",
-      "emptyOpenItems": "This counterparty has no open item to settle against."
+      "emptyOpenItems": "This counterparty has no open item to settle against.",
+      "scopeHeading": "Account and period",
+      "accountLabel": "Bank account",
+      "accountPlaceholder": "Choose a bank account…",
+      "periodLabel": "Statement period",
+      "periodPlaceholder": "Choose a period…",
+      "periodAll": "All live periods",
+      "noActiveAccount": "This client has no active bank account. Add one in the Accounts tab first.",
+      "linesTableLabel": "Unmatched statement lines",
+      "colSelect": "Select",
+      "colDate": "Date",
+      "colDescription": "Description",
+      "colDirection": "In or out",
+      "colAmount": "Amount",
+      "colClassHint": "Looks like",
+      "colOpen": "Open",
+      "inflow": "In",
+      "outflow": "Out",
+      "selectLineNamed": "Select the line {description}",
+      "openDetail": "Open",
+      "noLinesForFilter": "No unmatched line matches this account and period.",
+      "clearFilters": "Clear filters",
+      "detailHeading": "This line",
+      "lineNotAvailable": "This line is not available to you.",
+      "srcLine": "Line",
+      "srcAccount": "Account",
+      "srcPeriod": "Period",
+      "srcFilename": "Source file",
+      "srcSha": "Source digest",
+      "srcLineage": "Lineage",
+      "supersededBy": "Superseded by {id}",
+      "notSuperseded": "Not superseded",
+      "srcCoverage": "Coverage",
+      "coverageFigures": "{lines} lines · {debit} debits · {credit} credits · {unmatched} still unmatched",
+      "candidatesTableLabel": "Match candidates for this line",
+      "colPostingDate": "Posted",
+      "colMemo": "Entry",
+      "colCounterparty": "Counterparty",
+      "colCapacity": "Remaining capacity",
+      "colBasis": "Basis",
+      "colHistory": "History",
+      "colMatchedCents": "Amount to match",
+      "selectEntryNamed": "Select the entry {memo}",
+      "matchedCentsLabelNamed": "Amount to match against {memo}",
+      "highStakes": "High stakes",
+      "capacityDebit": "Debit {amount}",
+      "capacityCredit": "Credit {amount}",
+      "filterCandidatesLabel": "Filter candidates",
+      "filterCandidatesPlaceholder": "Memo, counterparty or reference…",
+      "noCandidateMatchesFilter": "No candidate matches this filter. Clear it to see them all.",
+      "uniqueSufficient": "One candidate matches this line's amount exactly.",
+      "ambiguousAmount": "{count} candidates match this line's amount exactly — the choice is yours to make.",
+      "noExactAmount": "No candidate matches this line's amount exactly.",
+      "basisAmountExact": "Amount matches exactly",
+      "basisAmountNotExact": "Amount does not match exactly",
+      "basisDateDelta": "{days} days from the line's date",
+      "basisDateUnknown": "No posting date to compare",
+      "basisCounterparty_id": "Counterparty identifier appears in the line",
+      "basisCounterparty_name": "Counterparty name appears in the line",
+      "basisCounterparty_none": "No counterparty evidence in the line",
+      "basisClassHint": "Line looks like {hint}",
+      "basisClassHintNone": "Line has no class hint",
+      "basisAbsent": "No basis recorded for this candidate",
+      "historyNone": "Never matched here",
+      "historyRow": "{status} · {amount} · {when}",
+      "residualEquation": "{lines} lines − {entries} entries − {adjustments} adjustments =",
+      "residualTies": "This group ties.",
+      "residualDiffers": "This group does not tie yet.",
+      "residualAuthority": "The database enforces the tie when you submit; this figure is a preview.",
+      "exceptionTitle": "This line has an open exception",
+      "exceptionKindReason": "{kind} · {reason}",
+      "exceptionBlocking": "A booking made from this line is still outstanding, so matching is blocked.",
+      "exceptionNotBlocking": "Nothing outstanding blocks this line right now.",
+      "exceptionBooking": "Entry {entry} · {cause}",
+      "exceptionRemedyLink": "Go to Exceptions: {call}",
+      "exceptionNoResolveHere": "Exceptions are resolved in the Exceptions tab, not here.",
+      "outcomeTitle": "Matched",
+      "outcomeNoNewCash": "No new cash entry was created. This line was allocated to a booking that was already in the books.",
+      "outcomeCreated": "This match created {count} journal entries for the named difference.",
+      "outcomeMatchId": "Match",
+      "outcomeLines": "Lines",
+      "outcomeEntries": "Journal entries",
+      "outcomeAmount": "Amount",
+      "outcomeAccountCode": "GL account",
+      "outcomeCounterparty": "Counterparty",
+      "outcomeSource": "Source file",
+      "outcomeOpKey": "Operation key"
     },
     "exceptions": {
       "proposalsHeading": "Open exception proposals",
@@ -3624,7 +4176,65 @@
       "reopenTitle": "Reopen this opening seed",
       "reopenDescription": "Reopens a finalized seed for a further batch of items.",
       "reasonLabel": "Reason",
-      "notSerializableHint": "Approval must run in a serializable transaction — the deploy ceremony sets this in the DB."
+      "notSerializableHint": "Approval must run in a serializable transaction — the deploy ceremony sets this in the DB.",
+      "asOfHint": "The date the opening balances are stated as at — normally the day before the first period you will keep.",
+      "asOfRequired": "An as-at date is required.",
+      "source": {
+        "pickerLabel": "Opening source document",
+        "keyedChoice": "No document — I will key the balances",
+        "candidateOption": "{filename} · filed {filedAt} · sha {sha}",
+        "pickedHint": "The basis will be bound to {filename} (sha {sha}). Every figure is read from that document and re-derived by the database.",
+        "keyedHint": "Without a document the balances are keyed by a named person and carry no page to trace them back to.",
+        "noCandidates": "This client has no filed, verified opening trial balance or management account yet. File one on the Documents tab, or key the balances.",
+        "candidatesFailed": "We could not read this client’s filed documents. You can still key the balances."
+      }
+    },
+    "source": {
+      "targetsHeading": "Lines read from the source",
+      "targetsEmpty": "Nothing has been read from this document yet.",
+      "lineKeyCol": "Line",
+      "sourceLabelCol": "As printed",
+      "accountCol": "Account",
+      "debitCol": "Debit",
+      "creditCol": "Credit",
+      "provenanceCol": "Provenance",
+      "mapThisLine": "Map this line",
+      "provenanceDocument": "Document",
+      "provenanceDocumentDetail": "{document} (sha {sha}) · region {region}",
+      "provenanceRegionUnknown": "unknown",
+      "provenanceKeyed": "Keyed",
+      "provenanceKeyedDetail": "entered by a person of your firm",
+      "coverageLabel": "How much of the source is mapped",
+      "coverageMapped": "Mapped",
+      "coverageUnmapped": "Not yet mapped",
+      "coverageUnmappedImpossible": "A document-sourced basis cannot carry an unmapped line — every figure is re-derived against this client's chart.",
+      "coverageCounts": "{n} line(s)",
+      "coverageCents": "Dr {debit} / Cr {credit}",
+      "boundTo": "Bound to {document} (sha {sha}).",
+      "boundToNothing": "This basis carries no source document.",
+      "headerDocumentRead": "From the bound document (sha {sha}) · {n} line(s) read",
+      "headerDocumentUnread": "Bound to a document (sha {sha}) · nothing read yet",
+      "headerKeyed": "Keyed by a person of your firm · {n} line(s)",
+      "headerKeyedEmpty": "Keyed basis · nothing keyed yet",
+      "readDocumentTrigger": "Read this document",
+      "readingDocument": "Reading…",
+      "readDocumentHint": "Reads the bound document into opening lines. Every figure is re-derived by the database; nothing is approved by this.",
+      "outcome": {
+        "parsedTitle": "Read",
+        "parsedBody": "{n} line(s) were read from the bound document and recorded with their provenance.",
+        "noLinesTitle": "Nothing to read",
+        "noLinesBody": "This document does not contain a trial balance we can read. Key the balances instead, or bind a different document.",
+        "unparseableTitle": "Not read",
+        "allOrNothing": "Nothing was recorded: one unreadable line forfeits the whole document, because a partial opening basis is worse than none.",
+        "unmappedAccounts": "Not in this client’s chart of accounts: {accounts}. Create them on the Accounts tab, then read again.",
+        "refusedTitle": "Refused",
+        "deniedTitle": "Not allowed",
+        "deniedBody": "Reading an opening source is restricted to a bookkeeper or above of this firm.",
+        "notFoundTitle": "Not found",
+        "notFoundBody": "This opening basis is not available to you.",
+        "failedTitle": "Could not reach the reader",
+        "failedBody": "The request did not complete ({kind}). Nothing was recorded."
+      }
     },
     "dryrun": {
       "heading": "Tie-out",
@@ -3772,6 +4382,7 @@
     "tabs": {
       "acquisition": "Acquisition",
       "particulars": "Particulars & policy",
+      "revisions": "Policy & effective revisions",
       "schedule": "Schedule",
       "history": "History"
     },
@@ -3807,7 +4418,41 @@
       "periodEnd": "Period end",
       "projected": "Projected charge"
     },
+    "revisions": {
+      "empty": "This asset's estimate has never been revised. A prospective revision supersedes the row forward and appears here.",
+      "tableCaption": "Policy-effective revisions, oldest first",
+      "effectiveFrom": "Effective from",
+      "changeClass": "Change class",
+      "life": "Useful life (months)",
+      "rate": "Rate (bps)",
+      "residual": "Residual",
+      "reason": "Why",
+      "current": "Current",
+      "note": "A revision is prospective: it supersedes the row forward and never restates a period already charged.",
+      "class": {
+        "estimate": "Estimate change",
+        "policy": "Policy change",
+        "error": "Error correction",
+        "notRecorded": "Not recorded"
+      }
+    },
+    "ledger": {
+      "heading": "Charge ledger",
+      "empty": "No depreciation has been charged for this asset yet.",
+      "emptyBlockedByParticulars": "No depreciation has been charged yet because this asset's depreciation particulars are still outstanding.",
+      "tableCaption": "Depreciation charges, oldest period first",
+      "period": "Period",
+      "amount": "Amount",
+      "effectiveDate": "Effective",
+      "entry": "Journal entry",
+      "kind": "State",
+      "live": "Charged",
+      "unwind": "Unwinding",
+      "unwound": "Unwound",
+      "note": "This ledger is append-only: a correction is a new unwinding row beside the charge it reversed, never an erasure."
+    },
     "history": {
+      "relationsHeading": "Related register rows",
       "asset": "Asset",
       "relation": "Relation",
       "derivedFrom": "Derived from",
@@ -3857,6 +4502,19 @@
       "reviseTitle": "Revise particulars (prospective)",
       "reviseDescription": "Mints a new register row effective from the date below; the current row is superseded. Cannot take effect on or before a period already charged.",
       "effectiveFromLabel": "Effective from",
+      "effectiveFromHelp": "The first day the revised estimate applies from. It must be after every period already charged.",
+      "changeClassLabel": "Change class",
+      "changeClassHelp": "What KIND of change this is. The register keeps it beside the revision.",
+      "changeClassUnsupported": "not available yet",
+      "changeClassRestatementNote": "A policy change or an error correction is a retrospective restatement — ticket #680 owns that lane, under #679's lock law. Only a prospective estimate change can be recorded here.",
+      "changeClass": {
+        "estimate": "Estimate change",
+        "policy": "Policy change",
+        "error": "Error correction"
+      },
+      "changeReasonLabel": "Why this estimate changed",
+      "changeReasonHelp": "One sentence a reviewer can act on. It is stored with the revision.",
+      "changeReasonRequired": "A reason is required.",
       "dispose": "Dispose",
       "disposeTitle": "Dispose this asset",
       "disposeDescription": "Books the disposal entry — stub depreciation through the disposal month, cost/accumulated relief, proceeds and any gain or loss.",
@@ -3932,6 +4590,18 @@
       "proposeDescription": "An admin must sign this before any period can be run.",
       "signTrigger": "Sign",
       "signTitle": "Sign this depreciation authority",
+      "windowFrom": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
+      "instructionKindLabel": "Where the instruction lives",
+      "instructionKindHelp": "The Work or chat task in this client that carries the firm's instruction to depreciate.",
+      "instructionKind": {
+        "accounting_work": "Accounting work",
+        "chat_task": "Chat task"
+      },
+      "instructionIdLabel": "Instruction id",
+      "instructionIdHelp": "Paste the id of that row. The register resolves it against this client before signing.",
+      "instructionIdRequired": "An instruction id is required.",
+      "instructionIdMalformed": "That is not an id.",
+      "instructionAbsent": "Signed before instruction references were recorded, so none is on file.",
       "signDescription": "Signing is admin-only — the autopost ramp derives from this signature.",
       "retireTrigger": "Retire authority",
       "retireTitle": "Retire this depreciation authority",
@@ -3951,10 +4621,54 @@
       "entriesCol": "Entries",
       "runTrigger": "Run depreciation",
       "runTitle": "Run depreciation for a period",
-      "runDescription": "The period must exactly match the live authority's own cadence window, and must have already ended.",
+      "runConfirm": "Run this period",
+      "entryCol": "Journal entry",
+      "skippedCol": "Skipped",
+      "skippedCount": "{count} skipped",
+      "runDescription": "Clara reads the exact period from the register before anything is written. Check it, then confirm.",
       "periodStartLabel": "Period start",
       "periodEndLabel": "Period end",
       "runNoop": "Nothing was due for this period — no entry was posted."
+    },
+    "preview": {
+      "unavailable": "The preview is not available for this client.",
+      "periodIsTheDatabases": "The period is the register's, not yours: it follows the signed authority's cadence and must already have ended.",
+      "wouldPost": "Will post",
+      "wouldDraft": "Will wait for approval",
+      "cadence": {
+        "monthly": "Monthly",
+        "annual": "Annual"
+      },
+      "chargesCaption": "Assets this run will charge",
+      "legsCaption": "The two general-ledger legs this run will write",
+      "assetCol": "Asset",
+      "periodCol": "Period",
+      "amountCol": "Amount",
+      "accountCol": "Account",
+      "debitCol": "Debit",
+      "creditCol": "Credit",
+      "total": "{amount} across {entries} charge row(s).",
+      "floor": "This authority reaches periods from {from} onward. Anything earlier needs an explicit catch-up run by a bookkeeper.",
+      "skippedHeading": "{count} asset(s) will be skipped",
+      "skippedClosedHeading": "{count} period(s) were skipped because their financial year is closed",
+      "skippedClosedNote": "A closed period is never run in its own right. Its arrears are charged by the next open period, and each charge row still carries the month it belongs to.",
+      "skip": {
+        "incomplete": "waiting on depreciation particulars",
+        "not_in_service": "not yet in service",
+        "fully_depreciated": "fully depreciated",
+        "none_method": "stated as not depreciated",
+        "disposal_draft_outstanding": "a disposal draft is waiting on this asset",
+        "unknown": "skipped by the register ({reason})"
+      },
+      "notDue": {
+        "period_not_ended": "Nothing is due yet: the next period has not ended.",
+        "nothing_due": "Nothing is due: every ended period is charged.",
+        "authority_not_live": "Nothing can be run: this client has no signed depreciation authority.",
+        "period_draft_outstanding": "A depreciation draft is already waiting for approval. Approve or withdraw it first.",
+        "period_correction_unsound": "A charge in range was reversed on a different date, so the period never cleared. A human finishes this one by hand.",
+        "period_unreachable": "No lawful period could be reached for this client.",
+        "generic": "Nothing is due ({reason})."
+      }
     },
     "needsYou": {
       "heading": "Complete this asset's particulars",
@@ -4915,7 +5629,20 @@
         "registration_recorded": "Registration recorded",
         "not_liable_documented": "Not liable — documented"
       },
-      "evidencePlaceholder": "Evidence"
+      "evidencePlaceholder": "Evidence",
+      "receiptHeading": "Disposition",
+      "receiptNone": "Nothing has been recorded on this watch yet.",
+      "receiptUnreadable": "The disposition on this watch could not be read.",
+      "receiptAct": {
+        "acknowledged": "Acknowledged by <actor></actor> on {at}.",
+        "snoozed": "Snoozed by <actor></actor> on {at}.",
+        "re_armed": "Re-armed on {at}.",
+        "resolved": "Resolved by <actor></actor> on {at}."
+      },
+      "receiptTransition": "State {before} → {after}.",
+      "receiptRationale": "Rationale: {rationale}",
+      "receiptEvidence": "Evidence: {evidence}",
+      "receiptNoVersion": "This record carries no version number — the transition above is what the database keeps."
     },
     "compliance": {
       "heading": "Compliance register",
@@ -6242,5 +6969,223 @@
     "capacityReasonPlaceholder": "Why is the limit changing?",
     "capacitySave": "Save capacity",
     "capacityReceipt": "Admission capacity is now {limit}, with {count} firms admitted."
+  },
+  "IntakeBatch": {
+    "heading": "Source batch",
+    "headingNamed": "Source batch — {label}",
+    "untitled": "Untitled batch",
+    "loading": "Loading this source batch…",
+    "liveLabel": "Source batch updates",
+    "announce": "Batch {label} is {state}.",
+    "computedAt": "Read at {at}",
+    "refresh": "Refresh",
+    "retry": "Try again",
+    "showAll": "Show all",
+    "unknownCount": "Not known",
+    "unnamedFile": "Unnamed file",
+    "openWork": "Open the work",
+    "openDocument": "Open the document",
+    "noAddressYet": "No address yet",
+    "facetFilterLabel": "Filter the batch",
+    "uncountedCompletions": "{n} finished without a receipt this read could date",
+    "waitingBasis": "Waiting: {question} on an open question, {fact} awaiting a fact, {attribution} awaiting attribution, {capacity} awaiting the daily quota, {unfiled} not yet filed to a client.",
+    "residual": {
+      "preIntakeRefusal": "A file refused by the daily quota before it was accepted never joins a batch — look for it in the upload list above, which shows the database's own message and remedy."
+    },
+    "state": {
+      "open": "open",
+      "cancelling": "stopping",
+      "cancelled": "stopped"
+    },
+    "empty": {
+      "firstUse": "No sources have joined this batch yet. Files uploaded on this tab while the batch is open will appear here with their own state and their own link.",
+      "noResults": "No sources in this batch are {facet} right now. Other groups still have rows."
+    },
+    "denied": {
+      "title": "You cannot read this batch",
+      "body": "Reading a source batch needs a bookkeeper role in this firm. Ask an owner or admin to change your role, then reload."
+    },
+    "failed": {
+      "title": "This batch could not be read",
+      "body": "The read did not answer, so nothing is known about this batch right now — this is not an empty batch."
+    },
+    "pollExhausted": {
+      "title": "No longer watching for changes",
+      "body": "Some sources are still moving, but this page has stopped checking. Press Refresh to read again."
+    },
+    "stopping": {
+      "title": "Stopping this batch",
+      "body": "Operations already admitted are finishing. {settled} have already been committed and their receipts are kept."
+    },
+    "cancelBlocked": {
+      "title": "This batch cannot finish stopping",
+      "body": "The person who stopped it is no longer an active member of this firm, so the remaining operations cannot be asked to stop under that decision. An owner or admin needs to restore their membership, or stop each remaining work item from its own page."
+    },
+    "cancelled": {
+      "title": "This batch was stopped",
+      "body": "No new operations were admitted after the decision. Everything that had already been committed kept its receipt."
+    },
+    "capacity": {
+      "title": "Waiting for the daily document quota",
+      "body": "The firm's daily document allowance resets at {at} {zone}. Sources blocked by the quota keep their place and continue after the reset."
+    },
+    "column": {
+      "file": "File",
+      "state": "State",
+      "detail": "Detail",
+      "open": "Open"
+    },
+    "facet": {
+      "all": "All",
+      "admitted": "Admitted",
+      "settled": "Committed",
+      "waiting": "Waiting",
+      "failed": "Failed",
+      "unassigned": "Unassigned"
+    },
+    "coverage": {
+      "ok": "Complete",
+      "partial": "Partial",
+      "unknown": "Not known",
+      "denied": "Withheld"
+    },
+    "coverageReason": {
+      "retry_label_preview_only": "the preview only",
+      "completions_without_receipt": "some completions carry no receipt",
+      "preview_only": "the preview only"
+    },
+    "rowState": {
+      "awaiting_fact": "Awaiting a fact",
+      "awaiting_attribution": "Awaiting attribution",
+      "awaiting_capacity": "Awaiting the daily quota",
+      "settled": "Committed",
+      "extractionFailed": "Extraction failed",
+      "intakeFailed": "Upload failed",
+      "unassigned": "Not filed to a client",
+      "inCustody": "In custody",
+      "retrying": "Retried",
+      "work": {
+        "queued": "Queued",
+        "running": "Running",
+        "awaiting_input": "Awaiting your answer",
+        "stopping": "Stopping",
+        "completed": "Finished",
+        "refused": "Refused",
+        "failed": "Failed",
+        "cancelled": "Stopped",
+        "expired": "Expired"
+      }
+    },
+    "cancel": {
+      "trigger": "Stop this batch",
+      "title": "Stop the batch “{label}”?",
+      "body": "{n} operations are still running. Each will be asked to stop, one at a time.",
+      "stillArriving": "{n} more files are still being taken in or read. They are not running yet, so they will be asked to stop as they arrive — this batch keeps stopping until they are all accounted for.",
+      "receiptsKept": "Anything already committed keeps its receipt. Nothing that has posted is undone.",
+      "confirm": "Stop the batch",
+      "pending": "Stopping…",
+      "dismiss": "Keep going",
+      "refusedTitle": "The batch was not stopped"
+    }
+  },
+  "FirmSettings": {
+    "heading": "Firm settings",
+    "loading": "Reading this firm's settings…",
+    "readFailed": "This could not be read.",
+    "retry": "Try again",
+    "identityHeading": "This firm",
+    "identitySubheading": "Who you are here, and where the firm's own details live.",
+    "identityNameLabel": "Firm",
+    "identityCreatedLabel": "In Clara since",
+    "identityRoleLabel": "Your role",
+    "identityIdLabel": "Firm ID",
+    "identityCopyId": "Copy firm ID",
+    "identityCopied": "Firm ID copied",
+    "identitySetupLink": "Firm details and setup",
+    "identityKnowledgeLink": "Firm accounting rules",
+    "identityNote": "The firm's registered name, registration number and address are recorded on Firm details and setup. They are not repeated here.",
+    "legalHeading": "Legal standing",
+    "legalSubheading": "The agreements this firm is operating under, and who accepted them.",
+    "legalKindTerms": "Terms of Service",
+    "legalKindDpa": "Data processing agreement",
+    "legalVersion": "Version {version}",
+    "legalStatusPublished": "Current",
+    "legalStatusDraft": "Draft — being prepared",
+    "legalStatusSuperseded": "Superseded",
+    "legalEffectiveFrom": "Effective from {date}",
+    "legalEffectiveUnknown": "No effective date is recorded",
+    "legalAcceptedBy": "Accepted by {name} on {date}",
+    "legalAcceptedForFirm": "Accepted for this firm",
+    "legalNotAcceptedForFirm": "Not yet accepted for this firm",
+    "legalYourAcceptance": "You accepted version {version} on {date}",
+    "legalYourAcceptanceNone": "You have not accepted this version",
+    "legalDraftNote": "This is a draft. It cannot be accepted, and nothing in Clara depends on it yet.",
+    "legalNotLiveHeading": "This firm's legal standing is not current",
+    "legalNotLiveBody": "Clara cannot use a model on any client's books until an owner of this firm accepts the current versions of both agreements.",
+    "legalNotLiveOwnerHint": "An owner of this firm must accept the current versions.",
+    "legalNotLiveOwnerNamed": "An owner of this firm must accept the current versions. The most recent acceptance on record was made by {name}.",
+    "legalLive": "An owner of this firm has accepted the current versions of both agreements.",
+    "legalMaskedNote": "Who accepted an agreement, and when, is shown to bookkeepers and above.",
+    "legalAcceptTrigger": "Accept for this firm",
+    "acceptDialogTitle": "Accept the {kind} for this firm",
+    "acceptDialogDescription": "You are accepting version {version} on behalf of this firm. Your name and the time are recorded.",
+    "acceptDialogTextLabel": "The text you are accepting",
+    "acceptDialogConfirm": "I accept this agreement",
+    "acceptDialogCancel": "Cancel",
+    "acceptDialogBusy": "Recording your acceptance…",
+    "acceptDialogAccepted": "Accepted on {date}.",
+    "acceptDialogReplayed": "Already accepted on {date}. Nothing was recorded twice.",
+    "acceptDialogStaleHeading": "This agreement changed while you were reading it",
+    "acceptDialogStaleBody": "A newer version is now current. Read it and accept that one instead — the version you were shown is no longer the one in force.",
+    "acceptDialogReread": "Show me the current version",
+    "acceptDialogUnavailable": "This did not reach the database. Nothing was recorded, and trying again is safe.",
+    "acceptDialogReadFailed": "The agreement text could not be read, so there is nothing to accept yet.",
+    "commercialHeading": "Plan and payment",
+    "commercialSubheading": "What this firm is on, and what the database holds about it.",
+    "commercialPlanLabel": "Plan",
+    "commercialPlanNone": "No plan is current for this firm",
+    "commercialPlanUnruled": "Beta — no price has been set for this plan yet",
+    "commercialPlanAmount": "{amount} {currency} per month",
+    "commercialPaymentLabel": "Payment",
+    "commercialPaymentRecorded": "Recorded on {date}",
+    "commercialPaymentNone": "No payment is recorded for this firm",
+    "commercialSubscriptionLabel": "Subscription",
+    "commercialSubscriptionPresent": "A subscription is attached to that payment",
+    "commercialSubscriptionAbsent": "No subscription is attached",
+    "commercialInvoicesLabel": "Invoices",
+    "commercialInvoicesUnavailable": "Clara does not collect subscription invoices for your firm, so there is nothing to list or download here. This is about the firm's own subscription; a client's invoices live on that client's own pages.",
+    "commercialSupport": "Write to support about a commercial arrangement",
+    "commercialDenied": "Plan and payment are shown to admins and owners.",
+    "capacityHeading": "Processing capacity",
+    "capacitySubheading": "The per-firm processing caps the operator sets. There is no control here.",
+    "capacityDocsPerDay": "Documents per day",
+    "capacityPagesPerDay": "Pages per day",
+    "capacityOcrConcurrency": "Documents processed at once",
+    "capacityWitnessConcurrency": "Model readings at once",
+    "capacityNone": "No per-firm processing caps are recorded for this firm. The processing lanes apply their own built-in limits.",
+    "capacitySourceNote": "Processing caps are set by the operator. There is no way to change them from Clara — write to support.",
+    "capacitySeatsNote": "There is no per-firm seat count. Seats are accepted product direction with no delivery date.",
+    "usageHeading": "Model usage",
+    "usageSubheading": "What Clara's models were asked to do for this firm, by month.",
+    "usagePeriodLabel": "Month",
+    "usageWindow": "Covering {from} to {to}, counted in UTC.",
+    "usageBadPeriod": "That month could not be read, so the current month is shown instead.",
+    "usageScopeFirm": "This firm",
+    "usageScopePlatform": "Platform-wide",
+    "usageScopeFirmNote": "Calls made for this firm's own work.",
+    "usageScopePlatformNote": "Calls Clara makes for everyone. They are shown because they are real spend; they are never added to your firm's figures.",
+    "usageColCallKind": "What was done",
+    "usageColCalls": "Calls",
+    "usageColInput": "Input tokens",
+    "usageColOutput": "Output tokens",
+    "usageColSpend": "Provider price",
+    "usageCurrencyNote": "Provider price ({currency}), not your books. Nothing here is converted to ringgit and nothing here posts to a ledger.",
+    "usageUnpriced": "{count} calls in this period have no price on record, so they are counted but not priced.",
+    "usageDropped": "{count} rows for this period could not be read, so this table is incomplete. Try again, and tell support if it keeps happening.",
+    "usageEmpty": "No model calls in this period.",
+    "usageDownload": "Download CSV",
+    "usageSeparation": "These are Clara's own model costs. They are not a client's figures and they never post to a ledger — a client's own numbers are on that client's pages.",
+    "usageClientsLink": "Go to clients",
+    "usageDenied": "Model usage is shown to admins and owners."
   }
 }

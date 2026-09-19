@@ -6,6 +6,7 @@
 // full receipt, singular, keyed by run id not client). Built against the
 // live names.
 
+import { useRef } from "react";
 import { callDoor } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -25,7 +26,22 @@ export type FaDepreciationAuthority = {
   signed_by: string | null;
   retired_by: string | null;
   created_at: string;
+  /** #651 [0227] — THE AUTHORITY WINDOW'S FLOOR: the first day of the month the authority was
+   *  SIGNED, in the book's Asia/Kuala_Lumpur calendar, written once and frozen (D8). The due
+   *  oracle never proposes a period starting before it, so a signature is not permission to charge
+   *  every past period. `null` on a proposed authority and on one signed before 0227. */
+  authority_from?: string | null;
+  /** #651 [0227] — the row in THIS database that carries the firm's instruction. REQUIRED at sign
+   *  time and RESOLVED against the same firm AND client; a Knowledge preference or a calculation
+   *  policy resolves to nothing and is refused by name (CLR38 `authority_ref_unresolved`).
+   *  `null` on rows signed before 0227. */
+  authority_ref?: FaAuthorityRef | null;
+  authority_kind?: string | null;
 };
+
+/** The two relations an instruction may live in. `chat_task` names `clara.agent_tasks`;
+ *  `accounting_work` names `clara.accounting_work`. */
+export type FaAuthorityRef = { kind: "accounting_work" | "chat_task"; id: string };
 
 export type FaDepreciationAuthorityEnvelope = {
   client_id: string;
@@ -51,11 +67,14 @@ export function getDepreciationAuthority(session: SessionTokenAccessor, clientId
  *  already exists — retire it first. */
 export function proposeDepreciationAuthority(
   session: SessionTokenAccessor,
-  args: { clientId: string; cadence: "monthly" | "annual" },
+  args: { clientId: string; cadence: "monthly" | "annual"; opKey: string },
 ): Promise<unknown> {
+  // #651 — ONE DECISION, ONE KEY (see `authorityIntent` / `useDepreciationDecisionKey` below).
+  // The caller holds the key for the life of the open dialog; minting one here would make every
+  // retry a NEW operation the database's replay ladder cannot recognise.
   return callDoor(
     "propose_depreciation_authority",
-    { p_client: args.clientId, p_cadence: args.cadence, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_cadence: args.cadence, p_op_key: args.opKey },
     { session },
   );
 }
@@ -69,11 +88,23 @@ export function proposeDepreciationAuthority(
  *  refusal verbatim on attempt. */
 export function signDepreciationAuthority(
   session: SessionTokenAccessor,
-  args: { clientId: string; authorityId: string },
+  args: { clientId: string; authorityId: string; authorityRef: FaAuthorityRef; opKey: string },
 ): Promise<unknown> {
   return callDoor(
     "sign_depreciation_authority",
-    { p_client: args.clientId, p_authority: args.authorityId, p_op_key: crypto.randomUUID() },
+    {
+      p_client: args.clientId,
+      p_authority: args.authorityId,
+      // #651 — ONE DECISION, ONE KEY, and on THIS door it is the one a person meets: the sign
+      // door's replay identity is {client, authority} (0227), so a retry that mints a fresh key
+      // reserves a new operation, reaches the `authority_already_live` arm and refuses instead of
+      // handing back the receipt the lost response already earned.
+      p_op_key: args.opKey,
+      // #651 [0227] — REQUIRED and RESOLVED. The door refuses CLR38 `authority_ref_invalid`
+      // (constraint object | kind | id) on a malformed one and `authority_ref_unresolved` when it
+      // names no row in this firm AND client. Both refusals render verbatim, with their code.
+      p_authority_ref: args.authorityRef,
+    },
     { session },
   );
 }
@@ -83,11 +114,13 @@ export function signDepreciationAuthority(
  *  `authority_not_live` if already retired. */
 export function retireDepreciationAuthority(
   session: SessionTokenAccessor,
-  args: { clientId: string; authorityId: string; reason: string },
+  args: { clientId: string; authorityId: string; reason: string; opKey: string },
 ): Promise<unknown> {
+  // #651 — ONE DECISION, ONE KEY. A second retirement of the same authority refuses CLR38
+  // `authority_not_live`; with the caller's key the retry returns the first receipt instead.
   return callDoor(
     "retire_depreciation_authority",
-    { p_client: args.clientId, p_authority: args.authorityId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_authority: args.authorityId, p_reason: args.reason, p_op_key: args.opKey },
     { session },
   );
 }
@@ -136,11 +169,148 @@ export async function getDepreciationRun(session: SessionTokenAccessor, runId: s
  *  `noop` — no entry, no receipt — reported, not an error. */
 export function runDepreciationManual(
   session: SessionTokenAccessor,
-  args: { clientId: string; periodStart: string; periodEnd: string },
+  args: { clientId: string; periodStart: string; periodEnd: string; opKey: string },
 ): Promise<unknown> {
   return callDoor(
     "run_depreciation_manual",
-    { p_client: args.clientId, p_period_start: args.periodStart, p_period_end: args.periodEnd, p_op_key: crypto.randomUUID() },
+    {
+      p_client: args.clientId,
+      p_period_start: args.periodStart,
+      p_period_end: args.periodEnd,
+      // #651 — ONE DECISION, ONE KEY. This used to mint `crypto.randomUUID()` inside itself, so a
+      // LOST RESPONSE answered the retry a person makes with a refusal instead of the receipt it
+      // had already earned. The caller now holds the key for the life of the open decision
+      // (`useDepreciationDecisionKey` below).
+      p_op_key: args.opKey,
+    },
     { session },
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// #651 [0227] — THE PREVIEW READ. `clara.preview_depreciation_run(p_client)` is VIEWER+ and
+// `stable` in the database, so it cannot write: no operation key, no receipt, no ledger row. What
+// it returns is the EXACT period the database chose (a caller never names one), the per-asset
+// amounts, the two GL legs the entry will carry, and every asset it will skip with its reason.
+// ---------------------------------------------------------------------------------------------
+
+export type FaPreviewCharge = {
+  asset_id: string;
+  description: string | null;
+  period_start: string;
+  period_end: string;
+  amount_cents: number;
+};
+
+export type FaPreviewSkip = { asset_id: string; reason: string };
+
+export type FaPreviewLeg = { account_code: string; debit_cents: number; credit_cents: number };
+
+/** A period the due oracle SKIPPED because its fiscal year is closing or closed. It will never be
+ *  run in its own right; the arrears are charged by the next OPEN period's run, and the charge
+ *  rows still carry their own months, so nothing is lost and nothing is silent. */
+export type FaSkippedClosedPeriod = {
+  period_start: string;
+  period_end: string;
+  fiscal_year_id: string;
+  fy_label: string | null;
+  fy_status: string;
+};
+
+export type FaRunPreview = {
+  client_id: string;
+  due: boolean;
+  /** The database's own reason when nothing is due — `period_not_ended`, `nothing_due`,
+   *  `authority_not_live`, `period_draft_outstanding`, `period_correction_unsound`. */
+  reason?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  cadence?: "monthly" | "annual" | null;
+  authority_from?: string | null;
+  authority_ref?: FaAuthorityRef | null;
+  skipped_closed?: FaSkippedClosedPeriod[];
+  charges: FaPreviewCharge[];
+  skipped: FaPreviewSkip[];
+  legs: FaPreviewLeg[];
+  charged_cents: number;
+  entries: number;
+  /** What the run WOULD do — `post` once the one-time ramp is earned, `draft` before that. A
+   *  high-stakes entry still drafts, which the surface says beside it. */
+  mode_would_be?: "post" | "draft";
+  ramp_earned?: boolean;
+};
+
+/** clara.preview_depreciation_run(p_client) — viewer+. CLR11 if the client is not in your firm. */
+export function previewDepreciationRun(session: SessionTokenAccessor, clientId: string): Promise<FaRunPreview> {
+  return callDoor<FaRunPreview>("preview_depreciation_run", { p_client: clientId }, { session });
+}
+
+/** THE FIVE SKIP REASONS a run receipt can carry, MEASURED off the live catalog: four from
+ *  `clara._fa_asset_charges` plus `disposal_draft_outstanding`, which `clara._fa_compute_charges`
+ *  writes itself and the per-asset body can NEVER return. An asset that is simply up to date is
+ *  not a skip and never appears. A reason outside this list still renders — as its verbatim code
+ *  beside a neutral sentence — because a vocabulary that was measured once can grow. */
+export const FA_SKIP_REASONS = [
+  "incomplete", "not_in_service", "fully_depreciated", "none_method", "disposal_draft_outstanding",
+] as const;
+export type FaSkipReason = (typeof FA_SKIP_REASONS)[number];
+
+/** A skip reason is BENIGN when it states a settled fact about the asset rather than work somebody
+ *  still owes. Appendix D row 17: a collapsible may never hide an unresolved question by default,
+ *  so a skipped list carrying a non-benign reason renders OPEN. */
+export const FA_BENIGN_SKIP_REASONS: readonly string[] = ["fully_depreciated", "none_method", "not_in_service"];
+
+export function faSkipListStartsOpen(skipped: readonly { reason: string }[]): boolean {
+  return skipped.some((s) => !FA_BENIGN_SKIP_REASONS.includes(s.reason));
+}
+
+// ---------------------------------------------------------------------------------------------
+// #651 — ONE DECISION, ONE KEY.
+//
+// The shape is `components/work/work-cancel-dialog.tsx:95`'s `useDecisionKey`, keyed on the INTENT
+// TUPLE so that changing what is being decided inside an open dialog mints a new key while
+// pressing Confirm twice on the same decision does not. `renew()` ends a decision explicitly — a
+// withdrawn draft being run again is a NEW operation, and reusing the old key would hand back the
+// receipt of the run that was withdrawn.
+// ---------------------------------------------------------------------------------------------
+
+/** The intent tuple a depreciation run is identified by — exactly the tuple
+ *  `clara._fa_run_period_core` hashes into its own operation key. */
+export function depreciationIntent(args: { clientId: string; periodStart: string; periodEnd: string }): string {
+  return `${args.clientId}|${args.periodStart}|${args.periodEnd}`;
+}
+
+/** The intent tuple an AUTHORITY CEREMONY decision is identified by — the act, the authority it
+ *  acts on, and the value being decided (the cadence proposed, the instruction cited, the reason
+ *  given). Two attempts at the same decision are ONE intent; changing what is being decided inside
+ *  the open dialog is a different one and earns a new key.
+ *
+ *  #651 fix-round 1 (adversarial review ADV-651-8): "one decision, one key" was applied to the run
+ *  door alone, so propose / sign / retire each minted a key inside the wrapper and a retry after a
+ *  lost response was a new operation. The doors were already idempotent; only the key transport
+ *  was not. */
+export function authorityIntent(
+  act: "propose" | "sign" | "retire",
+  args: { clientId: string; authorityId?: string | null; value?: string | null },
+): string {
+  return `${act}|${args.clientId}|${args.authorityId ?? ""}|${args.value ?? ""}`;
+}
+
+/** A stable key per OPEN DECISION: minted on first ask, reused for every attempt at the SAME
+ *  intent, renewed when the intent changes or the caller ends the decision. ONE hook serves every
+ *  FA door on this lane — the run dialog and the three authority ceremonies — because they all
+ *  need the same thing: a key that survives a retry and dies with the decision. */
+export function useDepreciationDecisionKey(): { key: (intent: string) => string; renew: () => void } {
+  const ref = useRef<{ intent: string; key: string } | null>(null);
+  return {
+    key: (intent: string) => {
+      if (ref.current === null || ref.current.intent !== intent) {
+        ref.current = { intent, key: crypto.randomUUID() };
+      }
+      return ref.current.key;
+    },
+    renew: () => {
+      ref.current = null;
+    },
+  };
 }

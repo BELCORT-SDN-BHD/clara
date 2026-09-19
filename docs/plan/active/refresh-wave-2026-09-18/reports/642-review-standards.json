@@ -1,0 +1,55 @@
+{
+  "ticket": 642,
+  "lens": "STANDARDS",
+  "lens_model": "claude-sonnet-5",
+  "head": "46a84750",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\642-review-standards.json",
+  "verdict": "fix_then_accept",
+  "findings": [
+    {
+      "id": "F1-intent-key-collision-drops-message",
+      "severity": "major",
+      "category": "correctness",
+      "where": "apps/web/lib/clara/intentKey.ts:64-66 (canonicalIntentAddress), consumed by apps/web/lib/clara/useClaraThread.ts:717-726 (deriveIntentKey call), enforced by clara.begin_chat_turn's replay branch (0006_runtime_core.sql:954-960)",
+      "what": "The content-addressed turn_key is a pure function of (threadId, altitude, trimmed draft text, sorted attachment ids) and nothing else — nothing in the address changes as the conversation itself moves forward. Two GENUINELY DIFFERENT sends in the same thread/altitude that happen to carry identical text (answering two different Clarify questions with 'yes', or sending 'ok'/'thanks' twice) derive the IDENTICAL turn_key forever, for the life of that thread. The second send lands on begin_chat_turn's replay branch, which returns the ORIGINAL (already-admitted, possibly already-settled) task_id with replayed:true and, per the door's own documented behaviour (which this ticket's own intentKey.ts header explains at length for the attachment case: 'the door returns at :957-960 BEFORE the insert at :995-996 and never reads p_user_parts'), never inserts the new user row at all. The second message is silently dropped: no error, no second bubble, no new turn, and the UI reports 'Clara already had that message' even though it did not. This is exactly the class of 'wrong books' hazard the ticket's own header calls out as 'the sharp one' for a changed attachment set, but it applies unmitigated to plain repeated text too — and short repeated confirmations are far more common in ordinary chat use than a swapped attachment.",
+      "evidence": "Reproduced directly against the shipped code with a targeted unit test (node --import ./test/bootstrap.mjs --import tsx --test) mounting the real ClaraThreadView + useClaraThread: sending 'yes', letting the turn settle (SSE 'done'), then sending 'yes' again as a genuinely new reply to a later question produces the IDENTICAL turnKey both times ('intent-7cd79e5c858fe0c3f74622eac6a9deeb' == 'intent-7cd79e5c858fe0c3f74622eac6a9deeb') and the second POST is answered replayed:true by a begin_chat_turn-shaped mock matching the real door's documented contract; the provisional bubble that the shipped test suite's own vacuity control (thread-intent-key.test.tsx) proves DOES appear for a fresh admission never appears for this second, genuinely-new send. Coverage gap confirmed by reading every cell in thread-intent-key.test.tsx and intentKey.test.ts: each either holds text+attachments fixed to prove the SAME key (intended, retry case) or changes text/attachments to prove a DIFFERENT key (intended, changed-intent case); none tests two independently-typed identical messages separated by a settled turn, which is the exact case that collides.",
+      "fix": "Break content-addressing's identity with conversation state so a genuinely new send cannot silently collide with an old one, while preserving the reload-recovery property appendix C asks for. E.g. cache the derived key alongside the still-uncommitted draft (threadStore) and only ever REUSE it while retrying that same draft; once a send is accepted (or the draft is cleared and retyped), mix something that has moved on into the address — such as the id/seq of the thread's last committed message at send time — so two sends separated by a settled turn always diverge. Add a red-first cell for exactly this scenario (two identical-text sends separated by a settled/accepted turn) before changing the derivation."
+    },
+    {
+      "id": "F2-status-line-not-exclusive-on-replay",
+      "severity": "major",
+      "category": "accessibility",
+      "where": "apps/web/components/clara/ClaraThreadView.tsx:565-566 (state.lastSendReplayed status line) vs :574-575 (streamStatusLabel status line)",
+      "what": "Every other role=\"status\" line in this component is written to be mutually exclusive with its siblings, and the file says so explicitly and repeatedly (e.g. the comment at :618, 'exclusive with the other two above for the same reason they are exclusive with each other') because the design law is that one event produces exactly one screen-reader announcement. The new lastSendReplayed line (:565-566, gated only by !revoked) and the pre-existing streamStatusLabel line (:574-575, gated by !revoked && !stopped && stopFailedCause === null && !runLostSight) do not exclude each other: a replayed send whose original task is still streaming renders BOTH 'Clara already had that message — this is the same request, not a second one.' AND 'Clara is responding…' as two simultaneous role=\"status\" announcements for one event, breaking the house invariant this same file documents for every other line in the block.",
+      "evidence": "Reproduced directly: driving the store through beginSend -> markAccepted(taskId, replayed=true) -> a live 'chunk' stream event (the exact sequence a real replayed-and-still-running turn produces) and reading every role=\"status\" node in the rendered tree yields two lines: [\"Clara already had that message — this is the same request, not a second one.\", \"Clara is responding…\"], where the house rule (and this file's own repeated documentation of it) expects exactly one.",
+      "fix": "Add !state.lastSendReplayed to the streamStatusLabel condition at :574 (or fold the replayed fact into the same line streamStatusLabel already owns), matching the mutual-exclusion pattern every other status line in this block follows."
+    },
+    {
+      "id": "F3-stray-untracked-scratch-file",
+      "severity": "note",
+      "category": "hygiene",
+      "where": "apps/web/components/clara/zz-adversarial-642.test.tsx (untracked in the worktree; not part of origin/main...HEAD)",
+      "what": "The worktree carries an untracked scratch test file, self-described in its own header as a 'THROWAWAY adversarial probe for #642 review — deleted after it is run', left over from an earlier review pass on this same worktree. It is not part of the branch's tracked diff and was not created by this review, but running it is what surfaced F1 and F2 above.",
+      "evidence": "git status --porcelain in C:\\Users\\zhant\\Desktop\\clara-wt\\642 shows exactly one untracked entry, apps/web/components/clara/zz-adversarial-642.test.tsx (7663 bytes, mtime 2026-09-19 13:37), absent from git diff origin/main...HEAD --stat.",
+      "fix": "Delete the file once its findings are triaged (rm apps/web/components/clara/zz-adversarial-642.test.tsx); it is scratch, not part of the branch, and should not ship or confuse the next reader of this worktree."
+    }
+  ],
+  "ran": [
+    "pnpm typecheck (worktree root) -> exit 0 (apps/web and packages/runtime both 'Done')",
+    "pnpm lint (worktree root) -> exit 0, including apps/web's eslint + check-token-contrast.mjs + check-test-manifest.mjs (+selftest) + check-message-keys.mjs (+selftest) + check-ui-add-guard.selftest.mjs, and packages/runtime / packages/db / packages/reporting-render eslint, all clean",
+    "node scripts/check-frozen-workflows.mjs (worktree root) -> OK, 296 frozen files verified, 53 'use workflow' modules frozen+registered, 3 retired entries, exit 0 (confirms 'you recut nothing / no frozen edit')",
+    "node packages/runtime/scripts/check-parts-parity.mjs (worktree root) -> OK, reader superset of emittable unchanged (AllCovered/NoExtra), confirms 'register no part kind'",
+    "pnpm --filter @clara/web ui:add avatar --dry-run -> resolves for base-nova (1 file create, dep cn) matching the final report's D6/M2 measurement exactly",
+    "pnpm --filter @clara/web ui:add attachment --dry-run -> REFUSES (would overwrite components/ui/button.tsx), matching the final report's claim and confirming the guard's Windows .CMD spawn fix (apps/web/scripts/ui-add.mjs) actually runs on this rig rather than failing silently",
+    "git log origin/main..HEAD (12 commits) -> every commit carries a Co-Authored-By line",
+    "git diff origin/main...HEAD -- apps/web/e2e/e2e-fixture-ownership.test.ts -> empty (no new RPC verb added, matches the brief's '—' disposition)",
+    "git diff origin/main...HEAD -- CONTEXT.md apps/web/messages/en.json apps/web/test/manifest.txt -> CONTEXT.md's 3 new terms (Turn key, Conversation scope, Tool outcome) match DECISIONS.md:132-133 verbatim in the house term/_Avoid_ shape; every new test file is inserted into test/manifest.txt at the sorted position; every new user-facing string lives under Clara.thread in en.json",
+    "grep -n readCachedJson apps/web/e2e/chat-parity-mock.mjs -> POST bodies read exclusively via the shared readCachedJson (aliased readJson), never a private reader",
+    "grep -n rootQuery/humanQuery in packages/db/tests/rig-runtime-lifecycle.test.mjs's two new cells -> the human-authored read (chat_messages under the author's own role) goes through humanQuery; packages/runtime/tests/chat-turn-replay-db.test.mjs's read-back assertions use rig.rootQuery, matching the established house pattern for packages/runtime/tests/* (c5-stream-reauth-db.test.mjs, chat-attachment-admission.test.mjs) rather than the packages/db/tests/* humanQuery convention — consistent, not a violation",
+    "grep -n ring-ring apps/web/components/clara/ClaraThreadView.tsx -> ring-ring/70 preserved on the composer textarea through the Field re-composition (AC7), matching tests/focus-ring-contract.test.ts's requirement",
+    "git diff origin/main...HEAD --stat -- apps/web/components/ui/ apps/web/package.json -> empty; confirms the D6 step-2 component migration truly was not attempted/half-installed (no stray ui/ files, no dependency or lockfile change), consistent with the report naming AC2's component migration as the residual",
+    "Read packages/db/tests/rig-runtime-lifecycle.test.mjs and packages/runtime/tests/chat-turn-replay-db.test.mjs additions in full: both drive begin_chat_turn's turn_key replay branch (fresh vs. live vs. post-terminal) with real assertions, no migration, no new gate module, no new rig-meta cohort — matches the ticket's 'no migration' binding line",
+    "Read apps/web/lib/clara/intentKey.ts, liveTools.ts, toolLabel.ts, useTranscriptScroll.ts, ClaraScopeBand.tsx, ClaraLiveToolStates.tsx and the ClaraThreadView.tsx / useClaraThread.ts / stream.ts / threadStore.ts / chatRoutes.ts / api.ts diffs in full",
+    "Independently reproduced two defects (see findings F1, F2) by running a pre-existing, untracked adversarial probe file found in the worktree (apps/web/components/clara/zz-adversarial-642.test.tsx) via node --import ./test/bootstrap.mjs --import tsx --test, then confirmed each failure against the actual source lines rather than trusting the probe's assertions alone"
+  ]
+}

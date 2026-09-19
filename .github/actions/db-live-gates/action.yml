@@ -70,6 +70,23 @@ runs:
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
           node tests/intake-admission-e2e.mjs
 
+    # #636 THE DURABLE INTAKE BATCH, on the same throwaway DB and the same bootstrapped world. Five
+    # legs: the headline batch at the MEASURED N (100 <=1MB PDFs is exactly what a fresh firm admits
+    # in one UTC day - re-derived on a migrated rig, not quoted), where N-5 reach a committed
+    # receipt while 5 independently wait on a declared fact, wait on the quota, fail their upload
+    # and stay unassigned; cancel-remaining keeping every committed receipt; the RESUMABLE fan-out
+    # (the decision made, the fan-out abandoned half way, the reconciler belt finishing it with the
+    # STORED actor and key, no child cancelled twice, the parent terminal exactly once); cross-firm
+    # poison isolation; and the capacity wall end to end through the real route, on its own firm.
+    # Standalone (not collected by `node --test`), so it is wired explicitly like the two above.
+    - name: "#636 intake batch e2e (same isolated DB + world)"
+      shell: bash -e {0}
+      run: |
+        cd packages/runtime
+        PGDATABASE=clara_intake_ci \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
+          node tests/intake-batch-e2e.mjs
+
     # Wave-B rig-confined fault gates (§4 of the contract): the four STANDALONE runtime e2es
     # (NOT collected by `node --test`, so wired explicitly like intake-e2e above). Gate 3 —
     # interview cancel/kill/complete through the REAL WDK engine (interview-e2e.mjs boots the
@@ -229,6 +246,20 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/staff-expense-claim-e2e.mjs
+        # #655 — the TRADE-INVOICE World leg, on the same throwaway database and the same world.
+        # It proves the thing no unit test and no in-transaction probe can: the signed AR/AP open
+        # item is minted by a DEFERRED constraint trigger AT COMMIT, so the entry, the receipt,
+        # the trade_invoices row and the item are one transaction — and all four survive an
+        # exit_after_commit crash and a respawn as ONE of each. It also proves the due-date basis
+        # is the DATABASE's derivation end to end: the browser sent 'absent', the door answered
+        # 'counterparty_terms' and stamped posting_date + payment_terms_days on the item. It SKIPS
+        # CLEANLY (exit 0, printed reason) when migration 0225 is absent, so it is safe to merge
+        # before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/trade-invoice-e2e.mjs
         # #631 — the WORK-EGRESS e2e, BEFORE the two builds below, because it is the only leg whose
         # subject is what happens BEFORE a model is called. It drives the three windows nothing
         # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->
@@ -288,6 +319,37 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/chat-turn-v20-e2e.mjs
+        # #655 + #651 + #658 — the wave 2026-09-18 successor cut's own chat leg, immediately after
+        # its v20 sibling and on the same rig, for the same reason: it admits and settles its own
+        # Work and leaves none live. The two legs above it now run against a chatTurn_v21 /
+        # claraWork_v5 image, which is the point of keeping them — a successor that broke a
+        # predecessor's lane would red there, not here.
+        #
+        # FIVE LEGS, each needing a real World plus a real HTTP boundary. (1) #655's chat entrance
+        # end to end: one turn admits a trade-invoice Work through
+        # `clara.admit_trade_invoice_work`, one `clara.trade_invoices` row lands with the party the
+        # DOOR resolved, and claraWork_v5 runs it to a posted approved entry — purpose
+        # `journal_entry`, with no `WORK_ACCEPTED_PURPOSES` widening. (2) a REPLAYED turn with the
+        # same payload re-reserves rather than admitting a second: still one Work, one invoice row,
+        # one committed receipt. A unit cell can prove the op key is stable; only this leg proves
+        # the door agrees. (3) #651's chat entrance reaches
+        # `clara.run_depreciation_period_for` — a `clara_runtime`-ONLY door, so arriving at all is
+        # the grant measured rather than assumed — and charges NOTHING on an empty register, which
+        # is an answer and not a failure. (4) #658's repointed read in both lanes and in the durable
+        # row: the bounded block reaches the CHAT prompt and the RUN prompt, the run leaves a
+        # `clara.work_knowledge_reads` row carrying the keys it actually read at an estate face
+        # word, the preload traces under `clara-capability-registry/v2`, and
+        # `read_knowledge_source` comes back with the record rather than a refusal. (5) the
+        # transcript carries EXACTLY ONE `work_accepted` — the depreciation run mints no card — and
+        # C-19 did not append its incomplete-coding refusal beside a turn that posted.
+        #
+        # It SKIPS CLEANLY (exit 0, printed reason) when migration 0225, 0227, 0230 or 0195 is
+        # absent, so it is safe to merge before any DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/chat-turn-v21-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
         # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
         # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor
@@ -362,6 +424,40 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/prepayment-occurrence-e2e.mjs
+        # #656 — THE OPENING LEDGER'S SOURCE, end to end. Every half of this journey was already
+        # tested and the JOIN between them never was: the producer against synthetic geometry with no
+        # database, the consumer against regions a fixture inserted by hand, the DB battery against
+        # regions it persisted itself. This leg runs a real Azure layout payload through the real
+        # `normalizeAzureLayout` (with #656's in-line producer inside it), the real
+        # `clara.persist_document_extraction`, the real authoritative-extraction trigger, the real
+        # `parseOpeningTargets` route core on a real clara_runtime connection, the real
+        # `clara.record_opening_targets_parsed` and the real `approve_opening_seed` ceremony — then
+        # asserts the finalized basis, its append-only approval rows, and that
+        # `clara.trial_balance_as_of` now answers with the printed opening position, cent for cent.
+        # NO WORKFLOW WORLD, measured rather than skipped: no workflow touches the opening lane
+        # (`grep -l "opening_seed\|opening_tb" packages/runtime/workflows/*` is empty), so AC7's
+        # database-boundary clause is the applicable one. It SKIPS CLEANLY (exit 0, printed reason)
+        # when migration 0228 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/opening-ledger-source-e2e.mjs
+        # #658 — THE KNOWLEDGE READ-SET RESUME PROPERTY, after the last standalone leg above.
+        # It SPAWNS a child that writes one `clara.work_knowledge_reads` row as `clara_runtime` and
+        # SIGKILLs it between the write and its acknowledgement, then respawns: the replayed step
+        # must land on the SAME (work_id, run_id, seq) row rather than a second one. It also proves
+        # that work/firm/client are DERIVED from the positive agent_tasks -> accounting_work join
+        # (a task of another kind is CLR11) and that the drift door observes from the recorded READ
+        # rather than from the execution-trace fallback. It bootstraps NO Workflow World — #658 cuts
+        # no frozen successor, so nothing on this branch calls the writer inside a durable step; the
+        # one-entry/one-receipt half closes with claraWork_v5. It SKIPS CLEANLY (exit 0, printed
+        # reason) when migration 0230 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/work-knowledge-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate

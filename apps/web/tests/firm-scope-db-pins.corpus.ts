@@ -157,4 +157,34 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "b0e7bb8b94ff7b2cc85da610a87d25105287a61ed1cfcb060ff0fa206830e93c",
     },
   ],
+  // #657 (0226) — the bank match-evidence lane. Its dynamic SQL is the 0129 caller-loop family:
+  // pg_get_functiondef splices that recut a CLOSED, LITERAL roster of named FUNCTIONS, each read
+  // by its exact regprocedure and re-installed with one counted anchor replaced.
+  [
+    "0226_bank_match_evidence.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of named functions: clara._match_bank_line_core(...) (its terminal _finish_op payload, one counted anchor), clara._agent_bank_receipt(...) (two counted anchors — the INSERT column list and the VALUES tail), and the THIRTEEN clara._agent_*_core bodies spelled out in this file own v_sigs array, exactly as 0129:1063-1106 does. Every target is read by its exact pinned signature, every anchor is asserted to occur EXACTLY once before replacing, and every body returns jsonb, uuid or void — the file contains no `create [or replace] view` of any spelling, static or spliced, so neither P4 scope view is reachable by construction rather than by inspection of a rendered string. Its two new functions, the recut clara.list_bank_match_candidates and the whole-body recut of clara._agent_get_bank_pack_core are all STATIC DDL the lexer inspects directly (a first cut spliced the pack body dynamically and was reverted for exactly that reason). The file's own prestate pins the pre-image prosrc sha256 of all five recut bodies plus two non-regression pins, and its tail re-reads owner, SECURITY DEFINER, search_path, ACL and a single-pg_proc-row census over every name it installs and recuts.",
+      sha256: "55b6e27952393d9a5327c1ae4ced980494facfffe93623765de232c342511b50",
+    },
+  ],
+  // #651 (0227) — the depreciation-history lane, the same 0201 splice family and the largest of
+  // them: SIX splices in one file rather than one or two.
+  [
+    "0227_depreciation_history.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut exactly NINE named functions across TEN blocks, each read at its own LITERAL regprocedure signature spelled in this file — clara._tf_fa_authority_transition() TWICE (§B.1 widens its write allowlist, §B.2 splices the write-once wall for the two sign-time columns on its own anchor), clara.retire_depreciation_authority(uuid,uuid,text,text) (§B.3 stamps the window floor by coalesce, without which this file's own ck_fa_authorities_window would refuse the lawful withdrawal of a never-signed authority as a raw 23514), clara._fa_validate_particulars(jsonb), clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text), clara._fa_complete_particulars_core(uuid,uuid,uuid,uuid,jsonb,text,text), clara.revise_fixed_asset_particulars(uuid,uuid,jsonb,date,text), clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text), clara._fa_oldest_unmet_period(uuid) and clara._fa_asset_json(uuid,date). Eight return jsonb/boolean/record and the ninth returns trigger, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. Every splice counts its anchor and refuses unless it occurs EXACTLY once; the two 0042-era bodies additionally re-run 0042 S5.15c/S5.15d's own marker censuses as their prestate AND their postcheck, including S5.15c's ordering law. The file's prestate pins the pre-image body sha256 of every recut target measured off pg_proc.prosrc, and its tail re-proves owner, ACL, SECURITY DEFINER and pinned search_path for each one. Every other object this migration creates (five columns, three CHECK constraints, one backfill UPDATE and four function bodies at literal signatures) is static DDL the lexer inspects directly.",
+      sha256: "d55113b5b956f69bc0fc07f2688a91916442408b13238bbb557a4ce5b636e424",
+    },
+  ],
+  // #660 [0232] — the client financial pack's own RLS loop, appended at the sorted position.
+  [
+    "0232_client_financial_pack.sql",
+    {
+      reason:
+        "Reviewed: the ONLY dynamic SQL in 0232 is a two-iteration do-block that enables and FORCES row level security and creates an owner policy and a firm-scoped human policy on the file's OWN two new relations (clara.cash_account_set_versions, clara.cash_account_set_members) — the same execute-format loop 0003:505-518 uses for the core tables. It emits ALTER TABLE and CREATE POLICY only and contains no CREATE VIEW of any kind, so neither P4 scope view can be a target; the two relation names it interpolates are string literals in the array beside it. Re-read in fix round 1 and again in fix round 2: the loop itself is byte-unchanged; the file's sha moved because the pack's comparison, composition, coverage-reason and disclosure arms were corrected (round 1) and because the publish door now re-reads the current version after its `select … for update` returns nothing (round 2, recheck NF-1) — none of which is dynamic SQL. Re-read a THIRD time in INTEGRATION fix round 2 (DECISIONS 6.4 row 1): the sha moved again because the two SECURITY INVOKER reads now take their money as-of from the house book-day authority through a new one-line SECURITY DEFINER delegate, clara.book_today(), which this file creates with STATIC `create function` DDL and a static `grant`/`revoke` pair — the do-block above is still byte-unchanged and is still the only dynamic SQL in the file.",
+      sha256: "4240e93328d0e9a3174fae476ed99a9fa41da6b2379cafc9d66d2ac2b3a667dd",
+    },
+  ],
 ]);

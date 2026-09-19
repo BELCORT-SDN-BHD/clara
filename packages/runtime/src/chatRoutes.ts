@@ -227,6 +227,7 @@ export function chatRoutes(): express.Router {
     const userParts = Array.isArray(body.parts) ? body.parts : [{ type: "text", text: String((body as { text?: string }).text ?? "") }];
 
     let taskId: string;
+    let replayed = false;
     try {
       const admitted = await withRuntime(async (c) => {
         const p = await authenticate(c, req.header("authorization"));
@@ -238,15 +239,31 @@ export function chatRoutes(): express.Router {
           JSON.stringify(userParts),
           DEFAULT_MODEL,
         ]);
-        const receipt = r.rows[0].receipt as { task_id: string };
+        // #642 — `replayed` IS READ OFF THE RECEIPT, beside `task_id`. The door has
+        // returned it since 0006 (`true` from the turn_key replay branch at :954-960,
+        // `false` from the fresh admission at :999) and this route threw it away, so a
+        // REPLAY and a FRESH ADMISSION were byte-identical on the wire: a client that
+        // re-posted the same intent (a dropped ack, a retried Send) could not tell
+        // "we already have this turn" from "we just admitted this turn", and the
+        // browser drew a second user bubble for a turn the database had deduplicated.
+        // Additive: a client that ignores the field is unaffected.
+        const receipt = r.rows[0].receipt as { task_id: string; replayed?: boolean };
         // Only kick off a run when the task is fresh (queued + unbound). The WORKFLOW
         // self-binds (S4-AB3 claimRunStep), so we never bind here; a turn_key replay of
         // an already-started task is skipped.
         const st = await c.query("select status, workflow_run_id from clara.agent_tasks where id = $1", [receipt.task_id]);
         const row = st.rows[0];
-        return { taskId: receipt.task_id, needsStart: row?.status === "queued" && row?.workflow_run_id == null };
+        return {
+          taskId: receipt.task_id,
+          // Fail-closed on a receipt that does not carry the field at all: an absent
+          // `replayed` is reported as a FRESH admission, which is the reading that
+          // draws the bubble rather than the one that silently swallows a turn.
+          replayed: receipt.replayed === true,
+          needsStart: row?.status === "queued" && row?.workflow_run_id == null,
+        };
       });
       taskId = admitted.taskId;
+      replayed = admitted.replayed;
 
       if (admitted.needsStart) {
         // Post-commit enqueue (best-effort — the reconciler re-enqueues an unbound
@@ -295,7 +312,7 @@ export function chatRoutes(): express.Router {
       res.status(500).json({ error: "internal" });
       return;
     }
-    res.status(202).json({ task_id: taskId });
+    res.status(202).json({ task_id: taskId, replayed });
   });
 
   return router;

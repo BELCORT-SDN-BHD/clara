@@ -133,6 +133,10 @@ function watchChatWire(page: Page): { urls: string[]; streamContentType: () => s
 test.beforeEach(async ({ page }) => {
   await signIn(page);
   await setBurst(page, false);
+  // #642 — the same backstop, for the same reason, for the two arms this ticket adds
+  // (`toolScript` and `history`). `reset: true` is honoured by the fixture explicitly so
+  // a cell can put the lane back as it found it without knowing how many arms exist.
+  await setLane(page, { reset: true });
 });
 
 test("a parked clarify is answered inline, in the thread, and the card shows the answered state", async ({ page }) => {
@@ -190,7 +194,12 @@ test("a parked clarify is answered inline, in the thread, and the card shows the
   await answerField.fill("ROME PROPERTIES");
   await page.getByRole("button", { name: "Answer", exact: true }).click();
   await expect(page.getByText("Answered by your firm")).toBeVisible();
-  await expect(page.getByText("ROME PROPERTIES")).toBeVisible();
+  // `{ exact: true }` since #642: the conversation now names its SCOPE beside the
+  // composer, so "ROME PROPERTIES" also appears inside "ROME PROPERTIES · E2E Accounting"
+  // (the band) and in the escalated heading's `sr-only` scope suffix. What THIS assertion
+  // is about is the answered clarify card's own client attribution, which is the node
+  // whose whole text is the client's name.
+  await expect(page.getByText("ROME PROPERTIES", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Answer", exact: true })).toHaveCount(0);
 
   await scan(page, "answered clarify face");
@@ -267,8 +276,14 @@ test("C6: a settled transcript renders the bank act's ledger fields, the pack's 
   // (c) THE TOOL CHIPS, RESOLVED. Two calls in one message: one answered, one errored.
   // Before this train both were the same bare grey name chip, so the assertion that
   // they DIFFER is the discriminating one.
-  await expect(page.getByText("get_bank_pack · done")).toBeVisible();
-  await expect(page.getByText("trial_balance · failed")).toBeVisible();
+  // RE-BASED BY #642 (UI-32): the chip's verb is a HUMAN label now, and the runtime's own
+  // token never reaches the reader — `lib/clara/toolLabel.ts` holds the measured map, and
+  // `components/parts/tool-call-status.test.tsx`'s own header records why C6's original
+  // "never re-worded" rule gave way. The DISCRIMINATING fact is unchanged: the two chips
+  // differ, which is what was false before C6.
+  await expect(page.getByText("Reading the bank pack · done")).toBeVisible();
+  await expect(page.getByText("Reading the trial balance · failed")).toBeVisible();
+  await expect(page.getByText("get_bank_pack")).toHaveCount(0);
 
   // (d) chatTurn_v19's GOVERNED-KNOWLEDGE RECEIPT. It renders the key, the act and the
   // watermark — and NOT the value, which is correctable and withdrawable while this transcript
@@ -583,4 +598,187 @@ test("#727: under reduced motion the clarify group fades and does not MOVE", asy
   expect(properties, "reduced motion keeps the fade").toContain("opacity");
   expect(properties, "reduced motion drops the rise — movement is the thing that is removed")
     .not.toContain("translate");
+});
+
+// ===========================================================================
+// #642 — B6 "Start Clara": one intent per send, live tool state, the scope band,
+// and a transcript whose scroll belongs to the reader.
+// ===========================================================================
+
+/** #642's own control switches, through the SAME id-scoped control arm `setBurst` uses
+ *  (the thread id rides in the query string so the fixture can decline another lane's
+ *  thread BEFORE it drains the body). */
+async function setLane(
+  page: Page,
+  arms: { reset?: boolean; toolScript?: boolean; history?: number },
+): Promise<void> {
+  const answer = await page.evaluate(
+    async ([thread, body]) => {
+      const res = await fetch(`/api/runtime/e2e-chat-parity/control?thread=${encodeURIComponent(thread as string)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.text() };
+    },
+    [THREAD_ID, arms] as const,
+  );
+  expect(answer.status, `arming the #642 lane returned ${answer.status}: ${answer.body}`).toBe(200);
+}
+
+/** Every turn POST's own `turnKey`, read off the request the BROWSER made. The key is the
+ *  whole subject of `p642.e2e.duplicate_send`, and reading it anywhere else would be
+ *  asserting about a value this file computed rather than one the app derived. */
+function watchTurnKeys(page: Page): { keys: () => string[] } {
+  const keys: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "POST" || !new URL(request.url()).pathname.includes("/turns")) return;
+    try {
+      const body = JSON.parse(request.postData() ?? "{}") as { turnKey?: string };
+      if (typeof body.turnKey === "string") keys.push(body.turnKey);
+    } catch {
+      /* a body this collector cannot parse is not evidence either way */
+    }
+  });
+  return { keys: () => keys };
+}
+
+const TRANSCRIPT = '[data-slot="clara-transcript-viewport"]';
+const PROVISIONAL = '[data-slot="clara-provisional-bubble"]';
+
+test("p642.e2e.duplicate_send — the SAME sentence sent twice is ONE intent: one key, a replay, and no second bubble", async ({ page }) => {
+  // THE JOURNEY: a person presses Send, the ack is lost or slow, and they send the same
+  // thing again. Before #642 the composer minted `crypto.randomUUID()` per press, so the
+  // door saw a brand-new intent and admitted a SECOND turn with a second bubble and a
+  // second run. The key is now a content address, so the second press lands on
+  // `clara.begin_chat_turn`'s replay branch (0006:954-960) and the 202 says `replayed`.
+  const turnKeys = watchTurnKeys(page);
+  await openThread(page);
+
+  await page.getByLabel(COMPOSER).fill("Code this invoice");
+  await page.getByLabel(COMPOSER).press("Enter");
+  await expect(page.getByText(QUESTION)).toBeVisible();
+  // The POSITIVE CONTROL, and it is what makes the assertion below mean something: a
+  // FRESH admission DOES draw the provisional bubble.
+  await expect(page.locator(PROVISIONAL)).toHaveCount(1);
+
+  // The same intent again — the same sentence, the same thread, the same (empty)
+  // attachment set.
+  await page.getByLabel(COMPOSER).fill("Code this invoice");
+  await page.getByLabel(COMPOSER).press("Enter");
+
+  await expect(page.getByText("Clara already had that message")).toBeVisible();
+  await expect(page.locator(PROVISIONAL), "a replay must not draw a second bubble for one intent").toHaveCount(0);
+
+  const keys = turnKeys.keys();
+  expect(keys.length, "both presses posted").toBe(2);
+  expect(keys[1], "the second press carried the SAME content-addressed key").toBe(keys[0]);
+  expect(keys[0], "…and it is a content address, not a uuid").toMatch(/^intent-[0-9a-f]{32}$/);
+
+  // A CHANGED intent is a different key, which is the other half of the same law: a new
+  // sentence must never be swallowed by the replay branch.
+  await page.getByLabel(COMPOSER).fill("Actually, code the Milan one");
+  await page.getByLabel(COMPOSER).press("Enter");
+  const after = turnKeys.keys();
+  expect(after.length).toBe(3);
+  expect(after[2], "a changed intent gets a new identity").not.toBe(after[0]);
+});
+
+test("p642.e2e.tool_state_live — the chip moves running → done INSIDE one turn, before any settle", async ({ page }) => {
+  // The transcript never settles in this cell: the task stays PARKED (no terminal
+  // `message`, no `done`), so `done` on the chip can only have come from the LIVE stream.
+  // That is the whole of AC4 — a reader watches the step happen rather than being handed
+  // a finished list afterwards.
+  await openThread(page);
+  await setLane(page, { toolScript: true });
+
+  await page.getByLabel(COMPOSER).fill("Check the trial balance");
+  await page.getByLabel(COMPOSER).press("Enter");
+
+  const group = page.getByRole("group", { name: "What Clara is doing" });
+  await expect(group).toBeVisible();
+  // UI-32 — the reader sees a sentence, never `trial_balance`.
+  await expect(group).toContainText("Reading the trial balance · running");
+  await expect(group).not.toContainText("trial_balance");
+  await expect(group).toContainText("Reading the trial balance · done");
+  // …and the turn really has not settled.
+  await expect(page.getByText("Clara is responding")).toBeVisible();
+});
+
+test("p642.e2e.scope_visible_at_both_altitudes — the conversation names its scope on the rail AND on the escalated route, and Back restores it", async ({ page }) => {
+  // Scope was ABSENT from this screen: the rail's heading and the escalated route's only
+  // `<h1>` both read "Clara", and the one sentence about scope was the NEGATIVE
+  // firm-altitude note. The band is the fix, and it has to be on BOTH mount points
+  // because they are the same conversation ("full-screen is the rail conversation
+  // enlarged, never a separate universe").
+  const band = page.getByRole("group", { name: "Conversation scope" });
+
+  await page.goto(`/clients/${CLIENT_ID}`);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+  await expect(band.first(), "the rail names the conversation's scope beside its composer").toBeVisible();
+
+  await page.goto(`/clients/${CLIENT_ID}/clara/${THREAD_ID}`);
+  await expect(page.getByLabel(COMPOSER)).toBeVisible();
+  // The escalated route reads both names SERVER-SIDE (its layout never mounts
+  // `FirmScopeProvider`), so this is also the cell that proves that path works at all.
+  await expect(band).toContainText("ROME PROPERTIES");
+
+  await page.goBack();
+  await expect(rail).toBeVisible();
+  await expect(band.first(), "Back restores the rail, scope and all").toBeVisible();
+});
+
+test("p642.e2e.long_history_scroll — a reader scrolled up stays put, and the jump-to-latest is keyboard-reachable (320px + 200%, axe)", async ({ page }) => {
+  await setLane(page, { history: 60 });
+  await openThread(page);
+
+  const viewport = page.locator(TRANSCRIPT);
+  await expect(viewport).toBeVisible();
+  // A fresh transcript opens on its newest message, so the reader scrolling up is an
+  // explicit act — exactly as it is for a person re-reading an earlier answer.
+  await expect(page.getByText("Earlier answer 60")).toBeVisible();
+  await viewport.evaluate((el) => { el.scrollTop = 0; });
+  const before = await viewport.evaluate((el) => el.scrollTop);
+
+  // Content arrives: the turn's own provisional bubble and the parked question, both
+  // inside this region.
+  await page.getByLabel(COMPOSER).fill("Code this invoice");
+  await page.getByLabel(COMPOSER).press("Enter");
+  await expect(page.getByText(QUESTION)).toBeVisible();
+
+  expect(await viewport.evaluate((el) => el.scrollTop), "content arriving must not move the reader").toBe(before);
+
+  // The control exists ONLY because there is something below, and it has a real
+  // accessible name rather than an icon.
+  const jump = page.getByRole("button", { name: "Jump to latest" });
+  await expect(jump).toBeVisible();
+  await jump.focus();
+  await expect(jump, "the jump control must be reachable and operable from the keyboard").toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(jump).toHaveCount(0);
+  // POLLED, because the jump is SMOOTH when motion is allowed — `scrollTo({behavior:
+  // "smooth"})` animates over several frames, so a single synchronous read here measures
+  // the first frame and nothing else. The property is "it returns to the bottom", not
+  // "it teleports"; the INSTANT arm under `prefers-reduced-motion` is
+  // `lib/clara/useTranscriptScroll.test.ts`'s own cell.
+  await expect
+    .poll(async () => viewport.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+      { message: "the jump returns to the bottom" })
+    .toBeLessThanOrEqual(2);
+
+  // AC6/AC7 — the transcript itself at 320px and at 200% zoom, with an axe scan on each.
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expect(page.getByLabel(COMPOSER)).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+    "no horizontal page scroll at 320px",
+  ).toBe(true);
+  await scan(page, "chat transcript at 320px");
+
+  // 200% zoom is emulated the way this repo already does it — half the CSS viewport at the
+  // same device size is what doubling the text size actually does to the layout.
+  await page.setViewportSize({ width: 640, height: 400 });
+  await expect(page.getByLabel(COMPOSER)).toBeVisible();
+  await scan(page, "chat transcript at 200% zoom");
 });

@@ -25,10 +25,16 @@
 // is not sent.
 //
 // FIVE PER TURN, refused locally and honestly. The same trigger raises CLR10 above five
-// (`if v_count>5 …`), and `packages/runtime/src/chatRoutes.ts:186-206` maps CLR10 to
-// NOTHING — it falls through to a bare 500. Refusing the sixth file here is the honest
-// spelling of a wall that already exists, not a client-side re-derivation of it: the
-// wall still stands, and this only stops us walking into it with a 500.
+// (`if v_count>5 …`). Refusing the sixth file here is the honest spelling of a wall that
+// already exists, not a client-side re-derivation of it: the wall still stands, and the
+// local refusal is what lets the person fix the turn before they send it.
+//
+// #642 C-45 CORRECTION — this paragraph used to end "…maps CLR10 to NOTHING — it falls
+// through to a bare 500", and that has not been true since FS-4 C-5 item 12: CLR10 is
+// mapped to a 400 carrying the door's OWN message (`packages/runtime/src/chatRoutes.ts`'s
+// `turnErrorStatus` + its `status === 400` arm), and `c5-chat-clr-census-db.test.mjs`
+// recomputes that map from the live catalog both ways on every run. The local refusal is
+// therefore the better ERROR, not the difference between an error and an incident.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Paperclip, RotateCcw, X } from "lucide-react";

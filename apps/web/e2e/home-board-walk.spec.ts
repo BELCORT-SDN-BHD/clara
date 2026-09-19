@@ -47,9 +47,70 @@ const ENVELOPE = {
   rows: [DRAFT_ROW], next_cursor: null,
 };
 
-const TIMELINE = [
-  { seq: 9, event_type: "entry_posted", event_description: "An entry was posted.", client_id: CLIENT_ACTIVE, actor: "u1", on_behalf_of: null, via_wake_kind: null, created_at: "2026-09-04T01:12:00Z" },
-];
+// #659 (D18.f) — Recent activity reads `clara.list_activity` now, so the board can render WHO did
+// each thing. This lane MUST overlay it: `activity-mock.mjs` answers a firm-wide `list_activity`
+// unconditionally on the shared server (serve-built.mjs:609, far above the home-board hook at
+// :720), so without a `page.route` here this walk would be asserting #632's fixtures.
+const ACTIVITY_MEMBER = "11111111-1111-4111-8111-111111111111";
+const ACTIVITY = {
+  rows: [{
+    id: "ev-9", source: "event", event_type: "entry_posted", description: "An entry was posted.",
+    client_id: CLIENT_ACTIVE, actor: ACTIVITY_MEMBER, on_behalf_of: null, via_wake_kind: null,
+    occurred_at: "2026-09-04T01:12:00Z", object_kind: "entry", object_id: "e1", work_id: null,
+    receipt_id: null, document_id: null, original_entry_id: null, replacement_entry_id: null,
+    status: "approved", kind: "journal",
+  }],
+  next_cursor: null, truncated: false,
+};
+
+const MEMBERS = [{
+  membership_id: "m1", user_id: ACTIVITY_MEMBER, display_name: "Tao Belcort",
+  email: "owner@example.test", role: "owner", status: "active",
+  created_at: "2026-01-01T00:00:00Z", removed_at: null,
+}];
+
+/**
+ * #659 — THE PORTFOLIO. A MIXED fixture on purpose: an active client with Work in all three
+ * columns, an active client that is caught up, and an ONBOARDING client whose Work is counted here
+ * while the needs-you chips above structurally exclude it. The counts are the ones `listWorkPage`
+ * can actually serve, so each drilldown lands on the population its number described.
+ */
+const PORTFOLIO = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 3,
+  page_limit: 50,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  rows: [
+    {
+      client_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Bee Creative Solution",
+      status: "active", active: 0, attention_failed: 0, failed: 0, refused: 0, recent_success: 0,
+      uncounted_completions: 0, coverage: "ok", coverage_reason: null, preview: [],
+    },
+    {
+      client_id: CLIENT_ONBOARDING, name: "Kuching Kopitiam", status: "onboarding",
+      active: 1, attention_failed: 0, failed: 0, refused: 0, recent_success: 0,
+      uncounted_completions: 0, coverage: "partial",
+      coverage_reason: "onboarding_client_excluded_from_queue", preview: [],
+    },
+    {
+      client_id: CLIENT_ACTIVE, name: "Rome Properties", status: "active",
+      active: 3, attention_failed: 2, failed: 1, refused: 1, recent_success: 1,
+      uncounted_completions: 0, coverage: "ok", coverage_reason: null, preview: [],
+    },
+  ],
+  next_cursor: null, truncated: false, coverage: "ok", coverage_reason: null,
+  sources: {
+    work: { computed_at: "2026-09-16T02:00:00.000Z" },
+    review_queue: { signal: "watermark", excludes: ["onboarding", "archived"] },
+    compliance: { signal: "stale_evaluator", window_hours: 48 },
+    lint: { signal: "stale_evaluator" },
+    sweep: { signal: "last_finalized_at" },
+  },
+  needs_you_ref: { source: "list_review_queue.counts", floor: "viewer", excludes: ["onboarding", "archived"] },
+};
 
 const PLAN = {
   id: "plan-1", firm_id: "f1", scope_kind: "client", client_id: CLIENT_ONBOARDING, state: "open",
@@ -190,7 +251,11 @@ function json(route: Route, body: unknown): Promise<void> {
 /** Overlay a populated firm on top of the shared mock, for THIS page only. */
 async function seed(page: Page): Promise<void> {
   await page.route("**/e2e-supabase/rest/v1/rpc/list_review_queue", (route) => json(route, ENVELOPE));
-  await page.route("**/e2e-supabase/rest/v1/rpc/list_firm_timeline", (route) => json(route, TIMELINE));
+  // #659 — the three reads Firm Home gained. `list_activity` REPLACES `list_firm_timeline` here
+  // (D18.f); the roster is what turns the actor uuid into a name; the pack is the portfolio.
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_activity", (route) => json(route, ACTIVITY));
+  await page.route("**/e2e-supabase/rest/v1/firm_members_visible**", (route) => json(route, MEMBERS));
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) => json(route, PORTFOLIO));
   await page.route("**/e2e-supabase/rest/v1/clients**", (route) => {
     const url = route.request().url();
     if (url.includes("fy_end_month")) {
@@ -253,10 +318,11 @@ test("Firm Home names the firm, scores the queue from the envelope, and every ti
   // The triage row is link-only at this altitude.
   await expect(board.getByText("high stakes")).toBeVisible();
   await expect(board.getByRole("button", { name: "Resolve" })).toHaveCount(0);
-  // The timeline prints the DB's own sentence.
+  // Recent activity prints the DB's own sentence — and, since #659, the PERSON beside it.
   await expect(board.getByText("An entry was posted.")).toBeVisible();
+  await expect(board.getByText("Tao Belcort")).toBeVisible();
   // The close roll-up stays an honest note.
-  await expect(board.getByText(/A firm-wide close status per client is not built/)).toBeVisible();
+  await expect(board.getByText(/A firm-wide close status per client is still not built/)).toBeVisible();
 
   // A tile, then back — the journey the map's own test obligation names.
   // #614: the tile now lands on Work's saved "Needs you" view rather than a
@@ -547,4 +613,626 @@ test("home.facets.delayed — a minute with no successful read says the UPDATE i
   await page.clock.fastForward("01:05");
   await expect(workbench(page).getByText(/Update delayed/)).toBeVisible();
   await expect(workbench(page).getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+// =================================================================================================
+// #659 (journey B1) — THE PORTFOLIO. Appended beside #650's client-altitude cells; nothing above is
+// restructured, and `home-board-mock.mjs` keeps its dispatch position and its EMPTY_RPCS arm.
+// =================================================================================================
+
+test("p659.home.portfolio — one row per client with the door's own counts, and the onboarding disclosure is on screen BEFORE any click", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 1 }));
+  await seed(page);
+  await signInTo(page, "/");
+  await settled(page);
+  const board = workbench(page);
+
+  await expect(board.getByRole("heading", { name: "Client portfolio", level: 2 })).toBeVisible();
+  const table = board.getByRole("table", { name: "Clients, with the Work waiting on each" });
+  await expect(table).toBeVisible();
+  // One row per client the door returned, in the door's own name order.
+  for (const name of ["Bee Creative Solution", "Kuching Kopitiam", "Rome Properties"]) {
+    await expect(table.getByRole("link", { name, exact: true })).toBeVisible();
+  }
+
+  // THE COUNTS ARE THE DOOR'S OWN, and each one is a link with a full noun phrase for its name.
+  await expect(board.getByRole("link", { name: "3 Work running for Rome Properties" })).toBeVisible();
+  await expect(board.getByRole("link", { name: "2 Work needing attention for Rome Properties" })).toBeVisible();
+  await expect(board.getByRole("link", { name: "1 Work posted for Rome Properties in the last seven days" })).toBeVisible();
+
+  // THE DISCLOSURE, BEFORE THE CLICK — both halves.
+  await expect(board.getByText(/cover active clients only/)).toBeVisible();
+  await expect(board.getByText(/dated by when each Work posted/)).toBeVisible();
+  await expect(board.getByText(/exclude this client/)).toBeVisible();
+
+  // AND NO MONEY ANYWHERE ON THE FIRM'S HOME.
+  const text = (await board.innerText()).replace(/\s+/g, " ");
+  expect(text, "Firm Home consolidates no client sums").not.toMatch(/RM\s?\d|MYR|\d+\.\d{2}/);
+});
+
+test("p659.home.drilldown — each count opens /work narrowed to exactly its population, and Back restores the home's own URL with focus on the control that left it", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  await seed(page);
+  await signInTo(page, "/?attention=active");
+  await settled(page);
+  const board = workbench(page);
+  const table = () => page.getByRole("table", { name: "Durable work" });
+
+  const legs = [
+    ["3 Work running for Rome Properties",
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=queued%2Crunning$`),
+      async () => {
+        await expect(table().getByRole("link", { name: "Office rent" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Payroll run" })).toBeVisible();
+        await expect(table().getByRole("link", { name: "Bank fee" })).toHaveCount(0);
+      }],
+    ["2 Work needing attention for Rome Properties",
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=failed%2Crefused$`),
+      // BOTH tokens, because the column counted both and the door published the split. A link
+      // carrying only `failed` would open a smaller set than the number the person clicked.
+      async () => { await expect(table()).toHaveCount(0); }],
+    // NO since/until ON THIS ONE (fix round 1, finding A2). The count is dated by the COMMITTED
+    // RECEIPT; `clara.list_accounting_work`'s since/until filter when the Work STARTED, so the
+    // narrowed list could be DISJOINT from the number clicked and "1" could open an empty page.
+    // The link is now a SUPERSET of the count, and the board says so before the click.
+    ["1 Work posted for Rome Properties in the last seven days",
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=completed$`),
+      async () => { await expect(table().getByRole("link", { name: "Rates accrual" })).toBeVisible(); }],
+  ] as const;
+
+  for (const [name, expected, landed] of legs) {
+    const link = board.getByRole("link", { name });
+    await expect(link, `${name} must be on the board as a link`).toBeVisible();
+    await link.focus();
+    await link.press("Enter");
+    await expect(page).toHaveURL(expected);
+    await landed();
+
+    await page.goBack();
+    // THE HOME'S OWN URL, WITH ITS FILTER INTACT — not merely "/" with the narrowing lost. That is
+    // the whole of AC2's second half, and a Back that dropped `?attention=` would satisfy a
+    // "returns to the home" assertion and fail the person.
+    await expect(page).toHaveURL(/\/\?attention=active$/);
+    // FOCUS RETURNS TO THE CONTROL THAT LEFT — measured through the ACCESSIBLE NAME of the focused
+    // node, compared against THIS leg's own `name`.
+    //
+    // Fix round 1, finding A3: this assertion used to read `document.activeElement?.textContent`
+    // and `.toContain("3")` — a hard-coded literal inside a three-leg loop. Each count link renders
+    // only its number as text, so legs 2 and 3 would have had to read "2" and "1"; the suite was
+    // green, which proved the focused node was an ANCESTOR whose text happens to contain the "3"
+    // of "Needs you: 3". The assertion could not fail, and AC7's focus-return clause was green on
+    // nothing. `aria-label` is unique per link and per leg, so this one can.
+    await expect
+      .poll(async () => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
+      .toBe(name);
+  }
+});
+
+test("p659.home.responsive — 320px, 200% zoom and reduced motion keep every count reachable with no horizontal scroll, and the populated board is axe-clean", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3, scans: 1 }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await seed(page);
+  await signInTo(page, "/");
+
+  for (const [label, width, height] of [
+    ["320px", 320, 720],
+    ["200% zoom (a halved 1280x720 viewport)", 640, 360],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await settled(page);
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `Firm Home must not scroll horizontally at ${label}`).toBeLessThanOrEqual(1);
+    for (const name of [
+      "3 Work running for Rome Properties",
+      "2 Work needing attention for Rome Properties",
+      "1 Work posted for Rome Properties in the last seven days",
+    ]) {
+      await expect(workbench(page).getByRole("link", { name }), `${name} at ${label}`).toBeVisible();
+    }
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await settled(page);
+  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).include("[data-firm-workbench]").analyze();
+  expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+});
+
+test("p659.home.states — an EMPTY register, a caught-up firm and a DENIED read are three different sentences, and the board dates its own read", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 3 }));
+  await seed(page);
+  await signInTo(page, "/");
+  await settled(page);
+  // The populated board dates its read rather than looking permanently live.
+  await expect(workbench(page).getByText(/^Read at /)).toBeVisible();
+
+  // ZERO CLIENTS — the first-use Empty, with the creation affordance BESIDE it.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, { ...PORTFOLIO, rows: [] }));
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) => json(route, []));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText("No clients yet", { exact: true })).toBeVisible();
+  await expect(workbench(page).getByText(/This firm has no clients yet\. Start with the first one\./)).toBeVisible();
+
+  // ZERO WORKLOAD — a firm WITH clients and no Work. A DIFFERENT sentence from the queue's own.
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) => json(route, CLIENTS));
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, {
+      ...PORTFOLIO,
+      rows: PORTFOLIO.rows.map((r) => ({ ...r, active: 0, attention_failed: 0, failed: 0, refused: 0 })),
+    }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText(/Every client is clear/)).toBeVisible();
+  await expect(workbench(page).getByText("No clients yet", { exact: true })).toHaveCount(0);
+
+  // DENIED — a permission, not a failure, and the viewer-floored chips above it still render.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    route.fulfill({
+      status: 400, contentType: "application/json",
+      body: JSON.stringify({ code: "CLR04", message: "insufficient role", details: null }),
+    }));
+  await page.reload();
+  await settled(page);
+  await expect(workbench(page).getByText(/Work records need a bookkeeper role/)).toBeVisible();
+  await expect(workbench(page).getByText(/read at a lower floor and are still yours/)).toBeVisible();
+  await expect(workbench(page).getByRole("link", { name: "Needs you: 3" })).toBeVisible();
+  await expect(workbench(page).getByText("No clients yet", { exact: true })).toHaveCount(0);
+});
+
+test("p659.home.zero_client_create — a firm with no clients reaches creation from the home and lands on the id the DATABASE returned; the draft survives a re-read", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  const BORN = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  await seed(page);
+  // A firm with NO clients, which is the state this page ships in on day one.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, { ...PORTFOLIO, rows: [] }));
+  let registerCalls = 0;
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) => {
+    registerCalls += 1;
+    // The FIRST read is empty; every later one carries a row — the transition that would unmount a
+    // control hung off the zero-client branch and silently discard a typed name.
+    return json(route, registerCalls === 1
+      ? []
+      : [{ id: BORN, name: "Penang Roastery", status: "onboarding", created_at: "2026-09-19T00:00:00.000Z" }]);
+  });
+  await page.route("**/e2e-supabase/rest/v1/rpc/client_identity_candidates", (route) =>
+    json(route, { name: "Penang Roastery", arity: 0, candidates: [] }));
+  await page.route("**/e2e-supabase/rest/v1/rpc/begin_client_onboarding", (route) =>
+    json(route, { client_id: BORN, plan_id: "plan-659" }));
+
+  await signInTo(page, "/");
+  await settled(page);
+  const board = workbench(page);
+  await expect(board.getByText("No clients yet", { exact: true })).toBeVisible();
+
+  await board.getByRole("button", { name: "Add client" }).click();
+  const name = page.getByLabel("Client name");
+  await expect(name).toBeVisible();
+  await name.fill("Penang Roastery");
+
+  // THE DRAFT SURVIVES A RE-READ. `focus` is one of this page's four re-read triggers, and the
+  // register now answers with a row — exactly the frame in which a remounted control would lose
+  // the typed name without a word.
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForLoadState("networkidle");
+  await expect(name, "the typed name must stand across a re-read that filled the register").toHaveValue("Penang Roastery");
+
+  await page.getByRole("button", { name: "Begin onboarding" }).click();
+  // AND THE HUMAN LANDS ON THE ID THE DATABASE RETURNED, never a guessed path.
+  await expect(page).toHaveURL(new RegExp(`/clients/${BORN}$`));
+});
+
+test("p659.home.zero_client_create (bookkeeper) — no control, and no greyed promise in its place", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 1 }));
+  await seed(page);
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_firm_portfolio_pack", (route) =>
+    json(route, { ...PORTFOLIO, rows: [] }));
+  await signInTo(page, "/", "bookkeeper@example.test");
+  await settled(page);
+  const board = workbench(page);
+  await expect(board.getByText("No clients yet", { exact: true })).toBeVisible();
+  // NOT OFFERED AT ALL, rather than offered and refused — `firm-setup-tile.tsx`'s own precedent.
+  await expect(board.getByRole("button", { name: "Add client", includeHidden: true })).toHaveCount(0);
+});
+
+// =============================================================================================
+// #660 — THE MONEY BAND. Appended after #650's legs; nothing above is restructured.
+//
+// The fixtures are overlaid PER PAGE, exactly as #650's are: `e2e/home-board-mock.mjs` answers the
+// three money verbs with the honest-empty (unpublished cash set) shape for every OTHER walk, and
+// these cells `page.route` a populated envelope on top for their own page only.
+// =============================================================================================
+
+const MONEY_PERIOD_MTD = {
+  start: "2026-09-01", end: "2026-09-30", as_of: "2026-09-18", timezone: "Asia/Kuala_Lumpur",
+};
+
+/** The ten-field envelope every figure group owes, so no fixture below can accidentally omit one
+ *  and make the face's `unknown` arm look like the component's own bug. */
+function moneyGroup(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    value_cents: 18_234_055,
+    status: "ok",
+    unit: "minor_units",
+    currency: "MYR",
+    period: MONEY_PERIOD_MTD,
+    computed_at: "2026-09-18T02:00:00.000Z",
+    definition_version: "clara.client-financial-pack/v1",
+    source_watermark: "100:100:",
+    coverage: "ok",
+    coverage_reason: null,
+    comparison: null,
+    composition: [],
+    composition_total: 0,
+    composition_truncated: false,
+    ...overrides,
+  };
+}
+
+const MONEY_ENTRY = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
+
+/** A POPULATED money band: cash over a published two-account set, a LOSS for the period, six cash
+ *  points with the oldest before the client's books, and a six-month series whose last month is
+ *  partial. */
+function financialPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    computed_at: "2026-09-18T02:00:00.000Z",
+    period: { ...MONEY_PERIOD_MTD, month: "2026-09-01", is_mtd: true },
+    coverage_floor: "2026-05-02",
+    cash: moneyGroup({
+      comparison: {
+        value_cents: 1_700_000, delta_cents: 16_534_055, delta_pct: 972.59, sign_change: false,
+        available: true, reason: null,
+        period: { start: "2026-08-31", end: "2026-08-31" },
+      },
+      set: {
+        version_id: "00000000-0000-4000-8000-00000000c5e7", revision: 1,
+        effective_from: "2026-05-02", member_count: 2, applied_to_all_points: true,
+      },
+      points: [
+        { as_of: "2026-04-30", value_cents: null, available: false, reason: "pre_coverage" },
+        { as_of: "2026-05-31", value_cents: 1_000_000, available: true, reason: null },
+        { as_of: "2026-06-30", value_cents: 1_200_000, available: true, reason: null },
+        { as_of: "2026-07-31", value_cents: 1_500_000, available: true, reason: null },
+        { as_of: "2026-08-31", value_cents: 1_700_000, available: true, reason: null },
+        { as_of: "2026-09-18", value_cents: 18_234_055, available: true, reason: null },
+      ],
+      composition: [{
+        account_id: "aaaa0000-0000-4000-8000-000000000010", account_code: "1010",
+        name: "Maybank Current", member_reason: "bank_registry",
+        opening_cents: 1_700_000, movement_cents: 16_534_055, closing_cents: 18_234_055,
+        entries: [], entries_total: 0, entries_truncated: false,
+      }],
+    }),
+    profit: moneyGroup({
+      value_cents: -123_456,
+      composition: [{
+        account_id: "aaaa0000-0000-4000-8000-000000000050", account_code: "5000",
+        name: "Office Rent", account_type: "expense",
+        opening_cents: 0, movement_cents: 623_456, closing_cents: 623_456,
+        entries: [{
+          entry_id: MONEY_ENTRY, posting_date: "2026-09-03", memo: "September rent",
+          amount_cents: 623_456,
+        }],
+        entries_total: 1, entries_truncated: false,
+      }],
+      composition_total: 1,
+      composition_truncated: false,
+    }),
+    income: moneyGroup({ value_cents: 500_000 }),
+    expense: moneyGroup({ value_cents: 623_456 }),
+    series: [
+      { month: "2026-04-01", income_cents: 100_000, expense_cents: 40_000, profit_cents: 60_000, partial: false, as_of: "2026-04-30" },
+      { month: "2026-05-01", income_cents: 120_000, expense_cents: 50_000, profit_cents: 70_000, partial: false, as_of: "2026-05-31" },
+      { month: "2026-06-01", income_cents: 140_000, expense_cents: 60_000, profit_cents: 80_000, partial: false, as_of: "2026-06-30" },
+      { month: "2026-07-01", income_cents: 160_000, expense_cents: 70_000, profit_cents: 90_000, partial: false, as_of: "2026-07-31" },
+      { month: "2026-08-01", income_cents: 180_000, expense_cents: 80_000, profit_cents: 100_000, partial: false, as_of: "2026-08-31" },
+      { month: "2026-09-01", income_cents: 500_000, expense_cents: 623_456, profit_cents: -123_456, partial: true, as_of: "2026-09-18" },
+    ],
+    unmarked_closing_entries: 0,
+    unmarked_closing_entries_series: 0,
+    series_coverage_reason: null,
+    excluded_by_design: ["receivable", "payable", "statement_balance"],
+    ...overrides,
+  };
+}
+
+/** Overlay a POPULATED money band on top of `seed()`, for THIS page only. */
+async function seedMoney(page: Page, pack: Record<string, unknown> = financialPack()): Promise<void> {
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => json(route, pack));
+  await page.route("**/e2e-supabase/rest/v1/rpc/propose_client_cash_accounts", (route) => json(route, {
+    computed_at: "2026-09-18T02:00:00.000Z", as_of: "2026-09-18", timezone: "Asia/Kuala_Lumpur",
+    unit: "minor_units", currency: "MYR",
+    definition_version: "clara.client-financial-pack/v1", published_version_id: null,
+    candidates: [{
+      account_id: "aaaa0000-0000-4000-8000-000000000010", account_code: "1010",
+      name: "Maybank Current", is_active: true, member_reason: "bank_registry",
+      balance_cents: 18_234_055, already_member: false,
+    }],
+    never_proposed: ["declared_cash", "declared_petty_cash"],
+    never_proposed_reason: "no structural marker exists for declared cash or petty cash; a human declares it (0121:4749)",
+  }));
+}
+
+test("p660.money.arrive — book cash and period profit land with their exact amounts, their currency and their as-of", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByRole("heading", { name: "Money", level: 2 })).toBeVisible();
+  // EXACT minor units, with the currency. A figure rendered at the wrong scale is the defect a
+  // "contains a number" assertion would never catch.
+  await expect(board.getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+  // A LOSS is printed as a loss. Nothing on this band clamps at zero.
+  await expect(board.getByTestId("client-money-profit-value")).toHaveText("-RM 1,234.56");
+  await expect(board.getByTestId("client-money-income-value")).toHaveText("RM 5,000.00");
+  await expect(board.getByTestId("client-money-expense-value")).toHaveText("RM 6,234.56");
+  // And the period is on the face, not only in a tooltip.
+  await expect(board.getByText("For 1 Sept 2026 to 18 Sept 2026")).toBeVisible();
+  // THE WORK BAND BESIDE IT IS UNTOUCHED — the money band has a period axis and that band does not.
+  await expect(board.getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+test("p660.money.period_switch — the selector writes ?period= into the URL, and Back restores the previous period", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  // BY ROLE, not by label alone: the drilldown table is named "Accounts behind this period…", so a
+  // bare label match is ambiguous — and a strict-mode failure here would be the locator being
+  // wrong rather than the page.
+  const selector = board.getByRole("combobox", { name: "Period" });
+  await expect(selector).toBeVisible();
+  await selector.click();
+  // The list is month-to-date plus thirteen whole months; picking a whole month is the change.
+  const option = page.getByRole("option").nth(1);
+  const label = (await option.textContent())?.trim() ?? "";
+  await option.click();
+
+  await expect(page).toHaveURL(/\?period=\d{4}-\d{2}$/);
+  await expect(selector).toContainText(label);
+  // FOCUS STAYS ON THE CONTROL the reader just used.
+  await expect(selector).toBeFocused();
+
+  // BACK RESTORES THE PREVIOUS PERIOD — which is the whole reason the address holds it (push, not
+  // replace).
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}$`));
+});
+
+test("p660.money.drilldown — a composition row opens the EXISTING journals address, and Back returns", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const link = workbench(page).getByRole("link", { name: /September rent/ });
+  await expect(link).toHaveAttribute(
+    "href", `/clients/${CLIENT_ACTIVE}/journals?tab=posted&entry=${MONEY_ENTRY}`);
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}/journals\\?tab=posted&entry=${MONEY_ENTRY}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_ACTIVE}$`));
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+});
+
+test("p660.money.partial — the unmarked-history face KEEPS the number and names the reason", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page, financialPack({
+    profit: moneyGroup({
+      value_cents: -123_456, coverage: "partial",
+      coverage_reason: "closing_transfer_unmarked_history",
+    }),
+    unmarked_closing_entries: 2,
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByTestId("client-money-profit-value")).toHaveText("-RM 1,234.56");
+  await expect(board.getByTestId("client-money-profit-partial"))
+    .toContainText("2 year-end closing entries in this period are not marked");
+  await expect(board.getByText("The figures are otherwise as posted.")).toBeVisible();
+});
+
+test("p660.money.unpublished — no published cash set shows the FACE and its entrance, and never RM 0.00", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page, financialPack({
+    cash: moneyGroup({
+      value_cents: null, status: "unknown", coverage: "unknown",
+      coverage_reason: "cash_set_unpublished", set: null, points: [], composition: [],
+    }),
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByText("Nobody has said which accounts count as cash")).toBeVisible();
+  await expect(board.getByText("This is not a figure of zero.")).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
+  // The entrance to the fix, and the dialog's own sentence about what it will never suggest.
+  await board.getByRole("button", { name: "Choose cash accounts" }).click();
+  await expect(page.getByRole("dialog")).toContainText("Petty cash and other cash on hand are never suggested here");
+  // CANCEL RESTORES NOTHING BECAUSE IT COMMITTED NOTHING — and the board behind it is unchanged.
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(board.getByText("Nobody has said which accounts count as cash")).toBeVisible();
+});
+
+test("p660.money.denied — a mid-session CLR04 clears the money while the Work band beside it is untouched", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => route.fulfill({
+    status: 403, contentType: "application/json",
+    body: JSON.stringify({ code: "CLR04", message: "insufficient role" }),
+  }));
+  await page.reload();
+  await settled(page);
+
+  const board = workbench(page);
+  // THE BAND'S OWN BANNER. The same sentence also stands in for each cleared figure, which is
+  // the point — three renderings of one permission, not three different states — so this names
+  // the banner rather than counting them.
+  await expect(board.getByRole("status").getByText(/Your role does not include/)).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
+  // A DENIED CALLER IS NOT OFFERED THE ADMIN-FLOORED AUTHORING DOOR.
+  await expect(board.getByRole("button", { name: "Choose cash accounts" })).toHaveCount(0);
+  // AND THE WORK BAND IS UNTOUCHED — every section reads for itself.
+  await expect(board.getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+test("p660.money.first_failure — a first read that fails shows NO number at all", async ({ page }) => {
+  await seed(page);
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ message: "upstream" }),
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByText("These figures could not be read")).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveCount(0);
+  await expect(board.getByTestId("client-money-profit-value")).toHaveCount(0);
+  // The Work band is still there, with its own numbers.
+  await expect(board.getByRole("link", { name: "3 Works are queued or running" })).toBeVisible();
+});
+
+test("p660.money.delayed — a minute with no successful read says the connection is delayed, and KEEPS the dated numbers", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
+  await page.clock.install();
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack");
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack", (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ message: "upstream" }),
+  }));
+
+  await page.clock.fastForward("01:05");
+  await expect(workbench(page).getByText("This connection is delayed")).toBeVisible();
+  // THE NUMBERS STAY, DATED. They were true when they were read.
+  await expect(workbench(page).getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+});
+
+test("p660.money.chart_fallback — the readable table is in the DOM beside the chart, every time", async ({ page }) => {
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  // Both disclosure tables, named, with their own rows — not a fallback that waits for a failure.
+  const cashTable = board.getByRole("table", { name: "Book cash at each of the last six month ends" });
+  await expect(cashTable).toBeVisible();
+  await expect(cashTable.getByText("RM 17,000.00")).toBeVisible();
+  // A PRE-COVERAGE POINT IS A GAP, NOT A ZERO.
+  await expect(cashTable.getByText("Before the books begin")).toBeVisible();
+
+  const seriesTable = board.getByRole("table", { name: "Income and expense by calendar month" });
+  await expect(seriesTable).toBeVisible();
+  await expect(seriesTable.getByText("September 2026")).toBeVisible();
+  // The partial month is labelled with its exact as-of, in the table and above it.
+  await expect(board.getByTestId("client-money-partial-month"))
+    .toContainText("September 2026 is a part month");
+});
+
+test("p660.money.narrow — 320px, 200% zoom and reduced motion: the table stands alone with no horizontal page scroll", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await page.setViewportSize({ width: 320, height: 720 });
+  await settled(page);
+
+  const board = workbench(page);
+  // At 320px the chart is out and the table is the whole disclosure — which is why it was never
+  // allowed to be a fallback.
+  await expect(board.getByRole("table", { name: "Income and expense by calendar month" })).toBeVisible();
+  await expect(board.getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  // 200% zoom is the same 640-CSS-pixel viewport at twice the scale; assert the same two
+  // properties there rather than assuming they carry.
+  await page.setViewportSize({ width: 640, height: 512 });
+  await page.evaluate(() => { document.documentElement.style.zoom = "200%"; });
+  await settled(page);
+  await expect(board.getByTestId("client-money-cash-value")).toHaveText("RM 182,340.55");
+  const zoomedOverflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(zoomedOverflow).toBeLessThanOrEqual(1);
+  await page.evaluate(() => { document.documentElement.style.zoom = ""; });
+});
+
+test("p660.money.axe — WCAG 2.1 AA over the money band, populated and denied", async ({ page }) => {
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 2 }));
+  await seed(page);
+  await seedMoney(page);
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+  const populated = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(populated.violations).toEqual([]);
+
+  // THE UNPUBLISHED FACE IS A DIFFERENT TREE — a banner, a button and a dialog entrance — so it is
+  // scanned on its own rather than assumed to inherit the populated one's result.
+  await page.unroute("**/e2e-supabase/rest/v1/rpc/get_client_financial_pack");
+  await seedMoney(page, financialPack({
+    cash: moneyGroup({
+      value_cents: null, status: "unknown", coverage: "unknown",
+      coverage_reason: "cash_set_unpublished", set: null, points: [], composition: [],
+    }),
+  }));
+  await page.reload();
+  await settled(page);
+  const unpublished = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(unpublished.violations).toEqual([]);
+});
+
+test("p660.money.disclosures — the ACCOUNT cap and the SIX-MONTH history are said on the face, not only on the wire", async ({ page }) => {
+  await seed(page);
+  // A chart of accounts bigger than the door's 50-row cap, and an unmarked pre-0120 close in a
+  // month the chart DRAWS but the selected period does not contain. Both are facts the reader can
+  // only learn from the face: the table would otherwise sum to less than the headline above it,
+  // and a bar would be drawn as clean while carrying a roll that should have been excluded.
+  await seedMoney(page, financialPack({
+    profit: moneyGroup({
+      value_cents: -123_456,
+      composition: [{
+        account_id: "aaaa0000-0000-4000-8000-000000000050", account_code: "5000",
+        name: "Office Rent", account_type: "expense",
+        opening_cents: 0, movement_cents: 623_456, closing_cents: 623_456,
+        entries: [], entries_total: 0, entries_truncated: false,
+      }],
+      composition_total: 61,
+      composition_truncated: true,
+    }),
+    unmarked_closing_entries: 0,
+    unmarked_closing_entries_series: 2,
+    series_coverage_reason: "closing_transfer_unmarked_history",
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByTestId("client-money-accounts-truncated"))
+    .toHaveText("Showing 1 of 61 accounts, largest first.");
+  await expect(board.getByTestId("client-money-series-unmarked"))
+    .toContainText("2 year-end closing entries in these six months");
+  // The SELECTED period is clean, so the profit tile says nothing — the two disclosures are about
+  // different populations and the face keeps them apart.
+  await expect(board.getByTestId("client-money-profit-partial")).toHaveCount(0);
 });

@@ -94,7 +94,16 @@ test("SettingsPage's own composition has ordered headings and named links for ev
     // type checker cannot see.
     assert.doesNotMatch(bodyText, /Firm registrations/, "the settings hub no longer carries the registration queue");
     assert.match(bodyText, /Legacy/, "the vendor-bindings card must carry its Legacy mark");
-    assert.match(bodyText, /Usage summaries, plan details, and billing management are not available yet\./, "the hub must explain which billing capabilities are unavailable");
+    // #635 REPLACED THE ONE BLANKET SENTENCE WITH THREE HONEST ONES, IN THIS COMMIT AND WITH THE
+    // REASON HERE. The old copy ("Usage summaries, plan details, and billing management are not
+    // available yet.") was true when nothing read the commercial doors; migration 0233 and
+    // /settings/firm's five cards make two of its three clauses false. What survives is the
+    // clause that is still true and now says WHY: no subscription invoice is collected anywhere
+    // in this estate, and there is no billing-management control on any page.
+    assert.match(bodyText, /Model usage, the firm's billing plan and its payment record are on Firm settings\./, "the hub must point at the page that now carries them");
+    assert.match(bodyText, /No subscription invoice is collected for this firm anywhere in Clara\./, "…and must say which capability genuinely does not exist");
+    assert.match(bodyText, /There is no billing-management control here or on any other page/, "…and must not imply one is coming");
+    assert.doesNotMatch(bodyText, /Usage summaries, plan details, and billing management are not available yet/, "the superseded blanket claim must be gone, not merely joined");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
   } finally {

@@ -20,6 +20,11 @@ import { FiledDocumentList } from "./filed-document-list";
 import { OpenCandidateList } from "./open-candidate-list";
 import { UploadPanel } from "./upload-panel";
 import { IntakeReceipts } from "./intake-receipts";
+// #636 — the DURABLE batch card. It is fed by `clara.get_intake_batch`, never by the queue's
+// memory (`intake-receipts.tsx:5-10`'s rule), and it mounts ABOVE the receipts so the parent
+// summary reads before the per-file record it summarises.
+import { IntakeBatchCard } from "./intake-batch-card";
+import { useIntakeBatch } from "@/lib/documents/use-intake-batch";
 import { DocumentDetail, DOCUMENT_HEADING_ID } from "./document-detail";
 import { DoorFeedback } from "./door-feedback";
 import { CodingLanePanel } from "./coding-lane-panel";
@@ -104,6 +109,10 @@ export function DocumentsWorkbench({ clientId, settlePoll: settlePollOptions }: 
    *  well-formed uuid whose read came back empty. Held so the aside can say "not available in this
    *  client" AFTER the parameter has been cleared: clearing it alone would drop the person onto
    *  "Select a document…", which is not an answer to the address they followed. */
+  /** #636 — `?batch=<uuid>` on this same leaf. No new route and no navigation leaf: a batch is a
+   *  VIEW of the sources this tab already shows, exactly as `?document=` is. */
+  const batch = useIntakeBatch({ settlePoll: settlePollOptions });
+
   const [missing, setMissing] = useState<string | null>(null);
 
   /** Tells the two close paths apart (Activity's own idiom, activity-feed.tsx:79-100): a row click
@@ -269,6 +278,23 @@ export function DocumentsWorkbench({ clientId, settlePoll: settlePollOptions }: 
             <SectionHeader level={2}>{t("uploadHeading")}</SectionHeader>
             <UploadPanel clientId={clientId} onFiled={refreshFiled} capabilityIndex={capabilities.index} />
           </section>
+
+          {/* #636 — THE BATCH CARD, when the URL names one. Mounted above the receipts because a
+              parent summary that reads after its own children is a table of contents at the back
+              of the book. */}
+          {batch.state !== null ? (
+            <section className="flex flex-col gap-2">
+              <IntakeBatchCard
+                state={batch.state}
+                clientId={clientId}
+                facet={batch.facet}
+                onFacetChange={batch.setFacet}
+                onRefresh={batch.refresh}
+                pollExhausted={batch.pollExhausted}
+                onCancelled={refreshFiled}
+              />
+            </section>
+          ) : null}
 
           {/* #633 AC1(c) — THE RECEIPTS CELL. A FIFTH independently-hydrated cell,
               re-derived on mount (so a reload recovers every receipt the queue's

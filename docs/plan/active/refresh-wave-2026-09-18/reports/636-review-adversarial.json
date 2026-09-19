@@ -1,0 +1,90 @@
+{
+  "ticket": 636,
+  "lens": "adversarial",
+  "lens_model": "claude-opus-5 (Codex gpt-5.6-sol refused: \"ERROR: You've hit your usage limit ... try again at 5:41 PM\" — DECISIONS §7 predicted the 2026-09-19 17:41 reset; the cross-model lane was attempted FIRST, exit 0 with no review produced, transcript at C:\\Users\\zhant\\AppData\\Local\\Temp\\claude\\C--Users-zhant-Desktop-clara-rebuild\\2d0e3faa-4367-4726-8208-67089ecdd96a\\tasks\\bv4umzw31.output)",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\636-review-adversarial.json",
+  "verdict": "fix_then_accept",
+  "findings": [
+    {
+      "id": "ADV-636-01",
+      "severity": "blocker",
+      "category": "correctness/product",
+      "where": "packages/db/migrations/0229_intake_batches.sql:864-870 (cancel_intake_batch's v_n=0 arm), :564-577 (_intake_batch_live_children), :482-515 (_tf_intake_batch_member_work_stamp, no parent-state guard); apps/web/components/documents/intake-batch-card.tsx:304-314 and :402",
+      "what": "Cancelling a batch whose files have not yet been admitted to Work reports CANCELLED and stops nothing: the parent flips terminal in the same call, the sweep never sees it again, and every member still in ingest goes on to be admitted, stamped onto the cancelled batch, and posted.",
+      "evidence": "MEASURED on clara_636 with a throwaway red cell (written under packages/db/tests, run, deleted; tree left clean). Two custody members, no Work yet -> cancel_intake_batch returned {\"state\":\"cancelled\",\"children\":[]} and stamped cancelled_at=2026-09-19T05:29:28.151Z. A Work admitted AFTERWARDS for one of those documents was stamped onto the member (work_id=3cda7b6d-1f01-4419-8930-aea240307ca7, equal to the admitted id); get_intake_batch then answered {\"state\":\"cancelled\",\"admitted\":1,\"settled\":0}; clara._intake_batch_live_children(parent) returned that live child; sweep_intake_batch_cancellations(50) did NOT list the parent (its state is 'cancelled', not 'cancelling') and did not settle it. The card offers 'Stop this batch' whenever !terminal (intake-batch-card.tsx:304) and passes liveChildren = admitted-settled = 0 (:402), so the dialog reads '0 operations are still running. Each will be asked to stop, one at a time.' (messages/en.json IntakeBatch.cancel.body) and then the control disappears, leaving no way back. AC4 is 'cancel remaining children': on a 100-file batch pressed during OCR, zero are cancelled and all 100 post. NOTE for the orchestrator: the hole is inherited from brief-636.md §3 item 9's live-children definition and item 10's 'if none is live flips straight to cancelled', so this may be a ruling rather than implementer error — but the shipped behaviour is wrong either way and no cell covers it.",
+      "fix": "Either (a) treat a member whose intake is non-terminal and whose work_id is NULL as LIVE in _intake_batch_live_children, so the parent stays 'cancelling' and the sweep keeps fanning out as children appear; or (b) guard _tf_intake_batch_member_work_stamp against a parent in ('cancelling','cancelled') and have cancel_intake_batch also stop the un-admitted members' intakes. Either way the terminal flip must mean 'nothing more can happen', and add p636.batch.cancel_before_admission as a red cell."
+    },
+    {
+      "id": "ADV-636-02",
+      "severity": "major",
+      "category": "correctness/surface-honesty",
+      "where": "packages/db/migrations/0229_intake_batches.sql:1167-1173 (failed facet count) and :1178-1190 (failed rows)",
+      "what": "The `failed` facet counts any member whose document has ANY document_processing_tasks row carrying an error_code, with no check that it is the current attempt and no exclusion of a member whose Work already posted — so children that settled successfully are reported as Failed at the same time.",
+      "evidence": "MEASURED on clara_636 against the worker's own World-leg data. Batch 0ac00d27-80ee-40a0-ac5c-c4b5fc24bb9b: members=100, admitted=95, settled=95, failed=35, settled_and_failed=31 — 31 of the 35 'failed' members hold a committed clara.operation_receipts row. Estate-wide, 84 members across 5 batches sit in both populations. clara.document_processing_tasks' CHECK forces error_code non-NULL only on status='failed' and a retry is a NEW row (0 documents on this rig carry both a failed and a done task), so a stale failed attempt is permanent. The card renders it as facet 'Failed' / row 'Extraction failed' (messages/en.json IntakeBatch.facet.failed, IntakeBatch.rowState.extractionFailed). This is the exact run the final report cites as AC2 evidence ('{admitted 95, settled 95, waiting 4, unassigned 4, failed 35}'), so AC2's headline — '95 finish while 5 wait/fail' — is contradicted by the door's own answer.",
+      "fix": "Scope the task-error arm to the document's CURRENT attempt (highest version_n / latest updated_at per lane) and exclude any member whose Work carries a committed receipt; or move the stale-attempt signal to its own key (e.g. retried_after_error) so it never reads as 'this file failed'. Add a cell asserting a member with an earlier failed attempt AND a committed receipt is NOT in `failed`."
+    },
+    {
+      "id": "ADV-636-03",
+      "severity": "major",
+      "category": "recovery/liveness",
+      "where": "packages/runtime/lib/intake-batches.mjs:338-351 (resumeCancel) and :281-303 (fanOutCancel); packages/db/migrations/0229_intake_batches.sql:905-940 (the sweep re-emits with no attempt cap); packages/runtime/lib/reconciler-batches.mjs:75-92",
+      "what": "When the stored cancel_requested_by loses authority mid-flight, the resumed fan-out refuses CLR04 on every child forever: the parent never leaves `cancelling`, the belt reports healthy, and the children keep running with nobody able to stop them.",
+      "evidence": "MEASURED on clara_636 with a throwaway red cell. BOB cancels a batch holding one claimed child -> {\"state\":\"cancelling\",\"by\":true,\"n\":1}. BOB's firm_memberships row is then set to status='removed'. sweep_intake_batch_cancellations(50) still hands back {cancel_requested_by: BOB, cancel_op_key: ...} with the live child, and re-issuing cancel_accounting_work with that STORED actor raised {\"code\":\"CLR04\",\"detail\":\"{\\\"reason\\\":\\\"actor_not_active\\\"}\",\"message\":\"the author is not an active member of this firm\"}; the parent's state after the failed resume was still 'cancelling'. resumeCancel cannot substitute an actor, because _work_door_ctx hashes {work, author} (0184:262-264) so any other identity is CLR10 op_key_conflict. reconciler-batches.mjs:80 counts the refusal but :88 still returns batchCancelOk:true, so the belt is green while the parent is permanently stuck, and the sweep has no attempt counter so it re-emits the same parent every cycle. NO cell covers this: p636.batch.authority_revoked_midbatch (packages/db/tests/intake-batch.test.mjs:767-795) revokes before an ATTACH, and the two runtime cells (intake-batch-unit.test.mjs:105, :257) drive a stubbed door. The final report nevertheless closes C51.4 ('authority/ownership through the RECLAIM commit, incl. revoke') as done on that attach cell.",
+      "fix": "Give the sweep an attempt/age bound and a terminal-but-named outcome (a `cancel_blocked` parent state, or a reason carrying the remedy 'the person who stopped this batch is no longer a member — a bookkeeper must re-issue'), surface it on the card, and add p636.batch.cancel_resume_after_revocation. Re-word the C51.4 row so it names the attach door rather than the reclaim path."
+    },
+    {
+      "id": "ADV-636-04",
+      "severity": "minor",
+      "category": "vacuous-test",
+      "where": "packages/db/tests/intake-batch.test.mjs:652",
+      "what": "A tautological assertion inside p636.batch.cancel_while_settling: `assert.equal(out.already_stopping ?? out.status, out.already_stopping ?? out.status)` compares an expression with itself and can never fail.",
+      "evidence": "Read at packages/db/tests/intake-batch.test.mjs:652. It sits under the comment claiming the fan-out converges on the stopping arm; the only real assertion of that claim is the `assert.ok([...].includes(out.status))` on the next line, so the already_stopping arm itself (0199:295-304) is asserted nowhere in the battery. Deleting line 652 changes no outcome, which is the definition of a vacuous line.",
+      "fix": "Assert the arm by name — measure what 0199:295-304 actually returns and assert that key — so the cell reds if the converge-a-stopping-run arm regresses."
+    },
+    {
+      "id": "ADV-636-05",
+      "severity": "minor",
+      "category": "weak-evidence",
+      "where": "packages/runtime/tests/intake-batch-e2e.mjs:369 and :373",
+      "what": "AC2's World-leg evidence for the failing/waiting half is two lower bounds (`waiting + failed >= 5`, `failed >= 1`) that pass for any amount of over-counting — which is why the run that produced 31 wrongly-failed children (ADV-636-02) was reported green.",
+      "evidence": "packages/runtime/tests/intake-batch-e2e.mjs:369 `assert.ok(pack.facets.waiting.count + pack.facets.failed.count >= 5, ...)` and :373 `assert.ok(pack.facets.failed.count >= 1, ...)`. The admitted/settled arms at :361 and :363 are exact equalities; the failed/waiting arms are not. Measured on the same rig the leg's own pack was {admitted 95, settled 95, failed 35} with 31 members in both settled and failed — the leg cannot tell 35 from 4.",
+      "fix": "Bound the failed facet from above, or assert the disjointness the product promises: no member may appear in both `settled` and `failed`. That one equality would have caught ADV-636-02 in the leg the report cites."
+    },
+    {
+      "id": "ADV-636-06",
+      "severity": "note",
+      "category": "documentation-drift",
+      "where": "apps/web/lib/documents/batch-url-state.ts:61-65",
+      "what": "The comment says the filter is 'FIVE values ... the door's own five facets plus \"all\"', but BATCH_FACETS holds four facets plus all — `admitted` is omitted, so the door's largest facet has no filter even though the i18n bundle carries its label.",
+      "evidence": "batch-url-state.ts:65 `export const BATCH_FACETS = [\"all\", \"waiting\", \"failed\", \"unassigned\", \"settled\"]`; the door returns five facets (0229:1225-1259) including `admitted`; messages/en.json IntakeBatch.facet does carry `\"admitted\": \"Admitted\"`, which nothing renders because intake-batch-card.tsx:297-301 maps over BATCH_FACETS.",
+      "fix": "Either add `admitted` to BATCH_FACETS or correct the comment and drop the orphan message key, so the file's own claim and its constant agree."
+    },
+    {
+      "id": "ADV-636-07",
+      "severity": "note",
+      "category": "durability",
+      "where": "packages/db/migrations/0229_intake_batches.sql:370-374",
+      "what": "`recorded_at default now()` is the TRANSACTION timestamp, so two events of the same kind for one member inside one transaction collapse silently through the writers' `on conflict do nothing`, and the append-only ledger then disagrees with the member row.",
+      "evidence": "0229:370-374 declares `recorded_at timestamptz not null default now()` plus `unique (member_id, event, recorded_at)`, and the comment at :369-371 presents the collapse as the intended same-transaction replay guard. Every writer pairs it with `on conflict (member_id, event, recorded_at) do nothing` (:449, :465, :508, :781). A member taken awaiting_fact -> cleared -> awaiting_capacity inside one transaction records one `dependency_set` (the first), so the history says awaiting_fact while intake_batch_members.dependency says awaiting_capacity. Not reachable through today's runtime (each door call is its own transaction in lib/intake-batches.mjs), which is why this is a note.",
+      "fix": "Key the ledger on the op_key or a sequence rather than the transaction clock, or say in the comment that the ledger is transaction-granular by design so a future in-transaction caller is warned."
+    },
+    {
+      "id": "ADV-636-08",
+      "severity": "note",
+      "category": "concurrency",
+      "where": "packages/db/migrations/0229_intake_batches.sql:914-918",
+      "what": "The sweep selects its `cancelling` parents with no `for update skip locked`, so two concurrent sweeps take the same worklist and fan out twice.",
+      "evidence": "0229:914-918 is a plain `select ... where ib.state='cancelling' order by ib.cancel_requested_at, ib.id limit p_limit`, unlike the row lock cancel_intake_batch takes at :813. Measured harm today is nil: the child key is derived (`<cancel_op_key>:<work_id>`, intake-batches.mjs:279) so the second caller either replays through _reserve_op or receives CLR13 operation_in_flight, which fanOutCancel classifies as `deferred` (intake-batches.mjs:294-296); and the belt is leader-elected. Stated so the property is on the record rather than emergent.",
+      "fix": "Add `for update skip locked` to the worklist select, or state in the comment that the fan-out's derived-key idempotency is what makes the missing lock safe."
+    },
+    {
+      "id": "ADV-636-09",
+      "severity": "note",
+      "category": "correctness/read",
+      "where": "packages/db/migrations/0229_intake_batches.sql:1076-1088",
+      "what": "The `settled` preview applies `limit v_preview` inside the `distinct on (m.work_id)` subquery ordered by `m.work_id, o.created_at desc`, so the preview is the v_preview lowest work_id UUIDs, not the most recent receipts the outer `order by x.committed_at desc` implies.",
+      "evidence": "0229:1075-1088. The other four facets limit an already-correctly-ordered subquery (`order by m.created_at desc, m.id desc limit v_preview`, e.g. :1124-1125, :1188-1189); only `settled` limits on the DISTINCT ON key. p636.batch.preview_bound (packages/db/tests/intake-batch.test.mjs:516) asserts the preview's LENGTH and coverage word, never which rows it contains, so nothing detects it.",
+      "fix": "Wrap the distinct-on result in an outer select ordered by committed_at desc before limiting, and have preview_bound assert the identity of the first row."
+    }
+  ]
+}

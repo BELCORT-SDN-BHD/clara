@@ -226,6 +226,32 @@ function TraceRuns({ runs, open, onToggle }: { runs: WorkTraceRun[]; open: boole
   );
 }
 
+/** The observed-revision object of ONE step, key by key. `clara.work_execution_traces`'
+ *  `observed_revisions` is a CLOSED six-key vocabulary (`knowledge_version`, `books_version`,
+ *  `chart_revision`, `basis_digest`, `source_sha256`, `question_version`) whose values 0210 bounds
+ *  in shape at the door, so every value here is a digest, a number or a short token — there is
+ *  nothing for this renderer to filter and nothing it could leak by rendering too much.
+ *
+ *  A KEY OUTSIDE THE SIX RENDERS VERBATIM rather than crashing on a missing message — the same
+ *  rule `phaseLabel` and `outcomeLabel` follow on this page, and for the same reason: the
+ *  vocabulary can widen before this file does. */
+export function ObservedRevisions({ observed }: { observed: Record<string, unknown> | null | undefined }) {
+  const t = useTranslations("WorkKnowledge");
+  const entries = observed && typeof observed === "object" && !Array.isArray(observed)
+    ? Object.entries(observed).filter(([, v]) => v !== null && v !== undefined)
+    : [];
+  if (entries.length === 0) return null;
+  return (
+    <span className="block text-muted-foreground" data-testid="work-diagnostics-observed">
+      <span className="sr-only">{t("observedHeading")}: </span>
+      {entries
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key} ${String(value)}`)
+        .join(" · ")}
+    </span>
+  );
+}
+
 function StepTable({ rows }: { rows: ReadonlyArray<WorkTraceRow> }) {
   const t = useTranslations("WorkDiagnostics");
   return (
@@ -264,6 +290,15 @@ function StepTable({ rows }: { rows: ReadonlyArray<WorkTraceRow> }) {
                 {row.refusal && typeof row.refusal.reason === "string" ? (
                   <span className="block text-muted-foreground">{String(row.refusal.reason)}</span>
                 ) : null}
+                {/* #658 — THE OBSERVED REVISIONS, rendered for the first time. The field has been
+                    TYPED in lib/work/diagnostics.ts since #631 and rendered NOWHERE, so a run that
+                    recorded which knowledge version it reasoned under had no surface that said so
+                    — the human-visible half of #885. It is rendered HERE, inside the rows this
+                    component ALREADY loaded, rather than in a second component: a second
+                    get_work_execution_trace read on one page would double the request and split
+                    the honesty story across two places. Values only — a closed six-key vocabulary
+                    bounded in shape at the door (0210), so there is nothing here to redact. */}
+                <ObservedRevisions observed={row.observed_revisions} />
               </td>
             </tr>
           ))}

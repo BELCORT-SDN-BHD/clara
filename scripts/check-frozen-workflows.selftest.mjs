@@ -425,27 +425,67 @@ const W = "packages/runtime/workflows/";
 const ATTRIBUTION = [
   // #815 acceptance: knowledge.mjs under the 4 reaching chatTurn_v19 entry files — and, since the
   // wave 2026-09-15 cut, chatTurn_v20's four, claraWork_v4's two (its knowledge-context step) and
-  // clientOnboarding_v5's two (interview.v4.known.ts's pre-read of the same pack). 12.
+  // clientOnboarding_v5's two (interview.v4.known.ts's pre-read of the same pack). Since the wave
+  // 2026-09-18 cut, chatTurn_v21's four and claraWork_v5's two as well. 18.
+  //
+  // NEITHER NEW PAIR REACHES IT DIRECTLY, AND THAT IS WORTH SAYING BECAUSE IT LOOKS LIKE A
+  // CONTRADICTION. chatTurn_v21 and claraWork_v5 both REPOINTED their knowledge read away from
+  // `clara.get_knowledge_pack` onto `clara.retrieve_knowledge`, through the new sibling
+  // `lib/knowledge-retrieval.mjs` — which does not import `knowledge.mjs` at all. They still reach
+  // it TRANSITIVELY, because v21's prompt re-exports v19's knowledge-context helpers and v5's impl
+  // imports v4's, and a closure is reachability rather than intent. The repoint is about which
+  // DOOR the running code calls; the old module stays in the graph as long as a predecessor's
+  // exports are carried forward.
   ["packages/runtime/lib/knowledge.mjs", [
     `${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`,
     `${W}chatTurn.v20.impl.ts`, `${W}chatTurn.v20.prompt.ts`, `${W}chatTurn.v20.tools.ts`, `${W}chatTurn.v20.ts`,
+    `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.prompt.ts`, `${W}chatTurn.v21.tools.ts`, `${W}chatTurn.v21.ts`,
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
+    `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}clientOnboarding.v5.ts`, `${W}interview.v4.known.ts`,
   ]],
   // ... periodic-adjustment-basis.ts under the 5 reaching chatTurn_v19 entry files plus
-  // chatTurn_v20's four. v20 carries v19's tool map forward, so it reaches this module too; it has
-  // no `parts.ts` of its own (v19 stays the declarer), which is why this roster is 9 and not 10.
+  // chatTurn_v20's four and chatTurn_v21's four. Each successor carries its predecessor's tool map
+  // forward, so each reaches this module too; neither v20 nor v21 has a `parts.ts` of its own (v19
+  // stays the declarer), which is why this roster is 13 and not 15.
   ["packages/runtime/lib/periodic-adjustment-basis.ts", [
     `${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.parts.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`,
     `${W}chatTurn.v20.impl.ts`, `${W}chatTurn.v20.prompt.ts`, `${W}chatTurn.v20.tools.ts`, `${W}chatTurn.v20.ts`,
+    `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.prompt.ts`, `${W}chatTurn.v21.tools.ts`, `${W}chatTurn.v21.ts`,
   ]],
   // ... capability-registry.mjs (reached ONLY transitively, through work-trace.mjs) and
-  // work-trace.mjs (reached ONLY through a DYNAMIC import) under claraWork_v3's 2 entry files and
-  // claraWork_v4's 2. `lib/capability-registry.mjs:30` still says it is reached from the FROZEN
-  // claraWork_v3 body; v4 reaches it too, and that file is deploy-locked, so the sentence cannot be
-  // corrected in place — this roster is where the true attribution is recorded.
-  ["packages/runtime/lib/capability-registry.mjs", [`${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`, `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`]],
-  ["packages/runtime/lib/work-trace.mjs", [`${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`, `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`]],
+  // work-trace.mjs (reached ONLY through a DYNAMIC import) under claraWork_v3's 2 entry files,
+  // claraWork_v4's 2 and — since the wave 2026-09-18 cut — claraWork_v5's 2.
+  // `lib/capability-registry.mjs:30` still says it is reached from the FROZEN claraWork_v3 body;
+  // v4 and v5 reach it too, and that file is deploy-locked, so the sentence cannot be corrected in
+  // place — this roster is where the true attribution is recorded.
+  //
+  // v5 REACHES capability-registry.mjs BY TWO PATHS NOW, not one. The transitive one through
+  // work-trace.mjs is v3's and is unchanged; the second is `lib/capability-registry-v2.mjs`, which
+  // v5's impl imports DIRECTLY and which carries v1's five entries by reference. That is the
+  // sibling pattern #658 chose over editing a hash-locked module, and the attribution shows it
+  // working: v1 is still reached, still unedited, and now reached on purpose.
+  ["packages/runtime/lib/capability-registry.mjs", [
+    `${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`,
+    `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
+    `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+  ]],
+  ["packages/runtime/lib/work-trace.mjs", [
+    `${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`,
+    `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
+    `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+  ]],
+  // ... and the three modules this cut introduced, recorded here at their birth so the NEXT
+  // successor's roster growth is measured against a written baseline rather than against nothing.
+  // `work-trace-bounds.mjs` is #847's writer-side mirror, `capability-registry-v2.mjs` is #658's
+  // registry sibling, and `knowledge-retrieval.mjs` is the bounded read both lanes now use — which
+  // is why it alone is reached by BOTH classes.
+  ["packages/runtime/lib/work-trace-bounds.mjs", [`${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`]],
+  ["packages/runtime/lib/capability-registry-v2.mjs", [`${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`]],
+  ["packages/runtime/lib/knowledge-retrieval.mjs", [
+    `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.ts`,
+    `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+  ]],
 ];
 
 for (const [rel, expected] of ATTRIBUTION) {

@@ -16,7 +16,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 process.env.RELAY_TEST_MODE ??= "1";
@@ -185,10 +186,23 @@ test("f-a6.pr2.parts.not-acting-intent: a freeform read is NOT coding intent (C-
 // =============================================================================================
 
 const BUNDLE = fileURLToPath(new URL("../.output/server/index.mjs", import.meta.url));
+/** The rest of what the build emits for this app — see the call-site census below. */
+const CHUNKS = fileURLToPath(new URL("../.output/server/_chunks", import.meta.url));
 const bundleBuilt = await stat(BUNDLE).then(() => true).catch(() => false);
 
 test("f-a6.pr2.bundle.s1-call-sites: no clara._freeform_* CALL SITE is in the bundle; the names survive only in a comment", { skip: bundleBuilt ? false : "no .output/ — run pnpm --filter @clara/runtime build" }, async () => {
-  const src = await readFile(BUNDLE, "utf8");
+  // THE BUILT OUTPUT, NOT ONE FILE OF IT. nitro decides for itself which modules are inlined into
+  // `index.mjs` and which are split into `_chunks/`, and that decision moves with the module graph
+  // — the wave 2026-09-18 fix round watched `lib/freeform-read.mjs` move into `_chunks/pools.mjs`
+  // when an unrelated `lib/` module gained a second importer. A census that reads one emitted file
+  // is a census that a bundler's chunking can silently switch off, so this reads every file the
+  // build emits for this app. The positive control below is what caught it: the verb the wrapper
+  // DOES call went missing from the grep while the code was unchanged.
+  const src = (await Promise.all(
+    [BUNDLE, ...(await readdir(CHUNKS).catch(() => [])).map((f) => join(CHUNKS, f))]
+      .filter((f) => f.endsWith(".mjs"))
+      .map((f) => readFile(f, "utf8")),
+  )).join("\n");
   // The behaviour that must be present.
   assert.ok(src.includes("read_books_freeform"), "the tool name reaches the bundle, or the model could never call it");
   assert.ok(src.includes("chatTurn_v15"), "the workflow export reaches the bundle");

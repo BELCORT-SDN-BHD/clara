@@ -240,6 +240,12 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   // and a Go row for the form itself would put a write affordance in a list of read destinations
   // at every rank.
   { pattern: "/clients/[clientId]/accounting/claims/new", builder: "staffExpenseClaimHref" },
+  // #655 — the trade-invoice form, the FOURTH member of the `accounting/<lane>/new` family and
+  // here for the same reason the three above are: it is the Accounting hub's second primary ACT,
+  // and a ⌘K Go row for it would put a write affordance in a list of read destinations, offered
+  // at every rank. What a reader looks for instead is already a Go row — the AR/AP registers and
+  // /journals, where the invoices a client has recorded are READ.
+  { pattern: "/clients/[clientId]/accounting/invoices/new", builder: "tradeInvoiceHref" },
   { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
   { pattern: "/clients/[clientId]/knowledge/[recordId]", builder: "knowledgeRecordHref" },
   // #647 — ONE counterparty's identity. Reached from the Identity section on the client's

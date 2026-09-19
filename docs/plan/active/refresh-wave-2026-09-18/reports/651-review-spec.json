@@ -1,0 +1,27 @@
+{
+  "ticket": 651,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/651-review-spec.json",
+  "findings": [
+    {
+      "id": "SPEC-651-N1",
+      "severity": "note",
+      "category": "measurement-drift",
+      "where": "packages/db/migrations/0227_depreciation_history.sql:323 vs reports/651-final.md \"0227 backfill timezone\" paragraph",
+      "what": "The migration's own pre-authoring measurement records 157 signed fa_depreciation_authorities rows (0 divergent between the literal UTC date_trunc and the ratified MYT composition); the final report's re-measurement on the same rig later found 285 signed rows (still 0 divergent). Re-querying myself independently during this review found 413 (215 'divergent' under a naive blanket comparison that does not exclude post-migration, fixture-inserted rows with a faked signed_at).",
+      "evidence": "Live query on clara_651 during this review: `select count(*) from clara.fa_depreciation_authorities where signed_at is not null` = 413 (run after this review had already executed the 17-cell p651 battery, the fixed-asset-acquisition battery, the x41 family and other suites, each of which mints new authority rows via labelled fixture DML). The migration text (line ~323) states 157 at authoring time; 651-final.md states 285 at report time.",
+      "fix": "No code change needed. This is expected behaviour of a shared, non-reset rig accumulating fixture rows across every test run (including this review's own runs), not a defect in the backfill formula, which I verified executes exactly the DECISIONS §6.1-ratified `clara._fa_month_start((signed_at at time zone 'Asia/Kuala_Lumpur')::date)` expression (0227_depreciation_history.sql:334-336). Both the migration header and the final report already caveat that only the hosted count (read at release time) is authoritative; future reviewers should not treat a rig-measured row count as reproducible across sessions on a persistent rig."
+    },
+    {
+      "id": "SPEC-651-N2",
+      "severity": "note",
+      "category": "corroboration",
+      "where": "packages/db/tests/x41-round35-tie.test.mjs:243 (cell x41.s4)",
+      "what": "Independently re-running the whole x41 family (20 files, one more than the report's stated 19 because my glob also picked up x41b0-surface.test.mjs and x41b2-surface.test.mjs) reproduced exactly one failure, x41.s4, with the identical signature the report names as a pre-existing, non-#651 defect (Follow-up 1): six x41_b3_* clients each carrying one clara.fixed_assets row of 77,000 cents on account 200-D41 with cost_diff=77000/accum_diff=0, attributed to x41.b3's fixture leaving a retroactively-born register row after `reverse_entry`'s reversed_by UPDATE re-fires the acquisition belt.",
+      "evidence": "Measured run: `node --test --test-concurrency=1 $(ls tests/x41*.test.mjs)` on clara_651 -> 105 tests, 103 pass, 1 fail, 1 skip; the sole failure's assertion output lists x41_b3_30228e, x41_b3_54bf32, x41_b3_fd6c1f, x41_b3_6386e5, x41_b3_cf5c20, x41_b3_4c186d all at account 200-D41 cost_diff=77000 (report says \"all five\"; my run shows six, one more than the report's count, consistent with additional x41.b3 fixture instances having accumulated on the rig since the report was written).",
+      "fix": "No action needed against #651: the migration touches none of x41.b3's acquisition/reversal belt (0227 recuts only the depreciation classification, the locked-period wall, the authority window and the two run doors), and the report already files this as Follow-up 1 with an argued (not merely asserted) attribution. Confirms the report's honesty about a residual it did not cause and did not hide."
+    }
+  ],
+  "verdict": "accept"
+}

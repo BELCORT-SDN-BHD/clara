@@ -1,0 +1,79 @@
+{
+  "ticket": 657,
+  "lens": "standards",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\657-review-standards.json",
+  "findings": [
+    {
+      "id": "S1",
+      "severity": "blocker",
+      "category": "signature-compatibility",
+      "where": "packages/db/tests/f-a3-pr3-doors.test.mjs:899-926 (test \"f-a3pr3.c2.task-binding a same-task pack-read grounds an act; a different-task pack-read refuses\", direct calls at lines 915-916 and 924-925), caused by packages/db/migrations/0226_bank_match_evidence.sql §7(a) (the DROP+CREATE of clara._agent_verify_inputs_digest around lines 762-800)",
+      "what": "0226 DROP+CREATEs clara._agent_verify_inputs_digest, changing its third parameter from `text` (the RAW op_key string, parsed internally with split_part(p_op_key, ':', 2)) to `uuid` (a PRE-EXTRACTED task id). The migration correctly re-patches all thirteen `_agent_*_core` callers (0226 §7b) to pass a pre-extracted uuid via `coalesce(clara._wake_task_id(), clara._bank_op_key_task(p_op_key))`, and #657's own new battery calls the function the same new way. But a pre-existing, unrelated test file that the brief never names — packages/db/tests/f-a3-pr3-doors.test.mjs, a prior-wave \"C2 (review finding, Codex, MUST)\" cell — calls the function DIRECTLY (bypassing every agent core) and still passes the full colon-joined op-key STRING (e.g. `bank-add_bank_account:${taskA}:0:{}`) as the third argument, exactly as the OLD text signature required. Because the parameter type is now `uuid`, Postgres itself rejects the call at the wire/bind layer before any application logic runs.",
+      "evidence": "Reproduced deterministically on the assigned rig (127.0.0.1:55707/clara_657, 220 migrations applied through 0226) two independent ways: (1) `cd packages/db && node --test --test-concurrency=1 tests/f-a3-pr3-doors.test.mjs` -> `not ok 21 - f-a3pr3.c2.task-binding ... error: 'invalid input syntax for type uuid: \"bank-add_bank_account:c2ta-b3206fed:0:{}\"' code: '22P02'`, stack pointing at f-a3-pr3-doors.test.mjs:916; (2) the same failure surfaced independently mid-way through a full `pnpm test` run of packages/db (`not ok 1263 - f-a3pr3.c2.task-binding ...`, same error). `grep -rn _agent_verify_inputs_digest packages/db/tests packages/runtime apps/web` confirms only this one file's two call sites (916, 925) still use the pre-0226 raw-string convention; #657's own battery and all thirteen re-patched cores already pass typed uuids. `grep -n f-a3-pr3-doors brief-657.md reports/657-final.md` returns zero hits in either document, so the worker never discovered or reported this regression, and it is not gated behind `skipHere()` (which only skips on a pre-migration chain, not applicable here at 220/226 migrations).",
+      "fix": "Update f-a3-pr3-doors.test.mjs's \"c2.task-binding\" test to the NEW (uuid,text,uuid) contract: mint taskA/taskB as real uuids (e.g. `randomUUID()`) or derive them the way `clara._bank_op_key_task` would, and pass them directly as the third argument instead of embedding them in a colon-joined string. Re-run the file to confirm both the \"same task admits\" and \"different task refuses\" assertions still hold under the new signature, then re-run the full packages/db suite once to confirm no other stale caller remains."
+    },
+    {
+      "id": "S2",
+      "severity": "major",
+      "category": "documentation-accuracy",
+      "where": "packages/db/README.md, \"## #657 — matching bank evidence to an already-approved booking (migration 0226)\" section, \"THE TWO-COPY CANDIDATE DISCIPLINE\" paragraph (lines 673-677)",
+      "what": "The README documents the two-copy candidate-projection mechanism as a dynamic extract-and-splice (\"0226 writes the projection ONCE... and then EXTRACTS that exact text out of the freshly recut catalog body and SPLICES it into the pack core in place of its own positionally-located old copy\"). That is the FIRST CUT of 0226, which the migration's own header says was reverted because apps/web/test/sqlFunctionCensus.ts refuses a dynamic statement it cannot resolve to exactly one function definition. The shipped migration instead types the identical projection literally TWICE (a static `create or replace` in both `clara.list_bank_match_candidates` and `clara._agent_get_bank_pack_core`), between matching `/* P657-CAND-BEGIN */.../* P657-CAND-END */` sentinels, with the tail asserting the two marked regions are identical modulo whitespace.",
+      "evidence": "packages/db/migrations/0226_bank_match_evidence.sql lines 31-51 (\"A FIRST CUT SPLICED THE COPY OUT OF THE CATALOG instead (take it, do not type it) and had to be reverted\u2026\") and lines 355-367 (\"A STATIC create-or-replace of the whole body, not a dynamic splice\u2026 A first cut of this file took the projection OUT of \u00a73's freshly recut catalog body and spliced it into the pack positionally\u2026 Measured, then conformed\"). Direct read of both function bodies (\u00a73 ~lines 290-352 and \u00a74 ~lines 383-496) shows byte-identical literal SQL between the sentinels in both `create or replace` statements, not a runtime splice. packages/db/README.md's own diff (this PR) was never touched by the later conformance commit that fixed this (7aa96d25 touches only apps/web/e2e/bank-match-mock.mjs, apps/web/e2e/bank-match-walk.spec.ts, apps/web/tests/firm-scope-db-pins.corpus.ts and the migration file itself).",
+      "fix": "Rewrite packages/db/README.md's \"THE TWO-COPY CANDIDATE DISCIPLINE\" paragraph to describe the shipped mechanism: the projection is typed identically in BOTH bodies between sentinel comments, and the migration's own tail (plus `p657.db.pack-parity`) is what keeps the two copies honest; a future change to the projection must edit both bodies by hand, not \"the public read only\" as currently implied."
+    },
+    {
+      "id": "S3",
+      "severity": "major",
+      "category": "evidence-accuracy",
+      "where": "docs/plan/active/refresh-wave-2026-09-18/reports/657-final.md, AC13 row",
+      "what": "The final report's AC13 row states \"Table/Field/InputGroup/Alert used,\" but `InputGroup` (`@/components/ui/input-group`) is not imported or used anywhere in #657's diff or in any bank/* surface. The cents input (`matching-candidates.tsx`) uses `Field`/`FieldError` wrapping `MoneyInput`, which itself wraps the plain `Input` primitive — never `InputGroup`. Table and Alert are genuinely used (confirmed); the InputGroup claim is false.",
+      "evidence": "`git diff origin/main...HEAD | grep -n InputGroup` -> zero matches. `grep -rln InputGroup apps/web/components/bank apps/web/lib/bank` -> no files. `apps/web/components/common/money-input.tsx` imports `Input` from `@/components/ui/input`, not InputGroup. Even the brief's own cited AC13 precedent, `apps/web/components/work/work-question-form.tsx:70`, does not import or use InputGroup either (`grep -n InputGroup apps/web/components/work/work-question-form.tsx` -> no matches), so the pattern was never actually adopted anywhere the report or brief points to.",
+      "fix": "Correct the AC13 evidence row in reports/657-final.md to \"Table/Field/Alert used\" (drop InputGroup), or add a real InputGroup wrapper around the cents input if the intent was to literally satisfy AC13's named primitive."
+    },
+    {
+      "id": "S4",
+      "severity": "minor",
+      "category": "evidence-accuracy",
+      "where": "docs/plan/active/refresh-wave-2026-09-18/reports/657-final.md, AC14 row",
+      "what": "The AC14 row cites \"walk leg 6 (320px, 200%, reduced motion, keyboard, focus return, 4 axe scans)\", but apps/web/e2e/bank-match-walk.spec.ts contains 6 total `expectAccessible()` (axe) calls across the whole file, and only 2 of them are inside walk leg 6 itself (the 320px/200%/keyboard test at line 199). The cited figure \"4\" matches neither the leg-6-only count (2) nor the whole-file count (6).",
+      "evidence": "`grep -n \"expectAccessible(page\" apps/web/e2e/bank-match-walk.spec.ts` -> lines 62, 119, 167, 196, 209, 228 (six total); only 209 and 228 fall inside the leg-6 test starting at line 199.",
+      "fix": "Correct the final report's AC14 evidence to either the whole-file total (6 axe scans across all legs) or scope the sentence to leg 6's own 2 scans."
+    },
+    {
+      "id": "S5",
+      "severity": "minor",
+      "category": "documentation-accuracy",
+      "where": "CONTEXT.md:568 (new \"Bank match\" term)",
+      "what": "The new \"Bank match\" term definition contains a garbled/truncated phrase: \"...journal entries on the same bank account, to the sen, with the sum of the lines equal to the sum of the entries.\" \"to the sen\" is not a real phrase in context (most likely an incomplete edit of \"to the cent\").",
+      "evidence": "`grep -n \"to the sen\" CONTEXT.md` -> line 568.",
+      "fix": "Correct the phrase, most likely to \"...on the same bank account, to the cent, with the sum of the lines equal to the sum of the entries.\""
+    },
+    {
+      "id": "S6",
+      "severity": "note",
+      "category": "documentation-accuracy",
+      "where": "packages/db/tests/bank-line-existing-booking.test.mjs:15",
+      "what": "The file header says \"THE NINE CELLS:\" but lists, and the file implements, TEN test() cells (no-new-cash, one-receipt-under-retry, capacity-race, candidate-enrichment, pack-parity, matching-context, exception-context, opkey-parse-free, digest-census, acl).",
+      "evidence": "`grep -n \"^test(\" packages/db/tests/bank-line-existing-booking.test.mjs` returns 10 matches; measured battery run (with the 41 gate flags) reports `# tests 10 / # pass 10`.",
+      "fix": "Change \"THE NINE CELLS\" to \"THE TEN CELLS\" (no functional impact — all ten pass)."
+    }
+  ],
+  "verdict": "fix_then_accept",
+  "measured_evidence": {
+    "pnpm_typecheck": "green (exit 0) from the worktree root",
+    "pnpm_lint": "green (exit 0) from the worktree root, including apps/web's ui-add guard and message-key selftests",
+    "check_frozen_workflows": "OK — 296 frozen files verified, 53 \"use workflow\" modules frozen+registered, 3 retired entries recorded",
+    "check_parts_parity": "OK — CI proves reader superset of emittable at this commit",
+    "bank_line_existing_booking_with_gate": "10/10 pass, 0 skipped (41 --import gate flags, matching packages/db/package.json's chain)",
+    "bank_line_existing_booking_without_gate": "10/10 pass (premise satisfied on this already-migrated rig; before()'s premise-guard code inspected and confirmed it would fail loudly on a pre-0226 chain)",
+    "operation_census_and_rig_isolation": "31 tests, 30 pass, 1 skipped (the destructive reset cell, correctly gated on CLARA_RIG_ALLOW_RESET which is unset) -- matches the final report's claim exactly",
+    "g1_wake_bank_e2e": "1/1 pass, 0 skipped -- matches the final report's claim exactly",
+    "x38_wave_c_b_match_plus_v14_parity": "33 + 4 = 37/37 pass -- matches the final report's claim exactly",
+    "playwright_e2e_bank_match": "6/6 passed -- matches the final report's claim exactly",
+    "e2e_fixture_ownership_test": "18/18 pass, confirming list_bank_statements/list_bank_accounts carry no SHARED_RPC_VERBS row and the new bank-match-mock.mjs lane is declared with no unscopeable/debt paths",
+    "apps_web_whole_suite": "4157 tests, 4153 pass, 2 fail, 2 skipped in a full run. One failure (lib/clara/use-clara-thread-stop.test.ts:1021) matches exactly the flake the final report discloses. The second failure (documents-workbench-refresh.test.tsx, an unrelated file #657 never touches) reproduces only under whole-suite load and passes 9/9 in isolation -- consistent with this repo's already-documented class of whole-suite timing flakes, not a defect introduced by #657",
+    "packages_db_full_suite_partial": "Ran in the background beyond the specific batteries the brief names; surfaced exactly one real, deterministic failure -- S1 above -- through roughly the first ~1300 of the estate's tests before this report was finalized; no other failures observed in that partial run",
+    "migration_self_validation": "clara.schema_migrations on the rig shows 0226_bank_match_evidence applied at 2026-09-18T20:15:43Z with checksum c17609ce6307ec8ef5e5bf0e83d43e245866cb2d13cb00076a298cc90ba8128a, matching apps/web/tests/firm-scope-db-pins.corpus.ts's REVIEWED_DYNAMIC_SQL_BARRIERS entry byte-for-byte -- since the migration's own prestate `do` block raises on any prosrc mismatch, its clean application is itself evidence the five prestate pins were correctly measured off the live catalog, not transcribed"
+  }
+}

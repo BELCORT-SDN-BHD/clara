@@ -13,6 +13,7 @@ import {
   draftEntryV3, approveEntry, reverseEntry,
   COST, ACCUM, EXPENSE, COST2, ACCUM2, EXPENSE2, LAND, BANK, GAIN, LOSS, OTHER, AR1, AP1, SHARE,
   upsertFaProfile, completeParticulars, proposeAuthority, signAuthority, runPeriod, runDue,
+  signTakesAuthorityRef, backdateAuthorityFloor,
   disposeAsset,
   mon, uniqTag,
 } from "./x41-fa-fixtures.mjs";
@@ -261,6 +262,17 @@ export async function liveAuthority(client, cadence = "monthly") {
   const id = idOf(proposed, "authority_id", "id");
   assert.ok(id, `propose_depreciation_authority names the authority (got ${JSON.stringify(proposed)})`);
   await signAuthority(w.users.hana, { client, authority: id });
+  // #651 [0227, D8]: a signature now floors the DUE ORACLE at the first day of the SIGNING month,
+  // and a period is due only once it has ENDED -- so an authority signed "today" makes this rig's
+  // month-minus-N fixtures permanently not-due and every arithmetic cell in the x41 family would
+  // measure an empty ladder instead of the arithmetic it was written for. The floor is back-dated
+  // here through the ONE labelled fixture site (fa-authority-sign-compat.mjs, which says why), so
+  // those cells keep their meaning. The floor itself is proven against the real door by
+  // `p651.authority.floor` in packages/db/tests/depreciation-history.test.mjs.
+  if (await signTakesAuthorityRef()) {
+    await backdateAuthorityFloor(id,
+      (await rootQuery("select (date_trunc('month', ((now() at time zone 'Asia/Kuala_Lumpur')::date - interval '10 years')))::date as d")).rows[0].d);
+  }
   const liveRows = (await authorityRows(client)).filter((a) => a.status === "live");
   assert.equal(liveRows.length, 1, "exactly ONE live authority per client (the partial unique)");
   return { id, signedBy: w.users.hana, cadence };

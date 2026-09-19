@@ -1,0 +1,143 @@
+{
+  "ticket": 655,
+  "role": "recheck",
+  "recheck_of_report": "docs/plan/active/refresh-wave-2026-09-18/reports/655-fixround-1.md",
+  "recheck_of_head": "067f84a15bd39c1e6e0c73d9b9fe96e59cbcda89",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\655-recheck-1.json",
+  "rig": "PG 127.0.0.1:55705 clara_655, Playwright triple 3340/3341/3342, worktree C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "verdict": "needs_second_round",
+  "verdict_reason": "Every code fix in the round is real, correctly targeted and re-verified green with zero regressions. The one thing withholding a plain 'accept' is F1: the branch still ships _subledger_classify_entry and _tf_subledger_item_belt recut alongside _record_journal_entry_core, which is a literal, unambiguous departure from DECISIONS.md's own override text ('#655 is the sole recutter of clara._record_journal_entry_core this wave', §6 line 176) and from brief-655.md's 'RECUTS EXACTLY ONE BODY' / explicit non-recut list for _subledger_classify_entry. This session's ruling ('D11/D12 stand') does not ratify the widening, so the deviation remains live and unresolved at HEAD. _subledger_classify_entry has a measured caller set of SIX across other lanes (staff claims, FA, corrections, close); this recheck could only re-run the two callers this repo already has regression suites for (x37-wave-c-a-subledger, fixed-asset-acquisition — both green), so the other four are unverified by anyone. This is a governance gate, not a code-quality gap: the fix-round worker measured it, disclosed it prominently in three places (migration header, final report, this round's report) and asked for a ruling rather than shipping silently. What is needed next is an orchestrator decision (ratify by rewriting DECISIONS.md §1.2/§2's row and brief-655.md, or direct a follow-up that unwinds the two extra recuts) — not another coding pass by the ticket implementer. Recorded as 'needs_second_round' because the branch is not yet in a state a reviewer can wave through, not because the implementer's work was deficient."
+  ,
+  "applied_findings": [
+    {
+      "id": "ADV-655-1",
+      "severity": "blocker",
+      "claim": "clara.admit_trade_invoice_work re-reads the surviving trade_invoices row after the on-conflict insert and raises intent_payload_conflict when it differs from what this caller sent, closing the race where a raced loser was silently answered SUCCESS about the winner's invoice",
+      "commits": ["cd27b06e"],
+      "verified": true,
+      "evidence": "Read 0225_trade_invoices.sql:1168-1196 (step 8b): `select ti.id, ti.particulars into v_invoice, v_prior_canon ... if v_prior_canon is distinct from v_canon then raise ... CLR10 intent_payload_conflict`, the same idiom cited from 0194:1239-1256. Ran packages/db/tests/trade-invoice.test.mjs's p655.replay.race in isolation on clara_655: 1 pass. Ran the whole 41-gate-flag battery (packages/db/tests/trade-invoice.test.mjs): 28/28 pass, 0 fail. Not vacuous: the new divergent arm races two DIFFERENT counterparties/references under ONE key and asserts the loser's CLR10 reason+field, plus that the winner's counterparty_id/kind/due_date_source and stored reference all belong to the SAME surviving row (the exact shape the pre-fix door got wrong)."
+    },
+    {
+      "id": "ADV-655-3",
+      "severity": "major",
+      "claim": "p655.replay.race and p655.parity.source_vs_direct no longer pass while the underlying defects they were meant to catch are live",
+      "commits": ["cd27b06e", "e4ae650d"],
+      "verified": true,
+      "evidence": "The race half is ADV-655-1's divergent arm (above). The parity half: read trade-invoice.test.mjs:1038-1063 — the cell now asserts `dItem.due_date === '2026-04-30'` BY NAME (the rule, not the other lane's output), asserts `'2026-04-30' !== '2026-04-03'` so the fixture's two anchors genuinely disagree (not vacuous), and only THEN asserts the coding-lane equality as a separately-scoped claim. Confirmed passing in the 28/28 battery run."
+    },
+    {
+      "id": "ADV-655-4",
+      "severity": "minor",
+      "claim": "source_already_posted and client_inactive are now driven end-to-end through refusesTi, not just declared/raised with no cell",
+      "commits": ["e4ae650d"],
+      "verified": true,
+      "evidence": "Read trade-invoice.test.mjs:809-871, new test p655.authority.cited_and_inactive: posts a real cited document, admits again citing the same document, asserts CLR13 source_already_posted naming both document_id and entry_id; separately archives a client (restored in a finally block) and asserts CLR10 client_inactive. Confirmed passing (part of the 28/28 battery)."
+    },
+    {
+      "id": "ADV-655-5",
+      "severity": "minor",
+      "claim": "step 6's unreachable balance re-sum is now labelled as a belt behind a door that already closed, and which arm actually answers is pinned by a cell rather than left implicit",
+      "commits": ["e4ae650d"],
+      "verified": true,
+      "evidence": "Read 0225_trade_invoices.sql:732-747: comment now states step 2's re-badge of _assert_journal_basis answers first and carries its own field/constraint keys, which step 6's raise does not build; the belt is kept deliberately as the only balance law this door owns if _assert_journal_basis is ever removed. trade-invoice.test.mjs:498-509 (p655.polarity.matrix(e3)) now asserts detail.constraint==='balanced' and detail.field==='lines' -- step 2's own keys, proving step 6 did not fire. Confirmed passing."
+    },
+    {
+      "id": "ADV-655-7",
+      "severity": "note",
+      "claim": "LADDER 3T's comment now states its actual rank (above ALL coding_kind ladders, not only LADDER 5's default) and records that #665's cutover must decide the case where an entry carries both",
+      "commits": ["e4ae650d"],
+      "verified": true,
+      "evidence": "Read 0225_trade_invoices.sql:2002-2020: comment corrected, explicitly cross-references F1 and states why it is deliberately NOT narrowed to `e.coding_kind is null` in code (would deepen the shared-classifier widening that is itself unratified). Consistent with the F1 finding below rather than contradicting it."
+    },
+    {
+      "id": "ADV-655-8",
+      "severity": "note",
+      "claim": "the contract (tool schema description + 0225 resolver header) now states which keys actually resolve a party and that a TIN-only payload leaves as party_unresolved, instead of silently advertising a dead `tin` input",
+      "commits": ["40bc89f8"],
+      "verified": true,
+      "evidence": "Read 0225_trade_invoices.sql:856-869: new comment block states the resolution order (id, registration, name/alias) and that `tin` is carried/echoed only, never a resolver key, with the precedence question filed as a follow-up (confirmed present in reports/655-final.md's follow-up list)."
+    },
+    {
+      "id": "F2",
+      "severity": "minor",
+      "claim": "clara._assert_trade_invoice_basis now raises invalid_particulars / invalid_currency / invalid_tax_facts as distinct tokens instead of overloading invalid_kind for four different failures, and both the runtime wire half (toDbTradeInvoice) and the web message catalogue/banner speak the same four tokens",
+      "commits": ["40bc89f8", "96226229"],
+      "verified": true,
+      "evidence": "DB: 0225_trade_invoices.sql:614-620,791-800 now raise the three new tokens at the right guards; comment block at :546-560 documents all four by name. Runtime: workRoutes.ts:609-699 (toDbTradeInvoice) maps the same four shape failures to the same four tokens, including reference/document-number failures mapping to invalid_particulars (not inventing a token the door lacks). Web: en.json:1653-1656 adds three distinct sentences; trade-invoice-form.test.tsx adds three cases to its banner-per-code loop. Ran packages/db/tests/trade-invoice.test.mjs (28/28, includes p655.polarity.matrix(d2)), packages/runtime/tests/trade-invoice-unit.test.mjs (23/23, includes route.shape), apps/web's trade-invoice-form.test.tsx (13/13). The runtime successor-contract comment and packages/db/README.md both independently state 'eighteen tokens' and the arithmetic checks out (14 DECISIONS.md:50 base tokens + invalid_kind + the 3 new ones = 18); grep of TRADE_INVOICE_REFUSALS in trade-invoice-basis.ts confirms exactly 18 keys."
+    },
+    {
+      "id": "S1",
+      "severity": "major",
+      "claim": "the outstanding amount on the Work page's trade-invoice link block now renders through the house <Money> component instead of a raw integer of sen",
+      "commits": ["40bc89f8"],
+      "verified": true,
+      "evidence": "Read work-detail.tsx:815-821: `<Money cents={tradeInvoice.outstanding_cents} />` replaces the bare interpolation. Ran apps/web/components/work/work-detail.test.tsx --test-name-pattern=\"655 AC5\" with the correct loaders (node --import ./test/bootstrap.mjs --import tsx --test): 1/1 pass. The cell asserts /RM\\s1,060\\.00/ matches, asserts the raw string \"106000\" is ABSENT, and asserts exactly two money-formatted amounts render (total + outstanding) -- not vacuous. Also ran the whole apps/web unit suite (node scripts/run-tests.mjs): 4180 tests, 4178 pass, 0 fail, 2 skip -- clean, no regression."
+    },
+    {
+      "id": "S2",
+      "severity": "minor",
+      "claim": "the trade invoice's stated total (TradeInvoice.link.total, previously authored and dead) now renders on the Work page beside the two dates",
+      "commits": ["40bc89f8"],
+      "verified": true,
+      "evidence": "Read work-detail.tsx:803-810: `{tti(\"total\")}: <Money cents={tradeInvoice.total_cents} />` added. Confirmed in the same 655 AC5 test cell (asserts /Total/ present and two money amounts render) and in the Playwright walk (apps/web/e2e/trade-invoice-walk.spec.ts:152-170, asserts /RM\\s1,060\\.00/ on both the composed-invoice block and the reloaded links block). Ran the Playwright walk against the assigned triple (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3340, NEXT_PORT=3341, RUNTIME_PORT=3342): 12/12 passed (22.4s), matching the fixround report."
+    },
+    {
+      "id": "self-found-defect",
+      "severity": "major",
+      "claim": "TradeInvoice.link.domain.ap did not exist (the key lived under TradeInvoice.domain), so next-intl raised MISSING_MESSAGE and C08.5's direction-aware noun ('Payable'/'Receivable') rendered as its own raw key path; fixed by adding TradeInvoice.link.domain and asserting the word plus the absence of a leaked key",
+      "commits": ["40bc89f8"],
+      "verified": true,
+      "evidence": "en.json diff adds `\"domain\": {\"ar\": \"Receivable\", \"ap\": \"Payable\"}` under TradeInvoice.link. The 655 AC5 unit cell asserts text.includes(\"Payable\") AND /TradeInvoice\\.link\\./.test(text) === false. The Playwright walk independently asserts toContainText(\"Payable\") in the real browser. Both green. This corrects reports/655-final.md's original (wrong) C08.5 evidence, and the correction is visible in the current 655-final.md text."
+    }
+  ],
+  "deliberately_left_findings_judged": [
+    {
+      "id": "ADV-655-6",
+      "severity": "note",
+      "judgment": "reason holds",
+      "reasoning": "DECISIONS.md section 4's evidence law explicitly accepts a NAMED residual as a closing condition (red-first cell, browser-walk leg, OR named residual) -- silence is what it forbids, not an open gap. The fix round did not silently leave this: it added p655.duplicate.same_reference_is_NOT_probed, which MEASURES the residual (one bill number under two intent keys -> two trade invoices, two open items, 212000 sen of payable for one RM 1,060 bill) and will red the moment a later ticket adds the probe. brief-655.md's AC4/cell-13 language is about a replayed INTENT, which is what p655.replay.* proves; a same-document-number check is a distinct, new refusal/advisory surface the brief does not grant #655, and the reviewer's own analysis (reference is nullable; two suppliers legitimately reuse numbers) correctly rules out the cheap fix (a hard unique constraint). Confirmed reports/655-final.md:116 and :125 name this residual with a stated owner candidate (#662's open-item list) rather than omitting it. No independent counter-evidence found."
+    }
+  ],
+  "ratification_requests_judged": [
+    {
+      "id": "F1",
+      "severity": "major",
+      "topic": "0225 recuts THREE governed bodies (_record_journal_entry_core, _subledger_classify_entry, _tf_subledger_item_belt) instead of the ONE (_record_journal_entry_core) that DECISIONS.md and brief-655.md bind #655 to",
+      "status": "still open -- not ratified by this session's rulings",
+      "judgment": "The deviation is real, material and still unresolved at HEAD. DECISIONS.md:176 (the orchestrator's own §6 override text) states in its own words: '#655 is the sole recutter of `_record_journal_entry_core` this wave' -- singular, unqualified. brief-655.md:13 says '0225 RECUTS EXACTLY ONE BODY' and brief-655.md:14 explicitly lists `_subledger_classify_entry` LADDER 2 among the bodies #655 does NOT recut, with a stated reason (it is a shared classifier, caller set stays the measured SIX). The shipped migration recuts it anyway (LADDER 3T) plus `_tf_subledger_item_belt`, and substitutes `_tf_subledger_entry_belt` into the non-regression-pin list in place of `_subledger_classify_entry`. This session's stated ruling ('D11/D12 stand') leaves D11 -- and DECISIONS.md's own §6 override text -- exactly as written, i.e. it does not ratify the widening. The fix round did not attempt to code around this (correctly: 'ADV-655-7 was deliberately answered with a comment rather than a code gate for exactly that reason'), and named it prominently in three places (migration header MEASUREMENT 2, 655-final.md's 'Scope deviation' section, and this round's own report). I independently re-ran the two regression suites the classifier's other known callers touch: x37-wave-c-a-subledger.test.mjs (39/39 pass) and fixed-asset-acquisition.test.mjs (21/21 pass) -- both green, confirming the widening has not (yet) broken anything measured. But `_subledger_classify_entry`'s caller set is measured at SIX across other lanes (staff claims, FA, corrections, close per the spec review), and this repo's regression coverage only reaches two of those six from this branch; the other four are unverified by anyone in this recheck. This is not a code-quality defect -- it is a compliance gap against a binding, explicit, still-standing ruling, and it needs an orchestrator action (rewrite DECISIONS.md's D11/§1.2/§2 row and brief-655.md's 'EXACTLY ONE BODY' line to ratify what shipped, OR direct a follow-up ticket that unwinds the two extra recuts) before this branch should be treated as DECISIONS-compliant.",
+      "recommendation": "escalate — do not treat as ratified by default; this is the single blocking item in this recheck"
+    },
+    {
+      "id": "ADV-655-2",
+      "severity": "major",
+      "topic": "the counterparty-terms due-date fallback anchors on posting_date, not document_date, so a bill posted weeks after its document date gets a due date that is weeks later than payment terms measured from the document would produce",
+      "status": "open, but the shipped behaviour is brief-compliant as written",
+      "judgment": "Unlike F1, this is NOT a violation of the literal brief: brief-655.md's section 4 cell 11 prescribes `posting_date + 30` verbatim, and the shipped `clara._trade_invoice_due` does exactly that (measured: document_date 2026-03-04, posting_date 2026-03-31, terms 30 days -> due_date 2026-04-30, confirmed via the now-un-vacuumed p655.parity.source_vs_direct cell, which pins the number by name and asserts the 27-day gap is real, not vacuous). D12's own text ('到期日单据写的优先、账期兜底' -- the document-stated due date wins, payment-terms is the FALLBACK) settles the priority between a STATED due date and a terms-derived one, but does not itself say what the terms fallback should anchor ON (document date vs. posting date) -- so D12 does not resolve this question either way, and this session's 'D11/D12 stand' ruling leaves that silence in place rather than closing it. The fix round correctly declined to change behaviour that matches the brief's literal text, and instead made the number impossible to miss (the pinned assertion reds the moment either the brief or the code changes). This is a genuine accounting-correctness concern worth an owner ruling (payment terms conventionally run from the document, and `document_date` was added by this very ticket), but it is not a shipped deviation from what was asked for the way F1 is.",
+      "recommendation": "orchestrator should rule on the anchor when convenient; not blocking, since the current code does what brief-655.md literally specifies and the disagreement is measured and cannot silently drift"
+    }
+  ],
+  "new_defects_introduced_by_fixes": [],
+  "observations": [
+    "The two 'first red cells' named in this session's brief (p655.rig.trigger_order and p655.rig.receipt_join, the deferred-trigger-ordering and operation_receipts-join measurements) are both present in the battery and both pass (confirmed by name in the 28/28 run), consistent with the ruling that the direct operation_receipts \u22c8 trade_invoices join is #638's real mechanism.",
+    "A tooling note for whoever runs this battery next: the 41 --import gate flags must be invoked with node's cwd set to packages/db/ (the flags are relative paths like ./tests/delta-preintegration-gate.mjs) -- running from the worktree root throws ERR_MODULE_NOT_FOUND. Likewise apps/web component tests need `--import ./test/bootstrap.mjs --import tsx` (the manifest runner's own flags), not a bare `node --test`. Both were dead ends before the correct invocation was found; recorded here so the next reviewer does not lose time on the same thing.",
+    "Running the full apps/web unit suite in this recheck produced 4178 pass / 0 fail / 2 skip -- the fixround report's named flake (lib/clara/use-clara-thread-stop.test.ts, an unrelated pre-existing whole-suite-contention flake per its own git-blame check) did not reproduce this run. This is consistent with 'flaky', not with the fix round having caused or hidden anything; no tracked file under lib/clara/ is touched by this branch (confirmed: git diff --stat origin/main..HEAD has no lib/clara/ entries)."
+  ],
+  "measured_evidence": {
+    "worktree_hygiene": "git status --short clean at both start and end of this recheck; HEAD unchanged at 067f84a15bd39c1e6e0c73d9b9fe96e59cbcda89 throughout; no tracked file was modified by this recheck (read-only honoured)",
+    "pnpm_typecheck": "green, exit 0 (apps/web tsc --noEmit Done; packages/runtime tsc --noEmit Done)",
+    "pnpm_lint": "green, exit 0, including check-message-keys.selftest and check-ui-add-guard.selftest passing inline",
+    "db_migration_ledger": "packages/db: node scripts/migrate.mjs -> '0 new migration(s) applied · 220 total · target 127.0.0.1:55705/clara_655'",
+    "trade_invoice_battery_41_gates": "packages/db/tests/trade-invoice.test.mjs, 41 --import gate flags, --test-concurrency=1: 28 tests, 28 pass, 0 fail, 0 skip (matches fixround claim exactly)",
+    "runtime_unit_tests": "packages/runtime/tests/trade-invoice-unit.test.mjs: 23 pass, 0 fail (matches fixround claim exactly)",
+    "web_form_component_tests": "apps/web/components/accounting/trade-invoice-form.test.tsx: 13 pass, 0 fail",
+    "web_work_detail_655_cell": "apps/web/components/work/work-detail.test.tsx --test-name-pattern=\"655 AC5\": 1 pass, 0 fail",
+    "apps_web_whole_unit_suite": "4180 tests, 4178 pass, 0 fail, 2 skip, 135 suites (69.4s) -- no failures this run (fixround's named 1-failure whole-suite flake did not reproduce)",
+    "playwright_trade_invoice_walk": "12 passed (22.4s), run against the assigned triple https://127.0.0.1:3340 / 3341 / 3342",
+    "world_leg": "packages/runtime/tests/trade-invoice-e2e.mjs (run from packages/runtime/, not the worktree root): PASS -- all 5 legs (admit->run->commit->ONE AP item; lost-ack replay; typed 409 from the particulars comparison; exit_after_commit+respawn -> ONE of everything; stated->counterparty_terms->absent derivation end to end)",
+    "regression_suites_for_f1s_widening": "x37-wave-c-a-subledger.test.mjs: 39 pass, 0 fail. fixed-asset-acquisition.test.mjs: 21 pass, 0 fail. operation-census.test.mjs: 10 pass, 0 fail. (70 combined, 0 failures)",
+    "rig_isolation": "19 pass, 1 fail, 1 skip -- the 1 failure is T10b (agent_ro EXECUTE scope), confirmed by name to be the pre-existing #866 issue the brief predicts and says to report rather than fix; the 1 skip is the destructive reset cell correctly gated off (CLARA_RIG_ALLOW_RESET unset)",
+    "check_frozen_workflows": "OK -- 296 frozen files verified, 53 use-workflow modules frozen+registered, 3 retired entries recorded",
+    "check_parts_parity": "OK -- reader \u2287 emittable, no new part kind",
+    "trigger_census_independent_check": "queried pg_trigger directly on clara_655 (raw node pg client, not the test battery): 24 non-internal triggers on clara.journal_entries, confirming packages/db/README.md's corrected 'twenty-FOUR triggers' claim (067f84a1) independently of the p655.rig.trigger_order cell that also passed"
+  }
+}

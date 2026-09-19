@@ -25,6 +25,19 @@
 // claiming a SHARED endpoint replaces everyone else's fixture). This lane claims no unfiltered
 // `/clients` register, no shared session list and no firm-wide read.
 
+// BODY READS GO THROUGH THE SHARED, CACHING READER. This lane's RPC verbs are not its own alone:
+// #651's `depreciation-mock.mjs` answers `get_fixed_asset`, `get_depreciation_authority`,
+// `list_depreciation_runs`, `list_fixed_assets` and `fa_register_tie` for its OWN client, and both
+// lanes are declared as sharing them in `e2e-fixture-ownership.test.ts`'s `SHARED_RPC_VERBS`. The
+// exact-verb guard below (N7's law) protects a verb NEITHER lane owns, but it cannot protect a verb
+// BOTH own: whichever lane is dispatched first reads the body, finds the client is not its own and
+// falls through — and with a private, non-caching reader the stream it drained is gone, so the
+// second lane sees `{}` and silently declines its OWN walk. MEASURED as exactly that: #651's walk
+// rendered "No fixed assets recorded" and an `unmatched_e2e_route` authority card. `readCachedJson`
+// parses once and caches the parsed value on the request object, so BOTH lanes read the same body
+// in EITHER dispatch order.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 export const FA = {
   clientId: "63963963-6396-4639-8639-639639639639",
   clientName: "SERI MURNI ENGINEERING",
@@ -328,22 +341,6 @@ const detailFor = (assetId) => {
   };
 };
 
-function readJson(request) {
-  return new Promise((resolve) => {
-    let raw = "";
-    request.on("data", (chunk) => {
-      raw += chunk;
-    });
-    request.on("end", () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        resolve({});
-      }
-    });
-  });
-}
-
 /** WHO IS ASKING. `serve-built.mjs` mints a real (unsigned) JWT whose payload carries the signed-in
  *  email, so this lane can answer the way the DOOR would for a persona without any shared mutable
  *  state: `clara.complete_fixed_asset_particulars` runs `clara._human_ctx(role_rank('bookkeeper'))`
@@ -405,7 +402,7 @@ export async function handleFixedAssetSupabase(request, response, path, url, sen
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
   if (!RPC_VERBS.has(verb)) return false;
-  const body = await readJson(request);
+  const body = await readCachedJson(request);
 
   if (verb === "list_fixed_assets") {
     if (body.p_client !== FA.clientId) return false;

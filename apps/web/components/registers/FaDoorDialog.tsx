@@ -37,6 +37,8 @@ export function FaDoorDialog({
   refusal,
   refusalFocusId,
   onConfirm,
+  onOpen,
+  onClosed,
   children,
 }: {
   triggerLabel: string;
@@ -71,6 +73,16 @@ export function FaDoorDialog({
    *  made a refusal indistinguishable from a success, and every wrapper closed on
    *  both — destroying the input the refusal was asking the human to correct. */
   onConfirm: () => Promise<boolean>;
+  /** #651 — ADDITIVE. Fired once each time the dialog OPENS, before anything is rendered inside
+   *  it. The depreciation run dialog reads its preview here rather than on mount: the preview is a
+   *  per-client arithmetic pass, and a panel that ran it unasked would ask the database to compute
+   *  a schedule nobody is looking at. Omit it and nothing changes. */
+  onOpen?: () => void;
+  /** #651 — ADDITIVE. Fired once each time the dialog CLOSES, whichever way it closed (Cancel,
+   *  Escape, the backdrop, or a confirmed success). A closed dialog ENDS the decision, which is
+   *  what renews the operation key: the next press is a new decision, and reusing the old key
+   *  would answer it with the receipt the previous one earned. Omit it and nothing changes. */
+  onClosed?: () => void;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -117,6 +129,10 @@ export function FaDoorDialog({
       // one's previous visit) is not shown until this dialog settles a confirm again.
         if (next) setAttempt(0);
         setOpen(next);
+        // #651 — the two additive lifecycle hooks, fired AFTER the state move so a handler that
+        // reads the dialog's own state sees the state it is about.
+        if (next) onOpen?.();
+        else onClosed?.();
       }}
     >
       <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>
@@ -142,7 +158,13 @@ export function FaDoorDialog({
               // with the refusal — and whatever the human typed — standing.
               const outcome = await runOnce(guardRef.current, onConfirm);
               if (outcome.ran) setAttempt((n) => n + 1);
-              if (closeOnConfirmedOk(outcome)) setOpen(false);
+              if (closeOnConfirmedOk(outcome)) {
+                setOpen(false);
+                // This path sets the state directly rather than through `onOpenChange`, so the
+                // close hook is fired here too — otherwise a decision that SUCCEEDED would never
+                // be ended and its key would be reused by the next one.
+                onClosed?.();
+              }
             }}
           >
             {busy ? t("working") : confirmLabel}

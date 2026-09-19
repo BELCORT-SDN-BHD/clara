@@ -110,6 +110,9 @@ const ROW_APPEARS_AFTER_EMPTY_READS = 1;
  *  bound it asserts is always measured over a burst that was demonstrably still running. */
 const BURST_DELTAS = 900;
 const BURST_INTERVAL_MS = 15;
+/** #642 — long enough that a walk can assert `running` before `done` lands, short enough
+ *  that the cell is not waiting on a timer. */
+const TOOL_RESULT_DELAY_MS = 700;
 
 const state = {
   turns: [],
@@ -121,8 +124,53 @@ const state = {
    *  this lane would see on screen, so they are armed by the one cell that needs them and
    *  disarmed in its own `finally`. */
   burst: false,
+  /** #642 — EVERY turnKey this lane has admitted, so the second POST of ONE intent can be
+   *  answered the way `clara.begin_chat_turn` answers it: the SAME task id with
+   *  `replayed: true` (0006_runtime_core.sql:954-960), rather than as a fresh admission.
+   *  A Set rather than a counter because the discriminant is the KEY, which is the whole
+   *  point of content addressing — a changed intent derives a different key and IS a
+   *  fresh admission. */
+  admittedTurnKeys: new Set(),
+  /** #642 — OPT-IN, the same shape as `burst` above and for the same reason. Armed, the
+   *  stream serves a NON-clarify tool's `tool-input-start` → `tool-call` → `tool-result`
+   *  sequence (the MEASURED `fullStream` shapes) instead of the clarify chunk, so a walk
+   *  can watch a chip move `running` → `done` INSIDE one turn, before any settle. */
+  toolScript: false,
+  /** #642 — how many prior messages `/messages` serves for the parked thread. Zero by
+   *  default (a parked task has no persisted assistant row at all, which is what every
+   *  other cell in this lane depends on); a scroll cell arms it to get a transcript tall
+   *  enough to scroll. */
+  history: 0,
   interruption: { status: "pending", answer: null, answered_by: null, answered_at: null },
 };
+
+/** #642 — a transcript of `n` settled exchanges for the parked thread, oldest first.
+ *  Deliberately plain `text` parts: this exists to make the region TALL, and any richer
+ *  part kind would drag another card's rendering into a scroll cell. */
+function historyMessages(n) {
+  const rows = [];
+  for (let i = 0; i < n; i += 1) {
+    rows.push({
+      id: `history-user-${i}`,
+      role: "user",
+      parts: [{ type: "text", text: `Earlier question ${i + 1}` }],
+      turn_key: `history-${i}`,
+      task_id: null,
+      seq: i * 2 + 1,
+      created_at: "2026-09-04T00:00:00.000Z",
+    });
+    rows.push({
+      id: `history-assistant-${i}`,
+      role: "assistant",
+      parts: [{ type: "text", text: `Earlier answer ${i + 1}` }],
+      turn_key: null,
+      task_id: null,
+      seq: i * 2 + 2,
+      created_at: "2026-09-04T00:00:00.000Z",
+    });
+  }
+  return rows;
+}
 
 /** A fresh turn is a fresh task, so the park it will produce starts unwritten again. Keeps
  *  the walks independent of each other's order. Deliberately does NOT touch `burst`: the
@@ -328,11 +376,12 @@ export async function handleChatParityRuntime(request, response, url) {
   const path = url.pathname;
 
   if (request.method === "GET" && path === `/api/chat/sessions/${CHAT_PARITY.threadId}/messages`) {
-    // Deliberately always empty. A parked task has NO persisted assistant row yet —
+    // Deliberately empty by default. A parked task has NO persisted assistant row yet —
     // `clara.settle_chat_turn` is what writes one, and it cancels the pending
-    // interruption in the same breath.
+    // interruption in the same breath. #642's scroll cell arms `history` to get a
+    // transcript tall enough to scroll; nothing else in this lane does.
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ messages: [] }));
+    response.end(JSON.stringify({ messages: historyMessages(state.history) }));
     return true;
   }
 
@@ -356,10 +405,25 @@ export async function handleChatParityRuntime(request, response, url) {
   }
 
   if (request.method === "POST" && path === `/api/chat/${CHAT_PARITY.threadId}/turns`) {
-    state.turns.push(await readJson(request));
-    resetPark();
+    const body = await readJson(request);
+    state.turns.push(body);
+    // #642 — THE DOOR'S OWN DISCRIMINANT, on the wire. `clara.begin_chat_turn` looks the
+    // `turn_key` up over `(session_id, turn_key, role='user')` and, on a hit, returns the
+    // ORIGINAL task with `replayed: true` BEFORE inserting anything (0006:954-960);
+    // `packages/runtime/src/chatRoutes.ts` now reads that field and puts it on the 202.
+    // The task id is this lane's one task either way, which is exactly the point: a
+    // replay is not a second turn.
+    const turnKey = typeof body?.turnKey === "string" ? body.turnKey : "";
+    const replayed = state.admittedTurnKeys.has(turnKey);
+    if (!replayed) {
+      state.admittedTurnKeys.add(turnKey);
+      // A REPLAY IS NOT A NEW PARK. The original task is still the one running, so its
+      // park state must survive — resetting it here would let a duplicate send silently
+      // rearm a question the first turn had already produced.
+      resetPark();
+    }
     response.writeHead(202, { "content-type": "application/json" });
-    response.end(JSON.stringify({ task_id: CHAT_PARITY.taskId }));
+    response.end(JSON.stringify({ task_id: CHAT_PARITY.taskId, replayed }));
     return true;
   }
 
@@ -370,6 +434,27 @@ export async function handleChatParityRuntime(request, response, url) {
       connection: "keep-alive",
       "x-accel-buffering": "no",
     });
+    // #642 — THE TOOL-STATE SCRIPT, armed by the one cell that needs it. Every shape here
+    // is the MEASURED `fullStream` vocabulary (captured on the rig against `ai@7.0.77`
+    // through the real `consumeChatTurnModelResult`): `tool-input-start` carries `id`,
+    // `tool-call`/`tool-result` carry `toolCallId`. The pair is spaced so a walk can see
+    // `running` on screen BEFORE `done` arrives — the whole point of AC4 is that a reader
+    // watches the step happen rather than being shown a finished list afterwards.
+    if (state.toolScript) {
+      const id = "tool-1";
+      const name = "trial_balance";
+      response.write(`event: chunk\ndata: ${JSON.stringify({ type: "tool-input-start", id, toolName: name })}\n\n`);
+      response.write(`event: chunk\ndata: ${JSON.stringify({ type: "tool-call", toolCallId: id, toolName: name, input: "{}" })}\n\n`);
+      const settleTimer = setTimeout(() => {
+        if (response.writableEnded) return;
+        response.write(`event: chunk\ndata: ${JSON.stringify({ type: "tool-result", toolCallId: id, toolName: name, input: "{}", output: { ok: true } })}\n\n`);
+      }, TOOL_RESULT_DELAY_MS);
+      response.on("close", () => clearTimeout(settleTimer));
+      // Still no terminal `message` and no `done`: the task is PARKED, so the chip's
+      // `done` state is genuinely LIVE rather than read off a settled transcript.
+      state.chunkSent = true;
+      return true;
+    }
     const chunk = {
       type: "tool-call",
       toolCallId: "call-1",
@@ -419,8 +504,20 @@ export async function handleChatParityRuntime(request, response, url) {
     if (url.searchParams.get("thread") !== CHAT_PARITY.threadId) return false;
     const body = await readJson(request);
     state.burst = body?.burst === true;
+    // #642 — two more opt-in arms, read the same way and reset the same way. `reset` is
+    // honoured explicitly so a cell can put the lane back exactly as it found it without
+    // knowing how many arms exist.
+    if (body?.reset === true) {
+      state.toolScript = false;
+      state.history = 0;
+      state.admittedTurnKeys = new Set();
+    }
+    if (typeof body?.toolScript === "boolean") state.toolScript = body.toolScript;
+    if (typeof body?.history === "number" && Number.isFinite(body.history)) {
+      state.history = Math.max(0, Math.min(200, Math.trunc(body.history)));
+    }
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ burst: state.burst }));
+    response.end(JSON.stringify({ burst: state.burst, toolScript: state.toolScript, history: state.history }));
     return true;
   }
 

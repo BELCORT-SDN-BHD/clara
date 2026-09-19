@@ -22,6 +22,10 @@ import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } f
 // branch is id-scoped and returns false otherwise, so chat-parity's single-row poll and
 // its own three intake legs are untouched.
 import { DOCS_INTAKE, handleDocumentsIntakeRuntime, handleDocumentsIntakeSupabase } from "./documents-intake-mock.mjs";
+// #636's batch lane. It answers ONE new RPC verb and two id-carrying runtime routes, all scoped to
+// its own batch ids, and it reuses the documents-intake lane's CLIENT so the workbench around the
+// card stays that lane's — see intake-batch-mock.mjs's own header.
+import { handleIntakeBatchRuntime, handleIntakeBatchSupabase } from "./intake-batch-mock.mjs";
 // P6-5's own lane, the same file-disjoint shape, consulted through the three hooks below.
 // Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
 // beside the chat-parity lane without either starving the other's fixtures.
@@ -37,6 +41,10 @@ import { handleJournalsTableSupabase } from "./journals-table-mock.mjs";
 // deliberately NOT first: it answers nothing the journals lane needs, and #548's ordering
 // note above is the one claim in this import block that is load-bearing.
 import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
+// #657. Dispatched ABOVE the home board, beside its sibling bank lane — see the dispatch site
+// below and bank-match-mock.mjs own header for the measurement that makes the position
+// load-bearing rather than cosmetic.
+import { handleP657Supabase } from "./bank-match-mock.mjs";
 // The documents-viewer walk's own lane (C-07 / D2 / D3), the same file-disjoint shape.
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
@@ -55,6 +63,7 @@ import { handleDocumentCorrectionSupabase } from "./document-correction-mock.mjs
 // below records against L7's module: this lane's handlers never call `readJson`, so a request
 // body some earlier hook already drained costs it nothing. Its RPC branch answers on the PATH
 // alone, and its one relation branch reads the query string.
+import { handleP656Runtime, handleP656Supabase } from "./opening-ledger-source-mock.mjs";
 import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // #623's durable-Work lane. Same file-disjoint shape: every branch is scoped to its own
 // client (or to an id that module minted) and falls through otherwise, it claims no
@@ -72,6 +81,10 @@ import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } fro
 // register. Scoped to its own client id in every branch (the control endpoint included) and
 // file-disjoint from every other lane. See staff-expense-claim-mock.mjs.
 import { handleStaffExpenseClaimRuntime, handleStaffExpenseClaimSupabase } from "./staff-expense-claim-mock.mjs";
+// #655's own lane — the trade-invoice form, its party picker, its refusals and the Work detail's
+// link block. Every branch names this lane's own client id (or the Work id this module minted)
+// before it answers and falls through otherwise. See trade-invoice-mock.mjs.
+import { handleTradeInvoiceRuntime, handleTradeInvoiceSupabase } from "./trade-invoice-mock.mjs";
 // #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
@@ -79,6 +92,7 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // #644's own lane (the C13 Knowledge walk). ID-scoped like its siblings — four client ids, one
 // per read outcome, plus its own record/document ids — hooked in ONE place below.
 import { handleKnowledgeSupabase } from "./knowledge-mock.mjs";
+import { handleWorkKnowledgeRuntime, handleWorkKnowledgeSupabase } from "./work-knowledge-mock.mjs";
 // #647's counterparty-identity lane — the C13 identity surface and its routed detail. A
 // file-disjoint sibling scoped to its own four client ids and the counterparty ids it minted; it
 // answers no verb any other lane answers (e2e-fixture-ownership.test.ts measures both).
@@ -130,6 +144,7 @@ import { handleClientCreateSupabase } from "./client-create-mock.mjs";
 // #639's C7 acquisition lane. Every handler names this lane's own client id or asset id
 // before it answers and falls through otherwise; it has no runtime half at all.
 import { handleFixedAssetSupabase } from "./fixed-asset-mock.mjs";
+import { handleDepreciationSupabase } from "./depreciation-mock.mjs";
 // #648's A5 lane — the firm setup checklist. Its five RPC verbs are names no other lane carries,
 // it reads a body only INSIDE a matched verb, and EVERY handler falls through unless the request
 // carries this lane's own cookie marker — which it has to, because `get_firm_setup` takes no
@@ -648,6 +663,10 @@ async function handleSupabase(request, response, url) {
   // would have starved the chat-parity thread of its `chat_sessions` row, which #507's new
   // client/thread pairing check turns into a 404.
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
+  // #636, BEFORE the documents-intake lane and safe there: it gates on `get_intake_batch` plus its
+  // own three batch ids and falls through for every other verb and every other id, so it cannot
+  // swallow anything that lane owns.
+  if (await handleIntakeBatchSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleDocumentsIntakeSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   // #649 — BEFORE the P6-5 lane, and that position IS load-bearing: `agentic-finish-mock.mjs`
@@ -665,6 +684,12 @@ async function handleSupabase(request, response, url) {
   // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
   // lane still needs; and every branch is scoped to a #644 id, so it answers for nobody else.
   if (await handleKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
+  // #658, on the same footing as the journal-work hook below and for the SAME measured reason
+  // (DECISIONS §6.1 / the #657 ruling: this chain is SEMANTIC, not sorted): `home-board-mock.mjs`
+  // answers `/rest/v1/coa_accounts` and `/rest/v1/agent_tasks_visible` with an honest `[]` for
+  // EVERY subject, so a Work-detail lane dispatched below it could never read its own run's task.
+  // Every branch here is scoped to this lane's own client or to a work id it minted.
+  if (await handleWorkKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleCounterpartyIdentitySupabase(request, response, path, url, sendJson, cors)) return;
   // AHEAD OF THE HOME BOARD (#623, and still true — NOT a body-drain reason):
   // `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers `/rest/v1/coa_accounts` and
@@ -687,7 +712,22 @@ async function handleSupabase(request, response, url) {
   // nothing but their placeholder. Every branch is scoped to this lane's own client and falls
   // through otherwise.
   if (await handleStaffExpenseClaimSupabase(request, response, path, url, sendJson, cors)) return;
+  // #655 — ABOVE home-board-mock.mjs for the reason the note above gives about EMPTY_RELATIONS:
+  // its unconditional /rest/v1/coa_accounts answer would leave this form's account pickers empty.
+  // Scoped to this lane's own client throughout (DECISIONS §6.1: dispatch order is SEMANTIC here,
+  // not sorted, and a lane whose verbs another arm answers unconditionally dispatches ABOVE it).
+  if (await handleTradeInvoiceSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
+  // #657 the /bank Matching lane. POSITION IS LOAD-BEARING and NOT sorted (DECISIONS §6.1):
+  // home-board-mock.mjs answers list_bank_statements and list_bank_accounts UNCONDITIONALLY
+  // through its EMPTY_RPCS array (home-board-mock.mjs:107-108, dispatched at :139-142,
+  // returning []), so a bank lane dispatched BELOW handleHomeBoardSupabase silently receives []
+  // for both and renders an empty account selector with no error anywhere. Every branch here is
+  // scoped to this lane own client or line ids and falls through otherwise, so the honest
+  // empties still answer every other walk. Do NOT move this below the home board, and do NOT
+  // declare those two verbs in SHARED_RPC_VERBS: the ownership census cannot see an
+  // array-dispatched arm, so a declaration would fail its own 2+ claimant reverse check.
+  if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
@@ -708,6 +748,13 @@ async function handleSupabase(request, response, url) {
   // reason the two lanes above are — it answers `/rest/v1/clients` with an id-scoped row of
   // its own and must reach it.
   if (await handleFixedAssetSupabase(request, response, path, url, sendJson, cors)) return;
+  // #651's depreciation lane. DISPATCHED AFTER #639's, and that order IS load-bearing rather than
+  // incidental: the two lanes share five verbs (`get_fixed_asset`, `get_depreciation_authority`,
+  // `list_depreciation_runs`, `list_fixed_assets` and `fa_register_tie` — all declared in
+  // `SHARED_RPC_VERBS`, which is that set's source of truth), each answering only for its own
+  // client or asset ids and falling through otherwise — so either order works, and this one keeps
+  // the older lane's fixtures first. It answers `/rest/v1/clients` the same honest id-scoped way.
+  if (await handleDepreciationSupabase(request, response, path, url, sendJson, cors)) return;
   // #652's C8 lane. Position is not load-bearing for the same reason the C9 lane's is not: every
   // branch is scoped to this lane's own client or accrual ids and falls through otherwise. It sits
   // beside the plan lane because it answers `/rest/v1/clients` the same honest id-scoped way.
@@ -717,6 +764,16 @@ async function handleSupabase(request, response, url) {
   // It sits AFTER the plan lane because the two share the four plan lifecycle verbs, each gated on
   // its own plan id — a declared share rather than a collision (see e2e-fixture-ownership.test.ts).
   if (await handlePrepaymentsSupabase(request, response, path, url, sendJson, cors)) return;
+  // #656's opening lane. ABOVE the home board, and that position IS load-bearing (DECISIONS
+  // §6.1's ruling on #657's finding, which is general): `home-board-mock.mjs`'s EMPTY_RELATIONS
+  // answers `/rest/v1/opening_seed_registry` AND `/rest/v1/coa_accounts` with an honest `[]` for
+  // EVERY subject, unconditionally — so this lane dispatched below it would find its own basis
+  // missing and its chart empty, silently, as an empty page rather than an error. Running here
+  // costs that lane nothing: every branch is scoped to this lane's own client, seed or document
+  // id and falls through otherwise, and its five rpc verbs are disjoint from every lane above.
+  if (await handleP656Supabase(request, response, path, url, sendJson, cors)) return;
+  // #657: this arm answers list_bank_statements / list_bank_accounts UNCONDITIONALLY through
+  // EMPTY_RPCS, which is why the bank-match lane above must stay ABOVE it.
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
@@ -788,6 +845,76 @@ async function handleSupabase(request, response, url) {
       counter: { required_answered: 0, required_total: 0 },
       items: [], required_outstanding: [], confirmed_facts: [],
     }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_legal_standing") {
+    // #635 — `/settings/firm` now READS. `firm-navigation-walk.spec.ts:175-197` walks that route
+    // as an owner AND as a bookkeeper with no mock for these three verbs, and
+    // `shell-migration-walk.spec.ts:131-140` lands on it after a redirect. The SAME reasoning
+    // #626 records for `get_my_preferences` above: a generic, HONEST default here keeps every
+    // other spec free of an unhandled-route 404 for a call it never asked about, and
+    // `firm-commercial-walk.spec.ts` installs its own `page.route` pairs (Playwright's
+    // last-registered-wins order) for every scenario it actually cares about.
+    //
+    // `can_accept_for_firm` FOLLOWS THE CORE'S OWN EMAIL-PREFIX PERSONA (the caller_context arm
+    // above): `owner@` is rank 3 and may accept for the firm; `bookkeeper@` and `viewer@` may
+    // not. A default that said "true" for everybody would render the accept control to a
+    // bookkeeper in every unrelated spec — precisely the class 裁-187 exists to prevent.
+    const owner = state.email.startsWith("owner@");
+    sendJson(response, 200, {
+      documents: [
+        {
+          kind: "terms", version: 1, status: "published", title: "Terms of Service (Clara beta)",
+          effective_from: "2026-09-12T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+          firm_accepted: true, accepted_at: "2026-09-18T14:00:00.000Z",
+          accepted_by: SUBJECT, accepted_by_name: "E2E Owner",
+          my_accepted_version: owner ? 1 : null, my_accepted_at: owner ? "2026-09-18T14:00:00.000Z" : null,
+        },
+        {
+          kind: "dpa", version: 1, status: "published", title: "Data processing agreement (clara-beta-2026-08-a)",
+          effective_from: "2026-08-30T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+          firm_accepted: true, accepted_at: "2026-09-18T14:00:00.000Z",
+          accepted_by: SUBJECT, accepted_by_name: "E2E Owner",
+          my_accepted_version: owner ? 1 : null, my_accepted_at: owner ? "2026-09-18T14:00:00.000Z" : null,
+        },
+      ],
+      standing_live: true,
+      can_accept_for_firm: owner,
+      masked: false,
+    }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_commercial_state") {
+    // #635 — ADMIN-FLOORED in the database (0233:342), so the default REFUSES below rank 2 the
+    // way the real door does. `serve-built.mjs`'s CORE has no rank-2 persona (owner@=3,
+    // bookkeeper@=1, viewer@=0) and this lane does NOT add one: nine lanes share that arm.
+    // Admin rank is proven in the DB battery and in the unit cells instead — a named residual.
+    if (!state.email.startsWith("owner@")) {
+      sendJson(response, 403, { code: "CLR04", message: "insufficient role", details: null }, cors);
+      return;
+    }
+    sendJson(response, 200, {
+      firm: { id: FIRM_ID, name: "E2E Accounting", created_at: "2026-08-31T00:05:00.000Z", is_operator: true },
+      // THE BETA PLAN AS 0163:214-215 SEEDS IT: unruled, so no figure may render anywhere.
+      plan: { local_key: "clara-beta-2026", name: "Clara Beta", currency: "MYR", amount_cents: 0, amounts_ruled: false },
+      payment: { recorded: false, recorded_at: null, subscription_present: false, customer_present: false },
+      invoices: { available: false, reason: "not_collected" },
+      // The 0007/0090 column defaults, which is what a firm WITH a row carries.
+      capacity: { docs_per_day: 100, pages_per_day: 1000, ocr_concurrency: 2, llm_witness_concurrency: 2, source: "firm_document_limits" },
+    }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_ai_usage") {
+    // #635 — admin-floored like its sibling, and EMPTY by default: an honest "no model calls in
+    // this period" rather than a fabricated figure on every unrelated spec's settings page.
+    if (!state.email.startsWith("owner@")) {
+      sendJson(response, 403, { code: "CLR04", message: "insufficient role", details: null }, cors);
+      return;
+    }
+    sendJson(response, 200, [], cors);
     return;
   }
 
@@ -1055,6 +1182,10 @@ await new Promise((resolveListen, rejectListen) => {
 // the shared session list. `handleChat` is last of the three and now returns false on a
 // miss, so FS-4 C-6's confirm route still reaches its own handler.
 const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, url) => {
+  // #636, BEFORE the documents-intake runtime lane: its two routes live under
+  // /api/intake/batches, a prefix that lane never claims, and the cancel route falls through on a
+  // batch id it did not mint.
+  if (await handleIntakeBatchRuntime(request, response, url)) return true;
   if (await handleDocumentsIntakeRuntime(request, response, url)) return true;
   if (await handleChatParityRuntime(request, response, url)) return true;
   if (await handleP6_5Runtime(request, response, url)) return true;
@@ -1064,12 +1195,22 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // while `handleChat` claims the whole `/api/chat/sessions/…/messages` shape and would
   // otherwise serve this lane's thread a canned text message with no Work cards in it.
   if (await handleJournalWorkRuntime(request, response, url)) return true;
+  // #658: ONE control endpoint, scoped to this lane's own client id on the WIRE (a query
+  // parameter, so the fall-through is taken before the body is drained), so nothing another
+  // walk owns can reach it.
+  if (await handleWorkKnowledgeRuntime(request, response, url)) return true;
   // #643, on the same footing: one admission route and one control endpoint, both scoped to this
   // lane's own client id, so nothing another walk owns can reach it.
   if (await handlePeriodicAdjustmentRuntime(request, response, url)) return true;
   // #638, on the same footing: one admission route and one control endpoint, both scoped to this
   // lane's own client id, so nothing another walk owns can reach it.
   if (await handleStaffExpenseClaimRuntime(request, response, url)) return true;
+  // #655, on the same footing: one admission route and one control endpoint, both scoped to this
+  // lane's own client id, so nothing another walk owns can reach it.
+  if (await handleTradeInvoiceRuntime(request, response, url)) return true;
+  // #656, on the same footing as its neighbours: ONE route (`POST /api/opening/parse-targets`),
+  // scoped to this lane's own seed id, so nothing another walk owns can reach it.
+  if (await handleP656Runtime(request, response, url)) return true;
   if (await handleChat(request, response, url)) return true;
   return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,

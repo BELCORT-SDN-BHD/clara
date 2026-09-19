@@ -340,7 +340,11 @@ test("a probe failure inside a DAILY belt skips that belt ONLY — the sweep beh
   const swept = await runReconcilerSweep(client, { ...chatDeps((m) => log.push(m)), faRuns: true, adjRuns: true, prune: true });
   assert.equal(swept.faOk, false, "the FA belt reports its own failure…");
   assert.equal(swept.adjOk, false, "…and so does the adjustment belt, independently");
-  assert.deepEqual(swept.beltErrors, [], "both contained THEMSELVES — nothing escaped to the assembly wrapper");
+  // #636's belt (0229) joined this law at wave 2026-09-18 by DECISIONS §6.3: it feature-detects
+  // through the SAME `to_regprocedure` read, so this fixture injects the identical failure into
+  // it, and it must contain it the identical way rather than name itself in `beltErrors`.
+  assert.equal(swept.batchCancelOk, false, "…and so does the intake-batch cancellation belt");
+  assert.deepEqual(swept.beltErrors, [], "all three contained THEMSELVES — nothing escaped to the assembly wrapper");
   assert.equal(typeof swept.pruned, "number", "the trace prune, sequenced last of all, still ran");
 });
 

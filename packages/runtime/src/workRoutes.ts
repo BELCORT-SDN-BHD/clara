@@ -585,6 +585,135 @@ export function toDbClaim(
   return { ok: true, claim: out };
 }
 
+/** The WIRE shape of #655's typed trade-invoice particulars. camelCase in, the database's own
+ *  snake_case out — the `toDbClaim` translation discipline, applied to a second typed payload. */
+type WireTradeInvoice = {
+  counterparty?: { id?: unknown; name?: unknown; registrationNo?: unknown; tin?: unknown };
+  documentDate?: unknown;
+  dueDate?: unknown;
+  dueDateSource?: unknown;
+  reference?: unknown;
+  currency?: unknown;
+  totalCents?: unknown;
+  taxFacts?: unknown;
+};
+
+const tiInvalid = (field: string, reason: string): InvalidBasis =>
+  ({ error: "invalid_basis", field: `invoice.${field}`, reason });
+
+/**
+ * Shape-validate the WIRE trade-invoice particulars and translate them into the database's own
+ * field spelling. `clara._assert_trade_invoice_basis` re-validates every one of these and is the
+ * authority — it alone holds the client's chart, the identity surface and the fiscal calendar.
+ * This is the earlier, more legible half whose job is to NAME THE FIELD.
+ *
+ * IT REFUSES IN THE DOOR'S OWN VOCABULARY, never in a private one: the same `reason` tokens the
+ * migration raises and `lib/trade-invoice-basis.ts` maps to messages, so a browser cannot tell the
+ * two halves of one validation apart. That is why the four SHAPE failures are four tokens here as
+ * well as in 0225 (review finding F2): `invalid_particulars` for a payload that is not a record of
+ * particulars (including an unusable document number, which the door has no token of its own for),
+ * `invalid_currency`, `invalid_tax_facts`, and `invalid_kind` for the kind and nothing else.
+ *
+ * NO FLOATING POINT ANYWHERE. `totalCents` arrives an integer and stays one; a non-integer is
+ * refused by name rather than rounded, because a rounded cent is a wrong ledger.
+ *
+ * `taxFacts` IS CARRIED, NEVER VALIDATED (the #638 rule): an object or null, and nothing inspects
+ * what is inside it.
+ */
+export function toDbTradeInvoice(
+  raw: unknown,
+): { ok: true; invoice: Record<string, unknown> } | { ok: false; error: InvalidBasis } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: { error: "invalid_basis", field: "invoice", reason: "invalid_particulars" } };
+  }
+  const wire = raw as WireTradeInvoice;
+
+  // ---- the party. Resolved at ADMISSION (D12a), never created here ---------------------------
+  const cp = wire.counterparty;
+  if (!cp || typeof cp !== "object" || Array.isArray(cp)) {
+    return { ok: false, error: tiInvalid("counterparty", "party_unresolved") };
+  }
+  const party: Record<string, unknown> = {};
+  if (cp.id !== undefined && cp.id !== null) {
+    if (typeof cp.id !== "string" || !UUID_RE.test(cp.id)) {
+      return { ok: false, error: tiInvalid("counterparty.id", "party_unresolved") };
+    }
+    party.id = cp.id;
+  }
+  for (const [wireKey, dbKey] of [["name", "name"], ["registrationNo", "registration_no"], ["tin", "tin"]] as const) {
+    const v = (cp as Record<string, unknown>)[wireKey];
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v !== "string") return { ok: false, error: tiInvalid(`counterparty.${dbKey}`, "party_unresolved") };
+    if (v.trim() === "") continue;
+    if (v.trim().length > 200) return { ok: false, error: tiInvalid(`counterparty.${dbKey}`, "party_unresolved") };
+    party[dbKey] = v.trim();
+  }
+  if (Object.keys(party).length === 0) {
+    return { ok: false, error: tiInvalid("counterparty", "party_unresolved") };
+  }
+
+  // ---- the two dates and the due-date basis (D12c) --------------------------------------------
+  if (typeof wire.documentDate !== "string" || !DATE_RE.test(wire.documentDate)) {
+    return { ok: false, error: tiInvalid("document_date", "invalid_due_date") };
+  }
+  let dueDate: string | null = null;
+  if (wire.dueDate !== undefined && wire.dueDate !== null && wire.dueDate !== "") {
+    if (typeof wire.dueDate !== "string" || !DATE_RE.test(wire.dueDate)) {
+      return { ok: false, error: tiInvalid("due_date", "invalid_due_date") };
+    }
+    if (wire.dueDate < wire.documentDate) {
+      return { ok: false, error: tiInvalid("due_date", "invalid_due_date") };
+    }
+    dueDate = wire.dueDate;
+  }
+  // `counterparty_terms` is the DATABASE's answer and never the caller's: only it holds
+  // `clara.counterparties.payment_terms_days`. A caller claiming it has invented a fact, so the
+  // wire admits only the two a caller can actually know, and the door derives the third.
+  let dueSource: string | undefined;
+  if (wire.dueDateSource !== undefined && wire.dueDateSource !== null && wire.dueDateSource !== "") {
+    if (wire.dueDateSource !== "stated" && wire.dueDateSource !== "absent") {
+      return { ok: false, error: tiInvalid("due_date_source", "invalid_due_date") };
+    }
+    if ((wire.dueDateSource === "stated") !== (dueDate !== null)) {
+      return { ok: false, error: tiInvalid("due_date_source", "invalid_due_date") };
+    }
+    dueSource = wire.dueDateSource;
+  }
+
+  // ---- the document's own number, the currency and the exact total ----------------------------
+  let reference: string | null = null;
+  if (wire.reference !== undefined && wire.reference !== null && wire.reference !== "") {
+    if (typeof wire.reference !== "string") return { ok: false, error: tiInvalid("reference", "invalid_particulars") };
+    if (wire.reference.trim().length > 64) return { ok: false, error: tiInvalid("reference", "invalid_particulars") };
+    if (wire.reference.trim() !== "") reference = wire.reference.trim();
+  }
+  if (wire.currency !== undefined && wire.currency !== null && wire.currency !== "MYR") {
+    return { ok: false, error: tiInvalid("currency", "invalid_currency") };
+  }
+  if (!isInteger(wire.totalCents)) return { ok: false, error: tiInvalid("total_cents", "invalid_total") };
+  if ((wire.totalCents as number) <= 0) return { ok: false, error: tiInvalid("total_cents", "invalid_total") };
+
+  let taxFacts: unknown = null;
+  if (wire.taxFacts !== undefined && wire.taxFacts !== null) {
+    if (typeof wire.taxFacts !== "object" || Array.isArray(wire.taxFacts)) {
+      return { ok: false, error: tiInvalid("tax_facts", "invalid_tax_facts") };
+    }
+    taxFacts = wire.taxFacts;
+  }
+
+  const out: Record<string, unknown> = {
+    counterparty: party,
+    document_date: wire.documentDate,
+    due_date: dueDate,
+    reference,
+    currency: "MYR",
+    total_cents: wire.totalCents,
+    tax_facts: taxFacts,
+  };
+  if (dueSource !== undefined) out.due_date_source = dueSource;
+  return { ok: true, invoice: out };
+}
+
 /** The WIRE spelling of a field path the DATABASE raised. Every path is the database's already —
  *  EXCEPT its evidence array, which it spells `source_refs` and the browser posts as `sourceRefs`,
  *  and #643's typed particulars, which it spells `adjustment.<snake_case>` and the browser posts
@@ -1117,6 +1246,148 @@ export function workRoutes(): express.Router {
     } catch (err) {
       if (sendAuthError(res, err)) return;
       sendAdmissionError(res, err, "staff expense claim admission");
+    }
+  });
+
+  // ---- C3 · #655 · the trade-invoice admission, the FOURTH sibling ---------
+  //
+  // A SIBLING of `/api/work/journal`, `/api/work/periodic-adjustment` and
+  // `/api/work/staff-expense-claim`, never a widened version of any of them, for the reason
+  // migration 0221 gives for keeping a third database door: they take different payloads and are
+  // reached by different surfaces.
+  //
+  // TWO ARGUMENTS, NOT ONE. Unlike the claim door, this one takes BOTH `invoice` and `basis`: a
+  // trade invoice's journal is NOT derivable from its particulars — which expense account a bill
+  // debits is a coding judgement, not an arithmetic one — so the door takes the basis the preparer
+  // (or Clara) actually chose, and re-checks that exactly one control leg of the right domain
+  // carries the stated total to the sen.
+  //
+  // BOTH THE HUMAN FORM AND, LATER, THE v21 CHAT TOOL POST THROUGH HERE, which is what makes ONE
+  // `clara_runtime` door the whole lane's admission. There is no `clara_authenticated` twin.
+  //
+  // 202 FOR THE SAME REASON THE SIBLINGS DO: the response acknowledges an ADMITTED intent, never a
+  // posted entry. The trade-invoice ROW, however, is already durable when this returns — it is
+  // written inside the admission transaction — which is why the 202 body carries `invoice_id`, the
+  // resolved `counterparty_id` and the DERIVED `due_date` / `due_date_source`.
+  router.post("/api/work/trade-invoice", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      clientId?: unknown; intentKey?: unknown; kind?: unknown; invoice?: unknown;
+      basis?: unknown; sourceRefs?: unknown;
+    };
+    if (typeof body.clientId !== "string" || !UUID_RE.test(body.clientId)) {
+      // A malformed client id is a NOT-FOUND, never a database error (#614's lesson) — and it is
+      // the same answer an unauthorised caller gets, so this door is not an existence oracle
+      // either (migration 0225 section B states the same law for the door's own preamble).
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    if (typeof body.intentKey !== "string" || body.intentKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_intent_key" });
+      return;
+    }
+    // THE KIND IS CHECKED HERE ONLY FOR ITS SHAPE. Whether a credit-note-shaped payload is
+    // admitted is the DOOR's answer (`credit_shape_not_admitted`), and it is refused by name there
+    // so the #666/#662 boundary is spoken once, in one place.
+    if (typeof body.kind !== "string" || body.kind.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "kind", reason: "invalid_kind" });
+      return;
+    }
+    const invoice = toDbTradeInvoice(body.invoice);
+    if (!invoice.ok) {
+      res.status(400).json(invoice.error);
+      return;
+    }
+    const translated = toDbBasis(body.basis);
+    if (!translated.ok) {
+      res.status(400).json(translated.error);
+      return;
+    }
+    // C1 · THE ATTACHMENT IS GENUINELY OPTIONAL. An omitted, null or empty `sourceRefs` is a
+    // chat- or UI-stated invoice; a cited document is the other lawful source. Both are AC3's.
+    const refs = toDbSourceRefs(body.sourceRefs);
+    if (!refs.ok) {
+      res.status(400).json(refs.error);
+      return;
+    }
+
+    try {
+      const admitted = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query(
+          "select clara.admit_trade_invoice_work($1::uuid, $2::uuid, $3::text, $4::text, $5::jsonb,"
+          + " $6::jsonb, $7::text, $8::jsonb, $9::text) as receipt",
+          [
+            body.clientId, p.sub, body.intentKey, (body.kind as string).trim(),
+            JSON.stringify(invoice.invoice), JSON.stringify(translated.basis),
+            "user_direct", JSON.stringify(refs.sourceRefs), DEFAULT_MODEL,
+          ],
+        );
+        return (r.rows[0]?.receipt ?? null) as {
+          work_id: string;
+          task_id: string;
+          logical_op_id: string;
+          status: string;
+          replayed: boolean;
+          invoice_id: string;
+          kind: string;
+          counterparty_id: string;
+          due_date: string | null;
+          due_date_source: string;
+        } | null;
+      });
+      if (!admitted) {
+        res.status(500).json({ error: "internal" });
+        return;
+      }
+      if (admitted.replayed !== true) await enqueueWork(admitted.task_id);
+      res.status(202).json({
+        work_id: admitted.work_id,
+        task_id: admitted.task_id,
+        logical_op_id: admitted.logical_op_id,
+        status: admitted.status,
+        replayed: admitted.replayed === true,
+        invoice_id: admitted.invoice_id,
+        kind: admitted.kind,
+        counterparty_id: admitted.counterparty_id,
+        due_date: admitted.due_date,
+        due_date_source: admitted.due_date_source,
+      });
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      // D12(a) — `party_ambiguous` IS THE ONE REFUSAL THAT CARRIES DATA. The door raises it with
+      // the candidate list VERBATIM in its typed detail, because the person has to pick and a
+      // sentence they cannot act on is worse than no sentence. `sendAdmissionError` answers the
+      // other thirteen faithfully but keeps only `detail.reason` (its own note at the
+      // `invalid_source_ref` arm says why: the browser must not have to parse Postgres detail), so
+      // this ONE arm is unfolded HERE, inside this lane's own route, rather than widening the
+      // shared responder for every door in the file.
+      if (reasonOf(err) === "party_ambiguous") {
+        const raw = (err as { detail?: unknown })?.detail;
+        let candidates: unknown[] = [];
+        if (typeof raw === "string" && raw.length > 0) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              const list = (parsed as Record<string, unknown>).candidates;
+              if (Array.isArray(list)) candidates = list;
+            }
+          } catch {
+            /* a plain-text detail carries no candidates — the banner is the door's sentence alone */
+          }
+        }
+        res.status(400).json({
+          error: "invalid_basis",
+          field: fieldOf(err) ?? "invoice.counterparty",
+          reason: "party_ambiguous",
+          detail: { candidates },
+        });
+        return;
+      }
+      sendAdmissionError(res, err, "trade invoice admission");
     }
   });
 

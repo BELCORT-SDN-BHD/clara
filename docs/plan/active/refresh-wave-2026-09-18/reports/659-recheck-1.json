@@ -1,0 +1,135 @@
+{
+  "ticket": 659,
+  "lens": "recheck",
+  "lens_model": "claude-sonnet-5",
+  "branch": "impl/659-firm-home",
+  "head": "cc19cf1892d616c184b0f9b366dbf4b6e96eee52",
+  "round_report": "docs/plan/active/refresh-wave-2026-09-18/reports/659-fixround-1.md",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/659-recheck-1.json",
+  "method": "Read 659-fixround-1.md and all three review JSONs (spec, standards, adversarial) in full. For every finding the round marked applied, opened the citing commit's diff (git show) and, where the fix's own evidence named a specific cell, ran that cell (independently, on the #659 rig at 127.0.0.1:55709/clara_659) rather than trusting the report's transcript. Ran the branch's full local batteries fresh, from a clean worktree at cc19cf18, rather than re-reading prior output: pnpm typecheck, pnpm lint (twice, to rule out a truncated background run), the 41-gate-flag db battery scoped to firm-portfolio-pack.test.mjs + compliance-watch-disposition.test.mjs, operation-census.test.mjs + rig-isolation.test.mjs with no reset flags, check-frozen-workflows.mjs, check-parts-parity.mjs, the whole apps/web unit suite (node scripts/run-tests.mjs), and pnpm --filter @clara/web e2e home-board on the assigned Playwright triple (3380/3381/3382). Cross-checked the two deliberately-left items and the one ratification-requested item against DECISIONS.md row 0231 ('Recuts: none'), WORK-ORDER.md rule 6 (scope discipline), and packages/db/scripts/migrate.mjs's actual checksum-drift-refusal code, and confirmed migration 0231 is in fact applied on clara_659 (clara.schema_migrations). Confirmed git status --porcelain is clean in the worktree and HEAD is cc19cf18 throughout; made no tracked-file edits.",
+  "verified_green_this_pass": [
+    "pnpm typecheck (worktree root) -> 0 errors, apps/web + packages/runtime both Done",
+    "pnpm lint (worktree root), run twice with an explicit exit-code sentinel after the first run's background log looked truncated -> LINT_EXIT_CODE:0 both times",
+    "node --test --test-concurrency=1 <41 gate flags incl. firm-portfolio-pack-preintegration-gate.mjs last> tests/firm-portfolio-pack.test.mjs tests/compliance-watch-disposition.test.mjs -> 23/23 pass (17+6), including both new cells p659.links.work_question_row_cannot_address_its_work and p659.portfolio.preview_zero_calls_helper_zero_times",
+    "node --test tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset flags set) -> 30 pass, 0 fail, 1 skip (T19, destructive, correctly skipped)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 296 frozen files, 53 use-workflow modules frozen+registered, 3 retired",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, reader superset of emittable",
+    "node scripts/run-tests.mjs (whole apps/web unit suite) -> 4204 tests, 4201 pass, 1 fail, 2 skipped. The one failure is lib/clara/use-clara-thread-stop.test.ts:1021 ('630 a stop the door says had ALREADY FINISHED...') -- exactly the cell and file S1 (standards review) already identified as a pre-existing, non-deterministic flake in #630's lane with zero diff against origin/main. Confirms S1's own claim of non-determinism (2/5 isolated runs red) rather than contradicting the fixround report's 'did not fire in my run' -- it is a coin flip and it landed differently this time. Not a regression from this branch.",
+    "pnpm --filter @clara/web e2e home-board (triple 3380/3381/3382) -> 15 passed (1.2m), including p659.home.drilldown's rewritten focus-return assertion and the undated recent-success drilldown URL",
+    "git status --porcelain in the worktree -> clean; HEAD -> cc19cf1892d616c184b0f9b366dbf4b6e96eee52 throughout"
+  ],
+  "verified_applied": [
+    {
+      "id": "A1",
+      "verdict": "confirmed",
+      "commit": "da830ddf",
+      "checked": "apps/web/lib/firm/needs-you-links.ts: the work_question special case and isUuidShaped guard are deleted; hasOwningTab loses its task_id parameter entirely; needs-you-links.ts and .test.ts now assert the root fall-through and doesNotMatch(/work/). apps/web/messages/en.json: NeedsYou.openTab.work_question key is deleted (grep confirms it is gone from the openTab block; the unrelated NeedsYou.work_question row-label key, a different string, correctly remains). packages/db/tests/firm-portfolio-pack.test.mjs's new p659.links.work_question_row_cannot_address_its_work opens a REAL parked question through parkedWork()/listReviewQueue(), not a fixture uuid, and asserts row.task_id !== work.id, row.id === questionId, and that no field of the row equals the Work id.",
+      "ran": "Full 41-gate db battery including this cell: pass (this session). needs-you-links.test.ts's rewritten cell: pass (whole-suite run, 'ticket 659 (fix round 1, A1): a work_question row keeps the workspace ROOT'). Not vacuous: the cell's guard assertion (no row field equals the Work id) is a live tripwire that reds the day work_id is published, unlike the original which compared against a self-invented uuid."
+    },
+    {
+      "id": "A2",
+      "verdict": "confirmed",
+      "commit": "cc19cf18",
+      "checked": "apps/web/lib/firm/portfolio-pack.ts: portfolioCountHref drops its pack parameter and always passes since:null/until:null for the recent_success arm; sole call site (firm-portfolio-section.tsx:217) updated to match. Doc comment corrected to state the link is a SUPERSET of the count rather than asserting non-divergence. messages/en.json's recentDatedBy now discloses both halves ('The Work list it opens is not narrowed to those seven days...'). e2e home-board-walk.spec.ts's #659 leg regex changed to /work?client=...&status=completed$ (no since/until), with the #650 client-altitude leg at a different line correctly left untouched (different door, different axis).",
+      "ran": "e2e home-board fresh run: 15/15 pass, this leg included. firm-portfolio.test.tsx cells for this fix are part of the 4201-pass whole-suite run."
+    },
+    {
+      "id": "A3",
+      "verdict": "confirmed",
+      "commit": "5ddabcee",
+      "checked": "apps/web/e2e/home-board-walk.spec.ts's poll now reads document.activeElement's aria-label and compares it to the loop's own `name` (not a hard-coded '3' against textContent) -- the exact rewrite the adversarial review prescribed. apps/web/lib/firm/portfolio-focus-return.ts is a new, real module (take-once sessionStorage marker, best-effort, per-tab) wired into firm-portfolio-section.tsx via a ref map keyed by the same id the marker stores (countLinks ref + pendingFocus ref + a useEffect that focuses once the link exists).",
+      "ran": "e2e home-board fresh run: 15/15 pass (the drilldown spec, which contains this poll, is in that file). Unit: portfolio-focus-return.test.ts cells ('an unavailable or throwing store costs the focus position and NEVER the navigation', etc.) pass in the fresh whole-suite run and are registered in apps/web/test/manifest.txt:320."
+    },
+    {
+      "id": "A4",
+      "verdict": "confirmed",
+      "commit": "e895464f",
+      "checked": "firm-portfolio-section.tsx's filtered-Empty sentence changed from 'The firm has clients -- none of them matches' to 'No client on this page of the register matches...', plus a conditional emptyFilteredMorePages hint when pack.truncated. Both message keys exist in en.json with that exact wording.",
+      "ran": "firm-portfolio.test.tsx cell 'ticket 659 (A4): the filtered-Empty makes a PAGE-local claim, never a firm-wide one' -> pass in fresh whole-suite run. Not vacuous: it mounts a truncated pack and asserts both the absence of the old firm-wide sentence and the presence of page-local/Next language."
+    },
+    {
+      "id": "A5",
+      "verdict": "confirmed",
+      "commit": "e895464f",
+      "checked": "rowMatchesAttention's active/failed arms changed from (row.x ?? 0) > 0 to row.x !== null && row.x > 0; the caught_up arm and top-level caughtUp both changed from (r.x ?? 0) === 0 to r.x === 0 (a null now fails all three predicates instead of satisfying caught_up).",
+      "ran": "Two cells ('an UNKNOWN count withholds the reassurance...' and '`caught_up` drops a row whose counts are unknown...') pass in the fresh whole-suite run. Not vacuous: the first mounts a real null-count row and asserts both 'could not be read' is present AND 'Every client is clear' is absent -- previously falsifiable and, per the finding, previously false."
+    },
+    {
+      "id": "A6",
+      "verdict": "confirmed",
+      "commit": "e895464f",
+      "checked": "coverageWord (singular) became coverageWords (plural, an array); it now appends the completions_without_receipt sentence off uncountedCompletions > 0 independently of which coverage_reason token won precedence, guarded against double-printing when the reason token already is that one.",
+      "ran": "Cell 'ticket 659 (A6): an undated completion is disclosed even when another coverage reason wins the row' passes in the fresh whole-suite run, mounting exactly the archived+undated-completion shape the finding described and asserting both sentences render together."
+    },
+    {
+      "id": "A7",
+      "verdict": "confirmed",
+      "commit": "cc19cf18",
+      "checked": "compliance-watch-affordance.tsx now imports MemberName + useMemberNames and renders the actor slot via t.rich(...) with a MemberName node, resolved through the same clara.firm_members_visible roster the activity band uses -- reusing an existing shared component rather than inventing a second resolution path. The agent-unreachable claim is structurally true (all three compliance doors floor at bookkeeper/CLR03 before any write, per DECISIONS and the existing compliance-watch-affordance.test.tsx which stayed 3/3 green).",
+      "ran": "compliance-watch-receipt.test.tsx: the pinned-uuid cell now asserts 'Acknowledged by Siti Rahman' and doesNotMatch the uuid; a new cell drives an unreadable (403) roster and asserts the shortened-id fallback, never a blank. Both pass in the fresh whole-suite run."
+    },
+    {
+      "id": "A8",
+      "verdict": "confirmed",
+      "commit": "5ddabcee",
+      "checked": "add-client-control.tsx's header no longer claims the two test files were repointed; it now says plainly they still mount ClientRegisterList as #649's AC1 evidence at its own surface, and names the residual (no cell imports this module by its own path). Verified independently that this is now TRUE, not merely reworded: apps/web/components/firm/client-register-list.tsx:26,89 imports and mounts AddClientControl, so the two test files, which do mount ClientRegisterList, do exercise this module transitively -- the claim in the new comment is checkable and holds."
+    },
+    {
+      "id": "A9",
+      "verdict": "confirmed",
+      "commit": "cc19cf18/da830ddf window",
+      "checked": "New db cell p659.portfolio.preview_zero_calls_helper_zero_times counts clara._work_run_attempts calls via pg_stat_user_functions with track_functions='all' and pg_stat_force_next_flush() (needed because the first, unforced form of the probe read zero for both arms, which the commit message itself discloses as a trap it fell into and corrected). Independently re-read the migration body: the left join clara._work_run_attempts(v_labelled) is unconditional in the SQL; the zero-calls-at-p_preview=0 property is a plan-shape fact (empty v_preview_ids -> no outer rows -> function scan never executes), matching both the migration comment at 0231:495-497 and the README addition.",
+      "ran": "This cell is one of the 23/23 in the fresh 41-gate db battery run: 0 calls delta at p_preview=0, 1 at p_preview=3."
+    },
+    {
+      "id": "A10",
+      "verdict": "confirmed",
+      "commit": "e895464f",
+      "checked": "use-firm-portfolio.ts's finally block gates setLoading(false)/setRefreshing(false) on epoch === epochRef.current, matching the epoch guard already used on the success/error paths for the data itself.",
+      "ran": "New cell 'fix round 1 (A10): a SUPERSEDED read cannot clear `loading` while the current one is still in flight' passes in the fresh whole-suite run. Not vacuous: it drives two out-of-order-settling reads via injected gates and asserts loading stays true after the OLDER read settles, then false only after the current one does -- this is exactly the race the finding described, reproduced and pinned rather than asserted away."
+    },
+    {
+      "id": "A12",
+      "verdict": "confirmed",
+      "commit": "5ddabcee",
+      "checked": "Two new cells in e2e-fixture-ownership.test.ts: one reads serve-built.mjs's raw text and asserts handleActivitySupabase's dispatch index is still below handleHomeBoardSupabase's (a real regression tripwire against the exact §6.1 hazard); one reads home-board-mock.mjs's raw text and asserts it answers no list_activity verb (a positive control on the dependency claim). Confirmed independently: git diff origin/main...HEAD -- apps/web/e2e/serve-built.mjs is empty (zero diff), so the dispatch order these cells pin is unmoved, honoring §6.1.",
+      "ran": "Both cells pass in the fresh whole-suite run."
+    },
+    {
+      "id": "A13",
+      "verdict": "confirmed",
+      "commit": "cc19cf18",
+      "checked": "packages/db/README.md gained the cursor-grammar paragraph verbatim as described (mint is lower(name)||'|'||id, decode refuses a blank name component, no rename door exists today). This is prose-only by design (see the 'deliberately left #2' judgment below for why 0231 itself was not touched)."
+    }
+  ],
+  "report_only_corrections_verified": [
+    {"id": "F1", "where": "659-final.md AC1/UI blueprint section", "checked": "The unscopeable-vs-debt reclassification and its reason (no client parameter at all, vs get_client_work_pack's unused p_client) is present in 659-final.md's Docs section, matching the spec review's own recommended fix wording."},
+    {"id": "F2", "where": "659-final.md Docs section", "checked": "The recentDatedBy polarity-reversal explanation (count is receipt-dated, #650's case is list-vs-count not count-vs-drilldown) is present, matching the spec review's fix."},
+    {"id": "F3", "where": "659-final.md Blueprint drift line", "checked": "Citation corrected to docs/PRD.md:27 with the reason (pre-existing brief off-by-four, branch does not touch PRD.md); independently confirmed with grep -n on the sentence in the checked-out docs/PRD.md, which does put it at line 27."},
+    {"id": "S1", "where": "659-final.md 'whole apps/web unit suite' line + follow-up 8", "checked": "Final report now states the measured 4188/1-fail run and explains the flake as #630's, non-deterministic, zero diff. This session's own fresh run reproduced the exact same failing cell independently, corroborating S1's non-determinism claim rather than finding a discrepancy."},
+    {"id": "S2", "where": "659-final.md UI-04 row", "checked": "Corrected to name @/components/parts/PartBadge specifically and cite the four sibling Firm-altitude components that already use it, matching grep -n Badge firm-portfolio-section.tsx (import { Badge } from \"@/components/parts/PartBadge\")."}
+  ],
+  "deliberately_left_judged": [
+    {
+      "item": "A11 — lib/firm/timeline.ts and clara.list_firm_timeline now have no production consumer; not deleted",
+      "judgment": "reason_holds",
+      "why": "WORK-ORDER.md rule 6 (scope discipline: 'do not widen or narrow the brief silently... take the most conservative reading... state the assumption') directly supports leaving a deletion decision to a later, deliberate lane rather than folding it into a fix round for unrelated findings. Independently re-ran the grep this pass: `grep -rn \"firm/timeline\" apps/web` still returns only the test file's own import and two prose references, confirming the dead-consumer claim is current, not stale. Named in 659-final.md's follow-ups (item 6) exactly as the adversarial review's own fix field asked ('Name it as a residual in the report')."
+    },
+    {
+      "item": "0231's own header/body comments not edited (A9's and A13's prose land in packages/db/README.md instead)",
+      "judgment": "reason_holds",
+      "why": "Independently confirmed both halves of the stated constraint: (1) migration 0231 is applied on clara_659 today (select version from clara.schema_migrations where version='0231_firm_portfolio_pack' returns a row); (2) packages/db/scripts/migrate.mjs:335-336 does contain the checksum-drift refusal cited ('applied migration ... was MODIFIED after being applied (checksum drift). Migrations are immutable -- add a new migration file instead'), and this repo already keeps a precedent section in README.md for exactly this situation (the pre-existing 0214 paragraph, confirmed present immediately above the new A9/A13 paragraphs). Editing the migration file in place would either be a no-op (if the DB rejects the drifted checksum) or would falsify the sha256(prosrc) pins other batteries assert against; writing the correction in README.md is the same move this codebase already made once."
+    }
+  ],
+  "ratification_requested_judged": {
+    "item": "Publish work_id on list_review_queue's work_question_rows (the real fix for A1)",
+    "judgment": "reasonable_to_defer",
+    "why": "DECISIONS.md row 0231 (#659's own row) states 'Recuts: none' in its own column, confirmed by direct grep of the live file. A recut of clara.list_review_queue (a different, unrelated migration's function) to add a column is categorically a recut this ticket's row forbids, not a scope call the fix-round worker could make unilaterally. The chosen alternative (withdraw the link to its pre-#659 fall-through, name the residual, leave a live db-level tripwire cell) is precisely option (a) the adversarial review itself offered as an acceptable fix, not an invention. No action needed from this recheck beyond flagging it to the orchestrator, which the fixround report already does explicitly."
+  },
+  "new_defects_introduced_by_fix_round": [],
+  "not_independently_verified": [
+    "Hosted evidence (all evidence in this recheck, like the fix round's own, is local to clara_659 / the assigned worktree).",
+    "A13's 'no rename door exists' claim was checked by re-reading the fixround report's own grep result and by structural inspection of the two doors (create_client refusing a blank name), not by an independent full-repo grep for every possible client-mutation door; this is a 'note' severity, non-blocking finding and the risk of a missed rename door is unchanged by this fix round (it existed before it too)."
+  ],
+  "verdict": "accept"
+}

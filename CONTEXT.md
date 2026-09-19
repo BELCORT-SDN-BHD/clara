@@ -143,6 +143,38 @@ plus the instant the read itself happened. The needs-you number is not in it: th
 review-queue count that owns it.
 _Avoid_: Calling its read instant a watermark; treating it as the needs-you source.
 
+**Firm portfolio pack**:
+The one firm-scoped read behind the firm's home: one row per client the caller may see, each
+carrying counts of DISTINCT Accounting work — what is running, what needs attention (failed and
+refused together, with the split published so a link and its number are the same population), and
+what a committed operation receipt dates inside the last seven `Asia/Kuala_Lumpur` calendar dates —
+plus that row's coverage and a short preview. It is paged by a keyset over the client's own name,
+and it carries **no money figure of any kind**: the firm's home shows counts, never client amounts.
+_Avoid_: A consolidated ledger; a cross-client money total; a sum of facets; calling its read
+instant a watermark.
+
+**Portfolio coverage**:
+A row's or a page's own statement of which part of the answer it is not making — that the attention
+numbers beside it exclude this client, that a finished Work carries no dated receipt, that only part
+of the page's retry labels were asked for, or that the register is longer than this page. It is a
+named condition, and it is never a smaller number presented as a complete one.
+_Avoid_: A percentage; a confidence score; a silent omission.
+
+**Attention source freshness**:
+The statement of WHICH signal dates each number on the firm's home: the review queue's mutation
+watermark, the compliance and lint evaluators' 48-hour staleness flags, the sweep's last-finalized
+instant, and the portfolio pack's own read instant. Reads of different ages are dated separately,
+because a single page-level "last updated" would be true of none of them.
+_Avoid_: One timestamp standing for the whole page; calling a read instant a watermark.
+
+**Watch disposition**:
+What a person has done about a compliance watch and when: acknowledged, snoozed, re-armed or
+resolved, with the actor, the instant, the rationale and — where the act was a resolution — the
+typed conclusion and evidence, over an append-only trail that records each state transition. An
+acknowledgement is an overlay: it never erases the condition it acknowledges. This record carries no
+revision number, so a transition is what names a change.
+_Avoid_: Treating an acknowledgement as a resolution; a dismissal; an invented version number.
+
 **Saved view**:
 A named set of list filters a person keeps, stored against that person rather than the firm. It is a filter on one destination — the same URL, narrowed — never a second destination and never a position in a result set.
 _Avoid_: A separate route or tab; a remembered page of results; a shared firm-level configuration.
@@ -178,6 +210,35 @@ _Avoid_: Presenting an exact-name check as duplicate detection — a same-name c
 **Opening position**:
 What a client's books start from: either a first year of trading, where there is nothing to carry down and no opening balances are owed, or a prior period's closing position that must be brought in and tied out before the books can be relied on. The second is owed work whether or not anyone has started it.
 _Avoid_: Treating a deferred carry-down as "no opening needed"; treating an empty opening register as evidence of a first year; a blanket onboarding sign-off standing in for either.
+
+**Opening basis**:
+The one versioned set of opening balances a client's books start from, together with its source,
+its mapping to the chart of accounts and its tie-out. A client has at most one live basis at a
+time; it is authored, corrected and superseded as a whole, and it is what every later figure is
+measured from.
+_Avoid_: Calling a single journal entry "the opening basis"; treating a keyed basis and a
+document-read basis as different kinds of truth — they differ in PROVENANCE, not in standing.
+
+**Opening source**:
+The prior general ledger or trial balance a firm receives from a client, filed as a document and
+bound to the opening basis by identity AND hash, so every figure on the basis can be traced back
+to the page it was printed on.
+_Avoid_: "The opening file"; treating a re-uploaded copy as the same source — a different hash is
+a different source, whatever its filename says.
+
+**Opening target**:
+One line of the printed source, as stated, mapped or not yet mapped to an account. It is what the
+tie-out compares the books against, never a posting in its own right.
+_Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
+target a journal line.
+
+**Provenance (document / keyed)**:
+Whether a target came from stored evidence on the bound document — a named extraction region whose
+text the database re-derives the figure from — or from a named professional's keying. Every target
+carries exactly one, and the two lanes are walled apart: a basis bound to a document refuses a
+keyed target outright.
+_Avoid_: Showing a keyed figure as if it had been read from the document; presenting a document
+figure without the region a person can open.
 
 **Invitation**:
 A single-use, time-limited admission into a firm that already exists, bound to one email address
@@ -230,7 +291,15 @@ _Avoid_: Editing a knowledge value in place; a correction with no stated reason;
 
 **Knowledge pack**:
 The bounded set of a client's live knowledge records read for one stated purpose, with the firm's current knowledge version as its watermark. A pack that could not be read is *unavailable* and says so with its reason; it is never presented as a client with nothing recorded, and it is never a reason to ask someone to repeat information they have already given. Its contents are supplied data, never instructions to the agent.
-_Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction.
+_Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction; a pack carrying a rule that is not in effect for the period being worked, with no mark saying so; a human surface built on the pack instead of the register.
+
+**Knowledge read status**:
+What one read of a client's knowledge produced, in the four words every face uses: *ok* — the run read everything it asked for; *partial* — it read the required records and some of the rest were withheld; *unknown* — the read did not succeed, so what the client has recorded is not known for that attempt; *denied* — the estate refused it. The runtime keeps its own two words internally; only these four reach a person or a stored column.
+_Avoid_: A fifth word; *unavailable* on a human surface; a version with no as-of; a stale view presented as current.
+
+**Knowledge read-set**:
+The exact keys, tiers and knowledge version one Work attempt actually read, recorded on that attempt. It is what makes “a record this Work read has changed” answerable at all, and what separates a change that matters to a run from one that does not.
+_Avoid_: The current version standing in for the one that was read; reporting “unrelated” when no read-set was recorded; reading a lagging projection as absence.
 
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions. It is a rule about how the firm works across its clients, which is what distinguishes it from a **Firm profile fact** — a statement about the firm's own circumstances, which applies to nobody but the firm.
@@ -348,6 +417,31 @@ _Avoid_: A placeholder as a signable agreement; one "current agreement" that sta
 The append-only record that one person accepted one published legal document at one exact version and hash, with its instant and the operation key that made it idempotent. Both kinds must be accepted at their current versions before checkout opens; the intent pins the versions it was opened against.
 _Avoid_: A checkbox state kept in the browser; acceptance of one kind counting for the other.
 
+<!-- #635 -->
+**Firm legal standing**:
+Whether ONE active OWNER of a firm holds acceptances of the currently published version of BOTH
+legal kinds. It is the firm's fact, not a person's: it goes false the moment a newer version is
+published, with no sweep, and it is what the model-egress basis reads before Clara may use a model
+on any client's books. An owner accepts the current versions in-app to put it back.
+_Avoid_: One person's own acceptance as the firm's; "we signed it once" as a standing state;
+a firm-level switch that can be turned on.
+
+**Billing plan**:
+The one current commercial arrangement a firm is on, held in the database with its amount, its
+currency and — separately — whether that amount has been RULED. An unruled plan has no price at
+all, and that is stated rather than shown as zero.
+_Avoid_: A price nobody decided rendered as RM 0.00; a plan as a per-seat licence; a subscription
+invoice, which Clara collects for no firm.
+
+**Model usage summary**:
+A firm's monthly roll-up of what Clara's models were asked to do, counted in UTC, in two buckets
+that are never added together: calls made for this firm, and platform-wide calls Clara makes for
+everyone. A call whose day has no price on record is COUNTED and published as unpriced rather than
+guessed at. Any money on it is the provider's price in USD, never converted and never posted to a
+ledger.
+_Avoid_: One combined spend figure; a firm's model cost as a client's expense; a calendar month in
+Asia/Kuala_Lumpur; a missing price rendered as a zero.
+
 **Checkout intent**:
 One applicant's one attempt to pay for one registration: opened, then bound to one live Stripe Checkout Session, then processing (the bank has not answered yet), paid, consumed by the firm claim, or ended as expired, failed or cancelled. One registration has at most one live session at a time; every move is written by one database trigger, and a settled payment is the authority over any earlier terminal state.
 _Avoid_: A browser redirect as proof of payment; a Stripe event as a substitute for the intent's own state; cancelling as a refund.
@@ -405,11 +499,19 @@ A missing-evidence readiness requirement that an authorised person explicitly ac
 _Avoid_: A passed evidence check; permission to waive an accounting identity; a standing waiver for future periods.
 
 **Open item**:
-A specific receivable or payable whose outstanding amount is tracked against its settlements and corrections.
-_Avoid_: The entire balance of an account as a substitute for identifying what remains due.
+A specific receivable or payable whose outstanding amount is tracked against its settlements and corrections. It is born with the entry that creates the claim, carries the due date its basis produced, and is never written by hand.
+_Avoid_: The entire balance of an account as a substitute for identifying what remains due; an open item created independently of the journal entry it belongs to.
+
+**Trade invoice**:
+A client's own accounting document that creates a receivable or a payable: a sales invoice the client issued, or a supplier bill the client received. It names one counterparty, the date the document itself carries, an exact total, and the journal it posts — and it is recorded once, as one accounting act, with the receivable or payable it creates. Its LINES are the journal it posts — a bookkeeper's coding judgement — and never the line items printed on the document.
+_Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not yet read.
+
+**Due-date basis**:
+How an open item's due date was decided: STATED on the document, derived from the COUNTERPARTY'S agreed payment terms, or honestly ABSENT because neither states one. Terms run from the DOCUMENT date — "30 days" is thirty days after the invoice, not after the day somebody keyed it in — and the basis is recorded beside the date so a reader can tell a date the document gave from one the terms produced.
+_Avoid_: Today's date, or any date invented when neither the document nor the terms supply one; the posting date as the anchor for agreed terms; a due date presented without saying where it came from.
 
 **Settlement allocation**:
-The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much.
+The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much. Matching a bank statement line to an already-approved booking IS an allocation of this kind: it creates no journal entry, no open item and no allocation object of its own, and the client's general-ledger cash on that account reads the same number before and after.
 _Avoid_: A new cash movement merely because an existing movement is matched.
 
 **Observed bank debit**:
@@ -417,8 +519,8 @@ A debit that has already occurred in a bank account and is supplied as an accoun
 _Avoid_: An instruction to initiate a payment; authority for a future bank mandate or recurring accounting plan.
 
 **Control account**:
-A general-ledger account whose balance must reconcile with its identified detailed accounting records.
-_Avoid_: An unrestricted shortcut for changing the total without its supporting detail.
+A general-ledger account whose balance must reconcile with its identified detailed accounting records. Which side a trade invoice moves is decided by what the document is, not by which account somebody typed: a sales invoice moves receivables, a supplier bill moves payables.
+_Avoid_: An unrestricted shortcut for changing the total without its supporting detail; a control leg whose party contradicts the direction the document states.
 
 **Operator support case**:
 One thing on the estate's admission surface that needs BELCORT's operator firm: an undecided firm registration with no payment against it, a registration payment that has not opened a firm, or a payment-provider event the estate could not act on. Each case names its affected entity and its current state.
@@ -516,6 +618,33 @@ journal entry.
 _Avoid_: A depreciation authority (that is the firm's permission to run it); a schedule (that is
 what these produce); a policy the product infers from the evidence; a second accounting entry.
 
+**Depreciation change class**:
+What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
+the revision MINTED and never on the one it superseded. Three are recognised — an *estimate* change
+(the life, rate or residual was re-assessed; it applies FORWARD and leaves every charged period
+alone), a *policy* change and an *error* correction (both restate periods the books have already
+reported). Only an estimate change can be recorded today; the other two are refused by name and
+belong to the retrospective-restatement lane. Every revision carries a class and a non-blank reason,
+so a reader can tell the three apart a year later without asking anybody.
+_Avoid_: Treating an error correction as an estimate change; treating a policy change as
+prospective; a revision with no stated reason; reading an absent class on an older row as "estimate".
+
+**Depreciation authority window**:
+The span a signed depreciation authority actually reaches: from the first day of the month it was
+signed, in the book's own calendar, forward. It is written once at signature and never moves, so the
+unattended belt runs forward only and a signature is not permission to charge every past period. A
+period earlier than the floor is charged only by an explicit catch-up a person performs.
+_Avoid_: Reading a signature as permission to charge every past period; a window a later edit can
+move; a floor derived from the machine's clock rather than the book's calendar.
+
+**Depreciation run preview**:
+What the NEXT depreciation run would do, read before anything is written: the exact period the
+register chose (never one a caller named), the per-asset amounts, the two general-ledger legs, every
+asset that will be skipped with the reason in words, and whether the run will post or wait for
+approval. It writes nothing at all — no operation key, no receipt, no ledger row.
+_Avoid_: A projection presented as a posted figure; a period a person typed; a preview that reserves
+anything.
+
 **Dependent particulars question**:
 The ONE versioned question a Work opens after it has already posted an acquisition, asking for the
 depreciation particulars it could not know. It parks that Work and nothing else: the acquisition is
@@ -540,6 +669,100 @@ _Avoid_: A log; a span with an attribute bag; anything that stores what was sent
 The durable per-upload record a file's arrival leaves behind, in its own right and independent of the browser session that made it: who uploaded it, from which entrance (documents tab or chat), the declared name, type and size, the status it has reached and — once custody happens — the document it became. It is recoverable at mount, so closing the tab mid-batch loses the QUEUE and not the answer; and it carries no client, because attribution is a separate act on the document rather than a property of the upload.
 _Avoid_: Treating `finalizeIntake`'s own advisory return as the receipt (only a subsequent read is DB-confirmed); the upload queue's in-memory row; a record that implies the file was filed to anyone.
 
+**Intake batch**:
+A firm-scoped, durable grouping of admitted sources opened by one person in one act. It holds no client, no counts and no transaction: the members that WAIT are precisely the unattributed ones, every number is derived at read time from the members themselves, and the children fail, finish and are cancelled independently of one another. Its three states are open, cancelling and cancelled — an open batch is never "settled", because nothing closes one and a new member may always join.
+_Avoid_: A transaction; a client-scoped object; the browser's upload queue; a synonym for a Work; a stored progress counter.
+
+**Batch member**:
+One admitted source's membership of an intake batch, carrying up to three identities IN ORDER — its intake always, its document once the bytes are in custody, its Work once some lane admits one — and at most one declared dependency. A second attach of the same intake is absorbed rather than duplicated, and an attach to a different batch is refused by name. The three populations are reported separately, because an unattributed file can never be a child Work.
+_Avoid_: Calling an unattributed source a Work; calling a processing task a child; a percentage; a total; a page length.
+
+**Member dependency**:
+The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at 08:00 `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
+_Avoid_: Treating a quota block as a failure; treating the declared value as the only source of "waiting".
+
 **Unassigned source**:
 An adopted document with no live filing: the firm holds it and its bytes are sealed and readable, but no client's shelf has claimed it. It is firm-visible, awaits exactly ONE attribution act, and leaves the population the moment that act lands. A document that is unassigned is not a document that failed — it is a document nobody has answered a question about yet.
 _Avoid_: An unprocessed or failed upload; a document whose filing was retired (that one has a history); a per-person inbox — the population is the firm's, not the uploader's.
+
+<!-- #642 -->
+**Turn key**:
+The caller's **content-addressed** identity for one message intent: a stable address over the conversation, the altitude, WHERE IN THE CONVERSATION the instruction was given, the message text and the set of documents attached to it. A retry of the SAME intent reuses it and the estate returns the turn it already admitted — a refused or lost send adds nothing to the transcript, so the retry stands in the same place; a CHANGED intent — including a changed attachment set, and including the same sentence given again after a turn has settled — derives a new one and is admitted as the new turn it is. It is what makes a lost acknowledgement safe in both directions: the same instruction is never accepted twice, and a corrected or repeated instruction is never swallowed by the first.
+_Avoid_: Treating a fresh uuid per press as idempotency; a session-scoped or handed-out key (either can silently resend, or silently DROP, a changed attachment); an address made of content alone (a repeated "yes" is a new instruction, not a retry).
+
+**Conversation scope**:
+The firm or client a conversation's executions belong to, named beside the composer so the person can see whose books an instruction will move before they send it. It is read-only here — switching scope is the shell's act — and it is never guessed: an identity that has not been positively read renders a neutral placeholder rather than the client whose name was on screen a moment ago.
+_Avoid_: Inferring it from the URL alone; a second scope switcher; a stale name carried across a switch.
+
+**Tool outcome**:
+What the transcript records about ONE step Clara took: *preparing*, *running*, *done*, *failed*, or *refused* — the tool ran and declined in its own typed vocabulary, which is not the same as failing. The states are read from what the run actually reported, live while the turn is still going and from the settled transcript afterwards; a step with no reported outcome says so rather than being assigned one.
+_Avoid_: Reading a tool-call count, prose or a shimmer as accounting completion; a *queued* state (nothing on the stream reports admission); presenting *preparing* as *queued*.
+**Settlement candidate row**:
+A DERIVED row that offers a decision and stores nothing. It is computed from live facts every
+time it is read, it never becomes an object with its own lifecycle, and it clears itself the
+moment the underlying facts stop producing it — nobody dismisses it, nobody closes it, and
+nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
+chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
+act. #657's pending bank line is its first instance.
+_Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
+that survives the fact that produced it; a suggestion the product acts on by itself.
+
+**Match basis**:
+The DETERMINISTIC evidence for pairing one bank statement line with one already-approved
+booking: whether the amounts are exactly equal, the signed whole-day distance between the line's
+date and the entry's posting date, whether the canonical counterparty's identifier or name-family
+token appears as a whole word in the line's description, and what the line's own description
+looks like. Every fact is one a professional can check against the statement in front of them.
+_Avoid_: A confidence score; a percentage; a ranking; a model's opinion presented as evidence; a
+"suggested match" the product would apply without a human choosing it.
+
+**Bank match**:
+A group that allocates one or more bank statement lines against one or more ALREADY-APPROVED
+journal entries on the same bank account, to the cent, with the sum of the lines equal to the sum
+of the entries. It records that an existing movement has been seen on the statement; it books
+nothing.
+_Avoid_: A posting; a cash entry; a way to create the entry it matches (that is a booking act);
+a partial allocation of a line (a line belongs to at most one live group, always at full amount).
+
+**Statement line**:
+One row of a bank statement as the bank stated it: its date, its description, its signed amount
+and its position in the running balance. It is evidence supplied from outside, never a figure
+the product computed, and it carries no page or region citation — the statement carries the
+provenance (its document, its digest and its filename), the line does not.
+_Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
+something tie.
+
+**Remaining capacity**:
+How much of one approved journal entry's movement on a given bank account is still unallocated,
+measured PER SIDE in absolute cents: the entry's gross debit (or credit) on that account minus
+every pending or live match member already drawn against that side. It is the bound a new match
+is refused against, by name and with its side.
+_Avoid_: An entry's balance; a netted single figure across both sides; a limit the face computes
+(the database is the authority and refuses at write time).
+
+**Bank line exception**:
+A statement line recorded as a bank error or a dispute rather than as something to clear. It
+takes the line out of the unmatched report by design and blocks matching by name, and it is
+resolved through its own door — not by matching around it, not by a suspense account and not by
+a write-off.
+_Avoid_: A line that is merely unmatched; a way to make a statement tie; an adjustment.
+<!-- #660 -->
+**Cash account set / 现金科目集合**:
+The governed, versioned list of which chart accounts count as a client's cash, decided by a human and by no other path. Each member carries WHY it is cash — a bank-registry marker, or a person's declaration of cash or petty cash — because petty cash has no structural marker in the chart at all and a name or a code is never evidence. Membership includes INACTIVE accounts: an account retired last year still holds the balance it held. A version is sealed when it is published and superseded rather than edited, so a figure computed last month keeps the membership it was computed under.
+_Avoid_: An account-type filter; a metric account set (that family refuses inactive accounts by design); anything derived from an account's name or code.
+
+**Book cash / 账面现金**:
+What the LEDGER says a client's cash accounts hold: every approved debit minus every approved credit over the published cash account set, cumulative from inception with no fiscal-year reset and an approved opening counted exactly once. It is a balance at an as-of date, not a flow over a period.
+_Avoid_: Statement balance; available balance; cleared balance — all three are a bank's claim at a date the bank chose, and they may legitimately differ from this by everything that has not cleared.
+
+**Period profit / 期间利润**:
+Income minus expense over one interval of approved entries, excluding the year-end closing transfer — the entries that carry BOTH the year-end mark and the closing-transfer mark. A year-end revenue CORRECTION carries only the first and still counts. Reversals and negative corrections move the figure by their signed amount; the figure is never clamped at zero, so a month the books say went backwards reads as a loss.
+_Avoid_: Net profit as a synonym for a statutory or tax figure; a figure with the year-end roll left in; anything floored at zero.
+
+**Source watermark / 来源水位**:
+The database snapshot a read actually saw, carried on the answer in text form so a later question — "had this figure already seen that posting?" — is answerable rather than guessed. Every figure produced by one read shares one watermark, which is what makes four faces of one envelope provably about one instant.
+_Avoid_: A timestamp (two transactions with the same clock reading can be on either side of a snapshot); a cache key; a freshness promise.
+
+**Definition version / 定义版本**:
+The named rule a published figure was computed under, carried on the figure itself so a number and the definition behind it travel together. A change of rule is a new version rather than a silent recomputation of old answers.
+_Avoid_: Metric definition version — that belongs to the delta-metric lane and is a different object; a schema or migration number; an API version.

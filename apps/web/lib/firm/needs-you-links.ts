@@ -26,6 +26,21 @@
 // `components/registers`), so a fragment would be a link that LOOKS like it selects the
 // object and does not. The tab is what exists; the tab is what is offered. When a tab learns
 // to select a row from the URL, this map is where that lands.
+//
+// AND ONE DESTINATION THAT LOOKS BUILDABLE AND IS NOT — `work_question` (#659, withdrawn in that
+// ticket's own fix round). A `work_question` row is one pending question a running accounting Work
+// is parked on, and `/clients/:clientId/work/:workId` is a page this checkout really serves, so
+// the deep link looks obviously right. The ROW cannot address it. `clara.list_review_queue`
+// selects `wqi.task_id` — an `agent_tasks` id — while the accounting Work reaches the row only
+// through `join clara.accounting_work wqw on wqw.id = wqi.work_id`, a DIFFERENT column of the same
+// interruption that the row does not publish. A link built from `task_id` spells a Work-detail URL
+// that resolves nothing (`lib/work/reads.ts`'s `getAccountingWork` answers null for an id that is
+// not an `accounting_work.id`). So this kind keeps the workspace root, where it has always gone,
+// and the RESIDUAL is against 0180's queue row rather than against this file: when
+// `work_question_rows` publishes `work_id`, the link becomes buildable off THAT — never off
+// `task_id`. `packages/db/tests/firm-portfolio-pack.test.mjs`'s
+// `p659.links.work_question_row_cannot_address_its_work` measures both facts on a real parked Work
+// and reds the day that column appears.
 
 import type { ReviewQueueRow } from "@/lib/journals/types";
 import { fixedAssetHref } from "@/lib/navigation/tree";
@@ -52,8 +67,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   coding_task: "/documents",
   // An open question about a document is settled beside the document.
   open_question: "/documents",
-  // The SST compliance watch renders on the firm admin compliance surface, which is NOT
-  // client-scoped — so this kind deliberately has no client tab and keeps the root.
+  // #659 — REPOINTED. The comment that used to sit here said the SST watch "renders on the firm
+  // admin compliance surface, which is NOT client-scoped", and that stopped being true when
+  // `components/tax/SstWatchSection.tsx:114` began mounting `ComplianceWatchAffordance` on
+  // `/clients/:id/tax`. The three acts (acknowledge, snooze, resolve) are a click away there, on
+  // the client whose turnover crossed. The stale sentence is DELETED rather than softened: a
+  // comment that explains a destination the file no longer chooses is worse than none.
+  compliance_watch: "/tax",
   // A lint finding is raised against the books; the journals workbench is where it is fixed.
   lint_finding: "/journals",
   // Both "incomplete" kinds are register rows missing particulars. `fixed_asset_incomplete` is
@@ -72,9 +92,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
  * `null` for a row with no `client_id`: every destination in this map is a tab under
  * `/clients/<clientId>`, so without one there is no page, and the caller renders no link
  * rather than a broken one.
+ *
+ * `task_id` IS ACCEPTED AND DELIBERATELY UNUSED — see the `work_question` note in this file's
+ * header. Keeping it in the signature is how the next reader learns that the field is on the row,
+ * was tried, and does not address a Work.
  */
 export function needsYouRowHref(
-  row: Pick<ReviewQueueRow, "row_kind" | "client_id"> & { id?: string | null },
+  row: Pick<ReviewQueueRow, "row_kind" | "client_id"> & { id?: string | null; task_id?: string | null },
 ): string | null {
   if (!row.client_id) return null;
   // #639 — THE ONE DEEP DESTINATION THIS MAP OFFERS, and it is not a fragment: `id` on a

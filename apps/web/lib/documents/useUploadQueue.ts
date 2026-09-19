@@ -137,6 +137,11 @@ export type UploadQueue = {
 export type UploadQueueOptions = {
   origin?: IntakeOrigin;
   sessionId?: string;
+  /** #636 — the durable batch every file in this queue joins, if the surface opened one. ADDITIVE
+   *  and passed straight through to `beginIntake`; #642 OWNS this hook's signature and must not
+   *  remove it. Nothing about the batch enters `documentIngest`'s step IO — the runtime commits the
+   *  membership beside the intake and the batch is read back from the database. */
+  batchId?: string;
   filingSource?: string;
   /** THE POLL BOUND, as data. Defaults are the shipped values (60 reads, 1 s apart);
    *  they are options ONLY so the exhausted-poll arm — C-73's "an exhausted poll
@@ -275,7 +280,7 @@ export function useUploadQueue(
         patch(localId, { state: "starting", intakeId: null, documentId: null, ...BLANK });
         const begun = await beginIntake(
           { filename: file.name, mime: file.type || "application/octet-stream", declaredBytes: file.size },
-          { session, signal, origin: options.origin, sessionId: options.sessionId },
+          { session, signal, origin: options.origin, sessionId: options.sessionId, batchId: options.batchId }, // #636: additive
         );
         patch(localId, { intakeId: begun.intake_id });
         patch(localId, { state: "uploading" });

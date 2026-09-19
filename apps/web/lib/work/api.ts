@@ -88,6 +88,41 @@ export type SubmitClaimWorkResult =
   | ({ kind: "accepted"; claimId: string | null } & WorkAdmission)
   | Exclude<SubmitJournalWorkResult, { kind: "accepted" }>;
 
+/**
+ * #655 — the trade-invoice admission's answer. The accepted arm carries FIVE facts the browser
+ * could not have computed: the invoice row the door already wrote, the party it RESOLVED (the form
+ * may have sent only a name), and the due date **with the basis the door derived** — which is the
+ * whole point of D12c's `stated → counterparty_terms → absent` ladder living in the database.
+ */
+export type SubmitTradeInvoiceWorkResult =
+  | ({
+    kind: "accepted";
+    invoiceId: string | null;
+    invoiceKind: string | null;
+    counterpartyId: string | null;
+    dueDate: string | null;
+    dueDateSource: string | null;
+  } & WorkAdmission)
+  /**
+   * D12(a) — `party_ambiguous` is the ONE refusal on this lane that carries DATA, so its arm is
+   * widened HERE rather than on the shared `invalid_basis` shape every door returns. The route
+   * unfolds the door's typed candidate list onto the 400 body (`workRoutes.ts`'s trade-invoice
+   * catch), and the form renders those candidates INLINE as a choice: a person told "more than
+   * one party answers to that name" and given nothing to click has been informed, not helped.
+   * Every OTHER refusal leaves `candidates` empty, which is what the banner's plain arm reads.
+   */
+  | { kind: "invalid_basis"; field: string | null; reason: string | null; candidates: PartyCandidateWire[] }
+  | Exclude<SubmitJournalWorkResult, { kind: "accepted" } | { kind: "invalid_basis" }>;
+
+/** ONE candidate, exactly as `clara.admit_trade_invoice_work` raises it. Read defensively: a door
+ *  that raised a shape this does not expect leaves the banner its sentence rather than crashing. */
+export type PartyCandidateWire = {
+  counterparty_id?: unknown;
+  name?: unknown;
+  registration_no?: unknown;
+  tin?: unknown;
+};
+
 export type RetryWorkResult =
   | ({ kind: "accepted" } & WorkAdmission)
   /** 409 — the Work is not in a state a new run may be admitted from. `status`
@@ -281,6 +316,93 @@ export async function submitStaffExpenseClaimWork(
   if (res.status === 409) {
     // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and all
     // three doors share the response map that builds both bodies (`workErrorResponse`).
+    if (str(body.error) === "source_already_posted") {
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+    }
+    return { kind: "conflict", workId: str(body.work_id) };
+  }
+  return {
+    kind: "unavailable",
+    message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
+  };
+}
+
+/**
+ * Admit ONE trade invoice — a client sales invoice or a supplier bill (#655).
+ *
+ * IT SENDS BOTH HALVES, and that is the one real difference from the claim door above. A trade
+ * invoice's journal is NOT derivable from its particulars: which expense account a bill debits is
+ * a coding judgement, not an arithmetic one. So `invoice` carries the document's own facts and
+ * `basis` carries the journal the preparer chose, and `clara._assert_trade_invoice_basis` re-checks
+ * that exactly one control leg of the right domain carries the stated total to the sen.
+ *
+ * `invoiceId` COMES BACK WITH THE 202, because the invoice row is durable at ADMISSION rather than
+ * at posting — and with it the RESOLVED party and the DERIVED due-date basis, which the browser
+ * could not have computed and must therefore render rather than guess.
+ */
+export async function submitTradeInvoiceWork(
+  auth: SessionTokenAccessor,
+  input: {
+    clientId: string;
+    intentKey: string;
+    kind: string;
+    invoice: Record<string, unknown>;
+    basis: Record<string, unknown>;
+    /** Omitted entirely for an invoice with no cited document — AC3's "chat-without-attachment"
+     *  and "direct UI" arms are both lawful. The route reads an absent, null or empty list
+     *  identically. */
+    sourceRefs?: ReadonlyArray<JournalSourceRefWire>;
+  },
+  signal?: AbortSignal,
+): Promise<SubmitTradeInvoiceWorkResult> {
+  const token = await auth.getAccessToken();
+  if (!token) return { kind: "denied" };
+
+  let res: Response;
+  try {
+    res = await runtimePost(`${WORK_BASE}/trade-invoice`, token, input, signal);
+  } catch (err) {
+    // A network failure, a timeout, an aborted socket: NO answer was observed. `lost` is NOT
+    // `unavailable` — the form resolves it by re-POSTing the SAME intent key exactly once.
+    return { kind: "lost", message: (err as Error).message };
+  }
+  if (res.type === "opaqueredirect") return { kind: "denied" };
+
+  const body = (await readBody(res)) ?? {};
+  if (res.status === 202) {
+    const admission = admissionOf(body);
+    return admission === null
+      ? { kind: "lost", message: "the runtime accepted the work without naming it" }
+      : {
+        kind: "accepted",
+        ...admission,
+        invoiceId: str(body.invoice_id),
+        invoiceKind: str(body.kind),
+        counterpartyId: str(body.counterparty_id),
+        dueDate: str(body.due_date),
+        dueDateSource: str(body.due_date_source),
+      };
+  }
+  if (res.status === 400) {
+    // The candidate list rides `detail.candidates` and is read DEFENSIVELY: an absent or
+    // non-array detail yields an empty list, never a guess, and the banner is the door's own
+    // sentence alone.
+    const detail = body.detail;
+    const raw = detail !== null && typeof detail === "object"
+      ? (detail as { candidates?: unknown }).candidates
+      : undefined;
+    return {
+      kind: "invalid_basis",
+      field: str(body.field),
+      reason: str(body.reason),
+      candidates: Array.isArray(raw) ? (raw as PartyCandidateWire[]) : [],
+    };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: "denied" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409) {
+    // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and all
+    // four doors share the response map that builds both bodies (`workErrorResponse`).
     if (str(body.error) === "source_already_posted") {
       return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
     }

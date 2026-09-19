@@ -1,0 +1,65 @@
+{
+  "ticket": 659,
+  "lens": "standards",
+  "lens_model": "claude-sonnet-5",
+  "branch": "impl/659-firm-home",
+  "head": "e14a8b9c",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/659-review-standards.json",
+  "verdict": "accept",
+  "commands_run": [
+    "node scripts/check-frozen-workflows.mjs -> OK (296 frozen files verified, 53 use-workflow modules frozen+registered, 3 retired)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK (reader superset of emittable)",
+    "pnpm typecheck -> green (apps/web, packages/runtime both Done, 0 errors)",
+    "pnpm lint -> exit 0 (eslint scripts+apps/web+packages/runtime+packages/db+packages/reporting-render all clean; check-token-contrast 19/19 WCAG AA; check-test-manifest: 416 files, alphabetical, all present; check-message-keys: 3734 t() keys resolve; check-ui-add-guard selftest green; dsn-pipe/frozen-workflow/dead-citation selftests all green)",
+    "node --test --test-concurrency=1 <41 gate flags incl firm-portfolio-pack-preintegration-gate.mjs> tests/firm-portfolio-pack.test.mjs -> 15/15 pass",
+    "node --test --test-concurrency=1 <same 41 gate flags> tests/compliance-watch-disposition.test.mjs -> 6/6 pass",
+    "node --test packages/db/tests/operation-census.test.mjs tests/rig-isolation.test.mjs (no reset flags) -> 30 pass, 0 fail, 1 skip (destructive T19, correctly skipped without CLARA_RIG_ALLOW_RESET)",
+    "pnpm --filter @clara/web e2e home-board (triple 3380/3381/3382) -> 15/15 passed (1.9m)",
+    "node scripts/run-tests.mjs (whole apps/web unit suite) -> 4191 tests, 4188 pass, 1 fail, 2 skipped (see F1 below)",
+    "git -C worktree diff origin/main...HEAD --stat / per-file diffs of migration, rig-meta.mjs, package.json, e2e-fixture-ownership.test.ts, home-board-mock.mjs, home-board-walk.spec.ts, messages/en.json, CONTEXT.md, three READMEs, needs-you-links.ts, use-firm-portfolio.ts",
+    "git log origin/main..HEAD (three commits) -> all three carry Co-Authored-By + Claude-Session trailers"
+  ],
+  "findings": [
+    {
+      "id": "S1",
+      "severity": "minor",
+      "category": "evidence-accuracy",
+      "where": "apps/web/lib/clara/use-clara-thread-stop.test.ts (whole-suite run); cell '630 a stop the door says had ALREADY FINISHED does not re-attach — there is nothing left to read'",
+      "what": "The final report claims 'whole apps/web unit suite ... 4191 tests, 4189 pass, 0 fail, 2 skipped'. A fresh run on this rig (node scripts/run-tests.mjs) measured 4188 pass / 1 fail, and re-running the single file in isolation with the correct bootstrap (node --import ./test/bootstrap.mjs --import tsx --test) is non-deterministic: 2 of 5 isolated runs failed the same cell, 3 passed. This file is untouched by #659 (zero diff vs origin/main) and imports nothing #659 touches, so this is a pre-existing timing flake in #630's thread-stop machinery, not a regression this branch introduced.",
+      "evidence": "Measured this pass: whole-suite run at /tmp/web-unit.out (`# tests 4191 / # pass 4188 / # fail 1`), failing at apps/web/lib/clara/use-clara-thread-stop.test.ts:1021 (`2 !== 0`, AssertionError). Isolated reruns with `node --import ./test/bootstrap.mjs --import tsx --test lib/clara/use-clara-thread-stop.test.ts`: run A 24/25 (same cell), run B 25/25, run C 25/25, run D 24/25, run E 24/25. `git diff origin/main...HEAD --stat -- apps/web/lib/clara/use-clara-thread-stop.test.ts apps/web/lib/clara/use-clara-thread-stop.ts` is empty (file not in this branch's diff at all).",
+      "fix": "No action needed on this branch — the flake is unrelated to #659's touched files and reproduces on the branch tip independent of any change here. The final report's 'Report claim vs measured' line should be corrected to '4188 pass, 1 fail (flaky, unrelated: use-clara-thread-stop.test.ts)' rather than '0 fail', per WORK-ORDER rule 6 (claims need a checkable, current measurement). Worth a separate ticket/note for the #630 lane owner since it is non-deterministic under the real bootstrap, not merely under a bad standalone invocation."
+    },
+    {
+      "id": "S2",
+      "severity": "note",
+      "category": "component-precision",
+      "where": "apps/web/components/firm/firm-home/firm-portfolio-section.tsx:58,286-288",
+      "what": "The client-status chip on the new portfolio table imports `Badge` from `@/components/parts/PartBadge` (a tone-based `neutral|info|warning|error` chip originally built for Clara 'parts' rendering — tool_call chips, clarify labels), not from `@/components/ui/badge.tsx` (the canonical shadcn cva-variant Badge used by most of the rest of the product, e.g. accounting-hub.tsx, members-tables.tsx, bank/accounts-section.tsx). The final report's UI-04 line ('Table ... Pagination, Empty, Skeleton, Badge... no primitive added') reads as claiming the shadcn ui/badge.tsx primitive specifically.",
+      "evidence": "`grep -n Badge apps/web/components/firm/firm-home/firm-portfolio-section.tsx` -> `import { Badge } from \"@/components/parts/PartBadge\";` and its one use-site at :286-288. `components/ui/badge.tsx` exists and IS the shadcn cva primitive (verified: cva variants default/secondary/destructive/outline/ghost/link). However every sibling component in the same neighbourhood already standardises on PartBadge's tone chip for the identical purpose: components/firm/client-home/client-work-attention.tsx, components/firm/firm-home/needs-you-scoreboard.tsx, components/firm/firm-home/oldest-waiting-list.tsx, components/tax/SstWatchSection.tsx.",
+      "fix": "No change needed — this matches, rather than breaks, the established local convention for Firm-altitude status/tone chips (four sibling components in components/firm/* already use PartBadge's Badge for exactly this purpose), so it is consistent reuse rather than a fresh violation or a second chip implementation. Flagging only so the final report's UI-04 evidence line names the actual module (PartBadge, matching its firm-surface siblings) rather than implying components/ui/badge.tsx specifically, since a future reader auditing 'is #659 really using shadcn's Badge' would otherwise be misled by the report text."
+    }
+  ],
+  "checks_confirmed_clean": [
+    "Migration 0231: order is header -> prestate (5 measured prosrc pins + single-pg_proc-row census wall) -> set role clara_fn_owner -> get_firm_portfolio_pack -> get_compliance_watch_disposition -> grants -> reset role -> tail postcheck; no conditional index block present, matching the measured 'no sequential scan' finding (Index Scan on uq_clients_firm_name / uq_accounting_work_intent, no Sort node needed beyond Incremental Sort) reported in the file header and packages/db/README.md.",
+    "Migration recuts nothing: p659.portfolio.no_recut and the tail's byte-identical sha256(prosrc) reassertion for list_review_queue/list_accounting_work/get_client_work_pack/_work_run_attempts/list_activity both pass on a live run.",
+    "Single-pg_proc-row-per-name census: prestate wall + tail count(*)=1 assertion for both new names, independently verified by running the battery.",
+    "Integer cents / money: N/A (this ticket adds no money value); the tail's prosrc negative-token assertion (amount_cents/_cents/debit/credit/total, concatenated to avoid the words appearing in prosrc/comment) passed live, and p659.portfolio.no_money passed.",
+    "Asia/Kuala_Lumpur calendar law: the pack's 7-day window is computed via `(v_now at time zone 'Asia/Kuala_Lumpur')::date`, asserted in the tail's prosrc-positive check and exercised by p659.portfolio.window (implicit in the 15-cell pass).",
+    "FORCE RLS / no app-role DML: N/A, no new tables; tail proves compliance_watches/compliance_watch_events remain ungranted to all five application roles after the migration (door 2's whole SECURITY DEFINER rationale), and no non-SELECT privilege reached accounting_work/operation_receipts/clients.",
+    "Lock order: N/A, no new locks/triggers introduced.",
+    "Gate module + package.json chain: firm-portfolio-pack-preintegration-gate.mjs matches client-work-pack-preintegration-gate.mjs's shape verbatim (including the 'a FOCUSED invocation ... FAILS loudly' paragraph); appended as the 41st --import flag, in migration order, immediately after preview-invite-preintegration-gate.mjs (counted: 41).",
+    "rig-meta.mjs cohort: FIRM_PORTFOLIO_PACK_0231_COHORT registered at all three required sites (declaration block ~2169, ALLOWED human-fn roster ~2537, cohortFailures ~2986), 'wholly present or wholly absent' bimodal check matching the 0214/0222/0217 precedent shape.",
+    "humanQuery personas: both new batteries (firm-portfolio-pack.test.mjs, compliance-watch-disposition.test.mjs) assert exclusively through humanQuery least-privileged personas per their own file headers; confirmed by running both live (15/15, 6/6).",
+    "Shared surfaces / one-line registrations: home-board-mock.mjs's EMPTY_RPCS arm and dispatch position (serve-built.mjs:609 handleActivitySupabase before :720 handleHomeBoardSupabase) are byte-unchanged (serve-built.mjs has zero diff vs origin/main), honoring DECISIONS §6.1's binding ruling that #659/#660 may not move either. e2e-fixture-ownership.test.ts's #902 debt string is untouched; the new get_firm_portfolio_pack verb is declared 'unscopeable' (correctly — the door takes no client argument at all) rather than 'debt'. list_review_queue/list_accounting_work needed no SHARED_RPC_VERBS entry because home-board-walk.spec.ts's seed() fully overlays both via page.route (test-scoped), never touching a lane-mock module — verified by reading both the census's LANE_DECLARATIONS scope and the spec's own page.route calls.",
+    "lib/firm/use-review-queue.ts, lib/navigation/tree.ts, app/(firm)/layout.tsx: zero diff (all three rulings honored — compose via useFirmPortfolio(onRefresh: queue.reload) rather than editing the shared hook, no new route leaf, no layout edit).",
+    "WORK_STALE_AFTER_MS: imported from lib/work/use-work-detail.ts in use-firm-portfolio.ts, not restated as a literal.",
+    "Every new web test file (5) is present in apps/web/test/manifest.txt at the correct sorted position, confirmed both by diffing manifest additions against new *.test.ts(x) files and by the check-test-manifest lint gate passing.",
+    "messages/en.json: check-message-keys lint (3734 keys) passed; new NeedsYou.openTab.compliance_watch/work_question keys follow the existing REVIEW_QUEUE_ROW_KINDS canonical order (not alphabetical, matching the array's own declared order in lib/firm/needs-you.ts) rather than breaking convention.",
+    "e2e-fixture-ownership.test.ts / mock verb declared for the new door only where actually needed (home-board-mock.mjs's EMPTY_PORTFOLIO_PACK arm, correctly NOT folded into the []-shaped EMPTY_RPCS array since the door returns a scalar JSONB object).",
+    "CONTEXT.md: four new terms (Firm portfolio pack, Portfolio coverage, Attention source freshness, Watch disposition) follow the house 'term / _Avoid_' shape at the correct sorted position.",
+    "READMEs (packages/db/README.md, packages/db/tests/README.md, apps/web/README.md): all three updated with the required content (floors/grants/INVOKER-restates-floor idiom/no-money tail assertion/101-id cut; the two-battery+cohort note; Firm Home's URL state + refresh contract).",
+    "No Sonner/toast usage introduced (WatchDispositionReceipt and the portfolio section both render persistent, typed state, not a transient toast).",
+    "No new needs-you row kind (REVIEW_QUEUE_ROW_KINDS untouched); no purpose-vocabulary widening; no widening of accounting_work.purpose.",
+    "Commit messages: all three commits on this branch (dd65b70c, 261aab7b, e14a8b9c) end with a Co-Authored-By + Claude-Session trailer block."
+  ]
+}

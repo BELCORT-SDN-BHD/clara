@@ -17,16 +17,30 @@ import { ClientWorkspaceOverview } from "@/components/firm/client-workspace-over
  *
  * `clientId` still comes verbatim from the URL; the workspace layout below it is what scopes
  * reads by it (components/client-scope-provider.tsx).
+ *
+ * #660 — `?period=` IS READ HERE, on the server, and handed down as a plain prop, on the
+ * precedent this workspace's journals tab already set (`journals/page.tsx:18-25`) and for the same
+ * reason: a `useSearchParams()` would work too, but it forces a Suspense boundary on every build
+ * of this route for a value that is only ever the OPENING state. Reading it here keeps THE ADDRESS
+ * the source of truth for the period, which is what makes Back restore the period a reader came
+ * from rather than only the page they came from.
+ *
+ * It narrows the MONEY BAND and nothing else on this board. The Work band has no period axis at
+ * all and must not grow one — `client-work-attention.test.tsx`'s `p650.pack.no_period_axis` mounts
+ * this very page at `?fy=…&period=…` and asserts that nothing in that band changes.
  */
 export default async function ClientWorkspacePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ clientId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { clientId } = await params;
+  const query = (await searchParams) ?? {};
   return (
     <PageShell>
-      <ClientWorkspaceOverview clientId={clientId} />
+      <ClientWorkspaceOverview clientId={clientId} periodParam={query.period} />
     </PageShell>
   );
 }

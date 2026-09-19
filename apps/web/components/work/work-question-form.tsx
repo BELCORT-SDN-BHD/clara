@@ -69,6 +69,8 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { StateBanner } from "@/components/common/state";
+import { WorkKnowledgeDriftBanner } from "@/components/work/work-knowledge-block";
+import { readWorkKnowledgeDrift, type WorkKnowledgeDriftRead } from "@/lib/work/knowledge";
 import {
   answerOpKey,
   answerWorkQuestion,
@@ -165,6 +167,31 @@ export function WorkQuestionForm({
    *  first, and the focus happens in an effect after that render. */
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [authoritative, setAuthoritative] = useState<WorkQuestionRecord>(record);
+  /**
+   * #658 — "YOUR BASIS CHANGED", ON THE FACE PLUS A RECHECK WHEN THE PERSON ARRIVES.
+   *
+   * `clara.answer_work_question` compares the op-key hash, the `question_version` and the client's
+   * status — and NEVER a knowledge version (#885). Splicing a sixth comparison into a door five
+   * migrations have already spliced (0180, 0184, 0198, 0200, 0216) was refused by this ticket's
+   * own brief, and one refusal code that has to mean both "you were slow" and "your basis moved"
+   * is unreadable. So the answer is a FACE: the person is told, in the door's own terms, that a
+   * record this Work read has changed — and is left to decide.
+   *
+   * IT NEVER CLEARS A TYPED ANSWER. The banner is additive: no draft is discarded, no field is
+   * reset, nothing is disabled. A surface that threw away what somebody had typed because a
+   * background read came back would be doing the one thing the draft machinery above exists to
+   * prevent.
+   *
+   * ONLY WHILE THE QUESTION IS STILL ANSWERABLE. A settled or converged card has nothing to
+   * re-ask, so it spends no request.
+   */
+  const [drift, setDrift] = useState<WorkKnowledgeDriftRead | null>(null);
+  useEffect(() => {
+    if (record.status !== "pending") return undefined;
+    let alive = true;
+    void readWorkKnowledgeDrift(record.work_id).then((read) => { if (alive) setDrift(read); });
+    return () => { alive = false; };
+  }, [record.work_id, record.status]);
   const controlRefs = useRef<Record<string, HTMLElement | null>>({});
   /**
    * THE LAST ACCEPTED CENTS PER MONEY FIELD, and it exists for one measured reason.
@@ -410,6 +437,11 @@ export function WorkQuestionForm({
       {refusal?.kind === "invalid" && refusal.constraint === "op_key_conflict" ? (
         <StateBanner tone="warning" silent={silent}>{t("opKeyConflict")}</StateBanner>
       ) : null}
+      {/* #658 — TWO WORDINGS, BECAUSE THE DOOR DISTINGUISHES THEM: "a record this Work read has
+          changed: <keys>" when the read-set proves relevance, and "which records it read was not
+          recorded" when only an execution trace carried the version. Never a confident
+          "unrelated" for the second. The draft is untouched either way. */}
+      <WorkKnowledgeDriftBanner read={drift} silent={silent} />
 
       <FieldGroup>
         {visible.map((field) => (

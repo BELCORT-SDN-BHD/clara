@@ -63,6 +63,11 @@ async function fetchBounded<T>(path: string, opts: Omit<GetRowsOptions, "limit">
 const ENTRY_SELECT =
   "id,client_id,status,posting_date,memo,origin,document_id,coding_kind,revision_token," +
   "maker_actor,checker_actor,approved_at,reversal_of,reversed_by,reversal_reason," +
+  // #656 (ONE hunk in this file, which #655 owns this wave): an approved opening item posts an
+  // ordinary entry with `origin='manual'` (0017:3375-3384), so without this column an opening
+  // balance is indistinguishable on C3 from a journal somebody typed by hand. See
+  // lib/journals/opening-badge.ts for what the face does with it.
+  "is_opening_balance," +
   "withdrawn_at,withdrawal_reason,created_at";
 
 /** clara.journal_entries, packages/db/migrations/0003_books_core.sql:101-128 —

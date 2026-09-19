@@ -55,9 +55,11 @@ const LANE_MOCKS = [
   "activity-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
+  "bank-match-mock.mjs",
   "chat-parity-mock.mjs",
   "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
+  "depreciation-mock.mjs",
   "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
   "documents-viewer-mock.mjs",
@@ -65,16 +67,20 @@ const LANE_MOCKS = [
   "fixed-asset-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
+  "intake-batch-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
   "knowledge-mock.mjs",
   "members-lifecycle-mock.mjs",
+  "opening-ledger-source-mock.mjs",
   "operator-support-mock.mjs",
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
   "prepayments-mock.mjs",
   "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
+  "trade-invoice-mock.mjs",
+  "work-knowledge-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
 
@@ -214,6 +220,20 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
  * The journals lane declares NEITHER, which is the shape a new lane mock should aim for.
  */
 const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] }> = {
+  // #656's own lane, the first fixture set for `?tab=opening`. Every handler is gated on this
+  // lane's own client, seed or document id and falls through otherwise; its five rpc verbs
+  // (`create_opening_seed`, `record_opening_target`, `get_opening_dryrun`, `approve_opening_seed`,
+  // `cancel_opening_seed`) are carried by no other lane, measured across `apps/web/e2e`; and its
+  // ONE runtime route (`POST /api/opening/parse-targets`) is likewise scoped to its own seed id.
+  // It declares NEITHER list, which is the shape a new lane mock should aim for.
+  "opening-ledger-source-mock.mjs": { unscopeable: [], debt: [] },
+  // #658's own lane (the B3 Work-knowledge walk). `work_knowledge_drift` is a brand-new RPC no
+  // other lane calls, and every branch — relation and verb alike — is scoped to this lane's own
+  // client id or to one of the two work/task ids it minted, with its own `return false;`
+  // fall-through otherwise. Its control endpoint takes its discriminant from the QUERY STRING, so
+  // the fall-through happens before the body is drained. It declares NEITHER list, which is the
+  // shape a new lane mock should aim for.
+  "work-knowledge-mock.mjs": { unscopeable: [], debt: [] },
   // #632's own lane. `list_activity`/`get_activity_event` are brand-new RPCs no other lane ever
   // calls, and each still carries its own `return false;` fall-through on an unmatched
   // `p_client`/`p_source`+`p_id` — the journals lane's shape, declaring neither list.
@@ -313,6 +333,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `p_candidate` before it dispatches at all — so there is nothing to declare in either
   // column, which is the state a lane mock should be in.
   "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
+  // #636's intake-batch lane. Its ONE PostgREST verb gates on `p_batch` being one of its own three
+  // batch ids BEFORE it answers, so there is nothing to declare in either column.
+  //
+  // THE SAME COVERAGE LIMIT `journal-work-mock.mjs`'s row names, and it is recorded rather than
+  // hidden: this lane's TWO runtime routes — `POST /api/intake/batches` and
+  // `POST /api/intake/batches/:id/cancel` — are matched with a REGEX because the second carries an
+  // id, so this census cannot see either of them at all. The cancel route returns false on a batch
+  // id this lane did not mint; the open route is unconditional, because a batch it opens IS its own
+  // by construction (it answers with this lane's id and nobody else's walk posts to that path). A
+  // green on this row means "every handler the reader can see is scoped", not "this file is clean".
+  "intake-batch-mock.mjs": { unscopeable: [], debt: [] },
   // #646's source-correction lane. Every literal-path handler names its own client or its own
   // `c0ee0c0c-` document prefix before it answers, and the RPC half guards on an exact-verb
   // allow-list BEFORE `readJson` and then on its own document/question/correction id — so there is
@@ -337,6 +368,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     // rows above — it COULD scope, which is exactly why it is not called unscopeable.
     debt: ["/rest/v1/report_agent_receipts"],
   },
+  // #657 the /bank Matching lane. Its ONE literal-path handler, `/rest/v1/clients`, scopes by
+  // `id=eq.<its own client>` and falls through for every other id; all SEVEN of its RPC verbs
+  // check `p_client` (or, for the line read, that the line id is one of its own three) before
+  // answering, and each returns false otherwise. Nothing here is unscopeable and nothing is debt.
+  "bank-match-mock.mjs": { unscopeable: [], debt: [] },
   // The Home boards' lane (#557). Its ONE literal-path handler, `/rest/v1/clients`, scopes by
   // id and falls through, so nothing is declared here.
   //
@@ -358,7 +394,34 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // that merely lands on `/clients/:id`). It holds no fixture: both facets are `count: 0` with no
   // rows, so there is nothing in it for a sibling walk to resolve as its own — the N4/N5 property.
   // A walk that wants a POPULATED band overlays its own `page.route`.
-  "home-board-mock.mjs": { unscopeable: [], debt: ["/rest/v1/rpc/get_client_work_pack"] },
+  // #659 added the SECOND handler this reader can see: `/rest/v1/rpc/get_firm_portfolio_pack`,
+  // Firm Home's own portfolio table. It is UNSCOPEABLE rather than debt, and the distinction is the
+  // same one #650's row draws from the other side: that door takes NO client argument at all. Its
+  // subject is the caller's own firm, which arrives as a JWT claim rather than as a discriminant in
+  // the request, so there is nothing in the body to gate on — unlike `get_client_work_pack`, whose
+  // `p_client` is right there and simply not used. It holds no fixture either (zero rows), so the
+  // N4/N5 property that makes the rest of this file safe holds for it too, and a walk that wants a
+  // POPULATED portfolio overlays its own `page.route`.
+  // #660 appends THREE more to the same lane, for the same reason and with the same property.
+  // `get_client_financial_pack` and `propose_client_cash_accounts` both carry `p_client`, so both
+  // COULD be scoped and are not: their job is to give EVERY client route an honest answer, and the
+  // pack verb returns a scalar object, so an unanswered 404 would grow a "could not be read" money
+  // band on every walk that merely lands on `/clients/:id`. Neither holds a fixture — the pack is
+  // the UNPUBLISHED-cash-set face (`status:'unknown'`, a NULL value, reason
+  // `cash_set_unpublished`; never a fabricated `RM 0.00`) and the proposal has no candidates — so
+  // there is nothing in either for a sibling walk to resolve as its own.
+  // `publish_client_cash_account_set` is a WRITE this lane has nothing to write to; it echoes the
+  // receipt shape and changes no state, and a walk that wants the published board overlays its own
+  // pack with `page.route`.
+  "home-board-mock.mjs": {
+    unscopeable: ["/rest/v1/rpc/get_firm_portfolio_pack"],
+    debt: [
+      "/rest/v1/rpc/get_client_financial_pack",
+      "/rest/v1/rpc/get_client_work_pack",
+      "/rest/v1/rpc/propose_client_cash_accounts",
+      "/rest/v1/rpc/publish_client_cash_account_set",
+    ],
+  },
   // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
   // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
   // above, which is the state a lane mock should be in.
@@ -414,6 +477,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // three table reads — the shape a new lane mock aims for, declaring neither list. It claims no
   // unfiltered `/clients` register (the walk navigates by URL) and it has no runtime half at all.
   "fixed-asset-mock.mjs": { unscopeable: [], debt: [] },
+  // #651 — every handler is scoped to one of this lane's OWN two client ids (`OURS()`) or to one
+  // of its own asset ids (`detailFor()` returns null otherwise), and falls through in every other
+  // case, so nothing is declared here. FIVE of its verbs are also answered by
+  // `fixed-asset-mock.mjs` — `get_fixed_asset`, `get_depreciation_authority`,
+  // `list_depreciation_runs`, `list_fixed_assets` and `fa_register_tie` — and SHARED_RPC_VERBS
+  // below is the source of truth for that set rather than this sentence. It reads the
+  // POST body through the SHARED `readCachedJson` (`mock-dispatch.mjs`), so declining another
+  // lane's client leaves that lane's body fully readable.
+  "depreciation-mock.mjs": { unscopeable: [], debt: [] },
   // #648's A5 lane. Every one of its five verbs falls through unless the request carries this
   // lane's own cookie marker, and the three that name a plan check it as well — so it answers for
   // nobody else, and the firm-home tile's `get_firm_setup` on every OTHER walk is served by
@@ -451,6 +523,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // are read by surfaces other lanes drive, and a lane that claimed them would replace their
   // fixtures.
   "staff-expense-claim-mock.mjs": { unscopeable: [], debt: [] },
+  // #655's C1/C3/C6 trade-invoice lane, built to the same shape: every branch names this lane's
+  // own client id or the Work id this module minted before it answers, and falls through
+  // otherwise — the three PostgREST reads (clients by id; coa_accounts and counterparties by
+  // client_id, the last also by kind, because a sales invoice is recorded against a customer and
+  // a supplier bill against a vendor), the ONE RPC it owns exclusively (get_trade_invoice, by
+  // p_work), the RUNTIME admission route by body.clientId, and the CONTROL ENDPOINT by
+  // body.client. The lane answers NEITHER list_accounting_work NOR list_entry_links: both are
+  // read by surfaces other lanes drive, and a lane that claimed them would replace their
+  // fixtures. It reads every POST body through this file's cached reader, so declining another
+  // lane's request leaves that lane's body fully readable.
+  "trade-invoice-mock.mjs": { unscopeable: [], debt: [] },
   // #652's C8 accrual lane, built to that same shape: every branch names this lane's own client id
   // or accrual id before it answers. `list_spoken_for_documents` is SHARED with
   // `periodic-adjustment-mock.mjs` — both lanes mount the same `EvidenceChooser`, which makes the
@@ -1104,7 +1187,22 @@ function rpcVerbCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, strin
  * above already establishes is not a property to lean on beyond what N5 already buys.
  */
 const SHARED_RPC_VERBS: Record<string, string[]> = {
-  list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs"],
+  list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs", "work-knowledge-mock.mjs"],
+  // #658 x #631 — the Work-knowledge lane renders the SAME Diagnostics section the journal-work
+  // lane does, because B3's Work detail mounts it for every Work. Each lane answers only for the
+  // work ids IT minted and falls through otherwise (journal-work-mock.mjs:1401-1405's
+  // `state.works.get(workId) === undefined` guard; work-knowledge-mock.mjs's two explicit ids),
+  // so the share is a declared one rather than a collision.
+  get_work_execution_trace: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
+  // #658 x #629 — B3's Work detail mounts `WorkQuestionPanel` for every parked Work, so the three
+  // question doors are read by any lane whose fixture Work is `awaiting_input`. The journal-work
+  // lane answers for its own question id and this lane for its own single one
+  // (work-knowledge-mock.mjs's `WK.questionId`), and both fall through otherwise. The WRITE is a
+  // declared share for the same reason and with the same scoping: `answer_work_question` is
+  // refused by each lane for a question it did not mint, so neither can accept the other's answer.
+  get_work_pending_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
+  get_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
+  answer_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
   // #624 AC4 — `clara.get_document_state` is read from TWO surfaces by design: the Documents
   // detail panel and the Work detail's Sources tab mount the SAME component over it, because the
@@ -1124,6 +1222,16 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // own `DOCUMENT_STATES` map / `LANE_DOCUMENT_PREFIX` (documents-viewer-mock.mjs:513, :536, :551,
   // :561); neither can answer for the other's walk, which is what makes these declared shares
   // rather than collisions.
+  // #651 x #639 — the depreciation lane renders the SAME asset detail and the SAME authority and
+  // runs panels as the acquisition lane, so the three reads those surfaces issue on mount are
+  // answered by both. `fixed-asset-mock.mjs` gates on its own `FA.clientId` / asset ids and
+  // `depreciation-mock.mjs` on its own two client ids and its own asset id; neither can answer
+  // for the other's walk, which is what makes these declared shares rather than collisions.
+  get_fixed_asset: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  get_depreciation_authority: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  list_depreciation_runs: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
   get_document_extract: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
   list_source_dependents: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
   list_source_revisions: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
@@ -1161,7 +1269,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // answering and falls through otherwise, so it can answer for neither of the other two.
   list_spoken_for_documents: [
     "accrual-mock.mjs", "documents-intake-mock.mjs", "journal-work-mock.mjs",
-    "periodic-adjustment-mock.mjs",
+    "periodic-adjustment-mock.mjs", "work-knowledge-mock.mjs",
   ],
   // #633 x the chat-parity train — THE ATTRIBUTION PAIR, answered by two lanes because two
   // surfaces perform the same act: the chat composer files what it just attached, and the
@@ -1195,7 +1303,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `journal-work-mock.mjs` answers NULL for its own two Works (`seededWorkId`,
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
-  get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
+  get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs", "work-knowledge-mock.mjs"],
   // #649 x P6-5 — `clara.begin_client_onboarding` is the ONE door that creates a client, so any
   // lane whose walk creates one answers it. The two answer for DIFFERENT names and the door
   // carries no id, so the name is the request's own subject here rather than a label for one:
@@ -1214,8 +1322,18 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // register rows, while `journal-work-mock.mjs` and `plans-mock.mjs` answer the door's own SQL
   // NULL for Works that are not claims. Neither can answer for another lane's walk.
   get_work_claim_origin: [
-    "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs",
+    "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs",
   ],
+  // WAVE 2026-09-18, INTEGRATION — the two OTHER doors the Work detail now reads on EVERY mount,
+  // for the same structural reason get_work_claim_origin above is read: a trade invoice and a
+  // knowledge read-set are both invisible in accounting_work.purpose, so the surface has to ask.
+  // The owning lane answers a real row for its own Work ids; journal-work-mock.mjs answers the
+  // door's own honest-empty value (SQL NULL / the 0230:845-848 no-observation envelope) for its
+  // two, and every arm falls through on a foreign id. clara.intake_batch_members is a RELATION
+  // read, not an rpc, so the census below cannot see it and it carries no row here — its arm in
+  // journal-work-mock.mjs states the same gate.
+  get_trade_invoice: ["journal-work-mock.mjs", "trade-invoice-mock.mjs"],
+  work_knowledge_drift: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   // #653 x #640 — the FOUR plan lifecycle doors. A prepayment schedule CONFIGURES an
   // `amortisation_schedule` accounting plan, so pause / resume / end / catch-up on it are
   // `clara.pause_accounting_plan` and its siblings called on that plan's id. The web surface
@@ -1442,4 +1560,47 @@ test("client-id census POSITIVE CONTROL · two lanes at one address ARE caught",
   const problems = clientIdCollisions(synthetic);
   assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
   assert.match(problems[0]!, /fake-lane-a-mock\.mjs, fake-lane-b-mock\.mjs/);
+});
+
+// ===============================================================================================
+// #659 (fix round 1, finding A12) — A LANE THAT DEPENDS ON ANOTHER LANE'S VERB, DECLARED.
+//
+// Firm Home now renders a recent-activity band off `clara.list_activity` (D18.f's swap). #659
+// added NO handler for that verb, because it could not usefully add one: `serve-built.mjs`
+// dispatches `handleActivitySupabase` far ABOVE `handleHomeBoardSupabase`, so an arm in
+// `home-board-mock.mjs` would never be reached, and moving either dispatch position is forbidden
+// by the wave's §6.1 ruling (#657 dispatches between them).
+//
+// The consequence is real and belongs to the census rather than to a paragraph in a report: every
+// OTHER lane's walk that merely lands on `/` now renders #632's activity fixtures inside Firm
+// Home's band. The two columns above cannot express it — this lane declares no handler for the
+// verb, so there is nothing for the reader to classify — which is exactly how a cross-lane
+// dependency stays invisible until it breaks. These two cells make it a checked fact instead.
+// ===============================================================================================
+
+test("#659 · Firm Home's activity band is answered by #632's lane, and the dispatch order that makes that true is pinned", () => {
+  const serveBuilt = readFileSync(SERVE_BUILT, "utf8");
+  const activityAt = serveBuilt.indexOf("handleActivitySupabase(request");
+  const homeBoardAt = serveBuilt.indexOf("handleHomeBoardSupabase(request");
+  assert.ok(activityAt > 0, "the activity lane is still dispatched");
+  assert.ok(homeBoardAt > 0, "the home-board lane is still dispatched");
+  assert.ok(
+    activityAt < homeBoardAt,
+    "activity-mock.mjs MUST stay above home-board-mock.mjs: Firm Home's recent-activity band is "
+    + "answered by #632's fixtures, and every walk that lands on `/` sees them. If this order is "
+    + "ever inverted, home-board-mock.mjs must grow its own honest-empty `list_activity` arm in "
+    + "the same change — otherwise the band silently changes what every other lane's walk renders.",
+  );
+});
+
+test("#659 · home-board-mock.mjs answers NO list_activity verb — the dependency above is real, not a duplicate", () => {
+  // A POSITIVE CONTROL on the claim: if this lane ever grows its own arm, the comment above stops
+  // being true and this cell is where that is noticed.
+  const homeBoard = readFileSync(join(E2E_DIR, "home-board-mock.mjs"), "utf8");
+  assert.doesNotMatch(
+    homeBoard, /rpc\/list_activity/,
+    "home-board-mock.mjs answers no list_activity verb; if it grows one, update the dependency "
+    + "note above and this lane's declaration, because the arm would be dead code under the "
+    + "current dispatch order",
+  );
 });

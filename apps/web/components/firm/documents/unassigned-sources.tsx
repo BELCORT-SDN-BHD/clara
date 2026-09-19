@@ -58,6 +58,11 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { fileToClient } from "@/lib/documents/doors";
 import { listUnassignedDocuments } from "@/lib/documents/receipts";
 import { listFirmClients } from "@/lib/documents/reads";
+// #636 — the SAME batch card, mounted READ-ONLY apart from Cancel. The firm leaf has no client in
+// scope, so a row's own address is a Work link when the child carries one and nothing otherwise;
+// the card says so rather than offering a link that could only 404.
+import { IntakeBatchCard } from "@/components/documents/intake-batch-card";
+import { useIntakeBatch } from "@/lib/documents/use-intake-batch";
 import { useCapabilityRegistry } from "@/lib/documents/use-capability-registry";
 import { renderFileSize } from "@/lib/documents/file-size";
 import { renderKindLabel, needsClassification } from "@/lib/documents/kind-label";
@@ -81,6 +86,8 @@ export function UnassignedSources() {
     (live) => listUnassignedDocuments(50, { session: live }) as Promise<UnassignedRow[]>,
   );
   const clients = useHydratedPart<ClientRow[]>(sessionTokenAccessor, (live) => listFirmClients({ session: live }));
+  /** #636 — `?batch=<uuid>` on this leaf, read-only apart from Cancel. */
+  const batch = useIntakeBatch();
   const capabilities = useCapabilityRegistry(sessionTokenAccessor);
 
   /** ASK-ONCE, held locally for the window between an act settling and the next read
@@ -94,6 +101,23 @@ export function UnassignedSources() {
   return (
     <PageShell>
       <PageHeader title={t("heading")} description={t("subheading")} />
+
+      {/* #636 — `?batch=<uuid>` on this leaf too. No new route: the firm Documents leaf already
+          exists (`lib/navigation/tree.ts:227`) and a batch is a VIEW of the sources it shows. */}
+      {batch.state !== null ? (
+        <section className="flex flex-col gap-2">
+          <IntakeBatchCard
+            state={batch.state}
+            clientId={null}
+            facet={batch.facet}
+            onFacetChange={batch.setFacet}
+            onRefresh={batch.refresh}
+            pollExhausted={batch.pollExhausted}
+            onCancelled={() => { void sources.reload(); }}
+          />
+        </section>
+      ) : null}
+
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("listHeading")}</SectionHeader>
 

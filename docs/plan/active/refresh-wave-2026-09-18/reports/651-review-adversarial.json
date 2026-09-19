@@ -1,0 +1,99 @@
+{
+  "ticket": 651,
+  "lens": "adversarial",
+  "lens_model": "claude-opus-5 (Codex gpt-5.6-sol lane attempted and REFUSED: \"You've hit your usage limit ... try again at 5:41 PM\" — the exhaustion DECISIONS §7 predicted; the fallback that same paragraph authorises was taken)",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\651-review-adversarial.json",
+  "verdict": "fix_then_accept",
+  "findings": [
+    {
+      "id": "ADV-651-1",
+      "severity": "blocker",
+      "category": "correctness-regression",
+      "where": "packages/db/migrations/0227_depreciation_history.sql:339-343 (ck_fa_authorities_window) vs packages/db/migrations/0041_wave_d_a_fa_register.sql:3393-3395 (retire_depreciation_authority); reachable from apps/web/components/registers/fa-authority-ceremony.tsx:107",
+      "what": "Retiring a NEVER-SIGNED (proposed) depreciation authority — a lawful, working act before this branch — now dies on a raw Postgres check violation with no CLR code, no reason token and no remedy. ck_fa_authorities_window demands authority_from IS NOT NULL for status in ('live','retired'); clara.retire_depreciation_authority flips proposed -> retired and explicitly coalesces signed_by/signed_at (0041:3394, written precisely so a never-signed authority CAN be retired) but never stamps authority_from, which only sign_depreciation_authority writes (0227:1086-1089). The transition trigger admits proposed -> retired, so nothing upstream stops it.",
+      "evidence": "MEASURED on clara_651 through the real human door at its admin floor (throwaway cell under packages/db/tests, run and deleted): propose_depreciation_authority -> retire_depreciation_authority => code=23514 constraint=ck_fa_authorities_window \"new row for relation \\\"fa_depreciation_authorities\\\" violates check constraint\", detail=undefined. No cell in the estate covers it: grep -rn retire_depreciation_authority over packages/db/tests finds only roster/census rows (rig-meta.mjs:697, x41-wave-d-a-fa.test.mjs:66, x41b0-surface.test.mjs:318) plus one unused fixture helper (x41-fa-fixtures.mjs:302); the 17-cell #651 battery retires nothing. The rig holds 66 rows in status 'proposed' today (select status, count(*) from clara.fa_depreciation_authorities => proposed 66, live 376, retired 19), every one of them now un-retirable. The browser reaches it: fa-authority-ceremony.tsx:107 renders <RetireDialog> unconditionally for BOTH 'proposed' and 'live' (only SignDialog at :106 is gated on 'proposed'), and apps/web/lib/registers/depreciation.ts:108-116 calls the door directly — so an admin who proposes the wrong cadence and tries to withdraw it meets an untyped 23514 in the dialog.",
+      "fix": "Smallest fix: stamp the floor in the retire UPDATE exactly the way it already stamps signed_at — authority_from = coalesce(au.authority_from, clara._fa_month_start(clara._fa_today())) — as a narrow measured recut of retire_depreciation_authority inside 0227 (the transition trigger's v_frozen allowlist already admits authority_from after 0227:382, so no further trigger work). Alternative if the orchestrator refuses a sixth recut: weaken the CHECK to (status = 'proposed' and authority_from is null) or (status = 'live' and authority_from is not null) or status = 'retired'. Either way add p651.authority.retire_unsigned driving the real admin door."
+    },
+    {
+      "id": "ADV-651-2",
+      "severity": "major",
+      "category": "spec-gap",
+      "where": "packages/db/migrations/0227_depreciation_history.sql:1062-1076; the branch's own fixture at packages/db/tests/fa-authority-sign-compat.mjs:62-66",
+      "what": "AC5's \"explicit instruction\" is not executable as claimed. The resolution ladder proves only that SOME row with that id exists in clara.accounting_work / clara.agent_tasks for the same firm and client. It reads no kind, no purpose, no status and no author — so a machine-born task nobody instructed satisfies the authority. The migration's own comment (0227:1064-1065) says \"A Knowledge preference, a calculation policy or a repeated debit has no row here, so none of them can supply authority\", which is true and beside the point: the rows that DO exist include ones Clara created for herself.",
+      "evidence": "0227:1063-1072 is `select exists (select 1 from clara.accounting_work w where w.id = v_ref_id and w.firm_id = c.firm and w.client_id = p_client)` and the identical shape over clara.agent_tasks — no further predicate. The branch proves the gap with its own fixture: fa-authority-sign-compat.mjs:62-66 inserts clara.agent_tasks(kind='autodraft', status='queued', model_snapshot='p651-fixture') and passes it as {kind:'chat_task', id}; the door signs, and every x41-family sign now runs through that shape. The helper's comment at :49-56 states it outright — the ladder \"resolves it against clara.agent_tasks by id, firm and client without reading kind\". p651.authority.ref_resolves (depreciation-history.test.mjs:317-372) tests null / scalar / wrong kind-word / bad uuid / nonexistent / other-client — every shape EXCEPT a row that exists and carries no instruction.",
+      "fix": "Either narrow the ladder (agent_tasks.kind in ('chat_turn') — a turn a human typed — and/or an accounting_work whose purpose or status shows a person asked), or, if narrowing is out of scope this wave, record a NAMED residual in the report AND soften the door's comment: today authority_ref proves PROVENANCE (a row in this client) and not INSTRUCTION. Do not ship the stronger claim in a live comment."
+    },
+    {
+      "id": "ADV-651-3",
+      "severity": "major",
+      "category": "evidence-integrity",
+      "where": "packages/db/migrations/0227_depreciation_history.sql (whole file) vs clara.schema_migrations on clara_651; reports/651-final.md Assumption 5",
+      "what": "The committed 0227 has never been applied end to end from a clean 0224 on any cluster. The rig's catalog was produced by the PRE-EDIT draft and the ledger checksum was then repaired in place. Every post-image assertion in §J, the tail census, the four new bodies' ACL/owner proofs and all 17 battery cells are therefore evidence about a hand-repaired catalog, not about this file.",
+      "evidence": "MEASURED. clara.schema_migrations row '0227_depreciation_history' carries applied_at 2026-09-18T19:50:37.880Z, matching commit b4b3f62e (2026-09-19 03:50:55 +0800). The file was edited again in commit 93579e4c (2026-09-19 13:41:05 +0800) — git show --stat 93579e4c -- packages/db/migrations/0227_depreciation_history.sql reports 64 insertions, 27 deletions — with no re-apply; pnpm db:migrate reports '0 new'. The ledger checksum now equals the on-disk file (both 5ac4180c7855fd68ed9f466f85323e043641202c86bc22f5a04a919670718321, measured with migrate.mjs:91's CRLF-normalised recipe), which is the in-place repair itself. The worker's mitigation (executing the two rewritten §C blocks against the live catalog inside a rolled-back transaction) proves those two blocks install identical bodies; it does not prove the file APPLIES — the §C validator prestate at 0227:424-426 (\"the validator already admits a change class\"), the §B trigger anchor count at :366-370 and every anchor-appears-exactly-once guard have never run against the state they will meet.",
+      "fix": "Do not read §J as apply evidence, and do not list '220 migrations, 0 new' as one. The integrator's from-scratch 0001->0233 chain is the gate for this branch specifically and the report should say so; if a second cluster is free before merge, a clean 0001->0227 run closes it cheaply."
+    },
+    {
+      "id": "ADV-651-4",
+      "severity": "major",
+      "category": "vacuous-test",
+      "where": "packages/db/tests/depreciation-history.test.mjs:403-431, the assertion at :430",
+      "what": "p651.authority.floor_sequencing cannot fail. Its only assertion is assert.ok(earlier === null || reasonToken(earlier) !== null) — a tautology over the two exhaustive branches (either the call did not raise, or it raised something with a reason token). It would pass if the floor, the oracle splice and the whole sequencing guard were deleted. The real finding is written to a noteLane() log line no gate reads. DECISIONS §4 closes a row with a red-first cell or a NAMED residual; this is neither — it is a cell that pins nothing while occupying the slot of the one that would.",
+      "evidence": "Read the cell: both arms end in a log call, and :430 is true in every branch (caught() returns null on success and an error object otherwise, and reasonToken is non-null for any typed refusal — this path has no untyped ones). Running the battery on clara_651 the exposed branch is the one taken: \"# p651.authority.floor_sequencing RESIDUAL CONFIRMED: two pre-floor months ran OUT OF ORDER through run_depreciation_manual with no period_earlier_unmet refusal\" (battery run: 17 tests, 17 pass, 0 fail, 0 skip).",
+      "fix": "Replace the tautology with the measured fact: assert earlier === null, then assert what the second run actually does (ADV-651-5: a noop, charge set unchanged), so a later change that turns the exposure into a double charge reds this cell. The residual is then pinned rather than logged."
+    },
+    {
+      "id": "ADV-651-5",
+      "severity": "minor",
+      "category": "invariant-weakened",
+      "where": "packages/db/migrations/0227_depreciation_history.sql:905-912 (the oracle's authority-floor skip), consequence in clara._fa_run_period_core's period_earlier_unmet arm (0041:3479-3494)",
+      "what": "Flooring the sequencing oracle removes the period_earlier_unmet guard for every pre-floor period, because that guard only binds when the oracle NAMES an earlier period and the floored oracle names none. A bookkeeper can run caller-named pre-floor months out of order through clara.run_depreciation_manual. Measured damage today is nil, but the guarantee 0042 installed (\"a run can never read around an unapproved period\") is gone below the floor and nothing re-derives it.",
+      "evidence": "MEASURED on clara_651 (throwaway cell, run and deleted): one straight-line asset in service from 2026-03, authority signed today so authority_from = 2026-09-01 (row readback), both target months pre-floor. run_depreciation_manual(2026-07-01..2026-07-31) => {status:'drafted', charged_cents:30000, entries:1}, one charge row period_start 2026-03-01 amount 30000 — the arrears ARE swept up, so the migration's arrears claim holds. run_depreciation_manual(2026-04-01..2026-04-30) afterwards => NO refusal at all (pre-0227 it would have been CLR38 period_earlier_unmet), and the second receipt is {status:'noop'} with the charge set and the run rows unchanged. The exposure is real and currently benign because the later run charges everything uncharged up to its period end, leaving the earlier run nothing to double.",
+      "fix": "No code change needed if the orchestrator accepts the exposure, but the residual in the report should carry THIS measurement (out-of-order is admitted; it is a noop because charges sweep to period end) rather than the open-ended \"the reducing-balance pin is unenforced\", which reads worse than what is true. Fold into the follow-up ADV-651-4 asks for."
+    },
+    {
+      "id": "ADV-651-6",
+      "severity": "minor",
+      "category": "invariant-weakened",
+      "where": "packages/db/migrations/0227_depreciation_history.sql:361-392 (the _tf_fa_authority_transition splice) and the column comment at :353-359",
+      "what": "D8's \"written once at sign time and frozen\" is, after this file, enforced by nothing. v_frozen is the allowlist of columns a LAWFUL TRANSITION may write; adding authority_ref and authority_from to it makes both writable by ANY admitted transition (proposed->live, proposed->retired, live->retired) without tripping CLR38 authority_immutable. The splice's own comment asserts the opposite — \"nothing else may ever move them\" — which is now a convention of two door bodies rather than a trigger law.",
+      "evidence": "Live trigger body read off pg_proc on clara_651: v_frozen text[] := array['status','signed_by','signed_at','signed_op_key','retired_by','retired_at','retired_reason','retired_op_key','authority_ref','authority_from'], followed by if (to_jsonb(new) - v_frozen) is distinct from (to_jsonb(old) - v_frozen) then raise ... authority_immutable. Nothing downstream re-checks the two columns. No cell pins the freeze either: the battery's backdateAuthorityFloor (fa-authority-sign-compat.mjs:98-108) moves authority_from with the trigger DISABLED, so it says nothing about the enabled path.",
+      "fix": "Two lines in the same splice: if old.authority_from is not null and new.authority_from is distinct from old.authority_from then raise ... authority_immutable, and the same for an already-set authority_ref. Pin it with a cell that drives retire_depreciation_authority and reads the floor back unchanged. Until then, soften the comment so it does not claim a wall that is not there."
+    },
+    {
+      "id": "ADV-651-7",
+      "severity": "minor",
+      "category": "test-isolation",
+      "where": "packages/db/tests/fa-authority-sign-compat.mjs:75 and :100",
+      "what": "A shared fixture helper disables triggers on two SHARED tables across separate autocommitted statements — alter table clara.agent_tasks disable trigger t_agent_task_insert, and alter table clara.fa_depreciation_authorities disable trigger t_fa_authorities_transition. Between the disable and the re-enable the guard is off for EVERY session on that rig, not only this test's, and a process killed in the window leaves it disabled permanently. Migration 0227 does the same manoeuvre correctly (:333-337, inside the runner's own per-migration transaction); these two are not in a transaction.",
+      "evidence": "Both sites are three separate rootQuery() calls (disable / insert / enable) with no begin. packages/db/package.json's test script pins --test-concurrency=1, which bounds the hazard WITHIN this package, but the estate runs real-DB cells from another package against the same rig (packages/runtime/tests/reconcile-fa.test.mjs, which the worker's own report runs with WORKFLOW_POSTGRES_URL) and the belt's arms write clara.agent_tasks. mintChatTaskRef's disable arm is reached exactly when the client is not yet active — the onboarding fixtures other lanes build.",
+      "fix": "Wrap each pair in one transaction on one connection (begin; alter table ... disable trigger ...; insert ...; alter table ... enable trigger ...; commit;) so the window is transaction-scoped and a crash rolls it back, as the migration already does."
+    },
+    {
+      "id": "ADV-651-8",
+      "severity": "minor",
+      "category": "idempotency",
+      "where": "apps/web/lib/registers/depreciation.ts:74, :95, :114 and apps/web/lib/registers/fixed-assets.ts:344",
+      "what": "\"One decision, one key\" was applied to exactly one door. runDepreciationManual now takes the caller's key (depreciation.ts:163-175, with useDecisionKey at :281), but propose / sign / retire and revise still mint crypto.randomUUID() inside the wrapper, so a double-click or a retry after a lost response is a NEW operation the database's replay ladder cannot recognise. On sign this is user-visible: the second call reserves a fresh key, reaches 0227:1029-1034 and refuses CLR38 authority_already_live instead of returning the first receipt — the exact \"lost response, click again\" shape the brief named for this lane.",
+      "evidence": "grep -n randomUUID over the two files: depreciation.ts:74 (propose), :95 (sign), :114 (retire), :281 (the decision-key hook itself); fixed-assets.ts:301 (complete), :344 (revise), :386. The sign door's replay identity is _hash({client, authority}) (0227:1015-1017) — the DOOR is idempotent and only the key transport is not, so the fix is entirely web-side.",
+      "fix": "Thread the existing useDecisionKey shape through the four authority-ceremony call sites the way the run dialog already does, or record a named residual with a follow-up. No DB change."
+    },
+    {
+      "id": "ADV-651-9",
+      "severity": "note",
+      "category": "pre-existing-red",
+      "where": "packages/db/tests/x41-round35-tie.test.mjs (cell x41.s4); reports/651-final.md \"Unverified\" item 2",
+      "what": "x41.s4 ships RED and the worker could not establish its base-state colour. It can be established, and it is not this branch's: the offending register row predates 0227's application on this rig by thirty minutes.",
+      "evidence": "MEASURED. Re-ran the file: \"not ok 2 - x41.s4 ...\", 2 pass / 1 fail. The first unexplained difference names client 0f659098-f4e9-45c2-8e09-38878ed63cfb = x41_b3_30228e, created_at 2026-09-18T19:20:49.086Z, whose single clara.fixed_assets row 66a6b0b3-8a19-42b2-9197-cc67b9bb6674 (cost 77000, change_class null) was created at 2026-09-18T19:20:49.192Z. clara.schema_migrations puts 0227_depreciation_history at applied_at 2026-09-18T19:50:37.880Z. The row is thirty minutes older than the migration, so the worker's attribution to x41.b3's reverse_entry fixture re-firing the acquisition belt stands.",
+      "fix": "No change to this branch. Move the line out of \"Unverified\" into \"Follow-ups\" with this timestamp evidence, so the integrator does not spend the from-scratch run re-litigating it."
+    },
+    {
+      "id": "ADV-651-10",
+      "severity": "note",
+      "category": "replay-semantics",
+      "where": "packages/db/migrations/0227_depreciation_history.sql:1012-1017",
+      "what": "sign_depreciation_authority's replay identity deliberately excludes p_authority_ref, so a retry carrying a CORRECTED instruction silently returns the first receipt and the wrong instruction stays on the row forever (authority_ref is write-once by the door, and the signature cannot be re-taken — 0227:1029-1032 refuses a non-proposed authority). The comment states the choice; nothing states its cost.",
+      "evidence": "0227:1015-1017 hashes only {client, authority}; the ref is validated afterwards (:1042-1076) and written at :1086-1089. The only recovery is retire-then-propose-then-sign, which ADV-651-1 has just broken for the proposed arm.",
+      "fix": "No code change required, but the owner question belongs in the report beside D8's: is a mis-cited instruction correctable, or is the remedy always to retire the authority and sign a new one?"
+    }
+  ]
+}

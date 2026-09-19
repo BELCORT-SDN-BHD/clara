@@ -19,6 +19,46 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The two pins the wave 2026-09-18 cut moved
+
+`chatTurn → chatTurn_v21`, `claraWork → claraWork_v5`. Every superseded body stays exported and in
+`workflowBodies` — the boot census refuses to start the world database-wide if a body a parked run
+needs is missing, and that is policy (c) enforced rather than promised. What each new body carries,
+and nothing more:
+
+* **`chatTurn_v21`** — exactly two tools over v20's map plus ONE step.
+  `start_trade_invoice_work` (#655) admits a sales invoice or a supplier bill through
+  `clara.admit_trade_invoice_work` (nine arguments, an eighteen-token refusal map, a deterministic
+  op key); it ADMITS and posts nothing. `run_depreciation_period_for_client` (#651) clears a
+  client's DUE periods through `clara.run_depreciation_period_for(uuid,date,text,uuid)` — a NEW
+  verb name, because `rig-meta.mjs:691-693` is an executable census that fails the moment
+  `run_depreciation_manual` reaches a machine role. And `loadClientBasisStepV21` (#658) repoints
+  the chat knowledge preload from `clara.get_knowledge_pack`'s recency dump to the bounded
+  `clara.retrieve_knowledge`, surfacing a read failure as a typed status instead of the null that
+  reads as "this client has nothing recorded". NO new wire kind and NO widened
+  `WORK_ACCEPTED_PURPOSES` — a trade invoice is a `journal_entry` Work and the depreciation run
+  mints no card at all, which is also why it is deliberately OUT of `hasCodingIntent_v21`.
+  `clara.get_context_pack` is not recut and not repointed. Deploy 0225, 0227 and 0230 first.
+* **`claraWork_v5`** — the same repointed read on the Work lane, plus the RECORD of it:
+  `clara.record_work_knowledge_read` writes the read-set row that makes "what did Clara actually
+  see?" answerable. A read that does not succeed is now TERMINAL (`knowledge_read_failed`,
+  recoverable, nothing posted) — the one place v5 is stricter than v4, ratified by DECISIONS
+  §6.2.0 R-D, and all-or-nothing because the door decides all three tiers in one statement and
+  catches nothing. Two new READS, `read_knowledge_source` and `read_knowledge_history`, neither of
+  which writes a row or mints a part kind. A resumed run asks `clara.work_knowledge_drift_for`
+  once; a `relevant:true` drift spends ONE EXISTING `budget.replans` and `relevant:null` is
+  surfaced rather than coerced. The roster goes from five names to seven and the bundle id moves to
+  `clara-work-tools/v5` — whose digest now covers **each tool's JSON Schema and its declared
+  dependencies** (ARCHITECTURE:435-445, below). Riders: #847's writer-side trace bounds through the
+  new sibling `lib/work-trace-bounds.mjs`, and #882(a)'s one-row CLR40 reclassification. Deploy
+  0230 first — without it EVERY Work stops, which is the correct failure for a deploy-order
+  mistake.
+
+TWO CONTRACTS THIS CUT DID NOT DELIVER, both by ruling rather than by wall: #656's
+`read_opening_source` belongs to a FUTURE `chatTurn_vN` (its own stanza says so, and it appears in
+no row of DECISIONS §1.2), and #636's `open_intake_batch` stays contract-only (D5). #653's and
+#647's remain where the 2026-09-15 note left them.
+
 ### The three pins the wave 2026-09-15 cut moved
 
 `chatTurn → chatTurn_v20`, `claraWork → claraWork_v4`, `clientOnboarding → clientOnboarding_v5`.
@@ -80,6 +120,42 @@ foreign-firm and out-of-client-scope, 403 `no_membership`, 409 `custody_pending`
 `ETag` (the content address), `Content-Length`, `Cache-Control: private, no-store` and
 `X-Content-Type-Options: nosniff`. No SQL text and no vendor response body reach the client.
 
+### The chat turn's 202 and what the live stream carries (#642)
+
+`POST /api/chat/:sessionId/turns` answers **`202 {task_id, replayed}`**. `replayed` is read straight
+off `clara.begin_chat_turn`'s receipt — `true` from the door's `turn_key` replay branch
+(`0006_runtime_core.sql:954-960`), `false` from the fresh admission at `:999` — and it is the only
+thing on the wire that distinguishes "we already have this turn" from "we just admitted this turn".
+It is additive: a client that ignores it is unaffected. A receipt that does not carry the field at
+all is reported as a fresh admission (fail-closed towards drawing the turn, never towards swallowing
+it). The route is otherwise unchanged and **#642 ships no migration**: the idempotency arm is already
+in 0006 and every defect that ticket closed is above the database.
+
+**The model's whole `fullStream` reaches the browser verbatim**, so a question about live tool state
+is a WEB question, not a version cut. `consumeChatTurnModelResult` writes every part of the AI SDK
+stream to the run's writable (`workflows/chatTurn.v10.impl.ts:216-221`, called at
+`chatTurn.v20.impl.ts:148-157`) and `src/streamRoute.ts:139` relays each one as `event: chunk` with
+no filter. Measured on this repo's own `ai@7.0.77` + the `MockLanguageModelV4` script the World legs
+use, the part names a turn actually emits are `start`, `start-step`, `text-start`, `text-delta`,
+`text-end`, `tool-input-start`, `tool-input-delta`, `tool-input-end`, `tool-call`, `tool-result`,
+`tool-error`, `finish-step`, `finish` — and the identifier field is **`id` on the three
+`tool-input-*` parts but `toolCallId` on `tool-call`/`tool-result`/`tool-error`**, which is the one
+fact a reader who took the vocabulary from the SDK docs would get wrong. There is **no admission
+event on the stream**: nothing in that vocabulary says "queued", so a live *queued* chip cannot be
+built without a new frozen `chatTurn` cut.
+
+**A revocation has two doors, and they say the same thing.** `src/streamRoute.ts` re-authorises on
+every poll and sends `event: revoked {taskId, reason}` when that throws (`:152-157`) — but it can
+only write that frame once the SSE headers are out, and its ATTACH-time authorisation answers
+before them (`:31-44`, an `AuthError`'s own status with `{error: code}`). Every revocation
+discovered when a read is opened — the reattach after a `detached`, a rail reopen, a scope switch
+back, any remount into a membership that is already gone — therefore arrives as **403 or 404**,
+never as an event. The browser treats exactly those two statuses as the same fact and synthesises
+the same `revoked` event (`apps/web/lib/clara/stream.ts`), because reading them as a transport
+failure produced eight rounds of "Reconnecting…" at a person whose access had been removed. A 401
+is about the caller's TOKEN rather than a membership and stays a transport failure; the web proxy's
+own unreachable and redirect arms answer 502, which is what "the lane is down" looks like.
+
 ### The prepayment-amortisation lane (#653) — one non-frozen module and two owed successors
 
 `lib/prepayment-schedule-basis.ts` is NOT imported by any workflow body and must not be until the
@@ -93,7 +169,13 @@ deliberately narrow and each absence is a rule: no amount, no period count, no t
 no authority id — all of them are derived by the frozen `clara.prepayment_schedule_v1` or are
 human-only by law (`clara.record_document_service_period` has no wake wrapper and never will).
 
-TWO SUCCESSOR CONTRACTS ARE WRITTEN IN THAT FILE'S FOOTER AND NEITHER IS CUT:
+TWO SUCCESSOR CONTRACTS ARE WRITTEN IN THAT FILE'S FOOTER AND NEITHER IS CUT. They were owed on
+`chatTurn_v20` / `claraWork_v4` when this section was written; **`chatTurn_v21` and `claraWork_v5`
+have since been cut and took neither**, for the same measured reason rather than by oversight —
+every prepayment door and read is granted to `clara_authenticated` alone (0223 §D.1), so the tool
+could only ever return a grant refusal, and a workflow cut does not write migrations. The version
+names below are therefore the contracts' ORIGINAL addressees, kept as written; the live reading is
+"the next `chatTurn_vN` / `claraWork_vN` cut AFTER the grant exists".
 
 * **`chatTurn_v20` — `start_prepayment_schedule_work`.** Four lines: the tool, the local refusal,
   a `stableOpKey`, one `clara.create_prepayment_schedule` call with `{kind:"chat_task", id:
@@ -113,6 +195,47 @@ one fact that lane cannot show: a per-period amount survives the frozen `.strict
 the run's faithful echo and the digest comparison, so the final period's entry charges the residual
 rather than the revision's stored constant. Its model is SCRIPTED, so it is local, supplementary
 evidence per #653's AC8 — not a provider run and not hosted evidence.
+
+### The depreciation lane (#651) — one non-frozen module, one owed successor, and a belt that needed NO change
+
+`lib/depreciation-run.ts` is NOT imported by any workflow body and must not be until the wave's
+successor ceremony. It is the `lib/fixed-asset-acquisition.ts` trajectory exactly: written to be
+final, because `scripts/check-frozen-workflows.mjs`' IMPORT-ESCAPE hash-locks it with the closure
+the instant `chatTurn_v21` imports it.
+
+It carries the `.strict()` zod input that deliberately holds NO period — `clara._fa_run_period_core`
+refuses any caller-named window that is not the cadence's, so the period is the database's — the
+door's four arguments in the database's own order, and a CLR → sentence map keyed on
+`(code, reason, axis)` rather than on the code alone, because 0227 adds a NEW axis
+(`period_closed`) to a reason 0041 already used for two others (`not_ended`,
+`not_cadence_aligned`). An unmapped code degrades to the door's verbatim message; it is never
+swallowed and never guessed.
+
+**The floor sentence is part of the contract, not decoration.** The door carries no floor bypass, so
+Clara cannot reach a period earlier than the authority window, and the map says so and points the
+person at the human catch-up door `clara.run_depreciation_manual`.
+
+ONE SUCCESSOR CONTRACT IS WRITTEN IN THAT FILE'S FOOTER AND IT IS NOT CUT: **`chatTurn_v21` —
+`run_depreciation_period_for_client`**. A NEW door name is mandatory rather than stylistic:
+`packages/db/tests/rig-meta.mjs:691-693` is an executable census that fails the moment
+`run_depreciation_manual` reaches a machine role, because that would hand the maker-checker ladder a
+bypass. The contract reuses the existing receipt part shape and mints no
+`accounting_work.purpose` — depreciation posts through `journal_entries` directly and never reaches
+the Work lane.
+
+**`reconciler-fa.mjs` needed NO change, and that is the finding.** The authority floor and the
+closed-period skip are both DB-side, which is that module's own law (`reconciler-fa.mjs:15-20`): the
+belt asks `depreciation_run_due` and runs what it is told. `tests/reconcile-fa-unit.test.mjs`'
+`p651.belt.unchanged` pins the absence — the belt makes no run call on a not-due answer, runs
+exactly the period the oracle named when it skipped a closed one, and NO client-side mirror
+appeared (the module names neither `authority_from` nor `fiscal_years` nor `skipped_closed`).
+
+**Depreciation invokes NO Workflow, and that is a finding rather than an omission.** There is no
+standalone World leg for this lane and none is owed: `reconciler-fa.mjs:59-61` says in its own words
+that it is "a plain polled belt … it neither listens on a channel nor starts a workflow run". The
+durability evidence in its place is `tests/reconcile-fa.test.mjs` — one real-database end-to-end
+under the `clara_runtime` group role — which 0227 touched only to sign its authority through the
+new four-argument door.
 
 The bank-agent and close-prep wake engine/bodies exist. Their cadence sources ship disabled and
 their producer/activation work remains open. Reporting uses a separate
@@ -387,7 +510,7 @@ to. The same four facts appear in one boot line, so a log and an HTTP read can b
 trusting either alone:
 
 ```
-[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v20 claraWork=claraWork_v4 clientOnboarding=clientOnboarding_v5 …
+[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v21 claraWork=claraWork_v5 clientOnboarding=clientOnboarding_v5 …
 ```
 
 `git_sha=<unset>` and `frontier=<unavailable: reason>` are the honest readings when the build arg
@@ -860,7 +983,67 @@ between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
 spawned-engine shape `interview-kill-resume-e2e.mjs` uses.
 <!-- #811 -->
-## Requirements carried by the next frozen `claraWork` version (was `claraWork_v4`; it took neither)
+### #658 — three NEW modules, **now frozen**, that the `claraWork_v5` cut imports
+
+When this section was written all three sat OUTSIDE every frozen closure (the union was 296
+modules with nine `lib/` members, and none of these three among them). **The wave 2026-09-18 cut
+imported them and they are frozen now**: the union is 312, and `--compare-base origin/main` reports
+296 entries unchanged plus 16 additions — the eleven closure files and these three plus
+`lib/trade-invoice-basis.ts` and `lib/depreciation-run.ts`, every one of them entering BY CLOSURE
+rather than by a marker somebody added. That is exactly the trajectory `lib/knowledge.mjs` took
+when `chatTurn_v19` imported it and `lib/knowledge-conflicts.mjs` when `claraWork_v4` did. A
+behavioural change to any of them is now a `claraWork_v6`, so DURABLE RULES LIVE IN MIGRATION 0230,
+never in these files. None of the
+three carries a module-level `node:` import, which is `lib/knowledge.mjs:44-64`'s measured
+constraint: the Workflow DevKit compiles a frozen closure into a VM script where `require` is
+undefined, and the failure is a RUN-TIME one no build gate sees.
+
+- **`lib/knowledge-retrieval.mjs`** — `retrieveKnowledge` (never null, never throws),
+  `renderRetrievedKnowledge` (three statuses, and `partial` reads as neither neighbour),
+  `recordWorkKnowledgeRead` and `readKnowledgeDrift`. It DELEGATES the envelope discipline to
+  `lib/knowledge.mjs` rather than restating it, for `knowledge-conflicts.mjs:19-24`'s reason: a
+  second copy is how two lanes come to disagree about what an unreadable pack means.
+- **`lib/capability-registry-v2.mjs`** at `clara-capability-registry/v2` — v1's five entries
+  carried by REFERENCE plus `accounting_work.retrieve_knowledge` and
+  `accounting_work.inspect_knowledge_source`, both `modelBound: true`. A SIBLING, never an edit
+  to the hash-locked v1 (`capability-registry.mjs:29-34`'s own rule; `layout-sandbox.mjs` is the
+  estate's precedent for a sibling).
+- **`lib/work-trace-bounds.mjs`** — #847's owed writer half; see the section below.
+
+**The status mapping, exported ONCE as `faceStatusOf`.** The runtime keeps its own frozen two
+words; every human face and the `clara.work_knowledge_reads.status` column use the estate's
+four. No face and no column ever says `unavailable` — 0230's CHECK refuses it by name.
+
+| runtime envelope | face word |
+|---|---|
+| `{status:'ok'}` | `ok` |
+| `{status:'ok', truncated:true}` | `partial` |
+| `{status:'unavailable', reason:'refused'}` | `denied` |
+| `{status:'unavailable', reason:'read_failed' \| 'malformed' \| 'no_client' \| 'no_purpose'}` | `unknown` |
+
+**Five reasons, not six — and D16's required read needs no sixth.** `clara.retrieve_knowledge`
+decides all three tiers in ONE statement and catches nothing, so it either answers with every tier
+or raises: "the core could not be read" is the same event as "the read failed", and both arrive as
+an `unavailable` answer whose face word is `unknown` or `denied`. D16's terminal at the v5 cut
+therefore fires on ANY unavailable answer; there is no per-tier readability signal to key on, and a
+caller must not be written as though there were. Asserted on both sides:
+`p658.retrieve.envelope_is_atomic` reads the catalogued door body, and `kr.07` reads this module's
+source. A later door revision that wants to distinguish a core-only failure adds the field in
+migration 0230, where durable rules live, and changes those two cells to say so.
+
+**A replay is named.** `recordWorkKnowledgeRead` returns `replayed` and `payload_match` beside the
+raw receipt. The relation is append-only and keyed by `(work_id, run_id, seq)`, so a re-execution
+whose outcome genuinely differed (first attempt `ok`, second `denied` because a record was
+withdrawn mid-flight) cannot overwrite the row — it is reported instead of being answered with a
+silent `ok`. The writer still never fails a run: a diagnostic write that could settle a Work would
+be worse than the divergence it reports.
+
+Batteries: `tests/knowledge-retrieval.test.mjs` (19 cells) and `tests/work-trace-bounds.test.mjs`
+(9 cells). Standalone leg: `tests/work-knowledge-e2e.mjs` — it SIGKILLs a child between the
+read-set write and its acknowledgement and proves the replay lands on the SAME
+`(work_id, run_id, seq)` row. It bootstraps NO Workflow World, so it leaves
+`packages/db/tests/rig-isolation.test.mjs` T10b green (#866).
+## Requirements carried by the next frozen `claraWork` version — **ALL THREE TAKEN BY `claraWork_v5`**
 
 `packages/runtime/lib/work-trace.mjs` is inside `claraWork_v3`'s frozen closure and hash-locked in
 `frozen-workflows.json`; a comment edit breaks that lock exactly as a code edit does. The owner's
@@ -886,9 +1069,217 @@ until that version is cut.
   surface the refusal, because today a run bound that is too tight loses trace rows silently
   rather than raising. Whichever it does, the writer's clause must stay NO TIGHTER than the door's.
 
-Until a version takes them, the honest sentence about both fields is: the DOOR bounds them in
-shape; the WRITER does not, and the door is the wall. **`claraWork_v4` was cut in the wave
-2026-09-15 integration and took NEITHER requirement** — it only feeds `knowledge_version` into
-the existing `observed` object (`claraWork.v4.impl.ts`). Both rows above therefore carry
-forward to the next frozen `claraWork` version, unchanged.
+**`claraWork_v4` was cut in the wave 2026-09-15 integration and took NEITHER requirement** — it
+only fed `knowledge_version` into the existing `observed` object (`claraWork.v4.impl.ts`).
+**`claraWork_v5` was cut in the wave 2026-09-18 integration and took BOTH**, so the sentence above
+has been spent: from v5 the honest one is *the door bounds these two fields in shape, and so does
+the writer.* `claraWork.v5.impl.ts` runs every NUMERIC observed revision through
+`boundedRevisionNumber` before `traceSafely` (a refused number drops its KEY, which is
+`observedRevisions`' own existing contract) and every `runId` through `boundedRunId` (a refused id
+skips the WHOLE row, because the door would refuse it anyway and a skipped write cannot poison the
+settle's open transaction). Both clauses are mirrors of 0210's and stay **no tighter** than it;
+`lib/work-trace.mjs` was not opened.
+
+**BOTH ROWS ARE NOW OWED ON `claraWork_v5`, AND THEIR CODE EXISTS (#658, filed as #847).**
+`packages/runtime/lib/work-trace-bounds.mjs` is a NEW, non-frozen SIBLING module that mirrors
+0210's two door-side clauses on the writer side — `boundedRevisionNumber` (`abs(v) < 1e12` and
+at most six decimal places) and `boundedRunId` (the `wrun_` + 26-character Crockford ULID arm,
+or no 13-digit run). `lib/work-trace.mjs` is NOT opened: #658 cuts no frozen body, so the module
+sits outside every closure until the v5 cut imports it, and the stanza that tells the integrator
+exactly where to call it is written in `reports/658-final.md`. Its own battery
+(`tests/work-trace-bounds.test.mjs`) asserts the admitted side BY VALUE against the shapes
+0210's tail exercised, because the writer's clause must stay **no tighter than the door's** — a
+writer stricter than the door loses rows the database would have accepted, and `traceSafely`
+swallows the loss. From v5 the honest sentence becomes: *the door bounds these two fields in
+shape, and from v5 so does the writer.*
+
+**#791 carried forward to v5, and v5 TOOK IT.** ARCHITECTURE:435-445 has been binding since v4
+and v4 shipped `tools: {id, names}` — a digest that could not see a tool whose SCHEMA changed while
+its name did not, which is exactly how `ask_question`'s v1→v2 change escaped with nothing but a
+hand-bumped id. `claraWork.v5.bundle.ts` hashes `tools: {id, names, schemas, dependencies}`:
+`schemas` is each tool's input JSON Schema, derived with zod 4's own `z.toJSONSchema` from the very
+object the builder hands to `tool({inputSchema})` (`target: "draft-07"` and `io: "input"` both
+PINNED rather than defaulted, so a library default moving cannot move a digest that is supposed to
+change only when a CONTRACT changes); `dependencies` is each tool's declared doors. A cell in
+`tests/clara-work-v5.test.mjs` tightens one bound on one schema, leaves the roster and the tools id
+untouched, and proves the digest moves — and that the v4-shaped projection of the same change is
+byte-identical, which is the measurement of what was missed rather than an assertion about it.
 <!-- #811 -->
+
+## #655 — the trade-invoice lane, and the `chatTurn_v21` contract it hands over
+
+`POST /api/work/trade-invoice` (`src/workRoutes.ts`) is the **FOURTH** sibling of
+`/api/work/journal`, `/api/work/periodic-adjustment` and `/api/work/staff-expense-claim`, never a
+widened version of any of them. It takes **two** payloads where #638's claim door takes one
+(`invoice` and `basis`), because a trade invoice's journal is not derivable from its particulars:
+which expense account a bill debits is a coding judgement, not an arithmetic one. Both the human
+form and, later, the v21 chat tool post through it, which is what makes ONE `clara_runtime` door
+the whole lane's admission. Its 202 carries `invoice_id`, the RESOLVED `counterparty_id` and the
+**derived** `due_date` / `due_date_source` — four facts the browser could not have computed.
+
+`lib/trade-invoice-basis.ts` is a **NEW non-frozen module**, and it is non-frozen only until
+`chatTurn_v21` imports it: `scripts/check-frozen-workflows.mjs` freezes the transitive relative-
+import closure of every frozen workflow, so at the cut every byte of it is hash-locked — exactly
+what happened to `lib/periodic-adjustment-basis.ts` at v19 and `lib/staff-expense-claim-basis.ts`
+at v20. **Which is why every durable rule lives in migration 0225 and none lives here.** The module
+carries the `.strict()` schema, the two builders, the local refusal mapper (the door's own
+**eighteen** tokens, as messages — fourteen from DECISIONS.md:50 plus `invalid_kind`, and, after
+the fix round's F2, `invalid_particulars`, `invalid_currency` and `invalid_tax_facts`, because one
+reason must name one thing or a person is shown a sentence about the wrong field) and a DISPLAY helper that names the domain and the item kind without naming a
+chart account — it has no chart. It carries **no object spread anywhere**, because
+`scripts/check-parts-parity.mjs` refuses one ("unclassifiable object spread") in any module it
+walks, and this module enters that walk at the cut; measured — the guard refused an earlier draft.
+
+**The successor contract this lane hands over** is written in full at the foot of that module: the
+tool name, the `.strict()` input schema, the door call with its argument order FIXED, the
+deterministic op key, the eighteen-token refusal map, the existing `work_accepted` part with **no**
+`WORK_ACCEPTED_PURPOSES` widening (a trade invoice is a `journal_entry`-purpose Work, exactly as
+#638's claim is), and the prompt stanza's "I've queued it" posture. Nothing is added to
+`claraWork_v4`: an ambiguous counterparty is refused AT ADMISSION precisely so no new mid-run
+question shape is needed, and a fact discovered mid-run goes through that body's existing
+`ASK_QUESTION_TOOL`.
+
+`tests/trade-invoice-e2e.mjs` is the World leg, and it is the ONLY place the thing this ticket is
+really about can be shown: the signed AR/AP open item is minted by a DEFERRED constraint trigger AT
+COMMIT, so the entry, the receipt, the `trade_invoices` row and the item are one transaction — and
+all four survive an `exit_after_commit` crash and a respawn as ONE of each. It also proves the
+due-date basis end to end: the browser sent `absent`, the door answered `counterparty_terms` and
+stamped `document_date + payment_terms_days` on the item (DECISIONS §6.2.0 R-A — agreed terms run
+from the document, so a bill dated 2026-03-04 and posted 2026-03-31 under 30-day terms is due
+2026-04-03, not 2026-04-30). It SKIPS CLEANLY when 0225 is absent.
+## #656 — the `opening_tb.line` producer gets its caller
+
+`lib/opening-tb-cells.mjs` has read a printed trial balance into canonical `opening_tb.line`
+regions since Wave B, and NOTHING called it: every import was a test. The consumer half
+(`lib/opening-parse.mjs` → `clara.record_opening_targets_parsed`, route `src/openingRoutes.ts:32`)
+has been live and unreachable for just as long. #656 joins them.
+
+**`lib/opening-tb-produce.mjs` is the whole new surface**, and it is an adapter plus a containment
+shell: it takes the `tables.N.cells.M` region payloads `normalizeAzureLayout` has just built, hands
+them to `cellsToOpeningTb` unchanged, and returns `{status, reason, regions, refusals, totals}`. It
+adds no grammar of its own, and that is a rule rather than a style — **any future Clara opening tool
+that imports it FREEZES it**, because the freeze lint locks a workflow's whole transitive
+relative-import closure (`lib/periodic-adjustment-basis.ts` is the estate's proof that the trap has
+sprung once). Durable rules therefore live in `0017`/`0228` and in `opening-tb-cells.mjs`'s four
+refusal laws, never here.
+
+**The integration point is IN LINE, at the OCR pass** (`lib/egress.mjs`'s `normalizeAzureLayout`),
+through one appended statement: no new processing lane, no new `engine_kind`, no CHECK widening, no
+facts-router splice. The wiring is kind-blind by construction and that is ACCEPTED, for two measured
+reasons: the reader must POSITIVELY identify a balancing trial balance and returns `null`
+otherwise, and an `opening_tb.line` region is INERT until an opening seed ties that document — at
+which moment `clara.create_opening_seed` re-checks the document's kind (CLR02 for anything but
+`opening_balance_doc` / `management_account`). The worst case of a false positive is a few extra
+evidence rows on a document nobody ever ties, never a number that reaches an accounting effect.
+
+**What a BAD region costs, priced honestly (fix-round, review finding A6).** The sentence above is
+about a region the database ACCEPTS. One it does not accept is dearer: `_derive_opening_region_fact`
+RAISES CLR31 over an `opening_tb.line` whose `monetary_cents` disagrees with the text it re-derives
+(0017:1488-1499), from inside `persist_document_extraction`'s region loop (0017:1587) — so the raise
+aborts the WHOLE persist and the document loses the entire extraction it earned, its invoice or
+payslip regions included. Before this wiring that abort was structurally unreachable; it is
+reachable now on every azure-di layout pass. `disagreeingOpeningRegion` therefore re-checks the
+database's own invariant before emission and drops the WHOLE set if any element fails it — the
+all-or-nothing law one layer lower. The cost is pinned by
+`tests/wave-b-opening-parse.test.mjs`'s A6 cell, which persists a contradicting region through the
+REAL writer and measures that the whole extraction is lost.
+
+**The refusal travels; it is not thrown away (fix-round, review finding A1).** The producer is
+all-or-nothing, so a trial balance it REFUSES — it does not balance, one row is OCR-mangled —
+emits zero regions. Keeping only `.regions` at the OCR pass made that byte-identical to a document
+that is not a trial balance at all: both reached `parseOpeningTargets` as zero rows, and the route
+answered its keyed-fallback signal `no_opening_tb_lines`, which the face renders as an INFORMATION
+banner offering to key the balances — over a document whose own figures the machine had just found
+inconsistent. `normalizeAzureLayout` now writes `{status, reason, refusals}` under the envelope key
+`opening_tb_refusal` (the estate's `corroboration_ineligible` idiom, 0009:148 — no new field_path,
+no CHECK widening, no migration), and `readOpeningRefusal` reads it back off the newest done
+extraction when zero lines came home, answering 422 with the reader's reason VERBATIM plus
+`source_refusal: true` and the failing row keys. `not_a_trial_balance` and a clean read carry no
+such key, so the keyed fallback stays exactly what it was. `producer_error` is deliberately NOT
+carried: it is an internal fault, not a verdict about the document.
+
+**It never throws.** This runs inside an OCR normalisation that has already succeeded; a producer
+fault must not destroy an extraction the document legitimately earned. Every path is contained and
+reports itself as `producer_error` with a named reason. Fail-quiet HERE is fail-closed DOWNSTREAM,
+because emitting nothing is exactly what the lane did before the module existed.
+
+**Two refusals this slice makes reachable for the first time**, both classified in
+`lib/opening-parse.mjs` rather than left to surface as a 500:
+
+- SQLSTATE 23503 on `fk_opening_tb_targets_account` — a printed account this client's chart has not
+  got. It carries no CLR code and no `detail.reason`, so it fell through to `throw` and the route
+  answered 500. `mapOpeningFkError` makes it a 422 in the `unparseable` family, NAMING the account
+  when Postgres' own structured DETAIL states one and it passes the chart's account-code grammar.
+  The runtime cannot pre-flight this: `clara_runtime` holds no SELECT on `clara.coa_accounts`.
+- CLR10 `op_key reused with different args` — the parse's op key is stable per (seed, document) so a
+  retry cannot double a basis, while the payload it hashes is keyed by region id. Re-reading the
+  tie document therefore makes a second parse a replay CONFLICT, which the generic arm reported as
+  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`. **Named residual**: the
+  answer is honest but still a dead end; re-parsing a re-read document needs either an op key
+  carrying the extraction or a door that re-points existing targets.
+
+`tests/opening-ledger-source-e2e.mjs` is the standalone leg that runs the whole chain on real
+Postgres. It bootstraps **no Workflow World**, measured rather than skipped: no workflow touches the
+opening lane, so AC7's database-boundary clause applies.
+## The intake batch lane (#636)
+
+`lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:
+`openBatch`, `attachIntake`, `beginIntakeInBatch`, `setMemberDependency`, `recordCapacityWait`,
+`cancelBatch`, `resumeCancel`, `sweepBatchCancellations`. Every one returns a typed
+`{status:'ok'|'refused'|'unavailable', …}` — never null, never a raw throw — because a timeout and
+a refusal are different facts and a retry loop that conflates them turns a permanent no into an
+infinite one.
+
+**WHY IT IS NOT IN `lib/intake.mjs`.** That file is ONE manifest line from freezing: five real
+reverse importers already point at it (`invoiceFacts.v1.services.mjs:9`,
+`statementFacts.v1.services.mjs:19`, `statementFacts.v2.services.mjs:31`,
+`witnessFacts.v1.services.mjs:27`, `witnessFacts.v2.services.mjs:38`), none of which is in
+`frozen-workflows.json` today. MEASURED on the rig with
+`node scripts/check-frozen-workflows.mjs --print-closure`: 288 @frozen entry files lock 296
+modules, and `lib/intake.mjs`, `src/intakeRoutes.ts`, `lib/reconciler.mjs` and `lib/spool.mjs` are
+all OUTSIDE it. Nothing frozen imports `lib/intake-batches.mjs`; it may IMPORT `lib/spool.mjs`,
+because an import edge pointing INTO a closure does not pull the importer in.
+
+**WHY THERE IS NO `documentIngest_v3`.** The batch id never enters the workflow's step IO. A begun
+intake and its membership commit together in an EXPLICIT transaction opened by
+`beginIntakeInBatch` (`withRuntime` is autocommit — `checkout()` in `lib/pools.mjs` issues no
+BEGIN), and the membership is read back from the database by the read door. Changing the step IO
+would be a new frozen body for a fact the database already holds.
+
+**THE FAN-OUT, and why the parent stores its decision.** `POST /api/intake/batches/:id/cancel`
+makes ONE governed decision and then issues one `clara.cancel_accounting_work` per live child, ONE
+CALL PER TRANSACTION — that is the acceptance criterion, not an optimisation: a child that already
+posted answers `already_completed` and keeps its receipt (0199:230-272), and one transaction around
+all of them would make the first refusal roll the others back. Each child's key is DERIVED
+(`<cancel_op_key>:<work_id>`) and the author is the STORED `cancel_requested_by`. MEASURED on the
+rig: `clara._work_door_ctx` hashes `{work, author}` (0184:262-264), so a resumed fan-out carrying
+the reconciler's own identity would raise CLR10 `op_key_conflict` on every child. CLR13
+`operation_in_flight` is not a failure — the child is left for the next sweep.
+
+**The belt.** `lib/reconciler-batches.mjs` is one contained belt in `runReconcilerSweep`, after the
+accounting-work belt and before the trace prune. It feature-detects
+`clara.sweep_intake_batch_cancellations(integer)` per cycle, so an image older than 0229 boots
+dormant and lights on the next leader cycle with no restart. The worklist is a DOOR rather than a
+query because `clara_runtime` holds no SELECT and no policy on `clara.operation_receipts`
+(0178:1619-1630 asserts both) and none on the batch parent.
+
+**The capacity wait.** MEASURED (0229's header, M2): a post-custody capacity refusal comes out of
+`clara._resize_document_reservation` as SQLSTATE `CLR18`, and `lib/intake.mjs:155-159` maps eight
+LITERAL codes with everything else to `internal` — so the intake lands at `failure_code='internal'`
+and 0229's trigger arm never fires in production. `recordCapacityWait` is therefore the production
+path to `awaiting_capacity`: CLR18 only, actor from the upload sidecar's `uploadedBy` (the finalize
+route carries a capability token and no principal), and its own refusal swallowed into a log line
+so the route's honest 429 never becomes a 500.
+
+**The World leg.** `tests/intake-batch-e2e.mjs` is standalone (not collected by `node --test`) and
+needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
+MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
+rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
+reads and `writeIntakeMeta`'s `rename` (the #693 family).
+
+**THE BELT'S COUNTERS DISTINGUISH A REFUSAL FROM A DEAD END.** `reconciler-batches.mjs` returns
+`batchCancelFailed` for refusals and `batchCancelBlocked` for a parent whose EVERY child refused
+CLR04 — which means its stored canceller has lost authority and no future sweep will change that,
+because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
+The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
+human as `cancel_blocked`.

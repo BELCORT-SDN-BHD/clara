@@ -34,6 +34,7 @@ import { useTranslations } from "next-intl";
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
 import { DocumentStatePanel } from "@/components/documents/document-state-panel";
 import { WorkDiagnostics } from "@/components/work/work-diagnostics";
+import { WorkKnowledgeBlock } from "@/components/work/work-knowledge-block";
 import {
   CancelOutcome,
   CancelWorkDialog,
@@ -56,6 +57,10 @@ import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+// #655 — the house currency renderer (N9's ruling: `<Money>` is the render path for money in
+// JSX, `formatCents` only for non-JSX value positions). Cents are the storage unit, never the
+// reading unit.
+import { Money } from "@/components/journals/money";
 import { businessDateTime } from "@/lib/business-date";
 import { isUuidShape } from "@/lib/client-id";
 import { readClarifyQuestion } from "@/lib/journals/governance-doors";
@@ -77,6 +82,10 @@ import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { purposeLabel } from "@/lib/work/purpose-label";
 import { getWorkClaimOrigin, type WorkClaimOrigin } from "@/lib/work/staff-expense-claim-reads";
+import { getTradeInvoice, type TradeInvoiceRead } from "@/lib/work/trade-invoice-reads";
+// #636 — the reverse row. NO `list_accounting_work` recut (that body is #905's and the Work-list
+// projection is frozen this wave): the LIST says nothing about batches; DETAIL gets ONE line.
+import { getWorkBatchOrigin, type WorkBatchOrigin } from "@/lib/documents/intake-batch";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -170,6 +179,8 @@ export function WorkDetailView({
   storage,
   loadLinks = listEntryLinks,
   loadClaimOrigin = getWorkClaimOrigin,
+  loadTradeInvoice = getTradeInvoice,
+  loadBatchOrigin = getWorkBatchOrigin, // #636
 }: {
   clientId: string;
   workId: string;
@@ -192,6 +203,11 @@ export function WorkDetailView({
    *  call a claim "Journal entry" and stop. `clara.get_work_claim_origin` answers NULL for every
    *  Work that is not a claim, so this read costs one round trip and never invents an origin. */
   loadClaimOrigin?: typeof getWorkClaimOrigin;
+  /** #655 — AC5's mutual links, for a Work that carries a trade invoice. `clara.get_trade_invoice`
+   *  answers NULL for every Work that does not, so this read costs one round trip and never
+   *  invents an origin — the same discipline `loadClaimOrigin` is held to. */
+  loadTradeInvoice?: typeof getTradeInvoice;
+  loadBatchOrigin?: typeof getWorkBatchOrigin; // #636
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
@@ -263,6 +279,36 @@ export function WorkDetailView({
       live = false;
     };
   }, [addressable, workId, loadClaimOrigin, session]);
+  /** #655 — the trade invoice this Work carries, or null. A FAILED read is indistinguishable
+   *  from "not a trade invoice" on purpose: both leave the block absent, and the page never says
+   *  a Work is NOT one, only that it IS. Nothing on this page is blocked by it. */
+  const [tradeInvoice, setTradeInvoice] = useState<TradeInvoiceRead | null>(null);
+  /** #636 — the batch this Work belongs to, or null. Read under the caller's OWN JWT through the
+   *  relation's FORCE-RLS grant, the same shape `entry_evidence_links` is read with. A FAILED read
+   *  is indistinguishable from "not in a batch" on purpose: both leave the row absent, and the page
+   *  never says a Work is NOT in a batch, only that it IS in one. Nothing here is blocked by it. */
+  const [batchOrigin, setBatchOrigin] = useState<WorkBatchOrigin | null>(null);
+  useEffect(() => {
+    if (!addressable) return;
+    let live = true;
+    void (async () => {
+      const found = await loadTradeInvoice(workId, { session }).catch(() => null);
+      if (live) setTradeInvoice(found);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [addressable, workId, loadTradeInvoice, session]);
+  useEffect(() => {
+    if (!addressable) return;
+    let live = true;
+    void (async () => {
+      const origin = await loadBatchOrigin(workId, { session }).catch(() => null);
+      if (live) setBatchOrigin(origin);
+    })();
+    return () => { live = false; };
+  }, [addressable, workId, loadBatchOrigin, session]);
+
   const postedEntryId = state.data?.entry?.id ?? null;
   const reloadLinks = useCallback(async () => {
     if (postedEntryId === null) return;
@@ -423,6 +469,7 @@ export function WorkDetailView({
         committed={committed}
         reloadLinks={reloadLinks}
         claimOrigin={claimOrigin}
+        tradeInvoice={tradeInvoice}
         reloadWork={() => state.reload()}
         session={session}
       />
@@ -431,6 +478,25 @@ export function WorkDetailView({
   return (
     <div className="flex flex-col gap-6">
       <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} clientId={clientId} />
+
+      {/* #636 — ONE row, "part of batch X", and it renders WHATEVER the Work's state is.
+          FIX ROUND 1, V636R-2: it used to live inside PostedEntrySection, which renders only once
+          a journal entry exists (`entry === null ? null : …`), so the reverse address was absent
+          for exactly the children AC5's recovery language is about — queued, running, waiting on
+          a dependency, refused, cancelled. A read that FAILED is still indistinguishable from
+          "not in a batch": both leave the row absent, and the page never says a Work is NOT in a
+          batch. The started-vs-posted divergence is STATED rather than fixed: the batch card's
+          `admitted` facet counts Work that has been ADMITTED, its `settled` facet counts Work
+          that holds a COMMITTED receipt, and #905 (not this ticket) owns the Work-list
+          projection that would otherwise have to agree with them. */}
+      {batchOrigin === null ? null : (
+        <p className="text-muted-foreground text-sm" data-testid="work-batch-origin">
+          {t("batchOrigin.label")}{" "}
+          <Link href={`${clientBase(clientId)}/documents?batch=${batchOrigin.batchId}`} className="underline">
+            {t("batchOrigin.value", { label: batchOrigin.label ?? batchOrigin.batchId })}
+          </Link>
+        </p>
+      )}
 
       {/* DELAYED IS ABOUT THE READ, not about the Work. It says the page has not
           managed a successful read since a named time, which is a fact about the
@@ -630,6 +696,14 @@ export function WorkDetailView({
               })}
             </ul>
           )}
+          {/* #658 — WHAT THIS WORK READ before it acted, and whether that basis has MOVED since.
+              Mounted in ONE line for the reason WorkDiagnostics states below: this file is
+              1332 lines and three lanes are editing it; everything lives in
+              components/work/work-knowledge-block.tsx. It belongs in SOURCES because the client's
+              governed knowledge is the OTHER thing a run stands on besides its documents — and
+              until 0230 nothing recorded it, so "documents" was the honest answer only by
+              omission. The tab is `keepMounted`, so this read fires once per Work detail visit. */}
+          <WorkKnowledgeBlock workId={work.id} session={session} />
         </TabsContent>
 
         <TabsContent value="activity" className="flex flex-col gap-6">
@@ -661,6 +735,7 @@ function PostedEntrySection({
   committed,
   reloadLinks,
   claimOrigin,
+  tradeInvoice,
   reloadWork,
   session,
 }: {
@@ -673,6 +748,7 @@ function PostedEntrySection({
   committed: OperationReceiptRow | null;
   reloadLinks: () => Promise<unknown>;
   claimOrigin: WorkClaimOrigin | null;
+  tradeInvoice: TradeInvoiceRead | null;
   reloadWork: () => Promise<unknown>;
   session: SessionTokenAccessor;
 }) {
@@ -680,6 +756,7 @@ function PostedEntrySection({
   const tm = useTranslations("ManualJournal");
   /** #638's own copy, for the one line that names a claim. */
   const tsec = useTranslations("StaffExpenseClaim");
+  const tti = useTranslations("TradeInvoice.link");
   return (
         <section className="flex flex-col gap-2">
           <SectionHeader
@@ -737,6 +814,61 @@ function PostedEntrySection({
                     claimant: claimOrigin.claimant_label,
                     settlement: tsec(`settlement.options.${claimOrigin.settlement}`),
                   })}
+                </dd>
+              </>
+            )}
+            {/* #655 — AC5's MUTUAL LINKS, in ONE block. A trade invoice is a `journal_entry`
+                Work by design (migration 0225's header states why a fourth purpose cannot post),
+                so the purpose line above correctly reads "Journal entry" and this block names
+                what it actually is: which kind, which party, which two dates, the exact total,
+                and — once the run posts — the journal entry, the signed open item with its due
+                date and outstanding, and the receipt. Every one of those is DERIVED by
+                `clara.get_trade_invoice`; none is a stored back-pointer, which is exactly why
+                `clara.trade_invoices` could stay append-only with zero admitted updates.
+                THE `admitted` STATE IS A REAL STATE, not missing data: the row is durable at
+                ADMISSION, so a Work whose run has not committed yet renders the document's facts
+                and says so, rather than showing blanks. */}
+            {tradeInvoice === null ? null : (
+              <>
+                <dt className="text-muted-foreground">{tti("heading")}</dt>
+                <dd className="text-foreground" data-testid="work-trade-invoice">
+                  <span>{tti(`kind.${tradeInvoice.kind}`)}</span>
+                  {tradeInvoice.counterparty_name ? (
+                    <span> · {tradeInvoice.counterparty_name}</span>
+                  ) : null}
+                  <span> · {tti(`domain.${tradeInvoice.domain}`)}</span>
+                  {tradeInvoice.reference ? (
+                    <span className="block text-sm text-muted-foreground">
+                      {tti("reference")}: {tradeInvoice.reference}
+                    </span>
+                  ) : null}
+                  <span className="block text-sm text-muted-foreground">
+                    {tti("documentDate")}: {tradeInvoice.document_date ?? "—"}
+                    {" · "}
+                    {tradeInvoice.due_date === null
+                      ? tti("noDueDate")
+                      : `${tti("dueDate")} ${tradeInvoice.due_date}`}
+                    {" · "}
+                    {/* THE STATED TOTAL, which is durable at ADMISSION and is the only amount on
+                        this page until the entry posts (the journal-lines table does not exist
+                        before that). Through `<Money>` like every other money value in the app —
+                        cents are the storage unit, never the reading unit. */}
+                    {tti("total")}: <Money cents={tradeInvoice.total_cents} />
+                  </span>
+                  {tradeInvoice.state !== "posted" ? (
+                    <span className="block text-sm text-muted-foreground">{tti("admitted")}</span>
+                  ) : (
+                    <span className="block text-sm text-muted-foreground" data-testid="work-trade-invoice-links">
+                      {tradeInvoice.open_item_id === null ? null : (
+                        <>
+                          {tti("openItem")}: {tradeInvoice.open_item_id}
+                          {tradeInvoice.outstanding_cents === null ? null : (
+                            <> · {tti("outstanding")}: <Money cents={tradeInvoice.outstanding_cents} /></>
+                          )}
+                        </>
+                      )}
+                    </span>
+                  )}
                 </dd>
               </>
             )}

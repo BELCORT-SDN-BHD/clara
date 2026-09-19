@@ -147,6 +147,23 @@ function faMock(seen: Record<string, number>, opts: { runRefuses?: boolean; slow
       history: [],
     }); }
     if (url.includes("/rpc/list_depreciation_runs")) { bump("runs"); return jsonResponse({ client_id: "c1", runs: [] }); }
+    // #651 — THE DIALOG READS A PREVIEW WHEN IT OPENS, because the period is the DATABASE's and
+    // the two date inputs this cell used to type into are gone. The read writes nothing, so it is
+    // counted but never asserted on: what these cells are about is what a SETTLED run re-reads.
+    if (url.includes("/rpc/preview_depreciation_run")) {
+      bump("preview");
+      return jsonResponse({
+        client_id: "c1", due: true, reason: null,
+        period_start: "2026-04-01", period_end: "2026-04-30", cadence: "monthly",
+        authority_from: "2026-01-01", skipped_closed: [],
+        charges: [{ asset_id: "a1", description: "Delivery van", period_start: "2026-04-01", period_end: "2026-04-30", amount_cents: 100000 }],
+        skipped: [], legs: [
+          { account_code: "6500", debit_cents: 100000, credit_cents: 0 },
+          { account_code: "1509", debit_cents: 0, credit_cents: 100000 },
+        ],
+        charged_cents: 100000, entries: 1, mode_would_be: "draft",
+      });
+    }
     if (url.includes("/rpc/run_depreciation_manual")) {
       bump("run_manual");
       if (opts.runRefuses) return jsonResponse({ code: "CLR37", message: "no live depreciation authority", details: '{"reason":"fa_authority_missing"}' }, 400);
@@ -180,13 +197,13 @@ test("addendum 1+2: a POSTED depreciation run re-reads the fixed-asset table AND
       await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
-      const start = findIn(body, (n) => (n as unknown as { id?: string }).id === "fa-run-start");
-      const end = findIn(body, (n) => (n as unknown as { id?: string }).id === "fa-run-end");
-      assert.ok(start && end, "the period fields must be reachable inside the dialog");
-      await h.act(() => { setFieldValue(start as never, "2026-04-01"); setFieldValue(end as never, "2026-04-30"); });
-      for (let i = 0; i < 2; i++) await h.settle();
+      // #651 — THERE IS NOTHING TO TYPE. The dialog reads the period from the register and shows
+      // it; the only lawful pair a person could have typed was the one the database already knew.
+      const period = findIn(body, (n) => (n as unknown as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === "fa-preview-period");
+      assert.ok(period, "the preview must name the period the DATABASE chose");
+      assert.match(textOf(period as never), /2026-04-01/, "…and it is the one the read returned");
 
-      const confirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Run depreciation" && (n as unknown) !== (trigger as unknown));
+      const confirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Run this period" && (n as unknown) !== (trigger as unknown));
       assert.ok(confirm, "the dialog's own Confirm must be reachable");
       await h.act(() => clickButton(confirm as never));
       for (let i = 0; i < 10; i++) await h.settle();
@@ -220,22 +237,21 @@ test("addendum 1 control: a REFUSED depreciation run does NOT re-read the table 
       const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Run depreciation"));
       await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
-      const start = findIn(body, (n) => (n as unknown as { id?: string }).id === "fa-run-start");
-      const end = findIn(body, (n) => (n as unknown as { id?: string }).id === "fa-run-end");
-      await h.act(() => { setFieldValue(start as never, "2026-04-01"); setFieldValue(end as never, "2026-04-30"); });
-      for (let i = 0; i < 2; i++) await h.settle();
-      const confirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Run depreciation" && (n as unknown) !== (trigger as unknown));
+      const confirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Run this period" && (n as unknown) !== (trigger as unknown));
       await h.act(() => clickButton(confirm as never));
       for (let i = 0; i < 10; i++) await h.settle();
 
       assert.equal(seen.run_manual, 1, "the door was reached");
       assert.equal(seen.assets ?? 0, assetsBefore, "a refused run posts nothing, so nothing it could have moved is re-read");
       assert.equal(seen.tie ?? 0, tieBefore, "…and the tie is untouched too");
-      // CB-AE2E-004 + addendum 5, together: the refusal keeps the dialog open AND the
-      // panel that owns it is still mounted, so the typed period survives.
-      const startAfter = findIn(body, (n) => (n as unknown as { id?: string }).id === "fa-run-start");
-      assert.ok(startAfter, "the dialog must still be open after the refusal");
-      assert.equal((startAfter as unknown as { value: string }).value, "2026-04-01", "the typed period start survives");
+      // CB-AE2E-004 + addendum 5, together: the refusal keeps the dialog open AND the panel that
+      // owns it is still mounted. There is no typed period to survive any more — what must
+      // survive is the READING, so the human can see what they were refused about, and the
+      // refusal itself has to be IN the dialog rather than behind its backdrop (#651).
+      const periodAfter = findIn(body, (n) => (n as unknown as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === "fa-preview-period");
+      assert.ok(periodAfter, "the dialog must still be open after the refusal");
+      assert.match(textOf(periodAfter as never), /2026-04-01/, "…still showing the period it was refused about");
+      assert.match(textOf(body as never), /no live depreciation authority/, "…and the door's own words, verbatim");
     } finally {
       await h.unmount();
       for (let i = 0; i < 4; i++) await h.settle();
@@ -467,6 +483,18 @@ test("addendum 5: the table is NOT replaced by a loading placeholder while an ac
       const eff = findIn(body, (n) => (n as unknown as { id?: string }).id?.startsWith("fa-revise-eff") === true);
       assert.ok(eff, "the effective-from field must be reachable inside the dialog");
       await h.act(() => setFieldValue(eff as never, "2026-05-01"));
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      // #651 — A REVISION NOW SAYS WHAT KIND OF CHANGE IT IS, and the reason is required: the
+      // Confirm is gated on a non-blank one. This cell is about what a settled act re-reads, so it
+      // fills the field rather than asserting about it (fa-row-actions.test.tsx owns the gate) —
+      // but it does assert the gate FIRST, because a helper that clicked through a disabled
+      // control would manufacture a green on a door that never opened.
+      const reason = findIn(body, (n) => (n as unknown as { id?: string }).id?.startsWith("fa-revise-reason") === true);
+      assert.ok(reason, "the change-reason field must be reachable inside the dialog");
+      const gated = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revise" && (n as unknown) !== (trigger as unknown));
+      assert.equal((gated as unknown as { disabled?: boolean }).disabled, true, "Confirm is gated until the reason is given");
+      await h.act(() => setFieldValue(reason as never, "the plant survey revised the remaining life"));
       for (let i = 0; i < 2; i++) await h.settle();
 
       const confirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revise" && (n as unknown) !== (trigger as unknown));

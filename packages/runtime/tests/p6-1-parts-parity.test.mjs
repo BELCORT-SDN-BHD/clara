@@ -145,6 +145,16 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
       // the evidence this cut wanted: `start_staff_expense_claim_work` and `start_accrual_work` both
       // announce a `journal_entry` Work, which is why `WORK_ACCEPTED_PURPOSES` did NOT have to widen
       // for either of them (0221's amendment; 0193's `_plan_admit_occurrence`).
+      //
+      // WAVE 2026-09-18 — chatTurn_v21 adds exactly ONE site, and the asymmetry with v20 is the
+      // fact worth reading off this row rather than a quirk of it. v21 ships TWO new tools and only
+      // `start_trade_invoice_work` appears here: a trade invoice announces a `journal_entry` Work
+      // on the existing card (0225 calls the unchanged `_admit_accounting_work_core(...,
+      // 'journal_entry', ...)`, so `WORK_ACCEPTED_PURPOSES` stays at three for the third cut
+      // running), while `run_depreciation_period_for_client` mints NO card at all — no existing
+      // kind can address a depreciation receipt truthfully and #651's stanza forbids a new one.
+      // v21 also has no `prompt.ts` site, because its promotion is `admittedWorkAcceptedV20` reached
+      // BY IMPORT rather than a fourth copy of one reader.
       constructionSites: [
         "packages/runtime/workflows/chatTurn.v18.prompt.ts",
         "packages/runtime/workflows/chatTurn.v18.tools.ts",
@@ -153,6 +163,7 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
         "packages/runtime/workflows/chatTurn.v20.prompt.ts",
         "packages/runtime/workflows/chatTurn.v20.tools.ts",
         "packages/runtime/workflows/chatTurn.v20.tools.ts",
+        "packages/runtime/workflows/chatTurn.v21.tools.ts",
       ],
     },
     {
@@ -171,11 +182,20 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
       // WAVE 2026-09-15 — claraWork_v4 writes it too, from the same place v3 does. v4 declares NO
       // new kind at all (claraWork.v3.parts.ts stays the declarer), so this row and `work_status` /
       // `work_question` below are the only places the cut is visible on this census.
+      //
+      // WAVE 2026-09-18 — claraWork_v5 writes it too, and this row is the ONLY place that cut is
+      // visible here, which is the claim worth checking rather than assuming. v5 adds two inspection
+      // READS and a knowledge preload; none of the three mints a part (#658's stanza forbids a kind
+      // for the reads, and the preload is a step whose durable record is `work_knowledge_reads`),
+      // so `work_status` and `work_question` below do NOT gain a v5 site — those stay v1/v3's and
+      // v2/v3's, reached by import. A v5 site appearing on either of them would mean this cut
+      // copied a park body it was supposed to inherit.
       constructionSites: [
         "packages/runtime/workflows/claraWork.v1.impl.ts",
         "packages/runtime/workflows/claraWork.v2.impl.ts",
         "packages/runtime/workflows/claraWork.v3.impl.ts",
         "packages/runtime/workflows/claraWork.v4.impl.ts",
+        "packages/runtime/workflows/claraWork.v5.impl.ts",
       ],
     },
     {

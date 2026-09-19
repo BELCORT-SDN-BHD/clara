@@ -2158,6 +2158,21 @@ cell("c3.53 folded set equality -- the money-store body roster is closed; open_c
     // merged wave-1 tree (PR #769, db-estate) because #615's own rig ran only its own battery.
     "_operator_support_cases",
     "apply_stripe_events", "claim_paid_firm",
+    // WIDENED BY #635 (0233_firm_commercial_settings.sql), deliberately and with the reason
+    // recorded here — the same reviewed act `_operator_support_cases`, `get_own_checkout_progress`
+    // and `resolve_operator_support_applicants` were. `clara.get_firm_commercial_state` is the
+    // firm's own Settings read (admin floor, `clara._human_ctx(clara.role_rank('admin'))`), and it
+    // reads `clara.firm_registration_payments` BY DESIGN: `consumed_firm_id = clara.jwt_firm()` is
+    // the ONE predicate that makes a payment row "this firm's", and that table grants every
+    // application role nothing, permanently. It is the FIRST firm-scoped reader of that relation
+    // (until 0233 the only reader outside the checkout chain was the operator console, 0188:304).
+    // It projects BOOLEANS ONLY — `stripe_customer_id is not null`, `stripe_subscription_id is not
+    // null` and `recorded_at` — so no raw Stripe identifier leaves the database, and 0233 §C
+    // asserts that from the door's own RETURN expression. STABLE: it writes nothing and consumes
+    // no payment, so it widens the ROSTER without widening the money surface. `0163`'s own comment
+    // on `open_checkout_intent` sets the standard: "hiding a real dependency from a catalog census
+    // on a money surface is the wrong kind of clever."
+    "get_firm_commercial_state",
     // WIDENED BY FS-4 C-6 (#517), deliberately and with the reason recorded here rather than
     // discovered during a merge-prep conflict. `clara.get_own_checkout_progress` is C-6's
     // self-scoped web read door, and it reads `clara.firm_registration_payments` BY DESIGN

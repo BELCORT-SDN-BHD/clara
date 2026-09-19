@@ -601,6 +601,44 @@ export const STAFF_EXPENSE_CLAIM_JE_TRIGGERS = [
 ];
 
 /**
+ * #655 [0225] — the ONE trigger the trade-invoice lane adds to `journal_entries`.
+ *
+ * TIER D, AND IT ABORTS — DECISIONS §6.3's ruling on `reports/integration-merge.md` §5.1. The
+ * wave-2026-09-18 integrator found this trigger UNPINNED, which is the one state this census
+ * refuses: an unpinned constraint trigger has no tier, so nobody has decided whether a failed
+ * open-item birth aborts the posting or converts into a refusal. It ABORTS, because ARCHITECTURE
+ * §5.A's transaction boundary says a confirmed invoice and its open item are ONE fact
+ * (「确认一张发票需要相应总账与 open item」): a trade invoice whose open item cannot be born
+ * never posts at all.
+ *
+ * IT IS GENUINELY REFUSAL-BEARING, like #638's advance birth and unlike #639's acquisition birth
+ * — measured on the live body (`p655.birth.abort_is_atomic` asserts the abort end to end, and
+ * `f-a2.c5.trade-invoice-birth` asserts the three reasons are still in the live body):
+ * `counterparty_kind_mismatch`, `wrong_control_domain` and `invalid_total`, all under CLR10 and
+ * all raised at COMMIT, outside every exception block. That is the Tier-D property this file's
+ * header defines.
+ *
+ * THE THREE REASONS ARE **NOT** ADDED TO `TIER_D_TOKENS`, for the reason
+ * `STAFF_EXPENSE_CLAIM_JE_TRIGGERS` gives verbatim: that set is the BELT vocabulary, pinned at
+ * exactly six by `f-a2-ladder-3.test.mjs` (`c3.D-vocab`), and widening it to carry a
+ * subledger-birth reason would change what that cell asserts. Named here instead, as #638's were.
+ *
+ * NO DOOR IN THE ESTATE REACHES THESE THREE RAISES TODAY, and that is stated rather than implied:
+ * `clara._assert_trade_invoice_basis` refuses a wrong-kind party and a wrong-class control leg at
+ * admission (0225:706-717, 0225:895-899), ties the control leg's signed amount to the stated total
+ * (0225:739-741), `clara.record_journal_entry` re-asks the control-leg class at commit
+ * (0225:1757-1772) behind a basis-digest wall that refuses any basis but the admitted one
+ * (0225:1684-1689), and `clara.trade_invoices` / `clara.counterparties` are both append-only
+ * after the fact. So the trigger is a BELT BEHIND CLOSED DOORS — which is exactly why its tier
+ * has to be written down: the day a door is loosened, this is what happens, and it happens at
+ * COMMIT.
+ */
+export const TRADE_INVOICE_JE_TRIGGER = {
+  tgname: "t_je_open_item_birth", deferrable: true, initdeferred: true,
+  tier: "D — the lane-agnostic open-item birth; ABORTS (CLR10 counterparty_kind_mismatch, wrong_control_domain, invalid_total), all raised at COMMIT, and a failed birth leaves no entry, no receipt and no posted status row",
+};
+
+/**
  * The pinned census for THIS database's frontier.
  *
  * FRONTIER-GATED, for the reason the 0042 clock roster's own header gives: `db-slice-frontiers`
@@ -632,5 +670,12 @@ export async function jeTriggerPins() {
     "select count(*)::int as n from clara.schema_migrations where version ~ 'staff_expense_claims$'");
   if (sec.rows[0].n > 0) pins.push(...STAFF_EXPENSE_CLAIM_JE_TRIGGERS);
   // wave-2026-09-15 END
+  // #655 [0225] — wave 2026-09-18's own birth trigger, gated on ITS OWN stem for the same reason
+  // every pin above is: `db-slice-frontiers` runs this battery against databases pinned below
+  // 0225, where the trigger does not exist.
+  const ti = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'trade_invoices$'");
+  if (ti.rows[0].n > 0) pins.push(TRADE_INVOICE_JE_TRIGGER);
+  // wave-2026-09-18 END
   return pins;
 }

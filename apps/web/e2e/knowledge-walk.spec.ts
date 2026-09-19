@@ -201,3 +201,73 @@ test("200% zoom: the detail's controls stay reachable", async ({ page }) => {
     document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow, "the detail must not scroll horizontally at the 200%-zoom equivalent").toBeLessThanOrEqual(1);
 });
+
+// ---------------------------------------------------------------------------
+// #658 — FRESHNESS: the version, the as-of date, and the out-of-effect mark.
+// ---------------------------------------------------------------------------
+test("the register prints the version WITH the Kuala Lumpur as-of date, and marks a rule that is not in effect", async ({ page }) => {
+  await signInTo(page, `/clients/${KN.clientOk}/knowledge`);
+  // A VERSION WITH NO AS-OF IS HALF AN ANSWER: which revision, and which calendar day the
+  // in-effect marks below were computed for.
+  await expect(page.getByText("Knowledge version 11")).toBeVisible();
+  await expect(page.getByText("As of", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("Kuala Lumpur", { exact: false }).first()).toBeVisible();
+  // …and the EXPIRED rule is PRESENT and MARKED, never dropped. A word, not a colour.
+  await expect(page.getByTestId("knowledge-not-in-effect").first()).toBeVisible();
+  await expect(page.getByText("Not in effect on", { exact: false }).first()).toBeVisible();
+  await expectAccessible(page, "knowledge register, freshness and out-of-effect mark");
+});
+
+test("320px: the as-of line and the out-of-effect mark stay readable with no page-wide horizontal scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await signInTo(page, `/clients/${KN.clientOk}/knowledge`);
+  await expect(page.getByText("As of", { exact: false }).first()).toBeVisible();
+  await expect(page.getByTestId("knowledge-not-in-effect").first()).toBeVisible();
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow, "the page must not scroll horizontally at 320px").toBeLessThanOrEqual(1);
+  await expectAccessible(page, "knowledge register, freshness at 320px");
+});
+
+// ---------------------------------------------------------------------------
+// #658 — "WORK THAT READ THIS RECORD" on the detail route the walk already visits.
+// DECISIONS.md:83's seventh door: the ONLY human path into a FORCE-RLS relation.
+// ---------------------------------------------------------------------------
+test("the record detail lists the Work that read it, with its version and face word, and links to the Work", async ({ page }) => {
+  await signInTo(page, `/clients/${KN.clientOk}/knowledge/${KN.recordMsic}`);
+  // It sits BELOW the revision timeline — what the record IS comes before who consumed it.
+  await expect(page.getByRole("heading", { name: "Work that read this record" })).toBeVisible();
+  await expect(page.getByText("Read partial")).toBeVisible();
+  await expect(page.getByText("Read at version 11")).toBeVisible();
+  await expect(page.getByText("for 2026-09-18", { exact: false })).toBeVisible();
+  await expect(page.getByText("remainder truncated", { exact: false })).toBeVisible();
+  // BOUNDED: the door caps at 100 and says exactly how many it withheld.
+  await expect(page.getByTestId("knowledge-record-reads-truncated")).toContainText("12 older read");
+  // READ-ONLY: the Work is a LINK, never an act.
+  const link = page.getByRole("link", { name: "Open this Work" });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute("href", new RegExp(`/clients/${KN.clientOk}/work/`));
+  // …and the revision timeline above it is untouched.
+  await expect(page.getByText("Revision 1")).toBeVisible();
+  await expectAccessible(page, "knowledge detail, reads list");
+});
+
+test("a record NO Work has read says so — never `unused`, and never as an error", async ({ page }) => {
+  await signInTo(page, `/clients/${KN.clientOk}/knowledge/${KN.recordReadsEmpty}`);
+  await expect(page.getByTestId("knowledge-record-reads-empty")).toBeVisible();
+  await expect(page.getByText("No Work has recorded a read of this record.")).toBeVisible();
+  // The empty face is NOT an alert: a record nobody has read yet is an ordinary state.
+  await expect(
+    page.getByRole("alert").filter({ hasText: "No Work has recorded a read" }),
+  ).toHaveCount(0);
+  await expectAccessible(page, "knowledge detail, reads list empty");
+});
+
+test("a DENIED reads-read gets its own banner and leaves the revision timeline readable beside it", async ({ page }) => {
+  await signInTo(page, `/clients/${KN.clientOk}/knowledge/${KN.recordReadsDenied}`);
+  await expect(page.getByText("You do not have access to this list")).toBeVisible();
+  // THE OTHER TWO READS ON THIS PAGE ARE UNAFFECTED — this read fails independently.
+  await expect(page.getByText("The month this client closes its financial year.").first()).toBeVisible();
+  await expect(page.getByText("Revision 1")).toBeVisible();
+  await expectAccessible(page, "knowledge detail, reads list denied");
+});

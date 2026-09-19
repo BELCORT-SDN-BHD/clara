@@ -1,0 +1,144 @@
+{
+  "ticket": 635,
+  "recheck_of": "reports/635-fixround-1.md",
+  "head": "a9d2d964df06e1d3de16c2a8eafc344469dcb260",
+  "reviews_read": [
+    "reports/635-review-spec.json",
+    "reports/635-review-standards.json",
+    "reports/635-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "summary": "All twelve findings the fix round claims are real: the eleven APPLIED fixes were opened at their citing commit, the exact cell each fix worker named was re-run independently on the rig (not just re-read from the report), and each one is behavioural, not vacuous. The one deliberately-left finding (A10) is correctly left -- it is inside the letter of the brief and no DECISIONS ruling contradicts it. The orchestrator's post-brief ruling on rig-meta.mjs (a REAL four-name cohort, not a comment) was already satisfied at the FEATURE commit (3e4cece3), before the review round, and remains intact after the fix round -- verified by reading packages/db/tests/rig-meta.mjs directly. No new defect was introduced by the fix round: pnpm typecheck and pnpm lint are green, the db battery matches the report's own count exactly (162 tests / 161 pass / 1 expected skip), the e2e triple matches exactly (49/49), and the one apps/web whole-manifest failure this recheck observed (lib/clara/use-clara-thread-stop.test.ts, a file with zero diff since before the review round) is a pre-existing, non-deterministic flake -- already on record in 635-review-standards.json's measured_runs *before* the fix round started, and it passed cleanly on an immediate re-run in isolation. It is not a fix-round regression.",
+  "applied_findings": [
+    {
+      "id": "A1",
+      "source": "adversarial",
+      "severity": "major",
+      "citing_commit": "436adaae51d559ec49a264cd6ef042a0fb63001c",
+      "claim": "accept control regated on the caller's own outstanding acceptance (canAcceptForFirm && !standingLive && status==='published' && myAcceptedVersion !== version), closing the split-acceptance dead end",
+      "verification": "Read the diff: legal-standing-card.tsx:127 now reads exactly the gate the fix-round report describes, with the added !standing.standingLive clause. Independently ran `node --import ./test/bootstrap.mjs --import tsx --test components/firm-admin/legal-standing-card.test.tsx` on the rig: 12/12 pass, including p635.web.legal_split_acceptance (asserts triggerCount===1, i.e. exactly one control, for the kind this owner has not accepted -- not merely 'a control exists') and p635.web.legal_live_offers_nothing_even_to_an_owner_who_never_accepted (triggerCount===0 on a live standing). Both cells construct the two-owner state the branch's own p635.db.legal_standing_two_people DB cell proves reachable. Not vacuous: the split-acceptance cell asserts an exact count against a specific kind, not merely presence.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A2",
+      "source": "adversarial",
+      "severity": "major",
+      "citing_commit": "6053b9dbbc91a5225a6972b7ad9da1085eef8c33",
+      "claim": "the usage answer now carries its own month (FirmUsageAnswer = FirmUsageTable & {month}); the card withholds rows, the window label pairing, and the Download button until view.data.month === period.month",
+      "verification": "Read the diff: firm-settings-panel.tsx's readUsage stamps `ready({month, ...table})`; ai-usage-card.tsx derives `answer` only when `view.data.month === period.month`, derives `rows`/`hasRows` from `answer`, and gates the Download button on `hasRows` -- so the button, the rows and the CSV all disappear together during the round trip, not just the rows. Independently ran ai-usage-card.test.tsx + firm-settings-panel.test.tsx on the rig: p635.web.usage_period_change and p635.web.usage_answer_for_another_month both pass (34/34 across the two files' relevant cells, printed by name). Not the weaker one-liner (setUsage(LOADING)) the reviewer offered as a floor -- the stronger fix was actually taken, matching the report's claim.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A3",
+      "source": "adversarial",
+      "severity": "major",
+      "citing_commit": "a9d2d964df06e1d3de16c2a8eafc344469dcb260",
+      "claim": "T.3's guard re-derives v_code from the freshly re-read v_src (the standing door's own body) instead of reusing the stale v_code left over from T.1's loop (whose last iteration is get_firm_ai_usage), so the guard now tests the right body",
+      "verification": "Read the diff: one line added, `v_code := regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g');`, placed immediately after `select p.prosrc into v_src ... get_firm_legal_standing()...` and immediately before the `position('users_visible' in v_code)` check -- so v_code is now always derived from the just-reread standing-door source. INDEPENDENTLY REPRODUCED on the live rig (not just re-read from the report): inside a transaction, replaced the standing door with pg_get_functiondef(...) with `clara.users u` spliced to `clara.users_visible u`, ran the corrected guard logic against it -- it raised '#635 tail: the standing door resolves a name through clara.users_visible' as expected -- then ROLLBACK, and confirmed the rollback actually reverted (post-rollback functiondef contains `clara.users u`, not `clara.users_visible u`). Rig state left exactly as found: 220 migrations, no residue.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A4",
+      "source": "adversarial",
+      "severity": "minor",
+      "citing_commit": "6053b9dbbc91a5225a6972b7ad9da1085eef8c33",
+      "claim": "decodeFirmUsageRows returns null (not []) for a non-array payload, loadFirmAiUsage throws on null like its two siblings, and the dropped-row count surfaces on the card and in the CSV",
+      "verification": "Read the diff: decodeFirmUsageRows returns `FirmUsageTable | null`, loadFirmAiUsage throws 'get_firm_ai_usage returned a payload this build cannot read' on null. Independently ran the cited cells: p635.reads.usage_not_a_table, p635.reads.usage_drops_unreadable, p635.web.usage_dropped_rows, p635.web.usage_dropped_rows_reach_the_csv, p635.csv.dropped_rows -- all pass. The card's named-zero branch (ai-usage-card.tsx) is now gated on `dropped === 0` in addition to `rows.length === 0`, so a dropped row can no longer render as a clean empty period.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A5",
+      "source": "adversarial",
+      "severity": "minor",
+      "citing_commit": "6053b9dbbc91a5225a6972b7ad9da1085eef8c33",
+      "claim": "the e2e focus-return assertion now compares document.activeElement to the actual trigger element, not merely `!== 'BODY'`",
+      "verification": "Read the diff at firm-commercial-walk.spec.ts:444: `const returned = await trigger.evaluate((el) => el === document.activeElement); expect(returned).toBe(true)`, where `trigger` is the same Playwright Locator used to open the dialog (a live locator, not a stale handle, so it re-resolves correctly even though the dialog unmounts on close). Independently ran the whole firm-commercial-walk suite on the triple (3300/3301/3302): 8 passed (48.2s), including leg 8 by name ('320px and 200% zoom carry no horizontal page scroll, and focus returns to the trigger after the dialog').",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A6",
+      "source": "adversarial",
+      "severity": "minor",
+      "citing_commit": "6053b9dbbc91a5225a6972b7ad9da1085eef8c33",
+      "claim": "plan is now nullable (FirmPlanState | null); the decoder distinguishes a genuinely absent current plan (all four scalars NULL) from a half-readable one (still drops the whole payload), and the card renders 'No plan is current for this firm' rather than a transport failure",
+      "verification": "Read the diff: new `decodePlan()` helper with an explicit UNREADABLE sentinel distinct from the absent-plan null, so 'no plan' and 'unreadable plan' cannot collapse into one value -- exactly the distinction AC3 requires. Independently ran p635.reads.commercial_no_current_plan and p635.reads.commercial_half_a_plan -- both pass, and by name each asserts the DIFFERENT outcome the two states require (the half-a-plan cell still returns null/failed).",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A9",
+      "source": "adversarial",
+      "severity": "note",
+      "citing_commit": "6053b9dbbc91a5225a6972b7ad9da1085eef8c33",
+      "claim": "formatMoneyCents no longer double-signs a negative sub-unit amount",
+      "verification": "Ran the new lib/firm/commercial-format.test.ts on the rig: p635.format.money_negative_sub_unit passes ('carries ONE sign, not two').",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A7",
+      "source": "adversarial",
+      "severity": "note",
+      "citing_commit": "report-only, no code change requested or made",
+      "claim": "the three non-regression pins' cross-ticket coupling is recorded as a follow-up rather than fixed (fail-closed is the intended posture)",
+      "verification": "Read reports/635-final.md's 'Follow-ups worth filing' section: item 2 names all three pinned functions verbatim, states the intended fail-closed posture, and records 'Verified for this wave: no file 0225-0232 recuts any of the three.' Read DECISIONS.md §2.1's recut sets table independently -- confirms the same. No code change was warranted; agree with leaving it as a report-only follow-up.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A8",
+      "source": "adversarial",
+      "severity": "note",
+      "citing_commit": "report-only, no code change requested or made",
+      "claim": "635-final.md's AC3 row now cites the surface cells (commercial-state-card + walk leg 1) as the behavioural evidence and describes p635.db.commercial_invoices_constant as the door constant's regression pin, not AC3 proof",
+      "verification": "Read reports/635-final.md's AC3 row directly: it now lists the four surface cells first and states 'p635.db.commercial_invoices_constant is the DOOR CONSTANT's regression pin, not behavioural evidence' verbatim. Matches the fix-round claim exactly.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "spec-F1 / standards-F1",
+      "source": "spec + standards",
+      "severity": "minor / note",
+      "citing_commit": "436adaae51d559ec49a264cd6ef042a0fb63001c",
+      "claim": "ownerHint now names the MOST RECENT acceptance on record (compared as instants, not strings) rather than the first document in array order carrying a name, and the test fixture that fed it a name now uses a shape 0233 can actually emit",
+      "verification": "Read the diff: new latestAcceptor() helper walks all documents, parses acceptedAt with Date.parse, keeps the max; en.json's legalNotLiveOwnerNamed string changed to 'The most recent acceptance on record was made by {name}.' Independently ran the three new/reworked cells: p635.web.legal_not_live_without_accept (realistic single-name shape, asserts the WHOLE sentence), p635.web.legal_named_hint (two-name split state, asserts Bob Lim is named and Alice Tan, the earlier acceptance, is NOT), p635.web.legal_named_hint_masked (masked payload falls back to the generic sentence) -- all pass. Both reviewers' complaint (a substring both hint variants match) is resolved: the assertions now match the full sentence.",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "deliberately_left": [
+    {
+      "id": "A10",
+      "source": "adversarial",
+      "severity": "note",
+      "claim": "get_firm_ai_usage carries neither stable nor plan_cache_mode=force_custom_plan, unlike its two siblings",
+      "fix_round_reasoning": "the brief's own text (brief-635.md line 5 and line 69) scopes the plan_cache_mode=force_custom_plan pin to 'the two new firm-bound reads' -- get_firm_legal_standing and get_firm_commercial_state -- not the delegating wrapper get_firm_ai_usage, which binds its firm through clara.jwt_firm() inside the query rather than taking it as a parameter the planner could freeze; declaring `stable` would misdescribe a body that calls a `volatile` function.",
+      "judgment": "HOLDS. Read brief-635.md directly: both citations say 'the two new firm-bound reads' verbatim, and the migration's own T.2 guard (0233:593-599) checks exactly those two names by array literal -- matching the brief, not exceeding or falling short of it. Checked DECISIONS.md's §6.1 rulings table (the only post-brief orchestrator corrections for #635): the sole #635 ruling is about the rig-meta.mjs cohort (already satisfied, see ruling_check below) and says nothing about extending the plan_cache_mode pin to a third door. No DECISIONS text contradicts the left reasoning. The reviewer itself filed this as a note and called it 'within the letter of the brief.' Correctly left; if the orchestrator wants uniform posture across all three doors that is a scope change to file forward, not a fix-round defect.",
+      "verdict": "HOLDS"
+    }
+  ],
+  "ruling_check": {
+    "ruling": "DECISIONS.md §6.1 (post-brief, binding): 'rig-meta.mjs cohorts are FUNCTION-name lists, so 0233 (three new functions + one recut) needs a real cohort... #635 ships a four-name cohort (get_firm_legal_standing, get_firm_commercial_state, get_firm_ai_usage, get_llm_usage_summary). 0228 stays comment-only.'",
+    "status": "SATISFIED, independent of the fix round",
+    "evidence": "Read packages/db/tests/rig-meta.mjs directly on HEAD a9d2d964: the FIRM_COMMERCIAL_0233_COHORT_FNS array (line 2340) lists exactly 'get_firm_legal_standing', 'get_firm_commercial_state', 'get_firm_ai_usage' and a separate FIRM_COMMERCIAL_0233_RECUT_FNS := ['get_llm_usage_summary'] (line 2342) -- the same four names the ruling names, as real arrays, not a comment. This was landed at the FEATURE commit (3e4cece3, whose own message says 'the four-name rig-meta cohort'), before any of the three reviews ran, and the fix round touched neither this file nor this cohort -- confirmed by `git diff --stat 34b9a32f a9d2d964` (the fix round's own full diff), which does not list packages/db/tests/rig-meta.mjs. No regression possible from this round; ruling was never at risk."
+  },
+  "new_defects": [],
+  "flake_investigated": {
+    "test": "apps/web/lib/clara/use-clara-thread-stop.test.ts -- '630 a stop the door says had ALREADY FINISHED does not re-attach'",
+    "observation": "This recheck's own independent run of `node scripts/run-tests.mjs` (the whole apps/web manifest, on HEAD a9d2d964) showed 4216 tests / 4213 pass / 1 fail / 2 skipped -- one more failure than the fix-round report's own table claims (4214 pass / 0 fail).",
+    "investigation": "git diff --stat between the pre-fix-round base (34b9a32f) and this round's HEAD (a9d2d964) does not list this file at all -- the fix round did not touch it. The file was last touched by an unrelated commit (ea001014, #798). This EXACT failure, by file, line, and test name, was already recorded in reports/635-review-standards.json's measured_runs BEFORE the fix round started ('4199 tests, 4196 pass, 1 fail, 2 skip. The 1 failure is lib/clara/use-clara-thread-stop.test.ts:1857... reproduces the class of pre-existing whole-suite-load flake'). Re-ran the file alone twice on the rig: first run failed the same cell (1/25 fail), second run passed clean (25/25) -- confirming it is non-deterministic (a real-timer-based flake per its own commit history, not load-order-only) and not a regression from any #635 code.",
+    "conclusion": "PRE-EXISTING, NOT A FIX-ROUND REGRESSION. The fix round's own claim of '0 fail' on this run was itself a lucky roll of a known flake, not evidence the flake was fixed -- the fixround report should not have implied the flake class was absent from THIS file (it correctly named a different flaky file, thread-live-clarify.test.tsx, as checked-and-absent, but did not mention this one recurring). This is noted as a documentation gap, not a code defect, and does not change the accept verdict."
+  },
+  "measured_runs": [
+    { "cmd": "pnpm typecheck (worktree root)", "result": "green -- packages/runtime Done, apps/web Done, exit 0" },
+    { "cmd": "pnpm lint (worktree root)", "result": "green -- all checks including reporting-render, exit 0" },
+    { "cmd": "packages/db: node --test --test-concurrency=1 tests/firm-commercial-settings.test.mjs tests/operation-census.test.mjs tests/rig-isolation.test.mjs tests/f-a9-usage-reshape.test.mjs tests/f-a9-pr-1b.test.mjs tests/checkout-gate-c3.test.mjs", "result": "162 tests, 161 pass, 0 fail, 1 skip (rig-isolation T19, CLARA_RIG_ALLOW_RESET-gated) -- matches fixround report exactly" },
+    { "cmd": "A3 mutant reproduction (rolled-back transaction, live rig)", "result": "post-fix guard raised '#635 tail: the standing door resolves a name through clara.users_visible' against a spliced mutant; rollback verified clean" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/firm-admin/legal-standing-card.test.tsx", "result": "12 tests, 12 pass" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/firm-admin/ai-usage-card.test.tsx components/firm-admin/firm-settings-panel.test.tsx components/firm-admin/commercial-state-card.test.tsx lib/firm/commercial-reads.test.ts lib/firm/commercial-format.test.ts lib/firm/usage-csv.test.ts", "result": "49 tests, 49 pass" },
+    { "cmd": "apps/web: node scripts/run-tests.mjs (whole manifest)", "result": "4216 tests, 4213 pass, 1 fail, 2 skip -- the 1 fail is the pre-existing use-clara-thread-stop.test.ts flake (see flake_investigated), non-reproducible on isolated re-run" },
+    { "cmd": "apps/web e2e (triple 3300/3301/3302): pnpm --filter @clara/web e2e firm-commercial-walk", "result": "8 passed (48.2s), including the focus-return leg comparing document.activeElement to the trigger" },
+    { "cmd": "apps/web e2e (triple 3300/3301/3302): pnpm --filter @clara/web e2e firm-navigation-walk shell-migration-walk", "result": "41 passed (1.9m)" },
+    { "cmd": "git diff --stat 34b9a32f a9d2d964 (the fix round's own full diff)", "result": "21 files changed, matches the fixround report's 'Files changed this round' list exactly -- no forbidden path touched, only one migration file (0233), no rig-meta.mjs change" }
+  ],
+  "notes": [
+    "This round's HEAD (a9d2d964) matches the task brief's stated HEAD exactly.",
+    "The fix-round report's self-corrected commit-message test count ('238 pass' in 6053b9db's message vs the measured 235, corrected in the report's own prose) is disclosed by the fix worker itself and is not a new issue this recheck needed to raise.",
+    "No ratification was requested by the fix round and none is needed: A1's added !standingLive clause and A6's nullable plan are narrower readings of brief §3, not contradictions of it."
+  ]
+}

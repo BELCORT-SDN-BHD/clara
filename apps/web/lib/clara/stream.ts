@@ -1,5 +1,8 @@
 // The Clara task-stream client (P2-RAIL). Implements the SSE envelope exactly as
-// `packages/runtime/src/streamRoute.ts` emits it — four events, no more, no fewer:
+// `packages/runtime/src/streamRoute.ts` emits it — FIVE events, no more, no fewer.
+// (It said "four" until #642: `revoked` has been on the wire since B-M3 and this module
+// simply had no case for it, so it fell through to `default` and was ignored — see the
+// reducer's own `revoked` arm for what that cost a reader.)
 //
 //   chunk    — a live, PROVISIONAL update (`streamRoute.ts:117`). Never authoritative;
 //              never persisted as a rendered part.
@@ -11,6 +14,10 @@
 //              transcript; it never merges with the provisional chunks that preceded it.
 //   done     — always follows a terminal `message` (`streamRoute.ts:76`); ends the
 //              attempt. Carries the same terminal `status`.
+//   revoked  — the reader LOST ACCESS mid-stream (`streamRoute.ts:157`, sent when the
+//              per-poll re-authorisation at `:84-90` throws an AuthError). Terminal, and
+//              distinct from both: the task did not finish, and reattaching would be
+//              refused for the same reason.
 //   detached — the attempt ended WITHOUT reaching a terminal status (supervisor drain
 //              or the read-window cap — `streamRoute.ts:159-161`). Never treated as
 //              failure or success: it means "reattach". A reattaching client gets the
@@ -35,7 +42,7 @@ import type { ClaraPart } from "./api";
 // 1a. Frame parsing — bytes to `{event, data}` pairs.
 // ---------------------------------------------------------------------------
 
-export type SseEventName = "chunk" | "message" | "done" | "detached";
+export type SseEventName = "chunk" | "message" | "done" | "detached" | "revoked";
 
 export type SseEvent = { event: string; data: unknown };
 
@@ -65,6 +72,14 @@ export type SseEvent = { event: string; data: unknown };
 export type ClaraTerminalMessagePayload = { taskId: string; status: string; parts: ClaraPart[] | null };
 export type ClaraDonePayload = { taskId: string; status: string };
 export type ClaraDetachedPayload = { taskId: string; reason: string };
+/** #642 AC5 — the FIFTH event, and it was on the wire the whole time.
+ *  `streamRoute.ts:157` sends `revoked` when the PER-POLL re-authorisation
+ *  (`:84-90`) throws an `AuthError` mid-stream: a membership revoked, a session gone
+ *  private, a token that no longer resolves. `reason` is `"not_found"` for a 404 and
+ *  the AuthError's own `code` otherwise. It is NEITHER `done` (the task did not
+ *  finish) NOR `detached` (there is nothing to reattach INTO — the next attach would
+ *  be refused for exactly the same reason). */
+export type ClaraRevokedPayload = { taskId: string; reason: string };
 
 /** Parses as many complete `\n\n`-delimited SSE frames as `raw` contains, returning the
  *  parsed events plus whatever incomplete tail remains (to be prefixed onto the next
@@ -113,7 +128,7 @@ export function createSseFrameParser(): { push(text: string): SseEvent[] } {
 // 1b. Authority-replacement reducer — events to UI state.
 // ---------------------------------------------------------------------------
 
-export type ClaraStreamStatus = "idle" | "streaming" | "terminal" | "detached" | "connection-lost";
+export type ClaraStreamStatus = "idle" | "streaming" | "terminal" | "detached" | "connection-lost" | "revoked";
 
 export interface ClaraStreamState {
   status: ClaraStreamStatus;
@@ -127,6 +142,10 @@ export interface ClaraStreamState {
   transcriptParts: ClaraPart[] | null;
   taskStatus: string | null;
   detachReason: string | null;
+  /** #642 — set ONLY by a `revoked` event, and never cleared by a later event, because
+   *  nothing later can arrive: `runClaraTaskStream` returns on it. Kept separate from
+   *  `detachReason` so a surface can never render a revocation as a reconnect. */
+  revokedReason: string | null;
   /** Consecutive failed (re)attach attempts since the last attach that yielded any
    *  event (FIX 1). `0` when not reconnecting; the reattach loop bumps this right
    *  before each backoff sleep, so the UI can show "Reconnecting… (attempt N)". Reset
@@ -149,6 +168,7 @@ export const initialClaraStreamState: ClaraStreamState = {
   transcriptParts: null,
   taskStatus: null,
   detachReason: null,
+  revokedReason: null,
   reconnectAttempt: 0,
   streamEndedUnexpectedly: false,
   retryAvailable: false,
@@ -163,6 +183,10 @@ function isDonePayload(data: unknown): data is ClaraDonePayload {
 }
 
 function isDetachedPayload(data: unknown): data is ClaraDetachedPayload {
+  return typeof data === "object" && data !== null && "reason" in data;
+}
+
+function isRevokedPayload(data: unknown): data is ClaraRevokedPayload {
   return typeof data === "object" && data !== null && "reason" in data;
 }
 
@@ -197,6 +221,21 @@ export function applyClaraStreamEvent(state: ClaraStreamState, event: SseEvent):
     case "detached": {
       const reason = isDetachedPayload(event.data) ? event.data.reason : null;
       return { ...state, ...NOT_RECONNECTING, status: "detached", detachReason: reason, provisionalChunks: [] };
+    }
+    /** #642 AC5 — THE HOLE THIS CLOSES. `revoked` had no case at all, so it fell to
+     *  `default` and was IGNORED: the reducer kept `status: "streaming"`, the reattach
+     *  loop counted it as progress, and a member removed from the firm mid-stream sat
+     *  in front of "Reconnecting…" forever while every reattach was refused. The fix is
+     *  a distinct TERMINAL state — never `detached`, which means "reattach", and never
+     *  `connection-lost`, which means "the transport failed and a Retry might work".
+     *
+     *  The provisional buffer is discarded for the same reason `detached` discards it:
+     *  it is not the transcript, and the authority that would have replaced it is never
+     *  coming. Whatever the reader could already see in the persisted transcript stays;
+     *  this drops only the live half. */
+    case "revoked": {
+      const reason = isRevokedPayload(event.data) ? event.data.reason : null;
+      return { ...state, ...NOT_RECONNECTING, status: "revoked", revokedReason: reason, provisionalChunks: [] };
     }
     default:
       return state;
@@ -273,6 +312,21 @@ export interface OpenTaskStreamOptions {
  *  and it matters MOST here: an unauthenticated 307 to `/login`, followed, is a 200
  *  `text/html` body this reader would parse as SSE — no events, a graceless close, and
  *  eight silent reattach attempts. Manual, `res.ok` is false and the attach throws. */
+/** The attach was REFUSED because this reader may not see this task — not because the
+ *  transport failed. It carries the route's status and code so `runClaraTaskStream` can
+ *  deliver the same `revoked` event the mid-stream arm delivers, instead of retrying a
+ *  refusal that will be repeated identically eight times. */
+export class StreamAccessRevokedError extends Error {
+  readonly status: number;
+  readonly reason: string | null;
+  constructor(status: number, reason: string | null) {
+    super(`stream attach refused (${status})`);
+    this.name = "StreamAccessRevokedError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
 export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<AsyncGenerator<SseEvent>> {
   const doFetch = opts.fetchImpl ?? fetch;
   const res = await doFetch(`/api/runtime/tasks/${encodeURIComponent(opts.taskId)}/stream`, {
@@ -287,8 +341,39 @@ export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<Async
   // next reader hunting for a runtime error that never happened. Same gate, same 307, so
   // the same phrase, imported rather than re-typed.
   if (res.type === "opaqueredirect") throw new Error(`stream attach failed: ${REDIRECTED}`);
+  // #642 (fix round 1, ADV-642-5) — A REVOCATION DISCOVERED AT ATTACH IS A REVOCATION.
+  // `streamRoute.ts` can only write the `revoked` FRAME after the SSE headers are out, and
+  // its attach-time authorisation answers before that, so the reattach after a `detached`,
+  // a rail reopen or any remount into a membership that is already gone comes back as a
+  // status rather than as an event. Read as a transport failure it produced up to eight
+  // rounds of "Reconnecting…" at someone whose access had been removed — the sentence this
+  // ticket exists to retire, on the one path the mid-stream arm never sees.
+  //
+  // 403 AND 404 ONLY, deliberately. They are the two the route's own masked-view law
+  // produces for "this reader may not see this task" (`lib/authz.mjs`: `no_membership`,
+  // `not_found`), and they are the same facts the mid-stream arm sends. A 401 is about
+  // THIS TAB'S TOKEN, not about a membership — "you no longer have access to this reply"
+  // would be an assertion the response does not make — so it stays a transport rejection.
+  if (res.status === 403 || res.status === 404) {
+    throw new StreamAccessRevokedError(res.status, await readRefusalCode(res, res.status));
+  }
   if (!res.ok || !res.body) throw new Error(`stream attach failed (${res.status})`);
   return readSseEvents(res.body);
+}
+
+/** The route's own refusal code, or `null` when the body cannot be read. NEVER guessed: an
+ *  unreadable body is not evidence of a reason, and the surface renders copy keyed off this
+ *  rather than the token itself (the masked-view law — a reason must never become an
+ *  existence oracle). 404 is worded `not_found` exactly as `streamRoute.ts`'s mid-stream
+ *  arm words it, so one fact reads one way wherever it is discovered. */
+async function readRefusalCode(res: Response, status: number): Promise<string | null> {
+  if (status === 404) return "not_found";
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    return typeof body?.error === "string" && body.error.length > 0 ? body.error : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +478,14 @@ function deliverEvent(opts: RunClaraTaskStreamOptions, event: SseEvent): void {
  *  their own abort, same as `apps/dashboard/app/chat/api.ts` `streamTask` callers do)
  *  — attach failures are never retried by this loop, only detaches/ungraceful closes.
  *
+ *  #642 — WITH ONE NAMED EXCEPTION, and it is not a transport fault: an attach the
+ *  route REFUSED (403/404 — this reader may not see this task). That is the same fact
+ *  a mid-stream revocation delivers as `revoked`, so it is delivered as `revoked` and
+ *  this function RETURNS. Rejecting it sent the caller down the transport path, which
+ *  is eight rounds of "Reconnecting…" at someone whose access has been removed. A
+ *  caller that resolves its own promise on the stream opening must therefore also
+ *  handle this read ending without ever opening — see `useClaraThread`'s `finally`.
+ *
  *  #734 — WHAT A REJECTION FROM THIS FUNCTION MEANS, now that it means one thing.
  *  This promise rejects for TRANSPORT faults only: the attach failed, the response
  *  was not ok, the body tore. It does NOT reject because a subscriber threw while
@@ -411,12 +504,33 @@ export async function runClaraTaskStream(opts: RunClaraTaskStreamOptions): Promi
 
   for (;;) {
     if (opts.signal.aborted) return;
-    const events = await openTaskStream(opts);
+    let events: AsyncGenerator<SseEvent>;
+    try {
+      events = await openTaskStream(opts);
+    } catch (err) {
+      // #642 (fix round 1, ADV-642-5) — the attach was REFUSED, not broken. One fact, one
+      // face: the reader gets the same `revoked` event a mid-stream revocation delivers,
+      // the loop stops exactly as it does for that event, and nothing is retried.
+      if (err instanceof StreamAccessRevokedError) {
+        deliverEvent(opts, { event: "revoked", data: { taskId: opts.taskId, reason: err.reason } });
+        return;
+      }
+      throw err;
+    }
     opts.onOpen?.();
     let sawProgress = false; // some event OTHER than the closing `detached` signal itself
     let detached = false;
     for await (const evt of events) {
       deliverEvent(opts, evt); // #734 — guarded; a subscriber throw never reaches this loop.
+      // #642 — A REVOCATION ENDS THE READ, and it ends it HERE, before any of the
+      // bookkeeping below can see it. Returning (rather than `break`) is the whole
+      // behaviour in one line: it is not counted as `sawProgress`, it does not reset the
+      // backoff, it does not take the ungraceful-close arm, and — the point — it never
+      // reattaches. The reader has LOST ACCESS; the next attach would be refused for the
+      // same reason, and a loop that kept trying is what printed "Reconnecting…" over a
+      // membership that had been removed. Same shape as the `done` arm below, because
+      // this is the same kind of fact: there is nothing more to read.
+      if (evt.event === "revoked") return;
       if (evt.event === "detached") {
         detached = true; // the failure/retry signal, not evidence of progress — don't reset on it
         break;

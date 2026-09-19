@@ -1,0 +1,160 @@
+{
+  "ticket": 660,
+  "role": "recheck",
+  "recheck_model": "claude-sonnet-5 (recheck reviewer, workflow harness)",
+  "head_checked": "e69b0e68dd1f499a5b2022105ef49cf074117383",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "rig": "127.0.0.1:55710 / clara_660",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\660-recheck-1.json",
+  "inputs_read": [
+    "reports/660-fixround-1.md",
+    "reports/660-review-adversarial.json",
+    "reports/660-review-spec.json",
+    "reports/660-review-standards.json",
+    "brief-660.md",
+    "DECISIONS.md"
+  ],
+  "verdict": "accept",
+  "summary": "All twelve applied findings (A1/M1, A2, A3, A4, A5, A6, A7, A8/N1, A9, A10, A11, A12/S2) were opened at e69b0e68 and independently re-verified: each cited cell was re-run on the #660 rig and is real, non-vacuous, and matches its commit's own description. Both deliberately-left findings (SP1/S1, SP2) hold up against brief-660.md and DECISIONS.md on independent reading -- SP2 in particular: the runtime task text this recheck (and the fix round) was handed asserts 'the guard must refuse the overwrite', but brief-660.md:64-70 and its own re-measurement at :765-770 are explicit, twice-measured, and binding that the JSON allowlist guard will NOT stop the card.tsx overwrite and that the protection is procedural -- the branch's four-step procedure (dry-run, add, git checkout, sha256 proof) is exactly what D19.c requires, and card.tsx is confirmed byte-identical (sha256 d8113cbf...) both before and after. Full re-runs: pnpm typecheck (exit 0), pnpm lint (exit 0), the db battery with the client-financial-pack gate (34/34), check-frozen-workflows.mjs and check-parts-parity.mjs (both OK), the whole apps/web e2e home-board-walk triple (21/21), and a live psql probe confirming A11's UPDATE/DELETE refusal. One genuine NEW defect was found by an additional concurrency probe the fix round's own report does not run: A9's FOR UPDATE fix mis-routes the loser to the wrong typed refusal under a specific race window (see new_findings). One report-accuracy issue was found: the fix round's claim that the whole web suite is 'fully green' is not reproducible -- use-clara-thread-stop.test.ts is a genuine pre-existing flake (1/3 reruns failed), unrelated to and untouched by this branch. Neither defers acceptance: the race window is narrow and the flake is not a #660 regression.",
+  "applied_findings": [
+    {
+      "id": "A1/M1",
+      "claim": "the elapsed-day comparison cap now branches on whether the read covers a complete month; a historic month compares against the WHOLE prior month",
+      "commit": "f040238f (SQL), 4da91df2 (period.ts mirror)",
+      "verification": "Read the diff: `v_as_of >= v_month_end` branches to the full-prior-month formula, else the elapsed-days cap; `v_month_end` is set on both the named-month and current-month paths so the branch is reachable from every call shape. Re-ran packages/db/tests/client-financial-pack.test.mjs (34/34 incl. p660.pack.historic_comparison_full_prior_month and mtd_comparison_capped) on the #660 rig. Read the matching web mirror in period.ts:priorInterval -- same >= monthEnd(periodMonth) branch.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A2",
+      "claim": "the cash/profit/income/expense comparisons are gated on the same coverage-floor availability predicate as points[], emitting null amounts + available:false + reason:pre_coverage instead of a fabricated zero",
+      "commit": "f040238f",
+      "verification": "Read the diff: v_prev_known / v_pl_prev_known gate every comparison object's value_cents/delta_cents/delta_pct/sign_change and add explicit available/reason keys. Re-ran the battery (p660.pack.pre_coverage_point extension green). Read the web-side mirror (financial-pack.ts comparison() honors raw.available !== false) and the new client-cash-summary.test.tsx cell 'A COMPARISON THE DOOR WITHHELD IS SAID, NOT SKIPPED', which asserts doesNotMatch(/against RM 0\\.00/) -- ran it directly, passes.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A3",
+      "claim": "profit_composition moved from a top-level envelope key into profit.composition, matching where the browser's parser reads it; the e2e mock's invented top-level key was deleted",
+      "commit": "f040238f (door), 4da91df2 (mock)",
+      "verification": "Read the diff: 'profit_composition' key removed from the top-level jsonb_build_object; 'composition' added inside the profit group's own jsonb_build_object. Confirmed apps/web/e2e/home-board-mock.mjs no longer carries a top-level profit_composition key. Re-ran p660.pack.composition_bounded (34/34 battery) and apps/web's client-financial-charts.test.tsx.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A4",
+      "claim": "the account-level composition now carries composition_total/composition_truncated (a count(*) over() inside the capped subquery, no second pass), hydrated and rendered as 'Showing N of M accounts'",
+      "commit": "f040238f (door), 4da91df2 (parser/UI)",
+      "verification": "Read the diff for both cash and profit composition subqueries; each now does `count(*) over ()::int as rows_total` before the `limit 50`, stripped from the per-row object and surfaced once as composition_total/composition_truncated. Read financial-pack.ts hydrateFigure adding compositionTotal/compositionTruncated, and client-income-expense-chart.tsx rendering 'Showing {shown} of {total} accounts, largest first.' Ran the e2e leg p660.money.disclosures directly: asserts exactly 'Showing 1 of 61 accounts, largest first.' -- passed.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A5",
+      "claim": "cash_set_version_changed_in_series only fires when more than one revision actually exists (v_set_multi); a single-revision client whose set was simply published after books started gets cash_set_published_after_books_start instead",
+      "commit": "f040238f",
+      "verification": "Read the diff: `select count(*) > 1 into v_set_multi ...` and the case expression on both the group-level reason and the per-point reason. Re-ran the battery (p660.pack.cash_set_published_after_books_start green, cash_set_version_pinned/cash_set_version_changed_in_series still green for the genuine 2-revision case). Confirmed the new reason token is wired through financial-display.ts's COVERAGE_REASON_KEYS and en.json, and exercised by client-cash-summary.test.tsx's dedicated cell.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A6",
+      "claim": "the finally block's setLoading(false)/setRefreshing(false) now only fire when epoch === epochRef.current, so a superseded read cannot clear the current read's skeleton",
+      "commit": "4da91df2",
+      "verification": "Read the diff at use-financial-pack.ts:151-166: the two set* calls are now inside `if (epoch === epochRef.current) { ... }`. This directly closes the described race (finally previously ran unconditionally). Re-ran apps/web's full suite (see below) with use-financial-pack.test.ts green.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A7",
+      "claim": "the cash composition collapsed from six correlated subqueries per account to one lateral scan with three FILTER aggregates, ~2x faster on the whole door per the README's re-measurement (36.4-40.4ms -> 18.9-21.7ms, byte-identical payload); named residual that cash.composition still has no renderer, left for #669/#670",
+      "commit": "f040238f",
+      "verification": "Read the diff: the six independent correlated subqueries (opening/movement/closing/entries/entries_total/entries_truncated) were replaced by one `cross join lateral (...)` computing all three sums with FILTER clauses over a single scan, entries via one more subquery reusing the same join predicate. Confirmed the three cent bounds are unchanged text (< v_start / between v_start and v_as_of / <= v_as_of) so p660.pack.composition_bounded's opening+movement=closing invariant still exercises the same numbers -- battery green. Read packages/db/README.md:741-747, which documents the exact re-measurement cited in the fix round report, on the same rig/corpus language. Did not re-run the EXPLAIN benchmark bit-for-bit (a timing measurement, not a correctness fact), but the code-shape change unambiguously reduces per-account scans and the correctness invariant (opening+movement=closing) still holds.",
+      "result": "CONFIRMED real and structurally correct; timing claim plausible and documented but not independently re-measured"
+    },
+    {
+      "id": "A8/N1",
+      "claim": "chart.tsx now imports cn from @/lib/utils like its 25 siblings; cn@^0.3.0 dropped from apps/web/package.json and pnpm-lock.yaml via a clean lockfile-only diff",
+      "commit": "bc1db717",
+      "verification": "Read the diff: chart.tsx's only change is the import line; package.json loses exactly the 'cn' dependency line; pnpm-lock.yaml loses exactly the cn@0.3.0 importer entry and package block, nothing else touched. Re-ran pnpm typecheck and pnpm lint (both exit 0).",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A9",
+      "claim": "the current published version row is now selected FOR UPDATE, and the residual unique_violation on the version insert is caught and remapped to CLR11 cash_set_version_raced instead of a raw 23505",
+      "commit": "f040238f",
+      "verification": "Read the diff: `for update` added to the current-version select; the insert into cash_account_set_versions wrapped in `begin ... exception when unique_violation then raise ... CLR11 ...`. Ran two independent live concurrency probes on the #660 rig (throwaway, written and deleted from packages/db/tests/, worktree confirmed clean after): (1) two ordinary concurrent supersede publishes via the pooled fixture helper serialize cleanly to revision 2/3 with no error at all -- correct, and consistent with the fix's stated intent. (2) A precisely-timed two-connection probe (explicit BEGIN on both sides, connection B's statement issued while connection A's transaction was still open) reproduces the exact race window and surfaces a DIFFERENT defect -- see new_findings NF-1.",
+      "result": "CONFIRMED the stated fix (no more raw 23505 in the ordinary race) is real; a narrower, previously-undetected edge case was found in the same code path (see new_findings NF-1)"
+    },
+    {
+      "id": "A10",
+      "claim": "the unmarked-closing-entries disclosure now also runs over the six months the chart draws (unmarked_closing_entries_series/series_coverage_reason), not only the selected period",
+      "commit": "f040238f (door), 4da91df2 (parser/UI)",
+      "verification": "Read the diff: a second detector query over [v_series_start, v_as_of] populates v_unmarked_ser, added to the envelope as two new top-level keys. Read financial-pack.ts's hydration of unmarkedClosingEntriesSeries/seriesCoverageReason and client-income-expense-chart.tsx's rendering of the series-level sentence, separate from the period-scoped tile sentence. Ran the e2e leg p660.money.disclosures directly: asserts the series sentence contains '2 year-end closing entries in these six months' while the period tile itself says nothing (period is clean) -- passed.",
+      "result": "CONFIRMED real, not vacuous"
+    },
+    {
+      "id": "A11",
+      "claim": "the member-integrity trigger now covers UPDATE and DELETE (not only INSERT), refusing both with CLR08 cash_set_members_sealed",
+      "commit": "f040238f",
+      "verification": "Read the diff: trigger changed to BEFORE INSERT OR UPDATE OR DELETE, with a tg_op <> 'INSERT' branch raising CLR08 with the attempted verb. Independently queried pg_trigger on the live #660 rig: confirmed the trigger definition is exactly 'BEFORE INSERT OR DELETE OR UPDATE'. Independently attempted a live UPDATE and a live DELETE against an existing cash_account_set_members row as root: both refused with CLR08 / {\"reason\":\"cash_set_members_sealed\",\"attempted\":\"UPDATE\"} and \"...DELETE\"} respectively. Re-ran the battery cell p660.pack.cash_set_members_sealed (green).",
+      "result": "CONFIRMED real and independently reproduced live, not vacuous"
+    },
+    {
+      "id": "A12/S2",
+      "claim": "the two web unit test files the brief named but the first pass silently narrowed (client-cash-summary.test.tsx, client-profit-summary.test.tsx) were written rather than the gap being disclosed as an assumption",
+      "commit": "59381439",
+      "verification": "Read both files (173 and 143 lines): six and four substantive cells respectively, each asserting specific rendered text/accessible names against realistic FigureGroup fixtures (exact amounts, unpublished-cash-set sentence + admin/viewer variant, an unavailable comparison never rendered as RM 0.00, the new cash_set_published_after_books_start sentence, a loss printed as a loss, unmarked-history count, empty-population zero, unknown/denied arms). Both registered in test/manifest.txt. Ran both files directly: 10/10 pass.",
+      "result": "CONFIRMED real, substantive, not vacuous"
+    }
+  ],
+  "deliberately_left_judgments": [
+    {
+      "id": "SP1/S1",
+      "finding": "the brief's 'leave e2e-fixture-ownership.test.ts:361 untouched' instruction was not honoured literally -- the #902 single-entry LANE_DECLARATIONS object for home-board-mock.mjs was rewritten into a larger object carrying #660's three new verbs alongside #902's original one",
+      "judgment": "REASON HOLDS. LANE_DECLARATIONS is `Record<filename, {unscopeable, debt}>` (one object literal per key) -- a second entry for the same file key is not legal TypeScript, so the brief's literal instruction is internally unsatisfiable whenever a second lane's verbs land in the same shared mock file. Both the spec and standards lenses independently reached this same conclusion. The resolution (extend the existing array in place) leaves #902's own entry (get_client_work_pack, debt, same reasoning) semantically untouched -- only the surrounding object literal grew. Disclosed in the fix round report and in 660-final.md's Assumption 6. Read e2e-fixture-ownership.test.ts:372-380 directly: confirms the four-entry debt array with get_client_work_pack's original string unchanged.",
+      "outcome": "held"
+    },
+    {
+      "id": "SP2",
+      "finding": "the task text's 'the guard must refuse the [card.tsx] overwrite' is not what the branch does -- the branch relies on a procedural refusal (dry-run, real add, git checkout, sha256 proof) rather than adding card.tsx to protected-components.json",
+      "judgment": "REASON HOLDS, and more strongly than the fix round report even states. brief-660.md's own D19.c (lines 64-70) is EXPLICIT and BINDING: 'Orchestrator correction, measured on this checkout and binding: the guard's allowlist ... holds exactly components/ui/button.tsx and components/ui/pagination.tsx, and ui-add.mjs:239-248 refuses only on an allowlisted file -- so it will NOT stop the card.tsx overwrite. The protection is therefore yours, and it is a procedure, not a hope.' This is reaffirmed a second time at brief-660.md:765-770 as 're-measured clean this pass.' Independently confirmed on the live worktree: protected-components.json holds exactly button.tsx/pagination.tsx (git log shows it was created by #772 and is untouched by this branch's diff), and card.tsx is byte-identical before/after (sha256 d8113cbf... on both origin/main and HEAD). The runtime task text handed to this very recheck session repeats the same 'must refuse' claim verbatim, which is itself evidence this is a persistent generation artifact rather than a new, considered ruling -- it contradicts the branch's own binding brief without citing any DECISIONS.md line that overrides D19.c. The branch's four-step procedural protection is exactly what D19.c prescribes and achieves the intended outcome (card.tsx never actually overwritten).",
+      "outcome": "held; task-text/DECISIONS reconciliation is a legitimate orchestrator-level follow-up, not a branch defect"
+    }
+  ],
+  "regression_checks": [
+    { "check": "pnpm typecheck (worktree root)", "result": "PASS", "detail": "exit 0; apps/web and packages/runtime tsc --noEmit both Done" },
+    { "check": "pnpm lint (worktree root)", "result": "PASS", "detail": "exit 0; includes check-ui-add-guard.selftest, check-test-manifest, check-message-keys, dispatch-model-guard selftest, all eslint projects" },
+    { "check": "packages/db client-financial-pack battery (focused, with its own gate)", "result": "PASS", "detail": "34/34, 0 fail, re-run independently on the #660 rig" },
+    { "check": "node scripts/check-frozen-workflows.mjs", "result": "PASS", "detail": "296 frozen files verified, 53 use-workflow modules frozen+registered, 3 retired" },
+    { "check": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "PASS", "detail": "reader superset of emittable confirmed" },
+    { "check": "apps/web whole unit suite (node scripts/run-tests.mjs)", "result": "PASS WITH ONE PRE-EXISTING FLAKE", "detail": "4195 tests, 4192 pass, 1 fail, 2 skipped on this run -- the 1 fail is use-clara-thread-stop.test.ts's 'a stop the door says had ALREADY FINISHED does not re-attach' cell, in a file the #660 diff never touches (git diff origin/main...HEAD is empty for it). Re-ran that one file 3x in isolation: failed 1/3 -- genuinely flaky, not a #660 regression. See new_findings NF-2." },
+    { "check": "pnpm --filter @clara/web e2e home-board-walk (triple 3390/3391/3392)", "result": "PASS", "detail": "21/21 passed in 1.2m, including p660.money.disclosures" },
+    { "check": "live sha256 of packages/db/migrations/0232_client_financial_pack.sql", "result": "PASS", "detail": "289fc682c1625b4273a82b01cbbb8d36e691f6b93e23ae7ad5cd7e33e3281e64 -- matches the sha the e69b0e68 re-registration commit pins in firm-scope-db-pins.corpus.ts exactly" },
+    { "check": "live UPDATE/DELETE probe on clara.cash_account_set_members", "result": "PASS", "detail": "both refused CLR08 cash_set_members_sealed with the correct attempted verb, confirming A11 behaviourally on top of the trigger-definition read" }
+  ],
+  "new_findings": [
+    {
+      "id": "NF-1",
+      "severity": "minor",
+      "category": "concurrency-correctness",
+      "where": "packages/db/migrations/0232_client_financial_pack.sql:570-613 (clara.publish_client_cash_account_set, the `for update` select and the v_cur_id-is-null branch)",
+      "what": "A9's fix serialises the common two-admin race correctly (verified: two ordinary concurrent supersedes cleanly become revision 2 and revision 3, no error at all). But the FOR UPDATE lock introduces a NEW race window the fix does not account for: if session B's `select ... for update` begins while session A still holds the row (A has not yet committed), B blocks; when A commits (having flipped that row's state from 'published' to 'superseded' and inserted a new published row), PostgreSQL's EvalPlanQual re-evaluates B's WHERE clause against the row's LATEST version, which no longer satisfies `state = 'published'` -- and because B's snapshot predates A's insert, B sees the new row either. B's select therefore returns v_cur_id = NULL, routing B into the 'THE FIRST VERSION' branch (line 575) instead of the intended supersede branch. If the client already has approved entries before B's requested effective_from (the ordinary case for a client whose cash set is being changed), B is refused CLR10 first_version_after_books_start ('the first cash-account-set version must cover the books it will be read over') -- a confusing, semantically WRONG refusal for a caller who was in fact racing a legitimate second publish, not attempting a first one. This does not reintroduce a raw postgres 23505 (A9's stated defect), but it does defeat A9's stated goal of giving the race's loser an honest 'somebody just published a new version, reload and try again' sentence: the loser instead gets a well-formed but incorrect business-rule refusal that would send an admin down the wrong path (checking their books-start date rather than simply retrying).",
+      "failure_scenario": "Two admins for the same client both submit a cash-set change within roughly the same tens-of-milliseconds window (plausible under real network jitter or a double-click that both requests survive). The second admin's request is refused with 'the first cash-account-set version must cover the books it will be read over' / reason first_version_after_books_start, naming their OWN requested effective_from against the client's real books-start date -- even though a cash set has existed and been read from for months. The admin has no way to read this refusal as 'you were racing a colleague; reload and retry', which is the exact sentence A9 exists to provide.",
+      "evidence": "MEASURED on clara_660, throwaway two-connection probe (written under packages/db/tests/, run, deleted; worktree confirmed clean via git status --porcelain after). Setup: financialClient with one approved entry on 2026-01-10, v1 published (revision 1, effective_from defaulted to 2026-01-10). Connection A: BEGIN; publish_client_cash_account_set(..., effective_from='2026-04-01') -- held open, uncommitted. After 150ms, connection B (separate BEGIN): publish_client_cash_account_set(..., effective_from='2026-05-01') -- observed to block. After a further 150ms, A commits: A's call returns revision 2 as expected. B's blocked call then RETURNS with error code CLR10, detail {\"reason\": \"first_version_after_books_start\", \"requested\": \"2026-05-01\", \"books_start\": \"2026-01-10\"} -- not CLR11, and not a raw 23505 either, but the wrong typed refusal for what actually happened.",
+      "fix": "Do not treat v_cur_id IS NULL as conclusive evidence of 'no version has ever existed'. Either (a) after the `for update` returns no row, re-check `exists (select 1 from clara.cash_account_set_versions where client_id = p_client)` before taking the first-version branch, and raise CLR11 cash_set_version_raced when a version DOES exist (the null was the race, not a true absence); or (b) select `for update` unconditionally against the whole per-client version set (e.g. lock a per-client advisory key, or `select ... where client_id = p_client for update` with no state filter, then derive v_cur_id/v_cur_from from the locked set in a second, un-raced step). Either fix keeps A9's intended sentence for BOTH shapes of the race.",
+      "introduced_by": "the FOR UPDATE addition in f040238f -- pre-fix code had no locking/EvalPlanQual mechanism, so this specific null-out-under-race path did not exist before A9's own fix (pre-fix, both racers would read the SAME non-null v_cur_id under plain READ COMMITTED and collide directly on the version-row unique constraint, which is the original 23505 A9 documents)."
+    },
+    {
+      "id": "NF-2",
+      "severity": "note",
+      "category": "report-accuracy",
+      "where": "reports/660-fixround-1.md's re-runs table: 'node scripts/run-tests.mjs (apps/web, whole suite) -> 4,195 tests * 4,193 pass * 0 fail * 2 skipped -- fully green, including use-clara-thread-stop.test.ts, the one red the pre-fix-round run reported as an unrelated flake'",
+      "what": "This claim is not reproducible. An independent re-run of the identical command on the identical HEAD (e69b0e68) produced 4192 pass / 1 fail -- the same use-clara-thread-stop.test.ts cell ('a stop the door says had ALREADY FINISHED does not re-attach') failing again with the same shape of assertion (a byte count mismatch, 3 !== 0). Running that one file in isolation three more times failed once more (1/3). This is a genuine, pre-existing flake -- the file is completely untouched by the #660 diff (git diff origin/main...HEAD is empty for both use-clara-thread-stop.ts and its test) -- so it is not a #660 regression and not something #660 owns. But the fix round's characterisation ('fully green') describes one lucky run, not a property of the branch, and should not be read as a determinism claim.",
+      "failure_scenario": "A future reader trusts 660-fixround-1.md's 'fully green' claim and is surprised when their own CI run shows a failure in a file #660 never touched, and may waste time bisecting #660's own commits for a cause that lives elsewhere.",
+      "evidence": "Full-suite re-run: 4195 tests, 4192 pass, 1 fail (use-clara-thread-stop.test.ts:1021, AssertionError 3 !== 0), 2 skipped. Isolated re-runs of that one file: fail, pass, pass (1/3). git diff origin/main...HEAD --stat -- apps/web/lib/clara/use-clara-thread-stop.test.ts apps/web/lib/clara/use-clara-thread-stop.ts is empty.",
+      "fix": "Not a #660 defect. Worth a one-line correction in the wave's record (or a separate flake ticket) so 'fully green' claims about this file are not repeated; #660's own fix round should not be asked to fix it.",
+      "introduced_by": "pre-existing; not introduced by this fix round"
+    }
+  ],
+  "ratification_items_sanity_checked": [
+    "1. cash_set_published_after_books_start token -- present and wired end to end (SQL case arm, financial-display.ts lookup, en.json sentence, dedicated web unit cell). Reasonable.",
+    "2. comparison.available/reason -- present on all four comparison objects (cash, profit, income, expense), consistently gated on the same floor predicate as points[]. Reasonable.",
+    "3. unmarked_closing_entries_series/series_coverage_reason -- present, additive top-level keys, series[] rows themselves unchanged. Reasonable.",
+    "4. lockfile move for this branch (cn removal) -- confirmed as a clean, minimal diff (package.json + pnpm-lock.yaml, cn@0.3.0 only). Reasonable."
+  ]
+}

@@ -289,18 +289,32 @@ test("v20.accrual: a client-less conversation refuses BEFORE the door", async ()
 // 4 · the closure's own identity
 // ---------------------------------------------------------------------------
 
-test("v20.identity: the engine stamp is this closure's, and the registry pins the body", () => {
+test("v20.identity: the engine stamp is this closure's, and v20 stays exported for parked runs", () => {
   assert.equal(v20Usage.chatEngineId("gpt-5.6-terra"), "llm-openai:gpt-5.6-terra:chatturn-v20",
     "check-workflow-bundle derives the expected stamp from the registry and refuses a bundle without it");
-  assert.equal(registry.workflowPins.chatTurn, "chatTurn_v20");
-  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v20);
+  // THIS CELL NO LONGER ASSERTS THAT v20 IS THE PIN, AND THAT IS THE REPAIR RATHER THAN A
+  // WEAKENING. The wave 2026-09-18 cut repointed `chatTurn:` to v21, and a cell that hard-codes
+  // the current pin fails at every future cut while testing nothing about the closure it is named
+  // for. What this file is FOR is v20's own contract — its stamp, its roster, its promotions — and
+  // what the registry owes v20 after a repoint is policy (c): the body stays exported and stays in
+  // the provenance roster, because it is the rollback target and the body any run parked on a v20
+  // clarify hook resumes into. That is what is asserted here now. `tests/registry-view.test.mjs`
+  // is the cell that owns "the pin, the dispatch table and the roster agree", for every class at
+  // once; duplicating it here is what made five cells red at the 2026-09-15 cut.
+  assert.equal(typeof registry.chatTurn_v20, "function",
+    "policy (c): a superseded body is never renamed or deleted while a run could be parked on it");
+  assert.ok(registry.workflowBodies.includes("chatTurn_v20"),
+    "and the provenance roster still carries it, which is what the rollback preflight enumerates");
+  const pin = registry.workflowPins.chatTurn;
+  assert.equal(registry.workflows.chatTurn, registry[pin],
+    "whatever the pin is, the dispatch table and the pin roster name ONE body");
   // THE LADDER STARTS AT v2, and the floor is a MEASURED consequence rather than a convention:
   // #810 RETIRED chatTurn_v1 (owner ruling 2026-09-15, hosted non-terminal count 0) and its three
   // files left the tree, so `frozen-workflows.json` records it under `retired` and the registry
   // exports it no more. Policy (c) is unchanged for every version above it — an export WITH
   // in-flight runs may never be renamed or deleted; v1 had none.
   assert.equal(registry.chatTurn_v1, undefined, "#810: chatTurn_v1 is retired, not silently still here");
-  for (let n = 2; n <= 19; n += 1) {
+  for (let n = 2; n <= 20; n += 1) {
     assert.equal(typeof registry[`chatTurn_v${n}`], "function", `policy (c): chatTurn_v${n} is still exported for parked runs`);
   }
 });

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 
 import { loadChatSession } from "@/lib/firm-admin/chat-sharing";
 import { sessionBelongsToClient } from "@/lib/clara/thread-scope";
+import { loadCallerContext } from "@/lib/identity/caller-context";
+import { loadClientById } from "@/lib/firm/reads";
 import { fixedTokenAccessor, resolveServerSession } from "@/lib/supabase/server-session";
 
 /**
@@ -25,8 +27,29 @@ export default async function ClientClaraThreadPage({
   const { from } = await searchParams;
   const caller = await resolveServerSession();
   if (caller === null) notFound();
-  const session = await loadChatSession(fixedTokenAccessor(caller.accessToken), threadId);
+  const token = fixedTokenAccessor(caller.accessToken);
+  const session = await loadChatSession(token, threadId);
   if (!sessionBelongsToClient(session, clientId)) notFound();
 
-  return <ClaraFullScreenThread threadId={threadId} returnHref={from || `/clients/${clientId}`} clientId={clientId} />;
+  // #642 AC1 — BOTH SCOPE NAMES, measured on the token this page ALREADY resolved to
+  // guard the route (no second session resolution, no new authority). The reads are the
+  // ordinary self-scoped ones — `clara.caller_context` for the firm and `loadClientById`
+  // for the client — never the scope spine, whose four entrances are pinned both ways by
+  // `tests/firm-scope-surfaces.test.ts` and whose layout entrance already ran above this
+  // page. Both degrade to `null`, which the band renders as its neutral placeholder: a
+  // name that could not be read is never guessed, and never blocks the composer.
+  const [context, client] = await Promise.all([
+    loadCallerContext(token).catch(() => null),
+    loadClientById(token, clientId).catch(() => null),
+  ]);
+
+  return (
+    <ClaraFullScreenThread
+      threadId={threadId}
+      returnHref={from || `/clients/${clientId}`}
+      clientId={clientId}
+      firmName={context?.firm_name ?? null}
+      clientName={client?.name ?? null}
+    />
+  );
 }

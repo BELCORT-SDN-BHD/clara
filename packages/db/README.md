@@ -103,6 +103,75 @@ CALLS it and its own safety argument depends on that helper's 101-id ceiling and
 bookkeeper floor; the pin is what forces a later recut of the helper to re-derive this door's
 argument rather than discover it at 102 running Works.
 
+[0231_firm_portfolio_pack.sql](migrations/0231_firm_portfolio_pack.sql) owes no consumer-first
+obligation for the same narrow reason, one altitude up. It adds exactly TWO read doors and nothing
+else — no relation, column, policy, index or trigger, and no recut.
+
+`clara.get_firm_portfolio_pack(p_limit, p_cursor, p_preview)` is SECURITY INVOKER over
+`clara.clients`, `clara.accounting_work` and `clara.operation_receipts` (all three already granted
+to `clara_authenticated` behind forced firm-scoped RLS), floored at bookkeeper by 0189's own three
+inline predicates restated in the body — the idiom every INVOKER door in this estate uses, because
+an INVOKER body cannot call the ungranted `clara._human_ctx`. EXECUTE goes to `clara_authenticated`
+alone; `clara_runtime`, the agent role and both wake roles gain nothing. The firm comes from
+`clara.jwt_firm()` and there is no client argument at all, so the only channel a client identity can
+enter through is the `lower(name)|uuid` pair inside `p_cursor` — which the body compares as a SORT
+KEY and never resolves against the register. A cursor naming another firm's real client and one
+naming an invented pair answer identically (`p659.portfolio.cross_firm`), which is deliberately
+UNLIKE `clara.list_review_queue`: that door takes an explicit client scope and raises CLR10 off a
+cross-firm existence probe. The preview ids are assembled across the whole page and **cut at 101**
+before `clara._work_run_attempts` is called, because at firm altitude 100 clients x 5 preview ids
+would exceed that helper's ceiling and make the whole board refuse in order to report a row label;
+rows past the cut carry 0214's own `retry_label_preview_only`. **The tail asserts, from `prosrc`,
+that the body names no money or sum key anywhere — in code or in comment** — because Firm Home
+consolidates no client figures and a portfolio table is the easiest place in the product to reduce
+rows into a false cross-client one.
+
+`clara.get_compliance_watch_disposition(p_watch)` is SECURITY **DEFINER** for one reason, and the
+tail proves it: `clara.compliance_watches` and `clara.compliance_watch_events` FORCE RLS with a
+single `clara_fn_owner` policy and **no application role holds any privilege on either**, so an
+INVOKER body would see nothing. It grants nothing on either relation. It returns no revision
+number, because the table carries none — each event's `state_before -> state_after` is what the
+receipt names instead. Measured on clara_659 after 0231: the only non-owner privilege on either
+relation is 0131's `clara_freeform_ro` SELECT on the watch table (the freeform analytics identity,
+which reaches no PostgREST surface); the event trail has no non-owner grantee at all.
+
+Its five prestate pins recut nothing — `clara.list_review_queue`, `clara.list_accounting_work`,
+`clara.get_client_work_pack`, `clara._work_run_attempts` and `clara.list_activity` are read-only
+dependencies, pinned so that "0231 recut nothing" is a checked fact and so a later recut of any of
+them has to re-derive this door's arguments. **No supporting index is owed, and that is a
+measurement**: on a seeded 300-client / 20 100-Work firm the client page plans `Index Scan using
+uq_clients_firm_name` (102 rows, 7 buffers, 0.080 ms) with only an *Incremental* Sort above it, and
+the per-client aggregate plans `GroupAggregate` over `Index Scan using uq_accounting_work_intent`
+(6 700 rows, 2.3 ms; 4.7 ms for the whole join). No sequential scan appears anywhere. End to end the
+door answers a 100-client page in 17-18 ms at `p_preview=3` and 7-8 ms at `p_preview=0`.
+
+Three sentences in 0231's own header are sharpened here rather than in the file, which is
+append-only. **The disclosure token `onboarding_client_excluded_from_queue`** covers `onboarding`
+**and** `archived` because the 0017 join excludes both, but its only door-reachable subject today is
+the ARCHIVED client — `clara.admit_accounting_work` refuses a client that is not `active`, so an
+onboarding client cannot accumulate Work in the first place.
+
+**`p_preview = 0` really does call `clara._work_run_attempts` zero times, and it is now COUNTED
+rather than asserted.** The header says so; the body comment beside the join says the helper is
+"reached with no ids rather than with a null", and the two read as a contradiction. They are not,
+and the resolution is worth writing down because it is not obvious from the text: the argument
+handed to the helper is an EMPTY array and never a NULL one (which 0189 refuses), and *separately*
+the helper is not executed at all, because `v_preview_ids` is empty, the outer scan over
+`clara.accounting_work` yields no rows, and the inner function scan of a nested loop never runs.
+That zero is therefore a PLAN SHAPE rather than a guard in the SQL — which is exactly why it is
+measured: `p659.portfolio.preview_zero_calls_helper_zero_times` counts the calls through
+`pg_stat_user_functions` with `track_functions='all'` and `pg_stat_force_next_flush()` (0 across a
+`p_preview=0` call, 1 across a `p_preview=3` call). The empty-never-null argument is what keeps the
+door correct if a future plan shape ever does execute it.
+
+**The cursor grammar depends on a non-blank client name**, and a later lane that adds a rename door
+needs to know it. The mint is `lower(name)||'|'||id` and the decode raises CLR10 `invalid_cursor`
+when the name component is blank, so a client whose name were whitespace-only would mint a cursor
+the door then refuses, dead-ending paging at that row. It is unreachable today — `clara.create_client`
+refuses a blank name (CLR10) and there is no rename door anywhere in the estate, so
+`clara.clients.name` cannot become blank after birth through any door — which is why 0231 carries no
+guard for it. A rename door must refuse a blank name, or this fence must move.
+
 Two sentences in 0214's own header are corrected here rather than in the file, which is
 append-only. **The planner does not use `ix_accounting_work_client` for the active facet.** Forced
 RLS adds `firm_id = clara.jwt_firm()` to every read of `clara.accounting_work`, which makes
@@ -190,6 +259,101 @@ no writer-quiescence window and cannot join the lock order above. Its refusal is
 shape for three different facts (unknown token, real token / wrong signed-in address, session with
 no verified address), because distinguishing them would rebuild the existence oracle
 [0141_p4_tranche1_invite_rbac.sql](migrations/0141_p4_tranche1_invite_rbac.sql) §B closed.
+
+[0225_trade_invoices.sql](migrations/0225_trade_invoices.sql) adds the trade-invoice lane (#655):
+`clara.trade_invoices` (the typed business object — one counterparty, the document's own date, the
+due date **and the basis it was decided on**, an exact positive total in sen, opaque tax facts) and
+its append-only status ledger `clara.trade_invoice_status`. Both are FORCE-RLS with **zero**
+application-role DML and tenant-carrying composite FKs throughout. The object admits **no** update
+at all — the entry, the receipt and the open item are DERIVABLE BY JOIN and are never stored on it,
+which is what lets it stay append-only.
+
+**Three doors and their floors.** `clara.admit_trade_invoice_work(p_client, p_author, p_intent_key,
+p_kind, p_particulars, p_basis, p_basis_origin, p_source_refs, p_model)` is granted to
+**`clara_runtime` and nothing else** — there is no `clara_authenticated` twin and no `_for`
+sibling, for the reason 0221:1202-1206 states: Work admission on this lane is a runtime act OBO a
+named human, and admission also ENQUEUES a run, which PostgREST cannot produce. §F asserts both
+halves of that negative. `clara.get_trade_invoice(p_work)` is viewer-floored and reachable by
+`clara_authenticated` and `clara_runtime`. `clara._assert_trade_invoice_basis` and the seven
+other internals are ungranted to every application role. The door carries **no `p_attestation`**
+and `is_high_stakes` is unreachable from it.
+
+**AGREED TERMS RUN FROM THE DOCUMENT, AND THE LEGACY LANE DISAGREES.** `clara._trade_invoice_due`
+resolves `stated → counterparty_terms → absent`, and when the terms decide it the arithmetic is
+`document_date + payment_terms_days` — DECISIONS.md §6.2.0 R-A, which overruled this file's first
+cut: "30 days net" is thirty days after the invoice, so the day a bookkeeper keys it in cannot move
+the money's due date or tell `ap_aging` that an overdue bill is current. The posting date remains
+the anchor only when no document date was stated, which this door refuses outright
+(`invalid_due_date` / `field:"document_date"` / `constraint:"required"`), so that arm is a belt
+behind a closed door rather than a path. The LEGACY coding/upload lane still anchors on the posting
+date (0040:6010-6015's splice, untouched this wave); R-A names that the legacy lane's own defect
+and gives it to **#665**'s cutover. The divergence is measured, not implied: cell
+`p655.due.anchor_document_date` drives one bill — dated 2026-03-04, posted 2026-03-31, 30-day terms
+— down both lanes and asserts **2026-04-03** here and **2026-04-30** there, by name; and
+`p655.parity.source_vs_direct` deliberately uses a fixture whose document date IS its posting date,
+so the parity claim is about the accounting rather than about which anchor won.
+
+**A RACED PAIR UNDER ONE INTENT KEY IS ANSWERED ABOUT ITS OWN INVOICE, or refused.** The typed row
+is written with `on conflict (work_id) do nothing`, which converges the core's replay branch onto
+one row — but converging is not agreeing. The door's particulars comparison at step 4 runs on the
+UNLOCKED path, so two admissions under one key are both past it before either commits, and
+`clara._admit_accounting_work_core` compares only basis digest / purpose / source_refs /
+adjustment (0194:1171-1190) — nothing of the counterparty, the reference, the dates or the total.
+Step 8b therefore re-reads the surviving row and raises `intent_payload_conflict` when it is not
+the one this caller sent, the idiom the core already uses for its own race (0194:1239-1256).
+Measured before that arm existed: both callers left as SUCCESS and the loser was handed the
+winner's `invoice_id` folded together with its own party and due date. Cell `p655.replay.race`'s
+divergent arm.
+
+**ONE REASON NAMES ONE THING.** The door's raise ladder is the contract (DECISIONS.md:50), and it
+holds **eighteen** tokens: the fourteen that ruling fixes, plus `invalid_kind` for a kind that is
+neither admitted value, and — because `_assert_trade_invoice_basis` measurably raised one token
+for four different failures — `invalid_particulars`, `invalid_currency` and `invalid_tax_facts`.
+The runtime's wire half (`toDbTradeInvoice`) names the same four, so a browser cannot tell the two
+halves of one validation apart. `p655.polarity.matrix(d2)` drives each.
+
+**One measured correction to #638's eight-step body order.** The authority preamble runs BEFORE the
+payload half here, not after. Measured on clara_655 with the payload half first: an UNKNOWN client
+left as CLR10 `control_leg_missing` (the chart lookup inside `_assert_trade_invoice_basis` is
+client-scoped) while a REAL client of another firm left as CLR11 `client_not_found` — and the
+difference between those two answers tells an unauthorised caller whether the client exists, which
+is exactly what 0194's no-existence-oracle rule forbids.
+
+**THE OPEN ITEM IS BORN BY A DEFERRED CONSTRAINT TRIGGER, and its ordering premise is MEASURED, not
+argued.** `t_je_open_item_birth` on `clara.journal_entries` is 0216's lane-agnostic instrument,
+declared identically and for 0216's stated reason. Enumerated from `pg_trigger` on clara_655
+(PG 17.11), AFTER 0225 applies: **twenty-four** triggers, three of which touch `clara.open_items`
+(`t_je_open_item_birth`, `t_je_subledger_belt`, `t_snapshot_staleness`) and of which exactly ONE
+DEFERRED constraint trigger reads `clara.open_items` at commit — `t_je_subledger_belt`
+(`t_snapshot_staleness` is not deferred). Deferred events for one row are queued in
+trigger-NAME order and fire at commit in queue order, so the birth is named to sort before it
+('o' < 's'), and `p655.rig.trigger_order` re-derives the whole ordering from the catalog rather
+than trusting this paragraph. The trigger resolves its subject through
+`clara.trade_invoice_status` (state='posted', entry_id), falls back to the committed operation
+receipt through the TEXT-compared `effects->>'entry_id'`, and returns immediately for every entry
+no trade invoice names — one indexed lookup, which is the whole cost it adds to every other lane.
+
+**THREE BODIES ARE RECUT, and the second and third were forced by a measurement.** The sixth full
+copy of `clara._record_journal_entry_core` was budgeted (D11: the control-leg refusal stands
+unless the Work carries a `clara.trade_invoices` row). The other two were not. Measured on
+clara_655 BEFORE the file was written: a `coding_kind IS NULL` entry with a payable control leg
+classifies as `'adjustment'` (LADDER 5), so `clara._tf_subledger_entry_belt` ARM 1 — which
+compares the entry's items against `clara._subledger_classify_entry` — raises CLR10
+`subledger_entry_untied` for a `'bill'` item (v_bad = 1, measured; 0 for today's
+`'adjustment'`), and `clara._tf_subledger_item_belt` hard-codes `item_kind='bill'` ⟺
+`coding_kind='supplier_bill'` without consulting the classifier at all. So the classifier gains
+LADDER 3T and the item belt's two arms learn the second lawful source, each firing ONLY when
+`clara.trade_invoices` names the entry. Setting `journal_entries.coding_kind` instead would have
+avoided both recuts and was rejected on measurement: it arms
+`clara._assert_supplier_bill_shape_at_projected`, whose `sst_purchase_cost` arm requires a
+DOCUMENT-STATED tax total, which a chat- or UI-stated bill has not got.
+
+**Three catalog censuses move, and each is re-derived rather than transcribed** (this closes #868's
+copies in this file): the `clara.open_items` WRITER set is now **TWO** (`_subledger_on_approve`
++ `_tf_je_open_item_birth`), superseding 0037:3830-3833's ONE; the subledger-hook CALLER set is
+**unchanged** at the measured SIX (0216:938-947), because the birth trigger births directly and
+names neither the hook nor the classifier; and the approve-path census is re-asserted to include
+`_record_journal_entry_core`, superseding 0037:3774-3782's stale four.
 
 **Named residual — the preview reproduces two of `accept_invite`'s three walls.** The acceptance
 door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
@@ -438,6 +602,59 @@ subledger hook's callers at FOUR. Measured on a migrated chain the live set is S
 model added `finalize_close` and `reopen_fiscal_year`. 0216's tail re-derives and re-pins the
 measured six, so a seventh is caught.
 
+### The depreciation-history lane (#651, migration 0227)
+
+Depreciation runs under an EXPLICIT, RESOLVED instruction with a FROZEN window; a locked period is
+refused at the RUNNING door instead of at approve; and every revision names what kind of change it
+is.
+
+| object | grant | what it is |
+|---|---|---|
+| `clara.fixed_assets.change_class` / `.change_reason` | — | The depreciation change class, stamped on the SUCCESSOR row by `revise_fixed_asset_particulars` and never back-filled. `ck_fixed_assets_change_class` is ONE-DIRECTIONAL on purpose: a two-directional form could not validate against a pre-existing hosted revision row, which carries neither column and which 0017's post-approval immutability wall makes unwritable. The REQUIREMENT that every new revision names a class lives in the door — the estate's standing "door enforces, CHECK guards shape" split. |
+| `clara.fa_depreciation_authorities.authority_kind` / `.authority_ref` / `.authority_from` | — | `clara.accounting_plans`' own shape (0193:415-430), relaxed to NULL-able for the backfill alone. The reference is REQUIRED at signature and RESOLVED against `clara.accounting_work` / `clara.agent_tasks` in the same firm AND client; `authority_from` is the first day of the SIGNING month in the book's `Asia/Kuala_Lumpur` calendar, written once and frozen. `clara._tf_fa_authority_transition`'s write allowlist gained exactly these two sign-time columns, or the door could not write them at all — and, because an ALLOWLIST IS NOT A FREEZE, the same trigger carries the write-once wall for both: once either value is set, no transition may move it (CLR38 `authority_immutable`, naming the column). 0193:476-478 freezes the plan lane's twin pair the same way. |
+| `clara._fa_assert_period_open(uuid,date)` | NONE — ungranted | **The fixed-asset lane's whole locked-period law, in one body.** It selects the fiscal year containing `p_date` exactly the way `0056:656-662` does, returns silently when there is none or it is `open`/`reopened`, and otherwise raises CLR38 `period_request_invalid` / axis `period_closed` naming the year, its status and the reopen path. **#678 adopts it unchanged rather than minting a second predicate.** |
+| `clara.preview_depreciation_run(uuid)` | `clara_authenticated` | What the NEXT run would do: the period the DATABASE chose, per-asset amounts, the two GL legs, the skipped assets with reasons, and `mode_would_be`. It is `stable`, so the LANGUAGE refuses to let it write. The ungranted-core/granted-wrapper idiom: `clara._fa_compute_charges` stays ungranted and `rig-meta.mjs`' main sweep fails the moment a grant appears on it. |
+| `clara.run_depreciation_period_for(uuid,date,text,uuid)` | `clara_runtime` ONLY | The OBO machine door, on `complete_fixed_asset_particulars_for`'s live-authority ladder verbatim (including the measured `firms … for key share` then `firm_memberships … for share` lock pair). It DELEGATES to `clara._fa_run_period_core` and inserts nothing, and carries NO floor bypass. **A NEW NAME is mandatory, not stylistic:** `rig-meta.mjs:691-693` is an executable census that fails the moment `run_depreciation_manual` reaches a machine role, because that would give the maker-checker ladder a bypass. |
+| `clara.sign_depreciation_authority(uuid,uuid,text,jsonb)` | `clara_authenticated` | DROP + CREATE'd from three arguments to four — one `pg_proc` row per name, never an overload. The `0018:188` scar is the precedent: the old arity's grant died with it, so this file re-states the grant and the owner. |
+| `clara.retire_depreciation_authority(uuid,uuid,text,text)` | `clara_authenticated` | RECUT by 0227 §B.3 because 0227's own `ck_fa_authorities_window` broke it. It is the ONE way a NEVER-SIGNED authority leaves `proposed` (a firm withdraws the wrong cadence), and 0041 wrote it for that case by coalescing the signature stamps rather than demanding them. It now stamps the window floor by the same `coalesce`, so the withdrawal cannot meet the CHECK as a raw 23514 with no CLR code. A SIGNED authority's floor is carried through untouched. |
+
+**The measurement that re-aimed this slice.** The spec said a run over a closed fiscal year drafts
+and dies at approve on 0056's entry-level CLR19. It does not. `clara._tf_period_wall_lines` — a
+BEFORE trigger on `clara.journal_lines` — refuses the LINE insert with the same reason token, the
+whole transaction rolls back, and NO draft survives. The real defect is one step further on: the due
+oracle then keeps advertising that same period, once per sweep, forever — which is exactly the
+failure `0042:4441` names in its own words and which `reconciler-fa.mjs:108-157` records as one
+`faFailed` per client per cycle and nothing louder. 0227 therefore does BOTH halves in one file: the
+wall moves to the running door (typed, before any work), AND the oracle skips a closed period and
+offers the next open one, reporting what it skipped under `skipped_closed`.
+
+**What a skip does NOT mean.** The skipped months' ARREARS are still charged by the next open
+period's run, because `clara._fa_asset_charges` charges every uncharged month up to the period end
+and 0227 does not touch that arithmetic (it is pinned NON-REGRESSION in the prestate and the tail).
+The charge ROWS keep their own `period_start`/`period_end`, so a reader sees which month each
+belongs to; the journal ENTRY is dated in the OPEN period, which is what keeps 0056's walls
+satisfied and the closed year's reported figures unmoved. `skipped_closed` means "this period will
+never be RUN in its own right", never "this money is gone".
+
+**The floor removes the agent catch-up lane's reach, deliberately.** `_agent_depreciation_catchup_core`
+derives every period it runs from `clara._depreciation_run_due_core` (a one-line passthrough to the
+floored oracle) and `p_through` bounds only the loop's upper exit, so after 0227 that parked lane can
+never propose a pre-floor period, and a future `closePrep_v2` inherits the loss. The human catch-up
+door `clara.run_depreciation_manual` (bookkeeper+, caller-named period, identical mechanics) is
+unchanged and is the one way back.
+
+**Two residuals this lane names rather than hides.** (1) The `period_earlier_unmet` sequencing
+guarantee — the thing that pins the reducing-balance arithmetic so a run can never read around an
+unapproved period — STOPS BINDING BELOW THE FLOOR for a caller-named period, because the only
+instruments that could re-derive it unfloored are the one 1-arg oracle (whose consumer set is
+`deepEqual`-pinned by two live CI batteries) or a bypass parameter on it (a DROP + CREATE against
+§2.2 rule 4). `p651.authority.floor_sequencing` pins the exposure. (2) `preview_depreciation_run`
+DUPLICATES the poster's leg aggregation rather than extracting it; the duplication is bound two ways
+— a normalized-fragment assertion in 0227's tail and the behavioural cell `p651.preview.matches_run`.
+
+**And one thing this file is not.** It does NOT unpark `close_prep`: the wake source stays
+registered-and-disabled, asserted in the prestate AND the tail in `0223:247-250`'s own idiom.
+
 ### Document source revision (#646, migration 0217)
 
 A document's own *reading* now has two governed human doors and two reads, all four
@@ -553,6 +770,99 @@ the human-review affordance instead.
 Battery: [tests/knowledge-firm-defaults.test.mjs](tests/knowledge-firm-defaults.test.mjs), gated by
 `knowledge-firm-defaults-preintegration-gate.mjs`.
 
+### Bounded knowledge retrieval, the recorded read-set and drift (#658, 0230)
+
+`0230_knowledge_retrieval.sql` adds **seven granted functions, one ungranted core and one
+relation**, and **recuts nothing** — eight bodies (`get_knowledge_pack`, `list_client_knowledge`,
+`_knowledge_legacy_rows`, `_knowledge_capture_core`, `_knowledge_floor`, `capture_knowledge`,
+`get_context_pack`, `answer_work_question`) are pinned by pre-image `sha256(prosrc)` **measured on
+a migrated rig**, never transcribed from file text, and re-read from the catalog in the tail.
+
+The doors, their floors and their grants:
+
+| Door | Lane | Floor / binding |
+|---|---|---|
+| `retrieve_knowledge(p_client, p_purpose, p_as_of, p_keys, p_limit, p_firm)` | `clara_runtime` ONLY | the pack's own lane picker (0192:1474-1500); `p_firm` required on the machine arm |
+| `read_knowledge_record_for(p_firm, p_client, p_record)` | `clara_runtime` ONLY | actor-explicit; CLR11 with no existence oracle |
+| `read_knowledge_history_for(p_firm, p_client, p_record)` | `clara_runtime` ONLY | actor-explicit; CLR11 with no existence oracle |
+| `record_work_knowledge_read(p_task, …)` | `clara_runtime` ONLY | work/firm/client DERIVED from the positive `agent_tasks → accounting_work` join |
+| `work_knowledge_drift_for(p_firm, p_work)` | `clara_runtime` ONLY | firm explicit |
+| `work_knowledge_drift(p_work)` | `clara_authenticated` ONLY | `_human_ctx(role_rank('viewer'))`, firm from the session |
+| `list_work_knowledge_reads_for_record(p_record)` | `clara_authenticated` ONLY | viewer floor; scope taken from the RECORD, firm-bounded |
+
+**`retrieve_knowledge` is pack-shaped, so #783 binds it.** The ruling lives at
+`.out-of-scope/human-read-of-knowledge-pack.md` — "the register is the human surface; the pack is
+the model's" — and the tail asserts the ABSENCE **positively**: no human role, no agent read role
+and no wake lane holds EXECUTE on any of the three pack-shaped reads, with #783 named in the
+failure message. "One register, one pack, one answer" is proven BEHAVIOURALLY instead, by
+`p658.retrieve.shadow_parity` across two personas.
+
+**The seventh door does not breach that, and its own header says why.**
+`list_work_knowledge_reads_for_record` IS granted to `clara_authenticated` because it returns READ
+METADATA — which Work, at which `knowledge_version` and `as_of`, under which `purpose`, with which
+face word, over which key NAMES — and never a record's value, its `applies_when`, source bytes or
+any assembled pack content. `DECISIONS.md:83` mandates exactly this door for exactly this reason:
+`clara.work_knowledge_reads` is FORCE-RLS with **no app-role SELECT**, so a SECURITY DEFINER door is
+the only human path to it and a `grant select` is not an alternative. The tail asserts that grant
+positively too — `clara_authenticated` and NOBODY else — and re-proves that the relation itself
+gains no privilege of any kind after it.
+
+**`clara.work_knowledge_reads` carries NO foreign key to `clara.accounting_work`, deliberately.**
+The reason is quoted from 0195's own measurement (`0195:254-268`) so a later "hardening" pass
+cannot add it back for want of a written reason: an FK takes `FOR KEY SHARE` on the Work row, the
+posting core holds `FOR UPDATE` on exactly that row, and a measured trace insert **blocked 4001 ms
+behind a posting lock and was then silently cancelled**. The binding is enforced by the sole writer
+instead. The status CHECK admits exactly `ok` / `partial` / `unknown` / `denied` and **refuses the
+runtime's own `unavailable`**, so that word can never reach a register through a column; the
+mapping between the two vocabularies is exported once, as `faceStatusOf` in
+`packages/runtime/lib/knowledge-retrieval.mjs`.
+
+`work_knowledge_drift` / `_for` answer over ONE ungranted core, which prefers the recorded
+read-set and falls back to `work_execution_traces.observed_revisions->>'knowledge_version'`. On
+that fallback arm `relevant` is **null, never false**: no read-set was recorded, so "nothing
+relevant moved" would be a claim about keys nobody wrote down. The envelope also carries `read` —
+the last attempt's face word, reason, tier counts and key NAMES — so B3's Work detail needs no
+eighth door for one panel.
+
+**The moved-key scan applies the same per-applicability shadow the READ applied** (`0192:1355-1363`,
+copied into `retrieve_knowledge` and into the seventh door). A firm default that is shadowed for
+this client is a record the run provably did not read, so intersecting it with the read-set on the
+key name would report `relevant` for a basis that did not move — and the Work detail would tell a
+person "a record this Work read has changed" about a record it never read. Two deliberate
+non-symmetries around it, both asserted: the scan applies **no `state`/`superseded_at` filter**,
+because a withdrawn record is a revision at a higher version and "the exception you were relying on
+was withdrawn" is the most relevant thing that can happen to a basis; and the **watermark stays
+unshadowed**, because it is the shipped `0192:1333-1335` expression the read itself records, so
+`drifted` keeps meaning "something in your scope moved" while `relevant` means "and it was yours".
+
+**What a read-set row may contain is walled by the column, not only by the writer.** `keys` has a
+grammar (`^[a-z][a-z0-9_]{0,62}$` — stricter than the catalog's own `btrim(...) <> ''`, which the
+file's header records for the next key-minting migration) and a 400-key cap; `tiers` is a closed
+vocabulary `{core, requested, remainder}` of non-negative integers; `as_of` must be a **finite**
+date (`infinity` is a real date value, and this relation can never delete a row); and
+`payload_digest` records the facts the row carries. The reason is the file's own: the read-set must
+not become a payload slot by the back door, on an APPEND-ONLY relation that both drift doors hand
+back verbatim to the human lane and the runtime lane alike.
+
+**A replay is named.** `record_work_knowledge_read` stays replay-idempotent on `(work_id, run_id,
+seq)` — a WDK re-execution lands on the original row — but the receipt now carries `replayed`,
+`payload_digest`, `stored_digest` and `payload_match`, so a re-execution that carried **different**
+facts (first attempt `ok`, second `denied` because a record was withdrawn mid-flight) is reported
+rather than answered with a silent `ok`. It does not refuse the way `clara._reserve_op` does on the
+same mismatch: an op-key governs a WRITE, this governs a record OF A READ, and a diagnostic write
+that could settle a Work would be worse than the divergence it reports.
+
+**Non-goals, stated here as well as in the file**: #658 captures nothing, corrects nothing,
+promotes nothing, accrues no experience and writes no wiki/OKF page (#663's engine); it registers
+no domain event; it mints no knowledge key and no per-key side table; it widens no
+`accounting_work.purpose`; and `p_purpose` is RECORDED and ECHOED and filters NOTHING —
+`p658.retrieve.purpose_is_recorded_not_filtered` asserts that so a later ticket has a red cell to
+flip.
+
+Battery: [tests/knowledge-retrieval.test.mjs](tests/knowledge-retrieval.test.mjs), gated by
+`knowledge-retrieval-preintegration-gate.mjs`.
+
+
 ### The prepayment-amortisation lane (#653, 0223)
 
 `clara.create_prepayment_schedule` is the one write of that lane and it is unusual in two ways a
@@ -646,3 +956,399 @@ list-form) `apps/web` caller, and the batteries in `tests/` that pin them are na
 `grant select … to clara_authenticated` (0182:360) under FORCE RLS
 `firm_id = clara.jwt_firm()` (:358-359); a SECURITY DEFINER wrapper would REMOVE that
 guarantee and force a hand re-implementation of it, for zero new capability.
+
+## #657 — matching bank evidence to an already-approved booking (migration 0226)
+
+**One new granted read, one new ungranted helper, five measured recuts, no new table.**
+
+`clara.get_bank_line_matching_context(p_line uuid) returns jsonb` — bookkeeper floor, firm from
+the session, EXECUTE to `clara_authenticated` and nobody else. It answers everything ONE bank
+statement line can say about itself before a match is decided: its own facts, its statement's
+header, lineage, `source_doc_sha256` (a column on `bank_statements` since 0038 that no other read
+emitted) and `documents.original_filename`, the period coverage, the governing
+`bank_line_exceptions` row, `clara._wdb_line_booking_block`'s payload verbatim, and one
+deterministic basis row per candidate entry.
+
+**THE GRANTED-WRAPPER / UNGRANTED-BLOCK IDIOM, and why it is the shape.**
+`clara._wdb_line_booking_block(uuid,uuid,uuid)` (0044:2459) has answered "what did this line
+cause to exist, and is any of it still outstanding?" since 0044 and is `revoke`d from PUBLIC at
+0044:2780 — it had ZERO consumers in `apps/web` or `packages/runtime`, a named door with no UI.
+Granting it would publish a PREDICATE; the wrapper publishes its ANSWER, which is the same
+posture 0219's identity read takes over the deliberately ungrantable `name_family_*` family. The
+block's grant state is asserted both in 0226's prestate (before the wrap) and in its tail (after).
+
+**THE TWO-COPY CANDIDATE DISCIPLINE.** `clara.list_bank_match_candidates(uuid,uuid)` and the copy
+inlined in `clara._agent_get_bank_pack_core` are the same projection written twice — the agent
+lane cannot call the public read because that read calls `clara._human_ctx`. Nothing fails at
+runtime if only one moves. So 0226 types the projection IDENTICALLY IN BOTH BODIES, between the
+sentinel comments `/* P657-CAND-BEGIN */` and `/* P657-CAND-END */`, as two static
+`create or replace` statements — and the TAIL is what keeps them honest: it reads both marked
+regions out of the live catalog, whitespace-normalises them and refuses if they differ, and
+`p657.db.pack-parity` proves the same thing behaviourally, field for field, against real data.
+**A future change to the candidate projection edits BOTH bodies by hand**, and the tail plus
+that cell are what catch a hand that edits only one.
+
+A first cut did splice instead — write the projection once in the public read, then extract that
+exact text out of the freshly recut catalog body and re-install the pack core around it — and it
+had to be REVERTED: `apps/web/test/sqlFunctionCensus.ts` refuses a dynamic statement it cannot
+resolve to exactly one function definition (`sql_function_census_unresolved_execute`). The
+splice-by-construction guarantee is therefore not available here; two typed copies plus an
+executable equality assertion is what this estate's census leaves standing.
+
+The three additions: `counterparty_name` (the name of
+`clara._canonical_counterparty(p_client, …)`, so a merged payer reads as its SURVIVOR),
+`high_stakes` = `clara.is_high_stakes(entry_id)` (replacing a hardcoded `false` that told every
+human no candidate was ever high-stakes), and a DB-bounded `match_history`
+(`order by acted_at desc limit 5`).
+
+**THE STRUCTURED TASK BINDING (C33.8).** `clara._agent_verify_inputs_digest` was DROP+CREATEd from
+`(uuid,text,text)` to `(uuid,text,uuid)`: the two `split_part` calls that derived and compared a
+task id out of an operation key are gone, and the comparison is
+`coalesce(r.wake_task_id, clara._bank_op_key_task(r.op_key)) = p_task` — a STORED column first,
+with a total, never-raising key reader as the fallback for rows written before 0226 (the table is
+append-only, so no backfill is lawful). `clara._agent_bank_receipt` now writes
+`bank_agent_receipts.wake_task_id`. **`clara._bank_op_key_task(text)` is the ONE place the bank
+operation-key schema is parsed** — IMMUTABLE, STRICT, uuid-regex guarded, ungranted.
+
+**LOUD, for every future bank-family pin.** 0226 re-patches the THIRTEEN `clara._agent_*_core`
+bodies rostered at 0129:1067-1081, so every one of them has a NEW `prosrc` sha. A later migration
+pinning any of them must measure against #657's POST-image, never 0129's.
+## #656 — the capability registry's second publication (0228)
+
+`0228_opening_ledger_source.sql` creates nothing and recuts nothing. It republishes
+`clara.document_capabilities` at `registry_version = 2` — an UPDATE that RAISES, never a
+DELETE-then-INSERT (#846; 0207's BEFORE UPDATE monotone trigger permits a raise and refuses a
+decrease with CLR08 `registry_version_monotone`) — and corrects the content of thirteen of the 240
+rows. It is the second file ever to touch this table; 0191 seeded it and 0207 walled its counter.
+
+**Why EVERY row moves when only two kinds change.** `tests/document-capability-registry.test.mjs`
+asserts `count(distinct registry_version) = 1` registry-wide — "the registry publishes exactly one
+version at a time" — and its rollback-hygiene cell asserts the published minimum besides. Raising
+two kinds alone reds that battery, whose whole subject is registry-wide uniformity. So the
+republication is whole-registry and the battery is re-based in the SAME commit, on the exact
+precedent `af3b5955` (#779) set when it shipped 0207 and +147 lines of that file together.
+
+**The two corrections are NOT symmetric, and the asymmetry is the point.**
+
+- `opening_balance_doc` × the six `azure-di:prebuilt-layout` formats moves `typed_facts` AND
+  `business_operation` to `supported`, because this branch BUILDS that operation: the
+  `opening_tb.line` producer is wired in line at the OCR pass and its regions are carried into the
+  governed opening-seed door. It ships in the same merge as that wiring and never one migration
+  ahead of it — shipping a level before its capability is exactly the "success that did not happen"
+  `0191:217-218` promises a professional will never be shown. The other six formats have no
+  producer (`structured_parse` emits `rows.*` / `sheets.*`, never `tables.*`) and stay `stored_only`.
+- `prior_gl` × the seven formats with a reader keeps its LEVEL and loses its LIE. Its basis said
+  "Clara derives nothing to drive it", which is false: `packages/runtime/lib/seeding-parse.mjs`
+  drives `clara.create_seeding_batch` off a filed prior GL today, from a printed ledger's table
+  cells or from xlsx bytes. The corrected sentence names the operation, its reader, its proposal
+  shape (counterparty, account and date, NEVER an amount) and the fact that **no browser entrance
+  exists** — nothing in `apps/web` calls `POST /api/seeding/prepare` — with
+  `limits = {"browser_entrance":"absent"}` making that gap machine-readable, which is 0191's own
+  instrument for a named gap (`:235-236`, "A limit is not a lower level").
+
+**Why the prior_gl LEVEL was held, measured rather than preferred.** #656's brief rules it to
+`supported`. 0228 was written that way, applied to a rig, and the registry's own cell
+(`document-capability-registry.test.mjs:278-284`, "business_operation never claims 'supported'
+where typed_facts is not supported") went red across all 240 rows; this column's own contract says
+the same in words (`0191:229-230`: "`supported` where Clara can carry TYPED FACTS into it").
+`prior_gl` has no typed-facts producer — `prior_gl.line` has never been written — and its operation
+yields human-ticked PROPOSALS, not carried facts. Raising the level needs either a false
+`typed_facts` claim or the relaxation of a 240-row honesty law for one row, so the level stands and
+the question is a named residual.
+
+**The two writers this lane splits across, and their floors.** `clara.record_opening_target(uuid,
+jsonb,text)` is the HUMAN door (bookkeeper+, `clara_authenticated`) and refuses ANY tied basis with
+CLR31 `parsed_target_writer_required`. `clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)`
+is `clara_runtime`-only with no `_human_ctx` twin, and re-derives every triple from the cited
+extraction region before it writes. A document-sourced figure is therefore written only by the lane
+that read it, and a keyed figure only by a named person — which is what makes `provenance_kind`
+mean something.
+
+**Two walls a caller meets that no CLR code names**, both measured while writing this slice:
+`fk_opening_tb_targets_account (client_id, account_code) → clara.coa_accounts` refuses a printed
+account this client's chart has not got with a bare SQLSTATE 23503; and `clara._tf_period_wall_lines`
+on `clara.journal_lines` refuses an opening DRAFT into a closed fiscal year with CLR19
+`write_into_closed_period`, long before `approve_opening_seed` is reached. The runtime classifies
+the first (`lib/opening-parse.mjs`'s `mapOpeningFkError`); the second is why 0228 writes no recut.
+## The intake batch relation family (#636, 0229)
+
+`0229_intake_batches.sql` adds a firm-scoped, durable parent over client-attributed child Work, so
+a hundred uploaded sources can be watched as one thing while each child keeps its own address.
+It **recuts nothing**: twelve live bodies are pinned by `sha256(prosrc)` in the prestate and
+re-read byte-identical in the tail, which is the file's own machine-checkable proof.
+
+**Three relations.** `clara.intake_batches` (the parent: firm-scoped, **no `client_id`** because the
+members that wait are the unattributed ones, **no stored counts**, three states `open` /
+`cancelling` / `cancelled`), `clara.intake_batch_members` (one admitted source, carrying up to three
+identities **in order** — intake always, document once in custody, Work once admitted — and at most
+one declared dependency) and `clara.intake_batch_member_events` (the append-only history, with the
+`_tf_append_only` / `_tf_no_truncate` pair). All three are FORCE RLS with an owner policy and a
+`clara_authenticated` SELECT predicated on `clara.jwt_firm()`; **no application role holds DML on
+any of them**. `clara_runtime` gets SELECT on the two CHILDREN only — the reconciler belt needs to
+see them — and nothing at all on the parent.
+
+**DERIVE, NEVER STORE.** The shape copied is `clara.seeding_batches` (0017:1252, facets derived at
+read time by live counts, 0017:4602-4610); the shape rejected by name is
+`clara.sales_backfill_batches` (0046:496) whose `admitted_count` is a stored counter a verb
+increments (0046:2287). A counter drifts from its children the moment one is cancelled.
+
+**Six granted names.** Five write/sweep doors are `clara_runtime` ONLY, actor-explicit, SECURITY
+DEFINER, `_reserve_op`/`_finish_op` + `_audit`, with no `_human_ctx` twin (the pool carries no JWT,
+0004:299-309) — `open_intake_batch`, `attach_intake_to_batch`,
+`set_intake_batch_member_dependency`, `cancel_intake_batch` and
+`sweep_intake_batch_cancellations`. One read, `get_intake_batch`, is `clara_authenticated` ONLY and
+SECURITY INVOKER with the inline bookkeeper floor (0214:262-274's reason).
+
+**Why the sixth name exists.** `clara.operation_receipts` carries no `clara_runtime` grant and no
+`clara_runtime` policy — 0178's own tail asserts both (0178:1619-1630) — and the runtime holds no
+SELECT on the batch parent. So the pool can read neither the committed receipts that decide which
+children are still live nor the `cancelling` parent itself. `sweep_intake_batch_cancellations` is
+the bounded, oldest-first, op-key-less worklist door on the `release_held_document_tasks(int)`
+precedent, and it performs the terminal flip.
+
+**The fan-out cancel, and why the parent STORES its decision.** `cancel_intake_batch` is NOT one
+transaction and must not be: it returns the live child list and the caller invokes
+`clara.cancel_accounting_work` once per child, one call per transaction, so a child that already
+posted answers `already_completed` and KEEPS its receipt (0199:230-272). Each child's key is
+derived as `<cancel_op_key>:<work_id>`, and the author is the STORED `cancel_requested_by` —
+`clara._work_door_ctx` hashes `{work, author}` (0184:262-264), so a resumed fan-out that passed the
+sweep's own identity would raise CLR10 `op_key_conflict` on every child. Measured on the rig, not
+argued.
+
+**Two lane-agnostic stamp triggers.** `_tf_intake_batch_member_intake_stamp` (AFTER UPDATE on
+`clara.document_intakes`) stamps custody on the `document_id` NULL → non-NULL transition and, as a
+belt, declares `awaiting_capacity` when an intake fails with `failure_code='limit'`.
+`_tf_intake_batch_member_work_stamp` (AFTER INSERT on `clara.accounting_work`) joins whatever Work
+names the member's document — at most one document per Work is possible (0182:520-527) — so #655's
+invoice lane and the autodraft lane stamp it without knowing this table exists. Both open with a
+cheap negative; the Work-side one reads `ix_intake_batch_members_open`, which is empty on a firm
+with no open batch.
+
+**What "cancelled" means, exactly.** A batch reaches `cancelled` only when nothing is live AND
+nothing can still become live: `_intake_batch_live_children` is the fan-out's worklist (members
+holding a Work that is neither terminal nor already carrying a committed receipt) and
+`_intake_batch_pending_members` is the other half — members with no Work yet whose intake is still
+arriving or whose document still has a queued/running processing task. Both the door and the sweep
+require both to be empty. Without the second, a batch stopped during ingest — which is exactly when
+a hundred-file batch gets stopped — flipped terminal at once, the sweep never looked at it again,
+and every one of its files went on to be admitted and posted. A member merely sitting in custody
+with nothing running is NOT pending: a Work another lane admits for it afterwards is that lane's
+own new decision, taken after the stop.
+
+**A stop that can never finish is NAMED.** The fan-out must re-issue with the stored
+`cancel_requested_by`; if that person's membership goes away, every child refuses CLR04 on every
+sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'` from the live
+membership rather than storing a fourth state, the card renders the remedy, and the reconciler belt
+counts that parent as `batchCancelBlocked` rather than as one more transient failure.
+
+**`settled` and `failed` are NOT compatible facets.** The five facets overlap by construction and
+are never summed, but a member holding a committed receipt is business-complete and is excluded
+from `failed` outright; the task-error arm looks only at the CURRENT attempt per lane
+(`distinct on (lane)` by descending `version_n`), because a retry is a new row
+(`unique (document_id, engine_id, version_n)`) and a terminally-failed row is immutable. Measured
+on the World leg's own data before the fix: 31 of 35 members reported "failed" held a committed
+receipt.
+
+**The capacity wall is a WAITING state, not a raised limit.** #636 changes no default and touches
+none of the three reservation bodies. Measured on a migrated rig: 100 ≤1MB PDFs are admitted and
+the 101st is refused CLR18 on the DOCS guard with both ceilings flush (docs 100 / pages 1000); 100
+images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window is
+`date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. **08:00 Asia/Kuala_Lumpur** — the
+read reports that in its `capacity` block so the surface can say 08:00 rather than "midnight".
+Moving the window to MYT is #635's ticket.
+## #660 — the client home's money band (0232)
+
+TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
+allowlist row: `clara_runtime`, `clara_agent_ro` and every `clara_wake_*` role hold ZERO on all
+three, asserted door by door and role by role in 0232's own tail and again behaviourally by
+`p660.pack.no_agent_reach`.
+
+- `clara.cash_account_set_versions` / `clara.cash_account_set_members` — a client's governed,
+  versioned CASH ACCOUNT SET. Exactly one `published` row per client (a partial unique index) and
+  contiguous, non-overlapping windows (`clara._tf_cash_account_set_integrity`, one trigger function
+  serving two triggers on 0058:362's pattern). Members are SEALED to the creating transaction
+  against INSERT, UPDATE **and** DELETE: the version row's `member_count` / `members_sha256` are
+  computed once, by the deferred trigger on the versions table, and are never re-checked
+  afterwards — so a member removed later would leave the frozen sha describing a membership that
+  no longer exists. A version is superseded, never edited.
+  `member_reason` is `bank_registry` | `declared_cash` | `declared_petty_cash`. FORCE RLS, two
+  policies each, `select` to `clara_authenticated` and ZERO INSERT/UPDATE/DELETE to any non-owner
+  role — which is what keeps the read doors honestly `SECURITY INVOKER`.
+
+  **There is NO `is_active` predicate on this family or on any read of it, and that is the whole
+  reason it exists rather than riding `clara.account_set_versions`.** That family resolves
+  membership through `clara._metric_selector_account_ids` (0058:344-358), which filters `is_active`
+  TWICE and REFUSES an explicitly named inactive account — exactly the population a cash set must
+  contain, since a retired bank account still holds the balance it held. Relaxing that resolver
+  would change membership semantics for every account set in the estate silently, because the
+  freeze checks re-derive from stored shas.
+
+- `clara.publish_client_cash_account_set(p_client, p_members, p_effective_from, p_op_key)` —
+  SECURITY DEFINER, **admin** floor (`clara._human_ctx(clara.role_rank('admin'))`, the floor
+  `create_account_set_v1` uses), op-key idempotent over all three payload arguments. `p_members` is
+  ONE jsonb array of `{account_id, member_reason}` and ITS ORDER IS THE ORDINAL. A first version
+  with a null `p_effective_from` is stamped at the books' own start; a first version dated AFTER
+  that start is refused `first_version_after_books_start`, because it would make every historic
+  month unreadable. Two admins superseding at once SERIALISE (the current version row is taken
+  `for update`) and the loser is refused CLR11 `cash_set_version_raced` — a typed refusal the face
+  can turn into a sentence, never a raw 23505 naming an internal constraint.
+
+  **AND THE LOCK ALONE IS NOT ENOUGH, WHICH IS A MEASURED FACT.** Under READ COMMITTED the waiter's
+  statement snapshot is taken BEFORE it blocks, so when the winner commits, EvalPlanQual re-checks
+  the row the waiter was queued on against its LATEST version — now `superseded` — the
+  `state = 'published'` predicate fails, the row drops out, and the winner's new published row is
+  invisible to that same pre-block snapshot. The waiter therefore reads NO current version at all.
+  The door does not read that null as "this client has never had one": it RE-READS in a separate
+  statement (a fresh snapshot) and, if any version row exists, refuses `cash_set_version_raced`.
+  Without the re-read the loser was refused CLR10 `first_version_after_books_start` — a true
+  sentence about a different mistake, which would send an admin off to check a books-start date
+  that had nothing to do with what happened. Cell: `p660.set.publish_race_loser_code`, two real
+  backends, the block proved from `pg_blocking_pids` rather than slept through.
+
+- `clara.propose_client_cash_accounts(p_client)` — STABLE SECURITY INVOKER, **viewer** floor. Lists
+  every `is_bank_account` row of the client, ACTIVE OR INACTIVE, with its cumulative approved
+  balance and whether it is already a member. It NEVER proposes declared cash or petty cash under
+  any account name or code: neither has a structural marker in this schema and `0121:4749` is house
+  law — structure and declared facts only. A human declares them.
+
+- `clara.get_client_financial_pack(p_client, p_as_of, p_month)` — STABLE SECURITY INVOKER,
+  **viewer** floor, `plan_cache_mode` pinned. Book cash with six points, period profit with income
+  and expense, a six-calendar-month series, per-account composition with capped entry lists, and a
+  ten-field envelope plus a comparison on every figure group. `status`/`coverage` take only
+  `ok | partial | unknown`; the door never says `denied` about itself (it raises CLR04) and never
+  says `unavailable`. A client the caller cannot see and an invented uuid answer IDENTICALLY.
+
+  **The comparison is TWO rules, not one.** A COMPLETE month (a historic month read to its own last
+  day, or an MTD read on the last day of the month) compares against the prior month IN FULL; an
+  in-progress month-to-date compares against the same ELAPSED stretch of the prior month, capped at
+  that month's last day. Applying the elapsed rule to a complete month truncates a LONGER
+  predecessor to the selected month's length — February against January drops three days — and the
+  same response's series row for that month then contradicts the comparison beside the headline.
+  `p660.pack.historic_comparison_full_prior_month` holds both arms to it.
+
+  **A comparison period the books cannot answer for is UNKNOWN, not zero.** When the comparison
+  interval ends before the coverage floor, every amount on it is null and it carries
+  `available:false, reason:'pre_coverage'` — the same answer `points[]` already gives that date.
+  The alternative is one read saying two different things about one date, and a whole balance
+  printed as growth from nothing.
+
+  **Each composition carries its own `composition_total` + `composition_truncated`,** beside the
+  entry level's `entries_total` + `entries_truncated`, and both live INSIDE the figure group they
+  are about (`cash.composition`, `profit.composition`). A top-level spelling is a key no consumer
+  of the envelope reaches: the browser hydrates each group through one parser, so the drilldown
+  renders nothing against the real door while a hand-written fixture stays green.
+
+  **A version window a point precedes means one of two things, and the read names the true one.**
+  More than one revision → `cash_set_version_changed_in_series` (the definition really changed
+  inside the trend). Exactly one revision → `cash_set_published_after_books_start`: nothing changed,
+  the set was DECLARED after those months were booked, which is the ordinary onboarding order and
+  the one case `first_version_after_books_start` cannot refuse.
+
+THE VIEWER FLOOR IS STRUCTURAL, not a judgement call: `journal_entries`, `journal_lines` and
+`coa_accounts` are table-SELECT-granted to the whole `clara_authenticated` role (0003:522-525)
+behind a FIRM-ONLY RLS predicate (0003:514). A viewer can already `SELECT` every row these reads
+aggregate, so flooring higher would protect nothing and only take the money band away from the
+people who read it most.
+
+THE COMPUTE SHAPE IS A MEASUREMENT, recorded in 0232's header. Seven `clara.trial_balance_as_of`
+calls cost 18.12 ms / 2,008 shared buffer hits against 2.04 ms / 176 for one filtered pass with six
+`filter (where posting_date <= point_k)` aggregates, on a 6,000-line corpus on a rig cluster
+(8.87x). The cash arm is therefore ONE scan — and because that is a SECOND spelling of a shared
+definition, the tail asserts from `prosrc` that it is still the same one: `status = 'approved'`
+present, a cumulative `posting_date <=` bound present, `is_opening_balance` ABSENT and `fiscal_year`
+ABSENT. `p660.pack.matches_trial_balance` is the behavioural half.
+
+AND THE WHOLE DOOR WAS MEASURED, not only that arm. On a 160-entry / 320-line / 19-account client
+with a three-member cash set (rig `clara_660`, PostgreSQL 17.11), `explain (analyze, buffers)` over
+`clara.get_client_financial_pack` reported **36.4-40.4 ms / 28,886 shared hits** while the two
+compositions each re-read their account's lines through six correlated subqueries. Collapsing the
+cash composition to ONE scan per member account with three FILTERED aggregates brought the same
+call to **18.9-21.7 ms / 12,134 shared hits** with a BYTE-IDENTICAL payload (14,558 bytes). The
+read is polled every thirty seconds while the client home is visible, so that is the number that
+matters rather than the cash arm's alone.
+
+### KNOWN COVERAGE LIMIT — pre-0120 unmarked closing transfers
+
+Entries finalised before 0120 stayed `closing_transfer = false` "forever" (0120:518-521), and
+0016:211-219's `closing_transfer_review` notification was never discharged by any migration. The
+pack DISCLOSES this and repairs none of it: an approved entry inside the period with
+`closing_transfer = false` AND (its own `close_receipt_id` — only `finalize_close` births one,
+0056:3010-3024 — OR a `reversal_of` naming an entry that has one, the reopen mirror 0120:797-814)
+drives `coverage = 'partial'` with reason `closing_transfer_unmarked_history`.
+
+**The detected rows are NOT also excluded.** A second, wider exclusion inside one read would make
+two reads of one ledger disagree; the exclusion predicate stays the estate's one definition
+(`not (is_year_end and closing_transfer)`, 0016:602, asserted verbatim in the tail) and the read
+says what it cannot vouch for. **The detector's own limit**: a close finalised before
+`close_receipt_id` existed (pre-0056) carries neither marker and is undetectable. The affected
+hosted row count is a release-time read, not an assumption.
+
+**The disclosure covers every month the chart draws.** `unmarked_closing_entries` is scoped to the
+SELECTED period; `unmarked_closing_entries_series` and `series_coverage_reason` run the identical
+detector over the six calendar months the series carries, because an unmarked close three months
+back is counted into that month's bar and the period-scoped count cannot see it
+(`p660.pack.unmarked_history_series_disclosed`).
+## 0233 — the firm's own legal, commercial and model-usage state (#635)
+
+THREE new `security definer` reads, granted to `clara_authenticated` and to nobody else, plus ONE
+body-only recut. Nothing else: 0233 creates, alters and drops no relation, issues no table grant,
+adds no trigger, CHECK or policy, and takes no row lock of any kind.
+
+| door | floor | answers |
+|---|---|---|
+| `clara.get_firm_legal_standing()` | `viewer` | one entry per legal kind on the shelf (0185:653-659's own `distinct on (kind)` selection, so a draft-only kind appears as a draft), whether an ACTIVE OWNER of the caller's firm accepted each current version, the caller's own acceptance, and whether the CALLER may accept for the firm |
+| `clara.get_firm_commercial_state()` | `admin` | the firm, the CURRENT billing plan (amount AND `amounts_ruled` together), whether a registration payment is recorded, the declared absence of subscription invoices, and the firm's stored processing caps or NULLs |
+| `clara.get_firm_ai_usage(date)` | `admin` | the caller's own firm's monthly model usage, bound to `clara.jwt_firm()` INSIDE the database, with `price_currency` |
+
+**`get_firm_legal_standing` is ARITY 0 FOREVER.** `clara._accounting_work_egress_live(p_firm,
+p_client)` is ungranted (0195:911) precisely because a per-client answer is an existence oracle for
+another firm's books (0195:871-874). This door answers that basis's limb (a) ONLY — the firm's legal
+standing — and takes no client argument. §C asserts the arity; `p635.db.legal_standing_no_client_arg`
+asserts it again from the other side. It carries neither the legal `body` nor its digest: those stay
+`clara.get_current_legal_documents()`'s (0185:634-671), so no second surface can render bytes a
+third digest was taken over. The attribution triple (`accepted_by` / `accepted_at` /
+`accepted_by_name`) is masked to NULL below bookkeeper, mirroring `0141:526`; `firm_accepted` is
+never masked, so a viewer reads WHETHER without WHO.
+
+**`get_firm_commercial_state` publishes booleans, not identifiers.**
+`clara.firm_registration_payments` carries `stripe_customer_id` and `stripe_subscription_id`; this
+door projects `... is not null` and the `recorded_at` date, and §C reads that off the door's own
+RETURN expression. It also forwards `amounts_ruled` beside the amount, which is what lets a surface
+use the flag as its RENDER CONDITION: the beta plan is seeded UNRULED (`0163:214-215`), so no
+figure appears at all today and a later owner ruling shows one with no code change.
+
+**IT WIDENS C-3's MONEY-STORE ROSTER, AND THAT IS A REVIEWED ACT.** `get_firm_commercial_state`
+reads `clara.firm_registration_payments` — it is the FIRST firm-scoped reader of that relation (the
+only reader outside the checkout chain until now was the operator console, `0188:304`). The name is
+added to `packages/db/tests/checkout-gate-c3.test.mjs`'s `c3.53` closed-world census with the reason
+beside it, exactly as `0164`'s and `0188`'s widenings were. It also READS `pages_per_day`, so it
+enters `f-a9-pr-1b.test.mjs`'s gate-7 roster too — classified there, in writing, as a READER and not
+a live usage gate.
+
+**THE RECUT: `clara.get_llm_usage_summary(uuid,date,uuid)` gains the rank floor it never had.**
+Created at `0110:706` and never spliced, that door's only wall was `p_firm is distinct from
+clara.jwt_firm()` — so before 0233 a VIEWER could read the firm's entire model spend (measured on
+the #635 rig). 0233 adds `perform clara._human_ctx(clara.role_rank('admin'));` as the FIRST
+statement of the body, ahead of that wall, so an under-ranked caller meets CLR04 whatever firm they
+name and a correctly-ranked caller naming a FOREIGN firm still meets CLR11 `client_not_in_firm`.
+Everything else is carried verbatim, and that is PROVEN rather than promised: §C squeezes the live
+body, subtracts 0233's floor block and requires the remainder to hash to the pre-image squeezed the
+same way. The grant is NOT re-issued — `create or replace` preserves the ACL, and §C asserts the
+live ACL is byte-identical to the pre-image, which is what makes that claim a measurement.
+
+**A CENSUS THAT READS THE WRONG BODY PROVES NOTHING.** §C's name-resolution guard — the standing
+door must resolve `display_name` inside its own definer body and never through
+`clara.users_visible` (0137:291-298 re-derives `jwt_firm()` and admits agents) — originally tested a
+variable last assigned inside the preceding loop, whose final iteration is `get_firm_ai_usage`. It
+therefore passed whatever the standing door said: measured on the rig by splicing `users_visible`
+into the standing body inside a rolled-back transaction, the whole tail still returned OK. The guard
+now re-derives the comment-stripped source from the standing door's own `prosrc` immediately before
+the test, and the same mutant raises. Comment-stripped and not raw, because this body legitimately
+NAMES `clara.users_visible` in the comment explaining why it does not use it.
+
+**`clara.firm_document_limits` IS UNTOUCHED.** Its viewer-readable SELECT (`0007:810-811`,
+`:2742-2744`) is unmoved in both directions, asserted in the prestate and again in the tail. The
+capacity numbers ride door 2 only so a settings card can render them beside the plan; that is an
+AFFORDANCE, not a wall. The residual stands: that relation still has NO human writer anywhere
+(`0196:36-40`).
+

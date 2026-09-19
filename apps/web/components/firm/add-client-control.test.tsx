@@ -10,6 +10,14 @@
 //
 // THE PERSONA CHANGES IN THE FIXTURE, not in a flag this file invented: `caller_context` is
 // the DB-computed rank (0141:549), and every cell below changes only what that read returns.
+//
+// #659 / #899 (D18.c): the control itself MOVED to `components/firm/add-client-control.tsx` so
+// Firm Home can mount the same one. These cells deliberately keep mounting `ClientRegisterList` —
+// they are #649's AC1 evidence AT ITS OWN SURFACE, and asserting the control through the page a
+// person actually reaches it on is the property they were minted for. What the move adds here is
+// the LAST cell: a register re-read that returns a row must not remount the control and must not
+// discard a draft, which is the failure mode the extraction created the opportunity for
+// (appendix C §3, "Draft across local view changes").
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -237,6 +245,75 @@ test("CB-AE2E-024 — a DoorRefusal renders VERBATIM with its code, and adds no 
       assert.match(h.text(), /your role may not open a client file/, `the DB's own words, unedited; got: ${h.text()}`);
       assert.match(h.text(), /CLR04/, "and its code");
       assert.deepEqual(pushed, [], "a refusal navigates nowhere");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});
+
+test("ticket 659 — a register RE-READ that returns a row does not remount the control: the typed name and the arity-1 tick stand", async () => {
+  // THE FAILURE MODE THE EXTRACTION MADE POSSIBLE. `AddClientControl` is mounted ABOVE the
+  // register's `DataState`, not inside its empty branch, precisely so the first re-read that
+  // returns a row cannot unmount it — and this control's whole draft (the typed name, the
+  // candidates, the acknowledgement) is memory-only React state. Firm Home re-reads on FOUR
+  // triggers, so on that page this is not a hypothetical at all.
+  let clientsSeen = 0;
+  const beginCalls: unknown[] = [];
+  const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/rpc/client_identity_candidates")) {
+      // ARITY 1 — the one wall that is the human's own act. The tick is part of the draft, so it
+      // has to survive the re-read too.
+      return jsonResponse({
+        name: "ROME PUBLIC ADVISORY", arity: 1,
+        candidates: [{ client_id: "11111111-1111-4111-8111-111111111112", name: "Rome Public Advisory", status: "active" }],
+      });
+    }
+    if (u.includes("/rest/v1/caller_context")) {
+      return jsonResponse([{ user_id: "11111111-1111-4111-8111-111111111111", firm_id: "33333333-3333-4333-8333-333333333333", firm_name: "E2E Accounting", role: "owner", role_rank: 3, is_operator: false }]);
+    }
+    if (u.includes("/rest/v1/clients")) {
+      clientsSeen += 1;
+      // The register is EMPTY on the first read and carries a row on every later one — the exact
+      // transition that would unmount a control hung off the empty branch.
+      return jsonResponse(clientsSeen === 1 ? [] : [{ id: "44444444-4444-4444-8444-444444444444", name: "Somebody Else", status: "active", created_at: "2026-09-01T00:00:00Z" }]);
+    }
+    if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
+    if (u.includes("/rpc/begin_client_onboarding")) {
+      beginCalls.push(init?.body ? JSON.parse(String(init.body)) : null);
+      return jsonResponse({ client_id: NEW_CLIENT_ID, plan_id: "plan-new" });
+    }
+    throw new Error(`unexpected fetch: ${u}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await mount();
+    try {
+      await clickButton(addClientTrigger(h) as never);
+      for (let i = 0; i < 4; i++) await h.settle();
+      const body = globalThis.document.body as unknown as Node;
+      const field = findIn(body, (n) => n.tagName === "INPUT" && n.getAttribute?.("aria-label") === "Client name");
+      assert.ok(field, "the name field is open");
+      await h.act(() => setFieldValue(field as never, "ROME PUBLIC ADVISORY"));
+
+      // Drive the identity check so the arity-1 acknowledgement exists to be preserved.
+      await clickButton(findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Begin onboarding") as never);
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(beginCalls.length, 0, "arity 1 stops at the acknowledgement — the door is not touched");
+      const tick = findIn(body, (n) => n.tagName === "INPUT" && n.getAttribute?.("type") === "checkbox");
+      assert.ok(tick, "the arity-1 acknowledgement is on screen");
+      await h.act(() => { (tick as unknown as { checked: boolean }).checked = true; });
+
+      // THE RE-READ. The register now returns a row; the control must be the SAME instance.
+      await h.rerender(App(createElement(ClientRegisterList, {})));
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const after = findIn(body, (n) => n.tagName === "INPUT" && n.getAttribute?.("aria-label") === "Client name");
+      assert.ok(after, "the dialog is still open after the register filled in");
+      assert.equal((after as unknown as { value?: string }).value, "ROME PUBLIC ADVISORY",
+        "the typed name stands — a remount would have emptied it, silently, mid-edit");
+      assert.equal(after as unknown, field as unknown, "and it is the SAME node: the control was never remounted");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();

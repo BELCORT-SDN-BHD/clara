@@ -1,4 +1,9 @@
 import { createReadStream } from "node:fs";
+// #656 (orchestrator ruling D13.1): the `opening_tb.line` producer is wired IN-LINE here, at the
+// OCR pass, through ONE non-frozen adapter — no new processing lane, no new engine_kind, no
+// facts-router splice. See `opening-tb-produce.mjs` for why that is safe when the wiring is
+// kind-blind, and for the freeze-by-closure warning that keeps rules out of it.
+import { produceOpeningTbRegions, openingRefusalEnvelopeEntry, OPENING_TB_REFUSAL_ENVELOPE_KEY } from "./opening-tb-produce.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-layout";
@@ -169,16 +174,46 @@ export function normalizeAzureLayout(payload, task) {
       }
     }
   }
+  // #656 — THE ONE NEW STATEMENT IN THIS FUNCTION. The trial-balance reader has existed,
+  // tested, since Wave B with NO production caller; `clara.record_opening_targets_parsed` and
+  // `POST /api/opening/parse-targets` have been live and unreachable for just as long. This
+  // appends the reader's `opening_tb.line` regions to the SAME array the cells above went into,
+  // so the existing consumer picks them up unchanged.
+  //
+  // It cannot fail this pass: `produceOpeningTbRegions` never throws and returns an EMPTY region
+  // set with a named reason both when the document is not a trial balance and when it is one the
+  // reader refuses (all-or-nothing, F-H5 — a partial opening basis is worse than none). Nothing
+  // above this line changes: both page-key spellings and every existing `field_path` stay
+  // byte-identical, because 0191's `_assert_field_path` grammar and the whole F-A1 witness estate
+  // read them.
+  const opening = produceOpeningTbRegions(regions);
+  for (const region of opening.regions) regions.push(region);
+
+  // …AND THE REFUSAL TRAVELS WITH IT (#656 fix-round, adversarial A1). Keeping only `.regions`
+  // threw away `status`/`reason`/`refusals`, so a trial balance the reader REFUSED left evidence
+  // byte-identical to a document that is not a trial balance at all — and the consumer's honest
+  // "no trial-balance lines, key them instead" was then shown over a document whose own figures
+  // the reader had just found inconsistent. The reason rides the envelope jsonb the writer stores
+  // verbatim (the estate's `corroboration_ineligible` idiom, 0009:148); `opening-parse.mjs` reads
+  // it back and answers the refusal instead of the keyed-fallback signal. NOTHING else changes:
+  // a clean read and a non-trial-balance carry no such key at all.
+  const openingRefusal = openingRefusalEnvelopeEntry(opening);
+
+  const envelope = {
+    schema_version: 1,
+    engine: { id: task.engineId, kind: "ocr", version_n: task.versionN },
+    content: String(result.content || ""),
+    pages: pages.map((p) => ({ page_number: Number(p.pageNumber || 1), width: p.width ?? null, height: p.height ?? null, unit: p.unit ?? null })),
+    tables: result.tables || [],
+  };
+  // Written only when there IS a refusal (a plain assignment, not a conditional spread:
+  // `check-parts-parity.mjs` refuses an unclassifiable spread in this package — measured).
+  if (openingRefusal) envelope[OPENING_TB_REFUSAL_ENVELOPE_KEY] = openingRefusal;
+
   return {
     pageCount: pages.length || 1,
     vendorOpRef: payload?.operationId || null,
-    envelope: {
-      schema_version: 1,
-      engine: { id: task.engineId, kind: "ocr", version_n: task.versionN },
-      content: String(result.content || ""),
-      pages: pages.map((p) => ({ page_number: Number(p.pageNumber || 1), width: p.width ?? null, height: p.height ?? null, unit: p.unit ?? null })),
-      tables: result.tables || [],
-    },
+    envelope,
     regions,
   };
 }

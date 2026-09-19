@@ -124,26 +124,31 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/reconciler-wake.mjs","reconcileWakeEngineTasks","...a","3ede989171f7d26660abc37f7818e34db641c3601fb9f70583fdb24e8187b59a","0"],
   ["packages/runtime/lib/reconciler-wake.mjs","reconcileWakeEngineTasks","...b","3ede989171f7d26660abc37f7818e34db641c3601fb9f70583fdb24e8187b59a","0"],
   ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...deps","81708a9233752a17848ce1af02f37620eaab87f435dd5f7b7f8d1b8ecffa3a57","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...adj","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...adj","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
   // #640 RE-FINGERPRINTED the fifteen entries above and below: `runReconcilerSweep`'s summary
   // statement gained `...plans` (the accounting-plan occurrence belt), so the STATEMENT sha moved
   // for every spread inside it. Each spread itself is unchanged — a per-lane result bag folded
   // into one sweep summary, reviewed at its own original landing — and re-pinning rather than
   // widening keeps the ledger's property: a tuple invalidates itself when its statement changes.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","ce96daf97d7a11f1287760e53cebe8e272166d9bca41d7690123ad99d66ee406","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  // #636 — the intake-batch cancellation belt joins the SAME reviewed return statement. Adding a
+  // spread to it re-fingerprints every sibling tuple above (the fingerprint is the sha of the
+  // whole normalised statement), which is why this block moved in one piece rather than gaining
+  // a line: the spread itself is the belt's own counters, the same shape every sibling carries.
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...batchCancels","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","5182a524afa7e3408c7dbcca8b77d84ecb83d7a1dfb11d12b7bda5fa891f054a","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.DATABASE_URL)","b7fac4efda9fec1f95de524d660835ef17527255af69ad9dd7265e7ba2ba9af3","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL)","d0fce5da9b74af277287fa27a5f72d05e08862412c14ba9094b890c334abad93","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...pg","314c243f644ce3eb9f984091d1f53d513440baeaf360b08bd57dd99785a6a2e6","0"],
@@ -371,6 +376,17 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   ["packages/runtime/workflows/chatTurn.v20.ts","chatTurn_v20","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v20.ts","chatTurn_v20","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/chatTurn.v20.ts","chatTurn_v20","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  // chatTurn_v21 (wave 2026-09-18). IDENTICAL in kind to v18's, v19's and v20's three sites, and
+  // ALL THREE FINGERPRINTS ARE AGAIN BYTE-IDENTICAL TO v19's AND v20's — the ledger, not a
+  // reviewer's eye, is what establishes that this cut carried the park/resume statements over
+  // unchanged rather than rewriting them. `tool-call`, `tool-result` and `json` are the AI SDK's
+  // OWN message-content discriminants, not Clara transcript part kinds; they are constructed here
+  // to replay the parked clarify call and to feed the human's answer back to the model as that
+  // tool's result. v21 adds NO transcript part kind at all — its two new tools mint the existing
+  // `work_accepted` card and nothing respectively, and its new knowledge step mints nothing.
+  ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
+  ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"tool-result\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"json\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   // #629 — claraWork_v2's resume message. IDENTICAL in kind to v1's two sites above: `tool-result`
@@ -398,6 +414,19 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // match to its own call. The four attributed value fields are v2's, unchanged.
   ["packages/runtime/workflows/claraWork.v4.ts","claraWork_v4","type: \"tool-result\"","bb63edae7941974d3f6f9542ab9817bc9b568725cb1c5d8fdb29e97eb9336827","0"],
   ["packages/runtime/workflows/claraWork.v4.ts","claraWork_v4","type: \"json\"","bb63edae7941974d3f6f9542ab9817bc9b568725cb1c5d8fdb29e97eb9336827","0"],
+  // claraWork_v5 (wave 2026-09-18). IDENTICAL in kind to v1's, v2's, v3's and v4's resume sites:
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds, and they are constructed here to feed a human's answer back to the
+  // model as the result of the question tool that parked the run. v5 adds NO transcript part kind
+  // at all — its two new reads mint nothing, which is what #658's stanza requires of them.
+  //
+  // THE FINGERPRINT MOVES FROM v4's AND THAT IS NOT A REWRITE. The enclosing statement's text
+  // includes its own comments, and the only difference from v4's is the version number inside one
+  // of them ("Three tools can park a v4 run" → "a v5 run"). v3→v4 moved for the same one-character
+  // reason. The statement's CODE is carried over byte for byte; the chatTurn rows above, whose
+  // comments carry no version number, are the control that shows the ledger behaving as intended.
+  ["packages/runtime/workflows/claraWork.v5.ts","claraWork_v5","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  ["packages/runtime/workflows/claraWork.v5.ts","claraWork_v5","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],

@@ -54,6 +54,143 @@ Some of those primitives carry owner-ruled fixes that a plain `shadcn add` would
 
 Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
+## The Clara transcript: live regions, scroll ownership and the intent key (#642)
+
+**ONE log, N exclusive statuses, and nothing nested.** `ClaraThreadView` carries exactly one
+`role="log"`, and it wraps the TRANSCRIPT and only the transcript — the welcome, the message
+map and the provisional bubble. Everything that announces on its own is a SIBLING of it: the
+onboarding checklist card, the clarify group, the live tool group, and the mutually exclusive
+`role="status"` lines (stream status, stopped, a refused stop, lost sight of the run, access
+revoked, a replayed send, a pre-send check). The last two keep their WORDS in every state and
+carry `role="status"` only when no other line is speaking — a replayed send whose original run
+is still streaming would otherwise announce twice for one press. That is `StateBanner`'s own
+`silent` decision (#629 §5, one announcement owner): unannounced never means hidden. The
+replayed line also retires with the turn it is about — the terminal `message` or a revocation —
+not merely with the next press. That geometry is not style. A `role="log"` inside
+a `role="log"` has no defined announcement order, and dropping `aria-live` does not fix it
+because `role="log"` carries an implicit polite live region of its own. The statuses are
+exclusive because one event must be one announcement.
+`components/clara/thread-live-regions.test.tsx` and
+`components/clara/thread-live-tool-states.test.tsx` both assert ZERO nested live regions, each
+with a vacuity control proving the tree really does contain live regions — treat
+`nested-live-region` as a gate, not a check.
+
+**The transcript owns its own scroll, and nothing else's.** `lib/clara/useTranscriptScroll.ts`
+holds the whole policy: a reader scrolled up stays put while content arrives (the "is the
+reader following?" answer is sampled from their own scroll events, never recomputed after an
+append — appending moves the bottom); a reader at the bottom follows instantly; a fresh attach
+lands on the newest message, because reopening the rail is a new element with no history. Only
+`scrollTop`/`scrollTo` on the ONE element it owns is ever written — `scrollIntoView` is
+deliberately absent from the whole surface, because it scrolls every scrollable ancestor and
+on the docked rail that means dragging the client's workspace behind it. The labelled
+jump-to-latest is offered only while there is something below, is a real `<Button>` (so it is
+in the tab order and has a word for a name, not an icon), and jumps instantly under
+`prefers-reduced-motion` — the preference is read at the press, not captured at mount.
+
+A smooth jump is CORRECTED until it lands. The animation targets the height it was given and
+the content can grow underneath it (a card finishing its transition, another delta), so a
+bounded correction re-measures the element and finishes the journey. The window that tells
+"our own animation" from "the reader changed their mind" is the PENDING correction itself, not
+a clock: the two expire together, so a trailing scroll event delivered at the deadline used to
+publish "the reader has scrolled up" and make the correction bail — measured in the browser as
+a transcript stranded 36px short. An arrival cancels the correction, so a reader who scrolls
+away after the jump lands is never dragged back. The caller's revision is a JOIN of its five
+content counts, never a sum: summed, the provisional bubble retiring in the same commit as the
+first chunk arriving cancelled to zero and the append effect did not run at all.
+
+Following a live turn costs the hook NO render of its own, and that is a measured contract
+rather than a nicety. The append effect runs once per streamed delta; publishing `atBottom` /
+`hasMoreBelow` on it unconditionally made React schedule a second render pass per token for
+the ordinary case (a reader parked at the bottom), and the transcript census
+`components/clara/thread-live-stream-stability.test.tsx` caught it at 401 commits for 200
+deltas against a budget of 215 — that suite's own words for "a component updating itself".
+Both flags are mirrored in refs and written only on a REAL transition.
+`lib/clara/useTranscriptScroll.test.ts`'s `p642.web.scroll_render_budget` pins it at this
+hook's seam: 25 appends must cost exactly 25 renders, all of them the caller's.
+
+**The intent key is content-addressed, and memory-only on purpose.**
+`lib/clara/intentKey.ts` derives the `turn_key` a send posts from the conversation, the
+altitude, the conversation's POSITION, the trimmed text and the SORTED attachment document
+ids. A retry of the same intent therefore reuses it — the composer keeps text and files on a
+refused send, and a refused or lost send adds nothing to the persisted transcript, so both the
+inputs and the position are identical by construction — and lands on
+`clara.begin_chat_turn`'s replay branch
+(`0006_runtime_core.sql:954-960`), which answers with the ORIGINAL task and `replayed: true`
+on the 202. A CHANGED intent, including a changed attachment set, derives a new key, and that
+half is the sharp one: the door returns from its replay branch BEFORE the user message is
+inserted and never reads `p_user_parts`, so a same-key repost carrying a different invoice
+would return the original task and drop the new file in silence while the screen said
+"already accepted". THE POSITION IS WHY A REPEAT IS NOT A RETRY, and it was the review
+round's blocker: addressed by content alone, every repeated utterance in a session — "yes",
+"ok", "continue" — derived the FIRST one's key and was answered with the turn Clara had
+already run, with no bubble, no task and no error, permanently, because the door's lookup has
+no time or state bound over an append-only table. A sentence re-typed after a turn has SETTLED
+sees a longer transcript and is admitted as the new instruction it is. Nothing persists the
+key: appendix C rules out promising reload recovery from memory-only state, and content
+addressing still makes the reload case work — a send that was never admitted leaves the
+transcript exactly as it was, so the same sentence with the same files derives the same key
+after a refresh. On `replayed: true` the
+view says so once and draws NO provisional bubble, because the original user row is already in
+the transcript.
+
+**Live tool state is a fold, not a version cut.** The model's whole `fullStream` reaches the
+browser verbatim (`packages/runtime/README.md` carries the measurement), so
+`lib/clara/liveTools.ts` maps the chunks already on the wire onto four live states —
+*preparing*, *running*, *done*, *failed* — plus *refused* for a tool that ran and declined in
+its own typed vocabulary. A step never walks backwards (the reattach replays from index 0),
+and `failed` outranks the other two terminals, so a step that returned and then threw reads
+*failed* rather than keeping the first terminal that arrived. It registers NO new part kind. There is no *queued* state and there
+cannot be one without a new frozen `chatTurn` body: nothing on the stream reports admission,
+and *preparing* (the model streaming a tool's arguments) is not *queued*. Every chip's label is
+a next-intl lookup over a measured list of tool tokens with the raw token as the fallback
+(`lib/clara/toolLabel.ts`); a source link belongs on a result card, never on a chip.
+## Firm home: its URL state and its refresh contract (#659)
+
+`/` is the firm's PORTFOLIO now, not only a dispatcher. It carries four query parameters —
+`?status=&attention=&q=&cursor=` — parsed in exactly ONE place,
+[`lib/firm/portfolio-url-state.ts`](lib/firm/portfolio-url-state.ts), and read by the board through
+`useSearchParams`. `app/(firm)/page.tsx` deliberately reads none of them on the server: nothing on
+this route appears or disappears with the portfolio's filter, so a second parse there would be a
+duplicated contract bought for nothing (contrast `app/(firm)/work/page.tsx`, which does read
+`?view=` on the server because the running-agent-task panel genuinely does not belong on the
+attention view).
+
+`status`, `attention` (`needs_you` | `active` | `failed` | `caught_up`) and `q` are BROWSER-side
+narrowings over the page the door returned — `clara.get_firm_portfolio_pack` takes no filter
+argument at all — which is why the Empty state can tell "nothing matches this view" from "this firm
+has no clients". A malformed value degrades to its empty default and issues no request. `cursor` is
+the door's own opaque keyset cursor, passed through as typed: its grammar (`lower(name)|uuid`,
+base64) belongs to the door, and a browser that re-derived it would be a second spelling of a
+contract this build does not own. **Any filter change drops the cursor**, because a cursor is a
+fence into ONE ordered result set.
+
+**The refresh contract lives in [`lib/firm/use-firm-portfolio.ts`](lib/firm/use-firm-portfolio.ts),
+which COMPOSES `useReviewQueue` rather than editing it.** Four surfaces share that hook and neither
+it nor `use-async-read.ts` registers a listener; adding one there would change three other surfaces'
+request profile. So this hook owns the pack read and the listeners, and calls the shared hook's own
+`reload` after each of its reads, so the needs-you chips are never older than the table beside them.
+Four triggers: `focus` and `visibilitychange` (which double as the live permission recheck), a 30 s
+while-visible interval (the compensation for a missed event — the estate emits no Work lifecycle
+domain event, the only `pg_notify` channels are server-side, and this app holds no realtime
+subscription), a page change, and `CLIENT_RECORD_CHANGED`. The 60-second delayed face is
+`WORK_STALE_AFTER_MS`, IMPORTED from `lib/work/use-work-detail.ts` rather than restated. A denial
+clears the rows and the read instant; a transport failure keeps them, dated.
+
+Two consequences worth stating plainly. **The board renders no money at all** — the firm's home
+shows counts, never client amounts — and that prohibition is enforced by the door's own `prosrc`
+tail assertion, by `lib/firm/portfolio-pack.ts` having no field to put one in, and by
+`components/firm/firm-home/firm-portfolio.test.tsx` asserting the rendered board contains none. And
+**the creation control is mounted BESIDE the portfolio's state machine, never inside its
+zero-client branch** ([`components/firm/add-client-control.tsx`](components/firm/add-client-control.tsx),
+extracted from the client register so both pages mount the same one): its whole draft is memory-only
+React state, and a control hung off the empty branch would be remounted — and silently emptied — by
+the first of those four re-reads that returns a row.
+
+Recent activity on this page reads `clara.list_activity` (not `clara.list_firm_timeline`) so it can
+render WHO did each thing through the one shared actor cell. Both doors floor at bookkeeper, so the
+swap moves no permission. `clara.list_activity`'s kind ladder misfiles several event families under
+`documents` (#861); that is named on the surface and is not corrected in the browser.
+
 ## The document detail's three routed views (#646)
 
 `/clients/:clientId/documents` keeps ONE route and TWO query parameters:
@@ -378,3 +515,469 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## #655 — `/clients/:clientId/accounting/invoices/new`
+
+The C1/C3/C6 direct entry point for a trade invoice: a client sales invoice or a supplier bill, and
+the signed AR/AP open item it births. It is a **route and not a Dialog**, and a **sibling address**
+of `…/accounting/journal/new`, `…/accounting/adjustments/new` and `…/accounting/claims/new`
+rather than a tab on any of them — the four admit different operations through different doors, and
+a stable URL is what makes the draft recoverable at all.
+
+**The state ladder**, each with its own cell or walk leg: *loading* (a skeleton fitted to the form,
+carrying `aria-busy` and a readable name — never a placeholder zero) · *successful-empty* (a client
+with no counterparties of that kind says so) · *no-results* (the party search keeps the query and
+offers Clear, and never offers to CREATE a party — 2026-09-15 D11) · *partial-stale* (the party read
+degrades INDEPENDENTLY of the chart read and names which half is missing) · *invalid-saving* (the
+error sits beside its control, focus moves to the first invalid one in DOCUMENT order, and every
+keystroke survives) · *denied* (a viewer typing the address reaches the form's own denied state,
+never a blank) · *failed* (a `StateBanner` carrying the door's own words AND its code, with the one
+next action that exists — **never a toast**) · *cancelled-recovery* (a lost answer is re-sent under
+the SAME intent key exactly once, and the second answer is authoritative).
+
+**The basis half is the composer's, reused.** The lines are `JournalDraftLine`s, validated by
+`lib/work/journal-basis.ts`'s own `validateJournalDraft` and rendered by the shipped
+`JournalBasisFields` — one set of rules about money in this app, not a second. The grid gets its
+OWN labelled horizontal viewport, so 320 px scrolls the GRID rather than the page.
+
+**The due date is never computed here.** The form carries what the document STATES;
+`clara.admit_trade_invoice_work` derives `stated → counterparty_terms → absent` (only it holds the
+party's agreed terms, and it adds them to the DOCUMENT date — DECISIONS §6.2.0 R-A) and the 202
+hands the derived basis back, which is what the success banner renders.
+`lib/work/trade-invoice.ts` has no path that produces `counterparty_terms` at all.
+
+**Nothing installs a primitive.** Combobox and Popover are uninstalled; the party picker is a text
+filter over the counterparty reads the registers already use, and `party_ambiguous`'s candidates
+render INLINE as a choice.
+
+**AC5's mutual links**: ONE block on the Work detail, from `clara.get_trade_invoice` — the kind,
+the party, the two dates, the reference and, once posted, the entry, the open item and its
+outstanding. The other half was already built and needed nothing:
+`components/journals/journal-entry-row.tsx` already renders a back-link to the Work from
+`clara.list_entry_links`' `work_id`.
+## #657 — the /bank Matching tab, and the two laws it changed
+
+**`/bank`'s six-way sub-nav is URL as truth.** `?tab=` addresses the strip (`accounts`,
+`statements`, `matching`, `exceptions`, `reconciliation`, `agency`) and `?line=` addresses the
+Matching tab's detail pane, copied verbatim from `components/registers/registers-workbench.tsx`'s
+shape — a `TABS` tuple, an `isTab` guard, `useSearchParams` and `router.replace`. Before #657 the
+strip was in-page `useState`, whose own comment called that "a deliberate simplification", so a
+reload or a shared link could not reach the Matching tab at all. **No new route and no
+`lib/navigation/tree.ts` row**: `/bank` is still ONE segment, and `?tab=` is a query.
+`router.replace` creates no history entry — the house's existing behaviour on the registers
+workbench, and the right answer for a sub-nav, where a tab is a view of one page rather than a
+place. **A multi-selection stays OUT of the URL**: a selection set is a draft, not an address.
+
+**ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
+key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
+flag}` — the same tuple `clara._reserve_op` hashes server-side — plus each selected entry's
+WORLD GENERATION, so "same intent ⇒ same key" is a property of the DATA rather than of a
+component's lifecycle, and there is no state to reset. The renewal rule is written out in full in
+that module's header; the short form is: the key renews on an intentional human act that changes
+WHAT is being submitted, or on a change to the WORLD it is deciding about, and on nothing else.
+
+The generation is `<count>:<newest match_id>:<newest status>` off the candidate row's own
+`match_history` (which migration 0226 put on the wire). Without it, `match → unmatch → resubmit
+the identical selection` — an ordinary re-decision — hashed to the FIRST key, and `_reserve_op`,
+which knows nothing about whether the match its stored result describes is still live, replayed
+the dead match's receipt: a persistent "no new cash entry was created" block naming a match the
+database had recorded as `unmatched`, beside a line that never left the unmatched report. An
+unmatch flips that newest history row, so the re-decision hashes differently; a lost response, a
+reload and a re-render write nothing and leave it byte-identical. It is KEY MATERIAL ONLY and
+never reaches the wire body. Its residual: the generation is only as fresh as the read it came
+from, so a concurrent unmatch between the last candidate read and the submit can still reach the
+replay; the surface re-reads after every act, which is a mitigation, not a proof.
+
+This deliberately DIFFERS from the house posture, which is left alone: `lib/members/doors.ts`
+mints a fresh uuid per call on purpose, and `work-cancel-dialog.tsx`'s `useDecisionKey` mints one
+per OPEN DIALOG. Both are right for a decision whose identity lives in a component's lifecycle. A
+bank match's does not — the surface reloads unconditionally after every act, failed or not, so a
+second press after a lost response is a re-render away from the first, and with a per-call uuid
+the database saw two operations and refused the second with `already_matched`: a refusal for
+something that had already succeeded. The other three verbs in `match-doors.ts` keep the uuid.
+
+**A refusal now preserves the draft** — the typed cents, the ticked rows and the ack flag — so a
+human changes one thing and resubmits. Retyping an amount you already typed is how a human ends
+up typing a different one, and an unchanged draft resubmits as the SAME operation.
+
+**MEASURED, and why there is no Combobox** (AC13). `pnpm --filter @clara/web ui:add combobox
+--dry-run` REFUSES on this project: the payload would overwrite `components/ui/button.tsx`, which
+is on `scripts/protected-components.json` because it carries owner-ruled fixes. `ui:add popover
+--dry-run` exits non-zero inside the shadcn CLI itself on this project's `base-nova` style with
+`"registries": {}`. Overriding the guard with `CLARA_UI_ADD_OVERWRITE=1` would clobber an owner
+ruling to buy a picker, so the candidate surface uses a search field over a `Table` instead —
+AC13's own named fallback — and #657 changes neither `apps/web/package.json` nor the lockfile.
+## The depreciation surfaces (#651)
+
+**The period is the database's, so the two date inputs are gone.** `fa-depreciation-runs-panel.tsx`
+used to ask a person to type a period start and end; the only lawful pair was the one
+`clara.depreciation_run_due` had already chosen, and anything else was refused. The dialog now opens
+on `clara.preview_depreciation_run` (`components/registers/fa-run-preview.tsx`) and shows what the
+next run WOULD do before anything is written: the period the register chose, the per-asset amounts,
+both general-ledger legs, every skipped asset with its reason in words, whether the run will post or
+wait for approval, and any period the oracle skipped for a closed financial year. Confirm runs it.
+
+**Every skip reason was MEASURED, and an unknown one degrades rather than vanishing.** The five the
+database can emit are `incomplete`, `not_in_service`, `fully_depreciated`, `none_method` and
+`disposal_draft_outstanding` — the fifth is written by `clara._fa_compute_charges` itself and the
+per-asset function can never return it. A reason outside that map renders as its VERBATIM code
+beside a neutral sentence; it is never dropped and never guessed. The skipped list may collapse only
+when every reason is benign: a row skipped for incomplete particulars renders the list OPEN, because
+it is work somebody still owes.
+
+**One decision, one key — on every FA door, not only the run.** These wrappers used to mint
+`crypto.randomUUID()` inside themselves, so "the response was lost, click again" answered the retry
+with a refusal instead of the receipt it had already earned. `lib/registers/depreciation.ts`'
+`useDepreciationDecisionKey` mints one key per OPEN DECISION, keyed on the intent tuple, and holds
+it until the decision changes or ends — on `components/work/work-cancel-dialog.tsx:95`'s shape. The
+tuples are `depreciationIntent` (client, period start, period end), `authorityIntent` (the act, the
+authority, the value being decided) and `reviseIntent` (every value the revision door is asked to
+write, particulars key-sorted). **Signing is where a person actually meets this**: the sign door's
+replay identity is {client, authority}, so a second key reaches 0227's `authority_already_live` arm
+and refuses. `completeFixedAssetParticulars` and `disposeFixedAsset` still mint their own key —
+#639's original shape, untouched by this branch and carried as a follow-up.
+
+**Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
+pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.
+The fifth tab is new: *Policy & effective revisions* renders the `lineage` array as a revision
+timeline — one row per generation with its effective date, its particulars, its change class and the
+reason for it — because "this asset's estimate has never been revised" and "depreciation particulars
+are not filled in yet" are different facts and a merged section can show only one of them. A
+generation minted before migration 0227 carries no class and reads as NOT RECORDED, never as an
+accounting claim this surface invented. *History* gains the immutable charge ledger from the
+`charges` array, each row linking the journal entry it posted; an unwound charge is struck through
+beside the row that unwound it rather than removed. Both arrays have been returned by
+`clara.get_fixed_asset` since 0041 and this app had never read either.
+
+**A revision now says what kind of change it is.** The revise dialog
+(`components/registers/fa-row-actions.tsx`) carries a change-class control and a required reason.
+`estimate` is the only selectable value; `policy` and `error` render as VISIBLY DISABLED options
+carrying the rule in words and naming the ticket that owns the retrospective-restatement lane, so a
+person learns the rule instead of wondering where it went. Both typed values survive a refusal, and
+a typed CLR37 refusal renders verbatim with its code.
+
+**Signing names the instruction it executes.** `fa-authority-ceremony.tsx` gains the instruction
+reference — the Work or chat task the instruction lives in — and renders the resolution refusals
+verbatim with their codes. `depreciation-authority-panel.tsx` shows the resolved reference as a link
+and the authority window's floor, with the honest sentence that anything earlier is reached only by
+an explicit catch-up a person performs.
+## #656 — the opening basis gets a source, and the books say so
+
+Three separate places made the document half of the opening lane unreachable from a browser, and
+all three had to be fixed for any of them to matter.
+
+- **`CreateOpeningSeedDialog` sent `tieDocumentId: null` unconditionally**, so no basis could ever
+  be bound to a document. It now offers this client's ACTIVE VERIFIED filings of the two kinds
+  `clara.create_opening_seed` admits — never `prior_gl`, which is CLR02 today — and sends BOTH the
+  id and the sha, because the door's XOR guard refuses one without the other. "No document — I will
+  key the balances" stays an EXPLICIT second choice with its own words, never an empty first row a
+  person falls into. Both new inputs are `Field`s in one `FieldGroup`, and the pre-`Field` as-of
+  input moved into the same group so the dialog does not carry two compositions. The rest of the
+  opening dialogs keep theirs; a whole-lane retrofit is #900's shape.
+- **The workbench rendered NOTHING for a tied basis** — the keyed panel mounts only when there is no
+  tie document — so a basis bound to a document showed four tie gates over targets nobody could see.
+  `OpeningTargetDocumentPanel` is its sibling: line key, the label AS PRINTED, account, debit,
+  credit and provenance (the document, its sha-12 and the region id the target cites). An unmapped
+  row renders as an ACTION, never a dash.
+- **Nothing called the runtime.** `OpeningParseAction` + `lib/registers/opening-source.ts` post to
+  `/api/runtime/opening/parse-targets` through the same-origin proxy, with the house runtime-wire
+  discipline. It is a PLAIN action: AC5 forbids a second ritual for the document read, and the
+  ceremony this lane has is `approve_opening_seed`'s distinct-checker door.
+
+**The outcome is persistent, never a toast.** A refusal here names rows on a page a professional has
+to go and find — the producer's whole value is that it says which lines it could not read — and a
+message that fades cannot carry that. Every branch of the route's contract renders with the
+database's own words: the named 422 VERBATIM with its counts and failing rows,
+`no_opening_tb_lines` as the honest keyed-fallback signal rather than an error, a 403 as denied
+(naming the restriction, offering no fake retry).
+
+**The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
+labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
+law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure
+worn as a tie figure, and `opening-dryrun-unchanged.test.tsx` re-measures that the totals did not
+resurrect it.
+
+**…and on a document-sourced basis the unmapped row STATES a fact rather than printing a zero**
+(fix-round, review finding A10). `unmappedCount` is structurally always 0 there — two database
+walls make every parsed target source-exact and chart-present — so "Not yet mapped: 0 line(s),
+Dr 0.00 / Cr 0.00" renders a CONSTANT as if it were a measurement, and a reader who does not know
+that reads it as "everything is mapped": C-25's defect one layer down. When every target is
+document-sourced (`isDocumentSourcedBasis`) the footer keeps the term and says why there is no
+count; a basis carrying a KEYED row keeps the numeric count, because there `unmapped_labels` is a
+real state a person can act on.
+
+**What the browser leg found that no component cell could (fix round).** Six of the walk's seven
+legs shipped as `test.fixme`; running them one at a time surfaced three app defects on this very
+surface. (1) The settled read outcome was UNMOUNTED by the reload that follows a successful read —
+`DataState` renders its LoadingState instead of children and every `act()` flips `loading`, so the
+banner that AC5 requires to be persistent vanished at the moment of success; fixed with
+`opening-register.tsx`'s own `hasSeedsData` precedent inside `opening-seed-workbench.tsx`. (2) The
+document panel was mounted with `documentName={null}`, so every provenance cell read the sha twice
+("Document 65a6f1e2d3c4 (sha 65a6f1e2d3c4)") and the footer had a hole where the filename belongs;
+the workbench now reads the tie document's name in a SEPARATE read whose failure costs only the
+name. (3) `OpeningDryrunStrip` rendered its refusal token at `opacity-70`, taking `text-warning` on
+`bg-warning-muted` to 3.33:1 — below WCAG AA for 12px text, and invisible to
+`scripts/check-token-contrast.mjs`, which reads only the tokens in globals.css. A component cell
+mounts one component with nothing re-reading around it; only the built page in a browser has the
+reload, the second read and the real colours.
+
+**A refusal by the READER is a warning, not the keyed invitation.** A 422 whose reason is the
+producer's own sentence ("trial balance does not balance: DR … vs CR …") is not
+`no_opening_tb_lines`, so `isKeyedFallback` is false and the face renders the warning branch with
+the reason verbatim — never "key the balances instead" over a document the reader has just found
+internally inconsistent.
+
+**C3's seam.** `ENTRY_SELECT` now reads `is_opening_balance`, and an opening entry carries a badge
+linking back to `?tab=opening`. An approved opening item posts an ordinary entry with
+`origin='manual'` (0017:3375-3384), so before this the client's own books showed their opening
+position and a journal typed this morning under the same word.
+## The durable batch card vs the live upload queue (#636)
+
+Two components on one surface answer two different questions, and conflating them is the defect
+`intake-receipts.tsx:5-10` was written to close.
+
+- `upload-panel.tsx` is the LIVE transfer view: what THIS browser is doing right now. It carries
+  the only legitimate `Progress` on the tab — a MEASURED byte transfer, with `value={null}` for the
+  unmeasurable case.
+- `intake-batch-card.tsx` is the DURABLE parent: what the firm's books know happened. Every number
+  and every row is read back through `clara.get_intake_batch`, so it survives a reload, a new tab
+  and a different device.
+
+**NO `Progress` AND NO PERCENTAGE ON THE CARD, IN ANY STATE.** The door supplies no denominator
+(0229 asserts it in its own tail); appendix D item 44 permits `Progress` only for a known
+numerator/denominator and says "Indeterminate agent Work keeps its durable named state instead";
+`work-detail.tsx:6-12` already forbids one for a single Work. The card renders labelled facet counts
+with their coverage word. The five facets OVERLAP — a member can be admitted AND waiting — so they
+legitimately exceed the member count and are never summed.
+
+**THE CAPACITY COPY SAYS 08:00, NEVER "MIDNIGHT" AND NEVER "TOMORROW".** The daily document window
+is `date_trunc('day', now() at time zone 'utc')` (0007:1644), whose boundary is 08:00
+`Asia/Kuala_Lumpur` — MEASURED on a migrated rig. The card renders the DOOR's own
+`resets_at_local`, so the string cannot drift from the wall it describes, and
+`lib/documents/batch-url-state.test.ts` fails if either word is ever written into the catalogue.
+
+**NO NEW ROUTE AND NO NAVIGATION LEAF.** The batch is `?batch=<uuid>` URL state on the two
+Documents leaves that already exist, on `lib/documents/url-state.ts`'s own idiom: `router.push` to
+open so Back closes, `router.replace` when the page was loaded directly at it, every other
+parameter preserved, and a malformed id answered as not-found rather than folded into "nothing is
+open".
+
+**THE TWO MOUNTS DIFFER ONLY BY `clientId`.** `components/firm/documents/unassigned-sources.tsx`
+mounts the same card with `clientId={null}`; `documents-workbench.tsx` mounts it with the real
+client's id. Nothing gates Cancel on either mount — the rows carry navigation, not acts, so there was
+never a second job for a read-only flag to do, and Stop is reachable on both for the same reason a
+person looking at a firm-wide board is exactly the person who needs to stop a batch.
+A TERMINAL batch offers no Stop on either mount — an affordance that could only refuse.
+
+**THE STOP DIALOG COUNTS WHAT IS STILL ARRIVING, NOT ONLY WHAT IS RUNNING.** `get_intake_batch`
+returns `pending_members` (members with no Work yet whose intake is still arriving or whose document
+is still being read), and the dialog says so. Without it, a batch stopped during ingest — the moment
+a hundred-file batch is most likely to be stopped — read "0 operations are still running" while a
+hundred were.
+
+**A STOP THAT CANNOT FINISH SAYS SO.** When the door answers `cancel_blocked`, the card renders a
+banner naming the reason and the remedy instead of showing "stopping" for ever. Today the one value
+is `canceller_not_active`: the fan-out must re-issue with the stored actor, so if that person leaves
+the firm, the remaining children cannot be stopped under that decision.
+
+**ONE CONFIRM, ONE GOVERNED CALL.** `intake-batch-cancel-dialog.tsx` performs exactly one
+`POST /api/runtime/intake/batches/:id/cancel`; the fan-out — one `clara.cancel_accounting_work` per
+live child — is the server's. One op key per open decision, minted with `work-cancel-dialog.tsx`'s
+`useDecisionKey` idiom copied with its source named.
+## #658 — knowledge freshness, who read a record, and "your basis changed"
+
+**C13 register** (`components/registers/knowledge-panel.tsx`). The version line now prints the
+`knowledge_version` AND the Kuala Lumpur `as_of` date the view was computed for — a version with
+no as-of is half an answer, because the in-effect marks below it are computed against a day. The
+date comes from the one business-date law (`lib/business-date.ts`), never the browser's raw
+clock. A record whose effective window does not cover that day is MARKED (`Not in effect on
+<date>`, a WORD with a title, never a colour alone) and STILL RENDERED: silently dropping a rule
+is how a reader comes to believe a client has no policy when it has one that stopped applying.
+Both facts come from fields `clara.list_client_knowledge` already returns, so there is no new
+door, no recut and no human grant on any pack (#783). The four existing faces are unmoved.
+
+**C13 record detail** (`components/registers/knowledge-record-reads.tsx`). "Work that read this
+record", below the revision timeline — the timeline is what the record IS, this is who consumed
+it. It reads `clara.list_work_knowledge_reads_for_record`, which `DECISIONS.md:83` mandates
+because the relation is FORCE-RLS with no app-role SELECT. It is READ-ONLY (the Work is a link,
+never an act), CAPPED at the door's 100 with an exact `hidden_count`, and it carries its OWN
+state ladder because this read fails independently of the two the page already makes: a denied
+reads-read leaves the revision timeline readable beside it, and an EMPTY list says "no Work has
+recorded a read of this record" — never "this record is unused", and never as an error.
+
+**B3 Work detail** (`components/work/work-knowledge-block.tsx`, mounted in ONE line inside the
+Sources tab). What this run read: the face word, the version, the period, the key set and the
+per-tier counts, from ONE `clara.work_knowledge_drift` read. `observed_revisions` is rendered
+for the first time inside the EXISTING `work-diagnostics.tsx` rows — a second
+`get_work_execution_trace` read on one page would double the request and split the honesty story
+across two components.
+
+**The drift banner has TWO wordings, because the door distinguishes them**, and it renders on
+the Work AND on `components/work/work-question-form.tsx`:
+
+- `relevant: true` → "a record this Work read has changed: <keys>", naming only the
+  INTERSECTION of what moved with what was read.
+- `relevant: null` (the observed version came from an execution trace, so no read-set exists) →
+  "this client's knowledge changed after this Work last read it; which records it read was not
+  recorded." **Never a confident "unrelated"**: the absence of a record is not evidence of
+  absence.
+
+**IT NEVER CLEARS A TYPED ANSWER.** The banner is additive — no draft is discarded, no field is
+reset, nothing is disabled — and `components/work/work-question-drift-banner.test.tsx` holds
+that with a drift that resolves only after the person has typed.
+
+**ONE FACT, ONE READ, ONE STORY — and the coalescer is where that is enforced.** The Sources
+block and the question form are two independent consumers of the same drift fact, and the form
+renders once per PENDING question card, so a Work detail could spend `1 + N` identical door calls
+and — worse — let the block and the banner disagree when a capture lands between two reads.
+`lib/work/knowledge.ts` therefore holds an **in-flight coalescer** keyed by `(work id, resolved
+session accessor)`: consumers that mount in the same tick share one request and one answer. The
+fix is NOT a prop drilled down from `work-detail.tsx`, because the same form is also mounted by
+the Clara chat lane (`components/parts/WorkCards.tsx`) and by Needs-you
+(`components/firm/work-question-affordance.tsx`), where there is no owner to drill from. It is a
+coalescer and **not a cache**: an entry lives only while its request is in flight, so the block's
+"re-read" button still makes a real call, a caller that brings its own `AbortSignal` keeps its own
+request (one component's unmount must not abort another's read), and two different accessors are
+two auth contexts that never share an answer. `lib/work/knowledge.test.ts` holds all four.
+## #660 — the client home's money band
+
+`lib/dashboard/financial-pack.ts` IS THE ENVELOPE MODULE, and it is exported as one on purpose:
+#669's receivable/payable tiles are a later ticket over the SAME door and the SAME parser, so they
+inherit the hydration rules rather than re-deriving them. Two rules carry the whole file:
+
+- **Unknown is not zero.** A figure this build could not read is `{status:'unknown',
+  valueCents:null}`. "This client's cash is zero" and "I could not find out what this client's cash
+  is" are different sentences; a `?? 0` anywhere in that module would be the bug.
+- **A number never arrives without its period.** A figure group missing ANY of its ten envelope
+  fields hydrates as `unknown`, not as a number with a hole in it — an amount whose interval the
+  reader cannot see is an unanswerable claim rather than a smaller truth.
+- **A comparison the door WITHHELD is said, not skipped.** `comparison.available:false` (with its
+  `reason`) is what the door sends for a period before this client's books begin; the face renders
+  the sentence rather than an amount, because "against RM 0.00" for a month-end the same read calls
+  unknown is a fabricated zero one line below the headline.
+- **The composition lives in the figure group it is about**, with its own `compositionTotal` /
+  `compositionTruncated` beside the entry level's pair, so a table cut at the door's 50-account cap
+  says "Showing 50 of 61 accounts" instead of quietly summing to less than the figure above it.
+
+NO CENTS ARITHMETIC HAPPENS IN THE BROWSER, and two source-reading cells keep it that way
+(`financial-pack.test.ts`, `period.test.ts`). Every delta, percentage, cap and series point is
+computed in `clara.get_client_financial_pack` (0232), once, so the browser, a later report and
+#669's tiles cannot disagree about what "down 12%" means.
+
+**ONE SECTION, ONE READ, FOUR FACES — and that satisfies the board's law rather than breaking it.**
+`client-workspace-overview.tsx:16-19` says every SECTION reads for itself, because a board that
+blanks on a single failure reads as "this client has nothing outstanding". Cash, profit and the two
+trends are not four sections: they are four faces of ONE envelope that are only true together —
+they share a period, a definition version and a SOURCE WATERMARK, which four reads could not
+guarantee. So the money band is one section with one hook instance, and a failure there darkens
+exactly that band.
+
+**THE ADDRESS IS THE ONLY SOURCE OF TRUTH FOR THE PERIOD.** `?period=YYYY-MM` names a whole natural
+month and its absence means month-to-date; the route reads it on the SERVER (`journals/page.tsx`'s
+own precedent) and the selector `router.push`es — push, not replace — so Back restores the period a
+reader came from. A malformed value falls back to month-to-date and the face SAYS so, because
+silently rewriting an address would let a reader screenshot one month under another month's label.
+
+**COMMIT-EVENT INVALIDATION IS A NAMED RESIDUAL, NOT AN OMISSION.** `lib/command/bus.ts` carries
+exactly two events (`clara:focus-rail`, `clara:client-record-changed`) and NEITHER is a posting or
+an approval — there is no commit event in this app to subscribe to. Rather than promise a freshness
+this build cannot deliver, the band's footer says what it actually does: these figures refresh at
+most every 30 seconds while the tab is open, and here is the last successful read. The 60-second
+"delayed" rule is IMPORTED from `lib/work/use-work-detail.ts` (C77.12: one contract, one owner,
+extended by reference rather than copied), and a source-reading cell refuses a second literal.
+
+### Recharts, and the table that is never a fallback
+
+`recharts@3.8.0` and `components/ui/chart.tsx` arrived through `pnpm --filter @clara/web ui:add
+chart` and its guard's own resolution. The payload also names `components/ui/card.tsx` as an
+OVERWRITE and the guard does not block it (`scripts/protected-components.json` holds only
+`button.tsx` and `pagination.tsx`), so the overwrite was refused at the CLI's own per-file prompt
+and `card.tsx` is byte-identical
+(`sha256 d8113cbf964f8d1aadf2649d2944d8bbc6e3cfd49d36746f76868cbc4dde3cfe`, unchanged).
+
+**The readable table is ALWAYS in the DOM**, beside the chart and not instead of it. Appendix D
+admits a chart only "for a defined time series or comparison … plus a readable value/table
+disclosure", and a disclosure that renders only when something fails is not one. The chart is
+`aria-hidden` because the table IS those rows, and announcing both would read the same six numbers
+twice. At 640px and below the chart is out and the table is the whole disclosure — which is exactly
+why it could never be failure-only. `prefers-reduced-motion` disables the animation at the source
+(`isAnimationActive` is off), so it is never started rather than started and overridden.
+
+`components/ui/chart.tsx` imports `cn` from `@/lib/utils` like the other 25 files under
+`components/ui/`. The registry's generated file imported it from the `cn` npm package instead,
+which would have put a SECOND class-merging engine (and the only caret-ranged dependency in
+`apps/web`) into one design system, where a single Tailwind conflict could resolve two ways on one
+page; the package was dropped and the import re-pointed. Nothing else in the generated file was
+hand-edited.
+
+`packages/reporting-render/lib/chart.mjs` is the FROZEN PDF chart runtime. It is never referenced,
+never imported and shares no code with this; nothing here hand-rolls a second SVG chart.
+## `/settings/firm` — the firm's commercial destination (#635)
+
+This is where a firm reads its own legal, commercial and model-usage state. Five cards over
+migration 0233's three governed reads, on the one existing address — there is no new route, so
+`tests/firm-scope-fourth-entrance.test.ts` and `tests/firm-scope-surfaces.test.ts` stay green
+(verified, not assumed), and the page still makes exactly ZERO extra `requireFirmScope()` calls: the
+identity card reads the scope the layout already provided.
+
+**ACCEPTING A NEW LEGAL VERSION HERE IS THE ONLY REMEDY IN THE PRODUCT** for a withdrawn derived
+model-egress authority. `clara._accounting_work_egress_live` (0195:875) requires ONE active OWNER
+holding acceptances of BOTH currently published legal kinds; a newer publication withdraws that the
+moment it lands (0195:890-892), with no sweep and no second switch. Until this page, the sentence
+`WorkDetail.egressNotAuthorized.body` shows a person standing in front of blocked Work — "an owner
+must accept the current versions" — had no destination: the only accept surface was `(entry)`'s
+signup stage, which a signed-in owner never sees again. `components/firm-admin/accept-legal-dialog.tsx`
+is that destination, and it imports `lib/registration/legal-reads.ts` and `legal-doors.ts`
+UNCHANGED rather than forking them, so the op-key, verbatim-digest and stale-re-read properties are
+the same ones the signup journey already proves.
+
+**What this page deliberately does not have**, each because the estate cannot honestly offer it:
+no price while `billing_plans.amounts_ruled` is false (the flag is the render condition, so an
+owner ruling shows a figure with no code change); no "Manage billing" control at any rank (nothing
+in this estate can change a firm's commercial arrangement — `billing_plans` has no door, and
+`firm_registration_payments` is written only by the Stripe webhook lane); no editor for the
+processing caps (`clara.firm_document_limits` has no human writer at all, 0196:36-40); no seat
+count; no chart; and no firm identity fact — the registered name, registration number and address
+live on `/settings/setup`, which this page links to and owns none of.
+
+**Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
+governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:
+the `denied` state has no `data` field, so a live demotion cannot leave a stale plan or payment
+behind a disabled control. It does NOT re-read `clara.caller_context` to notice the demotion — that
+is the child-side re-read P4-6 rules out, and it would make the surface trust a mirrored rank
+instead of the wall. NAMED RESIDUAL: a tab that is never refocused and never navigated keeps its
+last payload until one of those happens; closing that needs a server-push channel this estate does
+not have.
+
+**The accept control is gated on the CALLER's own acceptance, not on the firm's.**
+`standing_live` needs ONE active owner holding BOTH current acceptances, so two owners holding the
+two halves is a state where every kind reads `firm_accepted: true` and standing is still false
+(`p635.db.legal_standing_two_people` asserts exactly that). A control gated on `!firm_accepted`
+disappeared in precisely that state, leaving the firm with no in-app remedy at all. The gate is
+`can_accept_for_firm && !standing_live && status = 'published' && my_accepted_version <> version`:
+a control for the owner who can actually move the wall, and none while standing is live. The hint
+everyone else reads names the MOST RECENT acceptance on record — not "whoever sorts first accepted
+the previous ones", which is false whenever one kind's acceptance is still current.
+
+**An answer carries the month it is an answer for.** The window label, the CSV's provenance header
+and the download filename follow the period the instant it changes; the rows follow the door, which
+is a round trip later. So `FirmSettingsPanel` stamps the month onto the usage answer and the card
+renders nothing until the two agree — otherwise the provenance header that exists so a spreadsheet
+cannot lose the window would state a window its rows did not come from.
+
+**An unreadable read is never an empty one.** `loadFirmAiUsage` THROWS when the payload is not a
+table (the two sibling reads already did), so a refusal-shaped body reaches the card as a failure
+with a retry rather than as "No model calls in this period." Rows the build cannot decode are still
+dropped — a silently zeroed row is worse — but the COUNT comes back, the card says so beside the
+money column, and the CSV carries it, exactly as `unpriced_calls` is carried. Likewise, a firm with
+NO current billing plan (`uq_billing_plans_current`, 0163:207, permits zero) reads "No plan is
+current for this firm" and keeps its payment line, invoice explanation and capacity numbers, rather
+than dropping the whole answer behind a transport failure.
+
+**The model-usage window is UTC, and the page says so.** `clara.get_llm_usage_summary` filters rows
+by `(created_at at time zone 'utc')::date` (0110:750), so the month the card labels is a UTC month
+and not an `Asia/Kuala_Lumpur` one. `lib/firm/usage-period.ts` derives the bounds the way the door
+does and the card prints them. The CSV is client-side only — no route, no door, no byte path — and
+its first two lines carry the firm, that exact window and the currency, so a spreadsheet cannot lose
+the unit or the timezone the screen carried.
+

@@ -1,0 +1,39 @@
+{
+  "ticket": 656,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "reviewer_role": "spec-reviewer (read-only)",
+  "branch": "impl/656-opening-ledger",
+  "head": "d94e6580",
+  "verdict": "accept",
+  "summary": "Independently re-ran every measurement the report cites (db battery 12/12, document-capability-registry.test.mjs 19/19 both before-state-equivalent and after, runtime unit batteries 24/24, the real-Postgres World leg PASS, the whole apps/web unit suite 4165/4162 pass/1 fail/2 skip with the failure landing on the exact known use-clara-thread-stop.test.ts flake the report names, the 29 new web-battery cells 29/29, the 18 top-level e2e-fixture-ownership tests all green, check-frozen-workflows.mjs and check-parts-parity.mjs both clean no-ops, typecheck and lint both green, and the opening-ledger-source Playwright walk itself: 1 passed / 6 skipped (test.fixme), 33.3s) and every number matched the report exactly. Read the full diff against origin/main: migration 0228 is UPDATE-only (never DELETE-then-INSERT), raises every one of the 240 registry rows to version 2 per the orchestrator's 2026-09-19 06.1 ruling, and its prestate/tail DO blocks assert the p656.m1 census (240 rows, one distinct version, min=max=1) before touching anything, refusing to apply otherwise -- this is the STOP-and-report gate the brief demanded, correctly implemented as a hard migration-time exception rather than a comment. D13's four restated lines (in-line OCR wiring, non-frozen, kind-blind, never-throws; all-or-nothing refusal naming every failing row; UPDATE-based registry v2; no Clara entrance this wave, contract written) are all honoured in the code, not just claimed. Ownership boundaries (ONE hunk in #655's apps/web/lib/journals/api.ts, ONE badge in journal-entry-row.tsx, no PRD.md/ARCHITECTURE.md edit, CONTEXT.md carrying exactly the four ratified terms) all check out against the diff. No blueprint was edited, no new grant/lane/successor was cut, no scope was silently widened. Two disclosed deviations from the brief's literal text (prior_gl's business_operation held at stored_only rather than raised to supported, and the format list narrowed to the 6/7 rows with an actual reader) are both evidenced with an exact failing-test citation (document-capability-registry.test.mjs:278-284) and flagged in the report as 'orchestrator decision needed' per WORK-ORDER rule 6 -- this is the correct escalation, not a silent narrowing. The one real, material gap is AC6's browser proof: 6 of the walk's 7 legs are test.fixme and do not execute in a browser at all; only the URL-stability leg is live. That gap is disclosed in exhaustive detail (measured leg-by-leg timings, root-cause hypothesis, a named follow-up F7) rather than hidden, and the underlying behaviour is covered by 29 node-level cells plus the real-Postgres e2e leg -- but it is still a shortfall against AC6's explicit 320px/200%-zoom/keyboard+focus-return/SR browser-proof requirement and is called out below as a major finding for visibility, not because the report misrepresents it.",
+  "findings": [
+    {
+      "id": "656-S1",
+      "severity": "major",
+      "category": "ac-incomplete",
+      "where": "apps/web/e2e/opening-ledger-source-walk.spec.ts:91-249",
+      "what": "AC6 requires the full state ladder, 320px, 200% zoom, keyboard/focus-return and screen-reader proof to be verified as a real browser journey. Six of the walk's seven legs (the whole journey, the named refusal, no_opening_tb_lines, keyboard+focus-return, 320px+axe, 200% zoom) are marked test.fixme and do not run; only the reload/Back URL-stability leg is live.",
+      "evidence": "Ran `pnpm --filter @clara/web e2e opening-ledger-source --reporter=line` myself on the ticket's own rig (after clearing two stale leftover node processes holding ports 3350-3352 from an earlier build): output was '1 passed (33.3s)' / '6 skipped', matching the file's own header measurement at opening-ledger-source-walk.spec.ts:24-30 exactly (ok 4 · reload/Back; x 1,2,3,5,6,7 all test.fixme). This is a genuine shortfall against the literal AC6 text in the ticket body ('wide/narrow (including 320px), 200% zoom, keyboard/focus return, screen-reader names ... Use the relevant accepted shadcn/Base UI composition').",
+      "fix": "Not a fix for this reviewer to make (read-only). The report already files this as follow-up F7 with a concrete next step ('run the legs one at a time with --reporter=line and read the assertion'); the orchestrator should decide whether #656 merges with this residual or whether F7 must land in the same PR before merge, given the underlying behaviour is otherwise covered by 29 node cells and the real-Postgres e2e leg."
+    },
+    {
+      "id": "656-S2",
+      "severity": "note",
+      "category": "decisions-gap",
+      "where": "packages/db/migrations/0228_opening_ledger_source.sql:64-79 (header) and reports/656-final.md Assumption 1",
+      "what": "The brief's literal §3 text instructs `prior_gl x every format -> business_operation = 'supported'` with `typed_facts` left at `stored_only`. The worker measured that this combination is refused by the registry's own executable law (document-capability-registry.test.mjs:278-284, 'business_operation never claims supported where typed_facts is not supported') and held prior_gl's business_operation at stored_only instead, correcting only the false basis sentence and naming the gap in `limits`. DECISIONS.md sec6.1 only ratified the whole-registry version-raise question for #656, not this business_operation-level question, so this is a genuinely new, unresolved tension between the brief's literal instruction and a live invariant.",
+      "evidence": "Migration header lines 64-79 document the measured contradiction with the exact failing cell and file:line; reports/656-final.md's Assumption 1 states 'Orchestrator decision needed' explicitly; I independently confirmed document-capability-registry.test.mjs's cell at that description exists and passes today (19/19, including that cell) only because the level was held.",
+      "fix": "No code fix needed; this is WORK-ORDER rule 6's 'take the most conservative reading, state the assumption, do not stop to ask' followed correctly. The orchestrator should explicitly rule on whether prior_gl's business_operation stays stored_only (as shipped) or whether the registry's four-level vocabulary itself needs revisiting (the report's own follow-up F6)."
+    },
+    {
+      "id": "656-S3",
+      "severity": "note",
+      "category": "evidence-quality",
+      "where": "reports/656-final.md throughout",
+      "what": "Every quantitative claim I attempted to re-verify (DB battery 12/12, registry battery 19/19 twice, runtime unit 10/10+14/14, World-leg PASS, whole apps/web suite 4165/4162/1/2 with the exact same failing cell, new web batteries 29/29, 18 fixture-ownership tests, check-frozen-workflows/check-parts-parity no-ops, typecheck/lint green, and the walk's 1-pass/6-fixme shape) reproduced exactly on independent re-run.",
+      "evidence": "Commands and outputs captured in this review session against clara_656 / worktree C:\\Users\\zhant\\Desktop\\clara-wt\\656 at HEAD d94e6580, matching the report's own numbers line for line.",
+      "fix": "No action needed; recorded as a positive evidence-quality note rather than a defect."
+    }
+  ]
+}

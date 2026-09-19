@@ -8,6 +8,7 @@
 // post-0129 arity, never the retired rule-aware shape.
 
 import { s, numOrNull, bool, rec } from "./types";
+import { toMatchHistory, type MatchHistoryRow } from "./matching-context-types";
 
 export type OpenItemDomain = "ar" | "ap";
 
@@ -53,6 +54,11 @@ export type MatchCandidateEntryRow = {
    *  authority at write time). */
   debit_remaining_cents: number | null;
   credit_remaining_cents: number | null;
+  /** #657 (migration 0226): the last five groups this entry rode on THIS bank account's COA,
+   *  newest first. The DB bounds it (`order by acted_at desc limit 5`), not the face — a
+   *  surface that truncates a list it was handed in full is a surface that quietly hides
+   *  evidence. */
+  match_history: MatchHistoryRow[];
 };
 
 export function toMatchCandidateEntry(raw: unknown): MatchCandidateEntryRow {
@@ -67,6 +73,7 @@ export function toMatchCandidateEntry(raw: unknown): MatchCandidateEntryRow {
     high_stakes: bool(o.high_stakes),
     debit_remaining_cents: numOrNull(o.debit_remaining_cents),
     credit_remaining_cents: numOrNull(o.credit_remaining_cents),
+    match_history: toMatchHistory(o.match_history),
   };
 }
 
