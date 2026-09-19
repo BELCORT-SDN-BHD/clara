@@ -277,6 +277,73 @@ test("F6-2: a refused record_opening_target does NOT wipe the typed line key —
   });
 });
 
+test("#987: drafting an opening item into a CLOSED fiscal year names the OPENING BASIS, never a raw journal-entry id", async () => {
+  // clara._tf_period_wall_lines (0056_wave_e_close_model.sql:746-749) refuses at the DRAFT with
+  // CLR19 write_into_closed_period, naming the ENTRY it would have created and the fiscal year's
+  // label — the estate's one generic period-wall message, correct for every OTHER lane (the
+  // person never typed a journal entry here; #656 residual R2). The code and reason token must
+  // still surface (AC1: same rule, same refusal code) — only the SENTENCE changes.
+  const ENTRY_ID = "e1111111-1111-4111-8111-111111111111";
+  const mock = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) return jsonResponse(DRYRUN_EMPTY);
+    if (url.includes("/rest/v1/rpc/draft_opening_item")) {
+      return jsonResponse({
+        code: "CLR19",
+        message: `entry ${ENTRY_ID} sits in closed fiscal year FY2026; its lines may not change -- the formal reopen path is the one way back in`,
+        details: JSON.stringify({
+          reason: "write_into_closed_period", fiscal_year_id: "fy1", fy_status: "closed", entry_id: ENTRY_ID,
+        }),
+      }, 400);
+    }
+    if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([SEED_OPEN_UNTIED]);
+    if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse([{ id: "plan1", state: "open", revision_token: "rev1", created_at: "2026-01-01T00:00:00Z" }]);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([{ account_code: "1000", name: "Cash", account_type: "asset", account_class: null, special_acc_type: null, is_active: true }]);
+    if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse([]);
+    if (url.includes("/rest/v1/client_resolutions")) return jsonResponse([{ id: "r1" }]);
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(mock, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Draft opening item"));
+      assert.ok(trigger);
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      const keyField = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-draft-key");
+      assert.ok(keyField);
+      await h.act(() => setFieldValue(keyField as never, "cash-mbb"));
+
+      const buttons = buttonsLabelled(body as never, "Draft opening item");
+      await h.act(() => clickButton(buttons[1] as never));
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const text = textOf(body as never);
+      assert.match(text, /CLR19/, "AC1: the same governed code still surfaces");
+      assert.match(text, /write_into_closed_period/, "AC1: the same reason token still surfaces");
+      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "#987: the raw journal-entry id the person never created must never reach them");
+      assert.doesNotMatch(text, /sits in closed fiscal year/, "#987: the raw entry-centric sentence must not render inside the opening-basis flow");
+      assert.match(text, /opening basis/i, "#987: the message must speak in terms of the opening basis being worked on");
+
+      // CB-AE2E-004's own law, unaffected by this ticket: a refusal never closes the dialog nor
+      // wipes what the human typed.
+      const stillOpen = buttonsLabelled(body as never, "Draft opening item");
+      assert.equal(stillOpen.length, 2, "the dialog must still stay open on this refusal, exactly as on any other");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
 const FINALIZED_SEED = { ...SEED_OPEN_UNTIED, state: "finalized", batch_n: 1, finalized_at: "2026-01-16T00:00:00Z", finalized_by: "u1" };
 const FA_ITEM = { id: "ifa", firm_id: "f1", client_id: "c1", seed_id: "s1", item_kind: "fixed_asset", item_key: "van-1", entry_id: "efa", counterparty_id: null, fixed_asset_id: "fa1", item_ref: null, item_date: null, amount_cents: 8000000, sst_portion_cents: null, sst_rate_bp: null, sst_basis: null, state: "active", superseded_by_item: null, supersedes_item_id: null, created_by: "u1", created_at: "2026-01-15T00:00:00Z" };
 const GL_ITEM = { id: "igl", firm_id: "f1", client_id: "c1", seed_id: "s1", item_kind: "gl_balance", item_key: "cash-1", entry_id: "egl", counterparty_id: null, fixed_asset_id: null, item_ref: null, item_date: null, amount_cents: 500000, sst_portion_cents: null, sst_rate_bp: null, sst_basis: null, state: "active", superseded_by_item: null, supersedes_item_id: null, created_by: "u1", created_at: "2026-01-15T00:00:00Z" };

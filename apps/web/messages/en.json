@@ -4177,6 +4177,7 @@
       "reopenDescription": "Reopens a finalized seed for a further batch of items.",
       "reasonLabel": "Reason",
       "notSerializableHint": "Approval must run in a serializable transaction — the deploy ceremony sets this in the DB.",
+  "closedPeriodRefusal": "This opening basis is dated into a fiscal year that is now closed, so it cannot be drafted here. Date it into an open fiscal year, or have that year reopened, before trying again.",
       "asOfHint": "The date the opening balances are stated as at — normally the day before the first period you will keep.",
       "asOfRequired": "An as-at date is required.",
       "source": {

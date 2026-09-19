@@ -16,10 +16,11 @@ import { loadOpeningItems, loadOpeningTbTargets, loadOpeningKeyedResolution } fr
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { isDoorRefusal } from "@/lib/doors";
 import { SectionHeader } from "@/components/common/section-header";
+import { StateBanner } from "@/components/common/state";
 import { DataState, ErrorMessage } from "@/components/firm/data-state";
 import { OpeningSeedBadge, CancelOpeningSeedDialog, ReopenOpeningSeedDialog } from "./opening-seed-lifecycle";
 import { OpeningDryrunStrip } from "./opening-dryrun-strip";
-import { toDialogRefusal } from "@/components/common/dialog-refusal";
+import { toDialogRefusal, type DialogRefusal } from "@/components/common/dialog-refusal";
 import { OpeningItemsPanel } from "./opening-items-panel";
 import { OpeningTargetKeyedPanel } from "./opening-target-keyed-panel";
 import { OpeningTargetDocumentPanel } from "./opening-target-document-panel";
@@ -93,11 +94,31 @@ export function OpeningSeedWorkbench({
     return ok;
   };
 
+  // #987 — THE PERIOD WALL, IN THE OPENING BASIS'S OWN WORDS (#656 residual R2).
+  //
+  // `clara._tf_period_wall_lines` (0056_wave_e_close_model.sql:746-749) refuses `draft_opening_item`
+  // at the DRAFT with CLR19 `write_into_closed_period`, naming the fiscal year and the id of the
+  // journal entry it would have created — the estate's ONE generic period-wall message, correct
+  // everywhere else it fires. A person working an opening basis never typed a journal entry and is
+  // shown one anyway. The rule, the code and the firing point (draft, never approval) are exactly
+  // what they were; only the SENTENCE changes, and only inside this flow — every other caller of
+  // this same refusal (prepayments' own `explainClosedPeriod`, the bank/journals lanes, …) reads
+  // its message through `toDialogRefusal`/`ErrorMessage` untouched, because this substitution lives
+  // here, not in either of those shared renderers.
+  const openingClosedPeriodRefusal = isDoorRefusal(error) && error.code === "CLR19" && error.reason === "write_into_closed_period"
+    ? error
+    : null;
+  const openingRefusalCode = openingClosedPeriodRefusal
+    ? <>{openingClosedPeriodRefusal.code}{openingClosedPeriodRefusal.reason ? ` · ${openingClosedPeriodRefusal.reason}` : ""}</>
+    : null;
+
   // CB-AE2E-004 / 裁-187: ONE conversion of this workbench's sticky failure into
   // the shape every governed dialog below reads — it renders verbatim inside the
   // dialog (which now stays open on a refusal) and it is the only thing that
   // reveals an attestation field.
-  const dialogRefusal = toDialogRefusal(error);
+  const dialogRefusal: DialogRefusal | undefined = openingClosedPeriodRefusal
+    ? { err: t("closedPeriodRefusal"), clr: { code: openingClosedPeriodRefusal.code, reason: openingClosedPeriodRefusal.reason } }
+    : toDialogRefusal(error);
 
   // (fix-round, browser leg) ONCE THE BASIS HAS LOADED, A LATER `loading` IS A REFRESH — never a
   // teardown. `DataState` renders its LoadingState INSTEAD of children, and every `act()` flips
@@ -145,7 +166,9 @@ export function OpeningSeedWorkbench({
         </div>
       </div>
 
-      {error ? <ErrorMessage error={error} /> : null}
+      {openingClosedPeriodRefusal ? (
+        <StateBanner tone="error" code={openingRefusalCode}>{t("closedPeriodRefusal")}</StateBanner>
+      ) : error ? <ErrorMessage error={error} /> : null}
       {/* NOT A DEFECT, recorded per the fix round: approve_opening_seed /
           approve_opening_correction assert `transaction_isolation =
           'serializable'` in-body; no migration sets it (a manual wave-b 0017
