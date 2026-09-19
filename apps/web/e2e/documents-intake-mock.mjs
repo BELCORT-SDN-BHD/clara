@@ -185,6 +185,18 @@ function laneDocumentIds() {
   ];
 }
 
+/** STD-01 (code-review fix round) — the SAME `in.(…)` parse `document-correction-mock.mjs` and
+ *  `documents-viewer-mock.mjs` already export under this exact name (both edited in the SAME
+ *  #876 fix-round commit as this file): `null` when the param is absent or not `in.(...)` shaped,
+ *  else the decoded, trimmed id list. This file used to reimplement the same parse inline as
+ *  `namedLaneDocumentsIn`, folding the lane-ownership filter into it; the lane filter is now a
+ *  separate `.filter(laneDocumentIds().includes(...))` step below, matching the sibling files. */
+function inParam(url, key) {
+  const raw = url.searchParams.get(key);
+  if (!raw?.startsWith("in.(")) return null;
+  return raw.slice(4, -1).split(",").map((v) => decodeURIComponent(v.trim()));
+}
+
 /** The ONE extraction this lane publishes, for the settled document. */
 const EXTRACTION_ID = "e0e0e0e0-e0e0-4e0e-8e0e-e0e0e0e0e001";
 
@@ -357,13 +369,12 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
    *  `eq.` read this file already answers below) issues exactly this shape. Empty array, never
    *  null, when the param is present but shaped wrong or names none of this lane's documents —
    *  the caller distinguishes "answered, nothing matched" from "not this route" by whether this
-   *  function returns rows at all, same as `namedLaneDocument`'s null. */
-  const namedLaneDocumentsIn = (key) => {
-    const raw = params.get(key);
-    if (raw === null || !raw.startsWith("in.(") || !raw.endsWith(")")) return [];
-    const ids = raw.slice(4, -1).split(",").map((v) => decodeURIComponent(v));
-    return ids.filter((id) => laneDocumentIds().includes(id));
-  };
+   *  function returns rows at all, same as `namedLaneDocument`'s null.
+   *
+   *  STD-01 — the PARSE is `inParam` (module scope, shared shape with `document-correction-mock
+   *  .mjs` / `documents-viewer-mock.mjs`); the lane-ownership filter stays its own step here,
+   *  same as those two files do it. */
+  const namedLaneDocumentsIn = (key) => (inParam(url, key) ?? []).filter((id) => laneDocumentIds().includes(id));
 
   // THE RECEIPTS PREDICATE'S BOUNDED FILINGS READ (#876). `documents-workbench.tsx`'s intake
   // receipts card asks, for exactly the intake queue's own document ids, which of them already
