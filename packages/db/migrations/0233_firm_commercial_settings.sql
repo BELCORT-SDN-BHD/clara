@@ -610,6 +610,14 @@ begin
     raise exception '#635 tail: the standing door names the legal BODY or its digest -- those stay get_current_legal_documents()''s'
       using errcode='CLR10';
   end if;
+  -- v_code IS RE-DERIVED FROM *THIS* BODY, and the re-derivation is the assertion. It was last
+  -- assigned inside T.1's loop, whose final iteration is get_firm_ai_usage -- so the guard below
+  -- read the WRAPPER's source, found no 'users_visible' in it whatever the standing door said,
+  -- and passed unconditionally. Measured: with 'users_visible' spliced into the standing door's
+  -- code on a rig, the whole tail still returned OK. It must also be the COMMENT-STRIPPED source
+  -- and not v_src, because this body legitimately NAMES clara.users_visible in the comment that
+  -- explains why it does not use it -- testing v_src directly would red on a correct door.
+  v_code := regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g');
   if position('users_visible' in v_code) <> 0 then
     raise exception '#635 tail: the standing door resolves a name through clara.users_visible -- it must resolve inside the definer body'
       using errcode='CLR10';
