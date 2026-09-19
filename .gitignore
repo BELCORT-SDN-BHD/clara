@@ -63,3 +63,8 @@ Thumbs.db
 
 # Local scratch space for skills (to-tickets working files); delivery history lives on GitHub.
 .scratch/
+
+# World-e2e hold gates (#980, reviewed finding L10-A5): one directory per driver, files named per
+# run. A watchdog exit skips the finally that removes them, so they must never be trackable.
+packages/runtime/tests/.trade-invoice-gates/
+packages/runtime/tests/.work-cancel-gates/

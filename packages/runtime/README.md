@@ -1356,6 +1356,28 @@ absence of effect: `stopping` over the real route, `cancelled` as the terminal, 
 receipts, zero open items, and an invoice ledger that never reaches `posted`. The invoice ROW
 survives, because it was born inside the admission transaction and a cancel is not a retraction.
 
-**Both e2es' local gates now admit `clara_l<NN>`**, the per-lane database shape of the riders wave,
-beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`. Still loopback-only, still a parsed
-DSN equality check against the PG env, still fail-closed.
+**The `ask_question` script is scoped to ONE client, and the scope is mandatory.** One supervisor
+serves every queued accounting Work on the database — leftovers from earlier legs and from earlier
+crashed runs included — so an ask arm that fired on whatever the process picked up parked FOREIGN
+Work on a question nobody is holding, and `awaiting_input` is a state no leg polls out of: the next
+leg times out after 90s instead of measuring anything, and the row stays pending on the rig for
+good. `CLARA_WORK_ASK_ONLY_CLIENT` names the client whose Work may be asked; every other Work takes
+the `post` branch exactly as the default script would have taken it, and a caller that forgets the
+scope gets a loud child exit rather than a quiet park on a stranger's Work. Leg 6 admits a
+BYSTANDER Work for a second client in the same window and asserts it was never asked and settled on
+its own — the cell that says so.
+
+**Four World e2es' local gates now admit `clara_l<NN>`**, the per-lane database shape of the riders
+wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,
+`work-journal-e2e.mjs`, `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Still
+loopback-only, still a parsed DSN equality check against the PG env, still fail-closed. The
+remaining spawners (`accrual`, `plan-occurrence`, `prepayment-occurrence`,
+`fixed-asset-acquisition`, `work-egress`, `work-cancel`, `work-question`) still carry the narrow
+literal and cannot be run on a lane rig; one shared `tests/local-db-gate.mjs` is the standing
+follow-up.
+
+**No World e2e removes its gate directory recursively.** `tests/trade-invoice-e2e.mjs`'s hold gate
+cleans up its own two files and leaves `.trade-invoice-gates/` alone: the directory is shared with
+every other gate on the rig, and `open()` — the one call that must never throw, because a held
+child waits on that file forever — now re-creates its parent first. Both gate directories are
+git-ignored, because a watchdog exit skips the `finally` that would have removed their files.

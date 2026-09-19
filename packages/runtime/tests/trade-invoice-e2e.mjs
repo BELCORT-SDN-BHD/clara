@@ -151,6 +151,7 @@ function childEnv(extra = {}) {
   });
   delete base.CLARA_WORK_TEST_FAULT;
   delete base.CLARA_WORK_TEST_SCRIPT;
+  delete base.CLARA_WORK_ASK_ONLY_CLIENT;
   delete base.CLARA_CHAT_TEST_BASIS;
   // #980 · the cancel harness's hold is opt-in the same way: an inherited gate would hold every
   // OTHER leg's model at a window it never asked for.
@@ -272,7 +273,13 @@ function makeGate(label) {
   rmSync(held, { force: true });
   return {
     env: { CLARA_WORK_CANCEL_GATE: gate, CLARA_WORK_CANCEL_HELD: held },
-    open: () => writeFileSync(gate, "open"),
+    // `open()` re-creates the directory first: it is the one call that MUST NOT throw (a held
+    // child waits on this file forever), and the directory is shared with every other gate on
+    // this rig. `mkdirSync(…, {recursive:true})` on an existing directory is a no-op.
+    open: () => {
+      mkdirSync(GATE_DIR, { recursive: true });
+      writeFileSync(gate, "open");
+    },
     async waitHeld(workId, deadlineMs = 120000) {
       const end = Date.now() + deadlineMs;
       let seen = "";
@@ -597,10 +604,33 @@ async function main() {
   // while the run is blocked on a human, and the outcome once that human answers.
   // =========================================================================
   const six = await seedClient("ti-park");
+  const sixOther = await seedClient("ti-park-bystander");
   const parkIntent = randomUUID();
-  const parked = spawnServe({ CLARA_WORK_TEST_SCRIPT: "ask_question" });
+  const parked = spawnServe({ CLARA_WORK_TEST_SCRIPT: "ask_question", CLARA_WORK_ASK_ONLY_CLIENT: six.client });
+  let bystanderWork = null;
   try {
     await waitReady(45000, parked);
+
+    // ---- THE BYSTANDER, admitted FIRST and deliberately not this leg's ----
+    //
+    // Reviewed finding (L10-A3). ONE supervisor serves every queued accounting Work on the
+    // database — leftovers from earlier legs and from earlier crashed runs included; leg 7's
+    // `makeGate` already says so and gates its marker on the Work id. The `ask_question` script
+    // had no such gate, so it asked on WHATEVER Work this engine picked up, and a foreign Work
+    // parked on a question nobody is holding never terminalises: `awaiting_input` is a state no
+    // leg polls out of, so the next leg times out instead of measuring anything. Three such rows
+    // were left on this rig's database by exactly that path.
+    //
+    // So the script now asks only on the client this leg admitted, and this Work — a real one,
+    // served by the same engine, in the same window — is the cell that says so.
+    const bystander = await api("POST", "/api/work/trade-invoice", {
+      clientId: sixOther.client, intentKey: randomUUID(), kind: "supplier_bill",
+      invoice: invoiceWire(sixOther.counterparty), basis: basisWire(),
+    }, sixOther.jwt);
+    assert.equal(bystander.status, 202,
+      `leg 6 bystander admission 202 (got ${bystander.status} ${JSON.stringify(bystander.body)})`);
+    bystanderWork = bystander.body.work_id;
+
     const admitted = await api("POST", "/api/work/trade-invoice", {
       clientId: six.client, intentKey: parkIntent, kind: "supplier_bill",
       invoice: invoiceWire(six.counterparty), basis: basisWire(),
@@ -681,7 +711,20 @@ async function main() {
     assert.equal(await countEntries(six.client), 1, "leg 6: STILL exactly ONE entry");
     assert.equal(await countReceipts(workId), 1, "leg 6: STILL exactly ONE committed receipt");
     assert.equal((await openItems(six.client)).length, 1, "leg 6: STILL exactly ONE open item");
-    console.log("[ti-e2e] 6 OK — parked on a question, replayed into the window, answered, ONE of everything");
+
+    // ---- …and the BYSTANDER was never asked ------------------------------
+    // Same engine, same window, a different client: it must have taken the `post` branch and
+    // settled on its own. If the script ever asks on any Work it picks up again, this reds on the
+    // question count first and on the terminal second, in seconds rather than in a 90s timeout.
+    assert.deepEqual(await questionsFor(bystanderWork), [],
+      "leg 6: the ask_question script asked NOTHING of a Work this leg did not admit");
+    const bystanderSettled = await pollWork(bystanderWork, sixOther.jwt,
+      (b) => TERMINAL.has(b?.work?.status), "leg 6 bystander");
+    assert.equal(bystanderSettled.work.status, "completed",
+      `leg 6: the bystander Work ran to a terminal of its own (got ${bystanderSettled.work.status} / `
+      + `${JSON.stringify(bystanderSettled.work.error)})`);
+    assert.equal(await countEntries(sixOther.client), 1, "leg 6: …posting exactly ONE entry");
+    console.log("[ti-e2e] 6 OK — parked on a question, replayed into the window, answered, ONE of everything; a foreign Work was never asked");
   } finally {
     parked.child.kill("SIGTERM");
     await waitExit(parked.child).catch(() => { /* best effort */ });
@@ -745,7 +788,10 @@ async function main() {
     canceller.child.kill("SIGTERM");
     await waitExit(canceller.child).catch(() => { /* best effort */ });
     gate.cleanup();
-    rmSync(GATE_DIR, { recursive: true, force: true });
+    // NO recursive removal of GATE_DIR — reviewed finding L10-A5. `cleanup()` already removes
+    // this gate's two files, and the directory is shared: a recursive rm here deletes a
+    // concurrently running gate's files out from under it, and `open()` (which does not create
+    // its parent) then throws ENOENT on the very path that keeps a held child from hanging.
   }
 
   console.log("[ti-e2e] PASS — all legs green");

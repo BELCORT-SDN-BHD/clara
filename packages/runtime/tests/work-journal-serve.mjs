@@ -17,14 +17,30 @@
 //   narrate                 answer in prose without calling a tool at all — the "the model said
 //                           it did something and did nothing" case, which must settle the Work
 //                           `failed` with `no_effect` rather than `completed`.
-//   ask_question  (#980)    read the chart, then ASK a typed clarifying question and stop. The
-//                           run parks (`awaiting_input`), and it stays parked until a human
-//                           answers through `clara.answer_work_question`; only then does it
-//                           record the admitted basis. It is the same shape
-//                           tests/work-question-serve.mjs drives for the journal lane, lifted
-//                           into the SHARED harness so any lane spawning this file can reach the
-//                           park — the trade-invoice lane is the first (#980), and `post` and
-//                           `narrate` take exactly the branches they always did.
+//   ask_question  (#980)    read the chart, then ASK a typed clarifying question and stop, on ONE
+//                           named client's Work and no other. The run parks (`awaiting_input`),
+//                           and it stays parked until a human answers through
+//                           `clara.answer_work_question`; only then does it record the admitted
+//                           basis. It is the same shape tests/work-question-serve.mjs drives for
+//                           the journal lane, lifted into the SHARED harness so any lane spawning
+//                           this file can reach the park — the trade-invoice lane is the first
+//                           (#980), and `post` and `narrate` take exactly the branches they
+//                           always did.
+//
+// THE ask_question SCRIPT IS SCOPED TO ONE CLIENT, AND THE SCOPE IS MANDATORY — reviewed finding
+// L10-A3. ONE supervisor serves every queued accounting Work on the database, leftovers from
+// earlier legs and earlier crashed runs included (tests/work-cancel-e2e.mjs's `makeGate` says so
+// in the same words and gates its held marker on the Work id). An `ask_question` arm that asked
+// on whatever this process picked up therefore parked FOREIGN Work on a question nobody is
+// holding, and `awaiting_input` is a state no leg polls out of: the next leg times out after 90s
+// instead of measuring anything, and the row stays pending on the rig for good. Three such rows
+// were left on lane 10's database by exactly that path before this gate existed.
+//
+// So `CLARA_WORK_ASK_ONLY_CLIENT` names the client whose Work may be asked, it is REQUIRED
+// whenever the script is `ask_question`, and every other Work this process picks up takes the
+// `post` branch exactly as it would under the default script. Fail-closed rather than
+// fail-open: a caller that forgets the scope gets a loud child exit, not a quiet park on a
+// stranger's Work.
 //
 // A PARK IS A WINDOW, and that is why the cancel leg uses it too. While the run is parked the
 // Work is live, the run holds the task and NOTHING has been admitted to the ledger — the same
@@ -43,6 +59,17 @@
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
 const SCRIPT = process.env.CLARA_WORK_TEST_SCRIPT || "post";
+
+/** The ONE client whose Work the `ask_question` script may ask about (see the header). Required
+ *  for that script and meaningless for the other two. */
+const ASK_ONLY_CLIENT = (process.env.CLARA_WORK_ASK_ONLY_CLIENT || "").trim();
+if (SCRIPT === "ask_question" && !ASK_ONLY_CLIENT) {
+  throw new Error(
+    "CLARA_WORK_TEST_SCRIPT=ask_question needs CLARA_WORK_ASK_ONLY_CLIENT — the client id whose "
+    + "Work may be parked on a question. One supervisor serves every queued Work on the database, "
+    + "and an unscoped ask parks a Work no leg will ever answer.",
+  );
+}
 
 function usage() {
   return {
@@ -132,6 +159,17 @@ const ASK_QUESTION_INPUT = {
  *  begins `{"memo":…`, never `{"posting_date":…`, and a probe for a leading key name silently
  *  finds nothing and turns this script into the `narrate` one. */
 const BASIS_MARKER = "The admitted basis, to be echoed verbatim:";
+
+/** The CLIENT this envelope's Work belongs to, or `null` when the prompt carries no envelope.
+ *
+ *  `workEnvelopeMessage` (claraWork.v1.impl.ts, re-exported unchanged by every later body) opens
+ *  with `Work <uuid> — record one journal entry for client <uuid>.`, so the client id is on the
+ *  wire for every lane and every bundle version. Read the LAST occurrence, the way
+ *  `admittedBasis` reads the last marker: a resumed segment replays the whole conversation. */
+function envelopeClient(text) {
+  const all = [...text.matchAll(/for client ([0-9a-f-]{36})\./gi)];
+  return all.length ? all[all.length - 1][1] : null;
+}
 
 /** Pull the admitted basis object out of the envelope by BRACE MATCHING from that marker, so the
  *  model echoes the exact bytes it was given rather than a re-serialisation of a parsed copy. */
@@ -240,8 +278,11 @@ const model = new MockLanguageModelV4({
       };
     }
 
-    // #980 · THE PARK. Between reading the chart and recording the entry, ask once and stop.
-    if (SCRIPT === "ask_question") {
+    // #980 · THE PARK. Between reading the chart and recording the entry, ask once and stop —
+    // but ONLY for the client this process was scoped to (header; reviewed finding L10-A3). A
+    // Work belonging to anybody else falls through to the `post` branch below and settles on its
+    // own, exactly as the default script would have settled it.
+    if (SCRIPT === "ask_question" && envelopeClient(text) === ASK_ONLY_CLIENT) {
       if (!used.has("ask_question")) {
         return {
           content: [{
