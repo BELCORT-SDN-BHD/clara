@@ -325,9 +325,12 @@ ambiguity carrying its candidates (`p655.party.resolution`), the control tie-out
 (`p655.tieout.control`), LADDER 1 unwinding a reversal unchanged (`p655.reversal.unwinds`), the
 two-lane equivalence proof (`p655.parity.source_vs_direct` — a coding-lane bill and a Work-lane
 trade invoice for the same facts move the same control account by the same signed cents with the
-same due date -- asserted against the RULE by name, `posting_date + terms`, on a fixture whose
-document date is 27 days earlier, so the cell states which anchor the estate implements instead of
-only that two lanes agree), the grant posture including the absent attestation (`p655.grants`), the three
+same due date -- on a fixture whose document date IS its posting date, so the parity claim is
+about the accounting and not about which anchor won), the due-date anchor and the legacy lane's
+disagreement with it (`p655.due.anchor_document_date` -- DECISIONS §6.2.0 R-A: this lane derives
+`document_date + terms` = 2026-04-03 while the coding lane's 0040:6010-6015 splice still derives
+`posting_date + terms` = 2026-04-30 for the same bill, and both numbers are asserted BY NAME so
+neither side can drift silently; #665's cutover owns retiring the legacy anchor), the grant posture including the absent attestation (`p655.grants`), the three
 re-derived catalog censuses (`p655.census.writers`), the append-only belts (`p655.appendonly`) and
 the read's viewer floor (`p655.read.floor`).
 

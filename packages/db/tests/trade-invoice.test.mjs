@@ -356,7 +356,7 @@ test("p655.due.stated a stated due date reaches clara.open_items.due_date verbat
     "p655.due.stated: …and reaches the open item verbatim");
 });
 
-test("p655.due.terms_fallback no stated date + payment_terms_days=30 ⇒ posting_date + 30 with due_date_source='counterparty_terms'", async (t) => {
+test("p655.due.terms_fallback no stated date + payment_terms_days=30 ⇒ document_date + 30 with due_date_source='counterparty_terms'", async (t) => {
   if (await gateTi(t)) return;
   const client = await tiClient("dueterms");
   const cp = await vendor(ALICE(), { client, termsDays: 30 });
@@ -365,12 +365,88 @@ test("p655.due.terms_fallback no stated date + payment_terms_days=30 ⇒ posting
   });
   await post(a);
   const inv = await invoiceForWork(a.work_id);
-  // 2026-03-31 + 30 days = 2026-04-30 — the x37.c2 arithmetic (0040:6010-6015), on the NEW lane.
-  assert.equal(inv.due_date_text, "2026-04-30");
+  // DECISIONS.md §6.2.0 R-A: payment terms run from the DOCUMENT, which is the accounting
+  // convention and is what this ticket added `document_date` for. 2026-03-04 + 30 days =
+  // 2026-04-03. The posting date (2026-03-31) is the anchor only when a document date is absent,
+  // which this door refuses outright (0225 step 2, `invalid_due_date`/`document_date`/`required`).
+  assert.equal(inv.due_date_text, "2026-04-03");
   assert.equal(inv.due_date_source, DUE_SOURCE.terms);
   const entry = (await entriesForClient(client))[0];
-  assert.equal((await openItemsForEntry(entry.id))[0].due_date, "2026-04-30",
-    "p655.due.terms_fallback: the item carries the derived date, so the coding lane and this lane agree");
+  assert.equal((await openItemsForEntry(entry.id))[0].due_date, "2026-04-03",
+    "p655.due.terms_fallback: the item carries the derived date, so the aging surface reads the terms from the document");
+});
+
+test("p655.due.anchor_document_date the terms fallback anchors on the DOCUMENT date, and the legacy coding lane's posting-date anchor is the measured divergence #665 retires", async (t) => {
+  if (await gateTi(t)) return;
+  // R-A, PINNED BY NAME ON THE FIXTURE WHERE THE TWO ANCHORS DISAGREE.
+  //
+  // p655.parity.source_vs_direct deliberately uses a fixture where document date = posting date,
+  // so the two lanes agree there and the parity claim is about the ACCOUNTING (domain, sign,
+  // amount, item date, kind), not about an arithmetic coincidence. THIS cell is its sibling: the
+  // same bill, dated 2026-03-04 and posted 2026-03-31 with 30-day terms, so the anchors are 27
+  // days apart and exactly one of them is what each lane writes.
+  //
+  //   Work lane (0225 clara._trade_invoice_due)  : document_date + 30 = 2026-04-03  ← R-A
+  //   Coding/upload lane (0040:6010-6015)        : posting_date  + 30 = 2026-04-30  ← #665 retires
+  //
+  // The legacy anchor is NOT repaired here: 0040's splice is the upload lane's producer and
+  // brief-655.md leaves that lane untouched this wave. R-A names it as the lane's own defect and
+  // #665's cutover as its owner. This cell is what makes the divergence impossible to ship
+  // silently: whichever side changes, it reds.
+  const TERMS_FROM_DOCUMENT = "2026-04-03";  // TI_DATE.document + 30 — THIS lane
+  const TERMS_FROM_POSTING = "2026-04-30";   // TI_DATE.posting  + 30 — the legacy lane
+  assert.notEqual(TERMS_FROM_DOCUMENT, TERMS_FROM_POSTING,
+    "p655.due.anchor_document_date: the fixture's two anchors genuinely disagree (27 days), so neither assertion below can be vacuous");
+
+  // THE WORK LANE.
+  const direct = await tiClient("anchordirect");
+  const dcp = await vendor(ALICE(), { client: direct, termsDays: 30 });
+  const a = await armed({
+    client: direct, particulars: billParticulars({ counterparty: dcp, dueDate: null }),
+    basis: billBasis({ taxCents: 0 }),
+  });
+  await post(a);
+  const inv = await invoiceForWork(a.work_id);
+  assert.equal(inv.document_date_text, TI_DATE.document,
+    "p655.due.anchor_document_date: the invoice states 2026-03-04…");
+  assert.equal((await entriesForClient(direct))[0].posting_date, TI_DATE.posting,
+    "p655.due.anchor_document_date: …and posts on 2026-03-31, 27 days later");
+  assert.equal(inv.due_date_text, TERMS_FROM_DOCUMENT,
+    "p655.due.anchor_document_date: the stored due date is document_date + terms (R-A), NOT posting_date + terms");
+  assert.equal(inv.due_date_source, DUE_SOURCE.terms);
+  const dEntry = (await entriesForClient(direct))[0];
+  const dItem = (await openItemsForEntry(dEntry.id))[0];
+  assert.equal(dItem.due_date, TERMS_FROM_DOCUMENT,
+    "p655.due.anchor_document_date: …and it reaches clara.open_items.due_date, which is what ap_aging renders as overdue");
+
+  // THE LEGACY CODING LANE, THROUGH ITS OWN DOORS — the same idiom p655.parity uses.
+  const coded = await tiClient("anchorcoded");
+  const ccp = await vendor(ALICE(), { client: coded, termsDays: 30 });
+  const s6 = await import("./s6-helpers.mjs");
+  const rf = await import("./rig-fixtures.mjs");
+  const draft = await s6.draftEntryV3(ALICE(), {
+    client: coded,
+    resolution: await rf.freshResolution(ALICE(), coded, { subjectKind: "manual", subjectId: null }),
+    postingDate: TI_DATE.posting, memo: "Alpha Supplies bill, office paper",
+    lines: s6.billLines(TICHART.expense, TICHART.payable, 106000),
+    vendor: { existing_id: ccp }, opKey: opk("ti-anchor-draft"),
+  }).catch((e) => { throw new Error(`anchor coding-lane draft raised ${e.code}: ${e.message}`); });
+  // The same labelled fixture shortcut p655.parity states: clara.draft_entry passes NULL for
+  // p_coding_kind (0009:1424-1425), so a HUMAN can never create a coded invoice entry at all.
+  await rootQuery("update clara.journal_entries set coding_kind='supplier_bill' where id=$1",
+    [draft.entry_id]);
+  await rf.approveEntry(BOB(), {
+    entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("ti-anchor-approve") });
+  const cItem = (await openItemsForEntry(draft.entry_id))[0];
+  assert.equal(cItem.due_date, TERMS_FROM_POSTING,
+    "p655.due.anchor_document_date: the LEGACY lane still anchors on the posting date (0040:6010-6015) — untouched this wave, #665's cutover retires it");
+  assert.notEqual(dItem.due_date, cItem.due_date,
+    "p655.due.anchor_document_date: so the two lanes DISAGREE on this fixture by 27 days, named here rather than discovered in production");
+  // Everything else about the two items still agrees — the divergence is the anchor and nothing else.
+  assert.equal(dItem.domain, cItem.domain);
+  assert.equal(dItem.item_kind, cItem.item_kind);
+  assert.equal(String(dItem.amount_cents), String(cItem.amount_cents));
+  assert.equal(dItem.item_date, cItem.item_date);
 });
 
 test("p655.due.absent neither a stated date nor agreed terms ⇒ NULL due date, 'absent', and the aging read reports overdue:false rather than inventing one", async (t) => {
@@ -1031,8 +1107,16 @@ test("p655.parity.source_vs_direct a coding-lane supplier bill and a Work-lane t
   // THE WORK LANE.
   const direct = await tiClient("paritydirect");
   const dcp = await vendor(ALICE(), { client: direct, termsDays: 30 });
+  // THE FIXTURE DATES THE DOCUMENT ON THE DAY IT IS POSTED, DELIBERATELY (DECISIONS §6.2.0 R-A).
+  // The two lanes anchor the terms fallback on DIFFERENT dates -- this one on the document date,
+  // the legacy lane on the posting date -- so a fixture where those differ would turn this parity
+  // cell into an assertion about an arithmetic disagreement instead of about the ACCOUNTING. Here
+  // document_date = posting_date = 2026-03-31, so both anchors give 2026-04-30 and the cell says
+  // what it means: the same economic facts produce the same domain, sign, amount, item date, kind
+  // and due date. The divergence itself is pinned by name in p655.due.anchor_document_date.
   const a = await armed({
-    client: direct, particulars: billParticulars({ counterparty: dcp, dueDate: null }),
+    client: direct,
+    particulars: billParticulars({ counterparty: dcp, dueDate: null, documentDate: TI_DATE.posting }),
     basis: billBasis({ taxCents: 0 }),
   });
   await post(a);
@@ -1075,27 +1159,22 @@ test("p655.parity.source_vs_direct a coding-lane supplier bill and a Work-lane t
   // THE DUE DATE, ASSERTED AGAINST THE RULE AND NOT AGAINST THE OTHER LANE'S OUTPUT.
   //
   // ADV-655-3 (fix round 1): `assert.equal(dItem.due_date, cItem.due_date)` alone proves that two
-  // implementations agree on an arithmetic, never that the arithmetic is the right one for a lane
-  // that carries a SEPARATE document date. THIS Work-lane invoice states document_date 2026-03-04
-  // and posts on 2026-03-31, so the two candidate anchors are 27 days apart and exactly one of
-  // them is what the estate wrote. The cell now NAMES it.
+  // implementations agree on an arithmetic, never that the arithmetic is the right one. So the
+  // number is NAMED here: on this fixture the document date and the posting date are the same day
+  // (2026-03-31), which is what makes the two lanes' anchors agree, and 30-day terms put both at
+  // 2026-04-30.
   //
-  // ADV-655-2, RECORDED HERE RATHER THAN SILENTLY FIXED: payment terms conventionally run from the
-  // DOCUMENT, and the anchor is what the ticket added `document_date` for. But brief-655.md's
-  // section 4 cell 11 prescribes `posting_date + 30` verbatim, and D12c leaves the anchor unstated
-  // while pointing at the legacy producer 0040:6010-6015. Changing it changes what the brief
-  // specifies, so it is RATIFICATION-REQUESTED, not a hunk -- and until it is ruled, the number
-  // the estate actually writes is pinned here in the open. Flipping the anchor reds THIS line
-  // first, which is the point.
-  const TERMS_FROM_POSTING = "2026-04-30";   // TI_DATE.posting  + 30
-  const TERMS_FROM_DOCUMENT = "2026-04-03";  // TI_DATE.document + 30
-  assert.equal(dItem.due_date, TERMS_FROM_POSTING,
-    "p655.parity: the counterparty-terms fallback anchors on the POSTING date (0225's clara._trade_invoice_due, "
-    + "brief section 4 cell 11) -- NOT on the document date, though the document date is 27 days earlier here");
-  assert.notEqual(TERMS_FROM_POSTING, TERMS_FROM_DOCUMENT,
-    "p655.parity: the two anchors genuinely disagree on this fixture, so the assertion above is not vacuous");
+  // R-A (DECISIONS §6.2.0, 2026-09-19): the Work lane's terms fallback anchors on the DOCUMENT
+  // date. The legacy lane's 0040:6010-6015 splice still anchors on the posting date and is #665's
+  // to retire. That divergence is not glossed here -- it has its own cell,
+  // p655.due.anchor_document_date, on a fixture where the two dates are 27 days apart.
+  const BOTH_ANCHORS = "2026-04-30";         // TI_DATE.posting + 30, and document_date + 30 too
+  assert.equal((await invoiceForWork(a.work_id)).document_date_text, TI_DATE.posting,
+    "p655.parity: the fixture really does date the document on the posting day, so the anchors coincide by construction");
+  assert.equal(dItem.due_date, BOTH_ANCHORS,
+    "p655.parity: document_date + 30 (R-A, 0225's clara._trade_invoice_due)");
   assert.equal(dItem.due_date, cItem.due_date,
-    "p655.parity: and the coding lane derives the same date from the same anchor (0040:6010-6015)");
+    "p655.parity: and the coding lane's posting_date + 30 (0040:6010-6015) lands on the same day HERE, because the two dates are the same day");
   assert.equal(await controlBalance(direct, "payable"), await controlBalance(coded, "payable"),
     "p655.parity: the same control-account movement");
   // THE HONEST RESIDUAL, asserted rather than glossed: the two lanes' item KINDS agree only

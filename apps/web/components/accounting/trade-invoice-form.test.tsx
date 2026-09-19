@@ -198,7 +198,7 @@ test("a clean bill sends EXACT cents, `absent` when no due date is stated, and n
       seen.push(input);
       return { kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "l", status: "queued",
         replayed: false, invoiceId: "inv", invoiceKind: "supplier_bill", counterpartyId: ALPHA,
-        dueDate: "2026-04-30", dueDateSource: "counterparty_terms" } as SubmitTradeInvoiceWorkResult;
+        dueDate: "2026-04-03", dueDateSource: "counterparty_terms" } as SubmitTradeInvoiceWorkResult;
     },
   }));
   await fillBill(h);
@@ -215,7 +215,8 @@ test("a clean bill sends EXACT cents, `absent` when no due date is stated, and n
   // …and the DERIVED basis the door answered with is what the banner renders.
   assert.ok(String(h.text()).includes("agreed payment terms"),
     "the success banner renders the basis the DOOR derived, not the one the form sent");
-  assert.ok(String(h.text()).includes("2026-04-30"));
+  // 2026-03-04 (the document date this fixture types) + the party's agreed 30 days — R-A.
+  assert.ok(String(h.text()).includes("2026-04-03"));
 });
 
 test("`party_ambiguous` renders its candidates INLINE as a choice, and picking one clears the banner", async () => {

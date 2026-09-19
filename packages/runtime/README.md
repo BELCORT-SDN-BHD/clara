@@ -931,4 +931,6 @@ really about can be shown: the signed AR/AP open item is minted by a DEFERRED co
 COMMIT, so the entry, the receipt, the `trade_invoices` row and the item are one transaction — and
 all four survive an `exit_after_commit` crash and a respawn as ONE of each. It also proves the
 due-date basis end to end: the browser sent `absent`, the door answered `counterparty_terms` and
-stamped `posting_date + payment_terms_days` on the item. It SKIPS CLEANLY when 0225 is absent.
+stamped `document_date + payment_terms_days` on the item (DECISIONS §6.2.0 R-A — agreed terms run
+from the document, so a bill dated 2026-03-04 and posted 2026-03-31 under 30-day terms is due
+2026-04-03, not 2026-04-30). It SKIPS CLEANLY when 0225 is absent.

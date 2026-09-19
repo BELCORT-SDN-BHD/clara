@@ -209,6 +209,21 @@ halves of that negative. `clara.get_trade_invoice(p_work)` is viewer-floored and
 other internals are ungranted to every application role. The door carries **no `p_attestation`**
 and `is_high_stakes` is unreachable from it.
 
+**AGREED TERMS RUN FROM THE DOCUMENT, AND THE LEGACY LANE DISAGREES.** `clara._trade_invoice_due`
+resolves `stated → counterparty_terms → absent`, and when the terms decide it the arithmetic is
+`document_date + payment_terms_days` — DECISIONS.md §6.2.0 R-A, which overruled this file's first
+cut: "30 days net" is thirty days after the invoice, so the day a bookkeeper keys it in cannot move
+the money's due date or tell `ap_aging` that an overdue bill is current. The posting date remains
+the anchor only when no document date was stated, which this door refuses outright
+(`invalid_due_date` / `field:"document_date"` / `constraint:"required"`), so that arm is a belt
+behind a closed door rather than a path. The LEGACY coding/upload lane still anchors on the posting
+date (0040:6010-6015's splice, untouched this wave); R-A names that the legacy lane's own defect
+and gives it to **#665**'s cutover. The divergence is measured, not implied: cell
+`p655.due.anchor_document_date` drives one bill — dated 2026-03-04, posted 2026-03-31, 30-day terms
+— down both lanes and asserts **2026-04-03** here and **2026-04-30** there, by name; and
+`p655.parity.source_vs_direct` deliberately uses a fixture whose document date IS its posting date,
+so the parity claim is about the accounting rather than about which anchor won.
+
 **A RACED PAIR UNDER ONE INTENT KEY IS ANSWERED ABOUT ITS OWN INVOICE, or refused.** The typed row
 is written with `on conflict (work_id) do nothing`, which converges the core's replay branch onto
 one row — but converging is not agreeing. The door's particulars comparison at step 4 runs on the

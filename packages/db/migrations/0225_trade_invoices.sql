@@ -978,9 +978,34 @@ revoke all on function clara._trade_invoice_resolve_party(uuid,text,jsonb) from 
 -- ---------------------------------------------------------------------------------
 -- THE DUE DATE AND ITS BASIS (D12c). STATED WINS; the counterparty's agreed terms are the
 -- fallback; neither means the due date is honestly ABSENT and the aging read says so rather than
--- inventing one. The terms arithmetic is 0040:6010-6015's, to the day: `posting_date +
--- payment_terms_days`, which is what the coding lane already produces -- so `p655.parity`'s two
--- lanes agree on the due date as well as on the amount.
+-- inventing one.
+--
+-- THE TERMS FALLBACK ANCHORS ON THE DOCUMENT DATE -- DECISIONS.md section 6.2.0 R-A (2026-09-19),
+-- which OVERRULED this file's first cut. Payment terms are an agreement about how long after the
+-- INVOICE the money is due ("30 days net"), so the day the bookkeeper happens to key it in cannot
+-- move the money's due date. A bill dated 2026-03-04 and keyed on 2026-03-31 under 30-day terms
+-- is due 2026-04-03, not 2026-04-30; anchoring on the posting date would silently give the client
+-- 27 extra days of float and tell `ap_aging` an already-overdue bill is current. `document_date`
+-- is the column this ticket added for exactly this, and it is REQUIRED by this door (see
+-- `clara._assert_trade_invoice_basis`, which raises `invalid_due_date` /
+-- `field:"document_date"` / `constraint:"required"` before anything durable).
+--
+-- THE POSTING DATE IS THE FALLBACK'S OWN FALLBACK, and it is a BELT, not a path. R-A says
+-- "posting date only when the document date is absent"; on THIS door the document date can never
+-- be absent, so the coalesce's right arm is unreachable from `clara.admit_trade_invoice_work`
+-- today (measured: 0225 step 2 and step 7 both run the assert before step 7 calls this). It is
+-- written anyway because this function is `immutable` and signature-public inside the schema: a
+-- later lane that admits an undated document must get an honest answer out of it rather than a
+-- NULL-propagated `absent`.
+--
+-- THE LEGACY LANE STILL ANCHORS ON THE POSTING DATE. 0040:6010-6015's splice
+-- (`posting_date + payment_terms_days`, scoped to `item_kind in ('invoice','bill')`) is the
+-- upload/coding lane's producer and this wave leaves it untouched (brief-655.md D12c). R-A calls
+-- that the legacy lane's own defect and gives it to #665's cutover. The divergence is therefore a
+-- MEASURED, NAMED fact rather than a surprise: `p655.due.anchor_document_date` drives both lanes
+-- on one fixture 27 days apart and asserts each number by name, and `p655.parity.source_vs_direct`
+-- deliberately uses a fixture whose document date IS its posting date so that the parity claim is
+-- about the accounting and not about which anchor won.
 -- ---------------------------------------------------------------------------------
 create function clara._trade_invoice_due(p_particulars jsonb, p_basis jsonb, p_terms_days int)
   returns jsonb language sql immutable security definer set search_path = clara, pg_temp as $$
@@ -990,12 +1015,21 @@ create function clara._trade_invoice_due(p_particulars jsonb, p_basis jsonb, p_t
                               'due_date_source', 'stated')
     when p_terms_days is not null
       then jsonb_build_object(
-             'due_date', to_char((p_basis->>'posting_date')::date + p_terms_days, 'YYYY-MM-DD'),
+             'due_date', to_char(coalesce(
+               nullif(btrim(coalesce(p_particulars->>'document_date','')),'')::date,
+               (p_basis->>'posting_date')::date) + p_terms_days, 'YYYY-MM-DD'),
              'due_date_source', 'counterparty_terms')
     else jsonb_build_object('due_date', null, 'due_date_source', 'absent')
   end;
 $$;
 revoke all on function clara._trade_invoice_due(jsonb,jsonb,integer) from public;
+comment on function clara._trade_invoice_due(jsonb,jsonb,integer) is
+  'THE DUE-DATE LADDER (D12c), anchored per DECISIONS.md 6.2.0 R-A: a STATED due date wins; '
+  'otherwise the counterparty''s agreed terms are added to the DOCUMENT date (the posting date '
+  'only if no document date was stated, which this lane''s door refuses); otherwise the due date '
+  'is honestly absent. The legacy coding/upload lane still anchors on the posting date '
+  '(0040:6010-6015) and #665''s cutover owns retiring that -- cell p655.due.anchor_document_date '
+  'pins both numbers by name.';
 
 /**
  * clara.admit_trade_invoice_work — THE FOURTH PUBLIC ADMISSION DOOR, AND THE ONLY ONE ON THIS LANE.
@@ -1163,6 +1197,13 @@ begin
   end if;
   v_terms := (v_party->>'payment_terms_days')::int;
   v_due := clara._trade_invoice_due(p_particulars, p_basis, v_terms);
+  -- THE DDL CONSTRAINT `ck_trade_invoices_due_after_document`, RESTATED AS A TYPED REFUSAL BEFORE
+  -- THE INSERT COULD RAISE A BARE 23514 (0194:1078-1081's rule). Since R-A moved the terms anchor
+  -- to the document date and `clara.counterparties.payment_terms_days` is CHECKed 1..365
+  -- (0040:754-760), a DERIVED date is now always strictly after the document date, so this arm is
+  -- reachable only from a STATED date -- which `clara._assert_trade_invoice_basis` already refused
+  -- at step 2 with its own `constraint:"not_before_document"`. It is kept as the belt it is: this
+  -- door owns the derivation, so it owns the law about what the derivation may produce.
   if (v_due->>'due_date') is not null
      and (v_due->>'due_date')::date < (p_particulars->>'document_date')::date then
     raise exception 'the counterparty''s agreed terms put the due date (%) before the document date (%)',

@@ -112,7 +112,10 @@ const POSTED_INVOICE = {
   counterparty_kind: "vendor",
   counterparty_registration_no: "200101065565",
   document_date: "2026-03-04",
-  due_date: "2026-04-30",
+  // DECISIONS §6.2.0 R-A: the door counts the party's agreed 30 days from the DOCUMENT date
+  // (2026-03-04 + 30 = 2026-04-03), not from the 2026-03-31 posting date. The mock answers what
+  // clara.get_trade_invoice really would, or the walk would pin a number the database cannot give.
+  due_date: "2026-04-03",
   due_date_source: "counterparty_terms",
   reference: "ALPHA-2026-0042",
   currency: "MYR",
@@ -126,7 +129,7 @@ const POSTED_INVOICE = {
   receipt_id: TI.receiptId,
   open_item_id: TI.openItemId,
   open_item_amount_cents: 106000,
-  open_item_due_date: "2026-04-30",
+  open_item_due_date: "2026-04-03",
   outstanding_cents: 106000,
 };
 
@@ -417,7 +420,7 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
         invoice_id: TI.invoiceId,
         kind: body?.kind ?? "supplier_bill",
         counterparty_id: TI.vendorId,
-        due_date: "2026-04-30",
+        due_date: "2026-04-03",
         due_date_source: "counterparty_terms",
       });
       return true;
@@ -435,7 +438,7 @@ export async function handleTradeInvoiceRuntime(request, response, url) {
       invoice_id: TI.invoiceId,
       kind: body?.kind ?? "supplier_bill",
       counterparty_id: TI.vendorId,
-      due_date: "2026-04-30",
+      due_date: "2026-04-03",
       due_date_source: "counterparty_terms",
     });
     return true;

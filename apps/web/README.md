@@ -405,8 +405,9 @@ OWN labelled horizontal viewport, so 320 px scrolls the GRID rather than the pag
 
 **The due date is never computed here.** The form carries what the document STATES;
 `clara.admit_trade_invoice_work` derives `stated → counterparty_terms → absent` (only it holds the
-party's agreed terms) and the 202 hands the derived basis back, which is what the success banner
-renders. `lib/work/trade-invoice.ts` has no path that produces `counterparty_terms` at all.
+party's agreed terms, and it adds them to the DOCUMENT date — DECISIONS §6.2.0 R-A) and the 202
+hands the derived basis back, which is what the success banner renders.
+`lib/work/trade-invoice.ts` has no path that produces `counterparty_terms` at all.
 
 **Nothing installs a primitive.** Combobox and Popover are uninstalled; the party picker is a text
 filter over the counterparty reads the registers already use, and `party_ambiguous`'s candidates

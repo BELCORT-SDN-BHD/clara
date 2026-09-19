@@ -129,7 +129,8 @@ test("compose a bill → 202 → the Work page shows the persistent outcome, and
   // …carrying the basis the DOOR derived. The form sent `absent`; only the database knew the
   // party's agreed terms, and the banner renders what it was told.
   await expect(page.getByText(/from the party's agreed payment terms/i)).toBeVisible();
-  await expect(page.getByText("2026-04-30")).toBeVisible();
+  // document_date 2026-03-04 + the party's agreed 30 days (R-A), NOT posting_date + 30.
+  await expect(page.getByText("2026-04-03")).toBeVisible();
 
   // THE WIRE, as the fixture received it: exactly ONE submission, and the browser asserted
   // `absent` rather than inventing the terms basis.

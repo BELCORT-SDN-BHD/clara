@@ -35,8 +35,9 @@
 //      COMMIT, so nothing but a real World can show it survived the window.
 //   5. THE DUE-DATE BASIS ON THE REAL LANE. An invoice with NO stated due date, for a counterparty
 //      whose agreed terms the database holds, reaches `clara.open_items.due_date` as
-//      `posting_date + payment_terms_days` with `due_date_source='counterparty_terms'` — and the
-//      202 body says so, so the browser can render the basis it did not compute.
+//      `document_date + payment_terms_days` (DECISIONS §6.2.0 R-A — payment terms run from the
+//      DOCUMENT, not from the day it was keyed in) with `due_date_source='counterparty_terms'` —
+//      and the 202 body says so, so the browser can render the basis it did not compute.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent shared with its siblings), and
 // the file SKIPS CLEANLY when migration 0225 is absent — its runtime half merges alongside its DB
@@ -452,13 +453,15 @@ async function main() {
     // THE BROWSER SAID 'absent'; THE DATABASE KNEW BETTER, and the 202 hands back what it decided.
     assert.equal(termsAdmitted.body.due_date_source, "counterparty_terms",
       "the door derived the basis from the party's agreed terms — the browser could not have");
-    assert.equal(termsAdmitted.body.due_date, "2026-04-30", "posting_date 2026-03-31 + 30 days");
+    // R-A: document_date 2026-03-04 + 30 = 2026-04-03. The posting date is 2026-03-31, 27 days
+    // later, so this number names the anchor rather than agreeing with both.
+    assert.equal(termsAdmitted.body.due_date, "2026-04-03", "document_date 2026-03-04 + 30 days");
     const termsSettled = await pollWork(termsAdmitted.body.work_id, terms.jwt,
       (b) => TERMINAL.has(b?.work?.status), "leg 5 commit");
     assert.equal(termsSettled.work.status, "completed");
     const termsItems = await openItems(terms.client);
     assert.equal(termsItems.length, 1);
-    assert.equal(termsItems[0].due_date, "2026-04-30",
+    assert.equal(termsItems[0].due_date, "2026-04-03",
       "…and the DERIVED due date reached the open item, so the aging surface reads what the terms say");
     console.log("[ti-e2e] 5 OK — stated -> counterparty_terms -> absent is the DATABASE's derivation, end to end");
   } finally {

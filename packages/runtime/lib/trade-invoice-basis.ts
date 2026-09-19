@@ -45,9 +45,11 @@ export type TradeInvoiceKind = (typeof TRADE_INVOICE_KINDS)[number];
 
 /**
  * THE DUE-DATE BASIS (D12c). `stated` — the document says so. `counterparty_terms` — the party's
- * agreed payment terms produced it. `absent` — neither, and the due date is honestly NULL rather
- * than invented. `clara.trade_invoices.due_date_source`'s own CHECK, and a CHECK pairs it with the
- * column: `(due_date is null) = (due_date_source = 'absent')`.
+ * agreed payment terms produced it, COUNTED FROM THE DOCUMENT DATE (DECISIONS §6.2.0 R-A: "30 days
+ * net" is thirty days after the invoice, not after the day it was keyed in). `absent` — neither,
+ * and the due date is honestly NULL rather than invented.
+ * `clara.trade_invoices.due_date_source`'s own CHECK, and a CHECK pairs it with the column:
+ * `(due_date is null) = (due_date_source = 'absent')`.
  */
 export const DUE_DATE_SOURCES = ["stated", "counterparty_terms", "absent"] as const;
 export type DueDateSource = (typeof DUE_DATE_SOURCES)[number];
@@ -144,7 +146,8 @@ export const startTradeInvoiceWorkInputSchema = z
       .nullable()
       .describe(
         "The due date the document states, or null. Do NOT compute one from payment terms: the "
-        + "database derives that, because only it knows the party's agreed terms.",
+        + "database derives that (agreed terms counted from the document date), because only it "
+        + "knows the party's agreed terms.",
       ),
     due_date_source: z
       .enum(DUE_DATE_SOURCES)

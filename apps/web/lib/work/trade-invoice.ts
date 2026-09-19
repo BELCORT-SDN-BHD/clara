@@ -43,7 +43,9 @@ export type TradeInvoiceKind = (typeof TRADE_INVOICE_KINDS)[number];
 
 /** `clara.trade_invoices.due_date_source`'s own CHECK. `absent` is a first-class answer: a bill
  *  with no stated terms and a counterparty with none agreed HAS no due date, and inventing one
- *  would make every aging read lie. The browser may only ever assert two of the three. */
+ *  would make every aging read lie. The browser may only ever assert two of the three — and when
+ *  the database answers `counterparty_terms` it counted them from the DOCUMENT date, never from
+ *  the posting date (DECISIONS §6.2.0 R-A). */
 export const DUE_DATE_SOURCES = ["stated", "counterparty_terms", "absent"] as const;
 export type DueDateSource = (typeof DUE_DATE_SOURCES)[number];
 

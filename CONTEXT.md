@@ -413,8 +413,8 @@ A client's own accounting document that creates a receivable or a payable: a sal
 _Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not yet read.
 
 **Due-date basis**:
-How an open item's due date was decided: STATED on the document, derived from the COUNTERPARTY'S agreed payment terms, or honestly ABSENT because neither states one. It is recorded beside the date so a reader can tell a date the document gave from one the terms produced.
-_Avoid_: Today's date, or any date invented when neither the document nor the terms supply one; a due date presented without saying where it came from.
+How an open item's due date was decided: STATED on the document, derived from the COUNTERPARTY'S agreed payment terms, or honestly ABSENT because neither states one. Terms run from the DOCUMENT date — "30 days" is thirty days after the invoice, not after the day somebody keyed it in — and the basis is recorded beside the date so a reader can tell a date the document gave from one the terms produced.
+_Avoid_: Today's date, or any date invented when neither the document nor the terms supply one; the posting date as the anchor for agreed terms; a due date presented without saying where it came from.
 
 **Settlement allocation**:
 The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much.

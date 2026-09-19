@@ -1559,7 +1559,7 @@
     },
     "dueDate": {
       "label": "Due date",
-      "description": "Leave it blank if the document does not state one. Clara will use the party's agreed payment terms if they have any, and otherwise record it as having no due date rather than inventing one."
+      "description": "Leave it blank if the document does not state one. Clara will count the party's agreed payment terms from the document date if they have any, and otherwise record it as having no due date rather than inventing one."
     },
     "reference": {
       "label": "Document number",
@@ -1632,7 +1632,7 @@
     },
     "dueBasis": {
       "stated": "Due {date}, as the document states.",
-      "counterparty_terms": "Due {date}, from the party's agreed payment terms.",
+      "counterparty_terms": "Due {date}, from the party's agreed payment terms counted from the document date.",
       "absent": "No due date — neither the document nor the party's terms state one."
     },
     "refusals": {
