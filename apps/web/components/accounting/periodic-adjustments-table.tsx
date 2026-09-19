@@ -117,11 +117,23 @@ export function PeriodicAdjustmentsTable({
                       )}
                       {/* THE PARTICULARS, VERBATIM. Every key the commit stored, rendered as it
                           was stored — this is the "exact fields and sources" half of AC4, and a
-                          re-worded summary would be a second account of the same figures. */}
+                          re-worded summary would be a second account of the same figures.
+                          "VERBATIM" STILL MEANS THE HOUSE MONEY COMPONENT for a cents-typed key
+                          (#842): `settled_cents` (#797) is the one particular the estate types as
+                          minor units today, and rendering it through `String(value)` showed the
+                          same figure `amount_cents` renders as money, told a second way, in the
+                          same disclosure. */}
                       {Object.entries(row.basis)
                         .filter(([, value]) => value !== null && value !== undefined && value !== "")
                         .map(([key, value]) => (
-                          <Fact key={key} label={key} value={String(value)} mono />
+                          <Fact
+                            key={key}
+                            label={key}
+                            value={CENTS_PARTICULARS.has(key) && typeof value === "number"
+                              ? <Money cents={value} />
+                              : String(value)}
+                            mono
+                          />
                         ))}
                     </dl>
                   </details>
@@ -134,6 +146,11 @@ export function PeriodicAdjustmentsTable({
     </DataState>
   );
 }
+
+// #842 — the basis particulars the estate types as minor units. `settled_cents` (#797) is the
+// only one today (see periodic-adjustment.ts's ADJUSTMENT_FIELDS comment); a future cents-typed
+// particular joins this Set, not a re-guess of "looks like cents" from the key's spelling.
+const CENTS_PARTICULARS = new Set<string>(["settled_cents"]);
 
 function Fact({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
