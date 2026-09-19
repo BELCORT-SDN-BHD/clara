@@ -63,6 +63,23 @@ async function control(page: Page, body: Record<string, unknown>): Promise<void>
   expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
 }
 
+/** #848 — the same shape as `control` above, but returning the JSON body rather than only the
+ *  status: `egress_reactivate_keys` (and `cancel_keys` before it) answer WITH data a cell needs
+ *  to read, not only a side effect to trigger. */
+async function controlRead(page: Page, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return page.evaluate(
+    async (call: { path: string; payload: Record<string, unknown> }) => {
+      const res = await fetch(call.path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(call.payload),
+      });
+      return res.json() as Promise<Record<string, unknown>>;
+    },
+    { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },
+  );
+}
+
 /**
  * #631 · OPEN THE ACTIVITY TAB, which is where the Diagnostics section lives after wave-3
  * integration. #631 wrote the mount beneath the identity block because #641 was turning this
@@ -802,6 +819,85 @@ test("#631 B3: an egress refusal names the AGREEMENT and no provider, and its tr
     const table = page.getByRole("region", { name: "Execution trace steps" });
     await expect(table.getByText("Model call")).toHaveCount(0);
     await expect(table.getByText("egress_not_authorized").first()).toBeVisible();
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#848: pressing Reactivate on the egress_not_authorized face reaches migration 0211's door and converges the banner to active", async ({ page }) => {
+  // #812's action is proven at the unit level (egress-reactivate-action.test.tsx) with a stubbed
+  // door; what only a browser can add is that the REAL wire round trip — the app's own
+  // `reactivateClientEgress` -> `callDoor` -> PostgREST -> this lane's mock — actually reaches the
+  // door and renders what it answers, owner-signed-in as this whole spec's shared persona is.
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+    await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
+
+    const button = page.getByRole("button", { name: "Re-activate AI processing for this client" });
+    await expect(button, "owner-signed-in: the owner-only recovery action is offered").toBeVisible();
+    await button.click();
+
+    // THE BANNER CONVERGES TO ACTIVE — the exact receipt copy, which also states what did NOT
+    // happen (this record stays refused; only future dispatches are unblocked).
+    await expect(page.getByText("AI processing is on again for this client.")).toBeVisible();
+    // …and the refused Work's own face is UNCHANGED by the press — recovery restores future
+    // dispatches only, so the record on screen still reads exactly as refused as it did before.
+    await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
+
+    // THE onReactivated CONTRACT: the press told the page to re-read, which reached the runtime
+    // proxy exactly once with a REAL, non-empty op key — the same evidence `cancelKeys` proves for
+    // cancel elsewhere in this lane.
+    const after = await controlRead(page, { op: "egress_reactivate_keys" });
+    const keys = after.keys as unknown[];
+    expect(keys.length, "exactly one press reached the door").toBe(1);
+    expect(typeof keys[0], "a real op key, not a placeholder").toBe("string");
+    expect((keys[0] as string).length, "a real op key, not a placeholder").toBeGreaterThan(0);
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#848: a governed no_consent refusal renders VERBATIM, never paraphrased", async ({ page }) => {
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    // #812 — nothing was ever DEACTIVATED for this client in the fixture's steady state, so
+    // `no_consent` (a REVOKE, reversed by `restore_client_egress_purpose` instead) is the door's
+    // own answer this cell arms — the SAME typed refusal `egress-reactivate-action.test.tsx`'s
+    // `w812.web.refused` cell proves at the component level, now proven over the real wire shape.
+    await control(page, { op: "egress_reactivate_answer", mode: "no_consent" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+
+    await page.getByRole("button", { name: "Re-activate AI processing for this client" }).click();
+
+    // THE DATABASE'S OWN SENTENCE, verbatim — migration 0211's exact message, never re-worded.
+    await expect(page.getByText("no live typed egress consent for this client and purpose")).toBeVisible();
+    // …and NO success receipt is shown beside it: a refusal is not a paraphrase of success.
+    await expect(page.getByText("AI processing is on again for this client.")).toHaveCount(0);
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#848: the mock enforces the owner floor — a forced denial answers the database's own CLR04", async ({ page }) => {
+  // A signed-in browser cannot demote its own session (every cell in this whole spec signs in as
+  // the same owner persona), so the owner-only dispatch this door enforces
+  // (`clara._human_ctx(clara.role_rank('owner'))`, migration 0211) is proven by arming the mock to
+  // answer exactly the refusal a below-owner caller would receive, rather than by a second sign-in
+  // this lane's fixture has no persona for.
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    await control(page, { op: "egress_reactivate_answer", mode: "denied" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+
+    await page.getByRole("button", { name: "Re-activate AI processing for this client" }).click();
+
+    // `_human_ctx`'s exact CLR04 message — the owner floor, verbatim.
+    await expect(page.getByText("insufficient role")).toBeVisible();
+    await expect(page.getByText("AI processing is on again for this client.")).toHaveCount(0);
   } finally {
     await control(page, { op: "reset" }).catch(() => {});
   }
