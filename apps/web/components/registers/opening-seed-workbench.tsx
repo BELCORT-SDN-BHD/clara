@@ -22,6 +22,9 @@ import { OpeningDryrunStrip } from "./opening-dryrun-strip";
 import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { OpeningItemsPanel } from "./opening-items-panel";
 import { OpeningTargetKeyedPanel } from "./opening-target-keyed-panel";
+import { OpeningTargetDocumentPanel } from "./opening-target-document-panel";
+import { OpeningParseAction } from "./opening-parse-action";
+import { OpeningSourceHeader } from "./opening-source-header";
 import { OpeningFixedAssetDialog } from "./opening-fixed-asset-dialog";
 import { ApproveOpeningSeedDialog, ApproveOpeningCorrectionDialog } from "./opening-approve-dialogs";
 import type { OpeningSeedRow } from "@/lib/registers/opening-types";
@@ -49,6 +52,23 @@ export function OpeningSeedWorkbench({
       loadOpeningKeyedResolution(sessionTokenAccessor, seed.id),
     ]);
     return { items, targets, keyed };
+  });
+
+  // (fix-round, browser leg) THE TIE DOCUMENT'S NAME, because a sha is not a document a person can
+  // go and find. Before this the panel was mounted with `documentName={null}` and every provenance
+  // cell read "Document 65a6f1e2d3c4 (sha 65a6f1e2d3c4)" — the hash twice, and the footer said
+  // "Bound to  (sha …)" with a hole where the filename belongs. AC5's provenance is a figure a
+  // professional can trace back to a PAGE, and the filename is how they find the page.
+  //
+  // It is a SEPARATE read on purpose: a failure here must leave the basis, its targets and its
+  // gates exactly as they are (the filename degrades to the sha, which is what the panel already
+  // falls back to), and never take the whole tied-basis surface down the way a failed member of
+  // the combined read above does.
+  const tieDocumentRead = useAsyncRead(async () => {
+    if (!seed.tie_document_id) return null;
+    const { listDocumentsByIds } = await import("@/lib/documents/reads");
+    const rows = await listDocumentsByIds([seed.tie_document_id], { session: sessionTokenAccessor });
+    return rows[0]?.original_filename ?? null;
   });
 
   // BLOCKER 1 (fix round 2, rev-t2): `record_opening_target`'s live body ends
@@ -79,6 +99,16 @@ export function OpeningSeedWorkbench({
   // reveals an attestation field.
   const dialogRefusal = toDialogRefusal(error);
 
+  // (fix-round, browser leg) ONCE THE BASIS HAS LOADED, A LATER `loading` IS A REFRESH — never a
+  // teardown. `DataState` renders its LoadingState INSTEAD of children, and every `act()` flips
+  // `loading` on the reload it always fires, so the reload that follows a successful read
+  // UNMOUNTED `OpeningParseAction` and took its settled outcome with it: the banner that must be
+  // persistent ("reading an opening source is a material act … a message that disappears cannot
+  // carry that", #656 AC5) vanished the instant the read succeeded. The browser leg is what
+  // caught it — the component cells mount the action on its own, where nothing re-reads around
+  // it. This is `opening-register.tsx`'s own `hasSeedsData` precedent, applied one level down.
+  const hasData = data !== null;
+
   const items = data?.items ?? [];
   const draftItems = items.filter((i) => i.state === "active");
   const correctionItems = items; // the door itself selects which drafts qualify (opening-approve-dialogs.tsx)
@@ -87,9 +117,15 @@ export function OpeningSeedWorkbench({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <SectionHeader level={2}>{t("heading")}</SectionHeader>
-          <OpeningSeedBadge state={seed.state} />
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <SectionHeader level={2}>{t("heading")}</SectionHeader>
+            <OpeningSeedBadge state={seed.state} />
+          </div>
+          {/* #656: WHERE THIS BASIS CAME FROM, on the basis itself. A professional asked to
+              approve an opening position must be able to see, without opening anything, whether
+              the figures were read off a document this firm holds or keyed by a person. */}
+          <OpeningSourceHeader seed={seed} targets={data?.targets ?? []} />
         </div>
         <div className="flex flex-wrap gap-2">
           {/* F8 (fix round, rev-t2): un-hid — cancel_opening_seed's live
@@ -123,7 +159,7 @@ export function OpeningSeedWorkbench({
         <p className="text-xs text-muted-foreground">{t("notSerializableHint")}</p>
       ) : null}
 
-      <DataState loading={loading} error={null} isEmpty={false} emptyMessage="">
+      <DataState loading={!hasData && loading} error={null} isEmpty={false} emptyMessage="">
         {data ? (
           <div className="flex flex-col gap-6">
             {/* F2 residual fix (fix round 2, rev-t2): a COUNT-based key
@@ -135,9 +171,26 @@ export function OpeningSeedWorkbench({
                 the write added, updated, or left the row count unchanged. */}
             <OpeningDryrunStrip key={`${seed.id}:${actEpoch}`} seedId={seed.id} targets={data?.targets ?? []} />
 
-            {!seed.tie_document_id ? (
+            {/* #656: a TIED basis used to render NOTHING here — the keyed panel was the only
+                target surface and it is mounted only for an untied seed, so a basis bound to a
+                document showed its tie gates over targets nobody could see. The two lanes now
+                each have their own panel, and which one mounts is still decided by the one fact
+                that decides everything else about this basis: whether it carries a tie document. */}
+            {seed.tie_document_id ? (
+              <div className="flex flex-col gap-3">
+                {seed.state === "open" ? (
+                  <OpeningParseAction seedId={seed.id} busy={busy} onParsed={async () => { await act(async () => {}); }} />
+                ) : null}
+                <OpeningTargetDocumentPanel
+                  clientId={clientId}
+                  seed={seed}
+                  targets={data.targets}
+                  documentName={tieDocumentRead.data ?? null}
+                />
+              </div>
+            ) : (
               <OpeningTargetKeyedPanel clientId={clientId} seed={seed} targets={data.targets} keyedResolutionId={keyedResolutionId} accounts={accounts} busy={busy} act={act} />
-            ) : null}
+            )}
 
             <OpeningItemsPanel clientId={clientId} seed={seed} items={items} accounts={accounts} counterparties={counterparties} keyedResolutionId={keyedResolutionId} busy={busy} act={act} />
           </div>

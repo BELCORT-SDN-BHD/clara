@@ -456,3 +456,58 @@ per-migration transaction.
 `depreciation-history-preintegration-gate.mjs` is the package-wide sweep's escape
 (`CLARA_ALLOW_MISSING_DEPRECIATION_HISTORY`); a FOCUSED run does not preload it and fails loudly on
 a database below 0227, because a skip is not evidence.
+## `opening-ledger-source.test.mjs` (#656, migration 0228)
+
+Twelve cells over the opening lane's DOCUMENT half, which Wave B modelled completely and nothing
+ever exercised end to end because no producer existed. The premise probe is NOT a
+`to_regprocedure` check — 0228 installs no function — it is the republication itself: the registry
+publishes `registry_version = 2`. Its gate module is
+`opening-ledger-source-preintegration-gate.mjs` and the pairing is by the env-var STRING
+`CLARA_ALLOW_MISSING_OPENING_LEDGER_SOURCE`, never by a shared file-name stem (at least seven of
+the estate's forty gate modules do not transform their own stem). A FOCUSED run without the gate
+fails loudly; a sweep with it loud-skips all twelve.
+
+Every `opening_tb.line` region fixture is created through `clara.persist_document_extraction`
+(#857's rule, adopted early). A raw INSERT would let a cell prove the database accepts evidence the
+real producer could never have written — the writer's own chain of responsibility
+(`_derive_opening_region_fact` → the monetary corroboration → `ck_document_regions_opening_fact_0017`)
+is part of what is under test, not scaffolding around it.
+
+Three cells record facts that are NOT what their names suggest, each measured on the rig:
+
+- `p656.tie.unmapped_blocks` — on a DOCUMENT-sourced basis an unmapped target is structurally
+  IMPOSSIBLE. `_assert_opening_target_fact` refuses unless the account matches the stored region
+  exactly, and `fk_opening_tb_targets_account` refuses unless it exists in the chart. The nullable
+  `account_code` that `get_opening_dryrun.unmapped_labels` reports belongs to the KEYED lane alone,
+  so a surface reading an empty `unmapped_labels` on a document basis as "everything is mapped"
+  would paint C-25's quiet pass all over again.
+- `p656.tie.approve_rebinds` — the mutation is a SECOND PRODUCER RUN, not an edit.
+  `clara.document_regions` is append-only, so nothing in this estate can change a region after the
+  fact; what happens in production is that the document is read again, the authority trigger moves
+  the pointer, and every target recorded against the older run is refused AT APPROVAL.
+- `p656.period.closed_fy` — the wall that fires is `clara._tf_period_wall_lines()` on
+  `clara.journal_lines`, at the DRAFT. `approve_opening_seed` carries no period guard of its own
+  and never gets the chance to need one. That measurement is why 0228's conditional narrow recut
+  was not written.
+
+Three cells were corrected in the fix-round, each because a cell must assert what its name says:
+
+- `p656.tie.obe_not_nil` (finding A2) once drafted ONE item against a three-line target set, so
+  `_assert_opening_tie`'s DELTA arm fired first and the cell asserted `tie_mismatch` under a name
+  promising `obe_not_nil` — its own negation. The fixture now records a target pair whose two
+  printed figures do not sum and drafts an item for EACH, so every non-OBE account matches its
+  target (`_opening_seed_deltas` excludes the OBE account by construction), the delta arm passes,
+  the drafted entries' plug lands on opening-balance-equity, and the OBE arm fires with its own
+  token. The residue is asserted cent-for-cent (`shareCr - cashDr`).
+- `p656.tie.stale_extraction` and `p656.tie.approve_rebinds` (finding A7) pinned their refusal with
+  a disjunction over two tokens, so neither recorded WHICH wall fired. MEASURED: a second producer
+  run sets `superseded_by` on the first and `_assert_opening_extraction_ref` checks
+  `status<>'done' or superseded_by is not null` BEFORE the authoritative-pointer comparison, so a
+  re-read always refuses `extraction_not_accepted`. `stale_extraction_version` is the OTHER wall —
+  a run that is itself current while `documents.authoritative_extraction_id` names another.
+- `produceTbRegions` is a MIRROR of the runtime producer's element shape, not a call into it
+  (finding A8): packages/db carries no dependency on packages/runtime. The mirror is pinned next
+  door — `packages/runtime/tests/opening-tb-produce.test.mjs`'s last cell states the exact key set
+  and value grammar, so a `toRegion` drift reds there instead of leaving this whole family green
+  while production breaks — and the World leg drives the real producer's bytes into the real
+  writer end to end.

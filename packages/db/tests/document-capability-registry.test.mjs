@@ -55,6 +55,25 @@ const FORMATS = Object.freeze({
 
 const LEVELS = Object.freeze(["supported", "stored_only", "unsupported", "planned"]);
 
+/** THE VERSION THE REGISTRY PUBLISHES TODAY, written as a LITERAL rather than read back out of
+ *  the table — a cell that reads the number it is about to assert proves nothing.
+ *
+ *  1 from 0191 (the seed) until #656's `0228_opening_ledger_source.sql`, which republished the
+ *  WHOLE registry at 2. It had to be the whole registry and not only the rows whose content
+ *  changed, because THIS FILE's own `:204-212` cell asserts `count(distinct registry_version) = 1`
+ *  ("the registry publishes exactly one version at a time") and the rollback-hygiene cell below
+ *  asserts the published minimum besides — so a two-row raise would have redded a battery whose
+ *  whole subject is registry-wide uniformity. 0228 moves every row by UPDATE (never
+ *  DELETE-then-INSERT, #846) and changes CONTENT on thirteen rows only: six `opening_balance_doc`
+ *  azure-di rows to `typed_facts`/`business_operation` = supported, now that #656 wires the
+ *  `opening_tb.line` producer in line at the OCR pass, and seven `prior_gl` rows' basis + a named
+ *  `{"browser_entrance":"absent"}` limit.
+ *
+ *  A future republication re-bases HERE, in one place, and says why beside the number — the
+ *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
+ *  which shipped 0207 and +147 lines of this file together. */
+const PUBLISHED_REGISTRY_VERSION = 2;
+
 let live = false;
 let executed = 0;
 // #779 — the three monotonicity cells below ride 0207's BEFORE UPDATE trigger, which sits ABOVE
@@ -397,8 +416,9 @@ cell("CONTROL: an out-of-set level is refused by the table's own CHECK, not mere
 monotoneCell("an UPDATE that LOWERS registry_version for an existing (format, kind) row is refused BY THE DATABASE", async () => {
   const stored = await inRolledBackTxn(async (c) => {
     // Raise first, so the refusal below is unambiguously the TRANSITION wall and not the
-    // column's own `registry_version >= 1` positivity CHECK: the registry publishes version 1
-    // today, so "one lower than the current value" would be 0 and would trip that CHECK too.
+    // column's own `registry_version >= 1` positivity CHECK: a "one lower than the current
+    // value" probe against a low published version could be 0 and would trip that CHECK too.
+    // 5 → 3 stays a clean transition test at every published version this registry has had.
     await c.query(`update clara.document_capabilities set registry_version = 5 ${PDF_INVOICE}`);
     // A savepoint, so the REFUSED statement aborts only its own sub-transaction and the row can
     // still be re-read afterwards — the refusal is the subject, and an aborted outer transaction
@@ -434,8 +454,12 @@ monotoneCell("an UPDATE that RAISES registry_version, and one that leaves it UNC
          returning registry_version, limits`)).rows[0];
     return { raised, same: same.registry_version, limits: same.limits };
   });
-  assert.equal(seen.raised, 2, "raising registry_version must still succeed");
-  assert.equal(seen.same, 2, "an UPDATE that does not touch registry_version leaves it where it was");
+  // +1 from whatever the registry publishes: 2 before #656, 3 after 0228 republished at 2. The
+  // SUBJECT of this cell is the transition (a raise is admitted, an unchanged version beside
+  // another column's move is admitted), never the absolute number — so the number is derived
+  // from the one literal above and re-bases with it.
+  assert.equal(seen.raised, PUBLISHED_REGISTRY_VERSION + 1, "raising registry_version must still succeed");
+  assert.equal(seen.same, PUBLISHED_REGISTRY_VERSION + 1, "an UPDATE that does not touch registry_version leaves it where it was");
   assert.equal(seen.limits.probe_779, "transient", "the non-version column change was accepted");
   assert.equal(seen.limits.invoice_line_items, "planned", "the existing named limit survived the probe write");
 });
@@ -447,10 +471,12 @@ monotoneCell("ROLLBACK HYGIENE — after the probes the registry is byte-identic
             count(*) filter (where limits ? 'probe_779')::int as probe_limits
        from clara.document_capabilities`)).rows[0];
   assert.equal(r.versions, 1, "a probe write survived: the registry no longer publishes exactly one version");
-  assert.equal(r.v, 1, "a probe write survived: the published registry_version moved");
+  // 1 until #656; 2 since 0228 republished the whole registry (see PUBLISHED_REGISTRY_VERSION).
+  // The claim is unchanged — the probes above left NOTHING behind — only the published number is.
+  assert.equal(r.v, PUBLISHED_REGISTRY_VERSION, "a probe write survived: the published registry_version moved");
   assert.equal(r.probe_limits, 0, "a probe `limits` write survived on some row");
   const pdf = (await rootQuery(`select registry_version, limits from clara.document_capabilities ${PDF_INVOICE}`)).rows[0];
-  assert.equal(pdf.registry_version, 1, "the probed row's own version is back where it started");
+  assert.equal(pdf.registry_version, PUBLISHED_REGISTRY_VERSION, "the probed row's own version is back where it started");
   assert.deepEqual(pdf.limits, { invoice_line_items: "planned" }, "the probed row's limits are back where they started");
   const ofx = (await rootQuery(
     "select byte_extraction, typed_facts from clara.document_capabilities where format='ofx' and document_kind='bank_statement'")).rows[0];

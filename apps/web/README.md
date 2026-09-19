@@ -615,3 +615,73 @@ reference — the Work or chat task the instruction lives in — and renders the
 verbatim with their codes. `depreciation-authority-panel.tsx` shows the resolved reference as a link
 and the authority window's floor, with the honest sentence that anything earlier is reached only by
 an explicit catch-up a person performs.
+## #656 — the opening basis gets a source, and the books say so
+
+Three separate places made the document half of the opening lane unreachable from a browser, and
+all three had to be fixed for any of them to matter.
+
+- **`CreateOpeningSeedDialog` sent `tieDocumentId: null` unconditionally**, so no basis could ever
+  be bound to a document. It now offers this client's ACTIVE VERIFIED filings of the two kinds
+  `clara.create_opening_seed` admits — never `prior_gl`, which is CLR02 today — and sends BOTH the
+  id and the sha, because the door's XOR guard refuses one without the other. "No document — I will
+  key the balances" stays an EXPLICIT second choice with its own words, never an empty first row a
+  person falls into. Both new inputs are `Field`s in one `FieldGroup`, and the pre-`Field` as-of
+  input moved into the same group so the dialog does not carry two compositions. The rest of the
+  opening dialogs keep theirs; a whole-lane retrofit is #900's shape.
+- **The workbench rendered NOTHING for a tied basis** — the keyed panel mounts only when there is no
+  tie document — so a basis bound to a document showed four tie gates over targets nobody could see.
+  `OpeningTargetDocumentPanel` is its sibling: line key, the label AS PRINTED, account, debit,
+  credit and provenance (the document, its sha-12 and the region id the target cites). An unmapped
+  row renders as an ACTION, never a dash.
+- **Nothing called the runtime.** `OpeningParseAction` + `lib/registers/opening-source.ts` post to
+  `/api/runtime/opening/parse-targets` through the same-origin proxy, with the house runtime-wire
+  discipline. It is a PLAIN action: AC5 forbids a second ritual for the document read, and the
+  ceremony this lane has is `approve_opening_seed`'s distinct-checker door.
+
+**The outcome is persistent, never a toast.** A refusal here names rows on a page a professional has
+to go and find — the producer's whole value is that it says which lines it could not read — and a
+message that fades cannot carry that. Every branch of the route's contract renders with the
+database's own words: the named 422 VERBATIM with its counts and failing rows,
+`no_opening_tb_lines` as the honest keyed-fallback signal rather than an error, a 403 as denied
+(naming the restriction, offering no fake retry).
+
+**The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
+labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
+law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure
+worn as a tie figure, and `opening-dryrun-unchanged.test.tsx` re-measures that the totals did not
+resurrect it.
+
+**…and on a document-sourced basis the unmapped row STATES a fact rather than printing a zero**
+(fix-round, review finding A10). `unmappedCount` is structurally always 0 there — two database
+walls make every parsed target source-exact and chart-present — so "Not yet mapped: 0 line(s),
+Dr 0.00 / Cr 0.00" renders a CONSTANT as if it were a measurement, and a reader who does not know
+that reads it as "everything is mapped": C-25's defect one layer down. When every target is
+document-sourced (`isDocumentSourcedBasis`) the footer keeps the term and says why there is no
+count; a basis carrying a KEYED row keeps the numeric count, because there `unmapped_labels` is a
+real state a person can act on.
+
+**What the browser leg found that no component cell could (fix round).** Six of the walk's seven
+legs shipped as `test.fixme`; running them one at a time surfaced three app defects on this very
+surface. (1) The settled read outcome was UNMOUNTED by the reload that follows a successful read —
+`DataState` renders its LoadingState instead of children and every `act()` flips `loading`, so the
+banner that AC5 requires to be persistent vanished at the moment of success; fixed with
+`opening-register.tsx`'s own `hasSeedsData` precedent inside `opening-seed-workbench.tsx`. (2) The
+document panel was mounted with `documentName={null}`, so every provenance cell read the sha twice
+("Document 65a6f1e2d3c4 (sha 65a6f1e2d3c4)") and the footer had a hole where the filename belongs;
+the workbench now reads the tie document's name in a SEPARATE read whose failure costs only the
+name. (3) `OpeningDryrunStrip` rendered its refusal token at `opacity-70`, taking `text-warning` on
+`bg-warning-muted` to 3.33:1 — below WCAG AA for 12px text, and invisible to
+`scripts/check-token-contrast.mjs`, which reads only the tokens in globals.css. A component cell
+mounts one component with nothing re-reading around it; only the built page in a browser has the
+reload, the second read and the real colours.
+
+**A refusal by the READER is a warning, not the keyed invitation.** A 422 whose reason is the
+producer's own sentence ("trial balance does not balance: DR … vs CR …") is not
+`no_opening_tb_lines`, so `isKeyedFallback` is false and the face renders the warning branch with
+the reason verbatim — never "key the balances instead" over a document the reader has just found
+internally inconsistent.
+
+**C3's seam.** `ENTRY_SELECT` now reads `is_opening_balance`, and an opening entry carries a badge
+linking back to `?tab=opening`. An approved opening item posts an ordinary entry with
+`origin='manual'` (0017:3375-3384), so before this the client's own books showed their opening
+position and a journal typed this morning under the same word.

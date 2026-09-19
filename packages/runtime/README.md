@@ -1011,3 +1011,77 @@ due-date basis end to end: the browser sent `absent`, the door answered `counter
 stamped `document_date + payment_terms_days` on the item (DECISIONS §6.2.0 R-A — agreed terms run
 from the document, so a bill dated 2026-03-04 and posted 2026-03-31 under 30-day terms is due
 2026-04-03, not 2026-04-30). It SKIPS CLEANLY when 0225 is absent.
+## #656 — the `opening_tb.line` producer gets its caller
+
+`lib/opening-tb-cells.mjs` has read a printed trial balance into canonical `opening_tb.line`
+regions since Wave B, and NOTHING called it: every import was a test. The consumer half
+(`lib/opening-parse.mjs` → `clara.record_opening_targets_parsed`, route `src/openingRoutes.ts:32`)
+has been live and unreachable for just as long. #656 joins them.
+
+**`lib/opening-tb-produce.mjs` is the whole new surface**, and it is an adapter plus a containment
+shell: it takes the `tables.N.cells.M` region payloads `normalizeAzureLayout` has just built, hands
+them to `cellsToOpeningTb` unchanged, and returns `{status, reason, regions, refusals, totals}`. It
+adds no grammar of its own, and that is a rule rather than a style — **any future Clara opening tool
+that imports it FREEZES it**, because the freeze lint locks a workflow's whole transitive
+relative-import closure (`lib/periodic-adjustment-basis.ts` is the estate's proof that the trap has
+sprung once). Durable rules therefore live in `0017`/`0228` and in `opening-tb-cells.mjs`'s four
+refusal laws, never here.
+
+**The integration point is IN LINE, at the OCR pass** (`lib/egress.mjs`'s `normalizeAzureLayout`),
+through one appended statement: no new processing lane, no new `engine_kind`, no CHECK widening, no
+facts-router splice. The wiring is kind-blind by construction and that is ACCEPTED, for two measured
+reasons: the reader must POSITIVELY identify a balancing trial balance and returns `null`
+otherwise, and an `opening_tb.line` region is INERT until an opening seed ties that document — at
+which moment `clara.create_opening_seed` re-checks the document's kind (CLR02 for anything but
+`opening_balance_doc` / `management_account`). The worst case of a false positive is a few extra
+evidence rows on a document nobody ever ties, never a number that reaches an accounting effect.
+
+**What a BAD region costs, priced honestly (fix-round, review finding A6).** The sentence above is
+about a region the database ACCEPTS. One it does not accept is dearer: `_derive_opening_region_fact`
+RAISES CLR31 over an `opening_tb.line` whose `monetary_cents` disagrees with the text it re-derives
+(0017:1488-1499), from inside `persist_document_extraction`'s region loop (0017:1587) — so the raise
+aborts the WHOLE persist and the document loses the entire extraction it earned, its invoice or
+payslip regions included. Before this wiring that abort was structurally unreachable; it is
+reachable now on every azure-di layout pass. `disagreeingOpeningRegion` therefore re-checks the
+database's own invariant before emission and drops the WHOLE set if any element fails it — the
+all-or-nothing law one layer lower. The cost is pinned by
+`tests/wave-b-opening-parse.test.mjs`'s A6 cell, which persists a contradicting region through the
+REAL writer and measures that the whole extraction is lost.
+
+**The refusal travels; it is not thrown away (fix-round, review finding A1).** The producer is
+all-or-nothing, so a trial balance it REFUSES — it does not balance, one row is OCR-mangled —
+emits zero regions. Keeping only `.regions` at the OCR pass made that byte-identical to a document
+that is not a trial balance at all: both reached `parseOpeningTargets` as zero rows, and the route
+answered its keyed-fallback signal `no_opening_tb_lines`, which the face renders as an INFORMATION
+banner offering to key the balances — over a document whose own figures the machine had just found
+inconsistent. `normalizeAzureLayout` now writes `{status, reason, refusals}` under the envelope key
+`opening_tb_refusal` (the estate's `corroboration_ineligible` idiom, 0009:148 — no new field_path,
+no CHECK widening, no migration), and `readOpeningRefusal` reads it back off the newest done
+extraction when zero lines came home, answering 422 with the reader's reason VERBATIM plus
+`source_refusal: true` and the failing row keys. `not_a_trial_balance` and a clean read carry no
+such key, so the keyed fallback stays exactly what it was. `producer_error` is deliberately NOT
+carried: it is an internal fault, not a verdict about the document.
+
+**It never throws.** This runs inside an OCR normalisation that has already succeeded; a producer
+fault must not destroy an extraction the document legitimately earned. Every path is contained and
+reports itself as `producer_error` with a named reason. Fail-quiet HERE is fail-closed DOWNSTREAM,
+because emitting nothing is exactly what the lane did before the module existed.
+
+**Two refusals this slice makes reachable for the first time**, both classified in
+`lib/opening-parse.mjs` rather than left to surface as a 500:
+
+- SQLSTATE 23503 on `fk_opening_tb_targets_account` — a printed account this client's chart has not
+  got. It carries no CLR code and no `detail.reason`, so it fell through to `throw` and the route
+  answered 500. `mapOpeningFkError` makes it a 422 in the `unparseable` family, NAMING the account
+  when Postgres' own structured DETAIL states one and it passes the chart's account-code grammar.
+  The runtime cannot pre-flight this: `clara_runtime` holds no SELECT on `clara.coa_accounts`.
+- CLR10 `op_key reused with different args` — the parse's op key is stable per (seed, document) so a
+  retry cannot double a basis, while the payload it hashes is keyed by region id. Re-reading the
+  tie document therefore makes a second parse a replay CONFLICT, which the generic arm reported as
+  `malformed_lines`. It is now a typed 409 `source_reread_since_parse`. **Named residual**: the
+  answer is honest but still a dead end; re-parsing a re-read document needs either an op key
+  carrying the extraction or a door that re-points existing targets.
+
+`tests/opening-ledger-source-e2e.mjs` is the standalone leg that runs the whole chain on real
+Postgres. It bootstraps **no Workflow World**, measured rather than skipped: no workflow touches the
+opening lane, so AC7's database-boundary clause applies.

@@ -25,6 +25,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { ErrorMessage } from "@/components/firm/data-state";
+import type { DialogRefusal } from "@/components/common/dialog-refusal";
 import { CreateOpeningSeedDialog } from "./opening-seed-lifecycle";
 
 export function NoOpeningSeedState({
@@ -32,12 +33,18 @@ export function NoOpeningSeedState({
   plan,
   plansLoading,
   busy,
+  refusal,
   act,
 }: {
   clientId: string;
   plan: { id: string } | null;
   plansLoading: boolean;
   busy: boolean;
+  /** #656: the register's OWN standing failure, threaded into the create dialog so a refusal
+   *  (CLR31 `duplicate_seed`, CLR02 on a tie document whose bytes are not verified) renders
+   *  BESIDE the picked document and the typed as-of rather than behind the modal backdrop —
+   *  CB-AE2E-004's law, which this dialog was the last one on the tab not to follow. */
+  refusal?: DialogRefusal;
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("OpeningCarryDown");
@@ -47,25 +54,27 @@ export function NoOpeningSeedState({
       <div className="flex flex-col gap-2">
         <EmptyState>{t("noSeedYet")}</EmptyState>
         <div>
-          <CreateOpeningSeedDialog clientId={clientId} planId={null} busy={busy} act={act} />
+          <CreateOpeningSeedDialog clientId={clientId} planId={null} busy={busy} refusal={refusal} act={act} />
         </div>
         {!plansLoading ? <p className="text-xs text-warning">{t("noPlanNote")}</p> : null}
       </div>
     );
   }
 
-  return <OpeningPositionGate key={plan.id} clientId={clientId} planId={plan.id} busy={busy} act={act} />;
+  return <OpeningPositionGate key={plan.id} clientId={clientId} planId={plan.id} busy={busy} refusal={refusal} act={act} />;
 }
 
 function OpeningPositionGate({
   clientId,
   planId,
   busy,
+  refusal,
   act,
 }: {
   clientId: string;
   planId: string;
   busy: boolean;
+  refusal?: DialogRefusal;
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("OpeningCarryDown");
@@ -119,7 +128,7 @@ function OpeningPositionGate({
         ) : null}
         <NotBuiltNote>{t("openingPosition.notBuiltNote")}</NotBuiltNote>
         <div>
-          <CreateOpeningSeedDialog clientId={clientId} planId={planId} busy={busy} act={act} />
+          <CreateOpeningSeedDialog clientId={clientId} planId={planId} busy={busy} refusal={refusal} act={act} />
         </div>
       </div>
     );
@@ -129,7 +138,7 @@ function OpeningPositionGate({
     <div className="flex flex-col gap-2">
       <EmptyState>{t("noSeedYet")}</EmptyState>
       <div>
-        <CreateOpeningSeedDialog clientId={clientId} planId={planId} busy={busy} act={act} />
+        <CreateOpeningSeedDialog clientId={clientId} planId={planId} busy={busy} refusal={refusal} act={act} />
       </div>
     </div>
   );

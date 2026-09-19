@@ -63,6 +63,13 @@ export type JournalEntryRow = {
   reversal_of: string | null;
   reversed_by: string | null;
   reversal_reason: string | null;
+  /** #656 — 0017:3375-3384. TRUE on an entry the opening lane posted; `origin` stays `'manual'`
+   *  for those, so this column is the only thing that tells them apart from a hand-keyed one.
+   *  OPTIONAL deliberately: `ENTRY_SELECT` reads it, but eight existing fixtures across four
+   *  other lanes build this row literally, and a required field would have made a one-column
+   *  read a cross-ticket edit in files #636/#655/#658 are working in this wave. `isOpeningEntry`
+   *  (lib/journals/opening-badge.ts) treats absent exactly as false. */
+  is_opening_balance?: boolean | null;
   withdrawn_at: string | null;
   withdrawal_reason: string | null;
   created_at: string | null;

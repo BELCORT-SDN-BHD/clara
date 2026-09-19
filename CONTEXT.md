@@ -179,6 +179,35 @@ _Avoid_: Presenting an exact-name check as duplicate detection — a same-name c
 What a client's books start from: either a first year of trading, where there is nothing to carry down and no opening balances are owed, or a prior period's closing position that must be brought in and tied out before the books can be relied on. The second is owed work whether or not anyone has started it.
 _Avoid_: Treating a deferred carry-down as "no opening needed"; treating an empty opening register as evidence of a first year; a blanket onboarding sign-off standing in for either.
 
+**Opening basis**:
+The one versioned set of opening balances a client's books start from, together with its source,
+its mapping to the chart of accounts and its tie-out. A client has at most one live basis at a
+time; it is authored, corrected and superseded as a whole, and it is what every later figure is
+measured from.
+_Avoid_: Calling a single journal entry "the opening basis"; treating a keyed basis and a
+document-read basis as different kinds of truth — they differ in PROVENANCE, not in standing.
+
+**Opening source**:
+The prior general ledger or trial balance a firm receives from a client, filed as a document and
+bound to the opening basis by identity AND hash, so every figure on the basis can be traced back
+to the page it was printed on.
+_Avoid_: "The opening file"; treating a re-uploaded copy as the same source — a different hash is
+a different source, whatever its filename says.
+
+**Opening target**:
+One line of the printed source, as stated, mapped or not yet mapped to an account. It is what the
+tie-out compares the books against, never a posting in its own right.
+_Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
+target a journal line.
+
+**Provenance (document / keyed)**:
+Whether a target came from stored evidence on the bound document — a named extraction region whose
+text the database re-derives the figure from — or from a named professional's keying. Every target
+carries exactly one, and the two lanes are walled apart: a basis bound to a document refuses a
+keyed target outright.
+_Avoid_: Showing a keyed figure as if it had been read from the document; presenting a document
+figure without the region a person can open.
+
 **Invitation**:
 A single-use, time-limited admission into a firm that already exists, bound to one email address
 and to one role. Its secret is handed to the issuer exactly once and never stored, so an

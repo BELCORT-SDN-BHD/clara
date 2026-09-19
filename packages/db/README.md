@@ -851,3 +851,60 @@ operation-key schema is parsed** — IMMUTABLE, STRICT, uuid-regex guarded, ungr
 **LOUD, for every future bank-family pin.** 0226 re-patches the THIRTEEN `clara._agent_*_core`
 bodies rostered at 0129:1067-1081, so every one of them has a NEW `prosrc` sha. A later migration
 pinning any of them must measure against #657's POST-image, never 0129's.
+## #656 — the capability registry's second publication (0228)
+
+`0228_opening_ledger_source.sql` creates nothing and recuts nothing. It republishes
+`clara.document_capabilities` at `registry_version = 2` — an UPDATE that RAISES, never a
+DELETE-then-INSERT (#846; 0207's BEFORE UPDATE monotone trigger permits a raise and refuses a
+decrease with CLR08 `registry_version_monotone`) — and corrects the content of thirteen of the 240
+rows. It is the second file ever to touch this table; 0191 seeded it and 0207 walled its counter.
+
+**Why EVERY row moves when only two kinds change.** `tests/document-capability-registry.test.mjs`
+asserts `count(distinct registry_version) = 1` registry-wide — "the registry publishes exactly one
+version at a time" — and its rollback-hygiene cell asserts the published minimum besides. Raising
+two kinds alone reds that battery, whose whole subject is registry-wide uniformity. So the
+republication is whole-registry and the battery is re-based in the SAME commit, on the exact
+precedent `af3b5955` (#779) set when it shipped 0207 and +147 lines of that file together.
+
+**The two corrections are NOT symmetric, and the asymmetry is the point.**
+
+- `opening_balance_doc` × the six `azure-di:prebuilt-layout` formats moves `typed_facts` AND
+  `business_operation` to `supported`, because this branch BUILDS that operation: the
+  `opening_tb.line` producer is wired in line at the OCR pass and its regions are carried into the
+  governed opening-seed door. It ships in the same merge as that wiring and never one migration
+  ahead of it — shipping a level before its capability is exactly the "success that did not happen"
+  `0191:217-218` promises a professional will never be shown. The other six formats have no
+  producer (`structured_parse` emits `rows.*` / `sheets.*`, never `tables.*`) and stay `stored_only`.
+- `prior_gl` × the seven formats with a reader keeps its LEVEL and loses its LIE. Its basis said
+  "Clara derives nothing to drive it", which is false: `packages/runtime/lib/seeding-parse.mjs`
+  drives `clara.create_seeding_batch` off a filed prior GL today, from a printed ledger's table
+  cells or from xlsx bytes. The corrected sentence names the operation, its reader, its proposal
+  shape (counterparty, account and date, NEVER an amount) and the fact that **no browser entrance
+  exists** — nothing in `apps/web` calls `POST /api/seeding/prepare` — with
+  `limits = {"browser_entrance":"absent"}` making that gap machine-readable, which is 0191's own
+  instrument for a named gap (`:235-236`, "A limit is not a lower level").
+
+**Why the prior_gl LEVEL was held, measured rather than preferred.** #656's brief rules it to
+`supported`. 0228 was written that way, applied to a rig, and the registry's own cell
+(`document-capability-registry.test.mjs:278-284`, "business_operation never claims 'supported'
+where typed_facts is not supported") went red across all 240 rows; this column's own contract says
+the same in words (`0191:229-230`: "`supported` where Clara can carry TYPED FACTS into it").
+`prior_gl` has no typed-facts producer — `prior_gl.line` has never been written — and its operation
+yields human-ticked PROPOSALS, not carried facts. Raising the level needs either a false
+`typed_facts` claim or the relaxation of a 240-row honesty law for one row, so the level stands and
+the question is a named residual.
+
+**The two writers this lane splits across, and their floors.** `clara.record_opening_target(uuid,
+jsonb,text)` is the HUMAN door (bookkeeper+, `clara_authenticated`) and refuses ANY tied basis with
+CLR31 `parsed_target_writer_required`. `clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)`
+is `clara_runtime`-only with no `_human_ctx` twin, and re-derives every triple from the cited
+extraction region before it writes. A document-sourced figure is therefore written only by the lane
+that read it, and a keyed figure only by a named person — which is what makes `provenance_kind`
+mean something.
+
+**Two walls a caller meets that no CLR code names**, both measured while writing this slice:
+`fk_opening_tb_targets_account (client_id, account_code) → clara.coa_accounts` refuses a printed
+account this client's chart has not got with a bare SQLSTATE 23503; and `clara._tf_period_wall_lines`
+on `clara.journal_lines` refuses an opening DRAFT into a closed fiscal year with CLR19
+`write_into_closed_period`, long before `approve_opening_seed` is reached. The runtime classifies
+the first (`lib/opening-parse.mjs`'s `mapOpeningFkError`); the second is why 0228 writes no recut.
