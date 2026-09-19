@@ -14,6 +14,13 @@ Cut ONCE on `integration/wave-2026-09-18` after the ten merges and the integrati
 | `956ae8bb` | three corrections the battery found: the v21 leg's replay leg was testing a false property, its run-lane probes spoke for other runs, and `work-egress-e2e` pinned the pre-v5 trace shape |
 | `a18c8e73` | the build-info bundle census, which names five now and reads the array as a list rather than as a string |
 
+> **FIX ROUND 1 CHANGED SOME OF WHAT IS BELOW.** The three review lenses returned one blocker and
+> sixteen further findings; `reports/successors-fixround-1.md` is the record, and the claims this
+> report made that were wrong have been corrected IN PLACE here (each one says so, with the finding
+> id). The fix-round commits are `c4136de8`, `4c110b89`, `d97df49b`, `7417029d`, `0008849c` and the
+> report commit on top of them. Where this report still says "measured", it was re-measured after
+> those commits.
+
 **#658's conditional chat stanza (SUCCESSORS-ORDER §1.4) was TAKEN, not reduced to contract-only.**
 It landed with its cells green and its World leg green, and it registered NO part kind — §3 records
 the measurement that settled that.
@@ -31,7 +38,7 @@ modelId, segment), {…two literal keys})`. Engine stamp `llm-openai:<modelId>:c
 |---|---|
 | `start_trade_invoice_work` (#655) | Schema, `localTradeInvoiceRefusal`, `tradeInvoiceFromInput`, `journalBasisFromInput` and the eighteen-token `TRADE_INVOICE_REFUSALS` all imported from `packages/runtime/lib/trade-invoice-basis.ts`. Door: `clara.admit_trade_invoice_work($1 clientId, $2 ctx.createdBy, $3 intentKey, $4 input.kind, $5::jsonb particulars, $6::jsonb basis, $7 input.basis_origin, $8::jsonb [{kind:'chat_task',task_id,session_id}], $9 modelId)` — **nine arguments, in the carrier's order**. `intentKey = stableOpKey(ctx.taskId, TOOL, input)`. Session read from the task, never from a model argument. A REPLAY returns `invoice_id` alone, so `counterparty_id` / `due_date` / `due_date_source` come back **null rather than invented**; `kind` is safe to echo because a differing kind raises `intent_payload_conflict` first. Mints the existing `work_accepted`; `WORK_ACCEPTED_PURPOSES` stays at three. |
 | `run_depreciation_period_for_client` (#651) | Schema, `depreciationRunDoorArgs`, `localRunRefusal`, `refusalSentence`, `runSummary`, `floorSentence` from `packages/runtime/lib/depreciation-run.ts`. Door: `clara.run_depreciation_period_for($1::uuid, $2::date, $3::text, $4::uuid)` = `(p_client, p_through, p_op_key, p_obo)`. `clara.run_depreciation_manual` is named in PROSE (the floor sentence) and **never called** — `rig-meta.mjs:691-693` is an executable census that fails the moment the human verb reaches a machine role. A `client_id` disagreeing with the conversation's pin is refused **CLR03 `client_not_in_conversation` before any round trip** — a provenance wall, not a business rule: silently substituting the pin would run a period on a client the model did not name. `{pending:true}` from `_reserve_op` answers `ok:true, in_flight:true, periods_run:0` and mints no CLR of its own. **No part kind and NOT in `hasCodingIntent_v21`** — §3. |
-| `loadClientBasisStepV21` (#658 (B), TAKEN) | A SIBLING step beside the byte-untouched `loadContextStepV10`, which is still called for the history and the context pack. Reads `clara.retrieve_knowledge` with `p_purpose='chat_turn'` at `p_limit=60` (v19's own record cap, so the block does not shrink at the repoint) through `lib/knowledge-retrieval.mjs`. Answers `{status, reason, face_status, knowledge_version, as_of, records_shown, truncated, text}` and **never collapses to null**; `faceStatusOf` is the one mapping between the runtime's two frozen words and the estate's four. `clara.get_context_pack` is NOT recut and NOT repointed — a cell greps the closure's CODE (comments stripped) for both door names and finds neither. |
+| `loadClientBasisStepV21` (#658 (B), TAKEN) | A SIBLING step beside the byte-untouched `loadContextStepV10`, which is still called for the history and the context pack. Reads `clara.retrieve_knowledge` with `p_purpose='chat_turn'` at `p_limit=60` through `lib/knowledge-retrieval.mjs`. **Corrected in fix round 1 (ADV-S-5):** asking for sixty and PRINTING forty is not "the block does not shrink at the repoint", which is what this row claimed while `renderRetrievedKnowledge` capped every lane at 40 records and 200 value characters. The lane now passes its own caps, both imported from v19's `KNOWLEDGE_CONTEXT_MAX_RECORDS` / `_VALUE_CHARS` (60 / 300), and `records_shown` / `truncated` describe the BLOCK rather than the door's answer. Answers `{status, reason, face_status, knowledge_version, as_of, records_shown, truncated, text}` and **never collapses to null**; `faceStatusOf` is the one mapping between the runtime's two frozen words and the estate's four. `clara.get_context_pack` is NOT recut and NOT repointed — a cell greps the closure's CODE (comments stripped) for both door names and finds neither. |
 
 `SYSTEM_PROMPT_V21` = `SYSTEM_PROMPT_V20` + three paragraphs, byte for byte (cell). `ClaraPartV21`
 IS `ClaraPartV20` — no new wire kind.
@@ -51,13 +58,22 @@ IS `ClaraPartV20` — no new wire kind.
   and the estate's FACE word. **It records its own next seq on a divergent replay**: a
   `replayed:true, payload_match:false` answer means the estate holds a row that is not what this
   attempt saw, so the step takes seq+1 (bounded at 4, and it converges — the third execution matches
-  what the second wrote). A failure to WRITE the row sets `recorded:false` and nothing else.
+  what the second wrote). A failure to WRITE the row sets `recorded:false` and nothing else, and
+  **`read_seq` answers `null`** when nothing landed — a failed first write, or a fourth seq that
+  still diverged (fix round 1, ADV-S-12(a); it used to answer the last seq it TRIED). The row it
+  writes carries the counts the BLOCK printed, not the door's (ADV-S-5(c)).
 - **`knowledge_read_failed`** — settles `failed`/`internal`, recoverable, nothing posted, on ANY
   `{status:'unavailable'}` answer. Extracted as the pure predicate `knowledgeReadFailedV5` so the
   cells drive it: TRUE over all five frozen reasons, FALSE for `{status:'ok'}` with `tiers.core: 0`
   and for `truncated:true`. A cell greps all three v5 files, **comments included**, for
   `core_readable|core_unreadable|core_ok|tiers.core === 0` and finds none — the integrator was told
   twice not to write a per-tier signal, and this is the cell that would catch it being added back.
+- **The block NAMES its records** — fix round 1's blocker (ADV-S-1). `renderRetrievedKnowledge`
+  printed key, value and trust and no id, so `read_knowledge_source`, `read_knowledge_history` and
+  v4's still-rostered `ask_knowledge_conflict` — three tools whose only identifier is a `record_id`
+  the model can learn nowhere else — were rostered, hashed and unreachable, while three sentences
+  the model reads promised the id would be there. The line carries `record_id` again, with the
+  `in force` / firm-scope / `applies_when` / `source` marks v19 and v4 both printed.
 - **`read_knowledge_source` / `read_knowledge_history`** — one shared `.strict()` schema
   `{record_id: uuid, reason: 1..500}` carrying **no firm and no client**; those come from the Work
   row. Doors `clara.read_knowledge_record_for` / `clara.read_knowledge_history_for` called with
@@ -67,8 +83,19 @@ IS `ClaraPartV20` — no new wire kind.
   `pools().withRuntime`, not the wake-scoped path: 0230 grants these doors to `clara_runtime` and
   nobody else, so a wake-scoped call would answer 42501. Spend `budget.toolCalls`, mint no part,
   return no document bytes, and set no terminal — a read that refuses is a fact to reason about.
+  **What they leave behind (fix round 1, ADV-S-2):** nothing in `clara`. The stated `reason` is no
+  argument of either door, `clara.work_knowledge_reads` records the PRELOAD only, and
+  `clara.work_execution_traces` has no free payload column by design — so the reason lives in the
+  run's own journal. Three places claimed otherwise, including the schema's model-facing
+  `.describe()`; all three now say what is true, and the durable per-read row is a RATIFICATION
+  REQUEST (it needs a migration that tells the two kinds of read apart, because 0230's
+  `_work_knowledge_drift_core` reads the latest read-set row's keys as the run's whole read-set).
 - **Drift replan** — `readKnowledgeDrift` → `clara.work_knowledge_drift_for(p_firm, p_work)`, asked
-  ONCE per resume, AFTER the authority recheck and BEFORE the next segment. `driftSpendsReplanV5` is
+  ONCE per resume, AFTER the authority recheck and BEFORE the next segment — and **only when a next
+  segment exists** (fix round 1, ADV-S-3: on the LAST segment's resume the row's seq
+  `segmentTraceBase(budgets.segments)` IS `SETTLE_TRACE_SEQ`, and the settle's own row was then
+  dropped by `on conflict do nothing`, silently). It traces under its OWN capability id,
+  `accounting_work.read_knowledge_drift` (ADV-S-10). `driftSpendsReplanV5` is
   the pure predicate: only `relevant === true` spends one EXISTING `budget.replans`; `relevant:null`
   (`observed_from:'trace'`) and an unreadable drift are SURFACED and spend nothing. `driftNoteV5`
   writes three DIFFERENT sentences for the three facts (a cell asserts they are three). With the
@@ -84,7 +111,9 @@ IS `ClaraPartV20` — no new wire kind.
   remedy verbatim. A cell proves the Work settles `refused`/`tool_error`/recoverable where v4
   settled `invariant`/not-recoverable, and that the other two CLR40 reasons are byte-identical to
   v4's classification.
-- **Bundle `clara-work/v5`**, digest `b9f25a810730c7b6abe2c884bf1ab3df4e30a7659da098333fd156e51cc17114`.
+- **Bundle `clara-work/v5`**, digest `fe64198207d5082c06eff21b7cf7193c9a6dc03254f871cc1bdda5752bedc698`
+  (it was `b9f25a81…1cc17114` when this report was first written; fix round 1 re-worded one
+  `.describe()` the model reads and the digest moved, which is §2's claim paying out).
   §2 is its own section, because it is the first time this class has met ARCHITECTURE:435-445.
 - **Trace scheme** — v5 is the first cut in this class to move it: seq 1 claim, **seq 2 the
   knowledge preload**, `3 + index*4 + {0 drift, 1 dispatch, 2 model_call, 3 tool_call}`, settle at
@@ -92,7 +121,8 @@ IS `ClaraPartV20` — no new wire kind.
   there was no free seq; widening the block is the honest alternative to wedging them in. Every row
   records `registry_version = clara-capability-registry/v2` with an EXPLICIT purpose from
   `purposeForV2` — `lib/work-trace.mjs` defaults purpose from v1's `capability()`, which answers null
-  for the two new ids, and a null purpose on a model-bound row is the field an auditor most needs.
+  for the THREE new ids (the third is the drift read's, added in fix round 1), and a null purpose on
+  a model-bound row is the field an auditor most needs.
 
 ---
 
@@ -109,8 +139,19 @@ block is `{id, names, schemas, dependencies}`:
   tools name `clara.open_work_question` because that is the door their CALL causes the workflow to
   reach.
 
-The canonical hashed text goes from **10,217 bytes (v4) to 22,375 (v5)** — that is the coverage
-arriving, measured rather than asserted. Two cells carry it: one deep-equals every hashed schema
+The canonical hashed text goes from **10,217 bytes (v4) to 22,429 (v5)** — that is the coverage
+arriving, measured rather than asserted. (22,375 at the first cut; fix round 1's one corrected
+`.describe()` added the rest and moved the digest with it.)
+
+**AND WHAT THE DIGEST STILL CANNOT SEE, measured in fix round 1 (ADV-S-4).** `z.toJSONSchema`
+renders STRUCTURE and erases `.refine` / `.superRefine` entirely, so a rule that lives in a check
+contributes nothing to the hashed text. The roster carries exactly one — `ask_question.fields[]`'s
+"`options` is required for `choice` and forbidden for everything else", which is #791's own example
+of a schema changing under an unchanged name. Three cells now stand where the digest cannot: one
+asserts the JSON Schema is byte-identical with and without that rule (the limit, as a measurement,
+not a memory), one censuses which roster schemas carry an unrepresentable check so a NEW one must be
+declared, and one drives the rule's behaviour so relaxing it reds. The header's general sentence is
+true of every item it lists and is not true of everything a schema can say; both texts now say so. Two cells carry it: one deep-equals every hashed schema
 against `z.toJSONSchema` of the BUILT tool's `inputSchema` (the hashed schema IS the served schema);
 the other tightens one bound on one schema, leaves the roster and the `tools.id` untouched, proves
 the digest moves — and proves the **v4-shaped projection of the same change is byte-identical**,
@@ -198,11 +239,11 @@ cut's growth is measured against something written down.
 | `pnpm lint` | **exit 0** — freeze-lint + its three self-tests, the sibling checkers, eslint in all four workspaces, `apps/web`'s `check-token-contrast` / `check-test-manifest` / `check-message-keys` / `check-ui-add-guard.selftest`, and the root guard battery |
 | `node scripts/check-frozen-workflows.mjs` | **exit 0** — `312 frozen file(s) verified`, `55 "use workflow" module(s) all frozen+registered`, 3 retired |
 | `… --compare-base origin/main` | **exit 0** — `296 … same hash and deployed flag; 16 addition(s)` |
-| `node packages/runtime/scripts/check-parts-parity.mjs` | **exit 0** — emittable `{freeform_result, work_accepted, work_status, work_result, work_question, knowledge_receipt}` — **the same six as `origin/main`, no new kind**; `work_accepted` gains `chatTurn.v21.tools.ts:329`, `work_result` gains `claraWork.v5.impl.ts:822` |
+| `node packages/runtime/scripts/check-parts-parity.mjs` | **exit 0** — emittable `{freeform_result, work_accepted, work_status, work_result, work_question, knowledge_receipt}` — **the same six as `origin/main`, no new kind**; `work_accepted` gains a site in `chatTurn.v21.tools.ts` and `work_result` one in `claraWork.v5.impl.ts` (the census pins the FILE; this row named a line number that no longer held after the first edit — review S2) |
 | `pnpm --filter @clara/runtime build` | **exit 0** (nitro; `.output/server/index.mjs` 10.8 MB, 55 workflows) |
 | `node scripts/check-workflow-bundle.mjs` | **exit 0** — `12 pinned class(es) … 55 superseded body(ies) still ship for parked runs, chatTurn pinned at v21 with its step directive, engine stamp and freeform_result emitter (40 checks)` |
-| `node --test tests/{chat-turn-v21-tools,clara-work-v5}.test.mjs` | **56 pass / 0 fail** (24 + 32) |
-| `node --test tests/{registry-view,work-bundle,clara-work-v4,chat-turn-v20-tools}.test.mjs` | **58 pass / 0 fail** (after the two pin cells were repointed) |
+| `node --test tests/{chat-turn-v21-tools,clara-work-v5}.test.mjs` | **64 pass / 0 fail** (26 + 38) after fix round 1's cells; it was 56 (24 + 32) at the first cut |
+| `node --test tests/{registry-view,work-bundle,clara-work-v4,chat-turn-v20-tools}.test.mjs` | **65 pass / 0 fail** (7 + 17 + 25 + 16, re-measured in fix round 1 — this row said 58, which was simply wrong when it was written; review S1) |
 | `node --test tests/p6-1-parts-parity.test.mjs` | **22 pass / 0 fail** (after the census gained its two sites) |
 | **`node --test "tests/**/*.test.mjs"`** (whole runtime suite, `clara_rt` 55721) — run THREE times | **2788 tests · 2767–2768 pass · 4–5 fail · 16 skip · ~35 s**, the spread being which of the wake-engine flake's two variants fires — §7.2 |
 | **`node scripts/run-tests.mjs`** (whole `apps/web` unit suite) | **4628 tests · 4626 pass · 0 fail · 2 skip · 68.8 s · exit 0** |

@@ -65,7 +65,7 @@
       "deployed": true
     },
     "packages/runtime/lib/knowledge-retrieval.mjs": {
-      "sha256": "af0fd96759e949d5c78fae4b8331938caf876c6c8858df0bbc1475e0face5233",
+      "sha256": "af3f4ce8d13a4433ffbb72d290a4b2b48b784190595975bf146af6d95529dbdb",
       "note": ""
     },
     "packages/runtime/lib/knowledge.mjs": {

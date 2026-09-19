@@ -400,8 +400,11 @@ export function renderRetrievedKnowledge(answer, options = {}) {
     // dropped core rows and said only "more record(s) not printed" would hide exactly the loss
     // that matters (review ADV-S-5(b)).
     const coreHidden = records.slice(shown.length).filter((r) => r?.tier === "core").length;
+    // NO "ask for it by name" HERE: neither lane gives the model a way to request a key, so a
+    // sentence offering one would promise a capability that does not exist. It says what was lost
+    // and leaves the run to say so, which is the same discipline as the door-truncation sentence.
     lines.push(`(${printHidden} more record(s) not printed here`
-      + `${coreHidden > 0 ? `, ${coreHidden} of them CORE — ask for the key by name if you need it` : ""}.)`);
+      + `${coreHidden > 0 ? `, ${coreHidden} of them CORE. Say so if it matters` : ""}.)`);
   }
   return lines.join("\n");
 }

@@ -1,0 +1,36 @@
+{
+  "ticket": "successors",
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/successors-review-spec.json",
+  "findings": [
+    {
+      "id": "SP-1",
+      "severity": "low",
+      "category": "refusal-map-scope",
+      "where": "packages/runtime/lib/depreciation-run.ts:124-155 (DEPRECIATION_REFUSAL_MESSAGES)",
+      "what": "The #651 sentence map carries three entries (authority_already_live, authority_ref_invalid, authority_ref_unresolved) that migration 0227's own run_depreciation_period_for(uuid,date,text,uuid) never raises -- they belong to a DIFFERENT door, sign_depreciation_authority, which run_depreciation_period_for_client never calls. WAVE-DIGEST SS4's #651 stanza names a shorter CLR38/CLR19/CLR04 mapping and carries no '#655-style count is descriptive, the door's own raise ladder is the contract' carve-out that would license the extra rows.",
+      "evidence": "packages/db/migrations/0227_depreciation_history.sql:1164-1209 (authority_already_live / authority_ref_invalid / authority_ref_unresolved are raised inside sign_depreciation_authority, a separate function starting at :1132) vs packages/db/migrations/0227_depreciation_history.sql:1319-1404 (clara.run_depreciation_period_for's own body, which raises only obo_not_active, client_not_found, insufficient_role, client_inactive locally and delegates to _fa_run_period_core / _depreciation_run_due_core for the CLR38 family). packages/runtime/workflows/chatTurn.v21.tools.ts's runDepreciationPeriodForClient never reaches sign_depreciation_authority.",
+      "fix": "Either trim DEPRECIATION_REFUSAL_MESSAGES to the reasons run_depreciation_period_for's own call graph (the door plus _fa_run_period_core / _depreciation_run_due_core) can actually raise, or add one sentence in the carrier's header naming these as forward-looking/defensive entries the way #655's file states its count is descriptive. Purely cosmetic -- an unreachable map entry can never misfire because the lookup falls through to the door's verbatim message for anything it does not recognise."
+    },
+    {
+      "id": "SP-2",
+      "severity": "low",
+      "category": "refusal-map-scope",
+      "where": "packages/runtime/workflows/claraWork.v5.tools.ts:167-175 (READ_KNOWLEDGE_REFUSALS)",
+      "what": "The #658(A) read tools' sentence map carries a third key, pack_firm_required, beyond the two the successor contract names (WAVE-DIGEST SS4 and lib/knowledge-retrieval.mjs's own header: 'CLR11 -> record_not_in_scope, CLR03 -> no_pack_context, anything else -> the transport class'). pack_firm_required is a real CLR10 migration 0230 can raise if the firm argument were ever missing, but ctx.firmId is always populated from the Work row in this lane, so the branch is inert in practice.",
+      "evidence": "packages/runtime/workflows/claraWork.v5.tools.ts:167-175 defines the third key with its own comment acknowledging it 'describes the runtime's own mistake rather than the situation'; the successor stanza in reports/successors-final.md SS1 and lib/knowledge-retrieval.mjs's header both describe only the two-entry CLR11/CLR03 map for this class of read.",
+      "fix": "Either drop the pack_firm_required row (letting it fall through to the door's verbatim message, matching the stanza's literal two-entry map) or note the addition explicitly in the successor report the way #655's F2 addition was named and justified. No behavioural risk either way."
+    },
+    {
+      "id": "SP-3",
+      "severity": "low",
+      "category": "prompt-stanza-fidelity",
+      "where": "packages/runtime/workflows/chatTurn.v21.prompt.ts:161-191 (DEPRECIATION_CHAT_GUIDANCE) vs packages/runtime/lib/depreciation-run.ts:278-281",
+      "what": "depreciation-run.ts's successor-contract footer labels its three-sentence stanza 'PROMPT STANZA (verbatim, for the successor's system prompt)'. The delivered DEPRECIATION_CHAT_GUIDANCE conveys the same three ideas (execute-not-sign, the period is the database's, say what the receipt says including skips) but as expanded, reworded prose rather than that exact string appearing verbatim anywhere in SYSTEM_PROMPT_V21.",
+      "evidence": "packages/runtime/lib/depreciation-run.ts:278-281 (\"You execute an authority; you never sign one. The period is the database's, never yours. Say you have QUEUED/POSTED exactly what the receipt says...\") vs packages/runtime/workflows/chatTurn.v21.prompt.ts:162,168-171,173-178 (semantically equivalent but not byte-identical wording).",
+      "fix": "Cosmetic only -- the substance the stanza requires is present and the model-facing guidance is arguably clearer for being expanded. If literal verbatim insertion is intended by this wave's convention, fold the carrier's exact three sentences in as a standalone paragraph inside DEPRECIATION_CHAT_GUIDANCE."
+    }
+  ],
+  "verdict": "accept"
+}
