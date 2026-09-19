@@ -57,12 +57,28 @@
 //   node scripts/check-frozen-workflows.mjs --compare-base <ref> # semantic additions-only proof
 //   node scripts/check-frozen-workflows.mjs --print-closure   # report, per @frozen entry file,
 //                                                             # the modules its own closure locks
+//   node scripts/check-frozen-workflows.mjs --print-closure <module-path>
+//                                                             # #849 — targeted: just the entry
+//                                                             # files whose closure reaches
+//                                                             # <module-path>
+//   node scripts/check-frozen-workflows.mjs --retire <path> --ruling <ref>
+//                                                             # #849 — move <path>'s current
+//                                                             # manifest entry to `retired`,
+//                                                             # citing <ref> as the ruling
 //
 // `--print-closure` (#815) is ADDITIVE REPORTING ONLY: it reads nothing but the tree, writes no
 // manifest, changes no hash, and exits 0. It answers the question the flat manifest cannot —
 // "which frozen version(s) lock this module?" — which is what an author needs BEFORE editing e.g.
 // lib/work-trace.mjs (reached from claraWork.v3.impl.ts only through a DYNAMIC import) or
-// lib/capability-registry.mjs (reached only TRANSITIVELY, through work-trace.mjs).
+// lib/capability-registry.mjs (reached only TRANSITIVELY, through work-trace.mjs). Giving it a
+// module path (#849) filters straight to that answer instead of grepping the full report by hand.
+//
+// `--retire <path> --ruling <ref>` (#849) is the write side of #810's manifest shape: it moves
+// `path`'s current entry from `workflows` to `retired`, carrying its last frozen sha256 forward
+// and citing the ruling, refusing (with no manifest write) unless the file is already gone from
+// the tree and the path has a current entry. Like --update and --lock-deployed, it is REFUSED
+// under CI — a deliberate local ceremony act, never a computed CI outcome. Before #849 the same
+// move was a hand edit of frozen-workflows.json (#810's own three retirements).
 //
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
@@ -101,6 +117,8 @@ import { FROZEN_WORKFLOW_FAILURE_GUIDANCE } from "./frozen-workflow-guidance.mjs
 // The import-closure walk itself (#815) — shared with the selftest, which asserts the per-entry
 // attribution against the real tree without executing this CLI.
 import { FROZEN_MARKER, allImportsOf, computeFrozenClosures, formatClosureReport, scannedSourceFiles } from "./freeze-lint-closure.mjs";
+// #849 — the `--retire` command's pure logic, shared with the selftest the same way.
+import { retireFrozenEntry } from "./freeze-lint-retire.mjs";
 const COMPARE_BASE_INDEX = process.argv.indexOf("--compare-base");
 if (COMPARE_BASE_INDEX !== -1) process.exit(runFrozenManifestCompareCli(process.argv.slice(2)));
 // All git calls go through execFileSync with an argv array — never a shell string —
@@ -136,7 +154,21 @@ const IN_CI = !!(process.env.CI || process.env.GITHUB_ACTIONS);
 const UPDATE = process.argv.includes("--update");
 const LOCK_DEPLOYED = process.argv.includes("--lock-deployed");
 // #815 — parsed HERE, after the --compare-base early exit above, so that path is undisturbed.
-const PRINT_CLOSURE = process.argv.includes("--print-closure");
+const PRINT_CLOSURE_INDEX = process.argv.indexOf("--print-closure");
+const PRINT_CLOSURE = PRINT_CLOSURE_INDEX !== -1;
+// #849 — an optional module path immediately after --print-closure targets the report to just
+// the entries that reach it; absent (or the next token is itself a flag), the report is the full,
+// unfiltered per-entry breakdown #815 always printed.
+const PRINT_CLOSURE_MODULE =
+  PRINT_CLOSURE && process.argv[PRINT_CLOSURE_INDEX + 1] && !process.argv[PRINT_CLOSURE_INDEX + 1].startsWith("--")
+    ? process.argv[PRINT_CLOSURE_INDEX + 1]
+    : null;
+// #849 — `--retire <path> --ruling <ref>`: moves one currently-registered entry to the `retired`
+// record. Parsed here, alongside --print-closure, for the same reason (after --compare-base).
+const RETIRE_INDEX = process.argv.indexOf("--retire");
+const RETIRE_PATH = RETIRE_INDEX !== -1 ? (process.argv[RETIRE_INDEX + 1] ?? null) : null;
+const RULING_INDEX = process.argv.indexOf("--ruling");
+const RETIRE_RULING = RULING_INDEX !== -1 ? (process.argv[RULING_INDEX + 1] ?? null) : null;
 
 /** sha256 of file content, line-endings normalised to \n. */
 function hashText(text) {
@@ -236,7 +268,7 @@ function main() {
   const closure = computeFrozenClosures(REPO_ROOT, files);
   const { frozenRel } = closure;
   if (PRINT_CLOSURE) {
-    console.log(formatClosureReport(closure));
+    console.log(formatClosureReport(closure, PRINT_CLOSURE_MODULE));
     return 0;
   }
   const workflowFiles = files.filter((rel) => {
@@ -248,6 +280,25 @@ function main() {
   });
 
   const manifest = loadManifest();
+
+  if (RETIRE_PATH) {
+    // A deliberate local ceremony act, exactly like --update and --lock-deployed: it writes the
+    // manifest by hand-authorised ruling, not by CI computation.
+    if (IN_CI) {
+      console.error("freeze-lint: --retire is REFUSED under CI — a deliberate local ceremony act, same as --update and --lock-deployed.");
+      return 1;
+    }
+    const result = retireFrozenEntry(manifest, RETIRE_PATH, RETIRE_RULING, existsSync(join(REPO_ROOT, RETIRE_PATH)));
+    if (!result.ok) {
+      console.error(`freeze-lint: ${result.error}`);
+      return 1;
+    }
+    // result.manifest.retired is never empty here (retireFrozenEntry just added to it), so it is
+    // always written — unlike withRetired's "omit when empty" default for the other CLI paths.
+    writeFileSync(MANIFEST_PATH, JSON.stringify(result.manifest, null, 2) + "\n", "utf8");
+    console.log(`freeze-lint: ${result.message}`);
+    return 0;
+  }
 
   if (UPDATE) {
     if (IN_CI) {

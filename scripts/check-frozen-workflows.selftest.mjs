@@ -23,8 +23,9 @@ import {
   checkEnqueueSites,
   parseRegistrySource,
 } from "./freeze-lint-checks.mjs";
-import { computeFrozenClosures, scannedSourceFiles } from "./freeze-lint-closure.mjs";
+import { computeFrozenClosures, formatClosureReport, scannedSourceFiles } from "./freeze-lint-closure.mjs";
 import { compareFrozenManifestText } from "./frozen-manifest-compare.mjs";
+import { retireFrozenEntry } from "./freeze-lint-retire.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
@@ -514,6 +515,94 @@ testCase("#815 the flat set matches the manifest's registered entry count (the u
   if (closure.frozenRel.length !== registered) {
     throw new Error(`closure locks ${closure.frozenRel.length} module(s) but the manifest registers ${registered}`);
   }
+});
+
+// --- (#849) targeted `--print-closure <module>` + the `--retire` command ----
+// #815 gave the closure report a per-entry PARTITION; the question an author actually asks is
+// the INVERSE ("which entries lock module X"), and until now that meant grepping the full report
+// by hand. `formatClosureReport`'s optional second argument filters to exactly that. `--retire`
+// (#810's manifest shape, but no command to write it) is a pure function so this selftest can
+// exercise every refusal without touching git, the real manifest file, or process.exit.
+console.log("print-closure targeting + retire command (#849):");
+
+testCase("#849 formatClosureReport(closure, module) prints only the entry files whose closure includes that module", () => {
+  const closure = {
+    frozenRel: ["packages/x/a.ts", "packages/x/b.ts"],
+    byEntry: new Map([
+      ["packages/x/entryOne.ts", ["packages/x/a.ts"]],
+      ["packages/x/entryTwo.ts", ["packages/x/a.ts", "packages/x/b.ts"]],
+      ["packages/x/entryThree.ts", ["packages/x/b.ts"]],
+    ]),
+  };
+  const report = formatClosureReport(closure, "packages/x/a.ts");
+  if (!report.includes("packages/x/entryOne.ts")) throw new Error(`expected entryOne (reaches a.ts) in:\n${report}`);
+  if (!report.includes("packages/x/entryTwo.ts")) throw new Error(`expected entryTwo (reaches a.ts) in:\n${report}`);
+  if (report.includes("packages/x/entryThree.ts")) throw new Error(`entryThree does NOT reach a.ts — must not appear:\n${report}`);
+});
+
+testCase("#849 targeted print-closure on a module NO entry reaches -> says so, lists nothing", () => {
+  const closure = {
+    frozenRel: ["packages/x/a.ts"],
+    byEntry: new Map([["packages/x/entryOne.ts", ["packages/x/a.ts"]]]),
+  };
+  const report = formatClosureReport(closure, "packages/x/unreached.ts");
+  if (report.includes("entryOne")) throw new Error(`entryOne does not reach the queried module:\n${report}`);
+});
+
+testCase("#849 REAL repo canary: filtering the real closure to lib/work-trace.mjs matches the #815 unfiltered attribution exactly", () => {
+  const filtered = formatClosureReport(closure /* the module-level real closure computed above for #815 */, "packages/runtime/lib/work-trace.mjs");
+  for (const entry of reachedBy("packages/runtime/lib/work-trace.mjs")) {
+    if (!filtered.includes(entry)) throw new Error(`expected ${entry} in filtered report:\n${filtered}`);
+  }
+});
+
+const RETIRE_PATH_849 = "packages/runtime/workflows/chatTurn.v1.ts";
+const RETIRE_SHA_849 = "c".repeat(64);
+const RETIRE_RULING_849 = "#810 owner ruling 2026-09-15";
+const manifestWithOneEntry = () => ({
+  version: 1,
+  workflows: { [RETIRE_PATH_849]: { sha256: RETIRE_SHA_849, note: "" } },
+  retired: {},
+});
+
+testCase("#849 retireFrozenEntry moves the entry from workflows to retired, keeping its last hash and citing the ruling", () => {
+  const result = retireFrozenEntry(manifestWithOneEntry(), RETIRE_PATH_849, RETIRE_RULING_849, false);
+  if (!result.ok) throw new Error(`expected ok:true, got error: ${result.error}`);
+  if (Object.hasOwn(result.manifest.workflows, RETIRE_PATH_849)) throw new Error("entry must be REMOVED from workflows");
+  const record = result.manifest.retired[RETIRE_PATH_849];
+  if (!record) throw new Error("entry must be PRESENT in retired");
+  if (record.sha256 !== RETIRE_SHA_849) throw new Error(`retired sha256 must be the entry's last frozen hash; got ${record.sha256}`);
+  if (record.ruling !== RETIRE_RULING_849) throw new Error(`retired ruling must be the given citation; got ${record.ruling}`);
+});
+
+testCase("#849 retireFrozenEntry's output leaves a subsequent verify (compareFrozenManifestText) clean — no RETIRED-* violation", () => {
+  const base = manifestWithOneEntry();
+  const baseText = JSON.stringify(base, null, 2) + "\n";
+  const result = retireFrozenEntry(base, RETIRE_PATH_849, RETIRE_RULING_849, false);
+  if (!result.ok) throw new Error(`expected ok:true, got error: ${result.error}`);
+  const currentText = JSON.stringify(result.manifest, null, 2) + "\n";
+  expectClean(compareFrozenManifestText(baseText, currentText, "base", "current").violations);
+});
+
+testCase("#849 retireFrozenEntry refuses, with NO manifest write, when the target file is still present in the tree", () => {
+  const manifest = manifestWithOneEntry();
+  const result = retireFrozenEntry(manifest, RETIRE_PATH_849, RETIRE_RULING_849, /* fileExistsInTree */ true);
+  if (result.ok) throw new Error("expected ok:false — the file is still in the tree");
+  if (!Object.hasOwn(manifest.workflows, RETIRE_PATH_849)) throw new Error("the ORIGINAL manifest object must be untouched on refusal");
+});
+
+testCase("#849 retireFrozenEntry refuses, with NO manifest write, when the target has no current manifest entry", () => {
+  const manifest = { version: 1, workflows: {}, retired: {} };
+  const result = retireFrozenEntry(manifest, "packages/runtime/workflows/never-registered.ts", RETIRE_RULING_849, false);
+  if (result.ok) throw new Error("expected ok:false — no current entry to retire");
+});
+
+testCase("#849 retireFrozenEntry refuses when --ruling is missing or blank", () => {
+  const manifest = manifestWithOneEntry();
+  const withoutRuling = retireFrozenEntry(manifest, RETIRE_PATH_849, "", false);
+  if (withoutRuling.ok) throw new Error("expected ok:false — no ruling cited");
+  const withUndefinedRuling = retireFrozenEntry(manifest, RETIRE_PATH_849, undefined, false);
+  if (withUndefinedRuling.ok) throw new Error("expected ok:false — no ruling cited");
 });
 
 // --- (e) enqueue-site provenance --------------------------------------------
