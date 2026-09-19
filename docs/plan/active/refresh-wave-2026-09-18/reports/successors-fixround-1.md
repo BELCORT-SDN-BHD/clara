@@ -352,8 +352,8 @@ resumes at segment 1 of 4, so the guard added for ADV-S-3 does not apply to it; 
 path is one capability-id string.
 
 **The browser walks (§7.3) were NOT re-run, and here is why that is not a gap:** no file under
-`apps/web` changed this round (`git diff --name-only a666da12..HEAD` — 23 files, all under
-`packages/runtime` plus `frozen-workflows.json` and the reports), and the walks do not drive this
+`apps/web` changed this round (`git diff --name-only a666da12..HEAD | grep -c "^apps/web"` = **0**;
+28 files in all — 22 under `packages/runtime`, `frozen-workflows.json`, and five reports), and the walks do not drive this
 closure at all: `apps/web/e2e/serve-built.mjs:1230` starts the app with
 `CLARA_RUNTIME_URL = mockRuntime.origin`, a stand-in runtime, precisely so the walk exercises the
 proxy rather than the engine. The `apps/web` unit suite, which is what covers the changed surface's
