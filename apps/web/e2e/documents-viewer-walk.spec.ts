@@ -23,7 +23,7 @@
 import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { DOCS } from "./documents-viewer-mock.mjs";
-import { ensureRealFocus, signIn } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${DOCS.clientId}/documents`;
 
@@ -38,6 +38,11 @@ function selectDocument(page: Page, filename: RegExp) {
   return page.getByRole("button", { name: filename }).click();
 }
 
+/** ONE overlay measurement: the layer's rendered width, the page element's, and how many polygons
+ *  the measured `<svg>` actually holds — the third being what proves WHICH element was measured.
+ *  Named (#858) so the polygon-layer cell can hold the snapshot its own poll resolved on rather
+ *  than reading the page a second time. */
+type OverlayWidths = { svg: number; page: number; polygons: number };
 
 test.describe("documents viewer — the MIME gate, the page overlay and the CSP", () => {
   test("C-07: an XML document is never OFFERED a tab — the reason stands, and no browsing context appears", async ({ page, context }) => {
@@ -181,7 +186,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     const OVERLAY_SVG = "svg[aria-hidden='true']:has(polygon)";
     await expect.poll(() => page.locator(`${OVERLAY_SVG} polygon`).count(), { timeout: 20_000 }).toBeGreaterThan(0);
 
-    const widths = async () => page.evaluate((selector) => {
+    const widths = async (): Promise<OverlayWidths | null> => page.evaluate((selector) => {
       const svg = document.querySelector(selector);
       const canvas = document.querySelector("canvas");
       if (!svg || !canvas) return null;
@@ -210,20 +215,37 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     // null. Waiting on all three facts — resolved, still the layer, and actually
     // resized — is what makes the assertion below about geometry rather than
     // about timing.
+    //
+    // #858 — AND THE ASSERTIONS READ THE POLL'S OWN SNAPSHOT, which is the rest of
+    // that same defect. Waiting on the three facts and then calling `widths()`
+    // AGAIN is a check-then-act gap: the poll proves a complete measurement
+    // EXISTED, the second call is a DIFFERENT measurement, and the frame in
+    // between is exactly the unmount the poll was written to wait past. Measured
+    // on an idle Mac during the 2026-09-15 riders integration: this cell red
+    // `Received: null` at the line that dereferenced that second read, while its
+    // own poll had already passed — and passed on the very next run. Capturing
+    // the snapshot the condition was observed ON closes it, because there is no
+    // second read for anything to change between.
+    const resized: OverlayWidths[] = [];
     await page.setViewportSize({ width: 900, height: 900 });
     await expect
       .poll(async () => {
         const w = await widths();
-        return w !== null && w.polygons > 0 && w.page !== before!.page;
+        if (w === null || w.polygons === 0 || w.page === before!.page) return false;
+        resized.push(w);
+        return true;
       }, { timeout: 15_000 })
       .toBe(true);
 
-    const after = await widths();
-    expect(after, "the overlay must be back on screen after the reflow").not.toBeNull();
-    expect(after!.polygons, "the overlay layer must still be the element measured after the resize").toBeGreaterThan(0);
+    // The capture is itself asserted: a poll that resolved without pushing would
+    // make every assertion below read an empty array, which is the vacuous shape
+    // this edit exists to remove rather than to move.
+    expect(resized, "the poll must resolve on a snapshot it captured").toHaveLength(1);
+    const after = resized[0]!;
+    expect(after.polygons, "the overlay layer must still be the element measured after the resize").toBeGreaterThan(0);
     expect(
-      Math.abs(after!.svg - after!.page),
-      `after the resize the overlay drifted off the page: svg ${after!.svg} vs canvas ${after!.page}`,
+      Math.abs(after.svg - after.page),
+      `after the resize the overlay drifted off the page: svg ${after.svg} vs canvas ${after.page}`,
     ).toBeLessThanOrEqual(1);
   });
 
@@ -675,6 +697,20 @@ test.describe("#620 — source custody: preview, download and the state ladder (
   });
 
   test("THE LADDER: denied, not-found, storage-unavailable, custody-pending, expired session and integrity render DISTINCTLY", async ({ page }) => {
+    // #858 — A BUDGET SIZED TO THE LOOP, not Playwright's flat 30 s.
+    //
+    // This cell has no fixed wait anywhere: every assertion in it auto-retries, which is why its
+    // own intermittent red was never a missing state. What it does have is SIX sequential document
+    // loads, each with a 15 s-shaped wait for its refusal text plus two count assertions and an
+    // `innerText` read — behind one sign-in. The flat default is the whole budget for all of that,
+    // so under host load the cell reds as a TIMEOUT that reads as a product defect and is not one:
+    // measured during the 2026-09-15 riders integration on an idle Mac, this cell passed in 2.2 s
+    // inside a full suite run and timed out on a rerun of the same file minutes later.
+    //
+    // The shape is the house's (README's `CELL_BUDGET` table; home-board, journal-work,
+    // personal-settings and responsive-shell walks all say their work out loud this way), and a
+    // budget is a ceiling, never a wait — a cell that finishes in 2.2 s still finishes in 2.2 s.
+    test.setTimeout(cellBudgetMs({ signIns: 1, polls: 6 }));
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
 
