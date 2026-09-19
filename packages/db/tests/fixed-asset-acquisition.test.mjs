@@ -28,10 +28,10 @@ import {
   reverseAndSettle, approvedEntry, faRow, entryRowOf, eventCount,
   workRow, receiptsForWork, mintClientObo, wakeRecordJournalEntry,
   withActor, ROLES,
-  COST, ACCUM, EXPENSE, ACCUM2, EXPENSE2, BANK, LAND, AP1, SHARE,
+  COST, ACCUM2, EXPENSE2, BANK, LAND, AP1, SHARE,
   mon, dayIn, opk, rootQuery, humanQuery, namedCall,
   refuses, caught, reasonToken, noteLane, printLaneNotes, printSkipCount, endPool,
-  x41EnsureReady, kSeededFaClient, faWorld, buildFaChart, freshResolution, wb,
+  x41EnsureReady, kSeededFaClient, freshEnrolledFaClient, freshResolution, wb,
 } from "./fixed-asset-acquisition-fixtures.mjs";
 
 let live = false;
@@ -241,20 +241,21 @@ test("p639.birth.exclusions opening entries, reversal mirrors, disposals and sch
 
 test("p639.birth.opening_excluded a gl_balance opening leg on an ENROLLED fixed-asset account is refused CLR40 fa_k_gl_balance_on_enrolled naming the account, with NO register row and a full rollback", async (t) => {
   if (await gate(t, { needAcq: false })) return;
-  // A FRESH onboarding client, its OWN chart, and COST/ACCUM/EXPENSE explicitly ENROLLED
-  // (`upsert_fa_account_profile` is a deliberate act, never automatic — `clara._tf_fa_movement_belt`
-  // only sees an account as enrolled once this door has run for it). Built from the SAME pieces
-  // `kSeededFaClient` (below) composes, so the two cells share one vocabulary.
-  const w = await faWorld();
-  const o = await wb.onboardingClient(w.users.hana, "884refuse");
-  await wb.seedOpeningCoa(w.users.alice, o.client);
-  await buildFaChart(w.users.alice, o.client);
-  await upsertFaProfile(w.users.alice, { client: o.client, assetAccount: COST, accumAccount: ACCUM, expenseAccount: EXPENSE });
+  // A FRESH onboarding client, its OWN chart, and COST/ACCUM/EXPENSE explicitly ENROLLED —
+  // `freshEnrolledFaClient` (x41-fa-world.mjs), the SAME enrol-and-chart helper `kSeededFaClient`
+  // (below) composes, so the two cells share one source of truth, not two independent copies of
+  // it (#884 code review STD-1).
+  const { w, o } = await freshEnrolledFaClient("884refuse");
   const doc = await wb.openingDoc(w.users.alice, { firm: w.firms.A, client: o.client });
   const sr = await wb.createOpeningSeed(w.users.bob, {
     client: o.client, plan: o.plan, tieDocument: doc.documentId, tieSha256: doc.sha256 });
   const seed = sr.seed_id ?? sr.id;
+  // Pinned to the LITERAL zero the criterion names (code review L03-CRS5), not merely captured as
+  // a before/after delta: a fixture that had already produced a register row before the refused
+  // approval would otherwise still read green below.
   const beforeAssets = await assetCountOf(o.client);
+  assert.equal(beforeAssets, 0,
+    "opening_excluded: the fresh client must carry ZERO clara.fixed_assets rows before the refused approval");
 
   // THE ONE FACT ARM (e) IS ABOUT: a gl_balance leg naming the enrolled COST account directly —
   // never itemised as a fixed_asset opening item, which is exactly the shape 0041's own comment

@@ -838,14 +838,19 @@ refusal for a gl-balance leg on an ENROLLED fixed-asset account is raised by the
 (`clara._tf_fa_movement_belt`, migration 0041's arm (e)), SQLSTATE CLR40, reason
 `fa_k_gl_balance_on_enrolled`, not the birth trigger and not CLR38.
 
-`p639.birth.opening_excluded` builds a fresh onboarding client, explicitly ENROLS COST/ACCUM/EXPENSE
-(`upsert_fa_account_profile` is a deliberate act, never automatic — the belt only sees an account
-as enrolled once this door has run for it), drafts a plain `gl_balance` opening item naming the
-enrolled COST account directly (never itemised as `item_kind='fixed_asset'`) plus a second,
-ordinary item on SHARE so the set's net OBE ties to zero ahead of the belt, and asserts the
-approval refuses CLR40 `fa_k_gl_balance_on_enrolled` naming the account code, with zero
-`clara.fixed_assets` rows and both entries still `draft` — the belt is a DEFERRED constraint
-trigger, so its exception unwinds the WHOLE approval, not just the register write.
+`p639.birth.opening_excluded` builds a fresh onboarding client via `freshEnrolledFaClient`
+(`x41-fa-world.mjs` — the enrol-and-chart prefix `kSeededFaClient` also composes, factored out to
+one place rather than duplicated across the two, code review STD-1), which explicitly ENROLS
+COST/ACCUM/EXPENSE (`upsert_fa_account_profile` is a deliberate act, never automatic — the belt
+only sees an account as enrolled once this door has run for it). The cell then drafts a plain
+`gl_balance` opening item naming the enrolled COST account directly (never itemised as
+`item_kind='fixed_asset'`) plus a second, ordinary item on SHARE so the set's net OBE ties to zero
+ahead of the belt, and asserts the approval refuses CLR40 `fa_k_gl_balance_on_enrolled` naming the
+account code, with the register row count PINNED TO THE LITERAL ZERO the criterion names both
+before and after the refused approval (code review L03-CRS5 — a before/after delta alone would
+stay green on a fixture that already carried a register row) and both entries still `draft` — the
+belt is a DEFERRED constraint trigger, so its exception unwinds the WHOLE approval, not just the
+register write.
 
 `p639.birth.opening_admitted` drives `kSeededFaClient` and asserts EXACTLY ONE `clara.fixed_assets`
 row ties to the opening entry (`acquisition_entry_id`), and it is the SAME id `seed_fixed_asset`'s
