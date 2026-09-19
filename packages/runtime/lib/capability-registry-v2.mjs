@@ -31,7 +31,14 @@ import { CAPABILITY_REGISTRY as V1_REGISTRY, DATA_CLASSES } from "./capability-r
 
 export { DATA_CLASSES };
 
-/** The registry's own version. Recorded on every `clara.work_execution_traces` row. */
+/** The registry's own version. Recorded on every `clara.work_execution_traces` row.
+ *
+ *  IT STAYS v2 THROUGH FIX ROUND 1, and that is worth one sentence because the header above says
+ *  to bump it in the same commit as any change to the table. The rule exists so a DEPLOYED
+ *  registry cannot change meaning under rows already written with its name. `claraWork_v5` has
+ *  never shipped and no row anywhere carries `clara-capability-registry/v2` yet, so the third
+ *  entry below is part of v2's first cut rather than a change to it. The moment this image serves
+ *  a run, the rule applies as written. */
 export const CAPABILITY_REGISTRY_VERSION_V2 = "clara-capability-registry/v2";
 
 /**
@@ -71,7 +78,26 @@ export const CAPABILITY_REGISTRY_V2 = Object.freeze(Object.assign({}, V1_REGISTR
     description:
       "Inspect ONE knowledge record the run has already seen a key for: its current revision, its "
       + "revision history, its source pins and the source document's METADATA. Never the "
-      + "document's bytes — the byte door is 0190's and is not reachable from here.",
+      + "document's bytes — the byte door is 0190's and is not reachable from here. The record "
+      + "reaches the model INSIDE a segment whose egress dispatch is already authorised, which is "
+      + "the same arrangement `accounting_work.retrieve_knowledge` names above; what this lane "
+      + "does NOT yet have is a durable row of its own per inspection read, so the record of one "
+      + "is the run's journal rather than a relation in `clara` (claraWork.v5.tools.ts says so at "
+      + "the call site, and the fix round asked for the row to be ratified rather than invented).",
+  }),
+  "accounting_work.read_knowledge_drift": Object.freeze({
+    id: "accounting_work.read_knowledge_drift",
+    purpose: "accounting_work",
+    modelBound: true,
+    dataClass: "client_confidential",
+    scope: "clara_runtime → clara.work_knowledge_drift_for",
+    description:
+      "After a resume, ask whether the client's recorded knowledge moved while this Work waited — "
+      + "and whether anything THIS run recorded reading is among what moved. The moved key NAMES "
+      + "reach the model in the resume note, which is why it is modelBound. A DIFFERENT capability "
+      + "from the preload on purpose: both are knowledge reads, they call different doors, and a "
+      + "run with one resume otherwise writes two trace rows under one id that no reader — and no "
+      + "World leg looking a row up BY capability — can tell apart.",
   }),
 }));
 

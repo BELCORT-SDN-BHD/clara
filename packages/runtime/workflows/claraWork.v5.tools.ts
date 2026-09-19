@@ -202,10 +202,21 @@ export function readKnowledgeRefusal(code: string, reason: string | null, fallba
  * budget check, a credential path and a refusal router is how two reads of one family come to
  * disagree about what "out of scope" means.
  *
- * IT SPENDS `budget.toolCalls` AND IT NEVER SETS A TERMINAL. A read that refuses is a fact the
- * model should reason about ("that record is not mine to read, so I will ask instead"), not the
- * end of the run: unlike the chart read, this one is not REQUIRED for the Work to be correct — the
- * knowledge PRELOAD is, and that is a step, and its failure is `knowledge_read_failed`.
+ * IT SPENDS `budget.toolCalls`, AND A READ THAT REFUSES NEVER SETS A TERMINAL. A refusal is a
+ * fact the model should reason about ("that record is not mine to read, so I will ask instead"),
+ * not the end of the run: unlike the chart read, this one is not REQUIRED for the Work to be
+ * correct — the knowledge PRELOAD is, and that is a step, and its failure is
+ * `knowledge_read_failed`. The one terminal this function CAN set is the budget wall nine lines
+ * below, which belongs to the ledger rather than to the read, and which the first cut's sentence
+ * flatly denied (review ADV-S-12(b)).
+ *
+ * WHERE THE STATED REASON GOES, SAID PLAINLY BECAUSE IT IS NOT WHERE A READER WOULD ASSUME. The
+ * `reason` this tool requires is carried in the model's own call, which lives in this run's
+ * journal; it reaches NO relation in `clara`. `clara.work_knowledge_reads` records the PRELOAD
+ * only, and a row per inspection read there would be read back as the run's whole read-set by the
+ * drift door (0230's `_work_knowledge_drift_core` takes the latest row's keys), so it cannot be
+ * added without a migration that tells the two kinds of read apart. That row is owed and is
+ * recorded as a ratification request in `successors-fixround-1.md`, not invented here.
  */
 async function runKnowledgeRead(
   ctx: WorkToolCtx,

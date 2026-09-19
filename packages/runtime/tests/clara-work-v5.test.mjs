@@ -580,16 +580,46 @@ test("v5.bundle: the digest CANNOT see a zod refinement, and the roster's one re
 // 6 · the capability registry, the trace scheme and the registry pin
 // ---------------------------------------------------------------------------
 
-test("v5.capabilities: the two new ids are model-bound under accounting_work, and v1 is carried by REFERENCE", () => {
-  for (const id of ["accounting_work.retrieve_knowledge", "accounting_work.inspect_knowledge_source"]) {
+test("v5.capabilities: the three new ids are model-bound under accounting_work, and v1 is carried by REFERENCE", () => {
+  for (const id of [
+    "accounting_work.retrieve_knowledge",
+    "accounting_work.inspect_knowledge_source",
+    "accounting_work.read_knowledge_drift",
+  ]) {
     assert.equal(registryV2.isModelBoundV2(id), true,
       "retrieved knowledge goes INTO the model's context, so a dispatch authorization is owed");
     assert.equal(registryV2.purposeForV2(id), "accounting_work");
   }
   assert.equal(registryV2.CAPABILITY_REGISTRY_VERSION_V2, "clara-capability-registry/v2");
   // v1's five, unchanged and unedited — the sibling pattern, not a widening of a hash-locked module
-  assert.equal(registryV2.capabilityIdsV2().length, 7);
+  assert.equal(registryV2.capabilityIdsV2().length, 8);
   assert.equal(registryV2.purposeForV2("accounting_work.model_segment"), "accounting_work");
+  // AND THE DRIFT READ IS NOT THE PRELOAD (review ADV-S-10). One id for two doors left a resumed
+  // run with two `tool_call` rows that no reader — and no leg looking a row up BY capability —
+  // could tell apart, under a scope string that named neither the drift door nor the drift.
+  const impl = codeOf(new URL("../workflows/claraWork.v5.impl.ts", import.meta.url));
+  assert.match(impl, /capabilityId: "accounting_work\.read_knowledge_drift"/);
+  assert.match(registryV2.CAPABILITY_REGISTRY_V2["accounting_work.read_knowledge_drift"].scope,
+    /clara\.work_knowledge_drift_for/, "the scope names the door it actually calls");
+  assert.ok(!registryV2.CAPABILITY_REGISTRY_V2["accounting_work.retrieve_knowledge"].scope
+    .includes("work_knowledge_drift_for"), "...and the preload's scope still names only its own two");
+});
+
+test("v5.reads: what an inspection read leaves behind is written down, and it is not a relation", () => {
+  // REVIEW ADV-S-2. The `reason` these reads require is not an argument of either door, is not
+  // written to `clara.work_knowledge_reads` (its sole writer is the preload step) and reaches no
+  // trace row — `clara.work_execution_traces` has no free payload column by design. The first cut
+  // claimed the opposite in three places the model and a reviewer read. This cell pins the
+  // corrected claims rather than the absence of a feature.
+  const toolsSrc = codeOf(new URL("../workflows/claraWork.v5.tools.ts", import.meta.url));
+  const implSrc = codeOf(new URL("../workflows/claraWork.v5.impl.ts", import.meta.url));
+  assert.ok(!/input\.reason/.test(toolsSrc), "the reason is still not sent anywhere — the claim is what changed");
+  const writers = implSrc.split("recordWorkKnowledgeReadTyped(c,").length - 1;
+  assert.equal(writers, 1, "one call site, in the preload step: a second would move the drift door's read-set");
+  // the model-facing sentence no longer promises a record the estate does not keep
+  const describe = v5Prompt.readKnowledgeInputSchemaV5.shape.reason.description ?? "";
+  assert.ok(!/Recorded with the read/.test(describe));
+  assert.match(describe, /kept with this run's own record of the call/);
 });
 
 test("v5.trace: the seq scheme gives every act its own number and nothing collides", () => {

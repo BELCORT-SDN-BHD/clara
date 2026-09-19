@@ -627,7 +627,11 @@ export async function readKnowledgeDriftStepV5(
     const ok = d.status === "ok";
     await traceSafely(c, traceRow(null, {
       taskId, runId, seq, phase: "tool_call",
-      capabilityId: "accounting_work.retrieve_knowledge",
+      // ITS OWN CAPABILITY ID, not the preload's (review ADV-S-10). A resumed run writes two
+      // knowledge rows; under one id the only way to tell the preload from the drift was the seq,
+      // and `work-egress-e2e`'s own "find the row BY CAPABILITY" discipline — introduced to
+      // replace "the only tool_call in the run" — could not have worked on a run with a resume.
+      capabilityId: "accounting_work.read_knowledge_drift",
       startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
       outcome: ok ? "ok" : "failed",
       observed: {
@@ -927,12 +931,22 @@ export async function runWorkSegmentStepV5(
         await traceSafely(c, traceRow(work.model, {
           taskId, runId, seq: baseSeq + 3, phase: "tool_call",
           // NAMED FROM THE SERVER-OWNED REGISTRY, never from the model's own tool name. The two
-          // new reads do not appear here and that is correct rather than an omission: this row
-          // records the segment's TERMINAL act — what it posted, refused or asked — and an
-          // inspection read is never terminal. Its own capability id
-          // (`accounting_work.inspect_knowledge_source`) is what the v2 registry carries for the
-          // day a per-tool-call trace row exists; today the durable record of what the run read is
-          // `clara.work_knowledge_reads` plus the tool's own answer in the transcript.
+          // new reads do not appear here: this row records the segment's TERMINAL act — what it
+          // posted, refused or asked — and an inspection read is never terminal.
+          //
+          // AND THEY LEAVE NO ROW OF THEIR OWN EITHER, WHICH THIS COMMENT USED TO GET WRONG (fix
+          // round 1, review ADV-S-2). It said the durable record was "`clara.work_knowledge_reads`
+          // plus the tool's own answer in the transcript". The relation holds the PRELOAD and
+          // nothing else — `recordWorkKnowledgeRead` is called from `loadWorkKnowledgeStepV5` and
+          // from nowhere else — and the segment's parts are `text` / `refusal` / status, so the
+          // answer survives only in this run's own journal. Neither of the two alternatives is
+          // free: a `work_knowledge_reads` row per inspection read would be READ BACK as the
+          // run's read-set by `clara._work_knowledge_drift_core` (0230:812, `order by read_at
+          // desc, seq desc limit 1`), narrowing the drift comparison to that one record's key;
+          // and `clara.work_execution_traces` has NO free payload column by design (0195's layer
+          // 1), so it can record THAT a read happened but never the reason the model gave. The
+          // honest state is therefore written down rather than papered over, and the durable
+          // per-read row is the fix round's ratification request.
           capabilityId: question
             ? "accounting_work.ask_question"
             : "accounting_work.record_journal_entry",

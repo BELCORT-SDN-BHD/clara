@@ -42,7 +42,7 @@
       "deployed": true
     },
     "packages/runtime/lib/capability-registry-v2.mjs": {
-      "sha256": "e6e84d435804a966573ec94678d838eb35314de7abce206a7c1ee48502c566cb",
+      "sha256": "2024074b3a226c0c44cafdac668260fc3728c1d6eb67591a14d77f3692709857",
       "note": ""
     },
     "packages/runtime/lib/capability-registry.mjs": {
@@ -1195,15 +1195,15 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.impl.ts": {
-      "sha256": "2ed81bc77839bd573e22b60c82abb19d7ca6312cf1b5f6ff9cb622159118d217",
+      "sha256": "f8a2f9bf15c4f7fb185b0aa6a10410254ae8e439181a818de64dbfabd8554343",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.prompt.ts": {
-      "sha256": "eb93d6156514f21b2778dd6ed1f74843d21258c24ac76a415a49649398eb76d7",
+      "sha256": "49964b2331c551ba25ec9c7972fb4c27c6bf2f04c7fac284976055135e103b7f",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.tools.ts": {
-      "sha256": "a314cf4ea7cfab80279235298491e889b2bb27e44446e160c2bbe3ab308acfee",
+      "sha256": "5edfd0def584283afac85abc6e746c226e2b2bf4c5cd1d25591c9fb1e5b1d472",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.ts": {

@@ -105,11 +105,16 @@ export const READ_KNOWLEDGE_HISTORY_DOOR = "clara.read_knowledge_history_for";
  * `.strict()`: an extra key is a refusal, never an ignored field. #658's stanza fixes the two
  * members and the 500-character bound on the reason.
  *
- * THE REASON IS REQUIRED AND IT IS NOT CEREMONY. These reads put a human's recorded text into a
- * model's context, which is an egress event (`accounting_work.inspect_knowledge_source` is
- * `modelBound: true` in the v2 capability registry). A run that must SAY why it is reading a record
- * is a run whose reads a person can account for afterwards, and the estate's whole posture is that
- * an act nobody can account for is not an act this lane performs.
+ * THE REASON IS REQUIRED AND IT IS NOT CEREMONY — AND WHAT IT IS NOT, IT NO LONGER CLAIMS TO BE.
+ * These reads put a human's recorded text into a model's context, which is an egress event
+ * (`accounting_work.inspect_knowledge_source` is `modelBound: true` in the v2 capability
+ * registry; the record reaches the model inside a segment whose dispatch is already authorised).
+ * A run that must SAY why it is reading a record is a run whose reads a person can follow. The
+ * field's `.describe()` used to end "Recorded with the read", which was false: the reason is
+ * carried in the model's own call, in this run's journal, and reaches no relation in `clara` —
+ * `clara.work_knowledge_reads` records the PRELOAD only. The wording below states what is true,
+ * the durable per-read row is a ratification request rather than an invention, and the digest
+ * MOVED when this sentence changed, which is exactly the coverage §2 claims.
  */
 export const readKnowledgeInputSchemaV5 = z
   .object({
@@ -127,7 +132,7 @@ export const readKnowledgeInputSchemaV5 = z
       .max(500)
       .describe(
         "WHAT you are trying to settle by reading this record — the part of the basis or the "
-        + "question it bears on. Recorded with the read.",
+        + "question it bears on. It is kept with this run's own record of the call.",
       ),
   })
   .strict();

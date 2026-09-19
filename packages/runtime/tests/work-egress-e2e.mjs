@@ -376,10 +376,16 @@ async function main() {
       ["model_call", "tool_call", "settle"],
       `A: the run's steps are traced IN ORDER (got ${phases.join(" → ")})`,
     );
+    // EVERY ROW AHEAD OF THEM IS A KNOWLEDGE READ, and the count is NOT pinned — which is what the
+    // comment above says this assertion does, and what it did not do until fix round 1 (review
+    // ADV-S-10). A run with a resume writes a DRIFT row as well, so pinning `["tool_call"]`
+    // exactly would have red on a resumed run for a row the body is designed to write.
+    const ahead = afterDispatches.slice(0, -3);
+    assert.ok(ahead.length >= 1, `A: at least the preload precedes the segment (got ${phases.join(" → ")})`);
     assert.deepEqual(
-      afterDispatches.slice(0, -3),
+      Array.from(new Set(ahead)),
       ["tool_call"],
-      `A: and the ONE row ahead of them is claraWork_v5's knowledge preload (got ${phases.join(" → ")})`,
+      `A: and every row ahead of the segment is a knowledge read (got ${phases.join(" → ")})`,
     );
     const preload = rowsA.find((r) => r.capability_id === "accounting_work.retrieve_knowledge");
     assert.ok(preload, "A: the preload row names the v2 registry's own capability id");
