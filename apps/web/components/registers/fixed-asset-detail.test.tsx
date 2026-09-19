@@ -368,7 +368,11 @@ test("detail.a11y every tab has zero structural a11y violations", async () => {
     try {
       for (let i = 0; i < 5; i++) await h.settle();
       assert.deepEqual(checkAccessibility(h.container as never), [], "Acquisition");
-      for (const label of ["Particulars & policy", "Schedule", "History"]) {
+      // FIVE TABS SINCE #651, and every one of them is scanned. The loop used to name four, so
+      // "Policy & effective revisions" was the one panel in this component with no structural
+      // a11y cell at all — the same gap the e2e walk's axe loop carried, found while re-pointing
+      // that walk's keyboard cell (DECISIONS §6.3 on integration-merge §5.3).
+      for (const label of ["Particulars & policy", "Policy & effective revisions", "Schedule", "History"]) {
         await openTab(h, label);
         assert.deepEqual(checkAccessibility(h.container as never), [], label);
       }

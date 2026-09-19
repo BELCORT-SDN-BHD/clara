@@ -287,18 +287,32 @@ test.describe("#639 · C7 fixed-asset acquisition", () => {
 
     // THE TAB STRIP IS A REAL TABLIST with a roving tabindex — Base UI owns the arrow-key map, and
     // this is the cell that proves the ARIA contract is kept rather than half-declared.
+    //
+    // WHAT THIS CELL ASSERTS IS KEYBOARD NAVIGATION, NOT A BUSINESS ORDER. The names below are
+    // the strip's order only so the walk has something exact to expect; they are not a claim that
+    // Schedule belongs second, and a ticket that inserts a tab re-points this cell rather than
+    // arguing with it. #651 (wave 2026-09-18) did insert one — "Policy & effective revisions",
+    // between *Particulars & policy* and *Schedule*, pinned as the reading order by its own
+    // `fa-detail-tab-url.test.tsx:115` — and DECISIONS §6.3 ruled that five-tab order stands and
+    // this walk follows it. The traversal is now WHOLE: four ArrowRights cover all five tabs and
+    // `End` still lands on the last, which is the roving-tabindex contract itself.
     const strip = page.getByRole("tablist", { name: "Asset sections" });
     await expect(strip).toBeVisible();
     await page.getByRole("tab", { name: "Acquisition", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
     await expect(page.getByRole("tab", { name: "Particulars & policy", exact: true })).toBeFocused();
     await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("tab", { name: "Policy & effective revisions", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowRight");
     await expect(page.getByRole("tab", { name: "Schedule", exact: true })).toBeFocused();
     await page.keyboard.press("End");
     await expect(page.getByRole("tab", { name: "History", exact: true })).toBeFocused();
 
+    // …AND THE SCAN FOLLOWS THE SAME STRIP. A tab nobody scans is an unscanned surface, which is
+    // the same defect class as an unwalked one: #651 added the panel and taught only its own
+    // lane's cells. Five scans rather than four — `test.slow()` above already carries the budget.
     await scan(page, "asset detail — Acquisition");
-    for (const name of ["Particulars & policy", "Schedule", "History"]) {
+    for (const name of ["Particulars & policy", "Policy & effective revisions", "Schedule", "History"]) {
       await openTab(page, name);
       await scan(page, `asset detail — ${name}`);
     }
