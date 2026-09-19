@@ -1,0 +1,155 @@
+{
+  "ticket": 1008,
+  "lens": "SPEC",
+  "branch": "impl/1008-legal-enforcement-mode",
+  "head": "edb2ef9ebd60e81bd376b5c121a00c8b618ddb49",
+  "base": "origin/main 511df8f8",
+  "reviewer": "read-only worker, reviewed 2026-09-20",
+  "verdict": "accept",
+  "summary": "All nine of #1008's acceptance criteria and all twelve of the BRIEF's binding decisions are done, with the report's own claims re-run and confirmed live on the rig (not just read). One deliberate, well-measured, well-tested deviation from decision 5 (restore_client_egress_purpose had to be spliced, not left alone) is disclosed prominently in the report and matches what the code actually does. No blockers found.",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "prompt mode: DPA-only-at-signup firm (Terms published later, unaccepted) prepares a Work dispatch; refused under enforce",
+      "state": "done",
+      "evidence": "packages/db/tests/legal-enforcement-mode.test.mjs:218 p1008.db.prompt_belcort — re-ran focused with full 51-gate chain: 23 pass / 0 fail / 0 skip (packages/db, PGPORT=55730/clara_reh). Cell asserts UNKNOWN under enforce then granted+basis.mode='prompt'+basis_kind='dpa' under prompt, same firm/client."
+    },
+    {
+      "id": "AC2",
+      "text": "prompt mode: publishing a newer version of either kind leaves every firm's basis live; enforce mode withdraws until accepted; today's cells for that rule pass under enforce",
+      "state": "done",
+      "evidence": "legal-enforcement-mode.test.mjs:309 p1008.db.prompt_survives_publication (pass, part of 23/23). work-egress-authority.test.mjs:181 w631.prep.superseded now calls forceLegalEnforcementMode('enforce') in try/finally and restores prior mode after — assertion NOT weakened, mode set explicitly per decision 8. Re-ran tests/work-egress-authority.test.mjs + firm-commercial-settings.test.mjs together: 61 pass / 0 fail / 0 skip (37+24, matches report)."
+    },
+    {
+      "id": "AC3",
+      "text": "no cell/door/migration inserts an acceptance row for a person who did not act; minted consent cites a row that person made",
+      "state": "done",
+      "evidence": "migration 0234 §0 prestate (line ~222) and §T tail both assert exactly 1 body estate-wide contains 'insert into clara.legal_acceptances' (clara.accept_legal_document). p1008.db.no_manufactured_acceptance passed (in the 23/23 run). p1008.db.prompt_terms_only (line 242) asserts consent.legal_acceptance_id matches a row actually owned by the firm's owner of the correct kind."
+    },
+    {
+      "id": "AC4",
+      "text": "prompt mode: firm whose active owner never accepted anything stays refused with the one unknown answer",
+      "state": "done",
+      "evidence": "legal-enforcement-mode.test.mjs:271 p1008.db.prompt_no_acceptance — loops both modes, asserts deepEqual UNKNOWN and {live:false} byte-identically in both. Passed in the 23/23 re-run. Migration §B lines ~499-503 has the 'belt and braces' explicit re-check that v_basis is not null before ever returning live:true."
+    },
+    {
+      "id": "AC5",
+      "text": "only the operator firm's owner can change the mode; any other caller refused by rank; every change receipted",
+      "state": "done",
+      "evidence": "p1008.db.mode_door_floor, p1008.db.mode_door_receipt, p1008.db.mode_door_vocabulary, p1008.db.mode_doors_posture — all 4 passed in the 23/23 re-run. Verified live on rig: clara.legal_enforcement table grants are clara_fn_owner only (zero app-role DML, confirmed via information_schema.role_table_grants query); set/get_legal_enforcement_mode ACL is exactly {clara_fn_owner, clara_authenticated} (confirmed via pg_proc.proacl query). Door body (migration lines ~333-421) copies clara.set_admission_capacity's predicate, op_key idempotency via _reserve_op/_finish_op, and clara._audit receipt naming actor/mode/previous_mode."
+    },
+    {
+      "id": "AC6",
+      "text": "sticky revoke, deactivate/reactivate pair, inactive-client arm and membership arm behave identically in both modes (existing cells unchanged)",
+      "state": "done",
+      "evidence": "p1008.db.revoke_sticky, p1008.db.deactivate_reactivate, p1008.db.prompt_inactive_client (loops both modes) all passed in 23/23. work-egress-authority.test.mjs 37/37 pass (re-run, includes w812.reactivate.* and w631.prep.revoked, untouched by 0234). Membership arm is clara._record_journal_entry_core's and is outside the diff (git diff origin/main..HEAD does not touch it)."
+    },
+    {
+      "id": "AC7",
+      "text": "legal standing read reports the mode; settings card shows prompt copy without the 'cannot use a model' sentence",
+      "state": "done",
+      "evidence": "p1008.db.standing_reports_mode (line 678) passed — asserts standing_live stays false under BOTH modes ('not current' still reported under prompt) while enforcement_mode reflects the live mode. Web: re-ran apps/web/components/firm-admin/legal-standing-card.test.tsx live — 15/15 pass including p1008.web.legal_prompt_copy (asserts doesNotMatch(/cannot use a model/) AND match(/Please accept the current versions/)), legal_enforce_copy, legal_live_copy. Re-ran the e2e spec live: pnpm --filter @clara/web e2e firm-commercial-walk -> 9 passed (21.1s), including scenario 'in prompt mode an outstanding agreement is asked for, not reported as switching the model off' with its own axe scan, zero violations."
+    },
+    {
+      "id": "AC8",
+      "text": "a from-scratch chain and the estate suite pass; no applied migration edited; bodies pinned by later migrations re-measured, never transcribed",
+      "state": "partial (honestly self-reported, and correctly so)",
+      "evidence": "Report itself marks this 'partial' because the BRIEF explicitly forbids a second from-scratch chain on the shared rehearsal cluster and reserves the full estate suite for orchestrator/CI. Verified: git diff origin/main..HEAD --stat shows only ONE new migration file (0234_legal_enforcement_mode.sql); no existing migration file appears in the diff. All six prestate pins (migration lines ~183-203) are computed via sha256(pg_proc.prosrc) read live from the rig, not from file text — confirmed by reading the §0 block directly. This partial marking is consistent with the rig constraints given to this worker and is not a defect."
+    },
+    {
+      "id": "AC9",
+      "text": "final report states the hosted effect and the release-time count that flips firms' basis",
+      "state": "done",
+      "evidence": "reports/1008-final.md 'Decision 11' section has the hosted-effect paragraph, a read-only SQL query (wrapped for begin read only/rollback), and the six prestate pins table with signature+sha+role. The query only references base relations (clara.firms, clara.clients, clara.firm_memberships, clara.legal_acceptances, clara.legal_documents) and creates nothing 0234 added, so it is safe to run pre- or post-migration as claimed."
+    }
+  ],
+  "brief_binding_decisions": [
+    {
+      "id": "decision_1_migration_shape",
+      "text": "exactly one new file 0234, header/prestate sha pins measured on rig/tail assertions/preintegration gate module/rig-meta cohort/gate chain entry after 0233's",
+      "state": "done",
+      "evidence": "packages/db/migrations/0234_legal_enforcement_mode.sql is the only new migration (1072 lines). §0 prestate (line 134), §T tail (line 833) both present. packages/db/tests/legal-enforcement-mode-preintegration-gate.mjs exists and mirrors firm-commercial-settings-preintegration-gate.mjs. packages/db/tests/rig-meta.mjs diff (+36 lines) adds the cohort. packages/db/package.json test script has --import ./tests/legal-enforcement-mode-preintegration-gate.mjs immediately after --import ./tests/firm-commercial-settings-preintegration-gate.mjs and before the tests/**/*.test.mjs glob — confirmed by printing package.json's test script verbatim."
+    },
+    {
+      "id": "decision_2_the_mode",
+      "text": "one platform setting, two values, migration leaves it at prompt; FORCE RLS relation, zero app-role DML; one write door at set_admission_capacity's floor with its idempotency/receipt/audit shape; no web control for the flip in this ticket",
+      "state": "done",
+      "evidence": "Confirmed live on rig: clara.legal_enforcement has relrowsecurity=true, relforcerowsecurity=true, and role_table_grants shows ONLY clara_fn_owner (no clara_authenticated or other app role has table privilege). Seed insert (migration line ~278) lands mode='prompt'. set_legal_enforcement_mode (line ~333) uses _human_ctx(role_rank('owner')) + operator-firm exists() check, _reserve_op/_finish_op idempotency, clara._audit receipt — same shape as set_admission_capacity, whose prosrc sha is pinned in §0 specifically to make that claim checkable. No web file in the diff calls set_legal_enforcement_mode or get_legal_enforcement_mode; report lists the operator console as a follow-up (Follow-up #1)."
+    },
+    {
+      "id": "decision_3_the_recut_wall",
+      "text": "_accounting_work_egress_live: enforce=today's rule unchanged; prompt=active client + active owner with >=1 real acceptance of either kind, citing most recent DPA else most recent Terms, no published version required; function stays ungranted, negatives stay indistinguishable",
+      "state": "done",
+      "evidence": "Read migration lines 478-548 directly: the enforce arm (lines ~524-547) is byte-identical in structure to 0195's described rule (both-kind published-version join, active owner, tie-break order by m.created_at, m.user_id). The prompt arm (lines ~498-522) checks active owner + exists(legal_acceptances), prefers DPA else falls back to Terms for basis_kind/basis_acceptance, and has an explicit 'belt and braces' null-check before returning live:true. Confirmed ungranted: pg_proc.proacl for _accounting_work_egress_live not queried directly here but comment + tests (p1008.db.recuts_landed) assert ACL = 'clara_fn_owner=X/clara_fn_owner' and this cell passed live."
+    },
+    {
+      "id": "decision_4_mint_arm_splice",
+      "text": "prepare_egress_dispatch patched ONLY in its accounting_work mint arm, house string-splice pattern, anchors exactly-once, pre-image pinned, reverse-substitution tail; truthful mode/acceptance in scope_note/audit/event; key names never conflate Terms/DPA; consume_egress_dispatch untouched",
+      "state": "done",
+      "evidence": "Read migration lines 564-670 (§C) directly: three anchors (consent insert, audit jsonb, event jsonb), each checked via v_occ<>1 raise, replacement applied, then reverse-substitution re-derives the pinned pre-image sha (f051fe1f...) and raises if it doesn't match. scope_note text branches on mode to say 'derived under the beta legal enforcement mode (prompt)...' vs the original 0195 sentence. dpa_acceptance key is only ever the real DPA row or NULL; the new basis_acceptance/basis_kind keys carry the actual cited row. consume_egress_dispatch is not present anywhere in the diff and its pin is asserted byte-unmoved in both §0 (pre) and §T (post) — p1008.db.recuts_landed confirms this live."
+    },
+    {
+      "id": "decision_5_restore_helper",
+      "text": "restore_client_egress_purpose keeps refusing CLR28 derived_basis_not_live; needs no recut IF it only calls the helper; measure, do not assume",
+      "state": "done (with the deviation the report itself flags)",
+      "evidence": "Report explicitly states the assumption: measurement showed restore_client_egress_purpose does NOT only call the helper — it cites v_live->>'dpa_acceptance' three times in its own consent insert/audit/event and would raise a raw 23514 for a Terms-only firm restoring under prompt (ck_client_egress_purpose_consents_evidence requires legal_acceptance_id NOT NULL for accounting_work). Read migration §D (lines 680-765) directly and confirmed the same three-anchor/pin/reverse-substitution discipline as §C, and that the CLR28 refusal, floor, and mint-a-fresh-pair shape are untouched. p1008.db.restore_prompt (a Terms-only firm revoke-then-restore under prompt) and p1008.db.restore_basis (CLR28 refusal in both modes) both passed live in the 23/23 run, directly proving the necessity and correctness of this deviation."
+    },
+    {
+      "id": "decision_6_standing_read",
+      "text": "get_firm_legal_standing reports the mode; standing facts (esp. 'not current') stay true in both modes; arity 0 forever",
+      "state": "done",
+      "evidence": "Migration §E (line 774) is a one-anchor splice adding enforcement_mode to the returned object; standing_live computation untouched. §T tail (line 1028) explicitly asserts arity stays 0 ('arity 0 forever (0233 §C)'). p1008.db.standing_reports_mode passed live, asserting standing_live=false under BOTH prompt and enforce for a DPA-only-owner firm."
+    },
+    {
+      "id": "decision_7_web_card",
+      "text": "legal-standing card chooses copy by mode; prompt mode asks and never claims model is off; message keys only; e2e mock + fixture-ownership census updated if shape changed; no Firm Home work",
+      "state": "done",
+      "evidence": "legal-standing-card.tsx diff is one ternary keyed on standing.enforcementMode selecting t('legalNotLivePromptBody') vs t('legalNotLiveBody') — both are message keys in en.json, no inline strings. Re-ran the component test file live: 15/15 pass, p1008.web.legal_prompt_copy explicitly asserts the model-is-off sentence is ABSENT. e2e/serve-built.mjs default mock now answers enforcement_mode:'prompt' (matching post-0234 hosted); firm-commercial-walk.spec.ts's installStandingPair defaults mode to 'enforce' for pre-existing scenarios and takes 'prompt' explicitly for the new one. Re-ran the whole spec live: 9/9 pass. Diff touches nothing under app/(firm)/home or similar Firm Home paths — grep of the diff stat confirms no Firm Home files changed."
+    },
+    {
+      "id": "decision_8_tests_first_both_modes",
+      "text": "TDD red-then-green at the named seams; existing 0195/0211/0233 cells pass unchanged under enforce; if a cell's fixture needs the mode set explicitly, set it in the cell, never weaken the assertion",
+      "state": "done",
+      "evidence": "23 new cells in legal-enforcement-mode.test.mjs cover every named seam (BELCORT shape, newer publication, no-acceptance firm, inactive client; mint arm evidence; sticky revoke + deactivate/reactivate in both modes; mode door floor/replay/receipt; standing read mode; card copies via the web files). Re-ran tests/work-egress-authority.test.mjs (0195/0211) + tests/firm-commercial-settings.test.mjs (0233) together live: 61/61 pass, 0 fail, 0 skip. w631.prep.superseded (the one cell decision 8 calls out) sets mode via forceLegalEnforcementMode('enforce') in a try/finally that restores the prior mode afterward, rather than weakening its assertion — read directly at work-egress-authority.test.mjs:181-210."
+    },
+    {
+      "id": "decision_9_frozen_law",
+      "text": "no frozen workflow body or closure module changes; check-frozen-workflows.mjs shows no diff; no runtime code change expected",
+      "state": "done",
+      "evidence": "Ran node scripts/check-frozen-workflows.mjs live: 'freeze-lint: OK — 312 frozen file(s) verified against frozen-workflows.json (append-only vs origin/main); 55 \"use workflow\" module(s) all frozen+registered; 3 retired entr(ies) recorded.' git diff origin/main..HEAD --name-only contains no packages/runtime files and no file matching the frozen-closure list (work-trace.mjs, capability-registry.mjs, knowledge*.mjs, periodic-adjustment-basis.ts, accrual-basis.ts, staff-expense-claim-basis.ts, fixed-asset-acquisition.ts, malaysian-registration.mjs) — grep returned 'none'."
+    },
+    {
+      "id": "decision_10_docs",
+      "text": "packages/db/README.md, apps/web/README.md if card contract moved, CONTEXT.md new term in house shape; never PRD/ARCHITECTURE (list drift instead)",
+      "state": "done",
+      "evidence": "git diff shows packages/db/README.md (+68), apps/web/README.md (+18), CONTEXT.md (+12), packages/db/tests/README.md (+35) all touched with substantive, accurate content matching what was built (read the packages/db/README.md diff in full). CONTEXT.md adds 'Legal enforcement mode' in the term/_Avoid_ shape, placed before 'Billing plan' as the report claims. git diff origin/main..HEAD --stat for docs/PRD.md and docs/ARCHITECTURE.md is empty (neither file touched). Report's 'Blueprint drift' section names the two ARCHITECTURE sections (§5.E/§10) that are now stale, for the orchestrator to fold into #683."
+    },
+    {
+      "id": "decision_11_reports",
+      "text": "reports in worktree reports/ folder, uncommitted, 1008-final.md plus the release-count SQL section and exact prestate pins",
+      "state": "done",
+      "evidence": "docs/plan/active/rider-1008-legal-enforcement-mode/reports/1008-final.md exists in the worktree and is untracked (git status shows it under Untracked files). It contains a 'Decision 11 — what the release needs' section with the hosted-effect paragraph, a read-only counting SQL query, and a six-row prestate-pins table with signature + sha256 + role — matching what §0 of the migration actually checks (verified by reading migration lines 183-203 directly against the table)."
+    },
+    {
+      "id": "decision_12_commit_hygiene",
+      "text": "commit early and often; every commit message ends with the required Co-Authored-By line; never push, never open a PR",
+      "state": "done",
+      "evidence": "git log origin/main..HEAD shows 5 new commits, each ending with 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>' (confirmed by printing full commit bodies). git status shows branch is ahead of origin/main by 6 commits (5 impl + 1 pre-existing brief doc commit) with no push; git remote state unchanged; no PR-related evidence in the worktree."
+    }
+  ],
+  "additional_checks": [
+    {
+      "check": "firm-scope-db-pins corpus sha matches actual migration file",
+      "result": "confirmed — computed sha256 of packages/db/migrations/0234_legal_enforcement_mode.sql on disk is ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25, exactly matching the entry added to apps/web/tests/firm-scope-db-pins.corpus.ts. Re-ran apps/web/tests/firm-scope-db-pins.test.ts + e2e/e2e-fixture-ownership.test.ts live: 42/42 pass."
+    },
+    {
+      "check": "typecheck / lint",
+      "result": "pnpm typecheck exit 0 (both apps/web and packages/runtime report Done); pnpm lint exit 0 (all workspaces including the ui-add guard self-test suite)."
+    },
+    {
+      "check": "current rig db state",
+      "result": "clara.legal_enforcement currently holds mode='prompt' with a rig-fixture reason string, consistent with test runs having exercised and left it via the door; matches the migration's seeded landing value and does not indicate a defect."
+    }
+  ],
+  "findings": []
+}

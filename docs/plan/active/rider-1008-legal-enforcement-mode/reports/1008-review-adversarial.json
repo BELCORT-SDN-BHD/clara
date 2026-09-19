@@ -1,0 +1,149 @@
+{
+  "review": "#1008 legal enforcement mode — ADVERSARIAL lens",
+  "reviewer": "Claude Opus 5 (1M), read-only reviewer",
+  "date": "2026-09-20",
+  "branch": "impl/1008-legal-enforcement-mode",
+  "head": "edb2ef9ebd60e81bd376b5c121a00c8b618ddb49",
+  "base": "origin/main 511df8f8",
+  "rig": "PG 17.11 @127.0.0.1:55730 clara_reh, frontier 229 / 0234_legal_enforcement_mode",
+  "verdict": "accept-with-fixes",
+  "summary": "I attacked all ten listed paths on the live rig and could not break the implementation. Every probe ran inside a rolled-back transaction. The mode door's operator floor, the prompt arm's citation honesty, the indistinguishable negatives, the sticky revoke, the splice cardinality guards and the refusal to re-apply all hold under direct attack, and the flip back to enforce withdraws authority immediately because prepare_egress_dispatch re-derives the basis on every accounting_work call (consume does not, and does not need to). Seven findings, none blocking: two release-report gaps, two test-coverage gaps and three notes.",
+  "second_opinion": {
+    "tool": "codex exec --sandbox read-only --model gpt-5.6-sol",
+    "available": true,
+    "result": "0 implementation defects; 3 regression-test gaps (concurrent first dispatch, hostile acceptance-provenance fixtures, standing-read cross-firm cell).",
+    "verification": "I re-checked all three myself. All three are real COVERAGE gaps and none is a defect: I executed the missing scenarios directly on the rig and every one behaves correctly (findings A4 and A3 below). Codex's positive claims (client/firm binding precedes mode logic; the door's operator floor; sticky revoke; anchor cardinality) I re-proved independently on the rig rather than accepting."
+  },
+  "attack_results": [
+    {
+      "attack": "1 · prompt answering live with no real acceptance, or minting a null / fabricated / another user's / another firm's owner's legal_acceptance_id",
+      "result": "HELD",
+      "proof": "Rig probe: an owner holding only a Terms acceptance mints scope_note 'derived under the beta legal enforcement mode (prompt) from an active owner's terms acceptance at version 39 (#1008)' and legal_acceptance_id = that owner's own terms row (identity-checked against clara.legal_acceptances). A firm whose active owner holds nothing returns {live:false} in both modes and mints nothing. NULL is structurally impossible: ck_client_egress_purpose_consents_evidence raises 23514 on a NULL citation for accounting_work (proved by a direct insert, rolled back), and client_egress_purpose_consents_legal_acceptance_id_fkey forbids a fabricated id. clara.accept_legal_document is still the ONLY body in schema clara that inserts an acceptance (catalog scan)."
+    },
+    {
+      "attack": "2 · cross-tenant; existence oracle",
+      "result": "HELD",
+      "proof": "Rig probe: firm A's owner acceptance does not make firm B live; a foreign client, a non-existent client, a non-existent firm, an archived client and an owner with no acceptance all return the byte-identical {live:false}, and prepare_egress_dispatch collapses every one onto {verdict:unknown, authorization_id:null}. The prompt arm checks the client/firm binding FIRST, before it reads the mode. uq_membership_active_user (one ACTIVE membership per person, estate-wide) additionally makes a person an active owner of at most one firm."
+    },
+    {
+      "attack": "3 · suspended or removed owner; non-owner admin with acceptances; owner of a different firm",
+      "result": "HELD",
+      "proof": "Rig probe: an admin of the firm holding a real DPA acceptance does NOT make the firm live; removing the only accepting owner's membership (status='removed') and demoting them to admin each drop the basis to {live:false} immediately; with two active owners where only the later one has ever accepted, the prompt arm correctly founds the basis on that second owner (the EXISTS sits inside the owner selection)."
+    },
+    {
+      "attack": "4 · sticky revoke; restore",
+      "result": "HELD",
+      "proof": "Rig probe: after an owner's revoke, prepare under PROMPT returns unknown and mints nothing (the once-per-client guard spans revoked rows and is outside every spliced anchor). restore_client_egress_purpose under prompt on a Terms-only firm succeeds, mints a fresh pair citing that owner's own Terms acceptance, and its egress.purpose_consent_restored event carries enforcement_mode/basis_kind/basis_version with dpa_acceptance_id NULL. Under enforce the same door still refuses CLR28 derived_basis_not_live. Deactivate/reactivate behave identically in both modes."
+    },
+    {
+      "attack": "5 · concurrency",
+      "result": "HELD (one coverage gap, A3)",
+      "proof": "The mode door takes its own advisory xact lock and reads previous_mode after acquiring it, so two flips serialise and neither is lost; _reserve_op keys on (firm, fn, op_key, hash(mode,reason,actor)). The mint arm's race shape (NOT EXISTS + two ON CONFLICT DO NOTHING inserts, decided by uq_client_egress_purpose_consents_one_live / uq_client_egress_purpose_activations_one_live) is entirely OUTSIDE the three spliced anchors and is therefore byte-identical to 0195's, which the migration's reverse-substitution proof establishes. A mid-flight mode flip cannot make a consent's recorded mode wrong: the helper is called ONCE per prepare and its answer is what the mint records."
+    },
+    {
+      "attack": "6 · the mode door",
+      "result": "HELD",
+      "proof": "Rig probe, all refused: an ordinary firm's OWNER -> CLR04 not_operator_firm; the operator firm's BOOKKEEPER -> CLR04 (rank, from _human_ctx); unauthenticated -> CLR04 no authenticated actor; clara_runtime / clara_agent_ro / clara_wake_interactive / clara_wake_proactive -> 42501 permission denied; clara_authenticated calling the ungranted predicate -> 42501. The operator firm's OWNER succeeds, the stored row and the receipt carry the same now() sample, a replay with the same key and the same args returns the ORIGINAL receipt byte-identically, and a replay with a different value OR a different reason -> CLR10 op_key_conflict. 'PROMPT' -> CLR10 invalid_mode. One clara._audit row per real change naming actor, mode and previous_mode."
+    },
+    {
+      "attack": "7 · flipping to enforce",
+      "result": "HELD, with an evidence note (A1)",
+      "proof": "clara.consume_egress_dispatch (read in full from pg_proc; sha unmoved at f461ceb0…) does NOT re-derive the basis — it re-checks only the authorization's six-term binding, its bytes, its TTL and that the consent/activation are still live. But clara.prepare_egress_dispatch calls clara._accounting_work_egress_live on EVERY accounting_work call, not only at the mint, so the flip to enforce withdraws authority immediately. Proved on the rig: a client minted under prompt returns {verdict:unknown} on the next prepare after the flip, while its consent row survives unrevoked. The only residual window is an already-issued authorization's 120s TTL, which is 0195's pre-existing shape. ACCEPTABLE FOR LAUNCH."
+    },
+    {
+      "attack": "8 · the splice",
+      "result": "HELD",
+      "proof": "Each anchor's count is (length(src) - length(replace(src,probe,''))) / length(probe), asserted <> 1 -> raise. Verified the arithmetic on the rig for 2, 0 and 1 matches (returns 2, 0, 1), so a body where an anchor matched twice or zero times refuses LOUDLY. Doubly guarded: §0 pins the exact pre-image prosrc sha of all four recut bodies, so the anchor count is deterministic before any anchor is counted. Each block additionally re-reads the COMMITTED body, applies the reverse substitution and requires the remainder to hash to the pinned pre-image byte for byte."
+    },
+    {
+      "attack": "9 · re-application / relation already present",
+      "result": "HELD",
+      "proof": "Ran 0234's §0 prestate block verbatim against the already-migrated rig inside a rolled-back transaction: raises CLR10 '#1008 prestate: clara.legal_enforcement already exists'. The three new function names are checked the same way."
+    },
+    {
+      "attack": "10 · the standing read",
+      "result": "HELD",
+      "proof": "Rig probe: clara.get_firm_legal_standing() as the firm's owner and as its bookkeeper returns only that firm's own documents; standing_live stays false under BOTH modes (decision 6), arity stays 0, and the new key is the PLATFORM's enforcement_mode — not another firm's fact. Both doors that read the mode at operator rank (get/set_legal_enforcement_mode) refuse an ordinary firm's owner."
+    }
+  ],
+  "commands_rerun": [
+    { "cmd": "node --test --test-concurrency=1 tests/legal-enforcement-mode.test.mjs", "result": "23 pass / 0 fail / 0 skip" },
+    { "cmd": "node --test --test-concurrency=1 tests/work-egress-authority.test.mjs", "result": "37 pass / 0 fail / 0 skip" },
+    { "cmd": "node --test --test-concurrency=1 tests/firm-commercial-settings.test.mjs", "result": "24 pass / 0 fail / 0 skip" },
+    { "cmd": "node --test --test-concurrency=1 tests/legal-acceptance.test.mjs", "result": "19 pass / 0 fail / 0 skip" },
+    { "cmd": "node --test --test-concurrency=1 tests/{wave-a-egress,work-journal-post,f-a3-pr1c-egress-bank-matching,f-a7-gamma-egress}.test.mjs", "result": "13 / 33 / 7 / 21 — all pass, 0 fail, 0 skip" },
+    { "cmd": "node --import ./test/bootstrap.mjs --import tsx --test lib/firm/commercial-reads.test.ts", "result": "14 pass / 0 fail" },
+    { "cmd": "node --import ./test/bootstrap.mjs --import tsx --test components/firm-admin/legal-standing-card.test.tsx", "result": "15 pass / 0 fail" },
+    { "cmd": "node scripts/check-frozen-workflows.mjs", "result": "OK — 312 frozen file(s) verified, no manifest diff; no runtime file in the diff" },
+    { "cmd": "pnpm --filter @clara/web lint", "result": "exit 0" },
+    { "cmd": "the report's Decision-11 release-count SQL, inside begin read only … rollback", "result": "executes and returns the seven documented columns" },
+    { "cmd": "sha256 of packages/db/migrations/0234_legal_enforcement_mode.sql", "result": "ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25 — matches the firm-scope-db-pins.corpus.ts entry byte for byte" },
+    { "cmd": "non-regression pins re-read post-0234", "result": "consume_egress_dispatch f461ceb0… and set_admission_capacity 190d0fe8… both unmoved" }
+  ],
+  "findings": [
+    {
+      "id": "A1",
+      "severity": "minor",
+      "title": "A consent minted under `prompt` is never re-derived, so after the launch flip an enforce-live firm's durable record still reads as a beta-mode Terms citation",
+      "evidence": "Rig probe, rolled back: (a) a firm live under prompt on a Terms-only owner mints consent scope_note 'derived under the beta legal enforcement mode (prompt) from an active owner's terms acceptance at version 39 (#1008)', legal_acceptance_id = that Terms acceptance; (b) flip to enforce -> prepare returns {verdict:unknown} (correct) and the consent row survives unrevoked; (c) the owner then accepts BOTH published kinds -> prepare returns {verdict:granted} by REUSING that same prompt-era consent, because prepare_egress_dispatch's once-per-client guard (not exists over every row of the purpose — 0195's, carried through 0234's splice unchanged) never re-mints. The row's scope_note and legal_acceptance_id are unchanged. ck_client_egress_purpose_consents_evidence only requires NOT NULL, so nothing catches it. No security impact — the live gate is prepare's per-call re-derivation — but the consent row is the estate's durable record of the lawful basis, and the report's hosted-effect section (reports/1008-final.md, Decision 11 §1) does not mention it.",
+      "required_fix": "Record it. Add one paragraph to the release section of 1008-final.md and fold it into follow-up 3 (the evidence surface): after the flip to enforce, every consent minted during the beta keeps its prompt scope_note and its possibly-Terms citation, so any launch-time evidence read must join the consent to a FRESH clara._accounting_work_egress_live answer rather than trusting the stored scope_note, and a future ticket should decide whether the flip re-derives or annotates those rows. No code change before release."
+    },
+    {
+      "id": "A2",
+      "severity": "minor",
+      "title": "The documented rollback (\"the operator firm's owner calls set_legal_enforcement_mode\") has no product surface and no verified hosted precondition",
+      "evidence": "reports/1008-final.md Decision 11 §1 states 'Rollback needs no migration. The operator firm's owner calls select clara.set_legal_enforcement_mode(...)'. That door is granted only to clara_authenticated and gated on clara._human_ctx(role_rank('owner')) AND `f.id = clara.jwt_firm() and f.is_operator`, and the same report's follow-up 1 says it ships with NO web surface at all — so the flip is a psql act that must set request.jwt.claims to an active owner of the operator firm, which the report never spells out. The precondition is also unmeasured here: clara.firms.is_operator is set only by a raw ops act (packages/db/migrations/0133_g1_wake_engine.sql tail: 'ZERO firms are marked operator by this migration (a raw ops act does that later, never an app RPC)'), the rehearsal rig carries NO operator firm at all (measured: select id from clara.firms where is_operator -> 0 rows), and the only in-repo claim that hosted has one is docs/plan/active/refresh-wave-2026-09-14/brief-615.md:13 'BELCORT carries it in production' — a 2026-09-14 document, not a measurement.",
+      "required_fix": "Before the window, measure on hosted that an operator firm exists and has an ACTIVE owner, and put the literal rollback recipe in the release section: the psql form that sets request.jwt.claims to that owner's sub and calls the door (so the flip leaves its clara._audit receipt), plus the explicit statement that a bare update clara.legal_enforcement as superuser also works but leaves NO receipt and is the last resort."
+    },
+    {
+      "id": "A3",
+      "severity": "minor",
+      "title": "No cell exercises the concurrent first dispatch under `prompt` (independently raised by Codex)",
+      "evidence": "packages/db/tests/legal-enforcement-mode.test.mjs calls prepareEgressDispatch once per mint cell (p1008.db.mint_evidence_prompt / _terms_only / _enforce); no cell races two sessions. I verified this is coverage and not a defect: the mint guard, both ON CONFLICT DO NOTHING inserts and the activation select all lie OUTSIDE the three anchors §C splices (the anchors are only the consent VALUES list, the clara._audit payload and the egress.purpose_consent_derived payload — read from the live prosrc), and §C's reverse-substitution proof requires every other byte to reproduce the pinned 0195 pre-image f051fe1f…, so the race is decided by the same two partial uniques as before. I did not run a live race: it needs committed fixture rows on a release-rehearsal rig whose append-only audit and event tables cannot be cleaned up afterwards.",
+      "required_fix": "Optional for release. If CI's estate run can afford it, add one cell racing two prepareEgressDispatch calls for a brand-new client in prompt mode and asserting two grants but exactly ONE consent, ONE activation, ONE clara._audit row and ONE egress.purpose_consent_derived event."
+    },
+    {
+      "id": "A4",
+      "severity": "minor",
+      "title": "No hostile-provenance cell: the battery never seeds an acceptance held by the wrong person, and never removes or demotes the accepting owner",
+      "evidence": "packages/db/tests/legal-enforcement-mode.test.mjs covers the positive shapes (belcort, terms_only) and the empty shape (prompt_no_acceptance, an owner holding nothing), but no cell seeds an acceptance held ONLY by a non-owner member or by a user of another firm, and no cell removes/demotes the one accepting owner. Codex raised the same gap. I executed all four on the rig, rolled back, and each behaves correctly: an ADMIN of the firm holding a real DPA acceptance leaves the firm {live:false}; firm A's owner acceptance does not make firm B live; removing the accepting owner's membership -> {live:false}; demoting them to admin -> {live:false}. Behaviour is right; the battery does not pin it, so a future recut of the owner-selection predicate could drop m.role='owner' or m.status='active' and stay green.",
+      "required_fix": "Add one cell (a firm whose active owner holds nothing while a non-owner member holds a real acceptance -> refused in both modes, byte-identically) and one cell that removes or demotes the accepting owner of a live prompt firm and asserts the basis goes to {live:false}. Not blocking."
+    },
+    {
+      "id": "A5",
+      "severity": "note",
+      "title": "The battery's after() hook forces the mode to `prompt` rather than restoring what before() found",
+      "evidence": "packages/db/tests/legal-enforcement-mode.test.mjs after(): 'if (ready) await forceMode(MODE_PROMPT)'. before() never captures the prior value. Contrast packages/db/tests/work-egress-authority.test.mjs, which captures the prior mode with forceLegalEnforcementMode and restores it in a finally. On the rehearsal rig this is harmless because prompt is 0234's landing value, and I measured that the mode is still prompt after running the whole set of batteries — but the battery is a silent policy writer on any database where an operator had deliberately set enforce.",
+      "required_fix": "Capture the mode in before() and restore that value in after(), matching work-egress-fixtures.mjs's own discipline. Cosmetic; not blocking."
+    },
+    {
+      "id": "A6",
+      "severity": "note",
+      "title": "`terms_version` / `dpa_version` change meaning between the two modes",
+      "evidence": "In clara._accounting_work_egress_live's prompt arm those two keys carry the OWNER'S ACCEPTED versions; in the enforce arm they carry the PUBLISHED versions. Verified on the rig: a Terms-only owner returns terms_version 39, dpa_version null under prompt. The migration documents the choice and defends it, and every payload carries enforcement_mode so a reader can branch. Both keys also reach the clara._audit row and the egress.purpose_consent_derived / _restored events.",
+      "required_fix": "None now. When the evidence surface of follow-up 3 is built it must read enforcement_mode BEFORE it renders either version key; worth one sentence in that follow-up's body."
+    },
+    {
+      "id": "A7",
+      "severity": "note",
+      "title": "Two acceptance criteria stay open for the integrator: the from-scratch chain and the full estate suite",
+      "evidence": "The report says so plainly and the BRIEF's rig section forbids a second from-scratch chain on this cluster, so the worker was right to defer. The rehearsal rig reached 228 by a 0001→0224 chain plus the nine wave files — the same migration SET as a clean 0001→0233, but not the same run. 0234's §0 pins six prosrc sha256 values and refuses to apply if any has drifted, so the failure mode is loud, not silent. Separately: apps/web/tests/firm-scope-db-pins.corpus.ts pins the migration FILE's sha256 ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25; I re-measured the file on HEAD and it matches exactly.",
+      "required_fix": "CI/orchestrator: run a from-scratch 0001→0234 chain and the full packages/db estate suite before the hosted window; if 0234 is edited at integration, re-measure the corpus sha."
+    }
+  ],
+  "brief_decisions_checked": {
+    "1_one_migration_house_shape": "MET — one new file, prestate with six MEASURED sha pins, tail census, preintegration gate module, rig-meta cohort, gate chain entry appended after 0233's.",
+    "2_the_mode": "MET — clara.legal_enforcement: one row, FORCE RLS, one clara_fn_owner policy, ZERO application-role grants (measured), two-value CHECK, no-delete/no-truncate, seeded at prompt. Write door copies set_admission_capacity's predicate, _reserve_op key, clara._audit receipt and now()-sampled-once shape (both pinned by sha in §0). No web control; stated as follow-up 1.",
+    "3_the_helper": "MET — enforce arm carried through unchanged (five literal predicates re-asserted from the live source and re-proved by my own probes); prompt arm requires an active client, an active OWNER and at least one real acceptance; DPA preferred, Terms otherwise; no published version required; ungranted; negatives byte-identical.",
+    "4_mint_arm_only": "MET and NECESSARY — I proved the counterfactual: a NULL legal_acceptance_id for accounting_work raises 23514 on ck_client_egress_purpose_consents_evidence, so a Terms-only firm under prompt would have hit an estate defect. Key names stay truthful: dpa_acceptance is NULL for a Terms-only basis, in the payload, the audit row and the event. consume_egress_dispatch is byte-unmoved.",
+    "5_restore_measured": "MET — the door does NOT only call the helper (it cites dpa_acceptance three times), so the splice was required; the judgement is correctly flagged in the worker's own report as the thing to review, and I confirmed it. CLR28 derived_basis_not_live still fires in both modes (probe J).",
+    "6_standing_read": "MET — reports enforcement_mode, standing_live unmoved and still false under prompt, arity 0 preserved.",
+    "7_web": "MET — message keys only, fail-closed decode to enforce, e2e mock and walk fixture updated, no Firm Home work. The e2e fixture-ownership census is a verb/lane-mock census and needs no entry for a new payload FIELD; apps/web lint is green.",
+    "8_tests_first": "MET — 23 cells, every behavioural one asserting BOTH modes in one cell; the one 0195 cell that needed enforce SETS it rather than weakening; 0195/0211/0233 batteries pass unchanged (re-run by me).",
+    "9_frozen_law": "MET — check-frozen-workflows.mjs OK with no manifest diff, and no runtime file appears in the diff at all.",
+    "10_docs": "MET — packages/db/README.md, packages/db/tests/README.md, apps/web/README.md, CONTEXT.md (house term / _Avoid_ shape). PRD and ARCHITECTURE untouched; drift listed in the report.",
+    "11_reports": "MET — reports/ is uncommitted in the worktree, 1008-final.md carries the release count SQL (which I ran read-only) and the six prestate pins.",
+    "12_commits": "MET — five commits, each ending Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>; nothing pushed, no PR."
+  },
+  "nothing_left_behind": "Every rig probe ran inside a transaction that was rolled back; the only writes that persisted are the ones the repository's own test batteries make when run (new legal_documents versions, fixture firms), which is their normal behaviour. clara.legal_enforcement is back at mode=prompt. CLARA_RIG_ALLOW_RESET and CLARA_RIG_ALLOW_ROLE_SWEEP were never set; no second from-scratch chain was run; no tracked file was edited; nothing was pushed and no PR was opened."
+}
