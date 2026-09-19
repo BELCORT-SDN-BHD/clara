@@ -56,6 +56,13 @@ const BOTTOM_EPSILON_PX = 2;
  *  what tells those two apart, and it closes EARLY the moment the scroll arrives. */
 const PROGRAMMATIC_WINDOW_MS = 1000;
 
+/** How long after a correction that still did not reach the bottom before trying again,
+ *  and how many corrections one jump may make in total. Content that is still growing
+ *  (a card finishing its enter transition, another delta) is the case; a browser that
+ *  simply cannot reach the bottom is not, and must not be retried forever. */
+const LANDING_RETRY_MS = 120;
+const LANDING_MAX_CORRECTIONS = 3;
+
 export interface TranscriptScrollHandle<T extends HTMLElement = HTMLDivElement> {
   /** Attach to the ONE scrollable element this hook owns.
    *
@@ -104,14 +111,29 @@ function scrollToBottom(el: HTMLElement, smooth: boolean): void {
   el.scrollTop = top;
 }
 
+/** The caller's revision, built so that two opposite changes in ONE commit cannot cancel.
+ *
+ *  A SUM CAN STAND STILL WHILE THE CONTENT MOVES (fix round 1, ADV-642-7): the provisional
+ *  bubble retiring (−1) in the same commit as the first chunk arriving (+1) is what
+ *  `markSent` and the first `chunk` do together, and it left the append effect unrun — the
+ *  reader at the bottom unfollowed, the reader scrolled up not re-offered the jump. A join
+ *  keeps each source's own count, so the token moves whenever any one of them does and
+ *  stays still when none of them do (which is what the render budget depends on).
+ *
+ *  It is still the CALLER's count rather than a subscription this hook owns: the
+ *  transcript's content lives in several stores, and a hook that guessed at them would
+ *  miss one silently. */
+export function transcriptRevisionToken(counts: readonly number[]): string {
+  return counts.join(":");
+}
+
 /**
- * @param revision Bumped by the caller whenever the transcript's CONTENT changes (a new
- *   message, a new provisional chunk, a banner). It is deliberately a number the caller
- *   computes rather than a subscription this hook owns: the transcript's content lives in
- *   several stores, and a hook that guessed at them would miss one silently.
+ * @param revision Changed by the caller whenever the transcript's CONTENT changes (a new
+ *   message, a new provisional chunk, a banner) — see `transcriptRevisionToken`. Any value
+ *   React can compare by identity will do; the hook only ever uses it as a dependency.
  */
 export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
-  revision: number,
+  revision: string | number,
 ): TranscriptScrollHandle<T> {
   const [viewport, setViewport] = useState<T | null>(null);
   const viewportRef = useCallback((node: T | null) => setViewport(node), []);
@@ -189,10 +211,25 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     const onScroll = () => {
       // A jump this module started is not the reader changing their mind. Its intermediate
       // positions say nothing about what they want; only its ARRIVAL does, and that closes
-      // the window early so the very next real scroll is read normally.
-      if (Date.now() < programmaticUntilRef.current) {
+      // the window early — cancelling the landing correction with it, because a jump that
+      // arrived has nothing left to correct — so the very next real scroll is read
+      // normally.
+      //
+      // A PENDING CORRECTION COUNTS AS "STILL OURS", and that is the race fix (spec review
+      // F1, measured in the browser at 36px short). The clock and the correction expire at
+      // the same instant, so a trailing event from our own smooth animation delivered at
+      // the deadline used to take the branch below, publish `following: false` — the
+      // element really is short of the bottom mid-animation — and make the correction that
+      // was about to run bail out, stranding the reader for good. The pending timer is
+      // itself the statement that our jump has not arrived; it does not depend on which of
+      // two callbacks the event loop happens to run first.
+      if (landingTimerRef.current !== null || Date.now() < programmaticUntilRef.current) {
         if (el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_EPSILON_PX) {
           programmaticUntilRef.current = 0;
+          if (landingTimerRef.current !== null) {
+            clearTimeout(landingTimerRef.current);
+            landingTimerRef.current = null;
+          }
           measure();
         }
         return;
@@ -237,15 +274,36 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     // swapping, a delta arriving) — measured 36px short in the browser walk. One
     // correction at the end of the window puts the reader where they asked to be instead
     // of a few pixels above it, and it is skipped if they have taken the scroll back.
+    //
+    // IT RE-MEASURES RATHER THAN TRUSTING A FLAG. The old guard read `followingRef`, which
+    // any scroll event between the press and this moment could have written — including
+    // the animation's own (spec review F1). The element's geometry is the only thing that
+    // answers "did it land?", and it is cheap.
+    //
+    // AND IT IS BOUNDED. If the content grew again during the correction the reader is
+    // still short of the bottom, so one more attempt is scheduled, up to
+    // LANDING_MAX_CORRECTIONS — never a loop, and never a timer that outlives the mount.
     if (landingTimerRef.current !== null) clearTimeout(landingTimerRef.current);
-    landingTimerRef.current = setTimeout(() => {
+    const correct = (attemptsLeft: number) => {
       landingTimerRef.current = null;
-      programmaticUntilRef.current = 0;
-      if (!followingRef.current) return;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distance <= BOTTOM_EPSILON_PX) {
+        // It landed on its own (or the reader is already there). Read the element and
+        // publish what it actually says.
+        programmaticUntilRef.current = 0;
+        measure();
+        return;
+      }
       scrollToBottom(el, false);
-      publishAtBottom(true);
-      publishHasMoreBelow(false);
-    }, PROGRAMMATIC_WINDOW_MS);
+      const after = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (after > BOTTOM_EPSILON_PX && attemptsLeft > 0) {
+        landingTimerRef.current = setTimeout(() => correct(attemptsLeft - 1), LANDING_RETRY_MS);
+        return;
+      }
+      programmaticUntilRef.current = 0;
+      measure();
+    };
+    landingTimerRef.current = setTimeout(() => correct(LANDING_MAX_CORRECTIONS - 1), PROGRAMMATIC_WINDOW_MS);
   }, [viewport, publishAtBottom, publishHasMoreBelow]);
 
   return { viewportRef, atBottom, hasMoreBelow, jumpToLatest, measure };

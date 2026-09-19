@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { renderHook } from "../../test/hookHarness";
-import { useTranscriptScroll } from "./useTranscriptScroll";
+import { transcriptRevisionToken, useTranscriptScroll } from "./useTranscriptScroll";
 
 /** A viewport with real numbers on it. `scrollTo` is recorded rather than implemented so
  *  a cell can see WHICH behaviour was asked for — the reduced-motion half is exactly
@@ -259,6 +259,129 @@ test("p642.web.scroll_render_budget — following a live turn costs the hook NO 
     assert.equal(h.current.atBottom, true, "the reader is still following");
     assert.equal(h.current.hasMoreBelow, false, "…so no jump control is offered");
     assert.equal(el.scrollTop, el.scrollHeight, "…and the region really did follow the content");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("p642.web.jump_to_latest — the landing is not cancelled by the animation's OWN trailing scroll event", async () => {
+  // MEASURED IN THE BROWSER, by the spec review of this branch (finding F1): a
+  // `p642.e2e.long_history_scroll` run reported the transcript sitting `36` px short of
+  // the bottom for the whole 5s poll window — exactly the residual the correction below
+  // was written to remove — while an isolated re-run of the same leg passed. That is a
+  // race, not infra noise, and it is nameable: the window that tells "our own smooth
+  // animation" from "the reader changed their mind" was a CLOCK, and the landing
+  // correction fires at the same instant the clock expires. A trailing scroll event from
+  // the animation delivered at or just after that deadline took the handler's ordinary
+  // branch, published `following: false` (the element really is 36px short), and the
+  // correction's `if (!followingRef.current) return` guard then bailed — stranding the
+  // reader with nothing left to trigger another attempt.
+  //
+  // THE FIX is to stop asking the clock: a correction that is still PENDING is itself the
+  // statement that this module's own jump has not arrived, and the correction re-measures
+  // the element rather than trusting a flag some event may have written in between.
+  const originalMatchMedia = globalThis.window?.matchMedia;
+  Object.defineProperty(globalThis.window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({ matches: false, media: query }),
+  });
+  const realNow = Date.now;
+  const el = scrolledUp();
+  const { h } = await mount(el);
+  try {
+    await h.act(() => { el.scrollTop = 120; el.fireScroll(); });
+    assert.equal(h.current.hasMoreBelow, true, "the fixture must start scrolled up");
+    await h.act(() => { h.current.jumpToLatest(); });
+
+    // The content grew while the animation was targeting the OLD height, so the animation
+    // ends 36px short — the walk's own number.
+    el.scrollHeight += 240;
+    el.scrollTop = 804;
+    // …and its last trailing event is delivered just after the window's deadline.
+    Date.now = () => realNow() + 1005;
+    await h.act(() => { el.fireScroll(); });
+    Date.now = realNow;
+
+    await new Promise((r) => setTimeout(r, 1200));
+    await h.act(() => {});
+    assert.equal(el.scrollTop, el.scrollHeight,
+      "the jump must LAND even when its own trailing event arrives at the deadline");
+    assert.equal(h.current.atBottom, true, "…and the reader is following again");
+    assert.equal(h.current.hasMoreBelow, false, "…with no jump control still offered");
+  } finally {
+    Date.now = realNow;
+    await h.unmount();
+    if (originalMatchMedia) {
+      Object.defineProperty(globalThis.window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    }
+  }
+});
+
+test("p642.web.jump_to_latest — a reader who takes the scroll back AFTER the jump arrives is not dragged down again", async () => {
+  // THE CONTROL for the cell above, and the reason the old guard existed at all. Once the
+  // jump has ARRIVED, the window closes and any pending correction is cancelled: the very
+  // next scroll is the reader's, and nothing may pull them back to the bottom a second
+  // later. Without this arm, "always correct" would pass the cell above by breaking the
+  // property the guard was protecting.
+  const originalMatchMedia = globalThis.window?.matchMedia;
+  Object.defineProperty(globalThis.window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({ matches: false, media: query }),
+  });
+  const el = scrolledUp();
+  const { h } = await mount(el);
+  try {
+    await h.act(() => { el.scrollTop = 120; el.fireScroll(); });
+    await h.act(() => { h.current.jumpToLatest(); });
+    // The animation ARRIVES: the element reaches the bottom and says so.
+    await h.act(() => { el.scrollTop = 600; el.fireScroll(); });
+    assert.equal(h.current.atBottom, true, "the jump arrived");
+
+    // The reader then scrolls up to re-read something.
+    await h.act(() => { el.scrollTop = 200; el.fireScroll(); });
+    assert.equal(h.current.atBottom, false, "the reader's own scroll is read normally again");
+    await new Promise((r) => setTimeout(r, 1200));
+    await h.act(() => {});
+    assert.equal(el.scrollTop, 200, "a correction from the arrived jump must never fire at them");
+    assert.equal(h.current.hasMoreBelow, true, "…and they are still offered the way back");
+  } finally {
+    await h.unmount();
+    if (originalMatchMedia) {
+      Object.defineProperty(globalThis.window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    }
+  }
+});
+
+test("p642.web.scroll_holds_position — two opposite content changes in ONE commit are not a stationary revision", async () => {
+  // Fix round 1, review finding ADV-642-7. The caller's revision was the SUM of five
+  // independent lengths, so two opposite changes landing in one commit cancelled and the
+  // append effect never ran: the reader at the bottom was not followed and the reader
+  // scrolled up was not re-offered the jump control. The case is not hypothetical — the
+  // provisional bubble retiring (−1) in the same commit as the first arriving chunk (+1)
+  // is exactly what `markSent` and the first `chunk` do together.
+  const before = transcriptRevisionToken([3, 0, 1, 0, 0]); // 3 messages + the provisional bubble
+  const after = transcriptRevisionToken([3, 1, 0, 0, 0]); // …bubble retired, first chunk arrived
+  assert.notEqual(after, before, "the content changed, so the revision must have changed");
+  // THE CONTROL: a revision that changed on every read would make the assertion above
+  // pass for the wrong reason, and would cost a render per delta (see the budget cell).
+  assert.equal(transcriptRevisionToken([3, 1, 0, 0, 0]), after, "the same content is the same revision");
+
+  // …and the hook really does follow it, which is what makes the token worth anything.
+  const el = atBottom();
+  let rev = transcriptRevisionToken([3, 0, 1, 0, 0]);
+  const h = await renderHook(() => useTranscriptScroll<never>(rev));
+  try {
+    await h.act(() => { h.current.viewportRef(el as never); });
+    await h.settle();
+    await h.act(() => { el.scrollTop = 100; el.fireScroll(); });
+    assert.equal(h.current.hasMoreBelow, true, "the reader has scrolled up");
+    rev = transcriptRevisionToken([3, 1, 0, 0, 0]);
+    el.scrollHeight += 40;
+    await h.rerender();
+    await h.settle();
+    assert.equal(h.current.hasMoreBelow, true, "…and the arriving content is still measured for them");
   } finally {
     await h.unmount();
   }

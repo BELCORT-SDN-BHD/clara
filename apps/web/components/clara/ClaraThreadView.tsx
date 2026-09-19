@@ -23,7 +23,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { useFirmScopeOrNull } from "@/components/firm-scope-provider";
 import { useClientIdentity } from "@/components/app-shell/scope-context";
 import { foldLiveToolParts } from "@/lib/clara/liveTools";
-import { useTranscriptScroll } from "@/lib/clara/useTranscriptScroll";
+import { transcriptRevisionToken, useTranscriptScroll } from "@/lib/clara/useTranscriptScroll";
 import { claraWelcomeVisible } from "@/lib/clara/welcomeState";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -284,12 +284,19 @@ export function ClaraThreadView({
   // #642 AC5 — SCROLL OWNERSHIP. The revision is every content source this region
   // renders, counted rather than subscribed to: a hook that guessed at them would miss
   // one silently and stop following. See lib/clara/useTranscriptScroll.ts.
-  const transcriptRevision =
-    state.messages.length
-    + state.stream.provisionalChunks.length
-    + (state.pendingUserParts ? 1 : 0)
-    + clarifyParts.length
-    + liveToolSteps.length;
+  //
+  // IT IS A JOIN, NOT A SUM (fix round 1, ADV-642-7). Summed, two opposite changes in one
+  // commit cancelled — the provisional bubble retiring as the first chunk arrives, which
+  // is precisely what `markSent` and the first `chunk` do together — and the append effect
+  // did not run at all: the reader at the bottom was not followed and the reader scrolled
+  // up was not re-offered the way back.
+  const transcriptRevision = transcriptRevisionToken([
+    state.messages.length,
+    state.stream.provisionalChunks.length,
+    state.pendingUserParts ? 1 : 0,
+    clarifyParts.length,
+    liveToolSteps.length,
+  ]);
   const { viewportRef, hasMoreBelow, jumpToLatest } = useTranscriptScroll<HTMLDivElement>(transcriptRevision);
 
   // #642 AC5 — A REVOCATION IS ITS OWN TERMINAL, and it silences every other status line.
