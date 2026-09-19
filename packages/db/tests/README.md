@@ -269,6 +269,71 @@ against a chain below the frontier FAILS, because a skip is not evidence.
   `get_work_claim_origin`, the three reads, RLS posture and replay. Gate module:
   `staff-expense-claim-preintegration-gate.mjs` (`CLARA_ALLOW_MISSING_STAFF_EXPENSE_CLAIMS=1`).
 
+### The trade-invoice battery (#655)
+
+`trade-invoice.test.mjs` (+ `trade-invoice-fixtures.mjs`) is the #638 three-file shape applied to
+the lane that births AR/AP: it is frontier-gated on the `trade_invoices$` STEM, never on `0225`,
+and its gate module is `trade-invoice-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_TRADE_INVOICES=1`), wired into [package.json](../package.json)'s `test`
+script in MIGRATION order after `preview-invite-preintegration-gate.mjs`. A FOCUSED run does not
+preload it and FAILS loudly below the migration; the cohort is `TRADE_INVOICES_0225_COHORT` in
+[rig-meta.mjs](rig-meta.mjs), so the rig census stays wholly-present-or-wholly-absent.
+
+Every assertion under test runs through a `humanQuery` persona or the real `clara_runtime`
+credential; `rootQuery` appears only as a readback or as labelled fixture DML.
+
+**Five cells measure the rig before they assert anything, and they are the reason the migration is
+shaped the way it is.** `p655.rig.trigger_order` enumerates `pg_trigger` on
+`clara.journal_entries`, finds the deferred constraint triggers that read `clara.open_items` at
+commit, and proves `t_je_open_item_birth` sorts before every one of them — 0216's measurement
+reproduced with THIS trigger's name in place, never assumed. `p655.rig.receipt_join` proves which
+of the three subject-resolution paths is actually satisfiable when the deferred queue runs (both
+the status-ledger handle and the TEXT-compared receipt join are; the migration implements the
+first and names the second as the fallback). `p655.rig.coding_kind_untouched` proves this lane
+leaves `journal_entries.coding_kind` NULL, which is what keeps the document-anchored shape belts
+disarmed. `p655.rig.lines_validator_path` proves `clara._validate_entry_lines` is the only path
+into `journal_lines` here, which is why the counterparty is stamped AFTER the insert.
+`p655.rig.aging_floor` records `ar_aging`/`ap_aging`'s real grants and floors before any cell
+reads an aging number.
+
+**`p655.belts` records the finding that changed the migration.** A `coding_kind IS NULL` entry
+classifies as `'adjustment'` (LADDER 5), so `clara._tf_subledger_entry_belt` raised
+`subledger_entry_untied` against a `'bill'` item and `clara._tf_subledger_item_belt` hard-coded
+`item_kind='bill'` ⟺ `coding_kind='supplier_bill'`. Both were measured RED before the belts were
+recut, and `p655.classify.ladder_3t` pins that the classifier's answer is byte-identical for every
+input that is not a trade invoice.
+
+The rest of the battery: one commit yielding all four artefacts on both polarities
+(`p655.post.bill_one_commit`, `.invoice_one_commit`), the control-leg refusal still standing for
+every Work that is NOT a trade invoice (`p655.post.control_leg_still_refused` — the recut opened a
+door, not a hole), the three due-date bases end to end (`p655.due.stated` / `.terms_fallback` /
+`.absent`), the polarity matrix refusing a negative total, a cross-domain party and a credit-shaped
+payload BY NAME and as typed CLR10s rather than bare 23514s (`p655.polarity.matrix`), replay and
+its race (`p655.replay.one_receipt` asserts the second call writes NOTHING; `p655.replay.race`
+races the SAME payload with itself and then a DIVERGENT pair -- two parties, two references, one
+key -- and asserts that exactly one caller is answered, that the other leaves as
+`intent_payload_conflict`, and that the answered caller's party, kind and due-date basis are the
+ones the surviving row holds. That divergent arm is the cell that caught the door answering a
+raced loser about somebody else's invoice), the residual it does NOT close
+(`p655.duplicate.same_reference_is_NOT_probed` measures that one supplier bill number under two
+intent keys lands twice and doubles the payable -- "duplicate" on this lane means a replayed
+INTENT, and a same-document-number probe is nobody's yet), atomicity (`p655.atomic.no_partial`),
+the authority floors with no existence oracle (`p655.authority.floors`) and the two ladder tokens
+the first cut never drove (`p655.authority.cited_and_inactive`: a document that already backs a
+posted entry, and an archived client), admission-time party
+ambiguity carrying its candidates (`p655.party.resolution`), the control tie-out from zero
+(`p655.tieout.control`), LADDER 1 unwinding a reversal unchanged (`p655.reversal.unwinds`), the
+two-lane equivalence proof (`p655.parity.source_vs_direct` — a coding-lane bill and a Work-lane
+trade invoice for the same facts move the same control account by the same signed cents with the
+same due date -- on a fixture whose document date IS its posting date, so the parity claim is
+about the accounting and not about which anchor won), the due-date anchor and the legacy lane's
+disagreement with it (`p655.due.anchor_document_date` -- DECISIONS §6.2.0 R-A: this lane derives
+`document_date + terms` = 2026-04-03 while the coding lane's 0040:6010-6015 splice still derives
+`posting_date + terms` = 2026-04-30 for the same bill, and both numbers are asserted BY NAME so
+neither side can drift silently; #665's cutover owns retiring the legacy anchor), the grant posture including the absent attestation (`p655.grants`), the three
+re-derived catalog censuses (`p655.census.writers`), the append-only belts (`p655.appendonly`) and
+the read's viewer floor (`p655.read.floor`).
+
 ### The prepayment-amortisation battery (#653)
 
 `prepayment-schedule.test.mjs` and `prepayment-occurrences.test.mjs` are frontier-gated on the

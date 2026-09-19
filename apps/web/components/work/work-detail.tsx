@@ -56,6 +56,10 @@ import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+// #655 — the house currency renderer (N9's ruling: `<Money>` is the render path for money in
+// JSX, `formatCents` only for non-JSX value positions). Cents are the storage unit, never the
+// reading unit.
+import { Money } from "@/components/journals/money";
 import { businessDateTime } from "@/lib/business-date";
 import { isUuidShape } from "@/lib/client-id";
 import { readClarifyQuestion } from "@/lib/journals/governance-doors";
@@ -77,6 +81,7 @@ import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { purposeLabel } from "@/lib/work/purpose-label";
 import { getWorkClaimOrigin, type WorkClaimOrigin } from "@/lib/work/staff-expense-claim-reads";
+import { getTradeInvoice, type TradeInvoiceRead } from "@/lib/work/trade-invoice-reads";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -170,6 +175,7 @@ export function WorkDetailView({
   storage,
   loadLinks = listEntryLinks,
   loadClaimOrigin = getWorkClaimOrigin,
+  loadTradeInvoice = getTradeInvoice,
 }: {
   clientId: string;
   workId: string;
@@ -192,6 +198,10 @@ export function WorkDetailView({
    *  call a claim "Journal entry" and stop. `clara.get_work_claim_origin` answers NULL for every
    *  Work that is not a claim, so this read costs one round trip and never invents an origin. */
   loadClaimOrigin?: typeof getWorkClaimOrigin;
+  /** #655 — AC5's mutual links, for a Work that carries a trade invoice. `clara.get_trade_invoice`
+   *  answers NULL for every Work that does not, so this read costs one round trip and never
+   *  invents an origin — the same discipline `loadClaimOrigin` is held to. */
+  loadTradeInvoice?: typeof getTradeInvoice;
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
@@ -263,6 +273,21 @@ export function WorkDetailView({
       live = false;
     };
   }, [addressable, workId, loadClaimOrigin, session]);
+  /** #655 — the trade invoice this Work carries, or null. A FAILED read is indistinguishable
+   *  from "not a trade invoice" on purpose: both leave the block absent, and the page never says
+   *  a Work is NOT one, only that it IS. Nothing on this page is blocked by it. */
+  const [tradeInvoice, setTradeInvoice] = useState<TradeInvoiceRead | null>(null);
+  useEffect(() => {
+    if (!addressable) return;
+    let live = true;
+    void (async () => {
+      const found = await loadTradeInvoice(workId, { session }).catch(() => null);
+      if (live) setTradeInvoice(found);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [addressable, workId, loadTradeInvoice, session]);
   const postedEntryId = state.data?.entry?.id ?? null;
   const reloadLinks = useCallback(async () => {
     if (postedEntryId === null) return;
@@ -423,6 +448,7 @@ export function WorkDetailView({
         committed={committed}
         reloadLinks={reloadLinks}
         claimOrigin={claimOrigin}
+        tradeInvoice={tradeInvoice}
         reloadWork={() => state.reload()}
         session={session}
       />
@@ -661,6 +687,7 @@ function PostedEntrySection({
   committed,
   reloadLinks,
   claimOrigin,
+  tradeInvoice,
   reloadWork,
   session,
 }: {
@@ -673,6 +700,7 @@ function PostedEntrySection({
   committed: OperationReceiptRow | null;
   reloadLinks: () => Promise<unknown>;
   claimOrigin: WorkClaimOrigin | null;
+  tradeInvoice: TradeInvoiceRead | null;
   reloadWork: () => Promise<unknown>;
   session: SessionTokenAccessor;
 }) {
@@ -680,6 +708,7 @@ function PostedEntrySection({
   const tm = useTranslations("ManualJournal");
   /** #638's own copy, for the one line that names a claim. */
   const tsec = useTranslations("StaffExpenseClaim");
+  const tti = useTranslations("TradeInvoice.link");
   return (
         <section className="flex flex-col gap-2">
           <SectionHeader
@@ -737,6 +766,61 @@ function PostedEntrySection({
                     claimant: claimOrigin.claimant_label,
                     settlement: tsec(`settlement.options.${claimOrigin.settlement}`),
                   })}
+                </dd>
+              </>
+            )}
+            {/* #655 — AC5's MUTUAL LINKS, in ONE block. A trade invoice is a `journal_entry`
+                Work by design (migration 0225's header states why a fourth purpose cannot post),
+                so the purpose line above correctly reads "Journal entry" and this block names
+                what it actually is: which kind, which party, which two dates, the exact total,
+                and — once the run posts — the journal entry, the signed open item with its due
+                date and outstanding, and the receipt. Every one of those is DERIVED by
+                `clara.get_trade_invoice`; none is a stored back-pointer, which is exactly why
+                `clara.trade_invoices` could stay append-only with zero admitted updates.
+                THE `admitted` STATE IS A REAL STATE, not missing data: the row is durable at
+                ADMISSION, so a Work whose run has not committed yet renders the document's facts
+                and says so, rather than showing blanks. */}
+            {tradeInvoice === null ? null : (
+              <>
+                <dt className="text-muted-foreground">{tti("heading")}</dt>
+                <dd className="text-foreground" data-testid="work-trade-invoice">
+                  <span>{tti(`kind.${tradeInvoice.kind}`)}</span>
+                  {tradeInvoice.counterparty_name ? (
+                    <span> · {tradeInvoice.counterparty_name}</span>
+                  ) : null}
+                  <span> · {tti(`domain.${tradeInvoice.domain}`)}</span>
+                  {tradeInvoice.reference ? (
+                    <span className="block text-sm text-muted-foreground">
+                      {tti("reference")}: {tradeInvoice.reference}
+                    </span>
+                  ) : null}
+                  <span className="block text-sm text-muted-foreground">
+                    {tti("documentDate")}: {tradeInvoice.document_date ?? "—"}
+                    {" · "}
+                    {tradeInvoice.due_date === null
+                      ? tti("noDueDate")
+                      : `${tti("dueDate")} ${tradeInvoice.due_date}`}
+                    {" · "}
+                    {/* THE STATED TOTAL, which is durable at ADMISSION and is the only amount on
+                        this page until the entry posts (the journal-lines table does not exist
+                        before that). Through `<Money>` like every other money value in the app —
+                        cents are the storage unit, never the reading unit. */}
+                    {tti("total")}: <Money cents={tradeInvoice.total_cents} />
+                  </span>
+                  {tradeInvoice.state !== "posted" ? (
+                    <span className="block text-sm text-muted-foreground">{tti("admitted")}</span>
+                  ) : (
+                    <span className="block text-sm text-muted-foreground" data-testid="work-trade-invoice-links">
+                      {tradeInvoice.open_item_id === null ? null : (
+                        <>
+                          {tti("openItem")}: {tradeInvoice.open_item_id}
+                          {tradeInvoice.outstanding_cents === null ? null : (
+                            <> · {tti("outstanding")}: <Money cents={tradeInvoice.outstanding_cents} /></>
+                          )}
+                        </>
+                      )}
+                    </span>
+                  )}
                 </dd>
               </>
             )}

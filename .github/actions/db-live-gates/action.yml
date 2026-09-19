@@ -229,6 +229,20 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/staff-expense-claim-e2e.mjs
+        # #655 — the TRADE-INVOICE World leg, on the same throwaway database and the same world.
+        # It proves the thing no unit test and no in-transaction probe can: the signed AR/AP open
+        # item is minted by a DEFERRED constraint trigger AT COMMIT, so the entry, the receipt,
+        # the trade_invoices row and the item are one transaction — and all four survive an
+        # exit_after_commit crash and a respawn as ONE of each. It also proves the due-date basis
+        # is the DATABASE's derivation end to end: the browser sent 'absent', the door answered
+        # 'counterparty_terms' and stamped posting_date + payment_terms_days on the item. It SKIPS
+        # CLEANLY (exit 0, printed reason) when migration 0225 is absent, so it is safe to merge
+        # before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/trade-invoice-e2e.mjs
         # #631 — the WORK-EGRESS e2e, BEFORE the two builds below, because it is the only leg whose
         # subject is what happens BEFORE a model is called. It drives the three windows nothing
         # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->

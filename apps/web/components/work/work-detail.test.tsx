@@ -148,6 +148,10 @@ function App(props: {
   /** #634 — the entry's links read. DEFAULTED so no cell reaches a real socket:
    *  an empty answer is "the read succeeded and this entry has no links row". */
   loadLinks?: (clientId: string, entryIds: readonly string[]) => Promise<EntryLinkRow[]>;
+  /** #655 — `clara.get_trade_invoice`, injected so a cell can render the AC5 link block without a
+   *  socket. Undefined leaves the component's own read in place, which is what the door-census
+   *  cells above measure. */
+  loadTradeInvoice?: (workId: string, opts?: unknown) => Promise<unknown>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -167,6 +171,7 @@ function App(props: {
       scope: { roleRank: BOOKKEEPER_RANK, ...props.scope },
       storage: props.storage ?? null,
       loadLinks: (props.loadLinks ?? (async () => [])) as never,
+      ...(props.loadTradeInvoice === undefined ? {} : { loadTradeInvoice: props.loadTradeInvoice as never }),
     }),
   });
 }
@@ -1618,6 +1623,16 @@ function claimOriginCalls(calls: DoorCall[]): DoorCall[] {
   return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_work_claim_origin"));
 }
 
+/** #655 — `clara.get_trade_invoice` is the SAME SHAPE of read as `get_work_claim_origin` above and
+ *  is here for the same reason: a trade invoice is admitted with purpose `journal_entry`, so the
+ *  purpose alone cannot say the Work IS one, and the read answers NULL for every Work that is not.
+ *  It is the IDENTITY/LINK block's mount effect, not a Sources door and not an act on the Work, so
+ *  the cells below exclude it BY NAME and then PIN what it actually did — one read on mount, and
+ *  not one more per tab press. */
+function tradeInvoiceCalls(calls: DoorCall[]): DoorCall[] {
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_trade_invoice"));
+}
+
 /** The four states are announced BY NAME — `role="group"` with an `aria-label` of
  *  "<axis>: <state>" — which is what a listener hears instead of eight adjacent fragments. A cell
  *  that matched the rendered TEXT would pass on a build that printed the four words with no
@@ -1628,6 +1643,74 @@ function groupLabelled(h: { find: (p: (n: Stub) => boolean) => Stub | null }, la
     return typeof get === "function" && get.call(n, "aria-label") === label;
   });
 }
+
+test("655 AC5/AC12: the trade-invoice link block renders MONEY as money — the stated total and the outstanding, both in ringgit", async () => {
+  // S1 and S2 (fix round 1). The block interpolated `outstanding_cents` as a bare integer of sen,
+  // so a bookkeeper read "Outstanding: 106000" for RM 1,060.00 — a hundredfold misreading of the
+  // one number on the page that is about money, and not what AC12 means by exact values. Every
+  // other money value in this app renders through `<Money cents=… />` (components/journals/
+  // money.tsx, next-intl's formatter with currencyDisplay "narrowSymbol"), and so does this one
+  // now. The block's own comment also promised "the exact total", which it never rendered at all
+  // — leaving `TradeInvoice.link.total` authored and dead, and an ADMITTED invoice with no amount
+  // visible anywhere on the page, because the journal-lines table only exists once the entry
+  // posts.
+  const invoice = {
+    invoice_id: "11111111-1111-4111-8111-111111111111", work_id: WORK,
+    kind: "supplier_bill", domain: "ap",
+    counterparty_id: "22222222-2222-4222-8222-222222222222", counterparty_name: "Alpha Supplies",
+    counterparty_kind: "vendor", counterparty_registration_no: null,
+    document_date: "2026-03-04", due_date: "2026-04-03", due_date_source: "stated",
+    reference: "ALPHA-2026-0042", currency: "MYR", total_cents: 106_000, tax_facts: null,
+    source_document_id: null, recorded_by: USER, created_at: "2026-03-04T02:00:00Z",
+    state: "posted", entry_id: ENTRY, receipt_id: "receipt-1",
+    open_item_id: "33333333-3333-4333-8333-333333333333",
+    open_item_amount_cents: 106_000, open_item_due_date: "2026-04-03",
+    outstanding_cents: 106_000,
+  };
+  const h = await renderComponent(App({
+    loadTradeInvoice: async () => invoice,
+    load: async () => data({
+      work: workRow({ status: "completed", result: { entry_id: ENTRY, receipt_id: "receipt-1", posted_at: "2026-09-01T02:00:00Z" } }),
+      entry: {
+        id: ENTRY, client_id: CLIENT, status: "approved", posting_date: "2026-03-31", memo: "Alpha Supplies bill",
+        origin: "agent", document_id: null, coding_kind: null, revision_token: "rev", maker_actor: null,
+        checker_actor: null, approved_at: "2026-03-31T02:00:00Z", reversal_of: null, reversed_by: null,
+        reversal_reason: null, withdrawn_at: null, withdrawal_reason: null, created_at: "2026-03-31T02:00:00Z",
+      },
+      lines: [],
+      receipts: [],
+    }),
+  }));
+  try {
+    await settleUntil(h, () => String(h.text()).includes("Alpha Supplies"),
+      "the trade-invoice link block to render");
+    const text = String(h.text());
+    // `\s`, NOT a literal space: next-intl's narrowSymbol output separates "RM" from the number
+    // with U+202F, so a literal "RM 1,060.00" never matches a rendered amount — the vacuity
+    // journal-entries-table.test.tsx:105-111 already had to learn once.
+    const MONEY = /RM\s1,060\.00/g;
+    assert.match(text, MONEY,
+      "the outstanding renders in ringgit through the house Money component, never as raw sen");
+    assert.equal(text.includes("106000"), false,
+      "and the raw integer of sen appears nowhere on the page");
+    assert.ok(/Total/.test(text),
+      "the stated total is named — the block's own comment promises it and TradeInvoice.link.total was authored for it");
+    // TWO money facts, both formatted: the stated total and what is still outstanding.
+    assert.equal((text.match(MONEY) ?? []).length, 2,
+      "both the stated total and the outstanding render as money");
+    // AND NO RAW MESSAGE KEY ANYWHERE. Caught here for real: `tti` is scoped to
+    // `TradeInvoice.link`, and the block asks it for `domain.ap` — a key that lived under
+    // `TradeInvoice.domain` and NOT under `TradeInvoice.link`, so next-intl raised
+    // MISSING_MESSAGE and the direction noun rendered as its own key path. The walk never
+    // asserted the noun, so nothing caught it. It is asserted by NAME now.
+    assert.ok(text.includes("Payable"),
+      "the direction-aware noun renders as a word (C08.5), not as a missing-message key path");
+    assert.equal(/TradeInvoice\.link\./.test(text), false,
+      "no raw message key leaks into the page");
+  } finally {
+    await h.unmount();
+  }
+});
 
 test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Documents tab shows", async () => {
   await withStateDoor(documentState(), async (calls) => {
@@ -1664,11 +1747,14 @@ test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Doc
       // #638 — the identity block's one claim-origin read is excluded by name and pinned, so the
       // exclusion cannot hide a second one.
       assert.equal(claimOriginCalls(calls).length, 1, "exactly one get_work_claim_origin read, on mount");
+      // #655 — and the trade-invoice read, on the same footing and pinned the same way.
+      assert.equal(tradeInvoiceCalls(calls).length, 1, "exactly one get_trade_invoice read, on mount");
       assert.equal(
         calls.filter((c) =>
           c.url.includes("/rest/v1/rpc/")
           && !c.url.includes("get_document_state")
-          && !c.url.includes("get_work_claim_origin")).length,
+          && !c.url.includes("get_work_claim_origin")
+          && !c.url.includes("get_trade_invoice")).length,
         0,
         "the Sources tab opens no other door",
       );
@@ -1740,6 +1826,7 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
         "the source document's states to render");
       const doorsBefore = stateDoorCalls(calls).length;
       const originsBefore = claimOriginCalls(calls).length;
+      const invoicesBefore = tradeInvoiceCalls(calls).length;
 
       const sources = h.find((n) =>
         n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Sources");
@@ -1754,11 +1841,15 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
       // tab press is not a mount.
       assert.equal(claimOriginCalls(calls).length, originsBefore,
         "and a tab press does not re-ask the Work's claim origin");
+      // #655 — nor whether it carries a trade invoice. Same mount effect, same rule.
+      assert.equal(tradeInvoiceCalls(calls).length, invoicesBefore,
+        "and a tab press does not re-ask the Work's trade invoice");
       assert.equal(
         calls.filter((c) =>
           c.method !== "GET"
           && !c.url.includes("get_document_state")
-          && !c.url.includes("get_work_claim_origin")).length,
+          && !c.url.includes("get_work_claim_origin")
+          && !c.url.includes("get_trade_invoice")).length,
         0,
         "no mutating request of any kind left this page",
       );

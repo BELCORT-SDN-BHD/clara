@@ -469,3 +469,43 @@ classify gate then refuses as `document_processing_multi_client`. The nav floor 
 attribution act's own higher floor arrives as the DB's refusal on the row rather than
 as an empty page. The Clara composer's firm-altitude refusal is unchanged — this leaf
 is the destination it was already pointing at.
+
+## #655 — `/clients/:clientId/accounting/invoices/new`
+
+The C1/C3/C6 direct entry point for a trade invoice: a client sales invoice or a supplier bill, and
+the signed AR/AP open item it births. It is a **route and not a Dialog**, and a **sibling address**
+of `…/accounting/journal/new`, `…/accounting/adjustments/new` and `…/accounting/claims/new`
+rather than a tab on any of them — the four admit different operations through different doors, and
+a stable URL is what makes the draft recoverable at all.
+
+**The state ladder**, each with its own cell or walk leg: *loading* (a skeleton fitted to the form,
+carrying `aria-busy` and a readable name — never a placeholder zero) · *successful-empty* (a client
+with no counterparties of that kind says so) · *no-results* (the party search keeps the query and
+offers Clear, and never offers to CREATE a party — 2026-09-15 D11) · *partial-stale* (the party read
+degrades INDEPENDENTLY of the chart read and names which half is missing) · *invalid-saving* (the
+error sits beside its control, focus moves to the first invalid one in DOCUMENT order, and every
+keystroke survives) · *denied* (a viewer typing the address reaches the form's own denied state,
+never a blank) · *failed* (a `StateBanner` carrying the door's own words AND its code, with the one
+next action that exists — **never a toast**) · *cancelled-recovery* (a lost answer is re-sent under
+the SAME intent key exactly once, and the second answer is authoritative).
+
+**The basis half is the composer's, reused.** The lines are `JournalDraftLine`s, validated by
+`lib/work/journal-basis.ts`'s own `validateJournalDraft` and rendered by the shipped
+`JournalBasisFields` — one set of rules about money in this app, not a second. The grid gets its
+OWN labelled horizontal viewport, so 320 px scrolls the GRID rather than the page.
+
+**The due date is never computed here.** The form carries what the document STATES;
+`clara.admit_trade_invoice_work` derives `stated → counterparty_terms → absent` (only it holds the
+party's agreed terms, and it adds them to the DOCUMENT date — DECISIONS §6.2.0 R-A) and the 202
+hands the derived basis back, which is what the success banner renders.
+`lib/work/trade-invoice.ts` has no path that produces `counterparty_terms` at all.
+
+**Nothing installs a primitive.** Combobox and Popover are uninstalled; the party picker is a text
+filter over the counterparty reads the registers already use, and `party_ambiguous`'s candidates
+render INLINE as a choice.
+
+**AC5's mutual links**: ONE block on the Work detail, from `clara.get_trade_invoice` — the kind,
+the party, the two dates, the reference and, once posted, the entry, the open item and its
+outstanding. The other half was already built and needed nothing:
+`components/journals/journal-entry-row.tsx` already renders a back-link to the Work from
+`clara.list_entry_links`' `work_id`.

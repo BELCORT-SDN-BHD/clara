@@ -72,6 +72,10 @@ import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } fro
 // register. Scoped to its own client id in every branch (the control endpoint included) and
 // file-disjoint from every other lane. See staff-expense-claim-mock.mjs.
 import { handleStaffExpenseClaimRuntime, handleStaffExpenseClaimSupabase } from "./staff-expense-claim-mock.mjs";
+// #655's own lane — the trade-invoice form, its party picker, its refusals and the Work detail's
+// link block. Every branch names this lane's own client id (or the Work id this module minted)
+// before it answers and falls through otherwise. See trade-invoice-mock.mjs.
+import { handleTradeInvoiceRuntime, handleTradeInvoiceSupabase } from "./trade-invoice-mock.mjs";
 // #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
@@ -687,6 +691,11 @@ async function handleSupabase(request, response, url) {
   // nothing but their placeholder. Every branch is scoped to this lane's own client and falls
   // through otherwise.
   if (await handleStaffExpenseClaimSupabase(request, response, path, url, sendJson, cors)) return;
+  // #655 — ABOVE home-board-mock.mjs for the reason the note above gives about EMPTY_RELATIONS:
+  // its unconditional /rest/v1/coa_accounts answer would leave this form's account pickers empty.
+  // Scoped to this lane's own client throughout (DECISIONS §6.1: dispatch order is SEMANTIC here,
+  // not sorted, and a lane whose verbs another arm answers unconditionally dispatches ABOVE it).
+  if (await handleTradeInvoiceSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
@@ -1070,6 +1079,9 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // #638, on the same footing: one admission route and one control endpoint, both scoped to this
   // lane's own client id, so nothing another walk owns can reach it.
   if (await handleStaffExpenseClaimRuntime(request, response, url)) return true;
+  // #655, on the same footing: one admission route and one control endpoint, both scoped to this
+  // lane's own client id, so nothing another walk owns can reach it.
+  if (await handleTradeInvoiceRuntime(request, response, url)) return true;
   if (await handleChat(request, response, url)) return true;
   return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,

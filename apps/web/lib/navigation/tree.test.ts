@@ -286,6 +286,7 @@ const LEAF_SAMPLE_PATH = {
   // under the top-level `registers` accounting segment. #638 gained the arm; #639's row was
   // retired with its reason, in `tree.ts`.
   staffExpenseClaim: `/clients/${A}/accounting/claims/new`,
+  tradeInvoice: `/clients/${A}/accounting/invoices/new`,
   workDetail: `/clients/${A}/work/work-1`,
   knowledgeRecord: `/clients/${A}/knowledge/record-1`,
   counterpartyIdentity: `/clients/${A}/knowledge/parties/cp-1`,
