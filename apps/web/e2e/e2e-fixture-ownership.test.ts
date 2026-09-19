@@ -28,6 +28,9 @@ import { fileURLToPath } from "node:url";
 import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 import { handleL7Supabase, L7_RPC_VERBS } from "./bank-close-registers-mock.mjs";
 import { handleCheckoutMock } from "./fs4-checkout-mock.mjs";
+import {
+  EMPTY_WORK_PACK, HOME_WORK_PACK_CLIENT, POPULATED_WORK_PACK, handleHomeBoardSupabase,
+} from "./home-board-mock.mjs";
 import { JOURNAL_WORK, handleJournalWorkRuntime } from "./journal-work-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
@@ -386,14 +389,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // right shape here rather than a debt to repay. A green on this row means "the one shape the
   // reader can see is clean", not "this file is clean".
   // #650 added the ONE handler in this file the reader can see: `/rest/v1/rpc/get_client_work_pack`,
-  // the client home's Work attention band. It is DEBT rather than "unscopeable" and the
-  // distinction is the point — the request carries `p_client`, so it COULD be scoped, and writing
-  // "cannot be scoped" into this gate would be a false reason. It is not scoped because its whole
-  // job is to give EVERY client route in this suite an honest-empty answer (the verb returns a
-  // scalar object, so an unanswered 404 would grow two "could not be read" tiles on every walk
-  // that merely lands on `/clients/:id`). It holds no fixture: both facets are `count: 0` with no
-  // rows, so there is nothing in it for a sibling walk to resolve as its own — the N4/N5 property.
-  // A walk that wants a POPULATED band overlays its own `page.route`.
+  // the client home's Work attention band. #902 READS `p_client` now (it was carried and unread,
+  // which is exactly why this row was already DEBT rather than "unscopeable" — writing "cannot be
+  // scoped" would have been a false reason): ONE dedicated fixture client
+  // (`HOME_WORK_PACK_CLIENT`) reads a distinct, POPULATED pack, and every other id — the unscoped
+  // default included — keeps #650's honest-empty envelope. It STAYS in this DEBT row rather than
+  // moving to "scoped" because the census's mechanical test for "scoped" is a `return false`
+  // fall-through, and this door still never takes one: an unanswered id would grow the "could not
+  // be read" tile #650's own comment names, on every walk that merely lands on `/clients/:id`. The
+  // N4/N5 property still holds — the one id that gets data is a client no other lane mints or
+  // navigates to, so nothing in either envelope can be resolved by a sibling walk as its own. A
+  // walk that wants a DIFFERENT populated band still overlays its own `page.route`.
   // #659 added the SECOND handler this reader can see: `/rest/v1/rpc/get_firm_portfolio_pack`,
   // Firm Home's own portfolio table. It is UNSCOPEABLE rather than debt, and the distinction is the
   // same one #650's row draws from the other side: that door takes NO client argument at all. Its
@@ -1746,4 +1752,63 @@ test("#659 · home-board-mock.mjs answers NO list_activity verb — the dependen
     + "note above and this lane's declaration, because the arm would be dead code under the "
     + "current dispatch order",
   );
+});
+
+// ---------------------------------------------------------------------------
+// #902 · `get_client_work_pack` IS SCOPED BY `p_client` — one dedicated fixture client reads a
+// populated pack; every other id (including the unscoped default) keeps #650's honest empty one.
+// ---------------------------------------------------------------------------
+
+/** A fake PostgREST POST request whose body is `body`, delivered exactly once (mirrors N7's own
+ *  fake request above — this file's convention for driving a handler without a real socket). */
+function fakeJsonPost(body: unknown): AsyncIterable<Buffer> & { method: string } {
+  let delivered = false;
+  return {
+    method: "POST",
+    [Symbol.asyncIterator](): AsyncIterator<Buffer> {
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: Buffer.from(JSON.stringify(body), "utf8"), done: false };
+        },
+      };
+    },
+  };
+}
+
+async function readWorkPack(pClient: string | null): Promise<unknown> {
+  let sent: unknown;
+  const sendJson = (_response: unknown, _status: number, payload: unknown) => {
+    sent = payload;
+  };
+  const request = fakeJsonPost({ p_client: pClient });
+  const handled = await handleHomeBoardSupabase(
+    request as never, {} as never, "/rest/v1/rpc/get_client_work_pack",
+    new URL("https://example.test/rest/v1/rpc/get_client_work_pack") as never, sendJson as never, {} as never,
+  );
+  assert.equal(handled, true, "get_client_work_pack must always answer — an unanswered id grows the 'could not be read' tile #650's header names");
+  return sent;
+}
+
+test("#902 · the dedicated fixture client reads the POPULATED pack, distinct from the honest-empty default", async () => {
+  const populated = await readWorkPack(HOME_WORK_PACK_CLIENT.id);
+  assert.deepEqual(populated, POPULATED_WORK_PACK);
+  assert.notDeepEqual(populated, EMPTY_WORK_PACK, "the populated and empty packs must actually differ, or this proves nothing");
+});
+
+test("#902 · every other client id — including the unscoped default and undefined — keeps the honest-empty pack", async () => {
+  const forUnrelatedClient = await readWorkPack("11111111-1111-4111-8111-111111111111");
+  const forNoClientAtAll = await readWorkPack(null);
+  assert.deepEqual(forUnrelatedClient, EMPTY_WORK_PACK);
+  assert.deepEqual(forNoClientAtAll, EMPTY_WORK_PACK);
+});
+
+test("#902 · HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT and mints no id any other lane owns", () => {
+  // A POSITIVE CONTROL on the fixture itself: the two client ids `home-board-mock.mjs` mints
+  // must differ, or #902's own scoping would resolve to the SAME row #650's onboarding cell reads.
+  const homeBoard = readFileSync(join(E2E_DIR, "home-board-mock.mjs"), "utf8");
+  const onboardingMatch = /HOME_ONBOARDING_CLIENT = \{\s*id: "([0-9a-f-]+)"/.exec(homeBoard);
+  assert.ok(onboardingMatch, "home-board-mock.mjs must still declare HOME_ONBOARDING_CLIENT's id in this shape");
+  assert.notEqual(HOME_WORK_PACK_CLIENT.id, onboardingMatch![1]);
 });

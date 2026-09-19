@@ -64,8 +64,8 @@ const EMPTY_RELATIONS = [
 ];
 
 /**
- * #650 — THE HONEST-EMPTY WORK PACK, and the one handler in this file the ownership census can
- * see.
+ * #650/#902 — THE HONEST-EMPTY WORK PACK, and the one handler in this file the ownership census
+ * can see.
  *
  * `clara.get_client_work_pack` returns a scalar JSONB OBJECT, not a SETOF, so `[]` would be a
  * malformed body rather than an empty answer — the browser would degrade both facets to
@@ -73,17 +73,56 @@ const EMPTY_RELATIONS = [
  * the empty ENVELOPE instead: two facets that were read and found empty, with a window and a read
  * instant.
  *
- * DELIBERATELY UNSCOPED, and declared as such in `e2e-fixture-ownership.test.ts`. The request
- * DOES carry a discriminant (`p_client`), so this could be scoped and is not — which is why it is
- * recorded as debt rather than as "unscopeable", a reason that would be false. What makes it safe
- * is the property this whole file rests on: there is no fixture in it. A walk that wants a
- * POPULATED band overlays its own `page.route`, which is scoped to one page in one test and
- * cannot reach another spec's server.
+ * #902 SCOPES THE HANDLER BY `p_client` — the request already carried this discriminant and #650
+ * left it unread ("recorded as debt rather than as 'unscopeable', a reason that would be false").
+ * ONE dedicated fixture client (`HOME_WORK_PACK_CLIENT`, below) now reads a distinct, populated
+ * pack (`POPULATED_WORK_PACK`); EVERY other id — including the unscoped default, `undefined`, and
+ * `HOME_ONBOARDING_CLIENT`'s own id — keeps this honest-empty envelope, so the property #650's
+ * comment names (no walk that merely lands on an arbitrary `/clients/:id` can resolve a fixture as
+ * its own) still holds: nothing here answers unconditionally with data any more, and the one id
+ * that gets data is a client no other lane mints or navigates to. The handler still never falls
+ * through (`return false`) — an unanswered id would grow the "could not be read" tile #650's
+ * comment describes — so it remains DEBT in `e2e-fixture-ownership.test.ts`'s declaration rather
+ * than "scoped": the census's mechanical test for "scoped" is a `return false` fall-through, and
+ * this door's whole job is to never take that branch. A walk that wants a DIFFERENT populated band
+ * still overlays its own `page.route`, which is scoped to one page in one test.
  *
  * The dates are fixed rather than derived from `Date.now()` so two runs of one spec see the same
- * board; nothing asserts on them, because there is nothing in this envelope to count.
+ * board; nothing asserts on them, because there is nothing in either envelope to count on dates.
  */
-const EMPTY_WORK_PACK = {
+export const HOME_WORK_PACK_CLIENT = {
+  id: "90290290-9029-4029-8029-902902902902",
+  name: "Miri Seafood Bistro",
+};
+
+export const POPULATED_WORK_PACK = {
+  computed_at: "2026-09-16T02:00:00.000Z",
+  preview_limit: 5,
+  window: {
+    from: "2026-09-09T16:00:00.000Z", to: "2026-09-16T16:00:00.000Z",
+    from_date: "2026-09-10", to_date: "2026-09-16", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  facets: {
+    active: {
+      status: "ok", count: 1, coverage: "ok", coverage_reason: null,
+      rows: [{
+        id: "90290290-9029-4029-8029-902902902001", label: "September bank reconciliation",
+        state: "in_progress", updated_at: "2026-09-15T08:00:00.000Z",
+      }],
+    },
+    recent_success: {
+      status: "ok", count: 1, coverage: "ok", coverage_reason: null,
+      uncounted_completions: 0,
+      rows: [{
+        id: "90290290-9029-4029-8029-902902902002", label: "August GST filing",
+        state: "completed", updated_at: "2026-09-10T03:00:00.000Z",
+      }],
+    },
+  },
+  needs_you_ref: { source: "list_review_queue.counts.work_questions" },
+};
+
+export const EMPTY_WORK_PACK = {
   computed_at: "2026-09-16T02:00:00.000Z",
   preview_limit: 5,
   window: {
@@ -246,7 +285,9 @@ export async function handleHomeBoardSupabase(request, response, path, url, send
     return true;
   }
   if (request.method === "POST" && path === "/rest/v1/rpc/get_client_work_pack") {
-    sendJson(response, 200, EMPTY_WORK_PACK, cors);
+    const body = await readCachedJson(request);
+    const pack = body?.p_client === HOME_WORK_PACK_CLIENT.id ? POPULATED_WORK_PACK : EMPTY_WORK_PACK;
+    sendJson(response, 200, pack, cors);
     return true;
   }
   // #659 — APPENDED beside its client-altitude sibling, and deliberately NOT folded into
