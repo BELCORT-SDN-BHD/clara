@@ -320,14 +320,25 @@ test("chat.part: the clarification-closed part this belt writes is the one the d
   );
 });
 
-test("chat.wiring: the leader runs this belt BEFORE runReconcilerSweep, so the specific terminal beats the generic mirror", () => {
+test("chat.wiring: the SWEEP runs this belt FIRST, so the specific terminal beats the generic mirror", () => {
+  // #852 moved the call from leader.mjs into runReconcilerSweep (the import edge that forced it
+  // outside — chat-clarify -> control -> reconciler — was cut by lib/hook-resume.mjs). The ORDER
+  // this cell has always been about is unchanged and still load-bearing: reconcileTasks' section C
+  // would settle a parked chat turn with a lost run `cancelled`/engine_lost, so the chat-clarify
+  // arm has to decide first or #764's `expired` + clarify_closed terminal never happens. The
+  // runtime proof of that order lives in chat-clarify-sweep-wiring.test.mjs, which drives a whole
+  // sweep and reads the statement order off the client; this cell pins the WIRING.
+  const sweepSrc = readFileSync(new URL("../lib/reconciler.mjs", import.meta.url), "utf8");
+  const arm = sweepSrc.indexOf('await belt("chat clarify reconcile"');
+  const expiry = sweepSrc.indexOf('await belt("clarify expiry"');
+  const mirror = sweepSrc.indexOf('await belt("task reconcile"');
+  assert.ok(arm > 0 && expiry > 0 && mirror > 0, "wiring: all three belts are registered in the sweep");
+  assert.ok(arm < expiry && arm < mirror, "wiring: the chat-clarify belt is registered ahead of them");
+
   const leaderSrc = readFileSync(new URL("../lib/leader.mjs", import.meta.url), "utf8");
-  const arm = leaderSrc.indexOf("await reconcileChatClarifies(client");
-  const sweep = leaderSrc.indexOf("await runReconcilerSweep(client");
-  assert.ok(arm > 0 && sweep > 0, "wiring: both calls are in the leader loop");
-  assert.ok(arm < sweep,
-    "wiring: reconcileTasks' section C would settle a parked chat turn with a lost run `cancelled`/engine_lost; "
-    + "the chat-clarify arm has to decide first or #764's `expired` + clarify_closed terminal never happens");
+  assert.ok(!/reconcileChatClarifies/.test(leaderSrc),
+    "wiring: the leader no longer calls the belt itself — two callers a cycle would double-probe every resting row");
+
   const startWorldSrc = readFileSync(new URL("../plugins/startWorld.ts", import.meta.url), "utf8");
   assert.ok(/import \{ start, getRun, resumeHook \} from "workflow\/api";/.test(startWorldSrc)
     && /^\s*resumeHook,$/m.test(startWorldSrc),

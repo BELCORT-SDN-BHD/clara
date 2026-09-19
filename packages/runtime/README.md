@@ -1283,3 +1283,34 @@ CLR04 — which means its stored canceller has lost authority and no future swee
 because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
+
+## #852 — the chat-clarify belt inside the sweep receipt
+
+**What moved.** `reconcileChatClarifies` used to run from `lib/leader.mjs`, in its own try/catch,
+beside `runReconcilerSweep`. It is now the FIRST belt inside the sweep, registered exactly like
+every sibling. `leader.mjs` reads its counters off the sweep result and no longer imports it.
+
+**Why it was outside, and what the fix actually is.** The reason was IMPORT DIRECTION, not cadence:
+`lib/reconciler-chat-clarify.mjs` read `isHookNotFound` and `resumePayloadFor` from
+`lib/control.mjs`, and `control.mjs` imports `settleCancelledByKind` from `lib/reconciler.mjs` — so
+registering the belt inside the sweep closed `reconciler → chat-clarify → control → reconciler`.
+Both symbols now live in `lib/hook-resume.mjs`, a LEAF that imports nothing first-party; `control.mjs`
+re-exports them by name so every existing import site keeps resolving. The edge is removed rather
+than routed around.
+
+**What the receipt now carries.** The five `chatClarifyResumed / Expired / Landed / ProbeFailed /
+SettleFailed` counters ride `runReconcilerSweep`'s returned object, and a belt failure is named in
+`beltErrors` as `"chat clarify reconcile"` (logged with the estate's `[reconcile] <belt> error:`
+idiom) instead of being a log line only the leader could see. The estate law still holds: a FAILED
+belt contributes no counters at all, so `"chatClarifyResumed" in swept` is positive evidence that
+the belt ran.
+
+**Order.** The belt runs first of the belts and immediately after the heartbeat — the heartbeat is
+not a belt but the sweep's one deliberate fail-fast. The order is load-bearing: `reconcileTasks`'
+section C would mirror engine truth onto the same parked chat turn as `cancelled`/`engine_lost`,
+and only this belt writes the honest `expired` + `clarify_closed` terminal.
+
+**Evidence.** `tests/chat-clarify-sweep-wiring.test.mjs` (eight cells: the leaf's empty import list,
+the belt closure never reaching `reconciler.mjs`, the ONE pre-existing `reconciler ↔ reconciler-wake`
+cycle pinned by name, the five counters, the contained failure, the statement order, the leader's
+silence). `tests/control-chat-clarify.test.mjs`'s `chat.wiring` cell pins the registration.
