@@ -1204,6 +1204,66 @@ const STAFF_EXPENSE_CLAIMS_0221_CLOCK_NAMES = ["_assert_claim_basis", "_claim_re
 const PREVIEW_INVITE_0224_CLOCK_NAMES = ["preview_invite"];
 // WAVE 2026-09-15 END
 
+// ===========================================================================================
+// WAVE 2026-09-18 (0225..0233) - arm (D), FOUR stem-gated cohorts, THIRTEEN names.
+//
+// Measured at wave integration on the from-scratch 0001..0233 chain (rigint, 127.0.0.1:55720,
+// clara_int) by running arm (D)'s OWN detector over the live catalog and diffing against this
+// roster - not read off the nine migration files. ADDITIONS ONLY: the same run reported nothing
+// missing, so no name left the roster and none was removed (DECISIONS §6.3).
+//
+// FIVE OF THE NINE MIGRATIONS ADD NOTHING HERE, and they are named rather than omitted, because a
+// silent absence is indistinguishable from a missed census:
+//   * 0225 (#655 trade invoices) - five clock reads, none of them new: two are column DEFAULTs
+//     (`clara.trade_invoices.created_at`, `clara.trade_invoice_status.recorded_at`), which live in
+//     pg_attrdef and not in any prosrc, and the other three are inside
+//     `clara._record_journal_entry_core`, RECUT here but already on this roster from 0178.
+//   * 0226 (#657 bank-match evidence), 0228 (#656 opening-ledger source) and 0233 (#635 firm
+//     commercial settings) read no clock token at all in any body they create.
+//   * 0227 (#651 depreciation history) spells the MYT zone three times and `now()` five, and not
+//     one of them mints a name: the zone appears in an apply-time backfill UPDATE and in two
+//     `comment on` strings (neither reaches `prosrc` or `pg_get_functiondef`), and every `now()`
+//     is inside `clara.sign_depreciation_authority`, recut here and on this roster already.
+
+// #636 [0229] - SIX names, and all six for ONE shape: the batch lane moves state and moves its
+// instant in the same statement. `cancel_intake_batch` stamps `cancel_requested_at` and
+// `cancelled_at`, `sweep_intake_batch_cancellations` stamps `cancelled_at`,
+// `set_intake_batch_member_dependency` and the two member stamp triggers stamp `updated_at`.
+// `get_intake_batch` is the odd one and the harmless one: it samples ONE instant
+// (`v_now timestamptz := now()`) and spends it on `computed_at` alone - no date is derived from it
+// anywhere in the body. Its MYT zone spelling is arm (B)'s subject and is adjudicated there.
+const INTAKE_BATCHES_0229_CLOCK_NAMES = [
+  "_tf_intake_batch_member_intake_stamp", "_tf_intake_batch_member_work_stamp",
+  "cancel_intake_batch", "get_intake_batch", "set_intake_batch_member_dependency",
+  "sweep_intake_batch_cancellations",
+];
+
+// #658 [0230] - THREE names. `list_work_knowledge_reads_for_record` spends its only clock read on
+// the envelope's `computed_at`. `retrieve_knowledge` and `record_work_knowledge_read` each default
+// an `as_of` DATE from the clock, which is arm (B)'s subject and is adjudicated there; the clock
+// read itself is an instant. 0230's other bodies read no clock: the read-set relation's
+// `created_at` is a column DEFAULT.
+const KNOWLEDGE_RETRIEVAL_0230_CLOCK_NAMES = [
+  "list_work_knowledge_reads_for_record", "record_work_knowledge_read", "retrieve_knowledge",
+];
+
+// #659 [0231] - ONE name, and it is `get_client_work_pack`'s shape verbatim (0214, above):
+// `clara.get_firm_portfolio_pack` samples ONE instant into `v_now timestamptz := now()` and builds
+// both its seven-MYT-day window bounds and its `computed_at` from that single sample. The clock
+// read is an instant; the date it derives is arm (B)'s subject.
+const FIRM_PORTFOLIO_PACK_0231_CLOCK_NAMES = ["get_firm_portfolio_pack"];
+
+// #660 [0232] - THREE names, and TWO OF THEM ARE THE WAVE'S ONE UNSETTLED QUESTION.
+// `get_client_financial_pack` and `propose_client_cash_accounts` each derive an MYT `v_today` that
+// goes on to bound LEDGER ROWS - see their block on arm (B)'s roster, which carries the
+// adjudication and the escalation. `publish_client_cash_account_set` derives one too, as the last
+// fallback of an `effective_from`. Here on arm (D) the reading is the ordinary one in all three:
+// the token itself is an instant, sampled once.
+const CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES = [
+  "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
+];
+// WAVE 2026-09-18 END
+
 // #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
 // arm-(D) census over 0001..0194 returns nothing out of either file. 0191's three constraint
 // triggers derive their verdicts from stored terms and stamp `evaluated_at` through a column
@@ -1337,6 +1397,11 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("firm_knowledge_defaults$")) names.push(...KNOWLEDGE_FIRM_0220_CLOCK_NAMES);
   if (await appliedStem("staff_expense_claims$")) names.push(...STAFF_EXPENSE_CLAIMS_0221_CLOCK_NAMES);
   if (await appliedStem("preview_invite$")) names.push(...PREVIEW_INVITE_0224_CLOCK_NAMES);
+  // WAVE 2026-09-18 (0225..0233) - stem-gated, never number-gated, for the reason :207-214 gives.
+  if (await appliedStem("intake_batches$")) names.push(...INTAKE_BATCHES_0229_CLOCK_NAMES);
+  if (await appliedStem("knowledge_retrieval$")) names.push(...KNOWLEDGE_RETRIEVAL_0230_CLOCK_NAMES);
+  if (await appliedStem("firm_portfolio_pack$")) names.push(...FIRM_PORTFOLIO_PACK_0231_CLOCK_NAMES);
+  if (await appliedStem("client_financial_pack$")) names.push(...CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES);
   return names.sort();
 }
 
@@ -1469,6 +1534,85 @@ const KL_ROSTER_0220_FIRM_KNOWLEDGE = ["get_knowledge_applicability", "list_firm
 const KL_ROSTER_0223_PREPAYMENT = ["create_prepayment_schedule"];
 // WAVE 2026-09-15 END
 
+// ===========================================================================================
+// WAVE 2026-09-18 (0225..0233) - arm (B), FOUR stem-gated cohorts, SEVEN names, measured on the
+// from-scratch 0001..0233 chain (rigint, 127.0.0.1:55720, clara_int) by running arm (B)'s own
+// `like '%asia/kuala_lumpur%'` detector over the live catalog. ADDITIONS ONLY - the same run
+// reported nothing missing. DECISIONS 6.3's rule is the one applied name by name below: a body
+// that derives a MONEY date (as-of, posting, due, period) from the session clock by its own
+// expression must be re-pointed at the house derivation; a body whose clock read is
+// `computed_at` / a watermark / a sampled display window is registered with that class.
+//
+// FIVE OF THE NINE MIGRATIONS ADD NOTHING HERE. 0225, 0226, 0228 and 0233 spell the zone nowhere
+// at all. 0227 spells it three times and mints no name: once in an apply-time backfill UPDATE and
+// twice inside `comment on` strings, neither of which reaches `prosrc` or `pg_get_functiondef` -
+// measured, not assumed, because the detector reads exactly those two sources.
+
+// #636 [0229] - CLASS 1, the zone as a NAME. `clara.get_intake_batch` spells
+// `'timezone', 'Asia/Kuala_Lumpur'` once, inside the jsonb that describes the firm's UTC-day
+// document quota (`'window','utc_day','resets_at_local','08:00'`): it tells a person WHICH
+// calendar the 08:00 reset is quoted in. No date is derived from it, and the body's only clock
+// read (`v_now`) becomes `computed_at` and nothing else. `clara._book_today()` answers a date, so
+// the standing advice has nothing to offer a body that computes none - `_assert_plan_schedule`'s
+// case above, exactly.
+const KL_ROSTER_0229_INTAKE_BATCHES = ["get_intake_batch"];
+
+// #658 [0230] - CLASS 2, and it is 0220's family rather than a new question.
+// `clara.retrieve_knowledge` and `clara.record_work_knowledge_read` each default
+// `v_as_of := coalesce(p_as_of, (now() at time zone 'Asia/Kuala_Lumpur')::date)` and use it for
+// ONE thing: which knowledge revision is in effect (`effective_from <= v_as_of` and
+// `effective_to >= v_as_of`). `record_work_knowledge_read` also STORES it on the read row, as the
+// read's own provenance. That is `get_knowledge_applicability` / `list_firm_knowledge`'s shape
+// (KL_ROSTER_0220_FIRM_KNOWLEDGE above, "CLASS 2, the weaker half") and it inherits that block's
+// follow-up rather than opening a second one: no posting date, no period bound, no ledger row.
+const KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL = ["record_work_knowledge_read", "retrieve_knowledge"];
+
+// #659 [0231] - CLASS 2, and it is `get_client_work_pack`'s case (KL_ROSTER_0214_WORK_PACK above)
+// argument for argument. `clara.get_firm_portfolio_pack` takes ONE `now()` sample, derives
+// `v_today`, and spends it on a seven-MYT-day window (`v_from_date := v_today - 6`,
+// `v_to := ((v_today + 1)::timestamp) at time zone ...`) plus the `to_date` key of the envelope.
+// Nothing it derives reaches a ledger row, and the authority would make it WORSE for the same
+// reason it would make 0214's worse: `clara._book_today()` samples `statement_timestamp()` per
+// STATEMENT, so a pack straddling MYT midnight would report a window and a date from two
+// different days.
+const KL_ROSTER_0231_FIRM_PORTFOLIO = ["get_firm_portfolio_pack"];
+
+// #660 [0232] - THREE names, and they do NOT share one adjudication. This is the block a later
+// reader should come to first.
+//
+// `clara.publish_client_cash_account_set` is CLASS 2 and the reading is not close:
+// `v_from := coalesce(p_effective_from, v_books, v_today)` reaches `v_today` only when the caller
+// stated no date AND `v_books` is null, and `v_books` is
+// `least(min(finalized opening_seed.as_of), min(approved journal_entries.posting_date))` - so the
+// clock can only ever date the FIRST cash-account-set version of a client that has no books at
+// all. A client with money always takes the books' own date, and a stated date later than it is
+// refused by name (`first_version_after_books_start`). The date it writes is the lifetime of a
+// CONFIGURATION object, not a posting, a due date or an accounting period.
+//
+// `clara.get_client_financial_pack` and `clara.propose_client_cash_accounts` ARE MONEY DATES BY
+// 6.3's OWN ENUMERATION, and they are pinned here UNRESOLVED rather than folded in quietly:
+//   * the pack derives `v_today`, then `v_as_of := least(v_month_end, v_today)` when no as-of was
+//     stated, refuses `p_as_of > v_today` as `as_of_in_future`, and anchors
+//     `v_start := date_trunc('month', v_today)::date`. `v_as_of` is what selects the actuals the
+//     pack reports.
+//   * the proposal bounds its per-account balance with `je.posting_date <= v_today` over
+//     `clara.journal_lines` joined to approved `clara.journal_entries`, and echoes the same date
+//     as the envelope's `as_of`.
+// Both therefore derive an AS-OF from the session clock by their own expression, which 6.3 says
+// to re-point at `clara._book_today()`. THAT RE-POINT IS A MIGRATION EDIT of 0232, already applied
+// on every rig this wave measured, so 6.3's own escape applies: the integration fix worker STOPS
+// and reports instead of editing an applied migration behind the ledger checksum. Registered here
+// so the ratchet is exact and additions-only; ESCALATED in
+// `reports/integration-fix-1.md` so the ruling is the orchestrator's, not this file's. The
+// counter-argument the orchestrator will need is the one 0214's block already records: both
+// bodies take ONE `now()` sample and build `computed_at` from it too, so the authority - which
+// samples `statement_timestamp()` per statement - would let a pack straddling MYT midnight report
+// an as-of and a computed_at from two different days. It is a real trade, not a formality.
+const KL_ROSTER_0232_CLIENT_FINANCIAL = [
+  "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
+];
+// WAVE 2026-09-18 END
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
   const applied = async (pat) => (await query(
@@ -1494,5 +1638,10 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("counterparty_identity_provenance$")) names.push(...KL_ROSTER_0215_COUNTERPARTY_IDENTITY);
   if (await appliedStem("firm_knowledge_defaults$")) names.push(...KL_ROSTER_0220_FIRM_KNOWLEDGE);
   if (await appliedStem("prepayment_amortisation$")) names.push(...KL_ROSTER_0223_PREPAYMENT);
+  // WAVE 2026-09-18 (0225..0233) - stem-gated, never number-gated.
+  if (await appliedStem("intake_batches$")) names.push(...KL_ROSTER_0229_INTAKE_BATCHES);
+  if (await appliedStem("knowledge_retrieval$")) names.push(...KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL);
+  if (await appliedStem("firm_portfolio_pack$")) names.push(...KL_ROSTER_0231_FIRM_PORTFOLIO);
+  if (await appliedStem("client_financial_pack$")) names.push(...KL_ROSTER_0232_CLIENT_FINANCIAL);
   return names.sort().join(" ");
 }
