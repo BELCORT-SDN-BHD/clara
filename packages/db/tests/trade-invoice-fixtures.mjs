@@ -26,7 +26,7 @@ import {
 } from "./work-journal-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 import { upsertAccountClassed } from "./s6-helpers.mjs";
-import { asRole } from "./rig-helpers.mjs";
+import { asRole, asRoot } from "./rig-helpers.mjs";
 
 export * from "./work-journal-fixtures.mjs";
 export { createCounterparty, addAlias } from "./wave-a-fixtures.mjs";
@@ -322,6 +322,53 @@ export async function awaitRungWaiters(n, timeoutMs = 30000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+// ===========================================================================================
+// 5b · THE ONE LABELLED OWNER-LEVEL FIXTURE, and it is labelled because it is NOT a door.
+// ===========================================================================================
+
+/**
+ * REACH PAST EVERY DOOR AND RE-KIND A COUNTERPARTY. Used by exactly one cell,
+ * `p655.birth.abort_is_atomic`, and it exists because NO DOOR IN THE ESTATE reaches
+ * `clara._tf_je_open_item_birth`'s raises — measured, not assumed:
+ *
+ *   1 `clara._assert_trade_invoice_basis` step 3 refuses a party whose `kind` contradicts the
+ *     invoice's kind, at ADMISSION (0225:895-899, driven by `p655.polarity.matrix(b)`);
+ *   2 …step 4 refuses a control leg of the opposite class (0225:706-717, `matrix(b2)`);
+ *   3 …step 5 ties the control leg's SIGNED amount to the stated total (0225:739-741,
+ *     `matrix(e2)`), which is what closes the birth's `invalid_total` arm;
+ *   4 `clara.record_journal_entry` re-asks the control-leg class AT COMMIT (0225:1757-1772),
+ *     behind the basis-digest wall that refuses any basis but the admitted one (0225:1684-1689),
+ *     so a run cannot post a basis the admission never saw;
+ *   5 `clara.trade_invoices` is append-only (0225:411-419, `p655.appendonly`), so the invoice's
+ *     party cannot be repointed after admission;
+ *   6 `clara.merge_counterparties` refuses a CROSS-KIND merge outright (0015:2274-2280), so the
+ *     canonical party a merge leaves behind can never be of the other kind;
+ *   7 `clara._tf_counterparty_update_0011` admits only name / merge columns on an UPDATE and no
+ *     DELETE at all (0011:940-956), so `kind` is immutable through every role including root.
+ *
+ * THAT IS THE POINT OF THE TIER RULING, not an argument against it: DECISIONS §6.3 files this
+ * trigger as Tier D · ABORT, and a tier is a statement about what happens WHEN a door is
+ * loosened. So the cell makes the world the trigger is meant to refuse, and the only way to make
+ * it is from outside the doors.
+ *
+ * HOW, AND WHY THIS SHAPE. One root transaction that sets `session_replication_role` TXN-LOCALLY
+ * (`set_config(..., is_local => true)`), so the suppression lives on THIS connection for THIS
+ * transaction and is gone at COMMIT — no DDL, no `ALTER TABLE ... DISABLE TRIGGER`, and therefore
+ * no ACCESS EXCLUSIVE lock that a parallel test file could be let through. `withActor`'s own
+ * `finally` rolls back and `RESET ALL`s the pooled client whatever happens here.
+ */
+export async function forceCounterpartyKind(counterparty, kind) {
+  return asRoot(async (c) => {
+    await c.query("begin");
+    await c.query("select set_config('session_replication_role', 'replica', true)");
+    const r = await c.query(
+      "update clara.counterparties set kind = $2 where id = $1 returning id, kind",
+      [counterparty, kind]);
+    await c.query("commit");
+    return r.rows[0] ?? null;
+  });
 }
 
 // ===========================================================================================

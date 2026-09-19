@@ -15,7 +15,7 @@ import {
   ensureTiChart, vendor, customer,
   billParticulars, invoiceParticulars, billBasis, invoiceBasis,
   admitTradeInvoiceWork, getTradeInvoice, withClientRungHeld, awaitRungWaiters,
-  invoiceRow, invoiceForWork, invoiceCount, invoiceStatus,
+  invoiceRow, invoiceForWork, invoiceCount, invoiceStatus, forceCounterpartyKind,
   openItemsForEntry, openItemsForClient, classifyEntry, entryRow,
   controlBalance, subledgerOutstanding,
   buildWorkWorld, freshWorkClient, admitJournalWork, claimWorkRun, mintClientObo,
@@ -332,6 +332,83 @@ test("p655.post.control_leg_still_refused a plain admit_journal_work Work naming
       },
     }),
     "p655.post.control_leg_still_refused: the recut opened a DOOR, not a hole -- a Work with no clara.trade_invoices row still meets section 7's refusal");
+});
+
+test("p655.birth.abort_is_atomic a FORCED open-item birth failure aborts the whole posting: no entry, no committed receipt, no posted status row", async (t) => {
+  if (await gateTi(t)) return;
+  // DECISIONS §6.3's ruling on reports/integration-merge.md §5.1, driven rather than asserted.
+  // `clara.t_je_open_item_birth` is pinned TIER D · ABORT in f-a2-tier-d's §D.1 table, on
+  // ARCHITECTURE §5.A's transaction boundary: a trade invoice and its open item are ONE fact
+  // (「确认一张发票需要相应总账与 open item」), so an invoice whose open item cannot be born
+  // does not post AT ALL. Tier D is not a refusal: the raise arrives at COMMIT, outside every
+  // exception block, so nothing can catch it and convert it.
+  //
+  // THE WORLD IS MADE BY A LABELLED OWNER-LEVEL FIXTURE, and `forceCounterpartyKind`'s header
+  // carries the seven-door measurement that says why: no door in the estate reaches this raise
+  // today. That is the reason the tier had to be RULED rather than derived — it is a statement
+  // about what happens the day a door is loosened, and this cell is where that statement is
+  // measured instead of believed.
+  const client = await tiClient("birthabort");
+  const cp = await vendor(ALICE(), { client });
+  const a = await armed({
+    client, kind: TI_KIND.bill,
+    particulars: billParticulars({ counterparty: cp }),
+    basis: billBasis(),
+  });
+
+  // EVERYTHING ADMISSION WROTE IS ALREADY DURABLE, in an EARLIER transaction — which is the
+  // Tier-D evidentiary difference f-a2-tier-d's header states: a commit-time abort rolls back
+  // only the POST attempt, never the draft.
+  const invoice = await invoiceForWork(a.work_id);
+  assert.ok(invoice, "p655.birth.abort_is_atomic: admission wrote the trade invoice");
+  assert.deepEqual((await invoiceStatus(invoice.id)).map((r) => r.state), ["admitted"],
+    "p655.birth.abort_is_atomic: …and exactly one status row, `admitted`");
+  const entriesBefore = await entryCount(client);
+  const receiptsBefore = await committedReceiptCount(client);
+  const itemsBefore = (await openItemsForClient(client)).length;
+
+  // THE FORCED WORLD: the party this bill was admitted against is now a CUSTOMER, so the AP
+  // control net the entry carries can no longer be matched to a party of the domain's kind.
+  const flipped = await forceCounterpartyKind(cp, "customer");
+  assert.equal(flipped?.kind, "customer",
+    "p655.birth.abort_is_atomic: the fixture re-kinded the party — if this fails the cell below is vacuous");
+
+  // THE ABORT, TYPED. CLR10 / counterparty_kind_mismatch, and it arrives from the COMMIT rather
+  // than from the door: `clara.record_journal_entry` returned successfully inside the
+  // transaction, and the deferred queue then refused it.
+  const out = await assertPair("CLR10", TI_REASON.counterpartyKindMismatch,
+    () => post(a),
+    "p655.birth.abort_is_atomic: the open item cannot be born, so the posting aborts at COMMIT");
+  assert.equal(out.detail.invoice_id, invoice.id,
+    "p655.birth.abort_is_atomic: …and the abort names the INVOICE, which is the one thing a person would go and look at");
+  assert.equal(out.detail.domain, "ap",
+    "p655.birth.abort_is_atomic: …and the control domain it could not match");
+  assert.equal(out.detail.counterparty_kind, "customer",
+    "p655.birth.abort_is_atomic: …and the kind it found instead of `vendor`");
+
+  // THE ATOMICITY, IN THE THREE PLACES §6.3 NAMES.
+  assert.equal(await entryCount(client), entriesBefore,
+    "p655.birth.abort_is_atomic: NO journal entry — the books did not move");
+  assert.equal(await committedReceiptCount(client), receiptsBefore,
+    "p655.birth.abort_is_atomic: NO committed operation receipt — nothing claims the effect happened");
+  assert.deepEqual((await invoiceStatus(invoice.id)).map((r) => r.state), ["admitted"],
+    "p655.birth.abort_is_atomic: NO `posted` row on the status ledger — clara._tf_trade_invoice_posted fires off the receipt, and the receipt rolled back with it");
+  assert.equal((await openItemsForClient(client)).length, itemsBefore,
+    "p655.birth.abort_is_atomic: …and no half-born open item either");
+
+  // AND THE IDENTITY IS NOT SPENT: the reservation rolled back with everything else, so the run
+  // may be retried once the world is repaired. The repair is the point — a Tier-D abort is a
+  // wall, not a dead end.
+  await forceCounterpartyKind(cp, "vendor");
+  await post(a);
+  assert.equal(await entryCount(client), entriesBefore + 1,
+    "p655.birth.abort_is_atomic: with the party put back, the SAME logical op posts — the abort spent no identity");
+  assert.deepEqual((await invoiceStatus(invoice.id)).map((r) => r.state).sort(),
+    ["admitted", "posted"],
+    "p655.birth.abort_is_atomic: …and only NOW does the status ledger carry `posted`");
+  const items = await openItemsForClient(client);
+  assert.equal(items.length, itemsBefore + 1, "p655.birth.abort_is_atomic: …with exactly one open item, born on the retry");
+  assert.equal(String(items[items.length - 1].amount_cents), "106000");
 });
 
 // ===========================================================================================

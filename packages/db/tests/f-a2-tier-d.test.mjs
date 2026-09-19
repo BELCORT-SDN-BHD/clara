@@ -136,6 +136,42 @@ test("f-a2.c5.wave-births the three triggers wave 2026-09-15 added to journal_en
   }
 });
 
+test("f-a2.c5.trade-invoice-birth #655's open-item birth carries the tier the census claims — measured on the live body, not read off the pin", async (t) => {
+  if (await gateCore(t)) return;
+  // THE SAME HALF `c5.wave-births` IS FOR THE 2026-09-15 TRIGGERS. `c5.census` above compares
+  // NAMES and the two deferrability booleans; the `tier` string beside the pin is prose, and
+  // DECISIONS §6.3 ruled that this one ABORTS. This cell is what makes that ruling a measurement:
+  // an edit that takes the three reasons out of `clara._tf_je_open_item_birth`, or that turns the
+  // trigger into a plain non-deferred one, fails here BY NAME rather than quietly widening a
+  // census. The end-to-end half — a forced birth failure leaves no entry, no receipt and no
+  // posted status row — is `p655.birth.abort_is_atomic` in `trade-invoice.test.mjs`.
+  //
+  // FRONTIER-GATED on 0225's own stem, so a leg pinned below it skips the arm rather than
+  // reporting a body that does not exist.
+  const has = async (stem) => (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [stem])).rows[0].n > 0;
+  if (!await has("trade_invoices$")) {
+    noteLane("c5.trade-invoice-birth: skipped — this leg is pinned below 0225_trade_invoices");
+    return;
+  }
+  const { src } = await bodyOfName("_tf_je_open_item_birth");
+  assert.ok(src, "c5.trade-invoice-birth: #655's birth trigger function resolves");
+  assert.match(src, /raise\s+exception/i,
+    "c5.trade-invoice-birth: `t_je_open_item_birth` is pinned as REFUSAL-BEARING — a body that stopped refusing would be minting open items that contradict the ledger at COMMIT with nothing to say");
+  for (const reason of ["counterparty_kind_mismatch", "wrong_control_domain", "invalid_total"]) {
+    assert.ok(src.includes(reason),
+      `c5.trade-invoice-birth: …and it still names ${reason}, one of the three reasons the pin's tier string files under Tier D`);
+    // The pin says these three are deliberately NOT in TIER_D_TOKENS (that set is the BELT
+    // vocabulary, pinned at six by f-a2-ladder-3's c3.D-vocab), exactly as #638's two are not.
+    // Asserted so the exclusion is a decision on the record rather than an omission.
+    assert.equal(TIER_D_TOKENS.includes(reason), false,
+      `c5.trade-invoice-birth: ${reason} is deliberately OUTSIDE the six belt tokens — if it is added, c3.D-vocab's count pin moves with it and this exclusion must be re-argued, not silently inherited`);
+  }
+  assert.ok(src.includes("CLR10"),
+    "c5.trade-invoice-birth: …all three under CLR10, which is what makes a commit-time abort readable as a refusal ANYWAY rather than as a raw constraint violation");
+  noteLane("c5.trade-invoice-birth: #655's t_je_open_item_birth is measured, not merely listed — a DEFERRED constraint trigger whose three CLR10 reasons (counterparty_kind_mismatch, wrong_control_domain, invalid_total) are raised at COMMIT and stay outside the six-token belt vocabulary");
+});
+
 // ===========================================================================
 // The two structural walls at commit time.
 // ===========================================================================
