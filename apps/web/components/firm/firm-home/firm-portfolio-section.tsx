@@ -52,6 +52,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useEffect, useRef } from "react";
 
 import { SectionHeader } from "@/components/common/section-header";
 import { DataTableCard } from "@/components/common/data-table-card";
@@ -68,6 +69,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { businessDateTime } from "@/lib/business-date";
+import {
+  portfolioCountLinkId,
+  rememberPortfolioReturnFocus,
+  takePortfolioReturnFocus,
+} from "@/lib/firm/portfolio-focus-return";
 import {
   isPortfolioRowCoverageReason,
   portfolioCount,
@@ -163,6 +169,28 @@ export function FirmPortfolioSection({
 
   const pack = portfolio.pack;
   const rows = visiblePortfolioRows(pack.rows, state, needsYouClients);
+
+  // ----- focus return, after a drilldown and Back (fix round 1, finding A3) --------------------
+  //
+  // The marker is TAKEN ONCE, on the first render after this section mounts, and held in a ref
+  // until a link with that id actually exists. It cannot be taken inside the effect below: that
+  // effect re-runs on every re-read (four triggers, one of them a 30 s tick), and a marker read
+  // fresh each time would move the caret long after the person had moved on. Taking it on mount and
+  // clearing the store in the same breath means one marker can move focus exactly one time.
+  const countLinks = useRef(new Map<string, HTMLAnchorElement | null>());
+  const pendingFocus = useRef<string | null | undefined>(undefined);
+  if (pendingFocus.current === undefined) pendingFocus.current = takePortfolioReturnFocus();
+  useEffect(() => {
+    const want = pendingFocus.current;
+    if (want === null || want === undefined) return;
+    const el = countLinks.current.get(want);
+    // The rows arrive with the read, so the link is usually absent on the first pass. The ref is
+    // kept until it appears; if the client has left the page (archived away, filtered out, on
+    // another cursor) it never does, and focus simply stays where the browser put it.
+    if (el === null || el === undefined) return;
+    pendingFocus.current = null;
+    el.focus();
+  });
   const filtered = hasPortfolioFilters(state);
   const windowDates = portfolioWindowDates(pack);
 
@@ -179,9 +207,16 @@ export function FirmPortfolioSection({
       return <span className="text-muted-foreground">{t("portfolio.countUnknown")}</span>;
     }
     if (n === 0) return <span className="text-muted-foreground">0</span>;
+    const id = portfolioCountLinkId(row.client_id, kind);
     return (
       <Link
+        id={id}
+        // THE NODE FOCUS COMES BACK TO (fix round 1, finding A3). The ref map and the marker are
+        // keyed by the SAME id, so what is remembered and what is focused cannot drift.
+        ref={(el) => { countLinks.current.set(id, el); }}
         href={portfolioCountHref(kind, row.client_id, pack)}
+        // ENTER ON AN ANCHOR IS DISPATCHED AS A CLICK, so one handler covers pointer and keyboard.
+        onClick={() => rememberPortfolioReturnFocus(row.client_id, kind)}
         // AN EXPLICIT ACCESSIBLE NAME. axe is a violation scan, not a name assertion: five links
         // reading "3" in a row pass every rule and tell a screen-reader user nothing.
         aria-label={t(`portfolio.countLabel.${kind}`, { count: n, client: row.name ?? row.client_id })}

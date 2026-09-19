@@ -689,9 +689,18 @@ test("p659.home.drilldown — each count opens /work narrowed to exactly its pop
     // the whole of AC2's second half, and a Back that dropped `?attention=` would satisfy a
     // "returns to the home" assertion and fail the person.
     await expect(page).toHaveURL(/\/\?attention=active$/);
+    // FOCUS RETURNS TO THE CONTROL THAT LEFT — measured through the ACCESSIBLE NAME of the focused
+    // node, compared against THIS leg's own `name`.
+    //
+    // Fix round 1, finding A3: this assertion used to read `document.activeElement?.textContent`
+    // and `.toContain("3")` — a hard-coded literal inside a three-leg loop. Each count link renders
+    // only its number as text, so legs 2 and 3 would have had to read "2" and "1"; the suite was
+    // green, which proved the focused node was an ANCESTOR whose text happens to contain the "3"
+    // of "Needs you: 3". The assertion could not fail, and AC7's focus-return clause was green on
+    // nothing. `aria-label` is unique per link and per leg, so this one can.
     await expect
-      .poll(async () => page.evaluate(() => document.activeElement?.textContent?.trim() ?? ""))
-      .toContain("3");
+      .poll(async () => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
+      .toBe(name);
   }
 });
 

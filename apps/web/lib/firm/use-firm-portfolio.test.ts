@@ -380,14 +380,14 @@ test("fix round 1 (A10): a SUPERSEDED read cannot clear `loading` while the curr
 
       // The OLDER read settles first. It must contribute nothing at all — not its rows, and not
       // the end of the board's busy state.
-      await h.act(async () => { gates[0](packWith(9)); });
+      await h.act(async () => { gates[0]!(packWith(9)); });
       await settle(h);
       assert.equal(h.current.pack.rows.length, 0, "the superseded read's DATA is dropped (this already held)");
       assert.equal(h.current.loading, true,
         "and the board stays on the skeleton: an empty pack with loading=false is the 'No clients yet' Empty");
 
       // The current read settles and the board is whole.
-      await h.act(async () => { gates[1](packWith(5)); });
+      await h.act(async () => { gates[1]!(packWith(5)); });
       await settle(h);
       assert.equal(h.current.loading, false);
       assert.equal(h.current.pack.rows.length, 5);

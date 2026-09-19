@@ -446,7 +446,7 @@ test("p659.portfolio.partial_receipt — a completed Work with no committed rece
 // ===========================================================================================
 // p659.portfolio.preview_ceiling — 101 IS A CEILING ON THE HELPER, NOT ON THE ANSWER.
 // ===========================================================================================
-test("p659.portfolio.preview_ceiling — a page whose preview ids exceed 101 still answers; the cut rows carry retry_label_preview_only; p_preview=0 calls the helper zero times", async (t) => {
+test("p659.portfolio.preview_ceiling — a page whose preview ids exceed 101 still answers; the cut rows carry retry_label_preview_only; p_preview=0 assembles no preview at all", async (t) => {
   if (await gate(t)) return;
   const w = await freshFirm("ceil");
   // 21 clients x 5 active Works = 105 preview ids at p_preview=5, four past the helper's own
@@ -466,7 +466,9 @@ test("p659.portfolio.preview_ceiling — a page whose preview ids exceed 101 sti
   assert.ok(cut.length > 0, "and the rows beyond it say which part of the answer the door is not making");
   assert.equal(cut.every((r) => r.coverage === "partial"), true);
 
-  // p_preview = 0 — the cheap page. No preview rows at all, so the helper is never asked.
+  // p_preview = 0 — the cheap page. No preview rows at all. Whether the HELPER is called zero
+  // times is a separate question, and this cell does not answer it: see
+  // `p659.portfolio.preview_zero_calls_helper_zero_times` below, which counts the calls.
   const cheap = await portfolio(w.keeper, { limit: 100, preview: 0 });
   assert.equal(cheap.rows.length, 21);
   for (const row of cheap.rows) {
@@ -786,4 +788,61 @@ test("p659.links.work_question_row_cannot_address_its_work", async (t) => {
   const carriers = Object.entries(row).filter(([, v]) => v === parked.workId).map(([k]) => k);
   assert.deepEqual(carriers, [],
     "no field of the queue row is the accounting_work id — when one appears, the deep link becomes buildable");
+});
+
+// ===========================================================================================
+// p659.portfolio.preview_zero_calls_helper_zero_times — THE CALL COUNT, COUNTED.
+//
+// Fix round 1, finding A9. The migration header claims "`p_preview = 0` calls the helper NOT AT
+// ALL — the cheap page", and nothing in this battery measured a call: `preview_ceiling` asserted
+// only that the preview array came back empty and the counts were unaffected, which is true
+// whether the helper runs or not. The body keeps `left join clara._work_run_attempts(v_labelled)`
+// in the statement unconditionally, so the zero is a PLAN SHAPE, not a guard in the SQL — with
+// `v_preview_ids` empty the outer scan yields no rows and the inner function scan is never
+// executed. That is worth believing only if it is counted, so this cell counts it.
+//
+// HOW: `pg_stat_user_functions` with `track_functions = 'all'` set on THIS session, forced to
+// flush with `pg_stat_force_next_flush()` (PG 15+) because stats are otherwise reported at
+// transaction end with a minimum interval and the first, un-forced form of this probe read zeros
+// for BOTH arms — a measurement that would have "confirmed" the claim by measuring nothing.
+//
+// The counter is cluster-wide, so this cell takes a DELTA across its own two calls and asserts the
+// SHAPE (0 then 1), not an absolute.
+// ===========================================================================================
+test("p659.portfolio.preview_zero_calls_helper_zero_times", async (t) => {
+  if (await gate(t)) return;
+  const { getPool } = await import("./rig-helpers.mjs");
+  const w = await freshFirm("cnt");
+  const c1 = await namedClient(w.owner, `${w.prefix} Counted Co`);
+  await queuedWork(c1, w.owner, "cnt-1");
+
+  const conn = await getPool().connect();
+  const calls = async () => {
+    await conn.query("select pg_stat_force_next_flush()");
+    const r = await conn.query(
+      `select coalesce(sum(f.calls), 0)::int as n
+         from pg_stat_user_functions f join pg_proc p on p.oid = f.funcid
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'clara' and p.proname = '_work_run_attempts'`);
+    return r.rows[0].n;
+  };
+  try {
+    await conn.query("set track_functions = 'all'");
+    await conn.query(`set role ${ROLES.authenticated}`);
+    await conn.query(
+      "select set_config('request.jwt.claims', json_build_object('sub', $1::text)::text, false)", [w.keeper]);
+
+    const before = await calls();
+    const cheap = await conn.query("select clara.get_firm_portfolio_pack(p_preview => 0) as result");
+    const afterCheap = await calls();
+    assert.deepEqual(cheap.rows[0].result.rows.map((r) => r.preview), [[]], "the cheap page has no preview");
+    assert.equal(afterCheap - before, 0,
+      "p_preview = 0 does not reach clara._work_run_attempts at all — the header's claim, counted");
+
+    const full = await conn.query("select clara.get_firm_portfolio_pack(p_preview => 3) as result");
+    const afterFull = await calls();
+    assert.equal(full.rows[0].result.rows[0].preview.length, 1, "the full page has its preview");
+    assert.equal(afterFull - afterCheap, 1,
+      "and a page that DOES want labels asks the helper exactly once, for the whole cut array");
+  } finally { conn.release(); }
 });

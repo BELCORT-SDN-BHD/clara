@@ -7,8 +7,19 @@
 //
 // THE MOVE CHANGES NOTHING ABOUT WHAT IT DOES. The two headers below are #649's and H-51's own
 // reasoning and they travel WITH the code they describe — they are #649's AC1 evidence, not
-// decoration. `add-client-control.test.tsx` and `add-client-candidates.test.tsx` are repointed at
-// this module in the same commit and assert exactly what they asserted before.
+// decoration.
+//
+// WHERE THE CELLS FOR THIS CONTROL LIVE, stated as it actually is (fix round 1, finding A8 — this
+// paragraph previously claimed a repoint that never happened, which is the same class of stale
+// claim `app/(firm)/page.tsx`'s own header forbids). `add-client-control.test.tsx` and
+// `add-client-candidates.test.tsx` both still mount `ClientRegisterList`, deliberately: they are
+// #649's AC1 evidence AT ITS OWN SURFACE, and repointing them at this module would have moved that
+// evidence off the register page it was written to defend. What the extraction added is a NEW
+// property — this control now mounts BESIDE a state machine on a page that re-reads itself on four
+// triggers — and that property is proven where it is observable: by the non-remount cell in
+// `add-client-control.test.tsx` and by `apps/web/e2e/home-board-walk.spec.ts`'s
+// `p659.home.zero_client_create`. The residual is honest and named: no cell imports this module by
+// its own path, so a rename would be caught by the type-checker rather than by a red cell.
 //
 // WHERE IT IS MOUNTED, AND WHY THAT IS A RULE RATHER THAN A PREFERENCE (appendix C §3, "Draft
 // across local view changes"). This control's whole draft — the typed name, the identity

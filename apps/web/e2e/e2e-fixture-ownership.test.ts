@@ -1454,3 +1454,46 @@ test("client-id census POSITIVE CONTROL · two lanes at one address ARE caught",
   assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
   assert.match(problems[0]!, /fake-lane-a-mock\.mjs, fake-lane-b-mock\.mjs/);
 });
+
+// ===============================================================================================
+// #659 (fix round 1, finding A12) — A LANE THAT DEPENDS ON ANOTHER LANE'S VERB, DECLARED.
+//
+// Firm Home now renders a recent-activity band off `clara.list_activity` (D18.f's swap). #659
+// added NO handler for that verb, because it could not usefully add one: `serve-built.mjs`
+// dispatches `handleActivitySupabase` far ABOVE `handleHomeBoardSupabase`, so an arm in
+// `home-board-mock.mjs` would never be reached, and moving either dispatch position is forbidden
+// by the wave's §6.1 ruling (#657 dispatches between them).
+//
+// The consequence is real and belongs to the census rather than to a paragraph in a report: every
+// OTHER lane's walk that merely lands on `/` now renders #632's activity fixtures inside Firm
+// Home's band. The two columns above cannot express it — this lane declares no handler for the
+// verb, so there is nothing for the reader to classify — which is exactly how a cross-lane
+// dependency stays invisible until it breaks. These two cells make it a checked fact instead.
+// ===============================================================================================
+
+test("#659 · Firm Home's activity band is answered by #632's lane, and the dispatch order that makes that true is pinned", () => {
+  const serveBuilt = readFileSync(SERVE_BUILT, "utf8");
+  const activityAt = serveBuilt.indexOf("handleActivitySupabase(request");
+  const homeBoardAt = serveBuilt.indexOf("handleHomeBoardSupabase(request");
+  assert.ok(activityAt > 0, "the activity lane is still dispatched");
+  assert.ok(homeBoardAt > 0, "the home-board lane is still dispatched");
+  assert.ok(
+    activityAt < homeBoardAt,
+    "activity-mock.mjs MUST stay above home-board-mock.mjs: Firm Home's recent-activity band is "
+    + "answered by #632's fixtures, and every walk that lands on `/` sees them. If this order is "
+    + "ever inverted, home-board-mock.mjs must grow its own honest-empty `list_activity` arm in "
+    + "the same change — otherwise the band silently changes what every other lane's walk renders.",
+  );
+});
+
+test("#659 · home-board-mock.mjs answers NO list_activity verb — the dependency above is real, not a duplicate", () => {
+  // A POSITIVE CONTROL on the claim: if this lane ever grows its own arm, the comment above stops
+  // being true and this cell is where that is noticed.
+  const homeBoard = readFileSync(join(E2E_DIR, "home-board-mock.mjs"), "utf8");
+  assert.doesNotMatch(
+    homeBoard, /rpc\/list_activity/,
+    "home-board-mock.mjs answers no list_activity verb; if it grows one, update the dependency "
+    + "note above and this lane's declaration, because the arm would be dead code under the "
+    + "current dispatch order",
+  );
+});

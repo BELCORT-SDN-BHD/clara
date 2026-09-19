@@ -70,7 +70,7 @@ test("ticket 659 (fix round 1, A1): a work_question row keeps the workspace ROOT
     `/clients/${CLIENT}`,
     "the honest destination is the workspace root, as it was before this ticket",
   );
-  assert.equal(hasOwningTab({ row_kind: "work_question", task_id: TASK }), false,
+  assert.equal(hasOwningTab({ row_kind: "work_question" }), false,
     "and the LABEL says 'Open the client', so a click's destination is never oversold");
   // The id is not merely unused — it must not reach a path at all.
   assert.doesNotMatch(needsYouRowHref({ ...row("work_question"), task_id: TASK }) ?? "", /work/);
