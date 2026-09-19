@@ -332,3 +332,25 @@ Three cells record facts that are NOT what their names suggest, each measured on
   `clara.journal_lines`, at the DRAFT. `approve_opening_seed` carries no period guard of its own
   and never gets the chance to need one. That measurement is why 0228's conditional narrow recut
   was not written.
+
+Three cells were corrected in the fix-round, each because a cell must assert what its name says:
+
+- `p656.tie.obe_not_nil` (finding A2) once drafted ONE item against a three-line target set, so
+  `_assert_opening_tie`'s DELTA arm fired first and the cell asserted `tie_mismatch` under a name
+  promising `obe_not_nil` — its own negation. The fixture now records a target pair whose two
+  printed figures do not sum and drafts an item for EACH, so every non-OBE account matches its
+  target (`_opening_seed_deltas` excludes the OBE account by construction), the delta arm passes,
+  the drafted entries' plug lands on opening-balance-equity, and the OBE arm fires with its own
+  token. The residue is asserted cent-for-cent (`shareCr - cashDr`).
+- `p656.tie.stale_extraction` and `p656.tie.approve_rebinds` (finding A7) pinned their refusal with
+  a disjunction over two tokens, so neither recorded WHICH wall fired. MEASURED: a second producer
+  run sets `superseded_by` on the first and `_assert_opening_extraction_ref` checks
+  `status<>'done' or superseded_by is not null` BEFORE the authoritative-pointer comparison, so a
+  re-read always refuses `extraction_not_accepted`. `stale_extraction_version` is the OTHER wall —
+  a run that is itself current while `documents.authoritative_extraction_id` names another.
+- `produceTbRegions` is a MIRROR of the runtime producer's element shape, not a call into it
+  (finding A8): packages/db carries no dependency on packages/runtime. The mirror is pinned next
+  door — `packages/runtime/tests/opening-tb-produce.test.mjs`'s last cell states the exact key set
+  and value grammar, so a `toRegion` drift reds there instead of leaving this whole family green
+  while production breaks — and the World leg drives the real producer's bytes into the real
+  writer end to end.

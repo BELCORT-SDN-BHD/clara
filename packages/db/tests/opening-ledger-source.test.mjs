@@ -127,6 +127,15 @@ async function runningOcrTask(firm, document, engineId) {
 
 /** ONE producer run: persist `lines` as `opening_tb.line` regions through the real writer, in
  *  exactly the element shape `packages/runtime/lib/opening-tb-cells.mjs`'s `toRegion` emits —
+ *
+ *  THIS IS A MIRROR, AND THE MIRROR IS PINNED (#656 fix-round, adversarial A8). packages/db has
+ *  no dependency on packages/runtime, so the element below is hand-built rather than produced —
+ *  which means a `toRegion` drift would leave every `p656.tie.*` cell green while production
+ *  broke. The drift is made loud next door instead: `packages/runtime/tests/opening-tb-produce
+ *  .test.mjs`'s last cell states this exact key set and value grammar, and the World leg
+ *  (`packages/runtime/tests/opening-ledger-source-e2e.mjs`) drives the REAL producer's bytes into
+ *  the REAL writer end to end. If that pin reds, this literal is stale and must move with it.
+ *
  *  `field_path: 'opening_tb.line'`, the canonical text, and `monetary_cents` as a DECIMAL STRING
  *  the database casts and corroborates against the text independently.
  *  Returns `{ extractionId, refs }` where `refs[line_key]` is the `{extraction_id, region_id}`
@@ -382,8 +391,15 @@ test("p656.tie.stale_extraction: a target citing a superseded or non-authoritati
   const err = await assertRaises("CLR31", () => recordOpeningTargetsParsed({
     seed: sc.seed, document: sc.doc.documentId, lines: withRefs(BEE_LINES, first.refs), opKey: opk("p656-stale"),
   }), "a target citing the superseded first run");
-  assert.ok(["stale_extraction_version", "extraction_not_accepted"].includes(claraReason(err)),
-    `the refusal must name the staleness arm, got ${claraReason(err)}`);
+  // WHICH WALL, EXACTLY (#656 fix-round, adversarial A7). The disjunction this cell used to carry
+  // recorded neither. MEASURED on the rig: the second producer run sets `superseded_by` on the
+  // first, and `_assert_opening_extraction_ref` checks `status<>'done' or superseded_by is not
+  // null` BEFORE it compares the document's authoritative pointer — so a re-read always refuses
+  // `extraction_not_accepted`. `stale_extraction_version` is the OTHER wall: a run that is itself
+  // current and unsuperseded while `documents.authoritative_extraction_id` names another. Two
+  // different mechanisms; a cell that accepted either would pass if a future change swapped them.
+  assert.equal(claraReason(err), "extraction_not_accepted",
+    `the supersession wall fires first (0017 _assert_opening_extraction_ref), got ${claraReason(err)}`);
   assert.equal((await targetRows(sc.seed)).length, 0, "nothing is recorded against a stale citation");
 
   // The NEWEST run's regions are accepted — which is the fact that makes re-running the producer
@@ -437,9 +453,11 @@ test("p656.tie.approve_rebinds: approve_opening_seed re-runs the fact assertion 
   const err = await assertRaises("CLR31", () => approveOpeningSeed(sc.w.users.hana, {
     seed: sc.seed, planRevision: rev, tieSha256: sc.doc.sha256, entryRevisions: revMapOf(drafts),
   }), "approve over evidence a later run superseded");
-  assert.ok(["stale_extraction_version", "extraction_not_accepted"].includes(claraReason(err)),
-    "the approval re-runs _assert_opening_target_fact over EVERY target (0017:3884-3891), so a "
-    + "superseded citation refuses AT APPROVAL and not only at parse time -- got " + claraReason(err));
+  // The same wall, one layer later (A7): the approval re-runs `_assert_opening_target_fact` over
+  // EVERY target (0017:3884-3891), so the superseded citation refuses AT APPROVAL and not only at
+  // parse time — and it refuses with the supersession token, exactly as at parse time.
+  assert.equal(claraReason(err), "extraction_not_accepted",
+    `a superseded citation refuses at approval too, got ${claraReason(err)}`);
 
   // Assert nothing was approved by COUNTING rows.
   const state = (await rootQuery(
@@ -534,32 +552,69 @@ test("p656.tie.unmapped_blocks: on a DOCUMENT-sourced basis an unmapped line can
     "an unmapped line is a tie failure, and the face must name the same token the database does");
 });
 
-test("p656.tie.obe_not_nil: a nonzero opening-balance-equity net refuses with its OWN token, never tie_mismatch", async (t) => {
+test("p656.tie.obe_not_nil: a basis that TIES but leaves opening-balance-equity nonzero refuses with its OWN token, never tie_mismatch", async (t) => {
   if (unready(t)) return;
+  // REBUILT (#656 fix-round, adversarial A2). The first cut of this cell drafted ONE item against
+  // a three-line target set, so `_assert_opening_tie`'s DELTA arm fired first and the cell
+  // asserted `tie_mismatch` under a name promising `obe_not_nil` — a cell whose title asserted the
+  // negation of its assertion, and the token it claimed to own went unexercised in this battery.
+  //
+  // THE FIXTURE THAT ACTUALLY REACHES THE OBE ARM. `_assert_opening_tie` refuses `tie_mismatch`
+  // when a target is unmatched by a drafted item, and `_opening_seed_deltas` EXCLUDES the
+  // opening-balance-equity account from that comparison. So a basis whose every non-OBE account
+  // matches its target exactly passes the delta arm — and if the document's own two figures do
+  // not balance each other, the drafted entries' plug lands on OBE and the SECOND arm fires. That
+  // is the real-world shape: a printed source whose columns do not sum, faithfully transcribed.
   const sc = await tiedScene("obe");
-  const { refs } = await produceTbRegions({ firm: sc.firm, doc: sc.doc, lines: BEE_LINES });
-  await recordOpeningTargetsParsed({ seed: sc.seed, document: sc.doc.documentId, lines: withRefs(BEE_LINES, refs) });
+  const SHORT_LINES = [
+    { line_key: "cash", account_code: WB_COA.cash, source_label: "Cash and bank", debit_cents: BEE.cashDr, credit_cents: 0 },
+    // The retained-earnings line of the BEE trial balance is NOT among the targets: the two
+    // figures that are do not sum, which is what puts a residue on opening-balance-equity.
+    { line_key: "sharecap", account_code: WB_COA.shareCap, source_label: "Share capital", debit_cents: 0, credit_cents: BEE.shareCr },
+  ];
+  const { refs } = await produceTbRegions({ firm: sc.firm, doc: sc.doc, lines: SHORT_LINES });
+  await recordOpeningTargetsParsed({ seed: sc.seed, document: sc.doc.documentId, lines: withRefs(SHORT_LINES, refs) });
 
   const res = () => freshResolution(sc.w.users.alice, sc.client, { subjectKind: "document", subjectId: sc.doc.documentId });
-  // ONE item only: the basis does not tie, and the OBE account carries the difference.
-  const draft = await draftOpeningItem(sc.w.users.alice, {
-    client: sc.client, seed: sc.seed, resolution: res(), document: sc.doc.documentId, sha256: sc.doc.sha256,
-    item: { item_kind: "gl_balance", item_key: "gl:cash" },
-    lines: [{ account_code: WB_COA.cash, debit_cents: BEE.cashDr, credit_cents: 0 }],
-  });
+  const drafts = [
+    await draftOpeningItem(sc.w.users.alice, {
+      client: sc.client, seed: sc.seed, resolution: res(), document: sc.doc.documentId, sha256: sc.doc.sha256,
+      item: { item_kind: "gl_balance", item_key: "gl:cash" },
+      lines: [{ account_code: WB_COA.cash, debit_cents: BEE.cashDr, credit_cents: 0 }],
+    }),
+    await draftOpeningItem(sc.w.users.alice, {
+      client: sc.client, seed: sc.seed, resolution: res(), document: sc.doc.documentId, sha256: sc.doc.sha256,
+      item: { item_kind: "gl_balance", item_key: "gl:sharecap" },
+      lines: [{ account_code: WB_COA.shareCap, debit_cents: 0, credit_cents: BEE.shareCr }],
+    }),
+  ];
 
+  // EVERY TARGET IS MATCHED — the delta arm has nothing to refuse.
   const dryrun = await getOpeningDryrun(sc.w.users.alice, { seed: sc.seed });
-  assert.notEqual(dryrun.obe_net_cents, 0,
-    "the DB's own signed difference is what the face renders — never client arithmetic");
+  for (const d of dryrun.deltas ?? []) {
+    assert.equal(Number(d.delta_debit), 0, `${d.account_code} differs from its target`);
+    assert.equal(Number(d.delta_credit), 0, `${d.account_code} differs from its target`);
+  }
+  assert.equal(Number(dryrun.obe_net_cents), BEE.shareCr - BEE.cashDr,
+    "the residue lands on opening-balance-equity, cent for cent — the DB's own signed difference "
+    + "is what the face renders, never client arithmetic");
 
   const rev = await planRevision(sc.plan);
   const err = await assertRaises("CLR31", () => approveOpeningSeed(sc.w.users.hana, {
-    seed: sc.seed, planRevision: rev, tieSha256: sc.doc.sha256, entryRevisions: revMapOf([draft]),
-  }), "approve with a nonzero OBE net");
+    seed: sc.seed, planRevision: rev, tieSha256: sc.doc.sha256, entryRevisions: revMapOf(drafts),
+  }), "approve a basis that ties but leaves OBE nonzero");
   // C-25's own lesson: the face once painted a quiet pass and named the WRONG token for this arm.
-  assert.ok(["obe_not_nil", "tie_mismatch"].includes(claraReason(err)));
-  assert.equal(claraReason(err), "tie_mismatch",
-    "with targets recorded and only one item drafted the DELTA arm fires first — the distinct obe_not_nil token belongs to a basis that ties but leaves OBE nonzero");
+  // The two arms are DIFFERENT facts and a professional must be told which one stopped them.
+  assert.equal(claraReason(err), "obe_not_nil",
+    `the OBE arm owns its own token (0017 _assert_opening_tie), got ${claraReason(err)}`);
+
+  // Nothing was approved, and the basis stays open.
+  const state = (await rootQuery(
+    `select (select state from clara.opening_seed_registry where id=$1) as state,
+            (select count(*)::int from clara.opening_seed_approvals where seed_id=$1) as approvals`,
+    [sc.seed])).rows[0];
+  assert.equal(state.state, "open");
+  assert.equal(state.approvals, 0);
 });
 
 // ---------------------------------------------------------------------------------------------
