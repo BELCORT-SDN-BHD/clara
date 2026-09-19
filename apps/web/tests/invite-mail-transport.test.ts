@@ -255,6 +255,55 @@ describe("#874 the mail-endpoint seam: unset is production, set is a genuine ove
     if (!capability.ok) return;
     assert.equal(capability.config.mailEndpoint, "http://127.0.0.1:4873/captured-mail");
   });
+
+  // fix-round ADV-1 — the fence. A production-live override with no restriction on its VALUE
+  // could redirect the invite mail (recipient, subject, and the token-bearing link) to any host
+  // an attacker controls, from any environment that happened to have this variable set by
+  // mistake. The override is honoured only when it resolves to a loopback http(s) URL; anything
+  // else is treated exactly like an absent override — production behaviour, never a refusal that
+  // would leak the rejected value into a `missing` list or a thrown error.
+  test("ADV-1 fence: a NON-LOOPBACK override is ignored — production behaviour, not honoured and not refused", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_MAIL_ENDPOINT_ENV_NAME]: "https://attacker.example/capture",
+    });
+    assert.equal(capability.ok, true, "a rejected override must never itself cause mail_not_configured");
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, undefined, "a non-loopback host must never be honoured as the mail endpoint");
+  });
+
+  test("ADV-1 fence: a bare hostname that merely CONTAINS 'localhost' is not loopback (an exact-hostname check, not a substring one)", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_MAIL_ENDPOINT_ENV_NAME]: "https://localhost.attacker.example/capture",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, undefined);
+  });
+
+  test("ADV-1 fence: a non-URL / non-http(s) value (e.g. a bare path or a javascript: scheme) is rejected, never thrown", () => {
+    for (const bogus of ["/captured-mail", "javascript:alert(1)", "not a url at all"]) {
+      const capability = inviteMailCapability({ ...REQUIRED_ENV, [INVITE_MAIL_ENDPOINT_ENV_NAME]: bogus });
+      assert.equal(capability.ok, true, `must not throw or refuse for ${bogus}`);
+      if (!capability.ok) continue;
+      assert.equal(capability.config.mailEndpoint, undefined, `${bogus} must not be honoured`);
+    }
+  });
+
+  test("ADV-1 fence: an IPv6 loopback ([::1]) override IS honoured, matching the other two loopback spellings", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_MAIL_ENDPOINT_ENV_NAME]: "http://[::1]:4873/captured-mail",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, "http://[::1]:4873/captured-mail");
+  });
+
+  test("ADV-1 fence: the env var's NAME itself carries the CLARA_E2E_ harness prefix every other test-only flag in this app uses", () => {
+    assert.equal(INVITE_MAIL_ENDPOINT_ENV_NAME, "CLARA_E2E_INVITE_MAIL_ENDPOINT");
+  });
 });
 
 // ---------------------------------------------------------------------------

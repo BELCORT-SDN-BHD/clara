@@ -306,22 +306,44 @@ title so they are never mistaken for the database's words: `no_session`, `cross_
 something: the invitation exists and its link is unrecoverable, so the copy sends the admin to
 revoke it.
 
-**#874 — the mail endpoint alone has a test-only seam.** `lib/members/invite-mail.ts`'s
-`InviteMailConfig.mailEndpoint` — resolved from `INVITE_MAIL_ENDPOINT_OVERRIDE`
+**#874 — the mail endpoint alone has a test-only, FENCED seam.** `lib/members/invite-mail.ts`'s
+`InviteMailConfig.mailEndpoint` — resolved from `CLARA_E2E_INVITE_MAIL_ENDPOINT`
 (`INVITE_MAIL_ENDPOINT_ENV_NAME`), read by `inviteMailCapability` alongside the four required
 variables but never counted in `missing` — lets `productionInviteMailer`'s `send()` post
 somewhere other than `RESEND_ENDPOINT`. Owner ruling (2026-09-18): only the mail endpoint, never
 the Supabase admin calls (`canMintFor`/`mintSupabaseTokenHash` stay real everywhere). Unset (every
 real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before — pinned by
-`tests/invite-mail-transport.test.ts`'s `#874` suite. **Not yet exercised as a Playwright walk**:
+`tests/invite-mail-transport.test.ts`'s `#874` suite.
+
+**fix-round ADV-1 — the fence, and why it is a VALUE check, not a build-mode check.** The original
+cut read the override unconditionally, in any environment, with no gate at all — a production-live
+egress override on the one call that carries the invite's plaintext token, reachable by anyone who
+could set an environment variable on the deployment (accidentally or not). `lib/checkout
+/stripe-session.ts`'s `STRIPE_API_BASE` note is this repo's own precedent for the identical class,
+and its fence (`NODE_ENV !== "production"`) was DELETED rather than kept, because `next start` —
+the exact shape a browser e2e walk runs against — sets `NODE_ENV=production`, neutralising it. This
+seam is fenced differently for exactly that reason: `inviteMailCapability` (via
+`isLoopbackMailEndpoint`) honours the override only when it parses as an http(s) URL whose host is
+loopback (`127.0.0.1`, `localhost`, `[::1]`); anything else — a real hostname, a bare path, a
+`javascript:` scheme — is silently treated exactly like an absent override. A variable set by
+mistake in production can therefore never redirect the mail off the machine it is running on. The
+name also now carries the `CLARA_E2E_` prefix every other harness-only flag in this app uses
+(`CLARA_E2E_MONEY_INPUT_HARNESS`).
+
+**AC2 (a Playwright walk substituting the endpoint) remains unmet, reconciled rather than built.**
 `e2e/members-lifecycle-mock.mjs`'s own header records that this harness sets no `RESEND_API_KEY`
 so the invite leg terminates at `mail_not_configured` before any admin call is attempted; reaching
 `send()` from a browser walk needs `canMintFor`/`mintSupabaseTokenHash` to succeed first, which
 needs the Supabase admin REST endpoints (`GoTrueAdminApi`'s `listUsers`/`generateLink`) mocked
 under `/e2e-supabase` — a second, larger seam this ticket's own "why human" note left as the
-owner's separate call, not decided here. The seam is proven at the unit level (`send()` posts to
-the override with the exact body a walk would need to assert on); wiring a walk to reach it is a
-follow-up, not a re-litigation of this ruling.
+owner's separate call, not decided here, and the fix-round review confirmed this blocker is real
+and independent of the fence above. Wiring `CLARA_E2E_INVITE_MAIL_ENDPOINT` into the e2e server's
+own env (`e2e/run.mjs`/`serve-built.mjs`) without that second seam would prove the variable is
+*read*, which the unit suite already pins, but not that a real invite flow ever *reaches* `send()`
+— the one thing AC2 actually asks for — so it was not built as a half-measure. The seam is proven
+at the unit level (`send()` posts to the override with the exact body a walk would need to assert
+on, and the fence rejects a non-loopback value); wiring a walk to reach it is a follow-up gated on
+the second seam, not a re-litigation of this ruling.
 
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
