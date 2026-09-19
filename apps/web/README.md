@@ -306,6 +306,23 @@ title so they are never mistaken for the database's words: `no_session`, `cross_
 something: the invitation exists and its link is unrecoverable, so the copy sends the admin to
 revoke it.
 
+**#874 — the mail endpoint alone has a test-only seam.** `lib/members/invite-mail.ts`'s
+`InviteMailConfig.mailEndpoint` — resolved from `INVITE_MAIL_ENDPOINT_OVERRIDE`
+(`INVITE_MAIL_ENDPOINT_ENV_NAME`), read by `inviteMailCapability` alongside the four required
+variables but never counted in `missing` — lets `productionInviteMailer`'s `send()` post
+somewhere other than `RESEND_ENDPOINT`. Owner ruling (2026-09-18): only the mail endpoint, never
+the Supabase admin calls (`canMintFor`/`mintSupabaseTokenHash` stay real everywhere). Unset (every
+real deployment), `send()` posts to `RESEND_ENDPOINT` exactly as before — pinned by
+`tests/invite-mail-transport.test.ts`'s `#874` suite. **Not yet exercised as a Playwright walk**:
+`e2e/members-lifecycle-mock.mjs`'s own header records that this harness sets no `RESEND_API_KEY`
+so the invite leg terminates at `mail_not_configured` before any admin call is attempted; reaching
+`send()` from a browser walk needs `canMintFor`/`mintSupabaseTokenHash` to succeed first, which
+needs the Supabase admin REST endpoints (`GoTrueAdminApi`'s `listUsers`/`generateLink`) mocked
+under `/e2e-supabase` — a second, larger seam this ticket's own "why human" note left as the
+owner's separate call, not decided here. The seam is proven at the unit level (`send()` posts to
+the override with the exact body a walk would need to assert on); wiring a walk to reach it is a
+follow-up, not a re-litigation of this ruling.
+
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
 (CLR10, `0147:399`). Revoke, then invite again — the old link stops working immediately, and the

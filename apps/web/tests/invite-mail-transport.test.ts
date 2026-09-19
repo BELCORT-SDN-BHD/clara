@@ -27,6 +27,9 @@ import {
   classifyProviderStatus,
   escapeHtml,
   integerStatus,
+  INVITE_MAIL_ENDPOINT_ENV_NAME,
+  INVITE_MAIL_ENV_NAMES,
+  inviteMailCapability,
   InviteMailFailure,
   isConfirmedUser,
   isInviteMailFailure,
@@ -177,6 +180,80 @@ describe("the service-role key's only destination is the Supabase client constru
     await mailer.send({ to: "a@b.test", subject: "s", html: "h" });
     assert.equal(client.constructedWith.length, 0);
     assert.deepEqual(client.adminOps, []);
+  });
+});
+
+// #874 — the mail-endpoint seam (owner ruling 2026-09-18: the mail endpoint alone becomes
+// overridable, the Supabase admin calls stay real). `inviteMailCapability` is the ONE place
+// `INVITE_MAIL_ENDPOINT_ENV_NAME` is read; `productionInviteMailer`'s `send()` is the one place
+// the resolved `config.mailEndpoint` is spent.
+describe("#874 the mail-endpoint seam: unset is production, set is a genuine override", () => {
+  const REQUIRED_ENV = {
+    [INVITE_MAIL_ENV_NAMES.supabaseUrl]: "https://rig.supabase.test",
+    [INVITE_MAIL_ENV_NAMES.serviceRoleKey]: "PLACEHOLDER-service",
+    [INVITE_MAIL_ENV_NAMES.resendApiKey]: "PLACEHOLDER-resend",
+    [INVITE_MAIL_ENV_NAMES.from]: "Clara <invites@example.test>",
+  };
+
+  test("PRODUCTION PINNED: with the override variable ABSENT, the capability resolves no mailEndpoint at all, and send() posts to RESEND_ENDPOINT", async () => {
+    const capability = inviteMailCapability({ ...REQUIRED_ENV });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, undefined,
+      "an absent override must resolve to undefined, never to an empty string or RESEND_ENDPOINT itself");
+
+    const net = recordingFetch(() => new Response("{}", { status: 200 }));
+    const mailer = productionInviteMailer(capability.config, { fetch: net.fetch });
+    await mailer.send({ to: "a@b.test", subject: "s", html: "h" });
+    assert.equal(net.calls[0]!.url, RESEND_ENDPOINT, "production behaviour is unchanged by this ticket");
+  });
+
+  test("a BLANK override variable is treated exactly like absence, never as a request to post to the empty string", () => {
+    const capability = inviteMailCapability({ ...REQUIRED_ENV, [INVITE_MAIL_ENDPOINT_ENV_NAME]: "   " });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, undefined);
+  });
+
+  test("the override variable NEVER contributes to `missing` — its absence is production, not a misconfiguration", () => {
+    // Every REQUIRED variable present, the override absent: capability must still be ok.
+    const capability = inviteMailCapability({ ...REQUIRED_ENV });
+    assert.equal(capability.ok, true, "an unset override must never itself cause mail_not_configured");
+  });
+
+  test("SET: send() posts to the override URL instead of RESEND_ENDPOINT, with the identical body a real deployment would have sent", async () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_MAIL_ENDPOINT_ENV_NAME]: "http://127.0.0.1:4873/captured-mail",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, "http://127.0.0.1:4873/captured-mail");
+
+    const net = recordingFetch(() => new Response("{}", { status: 200 }));
+    const mailer = productionInviteMailer(capability.config, { fetch: net.fetch });
+    await mailer.send({ to: "newhire@larkin.test", subject: "You have been invited", html: "<p>link</p>" });
+
+    assert.equal(net.calls.length, 1, "no outbound call to any OTHER endpoint — this is the only one");
+    const call = net.calls[0]!;
+    assert.equal(call.url, "http://127.0.0.1:4873/captured-mail", "the override, not RESEND_ENDPOINT");
+    assert.notEqual(call.url, RESEND_ENDPOINT);
+    assert.deepEqual(JSON.parse(String(call.init.body)), {
+      from: capability.config.from,
+      to: ["newhire@larkin.test"],
+      subject: "You have been invited",
+      html: "<p>link</p>",
+    }, "a walk substituting this endpoint can assert on exactly this body — recipient, subject and the invite link");
+  });
+
+  test("a whitespace-padded override is trimmed the same way the four required variables are", () => {
+    const capability = inviteMailCapability({
+      ...REQUIRED_ENV,
+      [INVITE_MAIL_ENDPOINT_ENV_NAME]: "  http://127.0.0.1:4873/captured-mail  ",
+    });
+    assert.equal(capability.ok, true);
+    if (!capability.ok) return;
+    assert.equal(capability.config.mailEndpoint, "http://127.0.0.1:4873/captured-mail");
   });
 });
 

@@ -49,11 +49,29 @@ export const INVITE_MAIL_ENV_NAMES = {
   from: "INVITE_MAIL_FROM",
 } as const;
 
+/** #874 — a TEST-ONLY seam on the mail endpoint alone (owner ruling, 2026-09-18: "only the mail
+ *  endpoint becomes overridable... the Supabase admin calls stay real"). Named alongside
+ *  `INVITE_MAIL_ENV_NAMES` so every environment variable this transport reads is findable in one
+ *  place, but deliberately NOT one of them: it is OPTIONAL and `inviteMailCapability` below never
+ *  adds it to `missing` — its absence is the entire production posture (every real deployment),
+ *  not a misconfiguration a `mail_not_configured` refusal should ever name. Set, it substitutes
+ *  where `productionInviteMailer`'s `send()` posts the mail; a Playwright walk that sets it to a
+ *  local URL can assert on the posted body — recipient, subject, the invite link — with no
+ *  outbound network call, while `canMintFor`/`mintSupabaseTokenHash` still call the real Supabase
+ *  admin API untouched. */
+export const INVITE_MAIL_ENDPOINT_ENV_NAME = "INVITE_MAIL_ENDPOINT_OVERRIDE";
+
 export type InviteMailConfig = {
   supabaseUrl: string;
   serviceRoleKey: string;
   resendApiKey: string;
   from: string;
+  /** #874 — resolved from `INVITE_MAIL_ENDPOINT_ENV_NAME` by `inviteMailCapability`; `undefined`
+   *  whenever that variable is unset or blank, which `productionInviteMailer`'s `send()` reads as
+   *  "use `RESEND_ENDPOINT`" — the same default a config built with no such field at all gets. A
+   *  test literal that omits this field (every one that existed before this ticket) is therefore
+   *  still exactly production behaviour, unpinned by construction rather than by discipline. */
+  mailEndpoint?: string;
 };
 
 export type InviteMailCapability =
@@ -90,7 +108,16 @@ export function inviteMailCapability(env: Record<string, string | undefined>): I
   const resendApiKey = read(INVITE_MAIL_ENV_NAMES.resendApiKey);
   const from = read(INVITE_MAIL_ENV_NAMES.from);
   if (missing.length > 0) return { ok: false, missing };
-  return { ok: true, config: { supabaseUrl, serviceRoleKey, resendApiKey, from } };
+  // #874 — OPTIONAL and read LAST, after the `missing` gate above: an unset or blank override
+  // must never contribute to `missing` (it names no environment variable a real deployment is
+  // expected to set), and a blank string is treated exactly like absence rather than as a
+  // request to post to the empty string.
+  const endpointOverride = env[INVITE_MAIL_ENDPOINT_ENV_NAME];
+  const mailEndpoint =
+    typeof endpointOverride === "string" && endpointOverride.trim() !== ""
+      ? endpointOverride.trim()
+      : undefined;
+  return { ok: true, config: { supabaseUrl, serviceRoleKey, resendApiKey, from, mailEndpoint } };
 }
 
 /**
@@ -514,8 +541,13 @@ export function productionInviteMailer(
     },
     async send(message): Promise<void> {
       let res: Response;
+      // #874 — `config.mailEndpoint` is set ONLY by `inviteMailCapability` reading a positively
+      // present, non-blank `INVITE_MAIL_ENDPOINT_ENV_NAME` (or by a test building the config
+      // literal directly); every other caller — every real deployment — leaves it `undefined`
+      // and posts to the one production endpoint below, unchanged.
+      const endpoint = config.mailEndpoint ?? RESEND_ENDPOINT;
       try {
-        res = await doFetch(RESEND_ENDPOINT, {
+        res = await doFetch(endpoint, {
           method: "POST",
           headers: {
             "content-type": "application/json",
