@@ -5,7 +5,7 @@ import { analyzeDocument } from "./egress.mjs";
 import { detectDocument, IntakeScanError, scanFile } from "./scan.mjs";
 import {
   intakePaths,
-  listIntakeMetas,
+  listIntakeMetaEntries,
   mergeTaskMeta,
   noteTerminalFailure,
   noteTransientFailure,
@@ -430,11 +430,56 @@ export async function finalizeDocumentIntake(options) {
   }
 }
 
-/** Resume durable post-upload intakes after a crash. The sidecar carries only the capability HASH (the plaintext token is gone). */
-export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log = NOOP_LOG }) {
+/** How many sidecars ONE sweep may open and act on. Unchanged from the belt's first cut; what
+ *  changed (#966) is that it is now a bound on OPENS too, not only on actions. */
+const RECOVERY_BATCH = 10;
+
+/**
+ * How long a sidecar must have been QUIET before this belt may open it (#966).
+ *
+ * THE GUARD IS NOT NEW — THE PLACE IT RUNS IS. The belt has always skipped an intake whose sidecar
+ * was updated in the last few seconds, and the reason has always been the same: a stamp written
+ * moments ago belongs to a LIVE upload, and the belt has nothing to recover from a request that is
+ * still in flight. But it skipped on the sidecar's `updatedAt` FIELD, which it could only read by
+ * opening the file — so the guard ran BEHIND the open and could not prevent the thing it existed
+ * to avoid. On Windows the open is precisely what makes that intake's next atomic write fail
+ * `EPERM` (see `spool.mjs`'s `renameIntoPlace`), which failed the intake with an untyped
+ * `internal`: MEASURED at one child in six under load (#636 / #966).
+ *
+ * It now runs on the file's own mtime, from directory metadata, BEFORE any handle is taken. The
+ * two signals move together — every status transition rewrites the file through `atomicJson` — and
+ * mtime is the more faithful of the two here, because the race is a property of the FILE.
+ */
+const SIDECAR_QUIET_MS = Math.max(0, Number(process.env.CLARA_INTAKE_SIDECAR_QUIET_MS || 5000));
+
+/** The sidecar states this belt can carry forward. Anything else (`uploading`, `receiving`) belongs
+ *  to a request that has not handed the bytes over yet. */
+const RECOVERABLE_STATES = ["spooled", "canonical", "received", "verifying", "verified", "duplicate"];
+
+/**
+ * Resume durable post-upload intakes after a crash. The sidecar carries only the capability HASH
+ * (the plaintext token is gone).
+ *
+ * READS NOTHING IT COULD HAVE SKIPPED (#966). The sweep takes the spool's DIRECTORY METADATA,
+ * drops every sidecar inside the quiet window without opening it, and only then opens — at most
+ * `RECOVERY_BATCH` of them, the same number it has always been willing to act on. The quiet skip
+ * happens BEFORE the budget is taken, so a spool full of live uploads cannot starve the belt of
+ * the crashed intake sitting behind them.
+ *
+ * @param {{withRuntime:Function, enqueue:Function, log?:(m:string)=>void,
+ *          listEntries?:() => Promise<Array<{mtimeMs:number, read:() => Promise<any>}>>,
+ *          quietMs?:number}} deps  `listEntries` and `quietMs` are seams for the belt's own cells;
+ *          production passes neither.
+ */
+export async function recoverPendingDocumentIntakes({
+  withRuntime, enqueue, log = NOOP_LOG, listEntries = listIntakeMetaEntries, quietMs = SIDECAR_QUIET_MS,
+}) {
   const out = { recovered: 0, deferred: 0, expired: 0 };
-  const rows = (await listIntakeMetas()).filter((row) => row && !row.corrupt && row.intakeId);
-  for (const meta of rows.slice(0, 10)) {
+  const sweepStartedAt = Date.now();
+  const settled = (await listEntries()).filter((entry) => sweepStartedAt - entry.mtimeMs >= quietMs);
+  for (const entry of settled.slice(0, RECOVERY_BATCH)) {
+    const meta = await entry.read();
+    if (!meta || meta.corrupt || !meta.intakeId) continue;
     if (Date.parse(meta.expiresAt) <= Date.now()) {
       await withRuntime((client) =>
         callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt", [
@@ -447,9 +492,7 @@ export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log 
       out.expired += 1;
       continue;
     }
-    if (!["spooled", "canonical", "received", "verifying", "verified", "duplicate"].includes(meta.status)) continue;
-    const age = Date.now() - Date.parse(meta.updatedAt || meta.createdAt || "");
-    if (Number.isFinite(age) && age < 5000) continue;
+    if (!RECOVERABLE_STATES.includes(meta.status)) continue;
     try {
       await finalizeDocumentIntake({ withRuntime, intakeId: meta.intakeId, tokenHash: meta.tokenHash, enqueue });
       out.recovered += 1;

@@ -1314,3 +1314,40 @@ and only this belt writes the honest `expired` + `clarify_closed` terminal.
 the belt closure never reaching `reconciler.mjs`, the ONE pre-existing `reconciler ↔ reconciler-wake`
 cycle pinned by name, the five counters, the contained failure, the statement order, the leader's
 silence). `tests/control-chat-clarify.test.mjs`'s `chat.wiring` cell pins the registration.
+
+## #966 — the intake recovery belt can no longer fail a live intake
+
+**The defect, measured.** `recoverPendingDocumentIntakes` opened and parsed EVERY pending intake's
+spool sidecar on every leader sweep, though it acts on at most ten. A live intake writes its own
+sidecar atomically (temp file, then `rename()` into place) and on Windows a `rename()` over a
+destination another handle holds open fails `EPERM` — so a sweep landing between two
+`writeIntakeMeta` calls threw inside the intake, which was then failed with an untyped `internal`
+(a 500 on the byte PUT). #636 measured one child in six at the default 2 s cadence.
+
+**Both halves of the fix.**
+
+- **The writer.** `lib/spool.mjs`'s `atomicJson` now renames through `renameIntoPlace`, which
+  retries only `EPERM` / `EACCES` / `EBUSY` against a deadline (`CLARA_SPOOL_RENAME_RETRY_MS`,
+  default 2000 ms) and surfaces every other failure immediately. A reader's handle lives for
+  microseconds, so the retry turns a hard failure into a sub-millisecond wait — the shape
+  `graceful-fs` has shipped for a decade. A rename that still fails takes its temp file with it.
+- **The reader.** `listIntakeMetaEntries()` returns DIRECTORY METADATA — `{name, path, mtimeMs,
+  read()}` — and opens nothing. `stat()` does not hold a handle a rename can block; `open()` does.
+  The belt's recency guard (always there, always five seconds) now runs on `mtimeMs` BEFORE the
+  open rather than on the sidecar's `updatedAt` field after it, and the open budget is the same ten
+  the belt was already willing to act on. The quiet skip happens BEFORE the budget is taken, so a
+  spool full of live uploads cannot starve the belt of the crashed intake behind them.
+  `listIntakeMetas` / `listTaskMetas` keep their exact old contract, expressed over the lazy shape
+  so the two cannot drift. The knob is `CLARA_INTAKE_SIDECAR_QUIET_MS` (default 5000).
+
+**A consequence, stated.** An intake whose capability has already expired but whose sidecar was
+written in the last five seconds is expired on the NEXT sweep rather than this one. That is the
+guard doing its job: a sidecar written moments ago belongs to a request still in flight.
+
+**Evidence.** `tests/intake-sidecar-race.test.mjs` — the host property measured both ways (a held
+read handle IS `EPERM`; a `stat` is not), 500 writes against concurrent sweeps with zero failures
+(428 of 500 failed before the fix), the quiet-window sidecar never opened (counted double), the
+ten-open budget, the expiry arm, and the listing contract. `tests/intake-db.test.mjs` carries the
+end-to-end recovery cell (`p966 the belt still recovers a crashed mid-flight intake`) and the
+abandoned-sidecar expiry cell, both of which now age their fixture's mtime rather than sweeping
+against a file they wrote in the same millisecond.
