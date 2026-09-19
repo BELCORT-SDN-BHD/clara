@@ -22,12 +22,12 @@ enableDomInspection();
 
 const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-function row(basis: Record<string, unknown>): PeriodicAdjustmentRow {
+function row(basis: Record<string, unknown>, purpose = "payroll_obligation"): PeriodicAdjustmentRow {
   return {
     id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     work_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     logical_op_id: "op-842-1",
-    purpose: "payroll_obligation",
+    purpose,
     period_start: "2026-07-01",
     period_end: "2026-07-31",
     basis,
@@ -83,7 +83,65 @@ test("842.absent — a null settled_cents still renders nothing for that key (th
   try {
     for (let i = 0; i < 6; i++) await h.settle();
     const text = h.text();
+    // POSITIVE ANCHOR FIRST (L07-08): proves the particulars loop actually ran and rendered this
+    // row's basis, so the negative assertion below cannot pass by accident against a disclosure
+    // that rendered nothing at all (a failed <details>, a swallowed row, an empty table).
+    assert.match(text, /obligation_kind/, "the particulars loop rendered this row's other basis keys");
     assert.doesNotMatch(text, /settled_cents/, "a null particular is filtered out before the loop, key included");
+  } finally {
+    await h.unmount();
+    for (let i = 0; i < 3; i++) await h.settle();
+  }
+});
+
+test("842.amount — a payroll row's basis carrying amount_cents (told a second way beside the column) renders as money too", async () => {
+  const h = await renderComponent(
+    app(
+      createElement(PeriodicAdjustmentsTable, {
+        clientId: CLIENT,
+        load: async () => [row({ obligation_kind: "epf", amount_cents: 150050 })],
+      }),
+    ),
+  );
+  try {
+    for (let i = 0; i < 6; i++) await h.settle();
+    const text = h.text();
+    assert.match(text, /RM\s*1,500\.50/, "amount_cents in the basis renders as formatted money");
+    assert.doesNotMatch(text, /\b150050\b/, "the raw minor-unit integer never renders");
+  } finally {
+    await h.unmount();
+    for (let i = 0; i < 3; i++) await h.settle();
+  }
+});
+
+test("842.stock — a stock row's opening_cents/closing_cents/adjustment_cents render as money, not raw sen", async () => {
+  const h = await renderComponent(
+    app(
+      createElement(PeriodicAdjustmentsTable, {
+        clientId: CLIENT,
+        load: async () => [
+          row(
+            {
+              method: "opening_closing_count",
+              opening_cents: 250000,
+              closing_cents: 300000,
+              adjustment_cents: 50000,
+            },
+            "periodic_stock_adjustment",
+          ),
+        ],
+      }),
+    ),
+  );
+  try {
+    for (let i = 0; i < 6; i++) await h.settle();
+    const text = h.text();
+    assert.match(text, /RM\s*2,500\.00/, "opening_cents renders as formatted money");
+    assert.match(text, /RM\s*3,000\.00/, "closing_cents renders as formatted money");
+    assert.match(text, /RM\s*500\.00/, "adjustment_cents renders as formatted money");
+    assert.doesNotMatch(text, /\b250000\b/, "opening_cents' raw minor-unit integer never renders");
+    assert.doesNotMatch(text, /\b300000\b/, "closing_cents' raw minor-unit integer never renders");
+    assert.doesNotMatch(text, /\b50000\b/, "adjustment_cents' raw minor-unit integer never renders");
   } finally {
     await h.unmount();
     for (let i = 0; i < 3; i++) await h.settle();

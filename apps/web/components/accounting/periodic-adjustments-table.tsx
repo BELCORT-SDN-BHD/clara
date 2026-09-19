@@ -119,10 +119,10 @@ export function PeriodicAdjustmentsTable({
                           was stored — this is the "exact fields and sources" half of AC4, and a
                           re-worded summary would be a second account of the same figures.
                           "VERBATIM" STILL MEANS THE HOUSE MONEY COMPONENT for a cents-typed key
-                          (#842): `settled_cents` (#797) is the one particular the estate types as
-                          minor units today, and rendering it through `String(value)` showed the
-                          same figure `amount_cents` renders as money, told a second way, in the
-                          same disclosure. */}
+                          (#842): CENTS_PARTICULARS below names every basis key migration 0212's
+                          `_adjustment_basis_canonical` types as minor units, so none of them
+                          renders through `String(value)` as the same figure a column already
+                          renders as money, told a second way, in the same disclosure. */}
                       {Object.entries(row.basis)
                         .filter(([, value]) => value !== null && value !== undefined && value !== "")
                         .map(([key, value]) => (
@@ -147,10 +147,19 @@ export function PeriodicAdjustmentsTable({
   );
 }
 
-// #842 — the basis particulars the estate types as minor units. `settled_cents` (#797) is the
-// only one today (see periodic-adjustment.ts's ADJUSTMENT_FIELDS comment); a future cents-typed
-// particular joins this Set, not a re-guess of "looks like cents" from the key's spelling.
-const CENTS_PARTICULARS = new Set<string>(["settled_cents"]);
+// #842 — the basis particulars `clara._adjustment_basis_canonical` (migration 0212) types as
+// minor units: `amount_cents` (both purposes), `opening_cents`/`closing_cents`/`adjustment_cents`
+// (the stock branch) and `settled_cents` (#797, the payroll branch). Measured against that
+// function's `jsonb_build_object` calls, not re-guessed from a key's spelling — a future
+// cents-typed particular joins this Set because the migration says so, not because it "looks like
+// cents".
+const CENTS_PARTICULARS = new Set<string>([
+  "amount_cents",
+  "opening_cents",
+  "closing_cents",
+  "adjustment_cents",
+  "settled_cents",
+]);
 
 function Fact({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
