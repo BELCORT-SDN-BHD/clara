@@ -19,6 +19,8 @@ import messages from "../../messages/en.json";
 
 enableDomInspection();
 
+type Stub = { childNodes?: Stub[] };
+
 const COUNTS: ReviewQueueCounts = {
   ready: 1,
   needs_review: 2,
@@ -38,7 +40,7 @@ function app(node: ReturnType<typeof createElement>) {
 test("903.chips — the live envelope's counts render as exactly NINE chips, one per key", async () => {
   const h = await renderComponent(app(createElement(NeedsYouCounts, { counts: COUNTS })));
   try {
-    const badges = (h.container.childNodes?.[0]?.childNodes ?? []) as Parameters<typeof textOf>[0][];
+    const badges = ((h.container as Stub).childNodes?.[0]?.childNodes ?? []) as Parameters<typeof textOf>[0][];
     assert.equal(badges.length, 9, "one chip per ReviewQueueCounts key, work_questions included");
     const badgeTexts = badges.map(textOf);
     for (const value of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
