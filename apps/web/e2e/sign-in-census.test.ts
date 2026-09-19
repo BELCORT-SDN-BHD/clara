@@ -183,8 +183,11 @@ const WRAPPERS: Record<string, string> = {
 test("#851 · no spec file reimplements the login form — the ONE sign-in is `helpers.ts`'s", () => {
   const files = specFiles();
   // A census that scanned nothing would pass every assertion below. This is the floor, measured:
-  // the suite carried 42 spec files when this cell was written.
-  assert.ok(files.length >= 40, `the census must actually see the suite (found ${files.length} spec files)`);
+  // the suite carries 48 spec files — COUNTED (`ls -1 apps/web/e2e/*.spec.ts | wc -l`, and the
+  // same at `dd3f8f1d`), not remembered. The first cut of this comment said 42, which was never
+  // the number, and a floor set two below a wrong count is eight files of slack: eight walks
+  // could have been deleted or renamed out of the census's reach with the cell still green.
+  assert.ok(files.length >= 46, `the census must actually see the suite (found ${files.length} spec files)`);
 
   const offenders: string[] = [];
   for (const name of files) {
@@ -244,7 +247,7 @@ test("#851 · both exception lists are LIVE — an entry that no longer offends 
 });
 
 test("#851 · THE VACUITY CONTROL: the detector actually detects, and does not over-detect", () => {
-  // A cell that walks 42 files and finds nothing is only evidence if the instrument would have
+  // A cell that walks 48 files and finds nothing is only evidence if the instrument would have
   // found something. Four synthetic sources, driven through the same functions the census uses.
   const offender = [
     'await page.goto("/login");',
