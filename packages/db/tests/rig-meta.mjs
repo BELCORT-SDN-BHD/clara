@@ -1950,6 +1950,29 @@ export const FA_ACQUISITION_0216_COHORT = [
   ...FA_ACQUISITION_0216_RUNTIME_FNS, ...FA_ACQUISITION_0216_UNGRANTED_FNS,
 ];
 
+// #651 [0227, depreciation history] — the DEPRECIATION-POLICY lane, its own cohort for the same
+// "wholly present or wholly absent" reason FA_ACQUISITION_0216_COHORT carries: folding these names
+// into 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
+// fails a PARTIAL cohort by design.
+//
+//   the ONE new human read. `clara._fa_compute_charges` stays in FA_0041_UNGRANTED_FNS below and
+//   is never granted -- this wrapper is the only way a browser reaches the arithmetic, and the
+//   main sweep fails the moment a grant appears on the core (I6/Q6).
+const FA_DEPRECIATION_0227_HUMAN_FNS = ["preview_depreciation_run"];
+//   the ONE new machine door -- clara_runtime ONLY. `clara.run_depreciation_manual` (above) must
+//   NEVER reach a machine role, which is precisely why this OBO door carries a NEW NAME rather
+//   than a widened grant.
+const FA_DEPRECIATION_0227_RUNTIME_FNS = ["run_depreciation_period_for"];
+//   …and the UNGRANTED helper, declared the 0020 way so a grant appearing on it FAILS the main
+//   sweep. It is the fixed-asset lane's whole locked-period law, and #678 adopts it unchanged.
+//   `clara.sign_depreciation_authority` is NOT re-declared here: 0227 re-cut its signature, not
+//   its name, and the roster is BY NAME -- it stays in FA_0041_HUMAN_FNS.
+const FA_DEPRECIATION_0227_UNGRANTED_FNS = ["_fa_assert_period_open"];
+export const FA_DEPRECIATION_0227_COHORT = [
+  ...FA_DEPRECIATION_0227_HUMAN_FNS, ...FA_DEPRECIATION_0227_RUNTIME_FNS,
+  ...FA_DEPRECIATION_0227_UNGRANTED_FNS,
+];
+
 // #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
 //
@@ -2587,6 +2610,10 @@ export const ALLOWED = {
     // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
     ...PREVIEW_INVITE_0224_HUMAN_FNS,
     ...BANK_MATCH_EVIDENCE_0226_HUMAN_FNS, // 0226 [#657] the bank line matching-context read
+    // #651 [0227] the depreciation run preview — see the block above. clara_authenticated ONLY;
+    // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
+    // core it wraps (clara._fa_compute_charges) stays in FA_0041_UNGRANTED_FNS with no role at all.
+    ...FA_DEPRECIATION_0227_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2757,6 +2784,11 @@ export const ALLOWED = {
     // clara_runtime ONLY. Declared here so a grant to clara_authenticated (a second human door
     // with no _human_ctx floor) or to either wake role FAILS the matrix.
     ...FA_ACQUISITION_0216_RUNTIME_FNS,
+    // [#651, 0227] the depreciation run door the runtime calls OBO a named human -- clara_runtime
+    // ONLY, and a NEW NAME rather than a widened grant, because `run_depreciation_manual` (in
+    // FA_0041_HUMAN_FNS, expected false for every machine role) must never reach one or the
+    // maker-checker ladder would have a bypass. Declared here so any wider grant FAILS the matrix.
+    ...FA_DEPRECIATION_0227_RUNTIME_FNS,
     // [#638, 0221] the staff-expense-claim admission door — clara_runtime ONLY, the same lane
     // clara.admit_journal_work sits in, acting OBO a named human.
     ...STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS,
@@ -3016,6 +3048,12 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#638 0221 staff-expense-claim lane", STAFF_EXPENSE_CLAIMS_0221_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("#639 0216 fixed-asset acquisition lane", FA_ACQUISITION_0216_COHORT, liveNames));
+  // #651 [0227] — bimodal like 0216's: wholly present once 0227 applies, wholly absent before it,
+  // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
+  const depHistoryLive = FA_DEPRECIATION_0227_COHORT.filter((n) => liveNames.has(n));
+  if (depHistoryLive.length !== 0) {
+    failures.push(...cohortFailures("#651 0227 depreciation-history lane", FA_DEPRECIATION_0227_COHORT, liveNames));
+  }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
   const accrualLive = ACCRUAL_ADJUSTMENTS_0222_COHORT.filter((n) => liveNames.has(n));

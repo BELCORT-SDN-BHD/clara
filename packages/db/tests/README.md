@@ -405,3 +405,54 @@ check.
 
 `bank-match-evidence-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails LOUDLY on a database without 0226, because a skip is not evidence.
+### The depreciation-history battery (#651)
+
+`depreciation-history.test.mjs` is frontier-gated on the `_depreciation_history$` stem (migration
+0227) — never on a number — and shares `depreciation-history-fixtures.mjs`. Nineteen `p651.*`
+cells: the change class (required, `policy`/`error` refused by name with **#680** and #679's lock
+law in the `detail`, prior charges byte-identical after a revision, a first completion refused
+through BOTH completion doors), the locked-period law (refused at the RUNNING door before anything
+is drafted, the oracle skipping the closed period and reporting `skipped_closed`, and the
+withdraw-and-reopen recovery leg no battery held before), the authority's resolved instruction
+reference and its frozen window (including the floor's MEASURED cost — the parked agent catch-up
+lane can no longer reach a pre-floor period — the write-once wall on both sign-time columns, and
+the withdrawal of a NEVER-SIGNED authority, which 0227's own window CHECK would otherwise turn into
+a raw 23514), the preview (exact agreement with the run that
+follows it, and the proof it writes nothing), the OBO door (live-authority ladder, replay identity,
+and the three writer variants' mechanics asserted identical in one assertion — C86.2's re-derived
+pin), and four catalog censuses (the `_wdb_rerun_breach` consumer set, the `origin='scheduled_run'`
+writer set, `_fa_run_period_core`'s caller set at FOUR, and the replay census).
+
+Four things a later hand will trip over if they are not stated here.
+
+**The fixture world is `p651_`, not `x41_`, and that prefix is load-bearing.** These cells
+deliberately build broken books — an asset with no particulars, an asset under a disposal draft, a
+closed fiscal year — and `x41.s4` sweeps every `x41_` client expecting a healthy one. A fixture
+that named an `x41_` client would enrol this ticket's wreckage in a sibling battery's sweep.
+
+**Four other batteries sign a depreciation authority, and 0227 changed that door's arity.**
+`fa-authority-sign-compat.mjs` is the ONE place they all go through: it feature-detects the
+four-argument door off `to_regprocedure`, so `x41-fa-fixtures.mjs`, `client-onboarding-identity`,
+`f-a4-pr1c-rungs`, `x56-rest-j` and `packages/runtime/tests/reconcile-fa.test.mjs` all run at BOTH
+frontiers. It also owns the two labelled fixture writes no audited verb can reach: an instruction
+row for a client that is not yet ACTIVE, and an authority floor back-dated into a PAST month.
+
+**Back-dating the floor is a fixture act, not a product one.** `authority_from` is written once at
+signature and never moves, so every pre-existing arithmetic cell that charges a period earlier than
+"this month" needs the floor moved by labelled owner DML. `x41-fa-world.mjs`'s `liveAuthority` does
+exactly that, which is why the x41 arithmetic cells keep measuring arithmetic. MEASURED blast
+radius before that one line: 69 of 123 x41 cells red.
+
+**A fixture that turns a trigger off does it in ONE transaction.** `alter table … disable trigger`
+is DDL: inside a transaction it takes ACCESS EXCLUSIVE and the guard is off for that transaction
+alone, so a concurrent session blocks rather than writing past a disabled trigger and a killed
+process rolls the disable back. Run as separate autocommitted statements — which is how
+`fa-authority-sign-compat.mjs`'s two fixtures were first written — the window is open to EVERY
+session on the rig, and `--test-concurrency=1` bounds that only within this package while the
+estate runs real-DB cells from `packages/runtime` against the same database. `withTriggerOff` in
+that module is the shape; migration 0227:338-342 is the same manoeuvre inside the runner's own
+per-migration transaction.
+
+`depreciation-history-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_DEPRECIATION_HISTORY`); a FOCUSED run does not preload it and fails loudly on
+a database below 0227, because a skip is not evidence.

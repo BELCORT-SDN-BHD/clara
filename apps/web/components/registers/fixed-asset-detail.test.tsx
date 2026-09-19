@@ -22,13 +22,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
-import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { FixedAssetDetailView } from "./fixed-asset-detail";
-import messages from "../../messages/en.json";
+import { faApp, makeNavigation } from "./fa-depreciation-test-fixtures";
+
+const PATHNAME = "/clients/c1/registers/assets/a1";
 
 enableDomInspection();
 
@@ -115,25 +116,34 @@ function mockFor(detail: unknown, { status = 200 }: { status?: number } = {}): t
   }) as typeof fetch;
 }
 
+// #651 — THE TAB ID LIVES IN `?tab=` NOW, so this view reads `useSearchParams`/`useRouter` and a
+// bare `NextIntlClientProvider` no longer mounts it ("invariant expected app router to be
+// mounted"). These cells keep asking exactly what they asked before; what changed is that the
+// harness now supplies the navigation the component reads, through the SAME stub
+// `fa-detail-tab-url.test.tsx` uses — one shape, so the two files cannot drift apart. That file
+// owns the URL contract itself (which history verb, which address); this one owns the readings.
+let nav = makeNavigation("");
+
+function tree() {
+  return faApp(createElement(FixedAssetDetailView, { clientId: "c1", assetId: "a1" }), nav, PATHNAME);
+}
+
+/** A FRESH navigation per mount: `?tab=` is per-reader state, and a tab left selected by an
+ *  earlier cell would make the next one order-dependent. */
 function App() {
-  return createElement(NextIntlClientProvider, {
-    locale: "en",
-    messages,
-    children: createElement(
-      "div",
-      null,
-      createElement("h1", null, "Fixed asset"),
-      createElement(FixedAssetDetailView, { clientId: "c1", assetId: "a1" }),
-    ),
-  });
+  nav = makeNavigation("");
+  return tree();
 }
 
 /** Click the tab whose visible label is `label`. The strip is Base UI's Tabs, so the trigger is a
- *  real button with a role — this finds it the way a keyboard user reaches it. */
-async function openTab(h: Awaited<ReturnType<typeof renderComponent>>, label: string) {
+ *  real button with a role — this finds it the way a keyboard user reaches it. The RE-RENDER after
+ *  the click is not ceremony: the selected tab is now read from the URL, so the search params the
+ *  provider hands down have to be re-read before the new reading can be asserted. */
+async function openTab(h: Awaited<ReturnType<typeof renderComponent>> & { rerender: (el: ReturnType<typeof tree>) => Promise<void> }, label: string) {
   const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).trim() === label);
   assert.ok(trigger, `expected a tab trigger labelled "${label}"`);
   await h.fireEvent(trigger!, "click");
+  await h.rerender(tree());
   for (let i = 0; i < 4; i++) await h.settle();
 }
 

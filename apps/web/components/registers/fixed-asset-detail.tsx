@@ -27,8 +27,9 @@
 // EVERY FIGURE IS DB-PROJECTED. Cost, accumulated, NBV and the projected schedule all come from
 // `clara.get_fixed_asset`; this component formats them with `fmtCents` and computes none of them.
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { getFixedAsset, type FaRelatedAsset } from "@/lib/registers/fixed-assets";
@@ -42,10 +43,26 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { CompleteParticularsDialog, ReviseParticularsDialog } from "./fa-row-actions";
+import { FaRevisionTimeline } from "./fa-revision-timeline";
+import { FaChargeLedger } from "./fa-charge-ledger";
 import { fixedAssetHref, journalEntryHref, workDetailHref } from "@/lib/navigation/tree";
 import { applyDocumentParam, documentUrl } from "@/lib/documents/url-state";
 
-type TabId = "acquisition" | "particulars" | "schedule" | "history";
+// #651 — A FIFTH TAB, AND THE TAB ID MOVED INTO THE URL.
+//
+// AC4's word is SEPARATES, and the two empty states are different FACTS: "this asset's estimate
+// has never been revised" is not "depreciation particulars are not filled in yet", and a merged
+// section can only show one of them. Appendix D row 58 permits alternate views inside one route ON
+// CONDITION the state is shareable — which is why the id moved out of `useState` and into `?tab=`
+// in the same slice, on `registers?tab=fixedAssets`' own precedent. A pasted link now lands on the
+// reading it was about, and ONE Back returns to wherever the reader came from — the register, not
+// the tab they last glanced at — because every tab move REPLACES rather than pushes.
+const TABS = ["acquisition", "particulars", "revisions", "schedule", "history"] as const;
+type TabId = (typeof TABS)[number];
+
+export function isFaDetailTab(v: string | null): v is TabId {
+  return (TABS as readonly string[]).includes(v ?? "");
+}
 
 /** One labelled fact. `mono` is for ids and account codes — a reader comparing an id with one on
  *  another screen is doing character-by-character work, and a proportional font makes that worse. */
@@ -62,7 +79,19 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
   const t = useTranslations("FixedAssetDetail");
   const tReg = useTranslations("ClientRegisters.fixedAssets");
   const tc = useTranslations("Common");
-  const [tab, setTab] = useState<TabId>("acquisition");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab: TabId = isFaDetailTab(tabParam) ? tabParam : "acquisition";
+  // `router.replace`, not `push`: a tab is a READING of one object, and pushing one history entry
+  // per glance would make Back walk five tabs instead of leaving the page. This is the same shape
+  // `registers-workbench.tsx` uses for `?tab=`, and `?document=` before it.
+  const setTab = useCallback((next: TabId) => {
+    const qs = new URLSearchParams(searchParams.toString());
+    qs.set("tab", next);
+    router.replace(`${pathname}?${qs.toString()}`);
+  }, [pathname, router, searchParams]);
   const { data, loading, error, busy, act } = useAsyncRead(() => getFixedAsset(sessionTokenAccessor, assetId));
   const accountsRead = useAsyncRead(() => loadChartOfAccounts(sessionTokenAccessor, clientId));
   const hasData = data !== null;
@@ -109,6 +138,7 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
   const items: readonly { value: TabId; label: string }[] = [
     { value: "acquisition", label: t("tabs.acquisition") },
     { value: "particulars", label: t("tabs.particulars") },
+    { value: "revisions", label: t("tabs.revisions") },
     { value: "schedule", label: t("tabs.schedule") },
     { value: "history", label: t("tabs.history") },
   ];
@@ -292,6 +322,16 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
               </Card>
             ) : null}
 
+            {/* #651 — THE POLICY-EFFECTIVE REVISION TIMELINE, built from the `lineage` array
+                `clara.get_fixed_asset` has returned since 0041 and this app never read. */}
+            {tab === "revisions" ? (
+              <Card>
+                <CardContent className="flex flex-col gap-4">
+                  <FaRevisionTimeline asset={asset} lineage={data?.lineage ?? []} />
+                </CardContent>
+              </Card>
+            ) : null}
+
             {tab === "schedule" ? (
               <Card>
                 <CardContent className="flex flex-col gap-3">
@@ -345,6 +385,22 @@ export function FixedAssetDetailView({ clientId, assetId }: { clientId: string; 
                     <Fact label={t("history.disposedAt")}>{history?.disposed_at ?? dash}</Fact>
                   </dl>
                   {history?.chain_open ? <p className="text-sm text-warning">{t("history.chainOpen")}</p> : null}
+
+                  {/* #651 — THE IMMUTABLE CHARGE LEDGER. `charges` has been returned by
+                      `clara.get_fixed_asset` since 0041 and had no consumer in this app at all;
+                      AC4's "immutable charge, run and correction history" had no surface. An
+                      unwound row is struck through and labelled rather than removed, because the
+                      relation is append-only and a correction is a ROW, never an erasure. */}
+                  <section className="flex flex-col gap-2">
+                    <h3 className="text-sm font-medium">{t("ledger.heading")}</h3>
+                    <FaChargeLedger
+                      clientId={clientId}
+                      charges={data?.charges ?? []}
+                      particularsComplete={asset.particulars_complete}
+                    />
+                  </section>
+
+                  <h3 className="text-sm font-medium">{t("history.relationsHeading")}</h3>
                   {(history?.related ?? []).length === 0 ? (
                     <p className="text-sm text-muted-foreground">{t("history.empty")}</p>
                   ) : (

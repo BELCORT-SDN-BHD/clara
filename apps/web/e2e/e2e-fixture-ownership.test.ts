@@ -59,6 +59,7 @@ const LANE_MOCKS = [
   "chat-parity-mock.mjs",
   "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
+  "depreciation-mock.mjs",
   "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
   "documents-viewer-mock.mjs",
@@ -421,6 +422,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // three table reads — the shape a new lane mock aims for, declaring neither list. It claims no
   // unfiltered `/clients` register (the walk navigates by URL) and it has no runtime half at all.
   "fixed-asset-mock.mjs": { unscopeable: [], debt: [] },
+  // #651 — every handler is scoped to one of this lane's OWN two client ids (`OURS()`) or to one
+  // of its own asset ids (`detailFor()` returns null otherwise), and falls through in every other
+  // case, so nothing is declared here. FIVE of its verbs are also answered by
+  // `fixed-asset-mock.mjs` — `get_fixed_asset`, `get_depreciation_authority`,
+  // `list_depreciation_runs`, `list_fixed_assets` and `fa_register_tie` — and SHARED_RPC_VERBS
+  // below is the source of truth for that set rather than this sentence. It reads the
+  // POST body through the SHARED `readCachedJson` (`mock-dispatch.mjs`), so declining another
+  // lane's client leaves that lane's body fully readable.
+  "depreciation-mock.mjs": { unscopeable: [], debt: [] },
   // #648's A5 lane. Every one of its five verbs falls through unless the request carries this
   // lane's own cookie marker, and the three that name a plan check it as well — so it answers for
   // nobody else, and the firm-home tile's `get_firm_setup` on every OTHER walk is served by
@@ -1142,6 +1152,16 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // own `DOCUMENT_STATES` map / `LANE_DOCUMENT_PREFIX` (documents-viewer-mock.mjs:513, :536, :551,
   // :561); neither can answer for the other's walk, which is what makes these declared shares
   // rather than collisions.
+  // #651 x #639 — the depreciation lane renders the SAME asset detail and the SAME authority and
+  // runs panels as the acquisition lane, so the three reads those surfaces issue on mount are
+  // answered by both. `fixed-asset-mock.mjs` gates on its own `FA.clientId` / asset ids and
+  // `depreciation-mock.mjs` on its own two client ids and its own asset id; neither can answer
+  // for the other's walk, which is what makes these declared shares rather than collisions.
+  get_fixed_asset: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  get_depreciation_authority: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  list_depreciation_runs: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
   get_document_extract: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
   list_source_dependents: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
   list_source_revisions: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],

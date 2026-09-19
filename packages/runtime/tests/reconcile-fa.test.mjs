@@ -21,6 +21,49 @@ import assert from "node:assert/strict";
 import { rootQuery, humanQuery, asRuntime, opk, buildFirm, endPool } from "./relay-fixtures.mjs";
 import { reconcileFaRuns } from "../lib/reconciler-fa.mjs";
 
+// #651 [0227] — TWO THINGS MOVED UNDER THIS CELL, AND BOTH ARE THE PRODUCT'S, NOT THE RIG'S.
+//
+//   (1) `clara.sign_depreciation_authority` takes a REQUIRED, RESOLVED instruction reference, so
+//       its arity moved from three to four (one pg_proc row per name, never an overload).
+//   (2) A signature now FLOORS the due oracle at the first day of the SIGNING month (D8:
+//       "a signature is not permission to charge every past period"), and a period is due only
+//       once it has ENDED — so an authority signed today reaches NOTHING, and this cell's asset is
+//       three months old.
+//
+// Both are proven against the real doors by packages/db/tests/depreciation-history.test.mjs
+// (`p651.authority.ref_resolves`, `p651.authority.floor`). HERE they are fixture plumbing: the
+// cell is about the BELT, and the belt is unchanged. The db package's shared helper
+// (packages/db/tests/fa-authority-sign-compat.mjs) does exactly this for the four SQL-lane call
+// sites; this lane keeps its own pool, so the two lines are inlined rather than imported across
+// packages. Both are LABELLED fixture writes, and the second disables one trigger for exactly one
+// statement, in a `finally`.
+async function signAuthorityFor(owner, { client, authority, reachBack }) {
+  const four = (await rootQuery(
+    "select to_regprocedure('clara.sign_depreciation_authority(uuid,uuid,text,jsonb)') is not null as ok"
+  )).rows[0].ok;
+  if (!four) {
+    await humanQuery(owner,
+      "select clara.sign_depreciation_authority(p_client=>$1,p_authority=>$2,p_op_key=>$3) as r",
+      [client, authority, opk("sign")]);
+    return;
+  }
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
+  const task = (await rootQuery(
+    `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'autodraft','queued','p651-fa-belt-rig') returning id`, [firm, client])).rows[0].id;
+  await humanQuery(owner,
+    "select clara.sign_depreciation_authority(p_client=>$1,p_authority=>$2,p_op_key=>$3,p_authority_ref=>$4::jsonb) as r",
+    [client, authority, opk("sign"), JSON.stringify({ kind: "chat_task", id: task })]);
+  if (!reachBack) return;
+  try {
+    await rootQuery("alter table clara.fa_depreciation_authorities disable trigger t_fa_authorities_transition");
+    await rootQuery("update clara.fa_depreciation_authorities set authority_from=$2::date where id=$1",
+      [authority, reachBack]);
+  } finally {
+    await rootQuery("alter table clara.fa_depreciation_authorities enable trigger t_fa_authorities_transition");
+  }
+}
+
 const COST = "200-R41";
 const ACCUM = "210-R41";
 const EXPENSE = "900-R41";
@@ -135,9 +178,7 @@ test("the FA sweep runs end-to-end on a real 0041 database: feature-detect → d
     [client, "monthly", opk("prop")])).rows[0].r;
   const authority = proposed.authority_id ?? proposed.id;
   assert.ok(authority, `propose_depreciation_authority names the authority (got ${JSON.stringify(proposed)})`);
-  await humanQuery(owner,
-    "select clara.sign_depreciation_authority(p_client=>$1,p_authority=>$2,p_op_key=>$3) as r",
-    [client, authority, opk("sign")]);
+  await signAuthorityFor(owner, { client, authority, reachBack: m3.start });
 
   const due = await dueFor(client);
   assert.equal(due.due, true, "a live authority + a complete, in-service asset makes a period due");

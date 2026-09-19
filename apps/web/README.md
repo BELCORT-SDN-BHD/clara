@@ -561,3 +561,57 @@ is on `scripts/protected-components.json` because it carries owner-ruled fixes. 
 `"registries": {}`. Overriding the guard with `CLARA_UI_ADD_OVERWRITE=1` would clobber an owner
 ruling to buy a picker, so the candidate surface uses a search field over a `Table` instead —
 AC13's own named fallback — and #657 changes neither `apps/web/package.json` nor the lockfile.
+## The depreciation surfaces (#651)
+
+**The period is the database's, so the two date inputs are gone.** `fa-depreciation-runs-panel.tsx`
+used to ask a person to type a period start and end; the only lawful pair was the one
+`clara.depreciation_run_due` had already chosen, and anything else was refused. The dialog now opens
+on `clara.preview_depreciation_run` (`components/registers/fa-run-preview.tsx`) and shows what the
+next run WOULD do before anything is written: the period the register chose, the per-asset amounts,
+both general-ledger legs, every skipped asset with its reason in words, whether the run will post or
+wait for approval, and any period the oracle skipped for a closed financial year. Confirm runs it.
+
+**Every skip reason was MEASURED, and an unknown one degrades rather than vanishing.** The five the
+database can emit are `incomplete`, `not_in_service`, `fully_depreciated`, `none_method` and
+`disposal_draft_outstanding` — the fifth is written by `clara._fa_compute_charges` itself and the
+per-asset function can never return it. A reason outside that map renders as its VERBATIM code
+beside a neutral sentence; it is never dropped and never guessed. The skipped list may collapse only
+when every reason is benign: a row skipped for incomplete particulars renders the list OPEN, because
+it is work somebody still owes.
+
+**One decision, one key — on every FA door, not only the run.** These wrappers used to mint
+`crypto.randomUUID()` inside themselves, so "the response was lost, click again" answered the retry
+with a refusal instead of the receipt it had already earned. `lib/registers/depreciation.ts`'
+`useDepreciationDecisionKey` mints one key per OPEN DECISION, keyed on the intent tuple, and holds
+it until the decision changes or ends — on `components/work/work-cancel-dialog.tsx:95`'s shape. The
+tuples are `depreciationIntent` (client, period start, period end), `authorityIntent` (the act, the
+authority, the value being decided) and `reviseIntent` (every value the revision door is asked to
+write, particulars key-sorted). **Signing is where a person actually meets this**: the sign door's
+replay identity is {client, authority}, so a second key reaches 0227's `authority_already_live` arm
+and refuses. `completeFixedAssetParticulars` and `disposeFixedAsset` still mint their own key —
+#639's original shape, untouched by this branch and carried as a follow-up.
+
+**Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
+pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.
+The fifth tab is new: *Policy & effective revisions* renders the `lineage` array as a revision
+timeline — one row per generation with its effective date, its particulars, its change class and the
+reason for it — because "this asset's estimate has never been revised" and "depreciation particulars
+are not filled in yet" are different facts and a merged section can show only one of them. A
+generation minted before migration 0227 carries no class and reads as NOT RECORDED, never as an
+accounting claim this surface invented. *History* gains the immutable charge ledger from the
+`charges` array, each row linking the journal entry it posted; an unwound charge is struck through
+beside the row that unwound it rather than removed. Both arrays have been returned by
+`clara.get_fixed_asset` since 0041 and this app had never read either.
+
+**A revision now says what kind of change it is.** The revise dialog
+(`components/registers/fa-row-actions.tsx`) carries a change-class control and a required reason.
+`estimate` is the only selectable value; `policy` and `error` render as VISIBLY DISABLED options
+carrying the rule in words and naming the ticket that owns the retrospective-restatement lane, so a
+person learns the rule instead of wondering where it went. Both typed values survive a refusal, and
+a typed CLR37 refusal renders verbatim with its code.
+
+**Signing names the instruction it executes.** `fa-authority-ceremony.tsx` gains the instruction
+reference — the Work or chat task the instruction lives in — and renders the resolution refusals
+verbatim with their codes. `depreciation-authority-panel.tsx` shows the resolved reference as a link
+and the authority window's floor, with the honest sentence that anything earlier is reached only by
+an explicit catch-up a person performs.

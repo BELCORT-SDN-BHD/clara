@@ -9,6 +9,10 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldTitle,
+} from "@/components/ui/field";
 import { MoneyInput } from "@/components/common/money-input";
 import { NativeSelect } from "@/components/common/native-select";
 import { FaDoorDialog } from "./FaDoorDialog";
@@ -16,9 +20,13 @@ import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { faRefusalControlId } from "@/lib/registers/fa-refusal-field";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
 import { fmtCents } from "@/lib/registers/money";
-import { completeFixedAssetParticulars, reviseFixedAssetParticulars, disposeFixedAsset } from "@/lib/registers/fixed-assets";
+import {
+  completeFixedAssetParticulars, reviseFixedAssetParticulars, reviseIntent, disposeFixedAsset,
+  FA_CHANGE_CLASSES, FA_IMPLEMENTED_CHANGE_CLASSES,
+} from "@/lib/registers/fixed-assets";
+import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import type { FixedAssetRow, FaParticularsInput } from "@/lib/registers/fixed-assets";
+import type { FixedAssetRow, FaParticularsInput, FaChangeClass } from "@/lib/registers/fixed-assets";
 import type { AccountRow } from "@/lib/registers/accounts";
 
 type RowActionsProps = {
@@ -75,6 +83,18 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
 export function ReviseParticularsDialog({ clientId, asset, busy, act, error }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [effectiveFrom, setEffectiveFrom] = useState("");
+  // #651 — AC1's HUMAN HALF. Every revision now names what KIND of change it is and why; the door
+  // refuses CLR37 `fa_change_class_required` without it. `estimate` is the only selectable value,
+  // and the other two are rendered as VISIBLY DISABLED options carrying the reason in words rather
+  // than hidden — a person learns the rule instead of wondering where it went.
+  const [changeClass, setChangeClass] = useState<FaChangeClass>("estimate");
+  const [changeReason, setChangeReason] = useState("");
+  const reasonBlank = changeReason.trim() === "";
+  // #651 fix-round 1 (adversarial review ADV-651-8) — ONE DECISION, ONE KEY. A revision is a
+  // supersede-forward INSERT: a retry after a lost response that minted a second key would be a
+  // second revision of the same asset, not the same one. Editing any value in the form is a
+  // different decision and earns a new key (`reviseIntent`).
+  const decision = useDepreciationDecisionKey();
   const [particulars, setParticulars] = useState<FaParticularsInput>({
     method: (asset.method ?? "straight_line") as FaParticularsInput["method"],
     useful_life_months: asset.useful_life_months,
@@ -96,18 +116,91 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act, error }: R
       busy={busy}
       refusal={toDialogRefusal(error)}
       refusalFocusId={faRefusalControlId(`fa-revise-${asset.id}`, error)}
-      confirmDisabled={!effectiveFrom || !particularsReadyToSubmit(particulars)}
+      // A CLOSED DIALOG ENDS THE DECISION: the next press is a new revision and mints a new key.
+      onClosed={() => decision.renew()}
+      confirmDisabled={!effectiveFrom || reasonBlank || !particularsReadyToSubmit(particulars)}
       onConfirm={() =>
         act(async () => {
-          await reviseFixedAssetParticulars(sessionTokenAccessor, { clientId, assetId: asset.id, particulars, effectiveFrom });
+          const intent = reviseIntent({
+            clientId, assetId: asset.id, particulars, effectiveFrom,
+            changeClass, changeReason: changeReason.trim(),
+          });
+          await reviseFixedAssetParticulars(sessionTokenAccessor, {
+            clientId, assetId: asset.id, particulars, effectiveFrom,
+            changeClass, changeReason: changeReason.trim(), opKey: decision.key(intent),
+          });
         })
       }
     >
       <div className="flex flex-col gap-2">
-        <div className="grid gap-1.5">
-          <Label htmlFor={`fa-revise-eff-${asset.id}`}>{t("effectiveFromLabel")}</Label>
-          <Input id={`fa-revise-eff-${asset.id}`} type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-        </div>
+        {/* FieldGroup / Field / FieldLabel / FieldDescription / FieldError — appendix D row 28:
+            all new persistent inputs go through them, and they replace ad hoc label/error layout.
+            Both values survive a refusal, because FaDoorDialog stays open on one and this state
+            lives outside it. */}
+        <FieldGroup>
+          <Field>
+            <FieldContent>
+              <FieldLabel htmlFor={`fa-revise-eff-${asset.id}`}>
+                <FieldTitle>{t("effectiveFromLabel")}</FieldTitle>
+                <FieldDescription>{t("effectiveFromHelp")}</FieldDescription>
+              </FieldLabel>
+            </FieldContent>
+            <Input id={`fa-revise-eff-${asset.id}`} type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+          </Field>
+
+          <Field>
+            <FieldContent>
+              <FieldLabel htmlFor={`fa-revise-class-${asset.id}`}>
+                <FieldTitle>{t("changeClassLabel")}</FieldTitle>
+                <FieldDescription>{t("changeClassHelp")}</FieldDescription>
+              </FieldLabel>
+            </FieldContent>
+            <NativeSelect
+              id={`fa-revise-class-${asset.id}`}
+              value={changeClass}
+              onChange={(e) => setChangeClass(e.target.value as FaChangeClass)}
+            >
+              {FA_CHANGE_CLASSES.map((c) => (
+                <option
+                  key={c}
+                  value={c}
+                  // VISIBLY DISABLED, NOT HIDDEN. A policy change and an error correction are
+                  // retrospective restatements; ticket #680 owns that lane, under #679's lock law.
+                  // The door refuses both by name (CLR37 `fa_change_class_unsupported`) and that
+                  // refusal still renders verbatim if this control is reached any other way.
+                  disabled={!FA_IMPLEMENTED_CHANGE_CLASSES.includes(c)}
+                >
+                  {t(`changeClass.${c}`)}
+                  {FA_IMPLEMENTED_CHANGE_CLASSES.includes(c) ? "" : ` — ${t("changeClassUnsupported")}`}
+                </option>
+              ))}
+            </NativeSelect>
+            <FieldDescription data-testid={`fa-revise-class-note-${asset.id}`}>
+              {t("changeClassRestatementNote")}
+            </FieldDescription>
+          </Field>
+
+          <Field data-invalid={reasonBlank ? true : undefined}>
+            <FieldContent>
+              <FieldLabel htmlFor={`fa-revise-reason-${asset.id}`}>
+                <FieldTitle>{t("changeReasonLabel")}</FieldTitle>
+                <FieldDescription>{t("changeReasonHelp")}</FieldDescription>
+              </FieldLabel>
+            </FieldContent>
+            <Textarea
+              id={`fa-revise-reason-${asset.id}`}
+              value={changeReason}
+              aria-invalid={reasonBlank || undefined}
+              aria-describedby={reasonBlank ? `fa-revise-reason-${asset.id}-error` : undefined}
+              onChange={(e) => setChangeReason(e.target.value)}
+            />
+            {reasonBlank ? (
+              <FieldError id={`fa-revise-reason-${asset.id}-error`} data-testid={`fa-revise-reason-error-${asset.id}`}>
+                {t("changeReasonRequired")}
+              </FieldError>
+            ) : null}
+          </Field>
+        </FieldGroup>
         <FaParticularsFields idPrefix={`fa-revise-${asset.id}`} value={particulars} onChange={setParticulars} />
       </div>
     </FaDoorDialog>

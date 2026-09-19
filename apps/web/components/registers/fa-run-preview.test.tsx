@@ -1,0 +1,188 @@
+// #651 — the depreciation run PREVIEW, driven through its real render states.
+//
+// WHAT EACH CELL PINS:
+//   preview.figures      the exact period the DATABASE chose, the per-asset amounts, the two GL
+//                        legs, and whether the run will post or wait. The two date inputs this
+//                        dialog used to carry are GONE, because the only lawful value a person
+//                        could type was the one the database already knew.
+//   preview.skips        all FIVE measured reasons in words, plus an UNKNOWN one rendering as its
+//                        verbatim code rather than vanishing.
+//   preview.collapse     the skipped list renders OPEN when any reason is work somebody still owes
+//                        (appendix D row 17) and may collapse only when every reason is benign.
+//   preview.states       loading is shape-matched and stops on the answer; a denied/failed read is
+//                        NOT empty data (appendix D row 27) and renders verbatim with its code; a
+//                        not-due answer names the database's own reason and still shows the floor.
+//   preview.closed       a period the oracle skipped for a closed financial year is STATED. A skip
+//                        nobody can see is the same defect as a silent post.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createElement } from "react";
+
+import { renderComponent, textOf } from "../../test/hookHarness";
+import { enableDomInspection } from "../../test/domInspect";
+import { FaRunPreviewBody } from "./fa-run-preview";
+import { intlApp, faPreview, findAll, tid, attr } from "./fa-depreciation-test-fixtures";
+
+enableDomInspection();
+
+const render = (props: { preview?: unknown; loading?: boolean; error?: string | null }) =>
+  renderComponent(intlApp(createElement(FaRunPreviewBody, {
+    preview: (props.preview ?? null) as never,
+    loading: props.loading ?? false,
+    error: props.error ?? null,
+  })));
+
+test("preview.figures the period is the DATABASE'S, the amounts and both legs render exactly, and the dialog says what it will do", async () => {
+  const h = await render({ preview: faPreview() });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const text = h.text();
+    const period = h.find((n) => tid(n) === "fa-preview-period");
+    assert.ok(period, "the period renders as its own labelled element");
+    assert.match(textOf(period!), /2026-07-01/);
+    assert.match(textOf(period!), /2026-07-31/);
+    assert.match(text, /The period is the register's, not yours/,
+      "…and the surface SAYS whose period it is, which is why the two date inputs are gone");
+    assert.match(text, /Air compressor/, "the per-asset charge");
+    assert.match(text, /75\.00/, "…in exact minor units");
+    assert.match(text, /6510/, "the expense leg's account");
+    assert.match(text, /1519/, "…and the accumulated one");
+    assert.match(textOf(h.find((n) => tid(n) === "fa-preview-mode")!), /Will wait for approval/,
+      "an unearned ramp WAITS, and the preview says so before anything is written");
+    assert.match(textOf(h.find((n) => tid(n) === "fa-preview-total")!), /75\.00/);
+    assert.match(textOf(h.find((n) => tid(n) === "fa-preview-floor")!), /2026-03-01/,
+      "the authority window's floor is on the surface, not only in a refusal");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("preview.skips all FIVE measured reasons render in words, and an UNKNOWN reason renders as its verbatim code rather than vanishing", async () => {
+  const skipped = [
+    { asset_id: "a-inc", reason: "incomplete" },
+    { asset_id: "a-nis", reason: "not_in_service" },
+    { asset_id: "a-fd", reason: "fully_depreciated" },
+    { asset_id: "a-nm", reason: "none_method" },
+    { asset_id: "a-dd", reason: "disposal_draft_outstanding" },
+    { asset_id: "a-six", reason: "some_sixth_reason" },
+  ];
+  const h = await render({ preview: faPreview({ skipped }) });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const text = h.text();
+    assert.match(text, /waiting on depreciation particulars/);
+    assert.match(text, /not yet in service/);
+    assert.match(text, /fully depreciated/);
+    assert.match(text, /stated as not depreciated/);
+    assert.match(text, /a disposal draft is waiting on this asset/,
+      "the FIFTH reason — the one clara._fa_asset_charges can never return, written by clara._fa_compute_charges itself");
+    // THE DEGRADE. A vocabulary measured once can grow; dropping the row would tell a professional
+    // an asset was charged when it was not, and guessing a sentence would be worse.
+    assert.match(text, /some_sixth_reason/,
+      "an unmapped reason renders as its VERBATIM code beside a neutral sentence");
+    const rows = findAll(h.container as never, (n) => tid(n).startsWith("fa-preview-skip-"));
+    assert.equal(rows.length, 6, "every skipped asset gets a row, known reason or not");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("preview.collapse the skipped list renders OPEN when any reason is work somebody still owes, and may collapse only when every reason is benign", async () => {
+  const benign = await render({
+    preview: faPreview({ skipped: [{ asset_id: "a1", reason: "fully_depreciated" }, { asset_id: "a2", reason: "none_method" }] }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await benign.settle();
+    const node = benign.find((n) => tid(n) === "fa-preview-skipped");
+    assert.ok(node, "the disclosure renders");
+    assert.equal(attr(node as never, "data-starts-open"), "false",
+      "a list of settled facts may collapse");
+  } finally {
+    await benign.unmount();
+  }
+
+  const owed = await render({
+    preview: faPreview({ skipped: [{ asset_id: "a1", reason: "fully_depreciated" }, { asset_id: "a2", reason: "incomplete" }] }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await owed.settle();
+    assert.equal(attr(owed.find((n) => tid(n) === "fa-preview-skipped") as never, "data-starts-open"), "true",
+      "appendix D row 17: one asset waiting on its particulars opens the whole list — never hide an unresolved question by default");
+  } finally {
+    await owed.unmount();
+  }
+});
+
+test("preview.states loading is shape-matched, a refusal is NOT empty data, and a not-due answer names the database's own reason", async () => {
+  const loading = await render({ preview: null, loading: true });
+  try {
+    await loading.settle();
+    assert.ok(loading.find((n) => tid(n) === "fa-preview-loading"), "a shape-matched skeleton, not a spinner");
+    assert.doesNotMatch(loading.text(), /0\.00/, "and NO placeholder amount painted as a zero");
+  } finally {
+    await loading.unmount();
+  }
+
+  const denied = await render({ preview: null, error: "CLR11 · client is not in your firm" });
+  try {
+    await denied.settle();
+    assert.ok(denied.find((n) => tid(n) === "fa-preview-error"), "a refusal renders as a refusal");
+    assert.match(denied.text(), /CLR11/, "…with its CODE, verbatim");
+    assert.match(denied.text(), /client is not in your firm/, "…and the door's own words, un-re-worded");
+    assert.doesNotMatch(denied.text(), /Nothing is due/,
+      "appendix D row 27: permission denial and fetch failure are NOT empty data");
+  } finally {
+    await denied.unmount();
+  }
+
+  const notDue = await render({
+    preview: faPreview({ due: false, reason: "period_not_ended", charges: [], legs: [], charged_cents: 0, entries: 0 }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await notDue.settle();
+    assert.ok(notDue.find((n) => tid(n) === "fa-preview-not-due"));
+    assert.match(notDue.text(), /the next period has not ended/,
+      "the DATABASE's own reason, in words");
+    assert.match(textOf(notDue.find((n) => tid(n) === "fa-preview-floor")!), /2026-03-01/,
+      "…and the floor is still shown, because 'nothing is due' on a client with old uncharged assets needs a WHY");
+  } finally {
+    await notDue.unmount();
+  }
+
+  const unknownReason = await render({
+    preview: faPreview({ due: false, reason: "some_new_reason", charges: [], legs: [], charged_cents: 0, entries: 0 }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await unknownReason.settle();
+    assert.match(unknownReason.text(), /some_new_reason/,
+      "…and a reason this surface does not know is printed rather than swallowed");
+  } finally {
+    await unknownReason.unmount();
+  }
+});
+
+test("preview.closed a period the oracle skipped for a CLOSED financial year is stated, with the year and what happens to its arrears", async () => {
+  const h = await render({
+    preview: faPreview({
+      skipped_closed: [
+        { period_start: "2026-05-01", period_end: "2026-05-31", fiscal_year_id: "fy1", fy_label: "2026", fy_status: "closed" },
+        { period_start: "2026-06-01", period_end: "2026-06-30", fiscal_year_id: "fy1", fy_label: "2026", fy_status: "closed" },
+      ],
+    }),
+  });
+  try {
+    for (let i = 0; i < 3; i++) await h.settle();
+    const node = h.find((n) => tid(n) === "fa-preview-skipped-closed");
+    assert.ok(node, "a skip nobody can see is the same defect as a silent post");
+    const text = textOf(node!);
+    assert.match(text, /2 period\(s\) were skipped because their financial year is closed/);
+    assert.match(text, /2026-05-01/);
+    assert.match(text, /2026-06-30/);
+    assert.match(text, /\(2026\)/, "…and the year is NAMED");
+    assert.match(text, /arrears are charged by the next open period/i,
+      "…and the reader is told the money is not gone: `skipped_closed` means 'never run in its own right'");
+  } finally {
+    await h.unmount();
+  }
+});
