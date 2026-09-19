@@ -8,8 +8,9 @@ import { useReadErrKind } from "@/lib/parts/read-err-kind";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadDocumentDetail } from "@/lib/documents/loaders";
 import { readSourceDependents, readSourceRevisions, type CorrectionPreview } from "@/lib/documents/reads";
+import { listProcessingTasksForDocument } from "@/lib/documents/intake";
 import { useSettlePoll } from "@/lib/documents/use-settle-poll";
-import type { ProcessingStatus } from "@/lib/documents/types";
+import type { ProcessingStatus, ProcessingTaskRow } from "@/lib/documents/types";
 import { findEntryForDocument, type DocumentClaim } from "@/lib/work/evidence";
 import {
   applyDocumentTabParam, documentUrl, parseDocumentTabParam, type DocumentTab,
@@ -122,16 +123,25 @@ export function DocumentDetail({
    *  (the intake-receipts settle poll below covers the PRE-FILING queue, not a filed document's own
    *  extraction/OCR tasks). This reuses the SAME bounded, backed-off, hidden-tab-paused idiom
    *  `documents-workbench.tsx` already runs for the receipts list (`lib/documents/use-settle-poll.ts`)
-   *  rather than inventing a second one — `onTick` is the panel's OWN whole-bundle `reload`, which is
-   *  safe to call in the background: the render below gates on `loading && !data` (never bare
-   *  `loading`), so an in-flight background reload never blanks a panel that already has data.
+   *  rather than inventing a second one.
+   *
+   *  L07-02 (fix round) — `onTick` is `listProcessingTasksForDocument` ALONE, ONE read, matching
+   *  `use-settle-poll.ts`'s own onTick contract ("One read.") and the sibling receipts poll's law
+   *  (README.md, "A tick costs ONE read"). It USED to be the panel's whole-bundle `reload()` (five
+   *  or six reads a tick, up to ~72 over a poll's life) — the exact pattern fix round 1 removed from
+   *  the receipts poll for the same cost reason. `taskOverride` carries the freshest read; cleared
+   *  whenever `data` itself changes (a real `reload()`, from a mount, an act, or the manual Refresh
+   *  below) so a stale override can never shadow a fresher full bundle.
    *
    *  `resetKey: documentId` restarts the budget on a different document even though this component
    *  is already React-`key`ed by it at the workbench (documents-workbench.tsx's own consumer
    *  contract) — belt, matching `use-settle-poll.ts`'s own stated reason for the option existing. */
-  useSettlePoll({
-    enabled: data !== null && data.processingTasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status)),
-    onTick: () => void reload(),
+  const [taskOverride, setTaskOverride] = useState<ProcessingTaskRow[] | null>(null);
+  useEffect(() => { setTaskOverride(null); }, [data]);
+  const tasks = taskOverride ?? data?.processingTasks ?? [];
+  const tasksPoll = useSettlePoll({
+    enabled: tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status)),
+    onTick: async () => { setTaskOverride(await listProcessingTasksForDocument(documentId)); },
     resetKey: documentId,
     ...settlePoll,
   });
@@ -240,10 +250,12 @@ export function DocumentDetail({
     <div className="flex flex-col gap-4">
       <DocumentMetadata
         document={data.document}
-        tasks={data.processingTasks}
+        tasks={tasks}
         clientId={clientId}
         headingId={DOCUMENT_HEADING_ID}
         onShowExtraction={() => setExtractOpen(true)}
+        tasksExhausted={tasksPoll.exhausted && tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))}
+        onRefreshTasks={() => void reload()}
       />
 
       {/* #646 — the correction band stands ABOVE the tab strip so both of its sentences are

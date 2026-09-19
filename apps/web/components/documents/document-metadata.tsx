@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { documentBadges, type DocumentBadge } from "@/lib/documents/copy";
 import { renderKindLabel } from "@/lib/documents/kind-label";
 import { SectionHeader } from "@/components/common/section-header";
@@ -55,7 +56,7 @@ function badgeKey(badge: DocumentBadge): string {
  *  subject (reading the stored original) and they now live in one file; this one
  *  is back to being what its name says. */
 export function DocumentMetadata({
-  document: doc, tasks, clientId, headingId, onShowExtraction,
+  document: doc, tasks, clientId, headingId, onShowExtraction, tasksExhausted, onRefreshTasks,
 }: {
   document: DocumentRow;
   tasks: ProcessingTaskRow[];
@@ -72,6 +73,11 @@ export function DocumentMetadata({
    *  show. Opens the SAME structured extraction view that lives further down this
    *  panel (document-detail.tsx owns its open state). */
   onShowExtraction?: () => void;
+  /** #904 — true once the tasks settle-poll's tick ceiling was hit with a task still
+   *  non-terminal: the same "an exhausted poll is a visible end, not a silent one"
+   *  law `intake-receipts.tsx` already renders for the sibling receipts poll. */
+  tasksExhausted?: boolean;
+  onRefreshTasks?: () => void;
 }) {
   const t = useTranslations("ClientDocuments");
 
@@ -114,6 +120,19 @@ export function DocumentMetadata({
             ))}
           </ul>
         )}
+        {tasksExhausted ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-muted-foreground" data-testid="extraction-tasks-exhausted">
+              {t("extractionTasksExhausted")}
+            </p>
+            <Button
+              type="button" size="xs" variant="outline"
+              data-testid="extraction-tasks-refresh" onClick={onRefreshTasks}
+            >
+              {t("receiptsRefresh")}
+            </Button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

@@ -39,10 +39,22 @@ function taskRow(status: "queued" | "held_egress" | "running" | "done" | "failed
   };
 }
 
+/** L07-07 — a live, non-terminal intake row FILED TO `DOC_PDF` (already in `FILING_ROWS`, so
+ *  `buildReceipts`'s "filed to this client" arm shows it with no `caller_context` row needed). Used
+ *  only by the cell that must prove the receipts poll is GENUINELY live, not merely inert. */
+const LIVE_INTAKE_ROW = {
+  id: "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a", uploaded_by: "22222222-2222-4222-8222-222222222222",
+  origin: "documents_tab", original_filename: "still-verifying.pdf", declared_mime: "application/pdf",
+  declared_bytes: 1024, status: "verifying", document_id: DOC_PDF, failure_code: null,
+  expires_at: null, created_at: "2026-04-01T00:00:00.000Z", updated_at: "2026-04-01T00:00:00.000Z",
+};
+
 /** The workbench's read surface, counted by relation — `tasks` is a function so a cell can change
  *  what the NEXT poll tick returns (the settle transition), the same shape
- *  `documents-workbench-refresh.test.tsx`'s own `receiptFetch` uses for the intake-receipts poll. */
-function makeFetch(counts: Record<string, number>, tasks: () => unknown[]): typeof fetch {
+ *  `documents-workbench-refresh.test.tsx`'s own `receiptFetch` uses for the intake-receipts poll.
+ *  `intakeRows` defaults to an empty queue (every 904 cell but the L07-07 one wants the RECEIPTS
+ *  poll inert, so a tasks-poll assertion is never accidentally satisfied by the other poll). */
+function makeFetch(counts: Record<string, number>, tasks: () => unknown[], intakeRows: () => unknown[] = () => []): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = String(input);
     const relation = /\/rest\/v1\/(?:rpc\/)?([a-z_]+)/.exec(url)?.[1] ?? "unknown";
@@ -53,6 +65,7 @@ function makeFetch(counts: Record<string, number>, tasks: () => unknown[]): type
         case "documents": return [DOC_ROWS[DOC_PDF]];
         case "clients": return [{ id: DOCUMENTS_CLIENT, name: "Rome Properties", status: "active" }];
         case "document_processing_tasks_visible": return tasks();
+        case "document_intakes_visible": return intakeRows();
         case "attribution_candidates": return [];
         case "document_extractions": return [];
         case "document_regions": return [];
@@ -99,15 +112,19 @@ async function settleUntil(
 async function withDetailOpen(
   tasks: () => unknown[],
   run: (h: Awaited<ReturnType<typeof renderComponent>>, counts: Record<string, number>) => Promise<void>,
+  opts: { intakeRows?: () => unknown[]; settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number } } = {},
 ): Promise<void> {
   const counts: Record<string, number> = {};
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  globalThis.fetch = makeFetch(counts, tasks);
+  globalThis.fetch = makeFetch(counts, tasks, opts.intakeRows);
   configureSessionTokenSource(async () => "tok");
   const nav = makeNavigation();
-  const tree = () => documentsApp(createElement(DocumentsWorkbench, { clientId: DOCUMENTS_CLIENT, settlePoll: FAST_POLL }), nav);
+  const tree = () => documentsApp(
+    createElement(DocumentsWorkbench, { clientId: DOCUMENTS_CLIENT, settlePoll: opts.settlePoll ?? FAST_POLL }),
+    nav,
+  );
   const h = await renderComponent(tree());
   try {
     for (let i = 0; i < 8; i++) await h.settle();
@@ -193,4 +210,75 @@ test("904 — the intake-receipts settle poll is unaffected: a running processin
       "the tasks poll must never issue a read against the unrelated intake-receipts relation",
     );
   });
+});
+
+test("904.L07-07 — the intake-receipts poll is GENUINELY live alongside the tasks poll, not merely inert: with a real unsettled intake row, BOTH polls keep ticking their own relation independently", async () => {
+  // The cell above (AC3) only proves the tasks poll never touches document_intakes_visible while
+  // the receipts poll's own `enabled` predicate is FALSE throughout (empty queue) — a weaker claim
+  // than "the receipts poll is unaffected". This cell seeds one non-terminal intake row filed to
+  // the SAME document the tasks poll is watching, so the receipts poll is actually running, and
+  // proves each relation grows on ITS OWN poll's schedule rather than the other's.
+  await withDetailOpen(
+    () => [taskRow("running")],
+    async (h, counts) => {
+      for (let i = 0; i < 8; i++) await h.settle();
+      const mountIntakes = counts.document_intakes_visible ?? 0;
+      const mountTasks = counts.document_processing_tasks_visible ?? 0;
+      await settleUntil(h, () => (counts.document_processing_tasks_visible ?? 0) > mountTasks,
+        "control: the tasks poll to actually run");
+      await settleUntil(h, () => (counts.document_intakes_visible ?? 0) > mountIntakes,
+        "the receipts poll must keep ticking on its own schedule — non-vacuous only because this " +
+        "cell's fixture makes it genuinely live, unlike the AC3 cell above",
+      );
+    },
+    { intakeRows: () => [LIVE_INTAKE_ROW] },
+  );
+});
+
+test("904.L07-02 — a poll tick issues exactly ONE read (document_processing_tasks_visible), never the whole detail bundle", async () => {
+  // use-settle-poll.ts's own `onTick` contract: "One read." A whole-bundle `reload()` costs five
+  // (or six) reads a tick; this proves the narrowed tick touches nothing else the mount read pays
+  // for once.
+  await withDetailOpen(() => [taskRow("running")], async (h, counts) => {
+    for (let i = 0; i < 8; i++) await h.settle();
+    const before = {
+      documents: counts.documents ?? 0,
+      document_filings: counts.document_filings ?? 0,
+      document_extractions: counts.document_extractions ?? 0,
+      journal_entries: counts.journal_entries ?? 0,
+      tasks: counts.document_processing_tasks_visible ?? 0,
+    };
+    await settleUntil(h, () => (counts.document_processing_tasks_visible ?? 0) > before.tasks,
+      "control: a tick actually ran");
+    assert.equal(counts.documents ?? 0, before.documents, "a tick must not re-read the document row");
+    assert.equal(counts.document_filings ?? 0, before.document_filings, "a tick must not re-read filings");
+    assert.equal(counts.document_extractions ?? 0, before.document_extractions, "a tick must not re-read extractions");
+    assert.equal(counts.journal_entries ?? 0, before.journal_entries, "a tick must not re-read entries");
+  });
+});
+
+test("904.L07-A02 — exhausted, with a task still non-terminal, is a VISIBLE end: a message and a manual Refresh, not a silent stop", async () => {
+  // use-settle-poll.ts bound 3: `exhausted` exists "so the surface can offer a manual Refresh
+  // instead of spinning forever" — the same law intake-receipts.tsx already renders for the
+  // sibling poll. A tiny maxTicks reaches exhaustion inside the test's own settle budget instead of
+  // waiting out the shipped ~142s.
+  const TINY_POLL = { baseDelayMs: 0, maxDelayMs: 0, maxTicks: 2 } as const;
+  await withDetailOpen(
+    () => [taskRow("running")],
+    async (h, counts) => {
+      await settleUntil(h, () => h.text().includes("stopped checking"),
+        "the exhausted state to render its own visible end, not a silent stop");
+      const button = h.find((n) =>
+        (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("data-testid") === "extraction-tasks-refresh");
+      assert.ok(button, "a manual Refresh control must be offered once exhausted");
+      const beforeClick = counts.document_processing_tasks_visible ?? 0;
+      await h.fireEvent(button!, "click");
+      for (let i = 0; i < 5; i++) await h.settle();
+      assert.ok(
+        (counts.document_processing_tasks_visible ?? 0) > beforeClick,
+        "clicking Refresh must issue a fresh read, proving it is wired to reload() rather than decorative",
+      );
+    },
+    { settlePoll: TINY_POLL },
+  );
 });

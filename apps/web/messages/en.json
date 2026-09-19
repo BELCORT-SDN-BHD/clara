@@ -2580,6 +2580,7 @@
     },
     "extractionTasksHeading": "Extraction tasks",
     "extractionTasksEmpty": "No processing tasks yet.",
+    "extractionTasksExhausted": "Clara stopped checking for updates automatically. Refresh to check again.",
     "taskStatus": {
       "queued": "Extraction queued",
       "held_egress": "Awaiting egress approval",
