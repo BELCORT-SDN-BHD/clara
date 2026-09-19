@@ -263,6 +263,31 @@ test("p966.expire: an intake past its 15-minute capability is still failed throu
   await assert.rejects(readFile(intakePaths(id).bytes), { code: "ENOENT" }, "…as are the spooled bytes");
 });
 
+test("p966.expire: a FRESH sidecar past its capability is expired on the NEXT sweep — a delay, not a retirement", async () => {
+  // Review finding SPEC-4. On origin/main the expiry arm ran BEFORE the recency guard, so a
+  // freshly-stamped-but-expired intake was expired on that same sweep; the guard now runs across
+  // the whole listing ahead of everything, so it gates this arm too. That is what the ticket asked
+  // for in as many words — "the belt decides what to skip from directory metadata BEFORE opening
+  // anything", and `expiresAt` can only be read by opening — and the acceptance criterion it has
+  // to keep is "still expires an intake whose upload capability has passed its 15-minute expiry",
+  // which carries no latency clause. The change is a bounded DELAY (one quiet window, five
+  // seconds, against a fifteen-minute capability ≈ three leader cycles), and this cell is what
+  // says so out loud instead of the prose saying it.
+  const id = randomUUID();
+  const body = () => sidecar(id, 1, { status: "uploading", expiresAt: new Date(Date.now() - 1000).toISOString() });
+
+  const fresh = entryDouble(id, { ageMs: 0, body: body() });
+  const now = await drive([fresh], () => {});
+  assert.equal(fresh.reads, 0, "inside the quiet window it is not even opened — the guard is ahead of the open");
+  assert.deepEqual(now, { recovered: 0, deferred: 0, expired: 0 }, "…so it is not expired on THIS sweep");
+
+  const settled = entryDouble(id, { ageMs: 60_000, body: body() });
+  const later = await drive([settled], () => {});
+  assert.equal(settled.reads, 1, "…and once the sidecar has been quiet it IS opened…");
+  assert.deepEqual(later, { recovered: 0, deferred: 0, expired: 1 },
+    "…and expired, so the guard delays this arm by one quiet window and never retires it");
+});
+
 test("p966.resume: an intake left mid-flight by a crash is still driven, once it is past the guard", async (t) => {
   await ownSpool(t);
   const id = randomUUID();
