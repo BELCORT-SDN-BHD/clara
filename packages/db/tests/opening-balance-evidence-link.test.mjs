@@ -235,6 +235,34 @@ test("obw.siblings_ok a multi-item seed on ONE tie document still approves every
 // its own ticket") and puts repairing either wall, either approver or the document lock helper
 // explicitly OUT OF SCOPE for this ticket. Filed as a follow-up in this ticket's final report; the
 // cell stands as the regression sentinel until that follow-up lands.
+//
+// CLOSING NOTES, code-review round 2 (findings recorded here rather than answered with new code —
+// neither changes an assertion):
+//
+// L04B-SPEC-04 — AC2's literal wording is "reads standing postings off committed rows and asserts
+// exactly ONE". Neither race cell asserts a bare 1: `obw.race.opening_then_evidence` asserts
+// `s.drafts.all.length` (>= 3 by the seed's own mandatory multi-item setup, `obw.siblings_ok`) and
+// `obw.race.evidence_then_opening` asserts `s.drafts.all.length + 1`. This is a deliberate
+// reinterpretation, not an oversight: #821's whole carve-out is that MANY opening items legitimately
+// share one tie document, so "exactly one" can only mean "exactly the seed's own item count and
+// nothing else" — a single-item opening seed is not a shape this battery (or wb-fixtures.mjs's own
+// multi-item seed builder) can construct without weakening the multi-item coverage the ticket also
+// asks for. In the second arrival order, the count that actually stands (`+ 1`) IS the measured
+// defect this file's finding section names and L04B-SPEC-01 tracks — it is not a looser reading of
+// AC2, it is AC2's own assertion catching the regression it exists to catch.
+//
+// L04B-SPEC-07 — `approve_opening_correction`, named beside `approve_opening_seed` in the brief's
+// "Key interfaces" as one of "the contending doors", is never driven by either race cell; both call
+// `approveOpeningSeedOn` only. One-line check of whether the correction door reaches the SAME lock
+// path: `clara.approve_opening_correction` (0017:4162) loops over its draft correction entries and
+// calls `clara._approve_opening_entry(p_seed, e.id, ...)` for each one (0017:4241) — the EXACT SAME
+// helper `clara.approve_opening_seed` calls per item (0017:3962). `_approve_opening_entry`'s own
+// UPDATE into `journal_entries` (status -> approved) is what fires `t_source_binding_wall_upd`
+// (0213), which takes `clara._lock_document_binding` FIRST regardless of which approver's UPDATE
+// tripped it. So YES: the correction door shares the exact lock path the seed door does, and the
+// double-posting hole L04B-SPEC-01 measures on the seed door is architecturally reachable from the
+// correction door too — untested here, and worth naming explicitly in the residual issue this
+// ticket's report asks the integrator to file (L04B-SPEC-01's required_fix).
 
 /** Asserts the loser's refusal against `expectedShape`, one of the two shapes #854's brief
  *  names: `"CLR13"` (the wall's own `source_already_posted`, a statement-time refusal, same as

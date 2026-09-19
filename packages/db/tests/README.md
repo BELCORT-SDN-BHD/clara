@@ -208,6 +208,26 @@ resolved this document may not write to GitHub either): recorded as a follow-up 
 `obw.race.evidence_then_opening` verbatim. Whoever integrates this branch should file the issue
 before merge and replace this sentence with its number.
 
+**AC2's "exactly one", reinterpreted (L04B-SPEC-04):** the brief's literal wording is "asserts
+exactly one". Neither race cell pins a bare `1` — `obw.race.opening_then_evidence` asserts
+`s.drafts.all.length` (the seed's own item count, `>= 3` by `obw.siblings_ok`'s mandatory
+multi-item setup) and `obw.race.evidence_then_opening` asserts `s.drafts.all.length + 1`. This is
+deliberate: #821's carve-out is that many opening items legitimately share one tie document, so a
+single-item seed is not a shape available to pin a literal `1` against without weakening the
+multi-item coverage the ticket also requires. "Exactly one" is read as "exactly the seed's own item
+count and nothing else"; the second order's `+ 1` count IS the measured defect above, not a looser
+reading of the AC.
+
+**`approve_opening_correction` is never driven (L04B-SPEC-07):** the brief names it beside
+`approve_opening_seed` as one of "the contending doors", but both race cells drive the seed door
+only. It shares the exact lock path: `clara.approve_opening_correction` (0017:4162) and
+`clara.approve_opening_seed` (0017:3784) both call `clara._approve_opening_entry` per draft entry
+(0017:4241 and 0017:3962 respectively) — the same helper, whose `UPDATE` into `journal_entries`
+fires `t_source_binding_wall_upd` (0213), which takes `clara._lock_document_binding` first
+regardless of which approver's `UPDATE` tripped it. So the double-posting hole measured above is
+architecturally reachable from the correction door too, untested by this ticket — the residual
+issue (above) should name both doors, not only the seed one.
+
 ## Owner-level fixture DML, where it is unavoidable
 
 A cell that needs a state no verb can produce says so in source and builds it as the superuser,
