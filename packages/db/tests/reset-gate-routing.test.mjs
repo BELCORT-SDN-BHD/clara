@@ -17,9 +17,10 @@
 //    this ticket fixes). A file added later that imports `reset` unwrapped is caught by Cell 2
 //    without anyone updating a list.
 //  - Cell 2 (acceptance #1 — "a grep for reset( finds no unwrapped call behind the rig-reset
-//    gate"): every discovered file is read and asserted to contain NO bare `await reset(` call
-//    site — the exact idiom `rig-reset-guard.test.mjs`'s own structural cell uses for T19,
-//    applied to all 14.
+//    gate"): every discovered file has its comments and string/template literals blanked out,
+//    then is asserted to contain NO `reset(` call token — not only the `await reset(` spelling,
+//    so `const r = await reset(...)`, `return reset(...)` and an extra space before the paren are
+//    all caught too, the criterion's own shape rather than one hand-picked idiom.
 //  - Cell 3: every discovered file's source shows it importing `guardedReset` from
 //    `rig-reset-guard.mjs` at least as many times as it imports the raw `reset` — so the wrapper
 //    is in scope everywhere the destructive function is.
@@ -38,10 +39,14 @@
 //    they still reach their existing skip gate cleanly (no import-time crash from the added
 //    dynamic import) — the destructive path itself is CI's job, on an isolated database, per file.
 //
-// VACUITY CONTROL for Cell 2 (report has the transcript): with x42-split-upgrade-kit.mjs
+// VACUITY CONTROL for Cell 2 (fix-round report has the transcript): with x42-split-upgrade-kit.mjs
 // reverted to its pre-fix bare `await reset(...)` byte-for-byte, this suite's Cell 2 RED on that
-// exact file for the exact reason ("bare await reset( survives in x42-split-upgrade-kit.mjs");
-// restoring the fixed file byte-for-byte turned it green again.
+// exact file for the exact reason ("an unwrapped reset( call site survives in
+// x42-split-upgrade-kit.mjs"); restoring the fixed file byte-for-byte turned it green again. Also
+// re-run with that same call site rewritten three adversarial ways — `const r = await reset(...)`,
+// `return reset(...)`, and an extra space before the paren (the exact three shapes the fix-round
+// review demonstrated walked past the file's original `^\s*await reset\(` predicate) — each RED
+// for the same reason, then restored.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -107,15 +112,38 @@ test("#845 discovery: exactly the 14 known reset()-gated modules import the dest
     + "a file was added, removed, or renamed; update EXPECTED_GATED_FILES only after confirming with a fresh audit");
 });
 
-test("#845 acceptance 1: no discovered file has a bare, unwrapped `await reset(` call site", () => {
-  const bare = /^\s*await reset\(/m;
+/** Best-effort comment/string stripper for this file set: block comments, then line comments,
+ *  then string and template literal BODIES are blanked out (their delimiters stay, so an
+ *  adjacent real call is never merged into one token). Good enough here, not a general JS
+ *  parser: verified against all 14 discovered files, none of which puts `//` or `://` inside a
+ *  string literal (checked by hand at review time) — a file that ever did would need this
+ *  hardened, not the criterion loosened. */
+function stripCommentsAndStrings(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''");
+}
+
+// Any `reset(` call token, in actual code (comments and string literals already blanked out
+// above), that is not part of a longer identifier (so `guardedReset(` — different case, "Reset"
+// not "reset" — and any future `xReset(`/`reset2(` never match) and is not the bare
+// `{ reset }`/`{ reset: alias }` import destructure (which has no `(` immediately after `reset`
+// at all). This is the criterion's own shape — "a grep for reset( finds no unwrapped call" — not
+// the narrower `^\s*await reset\(` this cell shipped with, which a `const r = await reset(...)`,
+// a `return reset(...)`, or an extra space before the paren all walked straight past.
+const UNWRAPPED_RESET_CALL_RE = /(?<![A-Za-z0-9_$.])reset\s*\(/;
+
+test("#845 acceptance 1: no discovered file has an unwrapped `reset(` call site behind the rig-reset gate", () => {
   const offenders = [];
   for (const rel of discoverGatedFiles()) {
     const source = readFileSync(path.join(TESTS_DIR, rel), "utf8");
-    if (bare.test(source)) offenders.push(rel);
+    if (UNWRAPPED_RESET_CALL_RE.test(stripCommentsAndStrings(source))) offenders.push(rel);
   }
   assert.deepEqual(offenders, [],
-    `bare await reset( survives in: ${offenders.join(", ")} — every reset()-gated call site must read `
+    `an unwrapped reset( call site survives in: ${offenders.join(", ")} — every reset()-gated call site must read `
     + "await guardedReset(reset, ...) instead");
 });
 
@@ -158,8 +186,11 @@ test("#845 acceptance 2: a non-disposable database name refuses before the ACTUA
   const spy = { entered: 0 };
   // Wraps but NEVER DELEGATES to realReset — this cell proves the refusal happens before reset()
   // would run without ever issuing the DROP SCHEMA realReset performs, so it is safe on a rig
-  // this process is not allowed to reset.
-  const wrapped = async (...args) => { spy.entered += 1; return realReset(...args); };
+  // this process is not allowed to reset. `realReset` is fetched above only to prove it is a real,
+  // callable export from the exact module every one of the 14 files imports (see the assert.equal
+  // just above) — it is deliberately never invoked from here, the same shape
+  // rig-reset-guard.test.mjs's own spy uses for T19.
+  const wrapped = async () => { spy.entered += 1; };
 
   try {
     delete process.env.DATABASE_URL;

@@ -788,20 +788,30 @@ files could still drop a named, in-use rig database under `CLARA_RIG_ALLOW_RESET
 `reset-gate-routing.test.mjs` does not hand-list the files it checks (beyond one cross-check
 constant): it WALKS `packages/db/tests` for every module whose source contains an
 `import("<path>/scripts/reset.mjs")` call, asserts that set is exactly the audited 14 (T19's own
-file plus the 13 this ticket fixed), then asserts none of them has a bare `await reset(` call site
-left, and that each imports `guardedReset` at least as many times as it imports the raw `reset`. A
-file added later that imports the destructive `reset` unwrapped is caught by this suite without
-anyone maintaining a list. One behavioural cell imports the ACTUAL `scripts/reset.mjs` export —
-the identical module object every one of the 14 files resolves — wraps it in a non-delegating spy,
-and proves `guardedReset` refuses a non-disposable name (`clara_631`) before that spy is ever
-entered; because the structural cells already show every drill funnels through this same
-`guardedReset`, that one proof generalises to all 14 call sites.
+file plus the 13 this ticket fixed), then blanks out comments and string/template literals and
+asserts none of them has an unwrapped `reset(` call token left (not only the `await reset(`
+spelling — `const r = await reset(...)`, `return reset(...)` and an extra space before the paren
+are all caught the same way), and that each imports `guardedReset` at least as many times as it
+imports the raw `reset`. A file added later that imports the destructive `reset` unwrapped is
+caught by this suite without anyone maintaining a list. One behavioural cell imports the ACTUAL
+`scripts/reset.mjs` export — the identical module object every one of the 14 files resolves — to
+prove it is a real, callable export, then proves `guardedReset` refuses a non-disposable name
+(`clara_631`) before a spy that never delegates to that export is entered; because the structural
+cells already show every drill funnels through this same `guardedReset`, that one proof
+generalises to all 14 call sites.
 
-**This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are
-CI's job, one file at a time, on an isolated database (see each file's own header for its
-`PGDATABASE=... CLARA_RIG_ALLOW_RESET=1` invocation). What this suite proves locally, safely, and
-on a shared rig is the ROUTING: the name check runs before any of those paths could reach a real
-`reset()`.
+**This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are meant
+to be CI's job, one file at a time, on an isolated database — but as of this ticket only 11 of the
+14 actually have a CI leg: `.github/actions/closed-wave-upgrade-drills/action.yml` runs
+hrd-a-recut-guard, hrd-b-upgrade-kit, rig-docs-upgrade, rig-events-upgrade, s6-upgrade,
+wave-b/wb-0020-upgrade, x37/x40/x41-upgrade, and `.github/actions/frontier-leg/action.yml` runs
+x42-split-upgrade-kit; T19 (`rig-isolation.test.mjs`) runs in the ordinary battery and skips
+without the flag. `checkout-convergence-upgrade.test.mjs`, `rig-runtime-upgrade.test.mjs` and
+`wave-a-upgrade.test.mjs` have **no CI leg at all** — their destructive path has never run
+anywhere but a worker's own machine, by hand, per that file's own header recipe (a gap tracked as
+a follow-up, not closed by this ticket). What this suite proves locally, safely, and on a shared
+rig is the ROUTING: the name check runs before any of those 14 paths could reach a real `reset()`
+— never that the destructive body itself has been exercised for the 3 files with no CI leg.
 
 ## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
 

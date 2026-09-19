@@ -13,8 +13,14 @@
 // RESET-GATED (it drops schema clara), so it SKIPS in the ordinary battery — a mid-run schema drop
 // would nuke every other file — and it is run ALONE against its OWN throwaway database:
 //
-//   PGDATABASE=clara_0186_upgrade CLARA_RIG_ALLOW_RESET=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+//   PGDATABASE=clara_0186_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
 //     CLARA_ALLOW_DESTRUCTIVE=1 node --test packages/db/tests/checkout-convergence-upgrade.test.mjs
+//
+// (#845: the database name must look disposable — `rig-reset-guard.mjs`'s `guardedReset`, which
+// this file now routes its `reset()` through, refuses any name that isn't ci/test/tmp/temp/
+// scratch/ephemeral by whole name or final `.`/`_`/`-` segment. There is no CI leg for this file
+// yet — see packages/db/tests/README.md's #845 section — so this recipe is the only place this
+// drill's destructive path runs; run it against a throwaway database, never a shared rig.)
 //
 // THE SHAPES IT BUILDS, and why each is a separate claim 0186 §A makes:
 //   · an UNSTAMPED intent                       -> `open`,            status_at = opened_at

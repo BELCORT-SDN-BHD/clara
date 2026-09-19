@@ -6,6 +6,16 @@
 // runs files concurrently against one shared DB — a mid-run schema drop would
 // nuke the other suites). In a normal run it SKIPS.
 //
+//   PGDATABASE=clara_runtime_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+//     node --test packages/db/tests/rig-runtime-upgrade.test.mjs
+//
+// (#845: this file's `reset()` now routes through `rig-reset-guard.mjs`'s `guardedReset`, which
+// refuses any database name that doesn't look disposable — ci/test/tmp/temp/scratch/ephemeral by
+// whole name or final `.`/`_`/`-` segment. This file previously documented no PGDATABASE recipe
+// at all and has no CI leg — see packages/db/tests/README.md's #845 section — so it had never
+// been proven to run its destructive path anywhere; run it against a throwaway database like the
+// one named above, never a shared rig.)
+//
 // The deploy-onto-existing path: apply ONLY 0001–0005 onto a fresh DB, create
 // real data through the writers, seed a SYNTHETIC taxonomy version mapping
 // event types to internal_task AND notification (S4-ND9 — v1 only maps

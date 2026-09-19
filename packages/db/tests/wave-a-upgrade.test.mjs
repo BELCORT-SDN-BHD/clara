@@ -5,8 +5,14 @@
 // runner's idempotent re-run + duplicate-version refusal; two independent bootstraps
 // reach an identical surface. Contract-blind. RESET-GATED (drops schema clara) → it
 // SKIPS unless CLARA_RIG_ALLOW_RESET=1 and MUST run ALONE on an ISOLATED DB:
-//   PGDATABASE=clara_waveA_upgrade CLARA_RIG_ALLOW_RESET=1 \
+//   PGDATABASE=clara_waveA_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
 //     node --test packages/db/tests/wave-a-upgrade.test.mjs
+//
+// (#845: the name must look disposable to `rig-reset-guard.mjs`'s `guardedReset`, which this file
+// now routes its `reset()` through — ci/test/tmp/temp/scratch/ephemeral by whole name or final
+// `.`/`_`/`-` segment, or it refuses. No CI leg exists for this file yet — see
+// packages/db/tests/README.md's #845 section — so run this against a throwaway database, never a
+// shared rig.)
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

@@ -34,8 +34,11 @@
 // normal run — LOUDLY, on stdout, so a skip is never mistaken for a pass (ratchet R4 F2).
 // CI runs it FOR REAL in its own throwaway database ("Wave-B 0020 A7/A8 upgrade drill" in
 // .github/workflows/ci.yml), beside the C9 / document-pipeline / coding-floor drills.
-// Locally: PGDATABASE=clara_wb20_upgrade CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1
+// Locally: PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1
 //   CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
+// (#845: matches the name CI itself creates in closed-wave-upgrade-drills/action.yml — this file's
+// `reset()` now routes through `rig-reset-guard.mjs`'s `guardedReset`, which refuses any database
+// name that doesn't look disposable, and the old `clara_wb20_upgrade` spelling no longer does.)
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
