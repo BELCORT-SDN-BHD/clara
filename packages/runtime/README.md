@@ -1317,3 +1317,35 @@ ridden back under their own names. The trade-invoice fold is gone entirely; what
 **403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
 this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
 it would loosen an access answer.
+
+## #980 — the shared World harness's third script, and the trade-invoice lane's park and cancel
+
+`tests/work-journal-serve.mjs` is the child bootstrap nine standalone World e2es spawn. It offered
+two scripted-model conversation shapes, `post` and `narrate`, so no lane spawning it could reach
+the ONE place a run blocks on a human. It now offers a third, `ask_question` (#980): read the
+chart, ask ONE typed clarifying question and stop, and record the admitted basis only once the
+answer comes back as a `tool-result` for `ask_question`. The branch is the shape
+`tests/work-question-serve.mjs` already drove for the journal lane, lifted into the shared file;
+`post` and `narrate` return before it and no existing caller sets the new value, which
+`tests/work-journal-e2e.mjs` — the estate's only `narrate` driver — confirms on the rig rather than
+by reading.
+
+**The park IS the window, which is why one script serves both new legs.** While a run is parked
+the Work is live, the run holds the task and NOTHING has been admitted. `tests/work-cancel-serve.mjs`
+manufactures the same window with a gate file and a bound; the estate's own park holds it open
+until a human acts.
+
+**`tests/trade-invoice-e2e.mjs` gains legs 6 and 7.** Leg 6 drives a REPLAY into the parked
+window: the run asks, the Work reads `awaiting_input`, the SAME intent key is re-POSTed (one Work,
+one task, one invoice, ONE question — it does not re-ask, and it does not un-park), a human answers
+through `clara.answer_work_question`, and the whole thing converges on one entry, one receipt, one
+open item, with a further replay AFTER the answer still resolving to the same Work. Leg 7 spawns
+`tests/work-cancel-serve.mjs` UNCHANGED — borrowing that file's hold rather than copying it into the
+shared harness — holds the model before `record_journal_entry`, cancels there, and pins the whole
+absence of effect: `stopping` over the real route, `cancelled` as the terminal, zero entries, zero
+receipts, zero open items, and an invoice ledger that never reaches `posted`. The invoice ROW
+survives, because it was born inside the admission transaction and a cancel is not a retraction.
+
+**Both e2es' local gates now admit `clara_l<NN>`**, the per-lane database shape of the riders wave,
+beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`. Still loopback-only, still a parsed
+DSN equality check against the PG env, still fail-closed.

@@ -38,19 +38,44 @@
 //      `document_date + payment_terms_days` (DECISIONS §6.2.0 R-A — payment terms run from the
 //      DOCUMENT, not from the day it was keyed in) with `due_date_source='counterparty_terms'` —
 //      and the 202 body says so, so the browser can render the basis it did not compute.
+//   6. A REPLAY THAT LANDS WHILE THE WORK IS PARKED ON A QUESTION (#980). The run asks a typed
+//      clarifying question and parks (`awaiting_input`); the SAME intent key is re-POSTed into
+//      that window; a human answers; and the whole thing converges on ONE outcome — one Work,
+//      one task, one question, one entry, one receipt, one invoice, one open item — with a
+//      further replay AFTER the answer still resolving to the same Work. AC4 of #655 built this
+//      convergence lane-agnostically and other lanes cover it; nothing drove a trade invoice
+//      through the parked half until now.
+//   7. AN EXPLICIT CANCEL INSIDE THE COMMIT WINDOW (#980). The model is HELD after it has read
+//      the chart and before its `record_journal_entry` call — the Work is `running`, the run
+//      holds the task and nothing has been admitted — and the human cancels there. The Work
+//      reads `stopping` over the real route, terminalises `cancelled`, and the ledger is
+//      untouched: ZERO entries, ZERO receipts, ZERO open items, and the invoice row born at
+//      admission never gains its `posted` status row.
+//
+// TWO SERVE SCRIPTS, and leg 7 borrows rather than reinvents. Legs 1-6 spawn
+// tests/work-journal-serve.mjs (leg 6 with its `ask_question` script, added for this file by
+// #980). Leg 7 spawns tests/work-cancel-serve.mjs UNCHANGED, because the deterministic
+// before-admission window and its gate-file protocol already exist there and belong to that
+// file's header; a second copy of the hold inside the shared harness would be one more thing to
+// keep in step for no new fact. The model in either file is lane-agnostic — it reads the chart
+// and echoes the admitted basis — so a trade-invoice Work runs through it exactly as a
+// documentless journal entry does, which is the point leg 1 already makes about the bundle.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent shared with its siblings), and
 // the file SKIPS CLEANLY when migration 0225 is absent — its runtime half merges alongside its DB
 // half, and a green e2e against a database with no `clara.trade_invoices` would be a lie.
 //
-// A NOTE ON THE LOCAL GATE. The siblings hard-gate PGDATABASE to `clara_(rt_test|wave_b_ci)`. This
-// wave gives each implementer a DEDICATED cluster and database (`clara_<ticket>`, RIG.md), and the
-// brief's own command names `clara_655`, so the gate admits that shape too — still loopback-only,
-// still a parsed-DSN equality check against the PG env, and still fail-closed on anything else.
+// A NOTE ON THE LOCAL GATE. The siblings hard-gate PGDATABASE to `clara_(rt_test|wave_b_ci)`. The
+// 2026-09-18 wave gave each implementer a DEDICATED cluster and database (`clara_<ticket>`), and
+// the riders wave of 2026-09-20 gives each LANE one (`clara_l<NN>`, riders/RIG.md), so the gate
+// admits both shapes — still loopback-only, still a parsed-DSN equality check against the PG env,
+// and still fail-closed on anything else.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
@@ -65,11 +90,11 @@ if (process.env.CLARA_SKIP_WORK_E2E === "1") {
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|\d{3}(_world)?)$/;
+const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|\d{3}(_world)?|l\d{2})$/;
 if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
   throw new Error(
     "trade-invoice-e2e is hard-gated to a loopback host + PGDATABASE in "
-    + "{clara_rt_test, clara_wave_b_ci, clara_<ticket>, clara_<ticket>_world}");
+    + "{clara_rt_test, clara_wave_b_ci, clara_<ticket>, clara_<ticket>_world, clara_l<NN>}");
 }
 if (!process.env.WORKFLOW_POSTGRES_URL) {
   throw new Error("trade-invoice-e2e needs WORKFLOW_POSTGRES_URL beside the PG env");
@@ -93,6 +118,9 @@ const jwtSecret = "ti-" + randomUUID().replace(/-/g, "");
 const key = new TextEncoder().encode(jwtSecret);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const serveScript = fileURLToPath(new URL("./work-journal-serve.mjs", import.meta.url));
+// #980 · leg 7's window. The cancel lane's own bootstrap, spawned as-is.
+const cancelServeScript = fileURLToPath(new URL("./work-cancel-serve.mjs", import.meta.url));
+const GATE_DIR = fileURLToPath(new URL("./.trade-invoice-gates", import.meta.url));
 const FETCH_TIMEOUT_MS = 15000;
 
 const WATCHDOG_MS = 10 * 60 * 1000;
@@ -124,11 +152,15 @@ function childEnv(extra = {}) {
   delete base.CLARA_WORK_TEST_FAULT;
   delete base.CLARA_WORK_TEST_SCRIPT;
   delete base.CLARA_CHAT_TEST_BASIS;
+  // #980 · the cancel harness's hold is opt-in the same way: an inherited gate would hold every
+  // OTHER leg's model at a window it never asked for.
+  delete base.CLARA_WORK_CANCEL_GATE;
+  delete base.CLARA_WORK_CANCEL_HELD;
   return Object.assign(base, extra);
 }
 
-function spawnServe(extra = {}) {
-  const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
+function spawnServe(extra = {}, script = serveScript) {
+  const child = spawn(process.execPath, [script], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
   const state = { exited: false, exitInfo: null, banner: null, serving: null, stdout: "", stderr: "" };
   child.on("exit", (code, signal) => {
     state.exited = true;
@@ -225,6 +257,41 @@ async function api(method, path, body, jwt) {
   return { status: r.status, body: parsed };
 }
 
+/**
+ * ONE HOLD GATE for leg 7: the path tests/work-cancel-serve.mjs polls, and the marker it writes on
+ * arrival. Lifted from tests/work-cancel-e2e.mjs's `makeGate`, including the reason it waits for
+ * a marker naming THIS Work: one supervisor serves every queued accounting Work, leftovers from
+ * earlier legs included, so a bare "somebody is held" marker lets a leg act on another leg's Work.
+ */
+function makeGate(label) {
+  mkdirSync(GATE_DIR, { recursive: true });
+  const id = `${label}-${randomUUID().slice(0, 8)}`;
+  const gate = join(GATE_DIR, `${id}.open`);
+  const held = join(GATE_DIR, `${id}.held`);
+  rmSync(gate, { force: true });
+  rmSync(held, { force: true });
+  return {
+    env: { CLARA_WORK_CANCEL_GATE: gate, CLARA_WORK_CANCEL_HELD: held },
+    open: () => writeFileSync(gate, "open"),
+    async waitHeld(workId, deadlineMs = 120000) {
+      const end = Date.now() + deadlineMs;
+      let seen = "";
+      while (Date.now() < end) {
+        if (existsSync(held)) {
+          seen = readFileSync(held, "utf8");
+          if (seen.includes(workId)) return true;
+        }
+        await sleep(100);
+      }
+      throw new Error(`the model never reached the hold for work ${workId} (${id}); saw: ${seen}`);
+    },
+    cleanup: () => {
+      rmSync(gate, { force: true });
+      rmSync(held, { force: true });
+    },
+  };
+}
+
 const EXPENSE = "6300";
 const SST = "6310";
 const PAYABLE = "2000";
@@ -299,6 +366,13 @@ async function main() {
       + " from clara.open_items where client_id = $1 order by created_at", [client])
       .then((r) => r.rows);
   const tasksFor = (work) => rig.rootQuery("select id from clara.agent_tasks where work_id = $1", [work]).then((r) => r.rows);
+  // #980 · the park's own row. Read as root because `clara_runtime` holds no SELECT on it and the
+  // leg is measuring the ESTATE, not what one role can see.
+  const questionsFor = (work) =>
+    rig.rootQuery(
+      "select id, question_version, status, delivery_state, answered_by, fields, answer"
+      + " from clara.agent_interruptions where work_id = $1 order by question_version", [work])
+      .then((r) => r.rows);
   const linesOf = (entry) =>
     rig.rootQuery("select * from clara.journal_lines where entry_id=$1 order by line_no", [entry]).then((r) => r.rows);
 
@@ -512,6 +586,166 @@ async function main() {
   } finally {
     respawn.child.kill("SIGTERM");
     await waitExit(respawn.child).catch(() => { /* best effort */ });
+  }
+
+  // =========================================================================
+  // 6: a replay that lands while the Work is PARKED on a clarifying question.
+  //
+  // #655 AC4 built the convergence lane-agnostically — a duplicate, lost or restarted submission
+  // resolves to exactly ONE receipt — and `tests/control-work-question.test.mjs` is green on the
+  // park itself. What had never been driven is the two together ON THIS LANE: a replay arriving
+  // while the run is blocked on a human, and the outcome once that human answers.
+  // =========================================================================
+  const six = await seedClient("ti-park");
+  const parkIntent = randomUUID();
+  const parked = spawnServe({ CLARA_WORK_TEST_SCRIPT: "ask_question" });
+  try {
+    await waitReady(45000, parked);
+    const admitted = await api("POST", "/api/work/trade-invoice", {
+      clientId: six.client, intentKey: parkIntent, kind: "supplier_bill",
+      invoice: invoiceWire(six.counterparty), basis: basisWire(),
+    }, six.jwt);
+    assert.equal(admitted.status, 202, `leg 6 admission 202 (got ${admitted.status} ${JSON.stringify(admitted.body)})`);
+    const workId = admitted.body.work_id;
+    const invoiceId = admitted.body.invoice_id;
+
+    // ---- the run asks and parks ------------------------------------------
+    const question = await (async () => {
+      const end = Date.now() + 90000;
+      while (Date.now() < end) {
+        const pending = (await questionsFor(workId)).find((r) => r.status === "pending");
+        if (pending) return pending;
+        await sleep(250);
+      }
+      throw new Error("leg 6: the run never asked a question");
+    })();
+    assert.equal(question.question_version, 1, "leg 6: the first question on a Work is version 1");
+    assert.deepEqual(
+      question.fields.map((f) => [f.key, f.kind, f.required]),
+      [["posting_date", "date", true], ["amount_cents", "money", true]],
+      "leg 6: the harness's typed fields are stored verbatim — if the shared script changes its "
+      + "question, this pin says so rather than the answer below silently failing validation",
+    );
+    const blocked = await api("GET", `/api/work/${workId}`, undefined, six.jwt);
+    assert.equal(blocked.body.work.status, "awaiting_input", "leg 6: the Work is honest about being blocked");
+    assert.equal(await countEntries(six.client), 0, "leg 6: a parked run has posted nothing");
+    assert.deepEqual((await ledger(invoiceId)).map((r) => r.state), ["admitted"],
+      "leg 6: …and the invoice ledger says exactly that");
+
+    // ---- THE REPLAY LANDS IN THE WINDOW ----------------------------------
+    const replayWhileParked = await api("POST", "/api/work/trade-invoice", {
+      clientId: six.client, intentKey: parkIntent, kind: "supplier_bill",
+      invoice: invoiceWire(six.counterparty), basis: basisWire(),
+    }, six.jwt);
+    assert.equal(replayWhileParked.status, 202,
+      `leg 6 parked replay 202 (got ${replayWhileParked.status} ${JSON.stringify(replayWhileParked.body)})`);
+    assert.equal(replayWhileParked.body.replayed, true, "leg 6: the parked replay is a REPLAY, not a second admission");
+    assert.equal(replayWhileParked.body.work_id, workId, "leg 6: the SAME Work");
+    assert.equal(replayWhileParked.body.invoice_id, invoiceId, "leg 6: …and the SAME trade invoice");
+    assert.equal((await tasksFor(workId)).length, 1, "leg 6: the replay minted no second task");
+    assert.equal((await invoices(six.client)).length, 1, "leg 6: …no second invoice");
+    assert.equal((await questionsFor(workId)).length, 1, "leg 6: …and it did not re-ask the question");
+    const still = await api("GET", `/api/work/${workId}`, undefined, six.jwt);
+    assert.equal(still.body.work.status, "awaiting_input", "leg 6: the replay did not un-park the Work");
+
+    // ---- the human answers, and the run resumes --------------------------
+    const answer = await rig
+      .humanQuery(six.owner, "select clara.answer_work_question($1::uuid,$2::int,$3::jsonb,$4::text) as r", [
+        question.id, 1, JSON.stringify({ posting_date: "2026-03-31", amount_cents: 106000 }), `ti-${randomUUID()}`,
+      ])
+      .then((r) => r.rows[0].r);
+    assert.equal(answer.status, "answered");
+    assert.equal(answer.answered_by, six.owner);
+
+    const settled = await pollWork(workId, six.jwt, (b) => TERMINAL.has(b?.work?.status), "leg 6 resume");
+    assert.equal(settled.work.status, "completed",
+      `leg 6: the answered Work completes (got ${settled.work.status} / ${JSON.stringify(settled.work.error)})`);
+    assert.equal(await countEntries(six.client), 1, "leg 6: exactly ONE entry");
+    assert.equal(await countReceipts(workId), 1, "leg 6: exactly ONE committed receipt");
+    assert.equal((await invoices(six.client)).length, 1, "leg 6: exactly ONE invoice");
+    assert.equal((await openItems(six.client)).length, 1, "leg 6: exactly ONE open item");
+    assert.deepEqual((await ledger(invoiceId)).map((r) => r.state).sort(), ["admitted", "posted"],
+      "leg 6: …and the ledger gained exactly one row");
+
+    // ---- and a replay AFTER the answer converges on the same thing -------
+    // The intent key is the caller's identity for this intent, and the park changed nothing about
+    // that: a browser that lost the acknowledgement while the question was open, and presses again
+    // after somebody else answered it, must reach the SAME receipt rather than a second bill.
+    const replayAfter = await api("POST", "/api/work/trade-invoice", {
+      clientId: six.client, intentKey: parkIntent, kind: "supplier_bill",
+      invoice: invoiceWire(six.counterparty), basis: basisWire(),
+    }, six.jwt);
+    assert.equal(replayAfter.status, 202);
+    assert.equal(replayAfter.body.work_id, workId, "leg 6: the post-answer replay names the SAME Work");
+    assert.equal(replayAfter.body.replayed, true);
+    assert.equal(await countEntries(six.client), 1, "leg 6: STILL exactly ONE entry");
+    assert.equal(await countReceipts(workId), 1, "leg 6: STILL exactly ONE committed receipt");
+    assert.equal((await openItems(six.client)).length, 1, "leg 6: STILL exactly ONE open item");
+    console.log("[ti-e2e] 6 OK — parked on a question, replayed into the window, answered, ONE of everything");
+  } finally {
+    parked.child.kill("SIGTERM");
+    await waitExit(parked.child).catch(() => { /* best effort */ });
+  }
+
+  // =========================================================================
+  // 7: an explicit cancel INSIDE the commit window.
+  //
+  // The window is tests/work-cancel-serve.mjs's hold, reused as-is: the model has read the chart,
+  // its `record_journal_entry` call has not been made, the Work is `running` and the ledger is
+  // untouched. That is where a human pressing Cancel actually lands.
+  // =========================================================================
+  const gate = makeGate("ti-cancel");
+  const seven = await seedClient("ti-cancel");
+  let cancelWork = null;
+  const canceller = spawnServe(gate.env, cancelServeScript);
+  try {
+    await waitReady(45000, canceller);
+    const admitted = await api("POST", "/api/work/trade-invoice", {
+      clientId: seven.client, intentKey: randomUUID(), kind: "supplier_bill",
+      invoice: invoiceWire(seven.counterparty), basis: basisWire(),
+    }, seven.jwt);
+    assert.equal(admitted.status, 202, `leg 7 admission 202 (got ${admitted.status} ${JSON.stringify(admitted.body)})`);
+    cancelWork = admitted.body.work_id;
+    const invoiceId = admitted.body.invoice_id;
+
+    await gate.waitHeld(cancelWork);
+    const live = await api("GET", `/api/work/${cancelWork}`, undefined, seven.jwt);
+    assert.equal(live.body.work.status, "running", "leg 7: the run holds the Work while the model decides");
+    assert.equal(await countEntries(seven.client), 0, "leg 7: nothing has been admitted to the ledger yet");
+
+    const cancelled = await api("POST", `/api/work/${cancelWork}/cancel`, { opKey: `ti-cancel-${randomUUID()}` }, seven.jwt);
+    assert.equal(cancelled.status, 200, `leg 7 cancel 200 (got ${cancelled.status} ${JSON.stringify(cancelled.body)})`);
+    assert.equal(cancelled.body.cancelled, true);
+    assert.equal(cancelled.body.status, "stopping", "leg 7: STOPPING — the terminal is not yet known");
+    const stopping = await api("GET", `/api/work/${cancelWork}`, undefined, seven.jwt);
+    assert.equal(stopping.body.work.status, "stopping", "leg 7: and the real route serves it");
+
+    // Release the model. Its held tool call now meets the ordering boundary.
+    gate.open();
+    const settled = await pollWork(cancelWork, seven.jwt, (b) => TERMINAL.has(b?.work?.status), "leg 7 settles");
+    assert.equal(settled.work.status, "cancelled",
+      `leg 7: the Work terminalises CANCELLED (got ${settled.work.status} / ${JSON.stringify(settled.work.error)})`);
+    assert.equal(settled.work.error?.reason, "cancelled", "leg 7: under the cancellation's own reason");
+
+    // NO JOURNAL EFFECT, on every surface this lane writes to. The invoice row itself SURVIVES:
+    // it was born inside the admission transaction, before any run, and a cancelled Work does not
+    // retract an admitted intent — what it must never gain is the `posted` row the receipt's own
+    // trigger appends, and the open item that a committed entry mints.
+    assert.equal(await countEntries(seven.client), 0, "leg 7: ZERO entries");
+    assert.equal(await countReceipts(cancelWork), 0, "leg 7: ZERO committed receipts");
+    assert.equal((await openItems(seven.client)).length, 0, "leg 7: ZERO open items");
+    const states = (await ledger(invoiceId)).map((r) => r.state);
+    assert.ok(!states.includes("posted"),
+      `leg 7: the invoice never reached posted (ledger: ${JSON.stringify(states)})`);
+    assert.equal((await invoices(seven.client)).length, 1,
+      "leg 7: the invoice admitted before the run is still there — a cancel is not a retraction");
+    console.log(`[ti-e2e] 7 OK — cancelled inside the commit window; no journal effect (ledger: ${JSON.stringify(states)})`);
+  } finally {
+    gate.open();            // never leave a held child behind
+    canceller.child.kill("SIGTERM");
+    await waitExit(canceller.child).catch(() => { /* best effort */ });
+    gate.cleanup();
+    rmSync(GATE_DIR, { recursive: true, force: true });
   }
 
   console.log("[ti-e2e] PASS — all legs green");

@@ -12,11 +12,24 @@
 // would make the resumed attempt behave differently from the original, which is exactly the
 // property the crash scenario exists to measure.
 //
-// TWO SCRIPTS, selected by CLARA_WORK_TEST_SCRIPT:
-//   post     (default) read the chart, then record the admitted basis verbatim.
-//   narrate            answer in prose without calling a tool at all — the "the model said it
-//                      did something and did nothing" case, which must settle the Work `failed`
-//                      with `no_effect` rather than `completed`.
+// THREE SCRIPTS, selected by CLARA_WORK_TEST_SCRIPT:
+//   post          (default) read the chart, then record the admitted basis verbatim.
+//   narrate                 answer in prose without calling a tool at all — the "the model said
+//                           it did something and did nothing" case, which must settle the Work
+//                           `failed` with `no_effect` rather than `completed`.
+//   ask_question  (#980)    read the chart, then ASK a typed clarifying question and stop. The
+//                           run parks (`awaiting_input`), and it stays parked until a human
+//                           answers through `clara.answer_work_question`; only then does it
+//                           record the admitted basis. It is the same shape
+//                           tests/work-question-serve.mjs drives for the journal lane, lifted
+//                           into the SHARED harness so any lane spawning this file can reach the
+//                           park — the trade-invoice lane is the first (#980), and `post` and
+//                           `narrate` take exactly the branches they always did.
+//
+// A PARK IS A WINDOW, and that is why the cancel leg uses it too. While the run is parked the
+// Work is live, the run holds the task and NOTHING has been admitted to the ledger — the same
+// window tests/work-cancel-serve.mjs manufactures with a gate file, held open by the estate's own
+// mechanism instead of by a timer, which is why it needs no bound.
 //
 // ONE MODEL, TWO HALVES, BECAUSE ONE PROCESS RUNS BOTH LANES. `resolveModel` reads the same
 // `globalThis.__claraModelForTest` for every closure in the image, and the two lanes call the SDK
@@ -79,6 +92,39 @@ function toolsUsed(prompt) {
   }
   return names;
 }
+
+/** TRUE once the human's ANSWER has come back as this tool's result. The workflow feeds it in as
+ *  a `tool-result` for `ask_question`, so its presence IS the resume, structurally — read the
+ *  same way `toolsUsed` reads, never by counting calls. (tests/work-question-serve.mjs's own
+ *  reader, unchanged.) */
+function answerArrived(prompt) {
+  for (const message of prompt ?? []) {
+    if (typeof message?.content === "string") continue;
+    for (const part of message?.content ?? []) {
+      if (part?.type === "tool-result" && part.toolName === "ask_question") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * THE TYPED QUESTION the `ask_question` script asks: a date and an amount in integer cents — the
+ * pair `clara._assert_work_answer` validates by kind and the browser's bounded stepper renders.
+ *
+ * IT DOES NOT CHANGE WHAT IS POSTED, and that is a constraint rather than a choice: the admission
+ * door digested the basis before the run existed and `clara._record_journal_entry_core` refuses
+ * any echo that does not hash to it. What the answer does is UNBLOCK the model — which is exactly
+ * what a lane driving the park needs, because the outcome it converges on must be the admitted
+ * one whether the replay landed before or after the answer.
+ */
+const ASK_QUESTION_INPUT = {
+  question: "Which date should this be posted on, and for how much?",
+  reason: "The instruction named a payment but I have not been told which day it cleared or the exact amount.",
+  fields: [
+    { key: "posting_date", label: "Posting date", kind: "date", required: true },
+    { key: "amount_cents", label: "Amount", kind: "money", required: true, unit: "MYR cents" },
+  ],
+};
 
 /** The envelope line claraWork.v1.impl's `workEnvelopeMessage` writes immediately above the
  *  admitted basis. Anchoring on it is the only stable way in: the basis is read back out of
@@ -192,6 +238,35 @@ const model = new MockLanguageModelV4({
         usage: usage(),
         warnings: [],
       };
+    }
+
+    // #980 · THE PARK. Between reading the chart and recording the entry, ask once and stop.
+    if (SCRIPT === "ask_question") {
+      if (!used.has("ask_question")) {
+        return {
+          content: [{
+            type: "tool-call",
+            toolCallId: "e2e-ask",
+            toolName: "ask_question",
+            input: JSON.stringify(ASK_QUESTION_INPUT),
+          }],
+          finishReason: { unified: "tool-calls", raw: "tool_use" },
+          usage: usage(),
+          warnings: [],
+        };
+      }
+      if (!answerArrived(prompt)) {
+        // The question is on the wire and no answer has come back. Recording anything here would
+        // settle the Work over a question a human is still holding, so this branch exists only to
+        // be LOUD if the park ever fails to park: the Work settles `failed`/`no_effect` and the
+        // leg reds on the terminal rather than on a timeout.
+        return {
+          content: [{ type: "text", text: "I am waiting on the answer to my question." }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usage(),
+          warnings: [],
+        };
+      }
     }
 
     if (!used.has("record_journal_entry")) {
