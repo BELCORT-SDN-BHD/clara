@@ -494,13 +494,40 @@ filing's own history, not on the queue.
   (`lib/documents/use-settle-poll.ts`) while any row can still change. The predicate
   is "filed to this client, or mine and unattributed" — never "my uploads", because
   `clara.document_intakes` has no client column. **A tick costs ONE read.** The mount
-  pays four (the masked intake view, this client's filings, the unassigned set and
-  `caller_context`) and keeps the last three as a derivation; each tick re-reads the
-  masked view alone through `refreshIntakeReceipts` and rebuilds the rows against that
-  derivation, and the full four are paid again exactly once, on the tick where the batch
-  settles. Until fix round 1 the tick re-ran the whole derivation — up to four reads a
-  tick under the caller's own JWT, the heaviest of them a SECURITY INVOKER RPC.
+  pays THREE calls in two phases (`lib/documents/receipts.ts`'s `loadIntakeReceipts`,
+  #876): the masked intake view, the unassigned set and `caller_context` in one
+  `Promise.all`, then — sequenced AFTER it, because the bounded set cannot be known
+  before the intake rows are — a filings read BOUNDED to exactly those intake rows'
+  document ids (`document_filings?document_id=in.(…)`, `reads.ts`'s
+  `listActiveFilingsForDocuments`), never the client's whole active-filing set. That
+  fourth call replaced the pre-#876 shape (`document_filings?client_id=eq.<id>` inside
+  the same `Promise.all`, reading the client's ENTIRE active filing set to answer a
+  question about a handful of intake rows); the tradeoff is one extra serial round
+  trip per mount for a narrower, ID-bounded projection. Each tick re-reads the masked
+  view alone through `refreshIntakeReceipts` and rebuilds the rows against the kept
+  derivation (filings included), and the full mount sequence is paid again exactly
+  once, on the tick where the batch settles. Until fix round 1 (#633) the tick re-ran
+  the whole derivation — up to four reads a tick under the caller's own JWT, the
+  heaviest of them a SECURITY INVOKER RPC.
 - *Filed to this client* — unchanged.
+
+**The document-detail panel's own settle poll (#904)** is a SECOND, independent
+`useSettlePoll` (`components/documents/document-detail.tsx`), covering a filed
+document's own extraction/OCR tasks rather than the pre-filing queue above: it runs
+while any `document_processing_tasks_visible` row for the open document is
+`queued`/`held_egress`/`running`. **A tick costs ONE read**, same law as the receipts
+poll above: `onTick` calls `listProcessingTasksForDocument` alone (`lib/documents/
+intake.ts`) and keeps the result as a local override until the panel's own full
+`reload()` runs again — NOT the panel's whole-bundle reload (fix round, L07-02; the
+first cut re-ran all five-or-six of `loadDocumentDetail`'s reads every tick, the exact
+per-tick cost fix round 1 removed from the sibling receipts poll). Bounded by the same
+`maxTicks`/backoff/hidden-tab pause as the receipts poll, and independent of it: the
+two settle polls never share a tick. When the tick ceiling is hit with a task still
+non-terminal, `DocumentMetadata`'s extraction-tasks section renders the same visible
+end the receipts list renders when IT exhausts (`extractionTasksExhausted` + a manual
+Refresh, wired to the panel's full `reload()`) — fix round, L07-A02; the first cut
+discarded `useSettlePoll`'s `exhausted` return value, so a long-running task's panel
+went stale with no signal at all after roughly 142s.
 
 **The firm's unassigned sources** live at `/documents`
 (`components/firm/documents/unassigned-sources.tsx`), over the already-granted
