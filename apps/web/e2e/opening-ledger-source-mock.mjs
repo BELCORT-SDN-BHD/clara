@@ -78,6 +78,15 @@ export function p656SetParseAnswer(answer) {
 export const P656_RPC_VERBS = new Set([
   "create_opening_seed", "record_opening_target", "get_opening_dryrun",
   "approve_opening_seed", "cancel_opening_seed",
+  // THE FIXTURE CONTROL (fix-round finding A3). `serve-built.mjs` is ONE server for the whole run,
+  // so this lane's state survives from cell to cell — and `state.seedCreated` is exactly the fact
+  // every cell starts by changing. Without a reset, the FIRST cell created the basis and every
+  // later cell waited fifty seconds for a "Create opening seed" trigger that was gone, which is
+  // what made six of this walk's seven legs fail. Each cell now resets first, through a verb
+  // SCOPED to this lane's own client id — a control that answered for anybody would be able to
+  // reset a sibling lane's fixture, which is what `e2e-fixture-ownership.test.ts` exists to
+  // prevent. Same shape as `reset_document_correction_fixture` next door.
+  "reset_opening_ledger_source_fixture",
 ]);
 
 const CLIENT = () => ({
@@ -149,6 +158,14 @@ export async function handleP656Supabase(request, response, path, url, sendJson,
     return raw?.startsWith("eq.") ? raw.slice(3) : null;
   };
   const mine = () => eq("client_id") === P656.clientId || eq("id") === P656.clientId;
+  // …and the reads this lane makes that are scoped by the BASIS rather than by the client. The
+  // workbench's combined read fetches `opening_items` with `seed_id=eq.<seed>` and NOTHING else
+  // (`lib/registers/opening.ts:44-51`), so a `client_id`-only guard never matched it: the request
+  // fell through to a 404, `useAsyncRead` classified it `not_found`, and the whole tied-basis
+  // surface — the document panel, the read action, the items panel — never rendered at all. That
+  // is the defect that made six of this walk's seven legs fail (fix-round finding A3); it was in
+  // the FIXTURE, not in the app, and this is the one-line guard it needed.
+  const mineSeed = () => eq("seed_id") === P656.seedId || eq("bound_scope_id") === P656.seedId;
 
   // EVERY handler below opens on its own path and then GUARDS with an explicit `return false;`
   // fall-through on a subject this lane did not mint. That shape is what `e2e-fixture-ownership.
@@ -223,7 +240,7 @@ export async function handleP656Supabase(request, response, path, url, sendJson,
   }
   // The other reads this tab makes that this lane deliberately answers EMPTY for its own client,
   // and falls through for everybody else's.
-  if (request.method === "GET" && EMPTY_RELATIONS.has(path) && mine()) {
+  if (request.method === "GET" && EMPTY_RELATIONS.has(path) && (mine() || mineSeed())) {
     sendJson(response, 200, [], cors);
     return true;
   }
@@ -234,6 +251,12 @@ export async function handleP656Supabase(request, response, path, url, sendJson,
   if (!matchVerb(P656_RPC_VERBS, verb)) return false;
   const body = await readJson(request);
 
+  if (verb === "reset_opening_ledger_source_fixture") {
+    if (body?.p_client !== P656.clientId) return false;
+    resetP656();
+    sendJson(response, 200, { ok: true }, cors);
+    return true;
+  }
   if (verb === "create_opening_seed") {
     if (body?.p_client !== P656.clientId) return false;
     state.seedCreated = true;

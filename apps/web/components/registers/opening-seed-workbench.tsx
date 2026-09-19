@@ -54,6 +54,23 @@ export function OpeningSeedWorkbench({
     return { items, targets, keyed };
   });
 
+  // (fix-round, browser leg) THE TIE DOCUMENT'S NAME, because a sha is not a document a person can
+  // go and find. Before this the panel was mounted with `documentName={null}` and every provenance
+  // cell read "Document 65a6f1e2d3c4 (sha 65a6f1e2d3c4)" — the hash twice, and the footer said
+  // "Bound to  (sha …)" with a hole where the filename belongs. AC5's provenance is a figure a
+  // professional can trace back to a PAGE, and the filename is how they find the page.
+  //
+  // It is a SEPARATE read on purpose: a failure here must leave the basis, its targets and its
+  // gates exactly as they are (the filename degrades to the sha, which is what the panel already
+  // falls back to), and never take the whole tied-basis surface down the way a failed member of
+  // the combined read above does.
+  const tieDocumentRead = useAsyncRead(async () => {
+    if (!seed.tie_document_id) return null;
+    const { listDocumentsByIds } = await import("@/lib/documents/reads");
+    const rows = await listDocumentsByIds([seed.tie_document_id], { session: sessionTokenAccessor });
+    return rows[0]?.original_filename ?? null;
+  });
+
   // BLOCKER 1 (fix round 2, rev-t2): `record_opening_target`'s live body ends
   // in `on conflict(seed_id,line_key) do update set … debit_cents=excluded…`
   // against `uq_opening_tb_targets_key UNIQUE(seed_id,line_key)` — RE-recording
@@ -81,6 +98,16 @@ export function OpeningSeedWorkbench({
   // dialog (which now stays open on a refusal) and it is the only thing that
   // reveals an attestation field.
   const dialogRefusal = toDialogRefusal(error);
+
+  // (fix-round, browser leg) ONCE THE BASIS HAS LOADED, A LATER `loading` IS A REFRESH — never a
+  // teardown. `DataState` renders its LoadingState INSTEAD of children, and every `act()` flips
+  // `loading` on the reload it always fires, so the reload that follows a successful read
+  // UNMOUNTED `OpeningParseAction` and took its settled outcome with it: the banner that must be
+  // persistent ("reading an opening source is a material act … a message that disappears cannot
+  // carry that", #656 AC5) vanished the instant the read succeeded. The browser leg is what
+  // caught it — the component cells mount the action on its own, where nothing re-reads around
+  // it. This is `opening-register.tsx`'s own `hasSeedsData` precedent, applied one level down.
+  const hasData = data !== null;
 
   const items = data?.items ?? [];
   const draftItems = items.filter((i) => i.state === "active");
@@ -132,7 +159,7 @@ export function OpeningSeedWorkbench({
         <p className="text-xs text-muted-foreground">{t("notSerializableHint")}</p>
       ) : null}
 
-      <DataState loading={loading} error={null} isEmpty={false} emptyMessage="">
+      <DataState loading={!hasData && loading} error={null} isEmpty={false} emptyMessage="">
         {data ? (
           <div className="flex flex-col gap-6">
             {/* F2 residual fix (fix round 2, rev-t2): a COUNT-based key
@@ -158,7 +185,7 @@ export function OpeningSeedWorkbench({
                   clientId={clientId}
                   seed={seed}
                   targets={data.targets}
-                  documentName={null}
+                  documentName={tieDocumentRead.data ?? null}
                 />
               </div>
             ) : (

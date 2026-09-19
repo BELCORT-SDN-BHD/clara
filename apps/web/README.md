@@ -424,6 +424,21 @@ document-sourced (`isDocumentSourcedBasis`) the footer keeps the term and says w
 count; a basis carrying a KEYED row keeps the numeric count, because there `unmapped_labels` is a
 real state a person can act on.
 
+**What the browser leg found that no component cell could (fix round).** Six of the walk's seven
+legs shipped as `test.fixme`; running them one at a time surfaced three app defects on this very
+surface. (1) The settled read outcome was UNMOUNTED by the reload that follows a successful read —
+`DataState` renders its LoadingState instead of children and every `act()` flips `loading`, so the
+banner that AC5 requires to be persistent vanished at the moment of success; fixed with
+`opening-register.tsx`'s own `hasSeedsData` precedent inside `opening-seed-workbench.tsx`. (2) The
+document panel was mounted with `documentName={null}`, so every provenance cell read the sha twice
+("Document 65a6f1e2d3c4 (sha 65a6f1e2d3c4)") and the footer had a hole where the filename belongs;
+the workbench now reads the tie document's name in a SEPARATE read whose failure costs only the
+name. (3) `OpeningDryrunStrip` rendered its refusal token at `opacity-70`, taking `text-warning` on
+`bg-warning-muted` to 3.33:1 — below WCAG AA for 12px text, and invisible to
+`scripts/check-token-contrast.mjs`, which reads only the tokens in globals.css. A component cell
+mounts one component with nothing re-reading around it; only the built page in a browser has the
+reload, the second read and the real colours.
+
 **A refusal by the READER is a warning, not the keyed invitation.** A 422 whose reason is the
 producer's own sentence ("trial balance does not balance: DR … vs CR …") is not
 `no_opening_tb_lines`, so `isKeyedFallback` is false and the face renders the warning branch with

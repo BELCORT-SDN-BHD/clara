@@ -20,42 +20,57 @@ import { signInTo } from "./helpers";
 // `packages/db/tests/opening-ledger-source.test.mjs` and
 // `packages/runtime/tests/opening-ledger-source-e2e.mjs`.
 
-// ── MEASURED STATUS OF THIS FILE, 2026-09-19, and it is a PARTIAL ────────────────────────────
+// ── MEASURED STATUS OF THIS FILE, 2026-09-19 (fix round), and it is now WHOLE ───────────────
 // Run: `CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3350 CLARA_E2E_NEXT_PORT=3351
-// CLARA_E2E_RUNTIME_PORT=3352 pnpm --filter @clara/web e2e opening-ledger-source`, against the
-// real built bundle on this ticket's own rig. Result:
+// CLARA_E2E_RUNTIME_PORT=3352 pnpm --filter @clara/web e2e opening-ledger-source
+// --reporter=line --workers=1`, against the real built bundle on this ticket's own rig:
 //
-//   ok  4 · ?tab=opening survives a reload, and Back leaves the page rather than the tab (8.3s)
-//   x   1 · the whole journey                                                            (12.2s)
-//   x   2 · the named refusal                                                            (51.8s)
-//   x   3 · no_opening_tb_lines                                                           (54.2s)
-//   x   5 · keyboard + focus return                                                       (50.2s)
-//   x   6 · 320px + axe                                                                   (50.3s)
-//   x   7 · 200% zoom                                                                     (50.5s)
+//   7 passed (21.7s) — every leg live, none `fixme`, none skipped.
 //
-// The URL leg is LIVE and PASSES. The six legs that open the create dialog are marked
-// `test.fixme` below rather than left red, and that is a declaration, not a hiding place:
-// Playwright lists a fixme in its own report, the bodies are unchanged, and #656's final report
-// carries this measurement in full. They are NOT deleted, because the mock, the `serve-built.mjs`
-// wiring and the ownership-census row they depend on are all correct and green
-// (`e2e-fixture-ownership.test.ts` 18/18), and the surfaces themselves are covered by 29 node
-// cells plus a real-Postgres leg — what is missing is the browser proof, not the behaviour.
+// The first cut of this file shipped six of the seven legs as `test.fixme` with the failing
+// assertion unread. Reading them one at a time found FOUR defects, and only one of them was in
+// the spec:
 //
-// WHAT IS KNOWN, from the mock's own request log during the failing run: the page reaches
-// `?tab=opening`, the create dialog opens, `POST /rest/v1/rpc/create_opening_seed` is DISPATCHED
-// AND ANSWERED, and the workbench then re-reads `opening_seed_registry`, `opening_items` and
-// `opening_tb_targets`. So the journey is wired end to end and the failure is downstream of the
-// create — most likely in what this file asserts about the settled page rather than in the page
-// itself. ONE fixture defect was found and fixed while diagnosing (the keyed-resolution read is
-// scoped by `bound_scope_id`, not by client, so this lane fell through and the combined workbench
-// read never settled); that fix is in the mock and is NOT yet re-measured in the browser.
+//   1 · THE FIXTURE. `loadOpeningItems` reads `opening_items` by `seed_id` and nothing else, and
+//       the mock's empty-relation guard was `client_id`-only, so that read fell through to a 404
+//       and `useAsyncRead` classified the whole combined read `not_found`: the entire tied-basis
+//       surface rendered "This isn't available yet." The mock now guards on this lane's SEED too.
+//   2 · THE APP, and it is AC5's own law. After a successful read the settled outcome VANISHED:
+//       `DataState` renders its LoadingState INSTEAD of children, and every `act()` flips
+//       `loading` on the reload it fires, so the reload that follows the read unmounted
+//       `OpeningParseAction` and took its persistent banner with it. Fixed in
+//       `opening-seed-workbench.tsx` with `opening-register.tsx`'s own `hasSeedsData` precedent.
+//       No component cell could see this: they mount the action alone, where nothing re-reads.
+//   3 · THE APP AGAIN. The panel was mounted with `documentName={null}`, so every provenance cell
+//       read "Document <sha12> (sha <sha12>)" — the hash twice — and the footer said "Bound to
+//       (sha …)" with a hole where the filename belongs. The workbench now reads the tie
+//       document's name, in a SEPARATE read whose failure costs only the name.
+//   4 · THE APP, caught by axe. The dry-run strip rendered its refusal token at `opacity-70`,
+//       taking `text-warning` on `bg-warning-muted` to 3.33:1 — under WCAG AA for 12px text, and
+//       invisible to `scripts/check-token-contrast.mjs`, which only reads globals.css.
 //
-// The next pass should run the legs one at a time with `--reporter=line` and read the assertion,
-// which this run never printed before the machine was needed elsewhere.
+// And the one spec defect: `not.toMatch(/Ready to approve/i)` fails on the honest state it exists
+// to require, because "Not ready to approve" contains it.
+//
+// LANE STATE: `serve-built.mjs` is ONE server for the whole run, so every cell resets this lane
+// first through `reset_opening_ledger_source_fixture` (scoped to this lane's own client id) —
+// without it the first cell's basis made every later cell wait fifty seconds for a "Create
+// opening seed" trigger that was gone.
 
 const CLIENT = "656c656c-6565-4565-8565-656565656565";
 const OPENING = `/clients/${CLIENT}/registers?tab=opening`;
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+
+// ONE SERVER FOR THE WHOLE RUN, so this lane's fixture state (above all `seedCreated`) survives
+// from cell to cell — and every cell below starts by creating the basis. Each cell therefore
+// resets the lane first, through the verb scoped to this lane's own client
+// (`opening-ledger-source-mock.mjs`), exactly as `document-correction-walk.spec.ts` does.
+test.beforeEach(async ({ request }) => {
+  const response = await request.post("/e2e-supabase/rest/v1/rpc/reset_opening_ledger_source_fixture", {
+    data: { p_client: CLIENT },
+  });
+  expect(response.ok(), "the lane fixture must actually reset before each cell").toBe(true);
+});
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
@@ -88,7 +103,7 @@ async function createBasisWithDocument(page: Page): Promise<void> {
 // 1 — the whole journey, on the tab a client-Home link already points at.
 // ---------------------------------------------------------------------------------------------
 
-test.fixme("a basis is bound to a filed document, read, and shows every line with its provenance", async ({ page }) => {
+test("a basis is bound to a filed document, read, and shows every line with its provenance", async ({ page }) => {
   await signInTo(page, OPENING);
 
   // The tab is the URL's, and the URL is the truth.
@@ -127,7 +142,12 @@ test.fixme("a basis is bound to a filed document, read, and shows every line wit
   // the basis does NOT tie, and the strip names the database's own token.
   const strip = page.getByTestId("opening-dryrun-strip");
   await expect(strip).toContainText("tie_mismatch");
-  expect(await strip.textContent()).not.toMatch(/Ready to approve/i);
+  // The NEGATIVE has to be written against the copy, not against a substring of it: the honest
+  // sentence is "Not ready to approve — …", which contains "ready to approve". Measured on the
+  // first run that ever reached this line (fix-round): the loose `/Ready to approve/i` would fail
+  // on the very state it exists to require.
+  await expect(strip).toContainText(/Not ready to approve/);
+  expect(await strip.textContent()).not.toMatch(/all four checks the approval enforces are satisfied/);
 
   await expectAccessible(page, "opening tab, basis read");
 });
@@ -136,7 +156,7 @@ test.fixme("a basis is bound to a filed document, read, and shows every line wit
 // 2 — the refusal, which is the branch this slice exists for.
 // ---------------------------------------------------------------------------------------------
 
-test.fixme("a named refusal renders VERBATIM as a persistent block and the basis stays usable", async ({ page }) => {
+test("a named refusal renders VERBATIM as a persistent block and the basis stays usable", async ({ page }) => {
   await signInTo(page, OPENING);
   await createBasisWithDocument(page);
 
@@ -166,7 +186,7 @@ test.fixme("a named refusal renders VERBATIM as a persistent block and the basis
   await expectAccessible(page, "opening tab, named refusal");
 });
 
-test.fixme("`no_opening_tb_lines` is INFORMATION with the keyed path named, not an error", async ({ page }) => {
+test("`no_opening_tb_lines` is INFORMATION with the keyed path named, not an error", async ({ page }) => {
   await signInTo(page, OPENING);
   await createBasisWithDocument(page);
   await page.route("**/api/runtime/opening/parse-targets", (route) =>
@@ -199,7 +219,7 @@ test("?tab=opening survives a reload, and Back leaves the page rather than the t
   await expect(page).not.toHaveURL(/tab=opening/);
 });
 
-test.fixme("the create dialog is reachable and completable by keyboard alone, and focus returns to its trigger", async ({ page }) => {
+test("the create dialog is reachable and completable by keyboard alone, and focus returns to its trigger", async ({ page }) => {
   await signInTo(page, OPENING);
 
   const trigger = page.getByRole("button", { name: "Create opening seed" });
@@ -221,7 +241,7 @@ test.fixme("the create dialog is reachable and completable by keyboard alone, an
   await expect(trigger).toBeFocused();
 });
 
-test.fixme("the whole journey works at 320px, and the tab is accessible there", async ({ page }) => {
+test("the whole journey works at 320px, and the tab is accessible there", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await signInTo(page, OPENING);
   await expect(page.getByRole("heading", { name: "Opening balances & carry-down" })).toBeVisible();
@@ -239,7 +259,7 @@ test.fixme("the whole journey works at 320px, and the tab is accessible there", 
   await expectAccessible(page, "opening tab at 320px");
 });
 
-test.fixme("the tab is accessible at 200% zoom", async ({ page }) => {
+test("the tab is accessible at 200% zoom", async ({ page }) => {
   // 200% zoom modelled the way WCAG 1.4.4 means it: half the CSS viewport at the same content.
   await page.setViewportSize({ width: 640, height: 512 });
   await signInTo(page, OPENING);
