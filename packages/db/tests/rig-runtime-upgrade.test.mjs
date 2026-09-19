@@ -89,10 +89,11 @@ test("§3.9 upgrade/cutover: 0001–0005 + data + PENDING intents for ALL THREE 
     return;
   }
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
 
   // 1. Fresh DB with ONLY 0001–0005 (the Slice-3 world; no runtime core).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await migrate({ dir: exportPre0006(), log: () => {} });
   const pre = await rootQuery(
     "select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'clara' and c.relname = 'agent_tasks'",

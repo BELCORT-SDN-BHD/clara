@@ -85,12 +85,13 @@ function exportPreConvergence() {
 
 async function freshPreConvergenceDb() {
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   // Cluster-wide role survival: roles outlive `drop database`/`drop schema`, and 0154 asserts an
   // EXACT cluster-wide `clara%` role count, so a second from-scratch chain on one cluster refuses
   // without this sweep (tests/rig-cluster-reset.mjs's own header, review-518 D1/D2).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPreConvergence(), log: () => {} });
   return { migrate };

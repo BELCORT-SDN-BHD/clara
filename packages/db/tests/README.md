@@ -734,3 +734,32 @@ later file in the same sweep does not inherit this one's arrangement.
 
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
+
+## `reset-gate-routing.test.mjs` — #845
+
+Every `reset()`-gated upgrade-drill suite (checkout-convergence, hrd-a/hrd-b, rig-docs,
+rig-events, rig-runtime, s6, wave-a, wave-b, x37/x40/x41 and the x42 split kit — 13 files) now
+obtains the destructive `reset` from `../scripts/reset.mjs` and calls it as
+`guardedReset(reset, options)`, the same `rig-reset-guard.mjs` wrapper T19 in
+`rig-isolation.test.mjs` has used since #773. Before this ticket only T19 was wrapped; the shared
+gate in `lib/guard.mjs` admits any loopback host regardless of database name, so any of those 13
+files could still drop a named, in-use rig database under `CLARA_RIG_ALLOW_RESET=1` +
+`CLARA_ALLOW_DESTRUCTIVE=1`.
+
+`reset-gate-routing.test.mjs` does not hand-list the files it checks (beyond one cross-check
+constant): it WALKS `packages/db/tests` for every module whose source contains an
+`import("<path>/scripts/reset.mjs")` call, asserts that set is exactly the audited 14 (T19's own
+file plus the 13 this ticket fixed), then asserts none of them has a bare `await reset(` call site
+left, and that each imports `guardedReset` at least as many times as it imports the raw `reset`. A
+file added later that imports the destructive `reset` unwrapped is caught by this suite without
+anyone maintaining a list. One behavioural cell imports the ACTUAL `scripts/reset.mjs` export —
+the identical module object every one of the 14 files resolves — wraps it in a non-delegating spy,
+and proves `guardedReset` refuses a non-disposable name (`clara_631`) before that spy is ever
+entered; because the structural cells already show every drill funnels through this same
+`guardedReset`, that one proof generalises to all 14 call sites.
+
+**This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are
+CI's job, one file at a time, on an isolated database (see each file's own header for its
+`PGDATABASE=... CLARA_RIG_ALLOW_RESET=1` invocation). What this suite proves locally, safely, and
+on a shared rig is the ROUTING: the name check runs before any of those paths could reach a real
+`reset()`.

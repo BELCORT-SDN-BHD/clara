@@ -96,13 +96,14 @@ async function buildPreWorld(prefix) {
 test("probe 1 (fresh): reset → migrate ALL (0001→0009) compiles clean; the ACL/overload tail holds", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   // Cluster-wide role survival across this file's own multiple reset()+migrate()
   // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
   // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
   // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   await assertSurfaceClean();
@@ -115,13 +116,14 @@ test("probe 1 (fresh): reset → migrate ALL (0001→0009) compiles clean; the A
 test("probe 1 (upgrade): 0001→0008 with a filed doc + a single open draft → 0009 applies clean; the one-open-draft index is created", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   // Cluster-wide role survival across this file's own multiple reset()+migrate()
   // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
   // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
   // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0009(), log: () => {} });
 
@@ -145,13 +147,14 @@ test("probe 1 (upgrade): 0001→0008 with a filed doc + a single open draft → 
 test("probe 1 (upgrade pre-flight): a filing carrying TWO open drafts at 0008 ABORTS 0009 (deploy-onto-existing safety); it rolls back atomically", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   // Cluster-wide role survival across this file's own multiple reset()+migrate()
   // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
   // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
   // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0009(), log: () => {} });
 
@@ -182,13 +185,14 @@ test("probe 1 (upgrade pre-flight): a filing carrying TWO open drafts at 0008 AB
 test("probe 1 (upgrade legacy-state correction): approved cite + one open draft on one filing at 0008 → 0009 applies (no abort); approve_wrong_client_correction reverses the cite + withdraws the draft in one bounded transaction", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   // Cluster-wide role survival across this file's own multiple reset()+migrate()
   // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
   // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
   // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
-  await reset({ log: () => {} });
+  await guardedReset(reset, { log: () => {} });
   await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0009(), log: () => {} });
 
