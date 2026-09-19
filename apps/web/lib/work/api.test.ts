@@ -15,7 +15,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cancelWork, probeWork, retryWork, submitJournalWork, takeOverWork, type JournalBasisWire } from "./api";
+import {
+  cancelWork, probeWork, retryWork, submitJournalWork, submitTradeInvoiceWork, takeOverWork,
+  type JournalBasisWire,
+} from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const auth: SessionTokenAccessor = { getAccessToken: async () => "tok" };
@@ -460,6 +463,136 @@ test("a 409 TRANSIENT is not `not_takeable` — on the take-over door", async ()
     () => json({ error: "transient", reason: "serialization" }, 409),
     async () => {
       assert.deepEqual(await takeOverWork(auth, { workId: "w1", opKey: "k" }), { kind: "transient" });
+    },
+  );
+});
+
+// ===========================================================================================
+// #981 — THE GENERIC STRUCTURED-DETAIL CARRIER, read at this edge.
+//
+// The runtime's durable-Work routes stopped taking a refusal's typed detail apart key by key: the
+// door's whole `detail` object rides back under one key on every 400 and 409. This module is the
+// only reader of those bodies (they never go through `lib/wire.ts`), so the carrier is surfaced
+// HERE — once, in one helper — and every lane gets it without a new arm.
+//
+// THE OPTIONALITY IS THE COMPATIBILITY PROMISE, not laziness. A body that carries no structured
+// detail returns the result object it always returned, key for key, so no existing caller and no
+// existing cell sees a shape it did not see before.
+// ===========================================================================================
+
+test("981.web: a 400 with NO structured detail returns exactly the result it always did", async () => {
+  await withFetch(
+    () => json({ error: "invalid_basis", field: "memo", reason: "nonempty" }, 400),
+    async () => {
+      assert.deepEqual(await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS }), {
+        kind: "invalid_basis",
+        field: "memo",
+        reason: "nonempty",
+      });
+    },
+  );
+});
+
+test("981.web: a detail key this file has never heard of reaches the caller", async () => {
+  // THE WHOLE POINT. `max` / `length` / `clarified_by` are named nowhere in lib/work/api.ts, and
+  // they arrive anyway — the runtime promoted none of them and this edge unfolded none of them.
+  await withFetch(
+    () => json({
+      error: "invalid_basis",
+      field: "memo",
+      reason: "max_length",
+      detail: { reason: "invalid_basis", field: "memo", constraint: "max_length", max: 4000, length: 4001 },
+    }, 400),
+    async () => {
+      const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "invalid_basis");
+      assert.equal(out.kind === "invalid_basis" ? out.field : null, "memo", "the promoted keys are untouched");
+      assert.equal(out.kind === "invalid_basis" ? out.reason : null, "max_length");
+      assert.deepEqual(out.kind === "invalid_basis" ? out.detail : null,
+        { reason: "invalid_basis", field: "memo", constraint: "max_length", max: 4000, length: 4001 },
+        "…and the door's own object is readable whole");
+    },
+  );
+  // A detail that is not an object at all is NOT a guess: the caller sees no carrier rather than
+  // a wrapper around a string, exactly as `wire.ts`'s `parseRefusalDetail` answers null.
+  for (const detail of ["plain text", 42, ["a"], null]) {
+    await withFetch(
+      () => json({ error: "invalid_basis", field: "memo", reason: "nonempty", detail }, 400),
+      async () => {
+        const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+        assert.deepEqual(out, { kind: "invalid_basis", field: "memo", reason: "nonempty" },
+          `a ${JSON.stringify(detail)} detail carries no structured detail`);
+      },
+    );
+  }
+});
+
+test("981.web: the trade invoice's candidates are the SAME carrier, typed once", async () => {
+  // D12(a)'s list is no longer unfolded by a route-specific arm; it is read off the generic
+  // carrier, and `candidates` survives as a typed field because the form renders it INLINE as a
+  // choice and a `Record<string, unknown>` would make every render site parse for itself.
+  const candidates = [
+    { counterparty_id: "cp-1", name: "Alpha Supplies Sdn Bhd", registration_no: "199001000001", tin: null },
+    { counterparty_id: "cp-2", name: "Alpha Supplies Trading", registration_no: null, tin: "C1234567890" },
+  ];
+  await withFetch(
+    () => json({
+      error: "invalid_basis",
+      field: "invoice.counterparty",
+      reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", name: "Alpha Supplies", expected_counterparty_kind: "vendor", candidates },
+    }, 400),
+    async () => {
+      const out = await submitTradeInvoiceWork(auth, {
+        clientId: "c1", intentKey: "i1", kind: "supplier_bill", invoice: {}, basis: {},
+      });
+      assert.equal(out.kind, "invalid_basis");
+      if (out.kind !== "invalid_basis") return;
+      assert.equal(out.field, "invoice.counterparty");
+      assert.equal(out.reason, "party_ambiguous");
+      assert.deepEqual(out.candidates, candidates, "the typed field the form renders");
+      assert.equal(out.detail?.name, "Alpha Supplies",
+        "…and the rest of the door's sentence is there too, which the route-specific fold threw away");
+    },
+  );
+  // A refusal with no candidates leaves an EMPTY list rather than undefined — the banner's plain
+  // arm reads `candidates.length === 0`, and that must keep working for every other refusal.
+  await withFetch(
+    () => json({ error: "invalid_basis", field: "invoice.total_cents", reason: "invalid_total" }, 400),
+    async () => {
+      const out = await submitTradeInvoiceWork(auth, {
+        clientId: "c1", intentKey: "i1", kind: "supplier_bill", invoice: {}, basis: {},
+      });
+      assert.deepEqual(out, {
+        kind: "invalid_basis", field: "invoice.total_cents", reason: "invalid_total", candidates: [],
+      });
+    },
+  );
+});
+
+test("981.web: an UNNAMED 409 keeps the door's own reason on the carrier", async () => {
+  // The generic conflict arm is the 409 half of the same gap: before #981 a CLR13 nobody had
+  // promoted arrived as `{kind:"conflict", workId:null}` and every fact the door raised — which
+  // state, whose, since when — was gone by the time a surface could show it.
+  await withFetch(
+    () => json({
+      error: "conflict",
+      detail: { reason: "operation_in_flight", status: "running", op_key: "k-1" },
+    }, 409),
+    async () => {
+      const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "conflict");
+      assert.equal(out.kind === "conflict" ? out.workId : "x", null, "the promoted key is unchanged");
+      assert.deepEqual(out.kind === "conflict" ? out.detail : null,
+        { reason: "operation_in_flight", status: "running", op_key: "k-1" });
+    },
+  );
+  // …and the one every composer already reads is byte-for-byte what it was.
+  await withFetch(
+    () => json({ error: "intent_payload_conflict", work_id: "work-9" }, 409),
+    async () => {
+      assert.deepEqual(await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS }),
+        { kind: "conflict", workId: "work-9" });
     },
   );
 });

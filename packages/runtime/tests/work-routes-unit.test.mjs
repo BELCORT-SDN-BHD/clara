@@ -24,6 +24,7 @@ register();
 const {
   LINE_DESCRIPTION_MAX_CHARS,
   MEMO_MAX_CHARS,
+  TRADE_INVOICE_FIELD_DEFAULTS,
   detailField,
   reasonOf,
   toDbBasis,
@@ -465,4 +466,195 @@ test("630.route: the cancel door's authority and identity refusals keep the esta
   assert.deepEqual(workErrorResponse(raised("CLR10", { reason: "op_key_conflict" })).body,
     { error: "invalid_basis", field: "basis", reason: "op_key_conflict" },
     "a reused key with different arguments rides the route's own 400 vocabulary");
+});
+
+// ===========================================================================================
+// #981 — ONE GENERIC STRUCTURED-DETAIL CARRIER, instead of a fold per refusal type.
+//
+// WHAT WAS WRONG. A governed door raises ONE typed `detail` jsonb. This map used to take that
+// object apart key by key and rebuild a bespoke body per refusal category: a shared fold for the
+// three field-scoped `constraint` reasons, and — in the trade-invoice route's own catch — a
+// second, differently-shaped fold that copied `detail.candidates` onto a body of its own. Every
+// new refusal carrying structured detail therefore needed a new fold HERE and a new arm on the
+// web result type, and until both landed the detail did not exist as far as any browser could see.
+//
+// The rationale in the code for doing it that way cited `apps/web/lib/wire.ts` "discarding every
+// detail key but `reason`". That was true when it was written and is not true now (#629 added
+// `parseRefusalDetail`, THE WHOLE typed detail object) — and it never applied to these bodies at
+// all, because the durable-Work client (`apps/web/lib/work/api.ts`) parses this JSON itself and
+// never goes through wire.ts.
+//
+// WHAT IS TRUE NOW. The door's typed detail rides back VERBATIM under one key, `detail`, on every
+// 400 and 409 this map builds. The promoted top-level keys are unchanged — that is the whole
+// compatibility promise and LEGACY_BODIES below is its proof — so a reader keyed on `reason`,
+// `field`, `status`, `work_id`, `entry_id` or `superseded_by` reads exactly what it read before,
+// and a reader that wants a key nobody promoted reads it off the carrier without a code change
+// anywhere in this file.
+// ===========================================================================================
+
+/** The 400/409 bodies this map built BEFORE the carrier existed, each beside the error that
+ *  raises it. The table is not here because these shapes are good; it is here because every key
+ *  in it is read by something live today, and #981 promised not to move one of them. */
+const LEGACY_BODIES = [
+  ["a field-scoped basis refusal",
+    raised("CLR10", { reason: "invalid_basis", field: "lines[2].debit_cents", constraint: "integer_cents" }),
+    400, { error: "invalid_basis", field: "lines[2].debit_cents", reason: "integer_cents" }],
+  ["an evidence refusal only the database can reach",
+    raised("CLR10", { reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed" }),
+    400, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" }],
+  ["a claim refusal, re-spelled for the control that produced it",
+    raised("CLR10", { reason: "invalid_claim", field: "claim.items[1].description", constraint: "nonempty" }),
+    400, { error: "invalid_basis", field: "claim.items[1].description", reason: "nonempty" }],
+  ["a CLR10 with no constraint at all",
+    raised("CLR10", { reason: "invalid_intent_key" }),
+    400, { error: "invalid_basis", field: "basis", reason: "invalid_intent_key" }],
+  ["the takeover's basis gate",
+    raised("CLR10", { reason: "basis_confirmation_required", basis_origin: "clara_interpreted", basis_digest: "a".repeat(64) }),
+    400, { error: "basis_confirmation_required", basis_digest: "a".repeat(64), basis_origin: "clara_interpreted" }],
+  ["the intent-payload conflict that names the existing Work",
+    raised("CLR10", { reason: "intent_payload_conflict", work_id: "11111111-1111-4111-8111-111111111111" }),
+    409, { error: "intent_payload_conflict", work_id: "11111111-1111-4111-8111-111111111111" }],
+  ["the document already backing a posted entry",
+    raised("CLR13", { reason: "source_already_posted", document_id: DOC, entry_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }),
+    409, { error: "source_already_posted", entry_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", document_id: DOC }],
+  ["a retry the Work's status forbids",
+    raised("CLR13", { reason: "not_retryable", status: "queued" }),
+    409, { error: "not_retryable", status: "queued" }],
+  ["a takeover the Work's status forbids",
+    raised("CLR13", { reason: "not_takeable", status: "running" }),
+    409, { error: "not_takeable", status: "running" }],
+  ["a restatement the successor already closed",
+    raised("CLR13", { reason: "already_superseded", status: "cancelled", superseded_by: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }),
+    409, {
+      error: "already_superseded", reason: "already_superseded", status: "cancelled",
+      superseded_by: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    }],
+  ["the boundary's own refusal",
+    raised("CLR13", { reason: "work_cancelled", status: "stopping" }),
+    409, { error: "work_cancelled", status: "stopping" }],
+  ["an unnamed CLR13",
+    raised("CLR13", { reason: "run_already_terminal", status: "cancelled" }),
+    409, { error: "conflict" }],
+];
+
+test("981.route: the carrier is ADDITIVE — every key a current reader reads still carries its value", () => {
+  for (const [label, err, status, legacy] of LEGACY_BODIES) {
+    const out = workErrorResponse(err);
+    assert.equal(out.status, status, `${label}: the status is unchanged`);
+    for (const [key, value] of Object.entries(legacy)) {
+      assert.deepEqual(out.body[key], value, `${label}: ${key} is unchanged`);
+    }
+    // …and nothing was REMOVED and nothing but the carrier was added, so a reader that iterates
+    // the body (the World legs do) sees the same keys plus exactly one.
+    assert.deepEqual(
+      Object.keys(out.body).filter((k) => k !== "detail").sort(),
+      Object.keys(legacy).sort(),
+      `${label}: the promoted keys are exactly the ones that were there`,
+    );
+  }
+});
+
+test("981.route: the door's typed detail rides back VERBATIM under one key", () => {
+  for (const [label, err] of LEGACY_BODIES) {
+    const out = workErrorResponse(err);
+    assert.deepEqual(out.body.detail, JSON.parse(err.detail), `${label}: the carrier is the door's own object`);
+  }
+});
+
+test("981.route: a detail key never seen before reaches the wire with NO new fold", () => {
+  // THE WHOLE POINT. `clarified_by` appears nowhere in src/workRoutes.ts — that is the property
+  // under test — and it still arrives, because nothing takes the detail apart any more.
+  const err = raised("CLR10", {
+    reason: "invalid_basis",
+    field: "memo",
+    constraint: "max_length",
+    max: 4000,
+    length: 4001,
+    clarified_by: { question_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", asked_at: "2026-09-20T00:00:00Z" },
+  });
+  const out = workErrorResponse(err);
+  assert.equal(out.body.reason, "max_length", "the promoted vocabulary is untouched");
+  assert.equal(out.body.detail.max, 4000, "a NUMBER survives — detailField could only ever read strings");
+  assert.equal(out.body.detail.length, 4001);
+  assert.deepEqual(out.body.detail.clarified_by,
+    { question_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", asked_at: "2026-09-20T00:00:00Z" },
+    "a NESTED object survives too, which is what the candidate list is");
+});
+
+test("981.route: the three constraint folds are the only typing left, and the token rides beside them", () => {
+  // AC1 — a field-scoped refusal is still readable by every reason-keyed caller exactly as today,
+  // because the route's own earlier validation answers the SAME bare tokens and the two halves
+  // must not speak two vocabularies for one refusal. That is the fold's real justification, and
+  // it has nothing to do with wire.ts.
+  for (const reason of ["invalid_basis", "invalid_source_ref", "invalid_claim"]) {
+    const out = workErrorResponse(raised("CLR10", { reason, field: "memo", constraint: "nonempty" }));
+    assert.equal(out.body.reason, "nonempty", `${reason} still folds to its constraint on the wire`);
+    assert.equal(out.body.detail.constraint, "nonempty", "…and the raw token is on the carrier as well");
+    assert.equal(out.body.detail.reason, reason, "…beside the door's OWN reason, which the wire overwrote");
+  }
+  // A reason that carries a constraint but is NOT one of the three keeps its own name. The
+  // vocabulary is out of #981's scope, and a generic "fold whenever a constraint exists" would
+  // have moved invalid_adjustment, stale_basis and adjustment_lines_mismatch silently.
+  for (const reason of ["invalid_adjustment", "stale_basis", "adjustment_lines_mismatch"]) {
+    const out = workErrorResponse(raised("CLR10", { reason, field: "adjustment.counted_at", constraint: "present" }));
+    assert.equal(out.body.reason, reason, `${reason} does NOT fold`);
+    assert.equal(out.body.detail.constraint, "present", "…and its token is readable on the carrier instead");
+  }
+});
+
+test("981.route: party_ambiguous rides the SHARED responder, candidates and all", () => {
+  // AC2/AC4 — the trade-invoice route used to unfold this ONE refusal in its own catch, into a
+  // body shaped {error, field, reason, detail:{candidates}}. The minimum typing that survives is
+  // a per-lane FIELD DEFAULT (data, not code): clara._trade_invoice_resolve_party raises
+  // party_ambiguous with NO field, and the control the person must return to is the counterparty
+  // box, not "basis".
+  const candidates = [
+    { counterparty_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", name: "Alpha Supplies Sdn Bhd", registration_no: "199001000001", tin: null },
+    { counterparty_id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Alpha Supplies Trading", registration_no: null, tin: "C1234567890" },
+  ];
+  const err = raised("CLR10", {
+    reason: "party_ambiguous", name: "Alpha Supplies", expected_counterparty_kind: "vendor", candidates,
+  });
+  const out = workErrorResponse(err, { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS });
+  assert.equal(out.status, 400);
+  assert.equal(out.body.error, "invalid_basis", "the same three promoted keys the lane answered before");
+  assert.equal(out.body.field, "invoice.counterparty");
+  assert.equal(out.body.reason, "party_ambiguous");
+  assert.deepEqual(out.body.detail.candidates, candidates, "the list the browser renders, VERBATIM");
+
+  // The default is a default, never an override: a refusal that names its own field keeps it.
+  const named = raised("CLR10", { reason: "party_ambiguous", field: "invoice.counterparty.id", candidates: [] });
+  assert.equal(workErrorResponse(named, { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS }).body.field,
+    "invoice.counterparty.id");
+  // …and it applies to that ONE reason, not to every field-less refusal on the lane: the other
+  // party refusal answered `basis` before #981 and must go on answering `basis`.
+  assert.equal(
+    workErrorResponse(raised("CLR10", { reason: "party_unresolved", name: "Nobody" }),
+      { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS }).body.field,
+    "basis",
+    "party_unresolved is not the counterparty box's error — it was never folded and is not now");
+  // With no lane defaults at all (every other door) the fallback is the one it always was.
+  assert.equal(workErrorResponse(err).body.field, "basis");
+});
+
+test("981.route: a detail that is not a typed object carries NO carrier rather than an empty one", () => {
+  // PostgreSQL's own errors carry plain-text details. A `detail: {}` would tell a reader "the
+  // door raised a typed detail and it was empty", which is a different fact from "there is none".
+  const plain = Object.assign(new Error("deadlock"), { code: "CLR13", detail: "Process 1 waits for…" });
+  assert.equal(Object.hasOwn(workErrorResponse(plain).body, "detail"), false);
+  const none = Object.assign(new Error("boom"), { code: "CLR13" });
+  assert.equal(Object.hasOwn(workErrorResponse(none).body, "detail"), false);
+  // #630's transients are answered before every reason-keyed arm and stay exactly as they were.
+  assert.deepEqual(workErrorResponse(raised("40P01", null)),
+    { status: 409, body: { error: "transient", reason: "serialization" } });
+});
+
+test("981.route: 403 and 404 stay OPAQUE — the carrier never widens an existence answer", () => {
+  // A 404 on this surface answers BOTH "no such Work" and "a Work that is not this firm's", and
+  // that identity is the whole point (no existence oracle across firms). Putting the door's typed
+  // reason on it would loosen an access answer, which the standing ruling forbids.
+  assert.deepEqual(workErrorResponse(raised("CLR11", { reason: "work_not_found", firm_id: "other" })),
+    { status: 404, body: { error: "not_found", message: "not found" } });
+  assert.deepEqual(workErrorResponse(raised("CLR04", { reason: "insufficient_role", role: "viewer" })),
+    { status: 403, body: { error: "forbidden", message: "not permitted" } });
 });
