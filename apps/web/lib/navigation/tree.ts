@@ -775,6 +775,15 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
   if (parent === "accounting" && rest.length === 3 && rest[1] === "claims" && rest[2] === "new") {
     return "staffExpenseClaim";
   }
+  // #655 — the trade-invoice FORM, the fourth member of the same `accounting/<lane>/new` family.
+  // Registered here in the SAME commit as its `CLIENT_LEAVES` row and its href helper, because
+  // #638 proved what happens otherwise: a leaf whose arm nobody wrote resolves nowhere, and
+  // `tree.test.ts`'s reachability wall only catches it once the branches meet. There is no
+  // `accounting/invoices` LIST row: the invoices a client has recorded are read on /registers and
+  // /journals, both already built.
+  if (parent === "accounting" && rest.length === 3 && rest[1] === "invoices" && rest[2] === "new") {
+    return "tradeInvoice";
+  }
   if (parent === "work" && rest.length === 2) return "workDetail";
   // #647 — the three-segment arm sorts BEFORE the two-segment one only in reading order; the
   // exact-length rule keeps them disjoint, so `/knowledge/:recordId` and

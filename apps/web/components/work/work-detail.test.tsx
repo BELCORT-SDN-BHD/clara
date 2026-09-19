@@ -1618,6 +1618,16 @@ function claimOriginCalls(calls: DoorCall[]): DoorCall[] {
   return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_work_claim_origin"));
 }
 
+/** #655 — `clara.get_trade_invoice` is the SAME SHAPE of read as `get_work_claim_origin` above and
+ *  is here for the same reason: a trade invoice is admitted with purpose `journal_entry`, so the
+ *  purpose alone cannot say the Work IS one, and the read answers NULL for every Work that is not.
+ *  It is the IDENTITY/LINK block's mount effect, not a Sources door and not an act on the Work, so
+ *  the cells below exclude it BY NAME and then PIN what it actually did — one read on mount, and
+ *  not one more per tab press. */
+function tradeInvoiceCalls(calls: DoorCall[]): DoorCall[] {
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_trade_invoice"));
+}
+
 /** The four states are announced BY NAME — `role="group"` with an `aria-label` of
  *  "<axis>: <state>" — which is what a listener hears instead of eight adjacent fragments. A cell
  *  that matched the rendered TEXT would pass on a build that printed the four words with no
@@ -1664,11 +1674,14 @@ test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Doc
       // #638 — the identity block's one claim-origin read is excluded by name and pinned, so the
       // exclusion cannot hide a second one.
       assert.equal(claimOriginCalls(calls).length, 1, "exactly one get_work_claim_origin read, on mount");
+      // #655 — and the trade-invoice read, on the same footing and pinned the same way.
+      assert.equal(tradeInvoiceCalls(calls).length, 1, "exactly one get_trade_invoice read, on mount");
       assert.equal(
         calls.filter((c) =>
           c.url.includes("/rest/v1/rpc/")
           && !c.url.includes("get_document_state")
-          && !c.url.includes("get_work_claim_origin")).length,
+          && !c.url.includes("get_work_claim_origin")
+          && !c.url.includes("get_trade_invoice")).length,
         0,
         "the Sources tab opens no other door",
       );
@@ -1740,6 +1753,7 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
         "the source document's states to render");
       const doorsBefore = stateDoorCalls(calls).length;
       const originsBefore = claimOriginCalls(calls).length;
+      const invoicesBefore = tradeInvoiceCalls(calls).length;
 
       const sources = h.find((n) =>
         n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Sources");
@@ -1754,11 +1768,15 @@ test("624 AC4: switching to Sources fires no write and no SECOND state read", as
       // tab press is not a mount.
       assert.equal(claimOriginCalls(calls).length, originsBefore,
         "and a tab press does not re-ask the Work's claim origin");
+      // #655 — nor whether it carries a trade invoice. Same mount effect, same rule.
+      assert.equal(tradeInvoiceCalls(calls).length, invoicesBefore,
+        "and a tab press does not re-ask the Work's trade invoice");
       assert.equal(
         calls.filter((c) =>
           c.method !== "GET"
           && !c.url.includes("get_document_state")
-          && !c.url.includes("get_work_claim_origin")).length,
+          && !c.url.includes("get_work_claim_origin")
+          && !c.url.includes("get_trade_invoice")).length,
         0,
         "no mutating request of any kind left this page",
       );
