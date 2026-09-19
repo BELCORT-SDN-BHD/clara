@@ -1,3 +1,13 @@
+// THIS SCRIPT DOES NOT BUILD (#865). It serves whatever `.next/` already holds via
+// `next start` — it never runs `next build`. Only `e2e/run.mjs` (the `pnpm --filter @clara/web
+// e2e` script) builds first. A bare `npx playwright test`, or an IDE's own Playwright runner,
+// invokes THIS file directly through `playwright.config.ts`'s `webServer.command` and skips the
+// build, so it silently serves a STALE `.next/` and produces plausible but meaningless
+// failures — measured on the #648 fix round: a 19-minute-stale build produced a false failure
+// with no other symptom. Always run the browser suite as `pnpm --filter @clara/web e2e` (root
+// `apps/web`), never `npx playwright test` directly. The BUILD_ID this process is about to
+// serve, and its age, are logged at startup below (`logBuildFreshness`) so a stale run is
+// visible in the output rather than silent.
 import { spawn, spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -5,6 +15,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1222,6 +1233,30 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
     sendJson, readJson, accessToken, signupCode: E2E_SIGNUP_CODE,
   });
 });
+
+/**
+ * Logs the `BUILD_ID` this process is about to serve and its age, so a stale build (this file's
+ * own header names the #648 measurement: a bare `npx playwright test` serving a 19-minute-stale
+ * build produced a false failure with no other symptom) is VISIBLE in the run's own output
+ * rather than silent. Reads `.next/BUILD_ID`'s mtime rather than its contents for the age — the
+ * id itself carries no timestamp. A missing or unreadable file (a `.next/` that was never built)
+ * logs that fact instead of throwing, because the readiness probe a few lines below already
+ * turns "nothing is listening" into Playwright's own clear timeout.
+ */
+function logBuildFreshness() {
+  const buildIdPath = join(webRoot, ".next", "BUILD_ID");
+  try {
+    const buildId = readFileSync(buildIdPath, "utf8").trim();
+    const ageMinutes = (Date.now() - statSync(buildIdPath).mtimeMs) / 60_000;
+    console.log(`[e2e] serving .next BUILD_ID ${buildId}, built ${ageMinutes.toFixed(1)} min ago`);
+  } catch (err) {
+    console.error(
+      `[e2e] could not read ${buildIdPath} (${err instanceof Error ? err.message : String(err)}) — ` +
+        "is @clara/web built? Run \"pnpm --filter @clara/web e2e\", not a bare Playwright invocation.",
+    );
+  }
+}
+logBuildFreshness();
 
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(
