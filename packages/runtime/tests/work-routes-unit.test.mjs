@@ -58,6 +58,19 @@ const refusal = (basis) => {
 /** A raised database error, in the shape `pg` hands one back. */
 const raised = (code, detail) => Object.assign(new Error("refused"), { code, detail: JSON.stringify(detail) });
 
+/** #981 — one answer's PROMOTED half: everything but the generic `detail` carrier.
+ *
+ *  The cells written before #981 pin the keys a live reader KEYS ON, and every one of them is
+ *  unchanged; what changed is that the door's typed detail now rides back beside them under one
+ *  key. Reading those cells through this helper keeps each of them a literal, byte-for-byte pin
+ *  of the shape it was written to pin, instead of restating twelve bodies with one more key in
+ *  each. The carrier has cells of its own — LEGACY_BODIES at the foot of this file drives BOTH
+ *  halves together, so nothing here can hide a promotion that quietly moved. */
+const promoted = (out) => (out === null ? null : {
+  status: out.status,
+  body: Object.fromEntries(Object.entries(out.body).filter(([k]) => k !== "detail")),
+});
+
 // --- the happy path --------------------------------------------------------
 
 test("623.route: a well-formed wire basis becomes the DATABASE's shape, cents untouched", () => {
@@ -195,28 +208,28 @@ test("623.route: an over-long line narration is refused too (max_length, RAW)", 
 
 test("623.route: an intent-payload conflict answers with the existing Work's id", () => {
   const err = raised("CLR10", { reason: "intent_payload_conflict", work_id: "11111111-1111-4111-8111-111111111111" });
-  assert.deepEqual(workErrorResponse(err), {
+  assert.deepEqual(promoted(workErrorResponse(err)), {
     status: 409,
     body: { error: "intent_payload_conflict", work_id: "11111111-1111-4111-8111-111111111111" },
   });
   // The link is never INVENTED: a conflict whose detail carries no id answers with null, and the
   // composer's Alert then shows the message without a link rather than a broken one.
   const bare = raised("CLR10", { reason: "intent_payload_conflict" });
-  assert.deepEqual(workErrorResponse(bare), { status: 409, body: { error: "intent_payload_conflict", work_id: null } });
+  assert.deepEqual(promoted(workErrorResponse(bare)), { status: 409, body: { error: "intent_payload_conflict", work_id: null } });
   assert.equal(detailField(err, "work_id"), "11111111-1111-4111-8111-111111111111");
   assert.equal(detailField(Object.assign(new Error("x"), { code: "CLR10", detail: "plain text" }), "work_id"), null);
 });
 
 test("623.route: the retry door's 409 still names the status that made the retry illegal", () => {
   const err = raised("CLR13", { reason: "not_retryable", status: "queued" });
-  assert.deepEqual(workErrorResponse(err), { status: 409, body: { error: "not_retryable", status: "queued" } });
+  assert.deepEqual(promoted(workErrorResponse(err)), { status: 409, body: { error: "not_retryable", status: "queued" } });
 });
 
 test("623.route: a database invalid_basis rides back with the CONSTRAINT as its reason", () => {
   // The route's own 400s and the database's must be indistinguishable to a client: same `field`
   // vocabulary, same `reason` vocabulary. `reason` on the wire IS the database's `constraint`.
   const err = raised("CLR10", { reason: "invalid_basis", field: "lines[2].debit_cents", constraint: "integer_cents" });
-  assert.deepEqual(workErrorResponse(err), {
+  assert.deepEqual(promoted(workErrorResponse(err)), {
     status: 400,
     body: { error: "invalid_basis", field: "lines[2].debit_cents", reason: "integer_cents" },
   });
@@ -225,7 +238,7 @@ test("623.route: a database invalid_basis rides back with the CONSTRAINT as its 
 
   // A CLR10 that is NOT an invalid_basis has no constraint and keeps its own typed reason.
   const key = raised("CLR10", { reason: "invalid_intent_key" });
-  assert.deepEqual(workErrorResponse(key), { status: 400, body: { error: "invalid_basis", field: "basis", reason: "invalid_intent_key" } });
+  assert.deepEqual(promoted(workErrorResponse(key)), { status: 400, body: { error: "invalid_basis", field: "basis", reason: "invalid_intent_key" } });
   assert.equal(reasonOf(key), "invalid_intent_key");
 });
 
@@ -304,7 +317,7 @@ test("634.route: the DATABASE's source_refs[N] path is re-spelled sourceRefs[N] 
   const err = raised("CLR10", {
     reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed",
   });
-  assert.deepEqual(workErrorResponse(err), {
+  assert.deepEqual(promoted(workErrorResponse(err)), {
     status: 400,
     body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" },
   });
@@ -315,11 +328,10 @@ test("634.route: the DATABASE's source_refs[N] path is re-spelled sourceRefs[N] 
 
 test("634.route: an evidence refusal speaks ONE vocabulary whichever half caught it", () => {
   // Reviewed finding. `toDbSourceRefs` above answers with the bare CONSTRAINT token; the database
-  // answers `reason: "invalid_source_ref"` with the token in `detail.constraint`, and
-  // `lib/wire.ts` discards every detail key but `reason` — so unfolded, one refusal reached the
-  // browser under two different spellings depending on which half caught it, and `not_filed` (the
-  // only arm the route cannot reach, and the only one a preparer can act on) never reached the
-  // wire at all.
+  // answers `reason: "invalid_source_ref"` with the token in `detail.constraint` — so unfolded,
+  // one refusal reached the browser under two different spellings depending on which half caught
+  // it, and `not_filed` (the only arm the route cannot reach, and the only one a preparer can act
+  // on) reached it under the category name instead of its own.
   //
   // THE FOUR SHARED TOKENS, each raised from BOTH halves, must answer identically.
   for (const constraint of ["object", "kind", "uuid", "at_most_one_document"]) {
@@ -354,7 +366,7 @@ test("634.route: source_already_posted is a 409 that NAMES the entry already sta
     entry_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     conflict: true,
   });
-  assert.deepEqual(workErrorResponse(err), {
+  assert.deepEqual(promoted(workErrorResponse(err)), {
     status: 409,
     body: {
       error: "source_already_posted",
@@ -365,11 +377,11 @@ test("634.route: source_already_posted is a 409 that NAMES the entry already sta
   // The link is never INVENTED: a conflict whose detail carries no entry id answers with null,
   // and the composer's Alert then shows the conflict without a dead link.
   const bare = raised("CLR13", { reason: "source_already_posted" });
-  assert.deepEqual(workErrorResponse(bare).body,
+  assert.deepEqual(promoted(workErrorResponse(bare)).body,
     { error: "source_already_posted", entry_id: null, document_id: null });
   // …and the commit-time twin (raised inside the run, classified by claraWork's own errors) is
   // still an ordinary 409 on this surface, because this door never raises it.
-  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "source_conflict" })),
+  assert.deepEqual(promoted(workErrorResponse(raised("CLR13", { reason: "source_conflict" }))),
     { status: 409, body: { error: "conflict" } });
 });
 
@@ -397,7 +409,7 @@ test("630.route: the takeover's basis gate is NOT a malformed basis", () => {
     reason: "basis_confirmation_required", basis_origin: "clara_interpreted", basis_digest: "a".repeat(64),
   }));
   assert.equal(out.status, 400);
-  assert.deepEqual(out.body, {
+  assert.deepEqual(promoted(out).body, {
     error: "basis_confirmation_required",
     basis_digest: "a".repeat(64),
     basis_origin: "clara_interpreted",
@@ -408,16 +420,16 @@ test("630.route: the takeover's basis gate is NOT a malformed basis", () => {
 });
 
 test("630.route: not_takeable carries the status that made it so, like not_retryable", () => {
-  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "not_takeable", status: "running" })),
+  assert.deepEqual(promoted(workErrorResponse(raised("CLR13", { reason: "not_takeable", status: "running" }))),
     { status: 409, body: { error: "not_takeable", status: "running" } });
   // The Work-status arm the takeover shares with retry: a live run is a 409, never a 500.
   assert.equal(workErrorStatus("CLR13", "not_takeable"), 409);
 });
 
 test("630.route: the boundary's own refusals are 409s naming the Work status", () => {
-  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "work_cancelled", status: "stopping" })),
+  assert.deepEqual(promoted(workErrorResponse(raised("CLR13", { reason: "work_cancelled", status: "stopping" }))),
     { status: 409, body: { error: "work_cancelled", status: "stopping" } });
-  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "work_settled", status: "refused" })),
+  assert.deepEqual(promoted(workErrorResponse(raised("CLR13", { reason: "work_settled", status: "refused" }))),
     { status: 409, body: { error: "work_settled", status: "refused" } });
 });
 
@@ -447,7 +459,7 @@ test("630.route: the stranded pair is CONVERGED by the door, so no refusal is ma
   // What matters is that the token is gone — nothing can answer `run_already_terminal` any more,
   // so nothing downstream can pin it as covered.
   assert.deepEqual(
-    workErrorResponse(raised("CLR13", { reason: "run_already_terminal", status: "cancelled" })),
+    promoted(workErrorResponse(raised("CLR13", { reason: "run_already_terminal", status: "cancelled" }))),
     { status: 409, body: { error: "conflict" } },
     "the token is not in the map: an unreachable refusal gets no name of its own",
   );
@@ -463,7 +475,7 @@ test("630.route: the cancel door's authority and identity refusals keep the esta
   assert.equal(workErrorStatus("CLR04", "actor_not_active"), 403);
   assert.equal(workErrorStatus("CLR04", "insufficient_role"), 403);
   assert.equal(workErrorStatus("CLR13", "operation_in_flight"), 409);
-  assert.deepEqual(workErrorResponse(raised("CLR10", { reason: "op_key_conflict" })).body,
+  assert.deepEqual(promoted(workErrorResponse(raised("CLR10", { reason: "op_key_conflict" }))).body,
     { error: "invalid_basis", field: "basis", reason: "op_key_conflict" },
     "a reused key with different arguments rides the route's own 400 vocabulary");
 });

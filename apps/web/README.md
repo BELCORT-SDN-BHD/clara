@@ -999,3 +999,22 @@ does and the card prints them. The CSV is client-side only — no route, no door
 its first two lines carry the firm, that exact window and the currency, so a spreadsheet cannot lose
 the unit or the timezone the screen carried.
 
+
+## #981 — the durable-Work refusal carrier, read once
+
+`lib/work/api.ts` is the only reader of the runtime's durable-Work refusal bodies (they never go
+through `lib/wire.ts`). Those bodies now carry the governed door's WHOLE typed detail under one
+key, so this module surfaces it in one helper, `carrier()`, on the `invalid_basis` and the generic
+`conflict` arms — and a new structured key reaches a form with no new arm here and no new fold in
+`packages/runtime/src/workRoutes.ts`.
+
+**It is spread, not assigned, and that is the compatibility promise.** A body with no typed detail
+yields `{}`, so `{kind, field, reason}` stays exactly `{kind, field, reason}` for every caller and
+every existing cell. A `detail` that is not a JSON object (PostgreSQL's own errors carry plain
+text) yields `{}` too — never a wrapper around a string, which would be a guess.
+
+**The trade invoice keeps `candidates`, and it is the minimum typing layered on the carrier.**
+D12(a)'s list is read off `detail.candidates` and typed as a first-class field because
+`components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
+door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
+beside it now, where the route-specific fold used to throw it away.

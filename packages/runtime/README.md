@@ -1283,3 +1283,37 @@ CLR04 — which means its stored canceller has lost authority and no future swee
 because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
+
+## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
+
+`src/workRoutes.ts` turns one raised database error into one HTTP answer (`workErrorResponse`). It
+used to take the door's typed `detail` jsonb APART — a shared fold that overwrote `reason` with
+`detail.constraint` for three field-scoped reasons, and, inside the trade-invoice route's own
+catch, a second differently-shaped fold that lifted `detail.candidates` onto a body of its own.
+Every refusal that carried structured detail therefore needed a new fold here AND a new arm on
+`apps/web/lib/work/api.ts`; until both landed, the detail did not exist as far as a browser was
+concerned. The rationale in the code cited `apps/web/lib/wire.ts` "discarding every detail key but
+`reason`" — true when written, false since #629 added `parseRefusalDetail`, and never applicable
+to THESE bodies anyway, because the durable-Work client parses this JSON itself and never goes
+through wire.ts.
+
+**The door's typed detail now rides back whole, under `detail`, on every 400 and 409 this file
+builds.** `refusalDetail()` parses it once; `reasonOf` and `detailField` are views on that one
+object. The top-level keys are PROMOTIONS of what a caller keys on (`reason` focuses a control,
+`work_id` renders a link, `status` renders the state that made an act illegal) and every one of
+them is byte-for-byte what it was — `tests/work-routes-unit.test.mjs`'s `LEGACY_BODIES` is the
+twelve-row proof, driven in both directions.
+
+**What survives of the folds, and why.** The three constraint reasons (`invalid_basis`,
+`invalid_source_ref`, `invalid_claim`, now the named set `CONSTRAINT_FOLD_REASONS`) still answer
+the database's `constraint` token as the wire `reason`, because this route refuses the cheap cases
+ITSELF with a bare token and the two halves must not speak two vocabularies for one refusal. The
+raw token is on the carrier as well. It folds by NAME, never "whenever a constraint exists":
+`invalid_adjustment`, `stale_basis` and `adjustment_lines_mismatch` carry one too and have always
+ridden back under their own names. The trade-invoice fold is gone entirely; what is left of it is
+`TRADE_INVOICE_FIELD_DEFAULTS`, one row of DATA saying which control to focus when the door raises
+`party_ambiguous` with no `field` at all.
+
+**403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
+this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
+it would loosen an access answer.

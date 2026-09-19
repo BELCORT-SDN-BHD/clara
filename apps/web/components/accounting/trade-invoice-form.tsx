@@ -326,12 +326,11 @@ export function TradeInvoiceFormView({
       const field = fieldForServerPath(res.field);
       // D12(a): `party_ambiguous` carries its candidates VERBATIM, and they are rendered INLINE as
       // a choice rather than announced and thrown away.
-      // D12(a)'s candidate list rides the refusal's own `detail.candidates`, which
-      // `submitTradeInvoiceWork` unfolds onto a first-class `candidates` field — the shared
-      // `lib/wire.ts` keeps `detail.reason` and discards every other detail key, so the route
-      // unfolds this ONE refusal itself rather than widening the shared responder. Read
-      // DEFENSIVELY all the same: a refusal that carries none leaves the banner the door's
-      // sentence alone.
+      //
+      // #981 · the list rides the refusal's GENERIC carrier (`detail.candidates`), which every
+      // durable-Work refusal now has, and `submitTradeInvoiceWork` types that one key because
+      // this component renders it. Read DEFENSIVELY all the same: a refusal that carries none
+      // leaves the banner the door's sentence alone.
       const candidates: PartyCandidate[] = (res.candidates ?? [])
         .map((c) => ({
           counterparty_id: typeof c.counterparty_id === "string" ? c.counterparty_id : "",

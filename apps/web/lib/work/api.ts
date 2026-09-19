@@ -62,11 +62,14 @@ export type WorkAdmission = {
 export type SubmitJournalWorkResult =
   | ({ kind: "accepted" } & WorkAdmission)
   /** 400 — the runtime rejected the basis. `field`/`reason` are the DB's own
-   *  typed detail, mapped onto a control by the composer, never re-worded. */
-  | { kind: "invalid_basis"; field: string | null; reason: string | null }
+   *  typed detail, mapped onto a control by the composer, never re-worded.
+   *  `detail` is #981's generic carrier: THE WHOLE typed object the governed
+   *  door raised, present only when it raised one. */
+  | { kind: "invalid_basis"; field: string | null; reason: string | null; detail?: RefusalDetail }
   /** 409 — the same intent key already named a DIFFERENT payload. `workId` is
-   *  present only when the response carries one; a link is never invented. */
-  | { kind: "conflict"; workId: string | null }
+   *  present only when the response carries one; a link is never invented, and
+   *  `detail` carries whatever else the door said about the state it found. */
+  | { kind: "conflict"; workId: string | null; detail?: RefusalDetail }
   /** 409 — #634: the chosen SOURCE DOCUMENT already backs a posted entry. A
    *  DIFFERENT refusal from `conflict` because the next action is different: an
    *  attachment conflict opens IMPACT OR CORRECTION on the entry that already
@@ -104,14 +107,24 @@ export type SubmitTradeInvoiceWorkResult =
     dueDateSource: string | null;
   } & WorkAdmission)
   /**
-   * D12(a) — `party_ambiguous` is the ONE refusal on this lane that carries DATA, so its arm is
-   * widened HERE rather than on the shared `invalid_basis` shape every door returns. The route
-   * unfolds the door's typed candidate list onto the 400 body (`workRoutes.ts`'s trade-invoice
-   * catch), and the form renders those candidates INLINE as a choice: a person told "more than
-   * one party answers to that name" and given nothing to click has been informed, not helped.
-   * Every OTHER refusal leaves `candidates` empty, which is what the banner's plain arm reads.
+   * D12(a) — `party_ambiguous` is the ONE refusal on this lane that carries DATA, and the form
+   * renders those candidates INLINE as a choice: a person told "more than one party answers to
+   * that name" and given nothing to click has been informed, not helped.
+   *
+   * #981 · THE LIST COMES OFF THE GENERIC CARRIER, and `candidates` is the MINIMUM TYPING
+   * layered on it rather than a second shape beside it. The runtime no longer unfolds this one
+   * refusal in a catch of its own — it carries the door's whole typed detail like every other
+   * refusal — so what is left here is the one key this lane RENDERS, typed once so no render
+   * site has to parse for itself. Every OTHER refusal leaves `candidates` empty, which is what
+   * the banner's plain arm reads, and `detail` carries the rest of the door's sentence.
    */
-  | { kind: "invalid_basis"; field: string | null; reason: string | null; candidates: PartyCandidateWire[] }
+  | {
+    kind: "invalid_basis";
+    field: string | null;
+    reason: string | null;
+    candidates: PartyCandidateWire[];
+    detail?: RefusalDetail;
+  }
   | Exclude<SubmitJournalWorkResult, { kind: "accepted" } | { kind: "invalid_basis" }>;
 
 /** ONE candidate, exactly as `clara.admit_trade_invoice_work` raises it. Read defensively: a door
@@ -135,8 +148,35 @@ export type RetryWorkResult =
 
 const WORK_BASE = "/api/runtime/work";
 
+/**
+ * #981 — THE WHOLE typed detail a governed door raised, as the durable-Work routes now carry it
+ * back on every 400 and 409 (`packages/runtime/src/workRoutes.ts`'s `workErrorResponse`).
+ *
+ * WHY IT IS `unknown`-VALUED AND NOT A SHAPE. It is the door's object, not this module's: a
+ * candidate list, an integer cap, a period boundary, a status — whatever the migration that
+ * raised the refusal put there. A lane that RENDERS one key types that key (the trade invoice's
+ * `candidates` is the only one today); everything else is readable without a change here.
+ */
+export type RefusalDetail = Record<string, unknown>;
+
 function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
+ * The refusal body's generic carrier, read DEFENSIVELY and spread rather than assigned.
+ *
+ * SPREAD, because the absence of a carrier must be indistinguishable from the shape this module
+ * returned before #981: a body with no typed detail yields `{}`, so `{kind, field, reason}` stays
+ * exactly `{kind, field, reason}` for every existing caller and every existing cell. A detail
+ * that is not a JSON OBJECT (PostgreSQL's own errors carry plain text) yields `{}` too — never a
+ * wrapper around a string, which would be a guess.
+ */
+function carrier(body: Record<string, unknown>): { detail?: RefusalDetail } {
+  const detail = body.detail;
+  return detail !== null && typeof detail === "object" && !Array.isArray(detail)
+    ? { detail: detail as RefusalDetail }
+    : {};
 }
 
 // THE OPAQUE-REDIRECT ARM, and why it reads as DENIED here rather than as a
@@ -246,7 +286,7 @@ export async function submitPeriodicAdjustmentWork(
       : { kind: "accepted", ...admission };
   }
   if (res.status === 400) {
-    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason), ...carrier(body) };
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
@@ -256,7 +296,7 @@ export async function submitPeriodicAdjustmentWork(
     if (str(body.error) === "source_already_posted") {
       return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
     }
-    return { kind: "conflict", workId: str(body.work_id) };
+    return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
   return {
     kind: "unavailable",
@@ -309,7 +349,7 @@ export async function submitStaffExpenseClaimWork(
       : { kind: "accepted", ...admission, claimId: str(body.claim_id) };
   }
   if (res.status === 400) {
-    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason), ...carrier(body) };
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
@@ -319,7 +359,7 @@ export async function submitStaffExpenseClaimWork(
     if (str(body.error) === "source_already_posted") {
       return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
     }
-    return { kind: "conflict", workId: str(body.work_id) };
+    return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
   return {
     kind: "unavailable",
@@ -384,18 +424,17 @@ export async function submitTradeInvoiceWork(
       };
   }
   if (res.status === 400) {
-    // The candidate list rides `detail.candidates` and is read DEFENSIVELY: an absent or
-    // non-array detail yields an empty list, never a guess, and the banner is the door's own
-    // sentence alone.
-    const detail = body.detail;
-    const raw = detail !== null && typeof detail === "object"
-      ? (detail as { candidates?: unknown }).candidates
-      : undefined;
+    // The candidate list is ONE KEY of the generic carrier (#981), read DEFENSIVELY: an absent
+    // carrier or a non-array `candidates` yields an empty list, never a guess, and the banner is
+    // then the door's own sentence alone.
+    const held = carrier(body);
+    const raw = held.detail?.candidates;
     return {
       kind: "invalid_basis",
       field: str(body.field),
       reason: str(body.reason),
       candidates: Array.isArray(raw) ? (raw as PartyCandidateWire[]) : [],
+      ...held,
     };
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
@@ -406,7 +445,7 @@ export async function submitTradeInvoiceWork(
     if (str(body.error) === "source_already_posted") {
       return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
     }
-    return { kind: "conflict", workId: str(body.work_id) };
+    return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
   return {
     kind: "unavailable",
@@ -460,7 +499,7 @@ export async function submitJournalWork(
     return admission === null ? { kind: "lost", message: "the runtime accepted the work without naming it" } : { kind: "accepted", ...admission };
   }
   if (res.status === 400) {
-    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason), ...carrier(body) };
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
@@ -474,7 +513,7 @@ export async function submitJournalWork(
     if (str(body.error) === "source_already_posted") {
       return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
     }
-    return { kind: "conflict", workId: str(body.work_id) };
+    return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
   return {
     kind: "unavailable",
@@ -819,8 +858,8 @@ export type RestateWorkResult =
   /** 409 — the predecessor is not in a state a successor may replace: it posted, it settled, or
    *  it already has one. `reason` is the database's own token, rendered rather than re-worded. */
   | { kind: "not_restatable"; reason: string | null; status: string | null }
-  | { kind: "invalid_basis"; field: string | null; reason: string | null }
-  | { kind: "conflict"; workId: string | null }
+  | { kind: "invalid_basis"; field: string | null; reason: string | null; detail?: RefusalDetail }
+  | { kind: "conflict"; workId: string | null; detail?: RefusalDetail }
   | { kind: "denied" }
   | { kind: "not_found" }
   | { kind: "unavailable"; message: string }
@@ -860,7 +899,9 @@ export async function restateWork(
       ? { kind: "lost", message: "the runtime accepted the restatement without naming it" }
       : { kind: "accepted", ...admission, supersedes: str(body.supersedes) };
   }
-  if (res.status === 400) return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+  if (res.status === 400) {
+    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason), ...carrier(body) };
+  }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
   if (res.status === 409) {
@@ -871,7 +912,7 @@ export async function restateWork(
     if (reason === "not_restatable" || reason === "already_superseded" || reason === "not_restatable_purpose") {
       return { kind: "not_restatable", reason, status: str(body.status) };
     }
-    return { kind: "conflict", workId: str(body.work_id) };
+    return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
   return {
     kind: "unavailable",
