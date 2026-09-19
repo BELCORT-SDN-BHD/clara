@@ -28,9 +28,9 @@
 import { randomUUID } from "node:crypto";
 import {
   CLR, EVENT, PG, PROBLEM, ROLES, applyEvents, assertPair, assertRaises, claimPaidFirm,
-  clearOperator, deliver, detailOf, endPool, ensureOperatorOwner, getCapacity, getPool,
-  forceStatus, humanQuery, insertRegistration, insertUser, intentState, intentsOf, liveCheckout,
-  namedCall, openIntent, openedCheckout,
+  clearOperator, deliver, detailOf, endPool, ensureOperatorOwner, forceOpenedAt, getCapacity,
+  getPool, forceStatus, humanQuery, insertRegistration, insertUser, intentState, intentsOf,
+  liveCheckout, namedCall, openIntent, openedCheckout,
   opk, ordinaryFirm, paymentsFor, problemsFor, releaseCapacity, resolveProblem, roleQuery,
   rootQuery, setCapacity, sha256Hex, stampSession, stripeSessionId, userEmail, withActor,
 } from "./checkout-convergence-fixtures.mjs";
@@ -38,9 +38,9 @@ import { markSkip } from "./wave-a-helpers.mjs";
 
 export {
   CLR, EVENT, PG, PROBLEM, ROLES, applyEvents, assertPair, assertRaises, claimPaidFirm,
-  clearOperator, deliver, detailOf, endPool, ensureOperatorOwner, getCapacity, getPool,
-  forceStatus, humanQuery, insertRegistration, insertUser, intentState, intentsOf, liveCheckout,
-  namedCall, openIntent, openedCheckout,
+  clearOperator, deliver, detailOf, endPool, ensureOperatorOwner, forceOpenedAt, getCapacity,
+  getPool, forceStatus, humanQuery, insertRegistration, insertUser, intentState, intentsOf,
+  liveCheckout, namedCall, openIntent, openedCheckout,
   opk, ordinaryFirm, paymentsFor, problemsFor, releaseCapacity, resolveProblem, roleQuery,
   rootQuery, setCapacity, sha256Hex, stampSession, stripeSessionId, userEmail, withActor,
 };

@@ -245,20 +245,37 @@ export async function stampSession(intent, session = null) {
   return value;
 }
 
-/** Backdate an intent's `status_at` WITHOUT moving its status — the one shape 0158's stamp wall
- *  refuses outright (cc.4 pins that refusal), so the trigger is disabled for the width of this one
- *  root-owned UPDATE and re-armed immediately. That is 0186 §A's own measured idiom for the same
- *  problem, and it is the only way to age a clock the estate writes itself: #628 review S5's
- *  timeout arm reads `status_at`, and a cell that waited 24 real hours would not be a cell. */
-export async function backdateStatus(intent, interval = "25 hours") {
+/** Disable `t_checkout_intents_session_stamp` for the width of `fn`, then re-arm it in a
+ *  `finally` — 0186 §A's own measured idiom for forcing an identity column the trigger's FIRST
+ *  check otherwise freezes unconditionally, the only way to age a clock the estate writes itself.
+ *  Shared so this exact disable/write/re-arm dance is defined in ONE place: before #844 it was
+ *  duplicated verbatim here (for `status_at`) and, privately, in operator-support.test.mjs's own
+ *  `forceOpenedAt` (for `opened_at`) — code review STD-2. */
+async function withSessionStampDisabled(fn) {
   await rootQuery("alter table clara.checkout_intents disable trigger t_checkout_intents_session_stamp");
   try {
-    await rootQuery(
-      `update clara.checkout_intents set status_at = now() - $2::interval where id=$1`,
-      [intent, interval]);
+    return await fn();
   } finally {
     await rootQuery("alter table clara.checkout_intents enable trigger t_checkout_intents_session_stamp");
   }
+}
+
+/** Backdate an intent's `status_at` WITHOUT moving its status — the one shape 0158's stamp wall
+ *  refuses outright (cc.4 pins that refusal). #628 review S5's timeout arm reads `status_at`, and
+ *  a cell that waited 24 real hours would not be a cell. */
+export async function backdateStatus(intent, interval = "25 hours") {
+  return withSessionStampDisabled(() => rootQuery(
+    `update clara.checkout_intents set status_at = now() - $2::interval where id=$1`,
+    [intent, interval]));
+}
+
+/** Force an intent's `opened_at` to an exact instant — the companion to `backdateStatus` above,
+ *  for #844 os.19's tie-break world (two intents must share the IDENTICAL `opened_at` value,
+ *  which no admitted move can produce). Same trigger, same table, same disable/write/re-arm
+ *  idiom — `withSessionStampDisabled` generalizes both rather than each pasting its own copy. */
+export async function forceOpenedAt(intent, isoTimestamp) {
+  return withSessionStampDisabled(() => rootQuery(
+    "update clara.checkout_intents set opened_at=$2 where id=$1", [intent, isoTimestamp]));
 }
 
 /** Move `intent` to `status` by a bare status write (root). Every caller below walks only

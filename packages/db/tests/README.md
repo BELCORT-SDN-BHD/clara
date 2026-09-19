@@ -767,13 +767,21 @@ stamp needed) between opens.
 membership and the reported status/reason/timestamp, corroborated against the intent read as
 root.
 
-**Acceptance #3 ("the cell fails if the id key is removed") is checked by reversing the key's
-direction, not omitting it.** Without any id clause Postgres does not promise which of two
-`opened_at`-tied rows a bare `LIMIT 1` returns, so that comparison would prove nothing
-reproducible. os.19 runs a companion `SELECT` — the identical predicate from 0188's arm-1 lateral,
-never the deployed function or the migration body — with `i.id desc` reversed to `i.id asc`, and
-reads that it deterministically names the OTHER (loser) intent; a second companion run with the
-shipped direction is asserted to agree with the door, confirming the companion query is faithful.
+**Acceptance #3 ("the cell fails if the id key is removed") is checked two ways, since one alone
+does not cover the criterion (code review L03-CRS1).** Half one checks the key's DIRECTION: os.19
+runs a companion `SELECT` — the identical predicate from 0188's arm-1 lateral, never the deployed
+function or the migration body — with `i.id desc` reversed to `i.id asc`, and reads that it
+deterministically names the OTHER (loser) intent; a second companion run with the shipped
+direction is asserted to agree with the door, confirming the companion query is faithful. THIS
+HALF ALONE DOES NOT PROVE REMOVAL: a hand-written copy of the predicate still compares on id
+either way, so it cannot go red for a recut that drops the clause outright — measured on this rig,
+doing exactly that to a copy of the predicate named the SAME row as the shipped predicate in 6 of
+10 three-intent/two-instant worlds. Half two closes that gap with a STRUCTURAL pin against the
+ACTUAL deployed function body (`normalizedBody(SHARED_SIG)`, this file's own os.11 census idiom):
+it asserts the live, lower-cased, whitespace-stripped `clara._operator_support_cases` source still
+contains the exact ORDER BY clause ending `i.iddesc`, which is present in the real body and absent
+from both a simulated id-removed variant and a simulated id-reversed variant (checked directly
+against the live catalog and against string variants of it, not merely reasoned about).
 
 `EXPECTED_CELLS` (this file's own `os.VACUITY CONTROL`) is 19, one more than before this ticket.
 

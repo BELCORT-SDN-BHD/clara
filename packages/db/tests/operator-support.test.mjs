@@ -34,8 +34,8 @@ import {
   operatorFirmBookkeeper, operatorSupportLaneReady, opk, ordinaryFirm, paidUnclaimed, paymentRow,
   problemRow, registrationRow, rejectRegistration, releaseCapacity, resolveProblemWithKey,
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,
-  forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor, stampSession,
-  EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
+  forceOpenedAt, forceStatus, intentState, intentsOf, openIntent, openedCheckout, paymentsFor,
+  stampSession, EVENT, deliver, gateApplicantNames, resolveApplicantNames, stripeSessionId,
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
@@ -773,19 +773,10 @@ cell("os.14 arm 1 tie-break -- a registration carrying a PAID intent and a LATER
     "the later cancelled attempt's status is NOT what the operator reads");
 });
 
-/** #844 — force `opened_at`, the one identity column 0186's session-stamp trigger otherwise
- *  freezes outright (its FIRST check, before either of the two admitted moves). Disabled and
- *  re-armed exactly as checkout-convergence-fixtures.mjs's own `backdateStatus` does for
- *  `status_at`: root DML against a relation with zero application-role grant, on a trigger that
- *  exists to stop everyone else. */
-async function forceOpenedAt(intent, isoTimestamp) {
-  await rootQuery("alter table clara.checkout_intents disable trigger t_checkout_intents_session_stamp");
-  try {
-    await rootQuery("update clara.checkout_intents set opened_at=$2 where id=$1", [intent, isoTimestamp]);
-  } finally {
-    await rootQuery("alter table clara.checkout_intents enable trigger t_checkout_intents_session_stamp");
-  }
-}
+// #844 — `forceOpenedAt` (imported above) forces the one identity column 0186's session-stamp
+// trigger otherwise freezes outright (its FIRST check, before either of the two admitted moves).
+// It is now shared with `backdateStatus` via `checkout-convergence-fixtures.mjs`'s own
+// `withSessionStampDisabled` (code review STD-2) rather than a private near-copy in this file.
 
 cell("os.19 arm 1 id tie-break -- two intents sharing one `opened_at` instant, neither carrying "
   + "the money: the lateral's third key (`i.id desc`) is the only thing that can decide", async () => {
@@ -878,14 +869,20 @@ cell("os.19 arm 1 id tie-break -- two intents sharing one `opened_at` instant, n
   assert.notEqual(detail.intent_id, loser,
     "…and must NOT name the lesser-id tied intent");
 
-  // ACCEPTANCE #3, MEASURED: "the cell fails if the id key is removed from the lateral" is proven
-  // by running the IDENTICAL lateral predicate from migration 0188 with `i.id desc` REVERSED to
-  // `i.id asc` — a companion SELECT over the same base relation, never the deployed function or
-  // the migration body — and reading that it deterministically names the LOSER instead. Reversing
-  // rather than omitting the key is deliberate: without ANY id clause, Postgres does not promise
-  // which of two `opened_at`-tied rows a bare LIMIT 1 returns, so that comparison would prove
-  // nothing reproducible; flipping the direction keeps the query fully deterministic while
-  // removing exactly the one fact (which direction) migration 0188 fixes.
+  // ACCEPTANCE #3, HALF ONE — the id key's DIRECTION is load-bearing, proven by running the
+  // IDENTICAL lateral predicate from migration 0188 with `i.id desc` REVERSED to `i.id asc` — a
+  // companion SELECT over the same base relation, never the deployed function or the migration
+  // body — and reading that it deterministically names the LOSER instead. Reversing rather than
+  // omitting the key is deliberate here: without ANY id clause, Postgres does not promise which of
+  // two `opened_at`-tied rows a bare LIMIT 1 returns, so that comparison would prove nothing
+  // reproducible; flipping the direction keeps the query fully deterministic while removing
+  // exactly the one fact (which direction) migration 0188 fixes. NOTE: this half proves the
+  // DIRECTION matters, not that the cell fails if the key is REMOVED outright — a hand-written
+  // copy of the predicate compares on id either way, so it cannot go red for a recut that drops
+  // the clause. Measured on this rig: doing exactly that to a copy of the predicate (id clause
+  // deleted, not reversed) still names the SAME row as the shipped predicate in 6 of 10
+  // three-intent/two-instant worlds — i.e. this half alone would leave the criterion's "removed"
+  // case green about 60% of the time. Acceptance #3 half two, below, closes that gap.
   const reversed = await rootQuery(
     `select i.id
        from clara.checkout_intents i
@@ -906,6 +903,20 @@ cell("os.19 arm 1 id tie-break -- two intents sharing one `opened_at` instant, n
   assert.equal(asShipped.rows[0].id, winner,
     "the companion query, run with the SAME direction migration 0188 ships, agrees with the door -- "
     + "confirming the companion query is a faithful copy of the real predicate");
+
+  // ACCEPTANCE #3, HALF TWO (code review L03-CRS1) — a STRUCTURAL pin against the ACTUAL deployed
+  // function body, never a hand-written copy, so a recut that REMOVES the id key (not merely
+  // reverses it) goes red here by construction. `normalizedBody` (this file's own os.11 census
+  // idiom, reused rather than re-invented) lower-cases, strips comments, and strips ALL whitespace
+  // from `clara._operator_support_cases`'s live `pg_proc.prosrc` — the needle below is that exact
+  // normalization of 0188's arm-1 `order by` clause, verified against the live catalog and against
+  // a simulated id-key-removed variant of the same source text (report has the transcript: the
+  // needle is present in the real body and absent from the id-removed AND id-reversed variants).
+  const sharedBody = await normalizedBody(SHARED_SIG);
+  assert.ok(sharedBody.includes(
+    "orderby(i.statusin('paid','consumed'))desc,i.opened_atdesc,i.iddesc"),
+    `${SHARED_SIG}'s deployed arm-1 lateral no longer orders by (i.status in ('paid','consumed')) `
+    + "desc, i.opened_at desc, i.id desc -- the id key was removed or reworded");
 });
 
 // ===========================================================================================
