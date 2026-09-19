@@ -45,10 +45,12 @@ export const ACTIVITY = {
   workReceiptId: "a2a2a2a2-2222-4777-8777-a2a2a2a20103",
   workId: "a2a2a2a2-2222-4777-8777-a2a2a2a20104",
   // #853 — a SECOND Work id, so a `p_work` filter cell can prove two values return different,
-  // correctly scoped pages rather than the same one twice. `secondWorkEventId`/
-  // `secondWorkReceiptId` are this Work's own receipt row, the same shape `workId`'s row takes.
+  // correctly scoped pages rather than the same one twice. `secondWorkReceiptId`/
+  // `secondWorkEntryId` are this Work's own receipt row, the same shape `workId`'s row takes —
+  // its OWN entry id, never `entryOriginalId`/`entryReplacementId` (the correction pair's own).
   secondWorkId: "a2a2a2a2-2222-4777-8777-a2a2a2a20114",
   secondWorkReceiptId: "a2a2a2a2-2222-4777-8777-a2a2a2a20115",
+  secondWorkEntryId: "a2a2a2a2-2222-4777-8777-a2a2a2a20116",
   entryOriginalId: "a2a2a2a2-2222-4777-8777-a2a2a2a20105",
   entryReplacementId: "a2a2a2a2-2222-4777-8777-a2a2a2a20106",
   correctionOriginalEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20107",
@@ -127,13 +129,19 @@ const WORK_ROW = eventRow({
 });
 
 // #853 — the SECOND Work's own receipt row, so a `p_work` filter cell has two DIFFERENT,
-// non-null `work_id`s to distinguish. Otherwise identical in shape to WORK_ROW.
+// non-null `work_id`s to distinguish. `event_type` is DELIBERATELY a different registered
+// purpose (never `journal_entry`, WORK_ROW's own) — `lib/firm/activity.ts`'s label for an
+// `operation_receipt` row is `workPurposes.<purpose ?? event_type>`, which knows no `object_id`,
+// so two `journal_entry` rows would render the IDENTICAL "Recorded a journal entry" sentence and
+// break every existing cell that locates that text by `getByText` (strict-mode: two matches).
+// `entryId` is its OWN, never `entryOriginalId`/`entryReplacementId` — the correction pair's own,
+// which the feed's two-sided link logic keys on.
 const SECOND_WORK_ROW = eventRow({
   id: ACTIVITY.secondWorkReceiptId,
   source: "operation_receipt",
-  event_type: "journal_entry",
+  event_type: "periodic_stock_adjustment",
   occurred_at: "2026-09-01T02:30:00.000Z",
-  object_kind: "entry", object_id: ACTIVITY.entryReplacementId,
+  object_kind: "entry", object_id: ACTIVITY.secondWorkEntryId,
   work_id: ACTIVITY.secondWorkId, receipt_id: ACTIVITY.secondWorkReceiptId,
   status: "approved", kind: "work",
 });
