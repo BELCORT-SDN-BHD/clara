@@ -61,7 +61,12 @@ Some routes intentionally show an unavailable or not-built state where a product
 map and the provisional bubble. Everything that announces on its own is a SIBLING of it: the
 onboarding checklist card, the clarify group, the live tool group, and the mutually exclusive
 `role="status"` lines (stream status, stopped, a refused stop, lost sight of the run, access
-revoked, a replayed send, a pre-send check). That geometry is not style. A `role="log"` inside
+revoked, a replayed send, a pre-send check). The last two keep their WORDS in every state and
+carry `role="status"` only when no other line is speaking — a replayed send whose original run
+is still streaming would otherwise announce twice for one press. That is `StateBanner`'s own
+`silent` decision (#629 §5, one announcement owner): unannounced never means hidden. The
+replayed line also retires with the turn it is about — the terminal `message` or a revocation —
+not merely with the next press. That geometry is not style. A `role="log"` inside
 a `role="log"` has no defined announcement order, and dropping `aria-live` does not fix it
 because `role="log"` carries an implicit polite live region of its own. The statuses are
 exclusive because one event must be one announcement.
@@ -82,6 +87,17 @@ jump-to-latest is offered only while there is something below, is a real `<Butto
 in the tab order and has a word for a name, not an icon), and jumps instantly under
 `prefers-reduced-motion` — the preference is read at the press, not captured at mount.
 
+A smooth jump is CORRECTED until it lands. The animation targets the height it was given and
+the content can grow underneath it (a card finishing its transition, another delta), so a
+bounded correction re-measures the element and finishes the journey. The window that tells
+"our own animation" from "the reader changed their mind" is the PENDING correction itself, not
+a clock: the two expire together, so a trailing scroll event delivered at the deadline used to
+publish "the reader has scrolled up" and make the correction bail — measured in the browser as
+a transcript stranded 36px short. An arrival cancels the correction, so a reader who scrolls
+away after the jump lands is never dragged back. The caller's revision is a JOIN of its five
+content counts, never a sum: summed, the provisional bubble retiring in the same commit as the
+first chunk arriving cancelled to zero and the append effect did not run at all.
+
 Following a live turn costs the hook NO render of its own, and that is a measured contract
 rather than a nicety. The append effect runs once per streamed delta; publishing `atBottom` /
 `hasMoreBelow` on it unconditionally made React schedule a second render pass per token for
@@ -94,17 +110,26 @@ hook's seam: 25 appends must cost exactly 25 renders, all of them the caller's.
 
 **The intent key is content-addressed, and memory-only on purpose.**
 `lib/clara/intentKey.ts` derives the `turn_key` a send posts from the conversation, the
-altitude, the trimmed text and the SORTED attachment document ids. A retry of the same intent
-therefore reuses it — the composer keeps text and files on a refused send, so the inputs are
-identical by construction — and lands on `clara.begin_chat_turn`'s replay branch
+altitude, the conversation's POSITION, the trimmed text and the SORTED attachment document
+ids. A retry of the same intent therefore reuses it — the composer keeps text and files on a
+refused send, and a refused or lost send adds nothing to the persisted transcript, so both the
+inputs and the position are identical by construction — and lands on
+`clara.begin_chat_turn`'s replay branch
 (`0006_runtime_core.sql:954-960`), which answers with the ORIGINAL task and `replayed: true`
 on the 202. A CHANGED intent, including a changed attachment set, derives a new key, and that
 half is the sharp one: the door returns from its replay branch BEFORE the user message is
 inserted and never reads `p_user_parts`, so a same-key repost carrying a different invoice
 would return the original task and drop the new file in silence while the screen said
-"already accepted". Nothing persists the key: appendix C rules out promising reload recovery
-from memory-only state, and content addressing makes the reload case work anyway — the same
-sentence with the same files derives the same key after a refresh. On `replayed: true` the
+"already accepted". THE POSITION IS WHY A REPEAT IS NOT A RETRY, and it was the review
+round's blocker: addressed by content alone, every repeated utterance in a session — "yes",
+"ok", "continue" — derived the FIRST one's key and was answered with the turn Clara had
+already run, with no bubble, no task and no error, permanently, because the door's lookup has
+no time or state bound over an append-only table. A sentence re-typed after a turn has SETTLED
+sees a longer transcript and is admitted as the new instruction it is. Nothing persists the
+key: appendix C rules out promising reload recovery from memory-only state, and content
+addressing still makes the reload case work — a send that was never admitted leaves the
+transcript exactly as it was, so the same sentence with the same files derives the same key
+after a refresh. On `replayed: true` the
 view says so once and draws NO provisional bubble, because the original user row is already in
 the transcript.
 
@@ -112,7 +137,9 @@ the transcript.
 browser verbatim (`packages/runtime/README.md` carries the measurement), so
 `lib/clara/liveTools.ts` maps the chunks already on the wire onto four live states —
 *preparing*, *running*, *done*, *failed* — plus *refused* for a tool that ran and declined in
-its own typed vocabulary. It registers NO new part kind. There is no *queued* state and there
+its own typed vocabulary. A step never walks backwards (the reattach replays from index 0),
+and `failed` outranks the other two terminals, so a step that returned and then threw reads
+*failed* rather than keeping the first terminal that arrived. It registers NO new part kind. There is no *queued* state and there
 cannot be one without a new frozen `chatTurn` body: nothing on the stream reports admission,
 and *preparing* (the model streaming a tool's arguments) is not *queued*. Every chip's label is
 a next-intl lookup over a measured list of tool tokens with the raw token as the fallback

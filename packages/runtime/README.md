@@ -104,6 +104,18 @@ fact a reader who took the vocabulary from the SDK docs would get wrong. There i
 event on the stream**: nothing in that vocabulary says "queued", so a live *queued* chip cannot be
 built without a new frozen `chatTurn` cut.
 
+**A revocation has two doors, and they say the same thing.** `src/streamRoute.ts` re-authorises on
+every poll and sends `event: revoked {taskId, reason}` when that throws (`:152-157`) — but it can
+only write that frame once the SSE headers are out, and its ATTACH-time authorisation answers
+before them (`:31-44`, an `AuthError`'s own status with `{error: code}`). Every revocation
+discovered when a read is opened — the reattach after a `detached`, a rail reopen, a scope switch
+back, any remount into a membership that is already gone — therefore arrives as **403 or 404**,
+never as an event. The browser treats exactly those two statuses as the same fact and synthesises
+the same `revoked` event (`apps/web/lib/clara/stream.ts`), because reading them as a transport
+failure produced eight rounds of "Reconnecting…" at a person whose access had been removed. A 401
+is about the caller's TOKEN rather than a membership and stays a transport failure; the web proxy's
+own unreachable and redirect arms answer 502, which is what "the lane is down" looks like.
+
 ### The prepayment-amortisation lane (#653) — one non-frozen module and two owed successors
 
 `lib/prepayment-schedule-basis.ts` is NOT imported by any workflow body and must not be until the

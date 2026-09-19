@@ -733,7 +733,7 @@ export function ClaraThreadView({
             screen-reader user heard "invalid" with no reason and no route to one. The id
             goes on the ONE place this sentence already lives; a `FieldError` inside the
             field would be a second `role="alert"` saying the same thing. */}
-        {composerInvalid && (
+        {state.sendStatus === "error" && state.sendError && (
           <div id={composerErrorId}>
             <StateBanner tone="error">{t("sendError", { message: state.sendError })}</StateBanner>
           </div>
