@@ -61,6 +61,21 @@ checksum. Filenames must be `NNNN_name.sql`; the runner rejects late insertion b
 frontier. Files with no leading digit, including `UNNUMBERED_*.sql`, are silently skipped.
 `CLARA_MIGRATIONS_DIR` selects an alternate chain and must be set correctly for a split test rig.
 
+**Redo (#957).** Immutability is for *merged* history. A migration already applied to a rig but
+not yet merged sometimes needs one more fix-round edit, and the ordinary path above correctly
+refuses that on checksum drift. `redo`, passed to `migrate()` the same way `dir` is (or
+`CLARA_MIGRATION_REDO=<version>`), re-applies exactly one such version as a guarded, measured
+operation: it requires the same destructive guard `reset`/`restore`/`dr:selftest` already use
+(`CLARA_ALLOW_DESTRUCTIVE=1` and a disposable or explicitly-named target), refuses a version that
+is not currently applied or is not the *highest* applied version (so nothing built on top of it is
+silently invalidated), then deletes its ledger row and re-runs the edited file in the same
+transaction, under the same isolation/timeout/atomicity rules a normal apply uses. A failure
+anywhere in that transaction rolls the delete back with it, leaving the ledger exactly as it was.
+Write the redo target so re-running it against a database that already carries its OLD effects is
+safe — `create or replace function`/`procedure` and other naturally idempotent DDL, not a bare
+`create table`. This replaces the hand procedure (`SET ROLE clara_fn_owner`, re-run the body by
+hand, repair the ledger row by hand) six wave-2026-09-18 tickets independently reinvented.
+
 Read the repository frontier from `migrations/` and the target frontier from:
 
 ```sql

@@ -17,12 +17,34 @@
 // `dir` option) — an override hook for local/manual runs. NOTE: CI's
 // deploy-onto-existing check does NOT use this var; it swaps the files on disk
 // (`git checkout origin/main -- packages/db/migrations`, then re-runs migrate).
+//
+// #957 — REDO MODE. The ordinary apply path above refuses on checksum drift, by design
+// (migrations are immutable history). During a fix round, an already-applied-but-unmerged
+// migration sometimes needs one more edit; until now the only route was a hand procedure (SET
+// ROLE clara_fn_owner, re-run the body by hand, repair the ledger row by hand — six wave
+// 2026-09-18 tickets independently reinvented it: #635, #651, #655, #656, #657, #660). `redo`,
+// like `dir`, arrives via the options object OR `CLARA_MIGRATION_REDO` (never a DSN, never a new
+// argv contract — the runner still takes no argv). It:
+//   - refuses unless the SAME destructive guard reset()/restore()/dr-selftest.mjs already use
+//     (lib/guard.mjs's assertDestructiveAllowed) is satisfied — CLARA_ALLOW_DESTRUCTIVE=1 AND a
+//     disposable or explicitly-named target — checked BEFORE this function opens a connection;
+//   - refuses a version with no migration file on disk, or one that is not CURRENTLY applied;
+//   - refuses a version that is not the HIGHEST applied version (redoing anything below the
+//     frontier would silently invalidate whatever was applied on top of it);
+//   - then re-applies that ONE version and nothing else: the ledger row is DELETED and the
+//     (edited) file re-run under the exact same isolation/timeout/atomicity machinery a normal
+//     apply uses, in the SAME transaction, so a mid-apply failure rolls the delete back with it
+//     — the ledger is left exactly as it was, never row-less. The ordinary apply path (drift
+//     check, immutability abort, the late-insertion check) is completely unchanged when `redo`
+//     is not passed, and even when it IS passed, every OTHER applied version is still drift-
+//     checked as usual.
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeClient, targetLabel, isMain, assertNoTargetSplit } from "../lib/pg.mjs";
+import { assertDestructiveAllowed } from "../lib/guard.mjs";
 import {
   armMigrationTimeout,
   assertNoCheckFunctionBodyOverride,
@@ -275,12 +297,27 @@ function loadMigrationFiles(dir) {
   return migrations;
 }
 
-export async function migrate({ log = console.log, dir, clientFactory = makeClient, cleanupTimeoutMs = CLEANUP_TIMEOUT_MS } = {}) {
+export async function migrate({
+  log = console.log,
+  dir,
+  clientFactory = makeClient,
+  cleanupTimeoutMs = CLEANUP_TIMEOUT_MS,
+  redo = process.env.CLARA_MIGRATION_REDO || null,
+} = {}) {
   const migrationsDir = dir || process.env.CLARA_MIGRATIONS_DIR || DEFAULT_MIGRATIONS_DIR;
   if (!existsSync(migrationsDir)) throw new Error(`migrations directory not found: ${migrationsDir}`);
   const migrations = loadMigrationFiles(migrationsDir);
   const byVersion = new Map(migrations.map((migration) => [migration.version, migration]));
   assertNoTargetSplit();
+
+  // #957 — checked BEFORE any connection opens, so a guard refusal trivially "changes nothing".
+  // Reused, not reinvented: the SAME gate reset()/restore()/restore-full.mjs/dr-selftest.mjs call.
+  if (redo !== null) {
+    assertDestructiveAllowed({ action: `redo migration ${redo}` });
+    if (!byVersion.has(redo)) {
+      throw new Error(`redo refused: ${redo} has no migration file on disk under ${migrationsDir} — nothing to redo.`);
+    }
+  }
 
   // Keep the session lock on a connection migration SQL never receives. Advisory
   // unlocks are session-scoped and survive rollback, so exposing this client would
@@ -327,6 +364,10 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
     const applied = new Map(appliedRows.map((row) => [row.version, row.checksum]));
     const drift = [];
     for (const [version, checksum] of applied) {
+      // #957 — the ONE expected exception: the redo target is EXPECTED to differ from its
+      // ledger checksum (editing it is the entire point). Every OTHER applied version is still
+      // drift-checked exactly as before.
+      if (version === redo) continue;
       const onDisk = byVersion.get(version);
       if (!onDisk) {
         drift.push(`applied migration ${version} is MISSING from disk (deleted or renamed). Applied migrations are immutable history — restore the file; never delete or rename it.`);
@@ -345,6 +386,23 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
       }
     }
 
+    // #957 — redo's two remaining refusals, both requiring the ledger read above: the target
+    // must actually BE applied, and must be the HIGHEST applied version (so nothing built on
+    // top of it is silently invalidated). Neither has written anything yet.
+    if (redo !== null) {
+      if (!applied.has(redo)) {
+        throw new Error(`redo refused: ${redo} is not currently applied — nothing to redo (use the ordinary apply path for a migration that has never run).`);
+      }
+      const highestApplied = [...applied.keys()].reduce((best, version) =>
+        byVersion.get(version).num > byVersion.get(best).num ? version : best,
+      );
+      if (redo !== highestApplied) {
+        throw new Error(
+          `redo refused: ${redo} is not the highest applied version (${highestApplied} is) — redoing anything below the frontier would silently invalidate whatever was applied on top of it.`,
+        );
+      }
+    }
+
     // PRE-FLIGHT over everything about to be applied, beside the immutability refusals
     // above and BEFORE the first body runs. A pin that no longer resolves is a
     // history-integrity fault of the same family as checksum drift, and an operator should
@@ -352,13 +410,24 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
     // Each file is read exactly once here and carried into the apply loop, so the bytes
     // that were checksummed are the bytes that execute.
     const pending = [];
-    for (const { file, version } of migrations) {
-      if (applied.has(version)) continue;
+    if (redo !== null) {
+      // #957 — redo touches ONLY the named version, never also whatever else happens to be
+      // unapplied: a caller who wants both runs migrate() again afterward (see the header note).
+      const { file } = byVersion.get(redo);
       const sql = readFileSync(join(migrationsDir, file), "utf8");
       const checksum = migrationChecksum(sql);
-      assertNoTransactionControl(sql, version);
-      assertNoCheckFunctionBodyOverride(sql, version);
-      pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
+      assertNoTransactionControl(sql, redo);
+      assertNoCheckFunctionBodyOverride(sql, redo);
+      pending.push({ version: redo, sql, checksum, isolation: migrationIsolationLevel(redo, checksum) });
+    } else {
+      for (const { file, version } of migrations) {
+        if (applied.has(version)) continue;
+        const sql = readFileSync(join(migrationsDir, file), "utf8");
+        const checksum = migrationChecksum(sql);
+        assertNoTransactionControl(sql, version);
+        assertNoCheckFunctionBodyOverride(sql, version);
+        pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
+      }
     }
     // A ceremony against an already-migrated database applies nothing, so the per-migration
     // note below never fires — and silence there would read as "no pin is in play". Say what
@@ -429,6 +498,17 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
           throw new Error(
             `migration ${version} opened at transaction_isolation ${JSON.stringify(observedIsolation)}, not the ${JSON.stringify(isolation)} it was opened with — refusing to migrate on a transaction whose isolation the runner cannot vouch for`,
           );
+        }
+        if (version === redo) {
+          // #957 — delete the ledger row FIRST, inside this SAME transaction, so every evidence
+          // snapshot below sees the ledger exactly as it would for a version that had never
+          // applied (readLedgerReceipts reads the WHOLE table for receiptsBefore; deleting first
+          // is what makes that equal "every row except this one" — the same invariant a normal
+          // first-time apply gets for free because the row does not exist yet). A failure from
+          // here on rolls back with the transaction, restoring this row exactly as it was — the
+          // ledger is never left without it.
+          await preRearm();
+          await client.query("delete from clara.schema_migrations where version = $1", [version]);
         }
         const freezeBefore = await readFreezeStates(client, preRearm);
         const ledgerBefore = await readLedgerIdentity(client, preRearm);
@@ -518,8 +598,14 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
         else noteCleanup(outcome);
       }
       applied.set(version, checksum);
-      log(`  applied ${version} · backend pid ${backendPid}`);
+      log(version === redo
+        ? `  redone ${version} · backend pid ${backendPid} · new checksum ${checksum}`
+        : `  applied ${version} · backend pid ${backendPid}`);
       count++;
+    }
+    if (redo !== null) {
+      log(`migrate: redid ${redo} · new checksum ${applied.get(redo)} · target ${targetLabel()}`);
+      return { redone: redo, checksum: applied.get(redo) };
     }
     log(`migrate: ${count} new migration(s) applied · ${migrations.length} total · target ${targetLabel()}`);
     return { applied: count, total: migrations.length };
