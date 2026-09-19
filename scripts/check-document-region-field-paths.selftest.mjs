@@ -261,10 +261,10 @@ testCase("main(): a REAL subprocess run exits non-zero on a seeded malformed pat
       + ");\n",
       "utf8",
     );
-    // scanTargetFiles() reads `git ls-files`, which lists the INDEX -- a merely-written file is
-    // invisible to it (the real scope gap this same review named separately, L04-S11). `git add`
-    // stages it (index only, no commit) so the real subprocess sees exactly what a developer
-    // would see the moment they stage a new fixture.
+    // Stages the decoy (index only, no commit) so this case proves the TRACKED path specifically
+    // — scanTargetFiles() now also sees an untracked file (L04B-SPEC-06, the case right below this
+    // one), so staging is no longer load-bearing for detection, but it still matches exactly what
+    // a developer sees the moment they `git add` a new fixture.
     execFileSync("git", ["add", "--", DECOY_REL], { cwd: SELFTEST_ROOT });
     const out = spawnSync(process.execPath, [SCRIPT_PATH], { cwd: SELFTEST_ROOT, encoding: "utf8" });
     assertEqual(out.status, 1, `expected exit 1, got ${out.status} (signal ${out.signal}); stdout:\n${out.stdout}\nstderr:\n${out.stderr}`);
@@ -280,6 +280,50 @@ testCase("main(): a REAL subprocess run exits non-zero on a seeded malformed pat
     // above still leaves the worktree exactly as it found it.
     try { execFileSync("git", ["reset", "--quiet", "HEAD", "--", DECOY_REL], { cwd: SELFTEST_ROOT }); } catch { /* never staged */ }
     if (existsSync(DECOY_ABS)) rmSync(DECOY_ABS, { force: true });
+  }
+});
+
+const DECOY2_REL = "packages/db/tests/__check857_selftest_decoy_untracked.mjs";
+const DECOY2_ABS = join(SELFTEST_ROOT, ...DECOY2_REL.split("/"));
+
+testCase("main(): a REAL subprocess run catches a malformed fixture that was never git-added (L04B-SPEC-06)", () => {
+  // AC1's literal wording is unconditional ("exits non-zero on a seeded malformed path"), but the
+  // case above proves this only once the fixture is STAGED. scanTargetFiles() used to read
+  // `git ls-files` with no flags, which lists the INDEX alone -- so the one commit that introduces
+  // a malformed fixture (before its author ever runs `git add`) was invisible to a local
+  // `pnpm lint`. This case writes the decoy and deliberately does NOT stage it.
+  if (existsSync(DECOY2_ABS)) throw new Error(`${DECOY2_REL} already exists -- a previous run did not clean up`);
+  try {
+    writeFileSync(
+      DECOY2_ABS,
+      "// L04B-SPEC-06 self-test decoy -- written and removed within one test case, NEVER staged.\n"
+      + "await rootQuery(\n"
+      + "  `insert into clara.document_regions(firm_id,field_path) values($1,'rogue.company_ssm')`,\n"
+      + "  [firm],\n"
+      + ");\n",
+      "utf8",
+    );
+    const out = spawnSync(process.execPath, [SCRIPT_PATH], { cwd: SELFTEST_ROOT, encoding: "utf8" });
+    assertEqual(out.status, 1, `expected exit 1 on an UNSTAGED malformed fixture, got ${out.status} (signal ${out.signal}); stdout:\n${out.stdout}\nstderr:\n${out.stderr}`);
+    const stdout = out.stdout ?? "";
+    if (!stdout.includes(`${DECOY2_REL}:3:`)) {
+      throw new Error(`expected stdout to name "${DECOY2_REL}:3:", got:\n${stdout}`);
+    }
+  } finally {
+    if (existsSync(DECOY2_ABS)) rmSync(DECOY2_ABS, { force: true });
+  }
+});
+
+testCase("scanTargetFiles: sees an untracked, non-ignored file as well as a tracked one (L04B-SPEC-06)", () => {
+  if (existsSync(DECOY2_ABS)) throw new Error(`${DECOY2_REL} already exists -- a previous run did not clean up`);
+  try {
+    writeFileSync(DECOY2_ABS, "// untracked probe\n", "utf8");
+    const files = scanTargetFiles();
+    if (!files.includes(DECOY2_REL)) {
+      throw new Error(`expected scanTargetFiles() to list the untracked ${DECOY2_REL}, got ${files.length} file(s) without it`);
+    }
+  } finally {
+    if (existsSync(DECOY2_ABS)) rmSync(DECOY2_ABS, { force: true });
   }
 });
 

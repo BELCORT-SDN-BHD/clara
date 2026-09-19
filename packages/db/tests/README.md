@@ -113,6 +113,13 @@ literal to check statically and is skipped; an evidence-CITATION object
 excluded by its own `region_idx` marker. `scripts/check-document-region-field-paths.selftest.mjs`
 proves the detector against seeded fixtures and re-verifies the real two trees are clean today.
 
+**Scans untracked files too (L04B-SPEC-06):** `scanTargetFiles()` lists both git's INDEX
+(`--cached`) and any untracked-but-not-`.gitignore`d file (`--others --exclude-standard`), not the
+INDEX alone — the gap a tracked-only listing left was exactly the one commit AC1's "exits non-zero
+on a seeded malformed path" cares most about, the one that INTRODUCES a malformed fixture, before
+its author has ever run `git add`. Proven both ways: a real subprocess run against an unstaged
+decoy now exits 1 and names it, and a staged one still does too.
+
 This is the LINT half of #857 only. The ticket's other half — a `clara.document_regions` table
 `CHECK` built on a boolean sibling of `clara._assert_field_path` — needs a new migration, which a
 wave-1 lane may not cut (docs/plan/active/riders-2026-09-20/WORK-ORDER.md rule 5); left to a

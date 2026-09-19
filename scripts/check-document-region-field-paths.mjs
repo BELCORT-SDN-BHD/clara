@@ -90,9 +90,16 @@ export function fieldPathViolation(path, grammar) {
   return null;
 }
 
-/** Every git-tracked file under `SCAN_ROOTS`, relative to `repoRoot`. */
+/** Every file under `SCAN_ROOTS`, relative to `repoRoot`, that git either already tracks OR
+ *  would track the moment it is added (untracked, not `.gitignore`d). `--cached` alone (the
+ *  INDEX only) left exactly one commit unpoliced by a local `pnpm lint`: the one that INTRODUCES
+ *  a malformed fixture, before its author has run `git add` (L04B-SPEC-06) — AC1's own wording
+ *  ("exits non-zero on a seeded malformed path") names no such exemption. `--others
+ *  --exclude-standard` adds untracked-but-not-ignored files to the same listing; a file this repo's
+ *  own `.gitignore` excludes (a build artifact, a `node_modules` entry) stays excluded, same as
+ *  before. */
 export function scanTargetFiles(repoRoot = REPO_ROOT, roots = SCAN_ROOTS) {
-  return execFileSync("git", ["ls-files", ...roots], {
+  return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", ...roots], {
     cwd: repoRoot,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
