@@ -52,6 +52,7 @@ import {
   grantMatrixFailures,
   definerHygieneFailures,
   governedRlsFailures,
+  worldSchemaPresent,
 } from "./rig-meta.mjs";
 import { raceProactiveNotification, truncateGuardError } from "./rig-txn.mjs";
 
@@ -262,6 +263,21 @@ test("T10a posted entries are immutable / append-only (raw superuser DML → CLR
 
 test("T10b agent_ro can EXECUTE nothing outside pg_catalog + clara", async (t) => {
   if (unready(t)) return;
+  // #866: a bootstrapped Workflow/WDK World (packages/runtime's `bootstrap` bin)
+  // creates graphile_worker functions PUBLIC-EXECUTE by upstream default, which
+  // every role (agent_ro and the wake roles included) can then reach. That is
+  // World contamination, not a clara RBAC regression — named and skipped here
+  // (distinct from the `unready` pre-integration skip above) rather than folded
+  // silently into a passing assertion, so a genuine future leak still reds this
+  // cell on any rig database with no World bootstrapped (RIG.md's "clone a
+  // sibling database first if you need both" recipe keeps the two apart).
+  if (await worldSchemaPresent()) {
+    t.skip("World contamination (#866): a Workflow/WDK World is bootstrapped on this database "
+      + "(workflow/workflow_drizzle/graphile_worker schema present) — PUBLIC-EXECUTE on its "
+      + "functions is upstream default behaviour, not a clara RBAC leak; run T10b on a database "
+      + "with no World bootstrapped instead (RIG.md)");
+    return;
+  }
   const leaked = await agentReachableOutsideClara();
   assert.deepEqual(leaked, [], `agent_ro reaches functions outside pg_catalog/clara: ${leaked.join(", ")}`);
 });

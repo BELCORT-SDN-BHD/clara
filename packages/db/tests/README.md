@@ -94,6 +94,30 @@ it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
 `counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
 
+## World contamination and T10b (#866)
+
+`rig-isolation.test.mjs`'s T10b asserts that `clara_agent_ro` and the two wake roles can
+`EXECUTE` nothing outside `pg_catalog`/`clara`. Once a Workflow/WDK **World** is bootstrapped
+on a database (`pnpm --filter @clara/runtime exec bootstrap`, [runtime README §engine-bootstrap]
+(../runtime/README.md)), that stops being true for a reason that has nothing to do with clara's
+RBAC: PostgreSQL grants `EXECUTE` on a newly-created function to `PUBLIC` by default, and
+`graphile-worker`'s own bootstrap never revokes it on `workflow`/`workflow_drizzle`/
+`graphile_worker`. Every role — including the two clara roles T10b checks — can then reach
+`graphile_worker.add_job` and friends. That is upstream default-grant behaviour on schemas T10b
+was never scoped to police, not a leak in the grant matrix this package owns.
+
+`worldSchemaPresent()` (`rig-meta.mjs`) checks for those three schema names and T10b skips with a
+named reason (`World contamination (#866): …`, distinct from the `unready` pre-integration skip)
+the moment any of them exist, so the cell never has to guess. On a database with **no** World
+bootstrapped it runs unchanged and still reds on a genuine RBAC leak — nothing about what the
+read/wake roles are actually granted changed.
+
+**Recipe:** if your session needs both a bootstrapped World (for `WORKFLOW_POSTGRES_URL`-driven
+runtime work) and a clean T10b run, keep them on separate databases rather than relying on the
+skip — clone a sibling first (`create database <sibling> template <source>`, no active connections
+on the source) and bootstrap the World only on the sibling. `RIG.md` in an active wave plan
+restates this per-lane; this section is the durable copy.
+
 ## Owner-level fixture DML, where it is unavoidable
 
 A cell that needs a state no verb can produce says so in source and builds it as the superuser,
