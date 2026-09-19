@@ -797,19 +797,32 @@ files could still drop a named, in-use rig database under `CLARA_RIG_ALLOW_RESET
 `CLARA_ALLOW_DESTRUCTIVE=1`.
 
 `reset-gate-routing.test.mjs` does not hand-list the files it checks (beyond one cross-check
-constant): it WALKS `packages/db/tests` for every module whose source contains an
-`import("<path>/scripts/reset.mjs")` call, asserts that set is exactly the audited 14 (T19's own
-file plus the 13 this ticket fixed), then blanks out comments and string/template literals and
-asserts none of them has an unwrapped `reset(` call token left (not only the `await reset(`
-spelling — `const r = await reset(...)`, `return reset(...)` and an extra space before the paren
-are all caught the same way), and that each imports `guardedReset` at least as many times as it
-imports the raw `reset`. A file added later that imports the destructive `reset` unwrapped is
-caught by this suite without anyone maintaining a list. One behavioural cell imports the ACTUAL
+constant): it WALKS `packages/db/tests` for every module whose source imports
+`<path>/scripts/reset.mjs`, either dynamically (`import("…")`) or via a static
+`import … from "…"` (widened by code review L03-CRS2 — the dynamic-only spelling this suite
+shipped with let a static-import caller with a bare `reset()` keep the whole suite green;
+demonstrated with a temporary probe module, removed before commit), asserts that set is a
+SUPERSET of the audited 14 (T19's own file plus the 13 this ticket fixed) — a missing known file
+fails, an extra file is logged, not failed (code review L03-CRS4 — an exact match went red for a
+correctly-wrapped FUTURE file, a false red a later lane could misread as its own regression; the
+hard bar for an extra file's call sites is the next cell, which needs no list). It then blanks out
+comments and string/template literals and asserts none of the discovered files has an unwrapped
+`reset(` call token left (not only the `await reset(` spelling — `const r = await reset(...)`,
+`return reset(...)` and an extra space before the paren are all caught the same way), and that
+each imports `guardedReset` at least as many times as it imports the raw `reset`. A file added
+later that imports the destructive `reset` unwrapped, dynamically or statically, is caught by this
+suite without anyone maintaining a list. One behavioural cell imports the ACTUAL
 `scripts/reset.mjs` export — the identical module object every one of the 14 files resolves — to
 prove it is a real, callable export, then proves `guardedReset` refuses a non-disposable name
 (`clara_631`) before a spy that never delegates to that export is entered; because the structural
 cells already show every drill funnels through this same `guardedReset`, that one proof
 generalises to all 14 call sites.
+
+**Acceptance #3 ("every affected drill still passes its ordinary run") is PARTIAL, not done (code
+review L03-CRS3).** What runs here is only "no import-time crash from the added import" — a skip
+is not the drill's ordinary run — and, as the next paragraph says plainly, 3 of the 14 files have
+no CI leg anywhere to run the real thing. The fix-round report states this criterion's status as
+PARTIAL rather than folding it into the ticket's overall DONE.
 
 **This suite never sets `CLARA_RIG_ALLOW_RESET`.** The 14 drills' own destructive paths are meant
 to be CI's job, one file at a time, on an isolated database — but as of this ticket only 11 of the
