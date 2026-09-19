@@ -243,8 +243,7 @@
       "compliance_watch": "Open the tax tab",
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
-      "staff_advance_incomplete": "Open the registers tab",
-      "work_question": "Open the parked Work"
+      "staff_advance_incomplete": "Open the registers tab"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",

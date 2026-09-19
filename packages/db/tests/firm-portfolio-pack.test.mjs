@@ -737,3 +737,53 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   assert.equal(secdef.rows[0].w, false, "list_accounting_work is still SECURITY INVOKER");
   assert.equal(secdef.rows[0].a, false, "list_activity is still SECURITY INVOKER");
 });
+
+// ===========================================================================================
+// FIX ROUND 1 · A1 — WHAT A `work_question` QUEUE ROW CAN AND CANNOT ADDRESS.
+//
+// #659 repointed the Needs-you inbox's `work_question` row at `/clients/:clientId/work/:workId`,
+// built from the row's `task_id`, on the brief's premise that "the row carries the parked run in
+// task_id". The premise is true and the CONCLUSION is false: `task_id` is an `agent_tasks` id, and
+// the accounting Work is a DIFFERENT column of the same interruption (`work_id`), which the queue
+// row does not publish. A link built from `task_id` addresses a Work-detail route that resolves
+// nothing (`apps/web/lib/work/reads.ts`'s `getAccountingWork` returns null for an id that is not an
+// `accounting_work.id`).
+//
+// The web cell that was supposed to catch this asserted the builder's output against a MADE-UP
+// uuid, so it was true by construction. This cell uses a REAL parked Work, through the real doors,
+// and measures the two ids against each other. It is also a live guard on the residual: the day
+// `list_review_queue` learns to publish `work_id`, the last assertion reds and tells the next lane
+// that the deep link it wanted is now buildable.
+// ===========================================================================================
+
+test("p659.links.work_question_row_cannot_address_its_work", async (t) => {
+  if (await gate(t)) return;
+  const { parkedWork, listReviewQueue } = await import("./work-question-fixtures.mjs");
+  const w = await freshFirm("lnk");
+  const client = await namedClient(w.owner, `${w.prefix} Rome Properties`);
+
+  const parked = await parkedWork({ client, author: w.owner });
+  assert.match(parked.workId, UUID_RE);
+  assert.match(parked.taskId, UUID_RE);
+  assert.notEqual(parked.taskId, parked.workId,
+    "the parked RUN and the accounting WORK are two different rows — this is the whole finding");
+
+  const envelope = await listReviewQueue(w.owner);
+  const row = (envelope.rows ?? []).find(
+    (r) => r.row_kind === "work_question" && r.client_id === client);
+  assert.ok(row, "the owner's queue carries the pending question as a work_question row");
+
+  // WHAT THE ROW ACTUALLY PUBLISHES. `wqi.task_id` — the agent task — beside `wqi.id` as the row's
+  // own id. The Work reached the row only through the join `accounting_work wqw on wqw.id =
+  // wqi.work_id`, which contributes the client and the memo and no id at all.
+  assert.equal(row.task_id, parked.taskId, "task_id is the AGENT TASK, exactly as 0180 selects it");
+  assert.notEqual(row.task_id, parked.workId,
+    "so `/clients/:id/work/<task_id>` addresses a Work that does not exist");
+  assert.equal(row.id, parked.questionId, "and the row's own id is the INTERRUPTION, not the Work");
+
+  // THE RESIDUAL, ASSERTED. No column of this row carries the accounting Work's id, so there is
+  // nothing on it a correct deep link could be built from today.
+  const carriers = Object.entries(row).filter(([, v]) => v === parked.workId).map(([k]) => k);
+  assert.deepEqual(carriers, [],
+    "no field of the queue row is the accounting_work id — when one appears, the deep link becomes buildable");
+});
