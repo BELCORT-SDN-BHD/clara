@@ -108,6 +108,30 @@ test("route.total a non-integer, a zero and a negative total are all invalid_tot
   }
 });
 
+test("route.shape the wire half names the SAME four shape failures the door does -- never one token for all of them", () => {
+  // F2 (fix round 1), the route's half. This function's own contract is "it refuses in the door's
+  // own vocabulary, never in a private one" — so when the door stopped answering four different
+  // failures with `invalid_kind`, this half had to stop too, or a browser CAN tell the two halves
+  // of one validation apart, which is the exact thing the contract forbids.
+  assert.equal(toDbTradeInvoice(null).error.reason, "invalid_particulars");
+  assert.equal(toDbTradeInvoice("a bill").error.reason, "invalid_particulars");
+  assert.equal(toDbTradeInvoice([]).error.reason, "invalid_particulars");
+  const cur = toDbTradeInvoice(wire({ currency: "SGD" }));
+  assert.equal(cur.error.reason, "invalid_currency");
+  assert.equal(cur.error.field, "invoice.currency");
+  const tax = toDbTradeInvoice(wire({ taxFacts: ["SR", 6000] }));
+  assert.equal(tax.error.reason, "invalid_tax_facts");
+  assert.equal(tax.error.field, "invoice.tax_facts");
+  // The document number is a PARTICULARS-shape failure too: the door has no reference token, and
+  // inventing one the database never raises would break the same contract from the other side.
+  assert.equal(toDbTradeInvoice(wire({ reference: 42 })).error.reason, "invalid_particulars");
+  assert.equal(toDbTradeInvoice(wire({ reference: "x".repeat(65) })).error.reason, "invalid_particulars");
+  // AND THE KIND STILL MEANS THE KIND.
+  for (const [, token] of Object.entries({ a: "invalid_particulars", b: "invalid_currency", c: "invalid_tax_facts" })) {
+    assert.ok(ti.isTradeInvoiceRefusal(token), `${token} is in the door's raise ladder`);
+  }
+});
+
 test("route.dates a due date before the document date, and a declaration that contradicts the payload, are invalid_due_date", () => {
   assert.equal(toDbTradeInvoice(wire({ dueDate: "2026-03-01" })).error.reason, "invalid_due_date");
   assert.equal(toDbTradeInvoice(wire({ documentDate: "04/03/2026" })).error.reason, "invalid_due_date");

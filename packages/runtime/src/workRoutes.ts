@@ -609,7 +609,10 @@ const tiInvalid = (field: string, reason: string): InvalidBasis =>
  *
  * IT REFUSES IN THE DOOR'S OWN VOCABULARY, never in a private one: the same `reason` tokens the
  * migration raises and `lib/trade-invoice-basis.ts` maps to messages, so a browser cannot tell the
- * two halves of one validation apart.
+ * two halves of one validation apart. That is why the four SHAPE failures are four tokens here as
+ * well as in 0225 (review finding F2): `invalid_particulars` for a payload that is not a record of
+ * particulars (including an unusable document number, which the door has no token of its own for),
+ * `invalid_currency`, `invalid_tax_facts`, and `invalid_kind` for the kind and nothing else.
  *
  * NO FLOATING POINT ANYWHERE. `totalCents` arrives an integer and stays one; a non-integer is
  * refused by name rather than rounded, because a rounded cent is a wrong ledger.
@@ -621,7 +624,7 @@ export function toDbTradeInvoice(
   raw: unknown,
 ): { ok: true; invoice: Record<string, unknown> } | { ok: false; error: InvalidBasis } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ok: false, error: { error: "invalid_basis", field: "invoice", reason: "invalid_kind" } };
+    return { ok: false, error: { error: "invalid_basis", field: "invoice", reason: "invalid_particulars" } };
   }
   const wire = raw as WireTradeInvoice;
 
@@ -680,12 +683,12 @@ export function toDbTradeInvoice(
   // ---- the document's own number, the currency and the exact total ----------------------------
   let reference: string | null = null;
   if (wire.reference !== undefined && wire.reference !== null && wire.reference !== "") {
-    if (typeof wire.reference !== "string") return { ok: false, error: tiInvalid("reference", "invalid_kind") };
-    if (wire.reference.trim().length > 64) return { ok: false, error: tiInvalid("reference", "invalid_kind") };
+    if (typeof wire.reference !== "string") return { ok: false, error: tiInvalid("reference", "invalid_particulars") };
+    if (wire.reference.trim().length > 64) return { ok: false, error: tiInvalid("reference", "invalid_particulars") };
     if (wire.reference.trim() !== "") reference = wire.reference.trim();
   }
   if (wire.currency !== undefined && wire.currency !== null && wire.currency !== "MYR") {
-    return { ok: false, error: tiInvalid("currency", "invalid_kind") };
+    return { ok: false, error: tiInvalid("currency", "invalid_currency") };
   }
   if (!isInteger(wire.totalCents)) return { ok: false, error: tiInvalid("total_cents", "invalid_total") };
   if ((wire.totalCents as number) <= 0) return { ok: false, error: tiInvalid("total_cents", "invalid_total") };
@@ -693,7 +696,7 @@ export function toDbTradeInvoice(
   let taxFacts: unknown = null;
   if (wire.taxFacts !== undefined && wire.taxFacts !== null) {
     if (typeof wire.taxFacts !== "object" || Array.isArray(wire.taxFacts)) {
-      return { ok: false, error: tiInvalid("tax_facts", "invalid_kind") };
+      return { ok: false, error: tiInvalid("tax_facts", "invalid_tax_facts") };
     }
     taxFacts = wire.taxFacts;
   }
