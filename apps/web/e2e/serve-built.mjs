@@ -130,6 +130,7 @@ import { handleClientCreateSupabase } from "./client-create-mock.mjs";
 // #639's C7 acquisition lane. Every handler names this lane's own client id or asset id
 // before it answers and falls through otherwise; it has no runtime half at all.
 import { handleFixedAssetSupabase } from "./fixed-asset-mock.mjs";
+import { handleDepreciationSupabase } from "./depreciation-mock.mjs";
 // #648's A5 lane — the firm setup checklist. Its five RPC verbs are names no other lane carries,
 // it reads a body only INSIDE a matched verb, and EVERY handler falls through unless the request
 // carries this lane's own cookie marker — which it has to, because `get_firm_setup` takes no
@@ -708,6 +709,12 @@ async function handleSupabase(request, response, url) {
   // reason the two lanes above are — it answers `/rest/v1/clients` with an id-scoped row of
   // its own and must reach it.
   if (await handleFixedAssetSupabase(request, response, path, url, sendJson, cors)) return;
+  // #651's depreciation lane. DISPATCHED AFTER #639's, and that order IS load-bearing rather than
+  // incidental: the two lanes share three verbs (`get_fixed_asset`, `get_depreciation_authority`,
+  // `list_depreciation_runs`, all declared in `SHARED_RPC_VERBS`), each answering only for its own
+  // client or asset ids and falling through otherwise — so either order works, and this one keeps
+  // the older lane's fixtures first. It answers `/rest/v1/clients` the same honest id-scoped way.
+  if (await handleDepreciationSupabase(request, response, path, url, sendJson, cors)) return;
   // #652's C8 lane. Position is not load-bearing for the same reason the C9 lane's is not: every
   // branch is scoped to this lane's own client or accrual ids and falls through otherwise. It sits
   // beside the plan lane because it answers `/rest/v1/clients` the same honest id-scoped way.

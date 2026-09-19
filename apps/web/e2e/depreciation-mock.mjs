@@ -31,6 +31,13 @@ import { readCachedJson } from "./mock-dispatch.mjs";
 export const DEP = {
   clientId: "65165165-6516-4651-8651-651651651651",
   clientName: "TANJUNG MANUFACTURING",
+  /** A SECOND client whose next period sits inside a CLOSED financial year. It is a separate
+   *  client rather than a control-endpoint toggle on the first for the reason every cell in this
+   *  suite shares one server: a toggle makes two cells order-dependent, and the thing this walk
+   *  must prove is an ABSENCE (no run row was created), which a cell cannot assert if a sibling
+   *  may have flipped the world underneath it. */
+  lockedClientId: "65165166-6516-4651-8651-651651651652",
+  lockedClientName: "TANJUNG MANUFACTURING (locked year)",
   /** The asset the walk charges: in service, particulars complete, and REVISED once — so the
    *  revision timeline has two real generations and the charge ledger has real rows. */
   assetId: "65101001-6510-4651-8651-651065101001",
@@ -64,6 +71,11 @@ export const DEP = {
   closedPeriodEnd: "2026-05-31",
   fiscalYearId: "65107001-6510-4651-8651-651065107001",
   fyLabel: "FY2026",
+  /** The charge that was REVERSED and the append-only row that reversed it. The walk names both
+   *  by id rather than by their labels, because the table's own caption says the word "unwinding"
+   *  as well and a page-wide text match cannot tell a caption from a row. */
+  unwoundChargeId: "65104003-6510-4651-8651-651065104003",
+  unwindChargeId: "65104004-6510-4651-8651-651065104004",
 };
 
 const RPC_VERBS = new Set([
@@ -77,24 +89,22 @@ const RPC_VERBS = new Set([
   "list_fixed_assets",
 ]);
 
-/** The walk's own mutable state. Per-SERVER, not per-test — one server serves every walk — so a
- *  cell that mutates asserts its precondition rather than assuming it.
- *
- *  `lockedPeriod` is what the "refused before anything is drafted" cell arms: with it true the run
- *  door answers 0227's CLR38 axis `period_closed` VERBATIM, and `runsPosted` must not move. */
-const state = { runsPosted: 0, lockedPeriod: false, signed: false, lastOpKeys: [] };
+/** The walk's own mutable state. Per-SERVER, not per-test — one server serves every walk — so the
+ *  cell that runs a period asserts its precondition rather than assuming it. The LOCKED client has
+ *  no state at all: its door always refuses, so no ordering can make its "nothing was written"
+ *  assertion pass for the wrong reason. */
+const state = { runsPosted: 0, lastOpKeys: [] };
 
-const CLIENT = {
-  id: DEP.clientId,
-  name: DEP.clientName,
-  status: "active",
-  created_at: "2026-01-01T00:00:00.000Z",
+const CLIENTS = {
+  [DEP.clientId]: { id: DEP.clientId, name: DEP.clientName, status: "active", created_at: "2026-01-01T00:00:00.000Z" },
+  [DEP.lockedClientId]: { id: DEP.lockedClientId, name: DEP.lockedClientName, status: "active", created_at: "2026-01-01T00:00:00.000Z" },
 };
+const OURS = (id) => id === DEP.clientId || id === DEP.lockedClientId;
 
-const ACCOUNTS = [
-  { client_id: DEP.clientId, account_code: DEP.costAccount, name: "Plant & machinery", account_type: "asset", is_active: true },
-  { client_id: DEP.clientId, account_code: DEP.accumAccount, name: "Accumulated depreciation", account_type: "asset", is_active: true },
-  { client_id: DEP.clientId, account_code: DEP.expenseAccount, name: "Depreciation expense", account_type: "expense", is_active: true },
+const ACCOUNTS = (clientId) => [
+  { client_id: clientId, account_code: DEP.costAccount, name: "Plant & machinery", account_type: "asset", is_active: true },
+  { client_id: clientId, account_code: DEP.accumAccount, name: "Accumulated depreciation", account_type: "asset", is_active: true },
+  { client_id: clientId, account_code: DEP.expenseAccount, name: "Depreciation expense", account_type: "expense", is_active: true },
 ];
 
 const BASE_ROW = {
@@ -203,8 +213,8 @@ const CHARGES = [
   { id: "65104004-6510-4651-8651-651065104004", period_start: "2026-06-01", period_end: "2026-06-30", amount_cents: 100000, effective_date: "2026-06-30", entry_id: DEP.unwindEntryId, run_id: null, unwind_of: "65104003-6510-4651-8651-651065104003" },
 ];
 
-const AUTHORITY = () => ({
-  client_id: DEP.clientId,
+const AUTHORITY = (clientId) => ({
+  client_id: clientId,
   authority: {
     id: DEP.authorityId,
     status: "live",
@@ -222,7 +232,10 @@ const AUTHORITY = () => ({
   high_stakes_threshold_cents: 1000000,
 });
 
-const RUNS = () => {
+const RUNS = (clientId) => {
+  // The LOCKED client has never had a lawful period, so its runs list is empty — and stays empty,
+  // which is exactly what the refusal cell asserts.
+  if (clientId === DEP.lockedClientId) return { client_id: clientId, runs: [] };
   const rows = [
     {
       id: "65105003-6510-4651-8651-651065105003",
@@ -262,8 +275,8 @@ const RUNS = () => {
   return { client_id: DEP.clientId, runs: rows };
 };
 
-const PREVIEW = () => ({
-  client_id: DEP.clientId,
+const PREVIEW = (clientId) => ({
+  client_id: clientId,
   due: true,
   reason: null,
   period_start: DEP.periodStart,
@@ -346,23 +359,23 @@ export async function handleDepreciationSupabase(request, response, path, url, s
   // ID-SCOPED ONLY: the UNFILTERED /clients read is the client register every walk shares, and
   // claiming it would replace another walk's fixture. This walk navigates by URL.
   if (request.method === "GET" && path === "/rest/v1/clients") {
-    if (idFilter === DEP.clientId) {
-      sendJson(response, 200, [CLIENT], cors);
+    if (idFilter !== null && OURS(idFilter)) {
+      sendJson(response, 200, [CLIENTS[idFilter]], cors);
       return true;
     }
     return false;
   }
 
   if (request.method === "GET" && path === "/rest/v1/coa_accounts") {
-    if (clientFilter === DEP.clientId) {
-      sendJson(response, 200, ACCOUNTS, cors);
+    if (clientFilter !== null && OURS(clientFilter)) {
+      sendJson(response, 200, ACCOUNTS(clientFilter), cors);
       return true;
     }
     return false;
   }
 
   if (request.method === "GET" && path === "/rest/v1/fa_account_profiles") {
-    if (clientFilter === DEP.clientId) {
+    if (clientFilter !== null && OURS(clientFilter)) {
       sendJson(response, 200, [{
         id: "65108001-6510-4651-8651-651065108001",
         asset_account_code: DEP.costAccount,
@@ -387,9 +400,9 @@ export async function handleDepreciationSupabase(request, response, path, url, s
   const body = (await readCachedJson(request)) ?? {};
 
   if (verb === "list_fixed_assets") {
-    if (body.p_client !== DEP.clientId) return false;
+    if (!OURS(body.p_client)) return false;
     sendJson(response, 200, {
-      client_id: DEP.clientId,
+      client_id: body.p_client,
       as_of: "2026-08-01",
       assets: [currentRow(), incompleteRow(), frozenRow()],
       incomplete_count: 1,
@@ -398,8 +411,8 @@ export async function handleDepreciationSupabase(request, response, path, url, s
   }
 
   if (verb === "fa_register_tie") {
-    if (body.p_client !== DEP.clientId) return false;
-    sendJson(response, 200, { client_id: DEP.clientId, as_of: "2026-08-01", tie: true, accounts: [] }, cors);
+    if (!OURS(body.p_client)) return false;
+    sendJson(response, 200, { client_id: body.p_client, as_of: "2026-08-01", tie: true, accounts: [] }, cors);
     return true;
   }
 
@@ -411,25 +424,25 @@ export async function handleDepreciationSupabase(request, response, path, url, s
   }
 
   if (verb === "get_depreciation_authority") {
-    if (body.p_client !== DEP.clientId) return false;
-    sendJson(response, 200, AUTHORITY(), cors);
+    if (!OURS(body.p_client)) return false;
+    sendJson(response, 200, AUTHORITY(body.p_client), cors);
     return true;
   }
 
   if (verb === "list_depreciation_runs") {
-    if (body.p_client !== DEP.clientId) return false;
-    sendJson(response, 200, RUNS(), cors);
+    if (!OURS(body.p_client)) return false;
+    sendJson(response, 200, RUNS(body.p_client), cors);
     return true;
   }
 
   if (verb === "preview_depreciation_run") {
-    if (body.p_client !== DEP.clientId) return false;
-    sendJson(response, 200, PREVIEW(), cors);
+    if (!OURS(body.p_client)) return false;
+    sendJson(response, 200, PREVIEW(body.p_client), cors);
     return true;
   }
 
   if (verb === "sign_depreciation_authority") {
-    if (body.p_client !== DEP.clientId) return false;
+    if (!OURS(body.p_client)) return false;
     // 0227's resolution ladder, transcribed. A reference that names no row in this firm AND client
     // is refused BY NAME — that sentence is AC5's "explicit instruction" made executable.
     const ref = body.p_authority_ref;
@@ -449,21 +462,20 @@ export async function handleDepreciationSupabase(request, response, path, url, s
       }, cors);
       return true;
     }
-    state.signed = true;
     sendJson(response, 200, {
-      authority_id: body.p_authority, client_id: DEP.clientId, status: "live", cadence: "monthly",
+      authority_id: body.p_authority, client_id: body.p_client, status: "live", cadence: "monthly",
       authority_ref: ref, authority_from: DEP.authorityFrom,
     }, cors);
     return true;
   }
 
   if (verb === "run_depreciation_manual") {
-    if (body.p_client !== DEP.clientId) return false;
+    if (!OURS(body.p_client)) return false;
     state.lastOpKeys.push(String(body.p_op_key ?? ""));
 
     // THE LOCKED-PERIOD WALL, transcribed from `clara._fa_assert_period_open`. It is raised BEFORE
     // the first write, which is what the walk asserts: the runs table must not gain a row.
-    if (state.lockedPeriod) {
+    if (body.p_client === DEP.lockedClientId) {
       sendJson(response, 400, {
         code: "CLR38",
         message: `fiscal year ${DEP.fyLabel} (2026-01-01 to 2026-12-31) is closed; a depreciation charge dated ${DEP.periodEnd} may not be run into it -- the formal reopen path (clara.reopen_fiscal_year) is the one way back in`,
@@ -495,26 +507,4 @@ export async function handleDepreciationSupabase(request, response, path, url, s
   }
 
   return false;
-}
-
-/** The walk's own control endpoint — this lane's alone, gated on its own client id, so no other
- *  lane's fixture state can be reached through it (`journal-work-mock.mjs`'s own guard). */
-export async function handleDepreciationControl(request, response, path, sendJson, cors) {
-  if (request.method !== "POST" || path !== "/__e2e__/depreciation") return false;
-  const body = (await readCachedJson(request)) ?? {};
-  if (body.client !== DEP.clientId) return false;
-  if (body.op === "lock_period") state.lockedPeriod = true;
-  if (body.op === "unlock_period") state.lockedPeriod = false;
-  if (body.op === "reset") {
-    state.runsPosted = 0;
-    state.lockedPeriod = false;
-    state.lastOpKeys = [];
-  }
-  sendJson(response, 200, {
-    ok: true,
-    runsPosted: state.runsPosted,
-    lockedPeriod: state.lockedPeriod,
-    opKeys: state.lastOpKeys,
-  }, cors);
-  return true;
 }
