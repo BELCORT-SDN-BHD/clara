@@ -21,6 +21,8 @@
 // `staff_advance_statement` and the `staff_advances`/`staff_advance_accounts` table reads,
 // exclusively for its own `client_id`/`p_client`.
 
+import { readCachedJson, matchVerb } from "./mock-dispatch.mjs";
+
 export const SAR = {
   clientId: "87987987-8798-4879-8798-879879879879",
   clientName: "GEMILANG HARDWARE SDN BHD",
@@ -35,11 +37,27 @@ export const SAR = {
   freshPerson: "Halim bin Yaacob",
   // A control-flavoured liability leg for the book-application entry's other line.
   wagesPayable: "2020",
+  // fix-round SPEC-879-1 — a SECOND, distinct client with no enrolments and no advances at all,
+  // for the empty first-use state the brief's "Desired behavior" names alongside enrolling,
+  // booking, completing particulars and the statement panel: `staff-expense-claim-walk.spec.ts`'s
+  // own "an EMPTY register is its own state, not a failure" cell is the house precedent. The mock
+  // is already client-scoped (every handler falls through on any id it does not recognise), so a
+  // second client id is the cheap way to get a genuinely empty read rather than mutating the
+  // first client's own seeded state.
+  emptyClientId: "87987987-8798-4879-8798-8798798700e0",
+  emptyClientName: "SUNRISE CONSULTING SDN BHD",
 };
 
 const CLIENT = {
   id: SAR.clientId,
   name: SAR.clientName,
+  status: "active",
+  created_at: "2026-01-01T00:00:00.000Z",
+};
+
+const EMPTY_CLIENT = {
+  id: SAR.emptyClientId,
+  name: SAR.emptyClientName,
   status: "active",
   created_at: "2026-01-01T00:00:00.000Z",
 };
@@ -88,17 +106,21 @@ function outstandingCents() {
   return ADVANCE_AMOUNT_CENTS - state.appliedCents;
 }
 
-async function readJson(request) {
-  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  let parsed = {};
-  if (chunks.length > 0) {
-    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
-  }
-  request.__e2eParsedBody = parsed;
-  return parsed;
-}
+// fix-round STD-879-2 — this lane's own owned RPC verbs, checked BEFORE the body is ever read
+// (`matchVerb`/`readCachedJson`'s own house pattern, mock-dispatch.mjs's header: "call this
+// BEFORE readCachedJson, so a verb this lane does not own returns false without the stream ever
+// being touched"). A per-client `p_client` check still has to read the body first — the client
+// id IS a field of the body — but a verb this lane does not own at all is now rejected before
+// any read is attempted, not merely before this lane ACTS on what it read.
+const OWNED_RPC_VERBS = new Set([
+  "staff_advance_summary",
+  "staff_advance_tie",
+  "staff_advance_statement",
+  "book_staff_advance_application",
+  "complete_staff_advance_particulars",
+  "enrol_staff_advance_account",
+  "retire_staff_advance_account",
+]);
 
 export async function handleStaffAdvancesRegisterSupabase(request, response, path, url, sendJson, cors) {
   const idFilter = url.searchParams.get("id");
@@ -106,6 +128,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const id = idFilter?.startsWith("eq.") ? idFilter.slice(3) : null;
+    if (id === SAR.emptyClientId) { sendJson(response, 200, [EMPTY_CLIENT], cors); return true; }
     if (id !== SAR.clientId) return false;
     sendJson(response, 200, [CLIENT], cors);
     return true;
@@ -113,6 +136,9 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
 
   if (request.method === "GET" && path === "/rest/v1/coa_accounts") {
     const client = clientFilter?.startsWith("eq.") ? clientFilter.slice(3) : null;
+    // The empty client has a chart too (an enrol dialog with nothing to offer would be its own,
+    // different defect) — it simply has never enrolled or advanced against any of it.
+    if (client === SAR.emptyClientId) { sendJson(response, 200, [], cors); return true; }
     if (client !== SAR.clientId) return false;
     sendJson(response, 200, ACCOUNTS, cors);
     return true;
@@ -120,6 +146,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
 
   if (request.method === "GET" && path === "/rest/v1/staff_advance_accounts") {
     const client = clientFilter?.startsWith("eq.") ? clientFilter.slice(3) : null;
+    if (client === SAR.emptyClientId) { sendJson(response, 200, [], cors); return true; }
     if (client !== SAR.clientId) return false;
     sendJson(response, 200, state.enrolments, cors);
     return true;
@@ -127,6 +154,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
 
   if (request.method === "GET" && path === "/rest/v1/staff_advances") {
     const client = clientFilter?.startsWith("eq.") ? clientFilter.slice(3) : null;
+    if (client === SAR.emptyClientId) { sendJson(response, 200, [], cors); return true; }
     if (client !== SAR.clientId) return false;
     sendJson(response, 200, [
       {
@@ -147,9 +175,21 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
 
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
+  if (!matchVerb(OWNED_RPC_VERBS, verb)) return false;
 
   if (verb === "staff_advance_summary") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
+    if (body?.p_client === SAR.emptyClientId) {
+      sendJson(response, 200, {
+        client_id: SAR.emptyClientId,
+        as_of: typeof body?.p_as_of === "string" ? body.p_as_of : ISSUE_DATE,
+        advances: [],
+        outstanding_cents: 0,
+        incomplete_count: 0,
+        policy_notes: [],
+      }, cors);
+      return true;
+    }
     if (body?.p_client !== SAR.clientId) return false;
     const particularsComplete = state.purpose !== null && state.reference !== null;
     sendJson(response, 200, {
@@ -180,7 +220,16 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
   }
 
   if (verb === "staff_advance_tie") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
+    if (body?.p_client === SAR.emptyClientId) {
+      sendJson(response, 200, {
+        client_id: SAR.emptyClientId,
+        as_of: typeof body?.p_as_of === "string" ? body.p_as_of : ISSUE_DATE,
+        tie: true,
+        accounts: [],
+      }, cors);
+      return true;
+    }
     if (body?.p_client !== SAR.clientId) return false;
     sendJson(response, 200, {
       client_id: SAR.clientId,
@@ -204,7 +253,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
   }
 
   if (verb === "staff_advance_statement") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== SAR.clientId) return false;
     const accountCode = body?.p_account_code;
 
@@ -280,7 +329,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
   }
 
   if (verb === "book_staff_advance_application") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== SAR.clientId) return false;
     const allocations = Array.isArray(body?.p_allocations) ? body.p_allocations : [];
     const allocatedCents = allocations
@@ -305,7 +354,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
   }
 
   if (verb === "complete_staff_advance_particulars") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== SAR.clientId) return false;
     if (body?.p_advance !== SAR.advanceId) return false;
     state.purpose = typeof body?.p_purpose === "string" ? body.p_purpose : "";
@@ -315,9 +364,26 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
   }
 
   if (verb === "enrol_staff_advance_account") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== SAR.clientId) return false;
     if (body?.p_account_code !== SAR.freshAccount) return false;
+    // fix-round ADV-10 — IDEMPOTENT PER ACCOUNT CODE: `playwright.config.ts`'s `retries: 0` means
+    // this is not reachable today, but the enrol handler pushed a NEW row unconditionally, so a
+    // retried cell 2 (under a config this file does not own) would enrol 1191 a second time —
+    // two active rows the row-filter locator in the walk spec would then match, a strict-mode
+    // violation masking whatever the retry was actually diagnosing. A second call with the same
+    // account code, still active, now returns the EXISTING enrolment rather than minting another.
+    const existing = state.enrolments.find((e) => e.account_code === SAR.freshAccount && e.active);
+    if (existing) {
+      sendJson(response, 200, {
+        enrolment_id: existing.id,
+        status: "active",
+        client_id: SAR.clientId,
+        account_code: existing.account_code,
+        person_label: existing.person_label,
+      }, cors);
+      return true;
+    }
     const enrolmentId = mint("n");
     state.enrolments.push({
       id: enrolmentId,
@@ -342,7 +408,7 @@ export async function handleStaffAdvancesRegisterSupabase(request, response, pat
   }
 
   if (verb === "retire_staff_advance_account") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== SAR.clientId) return false;
     const row = state.enrolments.find((e) => e.id === body?.p_enrolment) ?? null;
     if (row === null) return false;

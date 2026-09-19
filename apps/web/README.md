@@ -1124,3 +1124,53 @@ never resolves on its own (so the ONLY way the loop can end is the abort, and a 
 turns a regression back into a hang into a clear failure instead of a silent one), and one proving
 the already-aborted fast path never even starts the sleep.
 
+**fix-round ADV-4.** `abortableSleep`'s race left the OTHER arm unguarded: `sleepImpl(ms).then
+(finish)` (one argument) had no handler for a REJECTING `sleepImpl` — `void` discarded the
+promise, so a rejection became an unhandled rejection AND `finish` was never called, hanging the
+awaited `runClaraTaskStream` forever. `sleepImpl` never rejects in production (it is a plain
+timer), but the fix is the same two-argument shape this promise already uses for its abort
+listener: `.then(finish, finish)`, so a failing clock ends that backoff exactly like an elapsed
+one, never a hang. New cell in `streamReattach.test.mjs`, confirmed to fail (unhandled rejection
+at the exact pre-fix line) via `git stash`/`pop`, then restored byte-for-byte.
+
+## #875 — poll-bound test-budget audit (fix round, landing the deliverable)
+
+**#875's whole deliverable is this table** — the point, per its own brief, is that the NEXT
+poller a lane adds can be checked against it rather than re-litigated from scratch. Every row was
+read at its source, not assumed clean.
+
+| poller | delay constant | test file | non-vacuity mechanism |
+|---|---|---|---|
+| `useClaraThread` run poll | `CLARA_RUN_POLL_MS=4000` | `lib/clara/use-clara-thread-stop.test.ts` | captures `setInterval`, fires the tick manually — never time-based |
+| `useUploadQueue` | `DEFAULT_POLL_INTERVAL_MS=1000` | `lib/documents/useUploadQueue.test.ts` | injectable `pollIntervalMs`; the exhausted-poll cell passes `pollIntervalMs: 0` explicitly |
+| `useInterviewRun` | `POLL_MS=3000` | `lib/interview/useInterviewRun.test.ts` | captures `setInterval`, fires manually |
+| `useClientWorkPack` | `CLIENT_WORK_PACK_REFRESH_MS=30_000` | `lib/work/use-client-work-pack.test.ts` | captures `setInterval` (`withTimers`/`ctx.tick()`), fires manually; the stale-after check uses a fake clock |
+| `useWorkDetail` | `WORK_POLL_MS=3000` | `components/work/work-detail.test.tsx` | genuinely waits real `3_100`/`6_500` ms past the interval — slow, not vacuous |
+| `CheckoutWaitingRefresh` | `CHECKOUT_REFRESH_INTERVAL_MS=5000` / `CHECKOUT_REFRESH_BUDGET_MS=120000` | `components/entry/checkout-faces-a11y.test.tsx` | injects `intervalMs:20, budgetMs:400`, waits a real `600ms` (> budget) — a #643 bisection already tightened this once |
+| `components/firm/work-question-affordance.tsx` | — | — | no interval/`setTimeout`-driven poll in this file at all (only a `requestAnimationFrame`/`setTimeout(…, 0)` next-frame wait) — not a poller |
+| `WorkCards.tsx` (rail card) | `WORK_CARD_POLL_MS=3000` | `components/parts/work-cards.test.tsx` | captures `setInterval`, fires manually |
+
+**Conclusion.** None of the eight surfaces named in this ticket's brief exhibits the
+`documents-workbench-refresh.test.tsx` shape (a real-time assertion window that never advances
+past the poller's own first-tick delay): six avoid the whole class structurally
+(capture-and-manually-fire), two pay real wall-clock time deliberately and correctly.
+
+**Scope, stated rather than left implicit (fix-round SPEC-875-1).** The audit above covers
+exactly the eight pollers this ticket's brief names — it is not a claim that these are the only
+interval-driven pollers in `apps/web`. Two further ones exist and were checked separately, for
+the same reason: `lib/dashboard/use-financial-pack.ts`'s `FINANCIAL_PACK_REFRESH_MS` (pinned by
+`lib/dashboard/use-financial-pack.test.ts`, capture-and-manually-fire) and
+`lib/firm/use-firm-portfolio.ts`'s `FIRM_PORTFOLIO_REFRESH_MS` (pinned by
+`lib/firm/use-firm-portfolio.test.ts`, the same shape). Both are structurally non-vacuous; no
+poller anywhere in the app was found with no budget cell at all.
+
+**A genuinely new, adjacent finding — not fixed here (scope discipline).** One whole-suite run
+(during #956's own verification) hit `documents-workbench-refresh.test.tsx`'s `"[633]: an
+UNSETTLED receipt keeps a bounded watch and says so; the poll's budget is finite"` cell — the
+same file #633's original vacuity defect was fixed in (`FAST_POLL = { baseDelayMs: 0, maxDelayMs:
+0 }`, `grew > 0` guard). This is a DIFFERENT failure mode: `baseDelayMs: 0` already advances past
+the first tick in principle, but 40 macrotask `h.settle()` hops are not always enough for the
+poll's own tick to land under host contention (1 failure in a 5-run sample). Follow-up: audit
+that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
+pollers) and not the same instance #875 was asked to fix.
+

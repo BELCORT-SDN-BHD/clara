@@ -37,6 +37,15 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * ceremony, not during authorship. The sample-invoice slot is asserted in the
  * completion walk, but binary upload transport is covered by useUploadQueue's
  * own battery rather than mutating the interview fixture with a throwaway file.
+ *
+ * #897 — THE FULL-SCREEN ALTITUDE LEG DOES NOT LIVE HERE, BY DESIGN (DECISIONS §3.1 row 8,
+ * ratified 2026-09-18: "a mock lane owning the rail + full-screen thread", not a docker-free
+ * live-stack path — this file stays docker-only, unchanged). Escalating `ClaraRail` to the
+ * full-screen `(full)` route group needs a run PARKED OPEN AND UNANSWERED, independent of the
+ * shared COMPLETE/CANCEL/RACE fixtures every test above consumes and mutates; this runner
+ * provisions none such. The arm belongs to whichever mock lane owns `ClaraRail`'s onboarding
+ * card fixtures instead, proven without docker in a real built-app Playwright walk exactly like
+ * every other mock-lane spec in this directory.
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];

@@ -62,6 +62,28 @@ test("[879] the staffAdvances tab renders: the ledger, the enrolled account and 
   expect(result.violations, "staffAdvances tab, collapsed").toEqual([]);
 });
 
+// fix-round SPEC-879-1 — the brief's "Desired behavior" names five states: "the empty first-use
+// state, enrolling an account, booking an application, completing particulars, and the statement
+// panel showing a booked advance's balance." Every cell above/below drives a POPULATED register;
+// none ever saw the empty state, which is a different face, not a lesser one (the house precedent:
+// staff-expense-claim-walk.spec.ts's own "an EMPTY register is its own state, not a failure").
+// A second, distinct client id (never enrolled, never advanced against) is this ticket's own,
+// since the mock is already client-scoped — cheaper than mutating the shared fixture's own state.
+test("[879] the empty first-use state is its own state, not a failure — and the primary act is still offered", async ({ page }) => {
+  await signInTo(page, `/clients/${SAR.emptyClientId}/registers?tab=staffAdvances`);
+
+  await expect(page.getByRole("heading", { name: "Staff advances" })).toBeVisible();
+  await expect(page.getByText("No staff advances recorded for this client.")).toBeVisible();
+  await expect(page.getByText("No staff-advance accounts enrolled for this client yet.")).toBeVisible();
+  await expect(page.getByText("No enrolled accounts yet — enrol one above to see its statement.")).toBeVisible();
+
+  // …and the primary act is still offered — an empty register is where a first enrolment starts.
+  await expect(page.getByRole("button", { name: "Enrol account", exact: true })).toBeEnabled();
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "staffAdvances tab, empty first-use state").toEqual([]);
+});
+
 test("[879] enrol an account, retire it, book an application and complete particulars — end to end", async ({ page }) => {
   // ---- ENROL --------------------------------------------------------------------------------
   const enrolDialog = await openDialog(page, "Enrol account");
@@ -105,6 +127,14 @@ test("[879] enrol an account, retire it, book an application and complete partic
   await bookDialog.getByRole("button", { name: "Book application", exact: true }).click();
   await expect(bookDialog).toBeHidden();
 
+  // fix-round ADV-10 — a POSITIVE, book-specific settle signal FIRST: the summary re-read's own
+  // outstanding figure (RM 1,000.00 minus the RM 300.00 just booked) can only read RM 700.00 once
+  // the write has actually landed and the page has re-rendered with it. Only once that is proven
+  // does the absence check below mean anything — asserted against an empty/transitional DOM
+  // (a dialog that has JUST closed, nothing else awaited), `getByText(/CLR\d/)).toHaveCount(0)`
+  // would pass instantly whether or not a refusal banner was about to render a frame later.
+  await expect(page.getByText("RM 700.00 outstanding across every enrolled account")).toBeVisible();
+
   // No error banner — a REFUSAL renders as a persistent StateBanner at the top of the register,
   // which a settled, accepted call must never leave behind.
   await expect(page.getByText(/CLR\d/)).toHaveCount(0);
@@ -125,8 +155,10 @@ test("[879] enrol an account, retire it, book an application and complete partic
   await expect(ledgerRow).toContainText("March school-fee advance instalment");
   await expect(ledgerRow.getByRole("button", { name: "Complete particulars" })).toHaveCount(0);
 
-  // ---- THE SUMMARY RE-READ REFLECTS BOTH WRITES -----------------------------------------------
-  await expect(page.getByText("RM 700.00 outstanding across every enrolled account")).toBeVisible();
+  // ---- THE SUMMARY RE-READ REFLECTS THE PARTICULARS WRITE TOO ---------------------------------
+  // (the outstanding figure itself was already asserted right after the booking, above — it does
+  // not change again here, since completing particulars affects the missing-particulars count,
+  // never an amount.)
   await expect(page.getByText(/advance\(s\) missing particulars/)).toHaveCount(0);
 });
 
