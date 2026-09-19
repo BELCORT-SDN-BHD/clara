@@ -1,13 +1,19 @@
 // #903 (item 1) — `NeedsYouCounts`'s own header comment said the live envelope carries EIGHT
 // counts; it renders NINE chips (the ninth, `work_questions`, was added by #629 after that
-// comment was written). This file pins the chip count so a stale comment cannot recur silently,
-// and source-pins the comment text itself so it cannot drift from the render again.
+// comment was written). This file pins the chip count so a stale comment cannot recur silently.
+//
+// STD-04 (code-review fix round) — this file used to ALSO source-pin the header comment's own
+// prose (readFileSync + a regex on "EIGHT counts"/"NINE counts"). Dropped: `903.chips` below
+// already renders the real component and counts its real output, which is a strictly stronger,
+// behavioural proof that the comment's claim ("nine counts") is true — a prose assertion added
+// nothing 903.chips didn't already cover, and it broke on a wording-only edit with zero behaviour
+// change (the /tdd side-channel anti-pattern: "the test breaks when you refactor but behavior
+// hasn't changed"). Unlike document-kind-labels.test.tsx's [878] source-pin (justified there by a
+// stated, specific constraint — Base UI's Select popup mounts lazily and no test here drives one
+// open), nothing about a header COMMENT's wording is unobservable through the DOM.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
@@ -50,12 +56,4 @@ test("903.chips — the live envelope's counts render as exactly NINE chips, one
   } finally {
     await h.unmount();
   }
-});
-
-test("903.comment — the component's own header states the CURRENT chip count, not a stale one", async () => {
-  const dir = dirname(fileURLToPath(import.meta.url));
-  const source = readFileSync(join(dir, "needs-you-counts.tsx"), "utf8");
-  assert.doesNotMatch(source, /EIGHT counts, not six/i,
-    "the FIX-4 comment's stale count ('eight') must not survive — nine chips render today");
-  assert.match(source, /NINE counts/i, "the comment must name the count that actually renders");
 });

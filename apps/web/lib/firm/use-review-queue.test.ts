@@ -86,22 +86,29 @@ async function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Pr
   }
 }
 
-// #903 (item 2, FIX ROUND L07-A03) — `ReviewQueueEnvelope.watermark` was deleted on grounds that
-// did not hold: `clara.list_review_queue` DOES emit it (0011_daily_loop.sql:3861, recut at
-// 0016_a21_compliance_watch.sql:4691), 0036_wave_c0_deferred_belts.sql:1737-1744 pins it as a
-// must-not-be-lost output of that function, and CONTEXT.md (both "Attention source freshness" and
-// "Source watermark") names it as a real, estate-wide concept — not "unrelated to the dead
-// front-end field" the deleting commit's comment claimed. Restored with the SAME posture this file
-// already gives `compliance`/`lint` just above it: present on the wire, typed loosely, a NAMED gap
-// rather than a silent, undocumented drop — this build still renders nothing from it. This is a
-// SOURCE pin, not a DOM one: there is nothing to mount that would prove an unread field is unread.
-test("903 — watermark is a NAMED, present-but-unread field on ReviewQueueEnvelope: typed, not (re-)read by the hook", () => {
+// #903 (item 2, CRS-07-03 code-review fix round). The PRIOR fix round restored `watermark` as
+// `watermark?: unknown`, present but never (re-)read — the SAME posture this file gives
+// `compliance`/`lint` just above it. But #903's own brief forbids exactly that outcome: "watermark
+// is either fully wired to a renderer or fully absent from the types... NO HALF-STATE WHERE IT IS
+// TYPED BUT DROPPED", and its out-of-scope line rules out the other fork ("A new freshness
+// indicator for the review queue" is precisely what rendering `watermark` would be). So this build
+// takes the brief's OTHER fork: the field is removed again, with no `compliance`/`lint`-shaped
+// exception, because that precedent predates #903 and was never put to the owner as an answer to
+// its AC2. `compliance`/`lint` are UNCHANGED (#903 named only `watermark`).
+//
+// This is a SOURCE pin, not a DOM one — a TYPE'S absence has no rendered behaviour to mount and
+// assert on; AC2's own words are "a grep proves no dangling reference".
+test("903 — watermark is REMOVED from ReviewQueueEnvelope: no half-state, no dangling reference", () => {
   const dir = dirname(fileURLToPath(import.meta.url));
   const needsYouSource = readFileSync(join(dir, "needs-you.ts"), "utf8");
-  assert.match(needsYouSource, /watermark\?:/,
-    "the type must name the field the DB actually emits, matching compliance/lint's own posture");
+  // A PROPERTY DECLARATION, not a bare word — the removal is explained in a comment naming the
+  // field (matching this file's own convention for every other recorded decision), so the grep
+  // must not fire on that prose. `watermark?:` / `watermark:` is the shape a field declaration
+  // takes; nothing in the surrounding comment's prose types that pattern.
+  assert.doesNotMatch(needsYouSource, /\bwatermark\s*\??\s*:/,
+    "AC2: the type must declare no such field — typed-but-dropped is the half-state the brief forbids");
   const hookSource = readFileSync(join(dir, "use-review-queue.ts"), "utf8");
-  assert.doesNotMatch(hookSource, /\.watermark\b/, "the hook must not read a field this build renders nowhere");
+  assert.doesNotMatch(hookSource, /\.watermark\b/, "AC2: the hook must not read a field the type no longer declares");
 });
 
 test("initial load: populates rows/counts from page 1, hasMore reflects a FULL page", async () => {
