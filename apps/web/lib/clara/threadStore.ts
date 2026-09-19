@@ -395,10 +395,18 @@ export const claraThreadStore = {
     // tab asserting it is still watching something it cannot see. `activeTaskId` is
     // kept, exactly as `markTurnStopped` keeps it — the id is still a fact.
     const revoked = event.event === "revoked";
+    // #642 (fix round 1, ADV-642-3) — AND THE SENTENCE ABOUT THE PRESS RETIRES WITH THE
+    // TURN IT IS ABOUT. `lastSendReplayed` was cleared by nothing but the NEXT `beginSend`,
+    // and this store is module-level: "Clara already had that message" stayed on screen
+    // after the turn settled and across a rail close/reopen, a statement about a press
+    // nobody is looking at any more. A terminal `message` is the authority that the turn
+    // ended (the same authority `settled` already uses here); a revocation ends this
+    // reader's view of it. Neither is the next press, which is exactly why neither cleared
+    // it before.
     setThread(threadId, settled
-      ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null }
+      ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null, lastSendReplayed: false }
       : revoked
-        ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null }
+        ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null, lastSendReplayed: false }
         : { stream });
   },
 

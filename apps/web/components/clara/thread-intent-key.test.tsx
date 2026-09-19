@@ -431,3 +431,96 @@ test("p642.web.distinct_resubmit_reads_state_first — a REMOUNT does not lose t
     }
   });
 });
+
+/** Every `role="status"` line currently on screen, in document order. The idiom is
+ *  `thread-revoked.test.tsx`'s, verbatim — this file needs it for the same law from the
+ *  other side: ONE press must produce ONE announcement. */
+const statusLines = (h: { container: Stub }): string[] => {
+  const out: string[] = [];
+  (function walk(node: Stub) {
+    const get = typeof node.getAttribute === "function" ? (node.getAttribute as (a: string) => string | null) : null;
+    if (get && get("role") === "status") {
+      const text = (function textOf(n: Stub): string {
+        if (n.nodeType === 3) return String(n.nodeValue ?? "");
+        const kids = (n.childNodes as Stub[] | undefined) ?? [];
+        if (kids.length > 0) return kids.map(textOf).join("");
+        return typeof n.textContent === "string" ? n.textContent : "";
+      })(node);
+      out.push(text.trim());
+    }
+    for (const c of (node.childNodes as Stub[] | undefined) ?? []) walk(c);
+  })(h.container);
+  return out;
+};
+
+test("p642.web.replayed_says_it_once — a replayed turn that is STILL STREAMING speaks with ONE status line", async () => {
+  // Fix round 1, review finding ADV-642-2 / STANDARDS F2. The replayed line was gated
+  // only on `!revoked`, so it was not part of this file's mutually exclusive status
+  // ladder — the ladder every other line belongs to, for the reason ClaraThreadView says
+  // three times in its own comments ("two `role=\"status\"` siblings would announce
+  // twice"). A replayed send whose original task is still running is the ORDINARY replay
+  // path: it streams chunks immediately, so "Clara already had that message" and "Clara
+  // is responding…" were two live regions announcing one press, for the whole turn.
+  //
+  // THE SENTENCE IS NOT DELETED, it is UNANNOUNCED — `StateBanner`'s own `silent` prop is
+  // the house precedent (#629 §5's one-announcement-owner rule): the reader still learns
+  // why no second bubble appeared, in the same place, with the same words.
+  claraThreadStore.reset(THREAD);
+  const wire: Wire = newWire("accepted");
+  await withFetch(wire, async () => {
+    const h = await renderComponent(view());
+    try {
+      await settle(h);
+      await h.act(() => {
+        claraThreadStore.beginSend(THREAD, "intent-fixture");
+        claraThreadStore.markAccepted(THREAD, TASK, true);
+        claraThreadStore.applyStreamEvent(THREAD, { event: "chunk", data: { type: "text-delta", id: "t", text: "Working on " } });
+      });
+      await settle(h);
+
+      const lines = statusLines(h);
+      assert.equal(lines.length, 1, `one press, one announcement; saw ${JSON.stringify(lines)}`);
+      assert.match(lines.at(0) ?? "", /Clara is responding/, "…and the live transition is the one that speaks");
+      assert.match(h.text(), /Clara already had that message/,
+        "…while the replay is still SAID, because the reader still needs to know why nothing new appeared");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p642.web.replayed_says_it_once — the line retires with the turn it is about", async () => {
+  // Fix round 1, review finding ADV-642-3. `lastSendReplayed` was cleared by NOTHING
+  // except the next `beginSend`: not by the terminal, not by a revocation, not by a
+  // thread change. The store is module-level and survives unmount, so "Clara already had
+  // that message" stayed on screen through the whole turn, after it settled, and across a
+  // rail close/reopen — a sentence about a press nobody is looking at any more, sitting
+  // over a quiet transcript. The field's own doc comment said "the surface says it ONCE".
+  claraThreadStore.reset(THREAD);
+  const wire: Wire = newWire("accepted");
+  await withFetch(wire, async () => {
+    const h = await renderComponent(view());
+    try {
+      await settle(h);
+      await h.act(() => {
+        claraThreadStore.beginSend(THREAD, "intent-fixture");
+        claraThreadStore.markAccepted(THREAD, TASK, true);
+      });
+      await settle(h);
+      assert.match(h.text(), /Clara already had that message/, "the fixture must start with the line on screen");
+
+      await h.act(() => {
+        claraThreadStore.applyStreamEvent(THREAD, {
+          event: "message",
+          data: { status: "completed", parts: [{ type: "text", text: "Done." }] },
+        });
+      });
+      await settle(h);
+      assert.doesNotMatch(h.text(), /Clara already had that message/,
+        "the turn the press was about has ended; the sentence about the press ends with it");
+      assert.equal(claraThreadStore.getThread(THREAD).lastSendReplayed, false, "…in the store, not just in the paint");
+    } finally {
+      await h.unmount();
+    }
+  });
+});

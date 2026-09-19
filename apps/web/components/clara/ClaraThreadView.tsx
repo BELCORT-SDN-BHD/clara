@@ -299,6 +299,25 @@ export function ClaraThreadView({
   // what this reader can no longer do, never whether the task or the firm exists.
   const revoked = state.stream.status === "revoked";
 
+  // #642 (fix round 1, ADV-642-2) — ONE PRESS, ONE ANNOUNCEMENT, as a single predicate
+  // instead of a gate each line repeats. Every line in the status block below is written
+  // to exclude its siblings — this file says so three times over — because a live region
+  // that speaks beside another live region announces one event twice. The two lines #642
+  // added were gated only on `!revoked` and so were never part of that ladder: a replayed
+  // send whose original run is still streaming (the ORDINARY replay) rendered "Clara
+  // already had that message" and "Clara is responding…" as two simultaneous
+  // `role="status"` nodes, and the pre-read line could speak over the give-up line.
+  //
+  // The ladder's own lines are unchanged and still own the announcement. The two
+  // send-facing lines keep their words and drop the live role when anything else is
+  // speaking — `StateBanner`'s `silent` decision, applied at the same altitude.
+  const liveStatusLabel = streamStatusLabel(state, t);
+  const ladderSpeaks = revoked || stopped || stopFailedCause !== null || runLostSight || liveStatusLabel !== null;
+  const checkingSpeaks = state.checkingBeforeSend && !revoked && !ladderSpeaks;
+  // The pre-read is about the press happening NOW; the replay is about the one before it,
+  // so the newer fact wins when both are on screen.
+  const replayedSpeaks = state.lastSendReplayed && !revoked && !state.checkingBeforeSend && !ladderSpeaks;
+
   // H-24 — ONE SEND PATH, AND ONE GATE ON IT.
   //
   // The composer had no key handler at all: a `<textarea>` inside a form does not
@@ -561,18 +580,29 @@ export function ClaraThreadView({
         {/* #642 AC3 — THE REPLAY, SAID ONCE. The door recognised this exact intent and
             returned the turn it already admitted, so there is no second bubble and no
             second run — and the reader is told that rather than left wondering why their
-            press appeared to do nothing. Cleared by the next send. */}
+            press appeared to do nothing. It retires with the turn it is about (a terminal
+            `message` or a `revoked`), not merely with the next press.
+
+            IT IS SAID, AND IT IS NOT ALWAYS ANNOUNCED (fix round 1, ADV-642-2). A
+            replayed turn whose original run is still going streams chunks immediately, so
+            this line and "Clara is responding…" were two live regions speaking for ONE
+            press — the exact defect the three comments below record being fixed twice.
+            The live transition owns the announcement; this keeps the words, in the same
+            place, unannounced. That is `StateBanner`'s own `silent` decision (#629 §5's
+            one-announcement-owner rule): UNANNOUNCED never means hidden. */}
         {state.lastSendReplayed && !revoked && (
-          <p role="status" className="text-xs text-muted-foreground">{t("alreadyAccepted")}</p>
+          <p {...(replayedSpeaks ? { role: "status" as const } : {})} className="text-xs text-muted-foreground">{t("alreadyAccepted")}</p>
         )}
         {/* #642 AC3 — THE PRE-READ, while it is happening. Only a DISTINCT resubmit after
             an UNKNOWN outcome reaches this state (see `useClaraThread`'s own note); a
-            same-key retry never gates on a read the door already does better. */}
+            same-key retry never gates on a read the door already does better. Same
+            announcement rule as the line above, for the same reason: it can coexist with
+            the give-up line below, which neither of them used to gate on. */}
         {state.checkingBeforeSend && !revoked && (
-          <p role="status" className="text-xs text-muted-foreground italic">{t("checkingBeforeSend")}</p>
+          <p {...(checkingSpeaks ? { role: "status" as const } : {})} className="text-xs text-muted-foreground italic">{t("checkingBeforeSend")}</p>
         )}
-        {streamStatusLabel(state, t) && !revoked && !stopped && stopFailedCause === null && !runLostSight && (
-          <p role="status" className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>
+        {liveStatusLabel && !revoked && !stopped && stopFailedCause === null && !runLostSight && (
+          <p role="status" className="text-xs text-muted-foreground italic">{liveStatusLabel}</p>
         )}
         {/* #630 — THE STOPPED MARKER, and it REPLACES the stream-status line rather than sitting
             beside it: two `role="status"` siblings would announce twice, and "Clara is responding…"
