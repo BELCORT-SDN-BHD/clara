@@ -18,13 +18,75 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   )
 }
 
-function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
+// #1005: Base UI's `<Select.Value>` renders the RAW `value` unless it is given a label
+// source (the primitive's `items` prop, or a function `children`) — see
+// https://base-ui.com/react/components/select#formatting-the-value. Left to each call
+// site to remember, that default silently regresses: a bank account renders its row id,
+// an "all" filter renders `__all__`. This wrapper makes the label-resolving path the
+// ONLY path: `items` or a function `children` is required, never neither, so a new call
+// site cannot compile without picking one. `select-value-label-census.test.ts` is the
+// repo-wide census that a regex census cannot substitute for (TypeScript already refuses
+// the missing case); it instead guards the shape of every existing call site.
+export type SelectValueItem<Value = unknown> = {
+  value: Value
+  label: React.ReactNode
+}
+
+export type SelectValueItems<Value = unknown> =
+  | ReadonlyArray<SelectValueItem<Value>>
+  | Record<string, React.ReactNode>
+
+function resolveSelectValueLabel<Value>(
+  value: Value,
+  items: SelectValueItems<Value>
+): React.ReactNode | undefined {
+  if (Array.isArray(items)) {
+    return (items as ReadonlyArray<SelectValueItem<Value>>).find((item) =>
+      Object.is(item.value, value)
+    )?.label
+  }
+  if (typeof value === "string" && Object.hasOwn(items, value)) {
+    return (items as Record<string, React.ReactNode>)[value]
+  }
+  return undefined
+}
+
+type SelectValueProps<Value = unknown> = Omit<
+  SelectPrimitive.Value.Props,
+  "children"
+> &
+  (
+    | { items: SelectValueItems<Value>; children?: never }
+    | { items?: never; children: (value: Value) => React.ReactNode }
+  )
+
+function SelectValue<Value = unknown>({
+  className,
+  items,
+  children,
+  placeholder,
+  ...props
+}: SelectValueProps<Value>) {
+  const resolveChildren = React.useCallback(
+    (value: Value) => {
+      if (items) {
+        if (value == null) return placeholder ?? ""
+        return resolveSelectValueLabel(value, items) ?? placeholder ?? ""
+      }
+      return children ? children(value) : ""
+    },
+    [items, children, placeholder]
+  )
+
   return (
     <SelectPrimitive.Value
       data-slot="select-value"
       className={cn("flex flex-1 text-left", className)}
+      placeholder={placeholder}
       {...props}
-    />
+    >
+      {resolveChildren}
+    </SelectPrimitive.Value>
   )
 }
 

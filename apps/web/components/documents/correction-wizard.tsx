@@ -61,6 +61,10 @@ export function CorrectionWizard({
   const [clr, setClr] = useState<PartClr>(null);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name || id;
+  // #1005: the SAME filtered roster feeds the option list and the trigger's label
+  // lookup, so the two can never diverge into "the trigger shows an id its own list
+  // doesn't offer".
+  const toClientOptions = clients.filter((c) => c.id !== fromClient && c.status === "active");
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setErr(null); setClr(null);
@@ -102,9 +106,14 @@ export function CorrectionWizard({
           <div className="flex flex-col gap-2">
             <DoorFeedback err={clientsErr} clr={clientsClr} />
             <Select value={toClient} onValueChange={(v) => setToClient(v ?? "")}>
-              <SelectTrigger aria-label={t("correctionMoveTo")}><SelectValue placeholder={t("correctionMoveTo")} /></SelectTrigger>
+              <SelectTrigger aria-label={t("correctionMoveTo")}>
+                <SelectValue
+                  placeholder={t("correctionMoveTo")}
+                  items={toClientOptions.map((c) => ({ value: c.id, label: c.name ?? c.id }))}
+                />
+              </SelectTrigger>
               <SelectContent>
-                {clients.filter((c) => c.id !== fromClient && c.status === "active").map((c) => (
+                {toClientOptions.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.name ?? c.id}</SelectItem>
                 ))}
               </SelectContent>

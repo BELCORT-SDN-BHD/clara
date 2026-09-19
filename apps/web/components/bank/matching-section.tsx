@@ -256,7 +256,13 @@ export function MatchingSection({
             ) : (
               <Select value={effectiveAccountId ?? ""} onValueChange={(v) => { setAccountId(v); setStatementId(null); onSelectLine?.(null); }}>
                 <SelectTrigger id="matching-account" className="w-full">
-                  <SelectValue placeholder={t("accountPlaceholder")} />
+                  <SelectValue
+                    placeholder={t("accountPlaceholder")}
+                    items={activeAccounts.map((a) => ({
+                      value: a.id,
+                      label: `${a.bank_name_display} ${a.account_number} · ${a.coa_account_code}`,
+                    }))}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {activeAccounts.map((a) => (
@@ -272,7 +278,16 @@ export function MatchingSection({
             <Label htmlFor="matching-period">{t("periodLabel")}</Label>
             <Select value={statementId ?? "__all"} onValueChange={(v) => setStatementId(v === "__all" ? null : v)}>
               <SelectTrigger id="matching-period" className="w-full">
-                <SelectValue placeholder={t("periodPlaceholder")} />
+                <SelectValue
+                  placeholder={t("periodPlaceholder")}
+                  items={[
+                    { value: "__all", label: t("periodAll") },
+                    ...liveStatements.map((s) => ({
+                      value: s.id,
+                      label: `${s.period_start} → ${s.period_end}`,
+                    })),
+                  ]}
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all">{t("periodAll")}</SelectItem>

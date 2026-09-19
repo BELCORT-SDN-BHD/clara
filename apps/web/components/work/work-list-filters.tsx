@@ -110,7 +110,13 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
                 onValueChange={(value) => apply({ client: value === ALL ? null : String(value), view: null })}
               >
                 <SelectTrigger id="work-filter-client" className="w-full">
-                  <SelectValue placeholder={t("filterClientAll")} />
+                  <SelectValue
+                    placeholder={t("filterClientAll")}
+                    items={[
+                      { value: ALL, label: t("filterClientAll") },
+                      ...(clients ?? []).map((c) => ({ value: c.id, label: c.name })),
+                    ]}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>{t("filterClientAll")}</SelectItem>
@@ -133,7 +139,13 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
               onValueChange={(value) => apply({ purpose: value === ALL ? [] : [String(value)], view: null })}
             >
               <SelectTrigger id="work-filter-purpose" className="w-full">
-                <SelectValue placeholder={t("filterPurposeAll")} />
+                <SelectValue
+                  placeholder={t("filterPurposeAll")}
+                  items={[
+                    { value: ALL, label: t("filterPurposeAll") },
+                    ...KNOWN_PURPOSES.map((p) => ({ value: p, label: t(`purposeLabels.${p}`) })),
+                  ]}
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>{t("filterPurposeAll")}</SelectItem>
@@ -155,7 +167,13 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
               onValueChange={(value) => apply({ initiator: value === ALL ? null : String(value), view: null })}
             >
               <SelectTrigger id="work-filter-initiator" className="w-full">
-                <SelectValue placeholder={t("filterInitiatorAll")} />
+                <SelectValue
+                  placeholder={t("filterInitiatorAll")}
+                  items={[
+                    { value: ALL, label: t("filterInitiatorAll") },
+                    ...memberOptions.map(([id, name]) => ({ value: id, label: name })),
+                  ]}
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>{t("filterInitiatorAll")}</SelectItem>

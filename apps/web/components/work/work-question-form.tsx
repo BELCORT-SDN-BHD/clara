@@ -677,7 +677,13 @@ function QuestionField({
               ref={register as (el: HTMLButtonElement | null) => void}
               data-testid={`work-question-account-${field.key}`}
             >
-              <SelectValue placeholder={t("accountPlaceholder")} />
+              <SelectValue
+                placeholder={t("accountPlaceholder")}
+                items={accounts.filter((a) => a.is_active).map((a) => ({
+                  value: a.account_code,
+                  label: a.name ? `${a.account_code} · ${a.name}` : a.account_code,
+                }))}
+              />
             </SelectTrigger>
             <SelectContent>
               {accounts.filter((a) => a.is_active).map((a) => (

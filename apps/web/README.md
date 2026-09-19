@@ -999,3 +999,35 @@ does and the card prints them. The CSV is client-side only — no route, no door
 its first two lines carry the firm, that exact window and the currency, so a spreadsheet cannot lose
 the unit or the timezone the screen carried.
 
+## #1005 — `SelectValue` requires a label source, by construction
+
+**The defect.** Base UI's `<Select.Value>` renders the raw `value` unless it is given a label
+source (its "Formatting the value" doc: the `items` prop on `Select.Root`, or a function
+`children` on `Select.Value`). Eleven call sites built option lists by hand
+(`<SelectItem value={x}>{label}</SelectItem>`) without ever wiring either path, so every one of
+their triggers showed a row id or a sentinel (`__all`, `all`) on first render — found on hosted
+during the signed-in release walk of wave 2026-09-18.
+
+**The fix is in the wrapper, not at each call site.** `components/ui/select.tsx`'s `SelectValue`
+now takes a discriminated prop union: `items` (an array of `{ value, label }` or a `Record<string,
+ReactNode>`) XOR a function `children`, never neither. There is no third, label-less shape to fall
+into — a new call site that supplies neither fails `pnpm typecheck`. Internally, the `items` path
+still renders through a function `children` (so it can fall back to the `placeholder` on a value
+absent from `items`, never the raw value); the function-child path is passed through unchanged
+(`components/firm/client-home/client-period-selector.tsx` already used it, deliberately, for a
+value whose label needs the popup's own list, which is not mounted at first paint).
+
+**Choosing between the two paths.** Reach for `items` first — it is the shape every OTHER call
+site (matching-section.tsx, activity-filters.tsx, knowledge-panel.tsx, knowledge-firm-panel.tsx,
+work-list-filters.tsx, work-question-form.tsx, unassigned-sources.tsx, correction-wizard.tsx,
+document-kind-control.tsx, document-kind-dialog.tsx) now uses, including for a SENTINEL item
+(`{ value: "__all", label: t("periodAll") }`) and a label composed from several fields
+(`` `${a.bank_name_display} ${a.account_number} · ${a.coa_account_code}` ``). Reach for a function
+`children` only when the label genuinely cannot be built from the mounted item list at first paint
+— `client-period-selector.tsx`'s own header explains its one such case.
+
+**The backstop.** `apps/web/tests/select-value-label-census.test.ts` walks every `.ts`/`.tsx` file
+under `app/` and `components/` for a `<SelectValue>` with neither path (an AST check, independent
+of `tsc`, so an `as any` or a `@ts-expect-error` at a call site is still caught) and for any file
+importing `@base-ui/react/select` directly instead of through this wrapper.
+

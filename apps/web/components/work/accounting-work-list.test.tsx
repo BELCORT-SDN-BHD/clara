@@ -456,6 +456,45 @@ test("an addressed-row read FAILURE is distinct from not-found, and offers Retry
   });
 });
 
+test("[1005]: the client, purpose and initiator filter triggers show their LABELS, never a row id or the ALL sentinel", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: `client=${CLIENT}&purpose=journal_entry&initiator=${USER}`,
+      load: emptyPage,
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /Rome Properties/, "the client trigger must show the client's name, not its row id");
+      assert.doesNotMatch(text, new RegExp(CLIENT), "the client row id must never render as trigger text");
+      assert.match(text, /Journal entry/, "the purpose trigger must show the translated purpose label");
+      assert.match(text, /E2E Owner/, "the initiator trigger must show the member's display name, not their user id");
+      assert.doesNotMatch(text, new RegExp(USER), "the initiator's user id must never render as trigger text");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("[1005]: with no filter chosen, all three triggers show their ALL-sentinel labels, never the raw sentinel", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({ load: emptyPage }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /All clients/);
+      // WorkList.filterPurposeAll and filterInitiatorAll both happen to read "All kinds"/"Anyone" —
+      // asserted from en.json directly above rather than restated here.
+      assert.match(text, /Anyone/);
+      // The sentinel is `const ALL = "__all__"` in this component (case-sensitive check — several
+      // legitimate words in this view contain "all", e.g. "All clients").
+      assert.doesNotMatch(text, /__all__/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("a DENIED list asks the addressed-row door nothing — one banner, not two", async () => {
   await withMockedEnv(async () => {
     let rowReads = 0;

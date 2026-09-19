@@ -104,7 +104,15 @@ export function KnowledgePanel({ clientId }: { clientId: string }) {
         <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground" id="knowledge-filter-label">{t("filterLabel")}</span>
           <Select value={kind} onValueChange={(v) => setKind(v ?? ALL)}>
-            <SelectTrigger aria-label={t("filterLabel")}><SelectValue placeholder={t("filterAll")} /></SelectTrigger>
+            <SelectTrigger aria-label={t("filterLabel")}>
+              <SelectValue
+                placeholder={t("filterAll")}
+                items={[
+                  { value: ALL, label: t("filterAll") },
+                  ...KINDS.map((k) => ({ value: k, label: t(`kind.${k}` as "kind.assertion") })),
+                ]}
+              />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>{t("filterAll")}</SelectItem>
               {KINDS.map((k) => (

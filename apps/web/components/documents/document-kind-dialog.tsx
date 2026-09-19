@@ -85,7 +85,10 @@ export function DocumentKindDialog({
         </p>
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
-            <SelectValue placeholder={t("kindPlaceholder")} />
+            <SelectValue
+              placeholder={t("kindPlaceholder")}
+              items={DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+            />
           </SelectTrigger>
           <SelectContent>
             {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB enum,

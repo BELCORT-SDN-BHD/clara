@@ -58,7 +58,13 @@ export function ActivityFilters({
               onValueChange={(value) => apply({ client: value === "__all__" ? null : value })}
             >
               <SelectTrigger id="activity-filter-client" className="w-full">
-                <SelectValue placeholder={t("filterClientAll")} />
+                <SelectValue
+                  placeholder={t("filterClientAll")}
+                  items={[
+                    { value: "__all__", label: t("filterClientAll") },
+                    ...clients.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">{t("filterClientAll")}</SelectItem>

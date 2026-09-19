@@ -72,7 +72,10 @@ export function DocumentKindControl({
       <div className="flex flex-col gap-2">
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
-            <SelectValue placeholder={t("kindPlaceholder")} />
+            <SelectValue
+              placeholder={t("kindPlaceholder")}
+              items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+            />
           </SelectTrigger>
           <SelectContent>
             {CLASSIFIABLE_DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}

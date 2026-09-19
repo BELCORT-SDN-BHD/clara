@@ -232,7 +232,10 @@ function SourceRow({
           <div className="flex flex-wrap items-center gap-2">
             <Select value={clientId} onValueChange={(v) => setClientId(v ?? "")}>
               <SelectTrigger aria-label={t("chooseClientLabel", { filename: name })} size="sm">
-                <SelectValue placeholder={t("chooseClient")} />
+                <SelectValue
+                  placeholder={t("chooseClient")}
+                  items={clients.map((c) => ({ value: c.id, label: c.name ?? c.id }))}
+                />
               </SelectTrigger>
               <SelectContent>
                 {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name ?? c.id}</SelectItem>)}
