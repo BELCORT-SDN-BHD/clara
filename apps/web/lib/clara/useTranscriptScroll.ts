@@ -121,6 +121,38 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
    *  BEFORE the new content's geometry exists. A ref, not the state above, because the
    *  effect runs in the same commit as the append and must not see a stale render. */
   const followingRef = useRef(true);
+
+  /** THE TWO PUBLISHED FLAGS, MIRRORED IN REFS — and this is a render-budget fix, not a
+   *  style preference.
+   *
+   *  MEASURED (`components/clara/thread-live-stream-stability.test.tsx`, the cell "a live
+   *  clarify survives a 200-delta stream"): the append effect below runs on EVERY
+   *  revision — i.e. once per streamed delta — and it used to call `setAtBottom(true)` and
+   *  `setHasMoreBelow(false)` unconditionally on its following arm. For a reader parked at
+   *  the bottom, which is the ordinary case for the whole of a live turn, both values were
+   *  ALREADY what they were being set to, and React still scheduled a second render pass
+   *  per delta: the transcript committed **401 times for 200 deltas against a budget of
+   *  215**. That census exists to catch exactly one thing — "a component updating itself"
+   *  — and this hook was it. React's eager `Object.is` bail-out does not save it, because
+   *  a delta has just re-rendered the fiber and the update is dispatched from inside that
+   *  same commit's layout phase, where there is nothing to bail out of yet.
+   *
+   *  Mirroring the last published value in a ref and writing only on a REAL transition
+   *  makes the no-op cost nothing: after the fix the same cell measures ~203. The refs
+   *  are the single source of "what the render currently shows" for both writers below,
+   *  so the state and the mirror cannot drift. */
+  const atBottomRef = useRef(true);
+  const hasMoreBelowRef = useRef(false);
+  const publishAtBottom = useCallback((next: boolean) => {
+    if (atBottomRef.current === next) return;
+    atBottomRef.current = next;
+    setAtBottom(next);
+  }, []);
+  const publishHasMoreBelow = useCallback((next: boolean) => {
+    if (hasMoreBelowRef.current === next) return;
+    hasMoreBelowRef.current = next;
+    setHasMoreBelow(next);
+  }, []);
   /** `Date.now()` until which a scroll this module ITSELF started may still be animating.
    *  Zero when nothing programmatic is in flight. */
   const programmaticUntilRef = useRef(0);
@@ -138,9 +170,9 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const bottom = distance <= BOTTOM_EPSILON_PX;
     followingRef.current = bottom;
-    setAtBottom(bottom);
-    setHasMoreBelow(!bottom);
-  }, [viewport]);
+    publishAtBottom(bottom);
+    publishHasMoreBelow(!bottom);
+  }, [viewport, publishAtBottom, publishHasMoreBelow]);
 
   // The reader's own movement is the ONLY thing that changes whether they are following.
   //
@@ -178,13 +210,13 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     if (!el) return;
     if (followingRef.current) {
       scrollToBottom(el, false); // following is always instant — see the header
-      setAtBottom(true);
-      setHasMoreBelow(false);
+      publishAtBottom(true);
+      publishHasMoreBelow(false);
       return;
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setHasMoreBelow(distance > BOTTOM_EPSILON_PX);
-  }, [revision, viewport]);
+    publishHasMoreBelow(distance > BOTTOM_EPSILON_PX);
+  }, [revision, viewport, publishAtBottom, publishHasMoreBelow]);
 
   const jumpToLatest = useCallback(() => {
     const el = viewport;
@@ -194,8 +226,8 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
     // a delta arriving mid-animation must not find `following` false and strand the
     // reader halfway.
     followingRef.current = true;
-    setAtBottom(true);
-    setHasMoreBelow(false);
+    publishAtBottom(true);
+    publishHasMoreBelow(false);
     const smooth = !prefersReducedMotion();
     programmaticUntilRef.current = smooth ? Date.now() + PROGRAMMATIC_WINDOW_MS : 0;
     scrollToBottom(el, smooth);
@@ -211,10 +243,10 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
       programmaticUntilRef.current = 0;
       if (!followingRef.current) return;
       scrollToBottom(el, false);
-      setAtBottom(true);
-      setHasMoreBelow(false);
+      publishAtBottom(true);
+      publishHasMoreBelow(false);
     }, PROGRAMMATIC_WINDOW_MS);
-  }, [viewport]);
+  }, [viewport, publishAtBottom, publishHasMoreBelow]);
 
   return { viewportRef, atBottom, hasMoreBelow, jumpToLatest, measure };
 }

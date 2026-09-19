@@ -211,3 +211,55 @@ test("p642.web.jump_to_latest — a SMOOTH jump's own scroll events are not the 
     }
   }
 });
+
+test("p642.web.scroll_render_budget — following a live turn costs the hook NO render of its own", async () => {
+  // THE DEFECT THIS PINS, MEASURED RATHER THAN FEARED. The append effect runs once per
+  // revision — i.e. once per streamed delta — and it used to publish `atBottom` and
+  // `hasMoreBelow` unconditionally on its following arm. For the ordinary case (a reader
+  // parked at the bottom for the whole of a live turn) both values were ALREADY what they
+  // were being set to, and React still scheduled a second render pass per delta. The
+  // transcript-wide census caught it first:
+  // `components/clara/thread-live-stream-stability.test.tsx`'s "a live clarify survives a
+  // 200-delta stream" measured 401 commits for 200 deltas against a budget of 215, which
+  // is that suite's own words for "a component updating itself".
+  //
+  // This cell is the same fact at THIS hook's seam, where it is attributable: the probe
+  // counts its own renders, so an extra one can only have come from inside the hook.
+  const el = atBottom();
+  let rev = 0;
+  let renders = 0;
+  const h = await renderHook(() => {
+    renders += 1;
+    return useTranscriptScroll<never>(rev);
+  });
+  try {
+    await h.act(() => { h.current.viewportRef(el as never); });
+    await h.settle();
+    const settled = renders;
+
+    const DELTAS = 25;
+    for (let i = 0; i < DELTAS; i += 1) {
+      rev += 1;
+      el.scrollHeight += 40; // the browser growing the region under the new content
+      await h.rerender();
+      await h.settle();
+    }
+
+    const own = renders - settled;
+    // THE VACUITY CONTROL. One re-render per delta is the caller's own, and it must
+    // actually have happened — a probe that never rendered would pass the budget below
+    // for the wrong reason.
+    assert.ok(own >= DELTAS, `the probe rendered ${own} times for ${DELTAS} appends — the instrument has no subject`);
+    assert.equal(
+      own,
+      DELTAS,
+      `the hook added ${own - DELTAS} render(s) of its own across ${DELTAS} appends; following a turn must publish nothing, because nothing changed`,
+    );
+    // …and it is still doing its job while costing nothing.
+    assert.equal(h.current.atBottom, true, "the reader is still following");
+    assert.equal(h.current.hasMoreBelow, false, "…so no jump control is offered");
+    assert.equal(el.scrollTop, el.scrollHeight, "…and the region really did follow the content");
+  } finally {
+    await h.unmount();
+  }
+});
