@@ -100,21 +100,41 @@ pre-image `sha256(prosrc)` of that body: measured on a migrated rig by reading `
 through `to_regprocedure`, never transcribed from the creating migration's file text, and asserted
 again, unchanged, in its own prestate (before touching anything) and usually again in its tail
 (after). That pin is a durable COUPLING placed on a function this migration does not own. **The
-rule it creates: a later migration that recuts the pinned function must locate every existing pin
-on that function and re-measure each one against the function's NEW body, in the SAME COMMIT as
-the recut** — the pin does not update itself, and only the migration that changes the body can
-know whether the pinning migration's argument still holds against the new one.
+rule it creates: a later migration whose OWN NUMBER is BELOW the pinning migration's, and which
+recuts the pinned function, must locate every existing pin on that function and re-measure each
+one against the function's NEW body, in the SAME COMMIT as the recut** — the pin does not update
+itself, and only the migration that changes the body can know whether the pinning migration's
+argument still holds against the new one. The qualifier matters because this repo assigns
+migration numbers per lane in advance, so they can land out of chronological order: "a later
+migration" means one whose number is still below the pin's, not merely one applied after it in
+git history.
+
+A recut whose own number is ABOVE the pinning migration's is a different case, not this rule's
+obligation: the pinning migration is already APPLIED, and this house never edits an applied
+migration to make it re-measure a body that postdates it. Such a recut pins its OWN pre-image of
+the function instead (in its own prestate and tail, the same convention, argued from its own safety
+case) and leaves the earlier, lower-numbered pin exactly as it was — historical, not current, and
+never re-measured, because it was never wrong: it correctly pinned the body that existed at ITS
+number.
+[0234_legal_enforcement_mode.sql](migrations/0234_legal_enforcement_mode.sql), documented further
+down this file, is the worked example: it recuts `clara._accounting_work_egress_live(uuid,uuid)`,
+one of 0233's three non-regression pins named below, but 0233 is applied and unedited — 0234 pins
+its own pre-image of that function instead (0234's "THE SIX PINS", four of them its own recut
+pre-images) and 0233's pin stands, describing 0233's own moment, not 0234's.
 
 The failure this coupling exists to produce, quoted verbatim because it is what an author actually
-sees: **`<name> has DRIFTED from its pinned body`** (each pinning migration appends its own reason
-after the em dash — 0233's three non-regression pins below read `-- re-measure on a migrated rig
-before applying`). It means the LIVE function no longer hashes to the sha the pinning migration
-recorded. Two readings, and the pinning migration cannot tell them apart on its own: either an
-intervening migration recut the pinned function and never re-derived this argument against the new
-body (the pin did its job — go re-measure it, in the recutting migration's own commit, before this
-one can be trusted again), or the pin was wrong from the start. Either way the check fires from the
-PRESTATE, before the migration changes anything, and fails CLOSED: a drifted pin blocks the
-migration rather than letting it apply against a body its own stated reasoning no longer describes.
+sees from 0221 onward: **`<name> has DRIFTED from its pinned body`** (each pinning migration
+appends its own reason after the em dash — 0233's three non-regression pins below read
+`-- re-measure on a migrated rig before applying`). The FIRST instance, 0214 below, predates that
+exact wording and reads `has DRIFTED from the pinned 0189 body` instead — both forms are grep-able
+from this file. Either way it means the LIVE function no longer hashes to the sha the pinning
+migration recorded. Two readings, and the pinning migration cannot tell them apart on its own:
+either an intervening migration recut the pinned function and never re-derived this argument
+against the new body (the pin did its job — go re-measure it, in the recutting migration's own
+commit, before this one can be trusted again), or the pin was wrong from the start. Either way the
+check fires from the PRESTATE, before the migration changes anything, and fails CLOSED: a drifted
+pin blocks the migration rather than letting it apply against a body its own stated reasoning no
+longer describes.
 
 Every migration below that pins a function it does not itself change is a live instance of this
 rule, findable by searching this file for the pinned function's name — for example
@@ -1389,10 +1409,14 @@ it does not itself change and pins each one's pre-image `sha256(prosrc)` in both
 its tail: `clara.get_current_legal_documents()` (the standing door's own text says its `body` and
 digest stay that function's, never a second copy), `clara.accept_legal_document(text,integer,text,text)`,
 and `clara._accounting_work_egress_live(uuid,uuid)` (the arity-0 argument above copies that door's
-own limb-(a) predicate, 0195:890-906). A later migration that recuts any one of these three must
-find this pin — and 0231's and 0232's, if it is one of theirs too — and re-measure it against the
-new body in the SAME commit as the recut, or risk the exact `has DRIFTED from its pinned body`
-refusal this file's general note explains. (0233's FOURTH pin, on `clara.get_llm_usage_summary`, is
+own limb-(a) predicate, 0195:890-906). A later migration whose OWN NUMBER is below 0233's, and
+which recuts any one of these three, must find this pin — and 0231's and 0232's, if it is one of
+theirs too — and re-measure it against the new body in the SAME commit as the recut, or risk the
+exact `has DRIFTED from its pinned body` refusal this file's general note explains. A recut at a
+number ABOVE 0233 is not this obligation: 0233 is applied and this house never edits an applied
+migration, so the recutting migration pins its own pre-image instead and 0233's pin is left
+standing, historical rather than current — 0234 immediately below is exactly that case for
+`clara._accounting_work_egress_live`. (0233's FOURTH pin, on `clara.get_llm_usage_summary`, is
 a different thing: a pre-image of the body 0233 itself recuts, not a non-regression pin on a
 function it leaves alone.)
 
