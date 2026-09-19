@@ -83,7 +83,9 @@ runs:
       shell: bash -e {0}
       run: |
         cd packages/runtime
-        PGDATABASE=clara_intake_ci         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci"           node tests/intake-batch-e2e.mjs
+        PGDATABASE=clara_intake_ci \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
+          node tests/intake-batch-e2e.mjs
 
     # Wave-B rig-confined fault gates (§4 of the contract): the four STANDALONE runtime e2es
     # (NOT collected by `node --test`, so wired explicitly like intake-e2e above). Gate 3 —
