@@ -229,13 +229,26 @@ begin
   -- signature is caught. (0103:1054-1070 is the idiom; its census covers only the eleven names
   -- 0103 installs, so this file writes its own.)
   foreach v_name in array array['publish_client_cash_account_set','propose_client_cash_accounts',
-                                'get_client_financial_pack','_tf_cash_account_set_integrity'] loop
+                                'get_client_financial_pack','_tf_cash_account_set_integrity',
+                                'book_today'] loop
     if exists (select 1 from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
                 where ns.nspname = 'clara' and p.proname = v_name) then
       raise exception 'client_financial_pack prestate: clara.% already exists', v_name
         using errcode = 'CLR10';
     end if;
   end loop;
+  -- THE AUTHORITY ITSELF MUST BE PRESENT AND STILL CLOSED before this file leans on it
+  -- (DECISIONS 6.4). If 0042 S5.20 has not applied there is nothing to delegate to, and if some
+  -- later file has opened its ACL then the delegate below is solving a problem that no longer
+  -- exists and the house law x42.s5c.1 pins has already been broken elsewhere.
+  if to_regprocedure('clara._book_today()') is null then
+    raise exception 'client_financial_pack prestate: clara._book_today() is absent (0042 S5.20 has not applied) -- the money as-of has no house authority to read'
+      using errcode = 'CLR10';
+  end if;
+  if has_function_privilege('clara_authenticated', 'clara._book_today()', 'execute') then
+    raise exception 'client_financial_pack prestate: clara_authenticated already holds EXECUTE on clara._book_today() -- x42.s5c.1 pins that ACL closed; re-derive this file''s delegate argument before applying'
+      using errcode = 'CLR10';
+  end if;
   if to_regclass('clara.cash_account_set_versions') is not null
      or to_regclass('clara.cash_account_set_members') is not null then
     raise exception 'client_financial_pack prestate: a cash_account_set relation already exists'
@@ -300,7 +313,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#660 prestate: clean -- the 0003/0016/0017/0038/0056/0058 shapes are present, no cash-account-set relation or door exists at any signature, and all five read-only dependency bodies are at their pinned (measured) bodies.';
+  raise notice '#660 prestate: clean -- the 0003/0016/0017/0038/0056/0058 shapes are present, no cash-account-set relation or door exists at any signature, clara.book_today() is not taken, clara._book_today() exists with its ACL still closed to clara_authenticated, and all five read-only dependency bodies are at their pinned (measured) bodies.';
 end $p660_pre$;
 
 set role clara_fn_owner;
@@ -698,6 +711,52 @@ comment on function clara.publish_client_cash_account_set(uuid, jsonb, date, tex
   'header. EXECUTE to clara_authenticated only.';
 
 -- ==============================================================================================
+-- clara.book_today() — THE HOUSE BOOK DAY, REACHABLE FROM A SECURITY INVOKER READ DOOR.
+--
+-- WHY IT EXISTS (DECISIONS 6.4 row 1, ruling on the S5.25 census escalation recorded in
+-- docs/plan/active/refresh-wave-2026-09-18/reports/integration-fix-1.md 4.3). Both reads below
+-- derive a MONEY date: the as-of that selects which actuals are reported, the month it anchors,
+-- the wall that refuses a future as-of, and the `posting_date <=` bound of a real per-account
+-- balance. 0042 S5.20 settled that every such date is ONE house fact computed in ONE body,
+-- clara._book_today(); this file's first cut spelled `(now() at time zone 'Asia/Kuala_Lumpur')
+-- ::date` inside each read instead, which is a SECOND COPY of that fact -- precisely the shape
+-- S5.25 arm (B) exists to stop. The answer was never wrong (`at time zone` on a timestamptz is
+-- session-zone-independent); the PROVENANCE was.
+--
+-- AND WHY A DELEGATE RATHER THAN A GRANT. clara._book_today() has PUBLIC revoked and an ACL of
+-- {clara_fn_owner} alone -- reachable only from the definer chain -- and x42.s5c.1
+-- (packages/db/tests/x42b0-s5c-clock.test.mjs:234-239) pins that closed ACL as a house law by
+-- asserting clara_authenticated is REFUSED 42501 on it. Both reads below are SECURITY INVOKER
+-- (they run AS their caller, so 0003's firm-scoped RLS is the wall), so neither can call the
+-- authority directly, and widening the authority's ACL is not available. MEASURED on the
+-- 0001..0233 chain before this edit: NOT ONE SECURITY INVOKER body in the whole catalog calls
+-- clara._book_today() -- every caller is a definer body. So this is a new shape, and it takes the
+-- shape 0042 S5.20 already chose for the same problem: a DELEGATE, not a copy and not a rename,
+-- so exactly one body still COMPUTES the fact (S5.20's own argument for clara._fa_today()).
+--
+-- THE TRADE, STATED. clara._book_today() samples statement_timestamp() per STATEMENT, while each
+-- read below samples now() (= transaction_timestamp()) once for `computed_at`. A call that
+-- straddles midnight MYT can therefore report an as-of and a computed_at from two different days.
+-- DECISIONS 6.4 ruled that trade explicitly: a MONEY date must be the book day regardless, and
+-- `computed_at` stays a sampling read of an INSTANT, which is not a money date at all.
+--
+-- SECURITY DEFINER (a SQL definer body is never inlined, so the definer hop is real), STABLE,
+-- search_path pinned, PUBLIC revoked, EXECUTE to clara_authenticated and to NO model lane -- the
+-- same posture as the three doors, asserted door by door and role by role in the tail.
+-- ==============================================================================================
+create function clara.book_today() returns date
+  language sql stable security definer
+  set search_path = clara, pg_temp as $$ select clara._book_today() $$;
+
+comment on function clara.book_today() is
+  '#660 / DECISIONS 6.4. The house book day (Asia/Kuala_Lumpur) for SECURITY INVOKER read doors: '
+  'a one-line DEFINER delegate of clara._book_today(), which stays unreachable by every '
+  'application role (x42.s5c.1 pins that). It COMPUTES NOTHING -- clara._book_today() remains the '
+  'single body that answers "what day is it" for every money-dated value (0042 S5.20). Never '
+  'current_date: that is the SESSION timezone''s date and is one day early for eight hours of '
+  'every UTC day. EXECUTE to clara_authenticated only; no model lane holds it.';
+
+-- ==============================================================================================
 -- clara.propose_client_cash_accounts — the read that says which accounts COULD be cash. STABLE
 -- SECURITY INVOKER, viewer floor. It PROPOSES; it never publishes, and it NEVER proposes petty
 -- cash under any account name or code (0121:4749 -- structure and declared facts only).
@@ -729,7 +788,10 @@ begin
       detail = jsonb_build_object('reason', 'invalid_client')::text;
   end if;
 
-  v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  -- THE MONEY DATE COMES FROM THE HOUSE AUTHORITY, not from an expression of this body's own
+  -- (DECISIONS 6.4 row 1). It bounds `je.posting_date <=` on a real per-account balance below and
+  -- is echoed as this envelope's `as_of`, so it is a money date by S5.25's own enumeration.
+  v_today := clara.book_today();
   select v.id into v_set from clara.cash_account_set_versions v
    where v.client_id = p_client and v.state = 'published';
 
@@ -779,7 +841,9 @@ end $$;
 comment on function clara.propose_client_cash_accounts(uuid) is
   '#660 B2. The read that says which accounts COULD be cash: every clara.coa_accounts row of the '
   'client carrying is_bank_account -- ACTIVE OR INACTIVE -- with its cumulative approved balance '
-  'at today''s Asia/Kuala_Lumpur date and whether it is already a member of the live published '
+  'at the HOUSE BOOK DAY -- clara.book_today(), the definer-chain delegate of clara._book_today(), '
+  'never the session clock and never current_date (DECISIONS 6.4) -- and whether it is already a '
+  'member of the live published '
   'version. STABLE SECURITY INVOKER over relations already clara_authenticated-granted behind '
   'forced firm-scoped RLS, floored at VIEWER inline. It PROPOSES; it never writes. It NEVER '
   'proposes declared cash or petty cash under any account name or code: neither has a structural '
@@ -869,7 +933,12 @@ begin
       detail = jsonb_build_object('reason', 'invalid_client')::text;
   end if;
 
-  v_today := (v_now at time zone 'Asia/Kuala_Lumpur')::date;
+  -- THE MONEY DATE COMES FROM THE HOUSE AUTHORITY (DECISIONS 6.4 row 1). `v_today` is the
+  -- default as-of, the month anchor and the future-as-of wall -- three money dates by S5.25's own
+  -- enumeration -- so it is READ from clara.book_today() (-> clara._book_today()) rather than
+  -- derived here a second time. `v_now` above stays: it is `computed_at`, a sampling read of an
+  -- INSTANT, and the ruling left it alone deliberately.
+  v_today := clara.book_today();
 
   -- ==========================================================================================
   -- THE PERIOD. A future as-of is a CALLER DEFECT, never a silent clamp: "no future actuals" is
@@ -1511,9 +1580,12 @@ comment on function clara.get_client_financial_pack(uuid, date, date) is
   'its own comparison {value_cents, delta_cents, delta_pct, sign_change, period} -- delta_pct is '
   'NULL on a zero comparison and the browser recomputes none of it. status and coverage take only '
   'ok | partial | unknown: this door never says `denied` about itself (it raises CLR04) and never '
-  'says `unavailable`. Default period is month-to-date in Asia/Kuala_Lumpur; p_month names a whole '
-  'natural month by its FIRST DAY; an as-of in the future is refused as_of_in_future rather than '
-  'clamped. No published cash set is status=unknown with a NULL value and reason '
+  'says `unavailable`. Default period is month-to-date on the HOUSE BOOK DAY -- the default '
+  'as-of, the month anchor and the future-as-of wall are all clara.book_today() (the '
+  'definer-chain delegate of clara._book_today(), 0042 S5.20), never the session clock and never '
+  'current_date (DECISIONS 6.4); computed_at stays a now() sample of an instant. p_month names a '
+  'whole natural month by its FIRST DAY; an as-of in the future is refused as_of_in_future rather '
+  'than clamped. No published cash set is status=unknown with a NULL value and reason '
   'cash_set_unpublished -- never 0. A complete read over an empty population is ok + 0 + '
   'no_posted_entries. An approved entry carrying close_receipt_id but closing_transfer=false (or '
   'reversing one that does) drives coverage=partial with closing_transfer_unmarked_history: the '
@@ -1555,6 +1627,10 @@ revoke all on function clara.propose_client_cash_accounts(uuid) from public;
 grant execute on function clara.propose_client_cash_accounts(uuid) to clara_authenticated;
 revoke all on function clara.get_client_financial_pack(uuid, date, date) from public;
 grant execute on function clara.get_client_financial_pack(uuid, date, date) to clara_authenticated;
+-- ...and the book-day delegate the two reads call. Same ACL, same absence of any model lane: it
+-- exists ONLY because a SECURITY INVOKER door cannot reach clara._book_today() (DECISIONS 6.4).
+revoke all on function clara.book_today() from public;
+grant execute on function clara.book_today() to clara_authenticated;
 
 -- ==============================================================================================
 -- THE EVENT PAIR (0219:276-291's idiom). 'ignore': publishing a cash account set is a HUMAN act
@@ -1589,6 +1665,7 @@ declare
   v_sig_publish constant text := 'clara.publish_client_cash_account_set(uuid,jsonb,date,text)';
   v_sig_propose constant text := 'clara.propose_client_cash_accounts(uuid)';
   v_sig_pack    constant text := 'clara.get_client_financial_pack(uuid,date,date)';
+  v_sig_today   constant text := 'clara.book_today()';
   v_acl constant text := 'clara_fn_owner=X/clara_fn_owner | clara_authenticated=X/clara_fn_owner';
   v_name text;
   v_sig  text;
@@ -1596,13 +1673,14 @@ begin
   -- (1) THE THREE DOORS EXIST, EXACTLY ONCE EACH, AT EXACTLY THEIR SIGNATURES. The rendered
   -- argument list is the contract: a defaulted fourth parameter on the pack would be a new
   -- parameterisation smuggled in as a default, and this postcheck argues back.
-  foreach v_sig in array array[v_sig_publish, v_sig_propose, v_sig_pack] loop
+  foreach v_sig in array array[v_sig_publish, v_sig_propose, v_sig_pack, v_sig_today] loop
     if to_regprocedure(v_sig) is null then
       raise exception 'client_financial_pack tail: % is absent', v_sig using errcode = 'CLR10';
     end if;
   end loop;
   foreach v_name in array array['publish_client_cash_account_set','propose_client_cash_accounts',
-                                'get_client_financial_pack','_tf_cash_account_set_integrity'] loop
+                                'get_client_financial_pack','_tf_cash_account_set_integrity',
+                                'book_today'] loop
     select count(*)::int into v_n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
      where ns.nspname = 'clara' and p.proname = v_name;
     if v_n <> 1 then
@@ -1623,6 +1701,12 @@ begin
        <> 'p_client uuid, p_as_of date DEFAULT NULL::date, p_month date DEFAULT NULL::date' then
     raise exception 'client_financial_pack tail: pack signature is %',
       pg_get_function_arguments(v_sig_pack::regprocedure) using errcode = 'CLR10';
+  end if;
+  -- The delegate takes NO argument. An `(timestamptz)` or `(text)` overload would be a second
+  -- way to ask what day it is, which is the very thing 0042 S5.20 collapsed into one body.
+  if pg_get_function_arguments(v_sig_today::regprocedure) <> '' then
+    raise exception 'client_financial_pack tail: clara.book_today() takes arguments (%)',
+      pg_get_function_arguments(v_sig_today::regprocedure) using errcode = 'CLR10';
   end if;
 
   -- (2) POSTURE: owner, security mode, volatility, and the proconfig pins. Whitespace-insensitive,
@@ -1657,10 +1741,49 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- (2b) THE BOOK-DAY DELEGATE (DECISIONS 6.4 row 1). Owner, DEFINER (an INVOKER delegate would
+  -- be refused the authority exactly as its caller is), STABLE (never IMMUTABLE: it reads a
+  -- clock, and an IMMUTABLE one would be constant-folded and freeze the house date), pinned
+  -- search_path -- and a body that DELEGATES rather than computes, so the estate still has
+  -- exactly ONE body that answers what day it is.
+  select case when pg_get_userbyid(p.proowner) <> 'clara_fn_owner'
+                then 'owned by ' || pg_get_userbyid(p.proowner)
+              when p.prosecdef is distinct from true then 'is not SECURITY DEFINER'
+              when p.provolatile <> 's' then 'is not STABLE'
+              when replace(coalesce(array_to_string(p.proconfig, ','), ''), ' ', '')
+                     not like '%search_path=clara,pg_temp%' then 'search_path is not pinned'
+              else null end
+    into v_bad from pg_proc p where p.oid = v_sig_today::regprocedure;
+  if v_bad is not null then
+    raise exception 'client_financial_pack tail: % %', v_sig_today, v_bad using errcode = 'CLR10';
+  end if;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src
+    from pg_proc p where p.oid = v_sig_today::regprocedure;
+  if position('clara._book_today()' in v_src) = 0 then
+    raise exception 'client_financial_pack tail: clara.book_today() does not delegate to clara._book_today() -- it must never compute the house date itself'
+      using errcode = 'CLR10';
+  end if;
+  if position('now(' in lower(v_src)) <> 0
+     or position('timestamp' in lower(v_src)) <> 0
+     or position('current_date' in lower(v_src)) <> 0
+     or position('Asia/' in v_src) <> 0 then
+    raise exception 'client_financial_pack tail: clara.book_today() reads a clock or spells the zone itself -- it is a delegate, not a second copy of the house fact'
+      using errcode = 'CLR10';
+  end if;
+  -- ...and the authority it delegates to is STILL CLOSED. This file solved its problem with a
+  -- definer hop precisely so it would not have to widen clara._book_today(); if that ACL has
+  -- moved, the house law x42.s5c.1 pins is broken and this file's whole argument is void.
+  if has_function_privilege('clara_authenticated', 'clara._book_today()', 'execute')
+     or has_function_privilege('clara_runtime', 'clara._book_today()', 'execute')
+     or has_function_privilege('public', 'clara._book_today()', 'execute') then
+    raise exception 'client_financial_pack tail: clara._book_today() is no longer closed -- this file grants it to nobody and must not have widened it'
+      using errcode = 'CLR10';
+  end if;
+
   -- (3) THE ACL CENSUS, EACH DOOR NAMED IN ITS OWN ASSERTION. A two-door assertion would pass
   -- while the proposal read stood open, and the proposal read is the surface that says which
   -- accounts COULD be cash.
-  foreach v_sig in array array[v_sig_publish, v_sig_propose, v_sig_pack] loop
+  foreach v_sig in array array[v_sig_publish, v_sig_propose, v_sig_pack, v_sig_today] loop
     if has_function_privilege('public', v_sig::regprocedure, 'execute') then
       raise exception 'client_financial_pack tail: PUBLIC still holds EXECUTE on %', v_sig
         using errcode = 'CLR10';
@@ -1726,9 +1849,27 @@ begin
       using errcode = 'CLR10';
   end if;
   if position('Asia/Kuala_Lumpur' in v_src) = 0 then
-    raise exception 'client_financial_pack tail: the calendar day is not resolved against Asia/Kuala_Lumpur'
+    raise exception 'client_financial_pack tail: the pack no longer STATES the calendar it counted in (the envelope''s timezone key)'
       using errcode = 'CLR10';
   end if;
+  -- THE MONEY AS-OF'S PROVENANCE, in BOTH reads (DECISIONS 6.4 row 1). Each must READ the house
+  -- book day from the authority and must carry NO second copy of the derivation. The probe runs
+  -- over comment-stripped prosrc, so a comment naming the authority cannot satisfy it.
+  foreach v_sig in array array[v_sig_propose, v_sig_pack] loop
+    select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_bad
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if position('clara.book_today()' in v_bad) = 0 then
+      raise exception 'client_financial_pack tail: % does not read its money as-of from clara.book_today() (-> clara._book_today())', v_sig
+        using errcode = 'CLR10';
+    end if;
+    if position('at time zone ''Asia/Kuala_Lumpur'')::date' in v_bad) <> 0 then
+      raise exception 'client_financial_pack tail: % still spells the house legal-date derivation itself -- 0042 S5.20 gives that fact exactly one body', v_sig
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  -- Restore v_src: the rules below this point are the PACK's own.
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src
+    from pg_proc p where p.oid = v_sig_pack::regprocedure;
   if position('greatest(' in v_src) <> 0 then
     raise exception 'client_financial_pack tail: greatest( appears in the pack -- a reversal or a negative correction must move a figure by its SIGNED amount, never be clamped'
       using errcode = 'CLR10';
@@ -1823,5 +1964,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#660 tail: OK -- three doors exist exactly once each at exactly their signatures, owned by clara_fn_owner; publish is SECURITY DEFINER, both reads are SECURITY INVOKER and STABLE, all three pin search_path and the pack pins plan_cache_mode. EXECUTE on all three reaches clara_fn_owner + clara_authenticated and NOBODY else -- PUBLIC revoked, the ACL asserted literally, and clara_runtime / clara_agent_ro / every clara_wake_* role asserted to hold nothing, door by door and role by role. Both new relations FORCE RLS with exactly two policies and carry SELECT to clara_authenticated and no other privilege to any role. The pack carries the estate''s one closing-transfer exclusion VERBATIM, resolves its calendar day against Asia/Kuala_Lumpur, restricts its cash arm to approved entries under a cumulative posting_date <= bound at every one of its six points, special-cases is_opening_balance NOWHERE, mentions no fiscal year, can never say `unavailable`, contains no greatest( clamp and reads clara.bank_statements NOWHERE. The event type is coupled to exactly one ignore taxonomy row. And nothing was recut: all five pinned dependency bodies are byte-identical to the bodies this file measured.';
+  raise notice '#660 tail: OK -- three doors plus the book-day delegate exist exactly once each at exactly their signatures, owned by clara_fn_owner; clara.book_today() is a STABLE SECURITY DEFINER one-line delegate of clara._book_today() that reads no clock and spells no zone of its own, clara._book_today() itself is still closed to clara_authenticated / clara_runtime / PUBLIC, and BOTH reads take their money as-of from the delegate and carry no second copy of the house derivation (DECISIONS 6.4 row 1); publish is SECURITY DEFINER, both reads are SECURITY INVOKER and STABLE, all three pin search_path and the pack pins plan_cache_mode. EXECUTE on all three reaches clara_fn_owner + clara_authenticated and NOBODY else -- PUBLIC revoked, the ACL asserted literally, and clara_runtime / clara_agent_ro / every clara_wake_* role asserted to hold nothing, door by door and role by role. Both new relations FORCE RLS with exactly two policies and carry SELECT to clara_authenticated and no other privilege to any role. The pack carries the estate''s one closing-transfer exclusion VERBATIM, states the Asia/Kuala_Lumpur calendar on its envelope, restricts its cash arm to approved entries under a cumulative posting_date <= bound at every one of its six points, special-cases is_opening_balance NOWHERE, mentions no fiscal year, can never say `unavailable`, contains no greatest( clamp and reads clara.bank_statements NOWHERE. The event type is coupled to exactly one ignore taxonomy row. And nothing was recut: all five pinned dependency bodies are byte-identical to the bodies this file measured.';
 end $p660_tail$;

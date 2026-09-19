@@ -26,8 +26,9 @@ import {
   CHART, financialClient, deactivate, makeCarryDownOnly, linkReversal, postEntry,
   stampPreFixCloseReceipt, plantBankStatement,
   pack, propose, publish, publishOn, members, reasonOf, trialBalanceCash,
-  rootQuery, humanQuery, upsertAccount,
+  rootQuery, humanQuery, roleQuery, ROLES, upsertAccount,
   twoSessions, asHumanSession, waitBlockedByOrThrow,
+  inZoneAsHuman, packOn, proposeOn,
 } from "./client-financial-pack-fixtures.mjs";
 
 const CLR04 = "CLR04";
@@ -1140,4 +1141,134 @@ test("p660.pack.cash_set_members_sealed — a member cannot be added to a versio
     + "where m.cash_account_set_version_id = v.id) as live from clara.cash_account_set_versions v "
     + "where v.id = $1", [v.cash_account_set_version_id]);
   assert.equal(after.rows[0].member_count, after.rows[0].live);
+});
+
+// ===========================================================================================
+// THE MONEY AS-OF IS THE BOOK DAY — DECISIONS §6.4 row 1, ruling on the escalation
+// `reports/integration-fix-1.md` §4.3 raised out of the S5.25 census pass.
+//
+// TWO ARMS, and they are not the same claim:
+//
+//   (1) BEHAVIOUR — under a session keeping a DIFFERENT calendar from the house, the pack's
+//       default as-of, its month anchor, its future-as-of wall and the proposal's echoed as_of
+//       are all the Asia/Kuala_Lumpur BOOK DAY, never the session's own `current_date`. Three
+//       zones: UTC (the one §6.4 names) plus Pacific/Midway (UTC-11) and Pacific/Kiritimati
+//       (UTC+14), which BRACKET MYT so their union disagrees with it at every instant of the
+//       day — the same forced non-vacuity `x42.s5c.1` uses, so this cell can never pass by
+//       having been run at a convenient hour.
+//
+//   (2) PROVENANCE — both bodies READ that day from the house authority (0042 S5.20's
+//       `clara._book_today()`, reached through 0232's definer-chain delegate
+//       `clara.book_today()`), instead of spelling the derivation a second time themselves.
+//
+// AND THE RED WAS ARM (2), SAID PLAINLY: before the §6.4 fix, arm (1) passed on the UNEDITED
+// bodies too, because `(now() at time zone 'Asia/Kuala_Lumpur')::date` yields the right ANSWER
+// — `at time zone` on a timestamptz is session-zone-independent. What was wrong was the
+// PROVENANCE: a money as-of was a second copy of a house fact that has exactly one body, which
+// is the whole of what S5.25 arm (B) exists to stop. Arm (2) is therefore the assertion that
+// failed against the pre-fix migration, and it is written first in this cell's order of proof.
+// `computed_at` is untouched on purpose: it is a sampling read of an INSTANT, not a money date.
+// ===========================================================================================
+
+/** `YYYY-MM-DD` for a pg `date` (node-postgres hands back a JS Date in local time). */
+const isoDay = (d) => (d instanceof Date
+  ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  : String(d));
+
+/** The house book day (optionally + n days), read from the authority itself, as its owner. */
+const bookToday = async (plus = 0) => isoDay((await roleQuery(
+  ROLES.fnOwner, `select clara._book_today() + ${Number(plus) | 0} as d`)).rows[0].d);
+
+test("p660.pack.as_of_is_book_day — the pack's default as-of, its month anchor, its future wall and the proposal's as_of are the Asia/Kuala_Lumpur book day under a UTC and two bracketing session zones, and BOTH bodies read that day from the house authority instead of deriving it again", async (t) => {
+  if (await gate(t)) return;
+  const { client } = await financialClient(ALICE(), "bookday");
+
+  // -----------------------------------------------------------------------------------------
+  // ARM (2) — PROVENANCE. First, because it is the one the ruling changed.
+  // -----------------------------------------------------------------------------------------
+  // The ACL fact that forces the shape, asserted rather than assumed: `clara._book_today()` has
+  // PUBLIC revoked and an ACL of {clara_fn_owner} alone (x42.s5c.1 pins that as a house law), so
+  // a SECURITY INVOKER read door running AS its caller cannot call it — measured on this chain,
+  // where ZERO of the authority's callers are INVOKER bodies. The house-shaped answer is the one
+  // 0042 S5.20 itself used for `clara._fa_today()`: a DELEGATE, not a second copy, granted to the
+  // role that needs it, so the fact still has exactly one body that computes it.
+  const acl = (await rootQuery(
+    "select has_function_privilege('clara_authenticated','clara._book_today()','EXECUTE') as authority, "
+    + "has_function_privilege('clara_authenticated','clara.book_today()','EXECUTE') as delegate, "
+    + "has_function_privilege('clara_runtime','clara.book_today()','EXECUTE') as runtime, "
+    + "has_function_privilege('clara_agent_ro','clara.book_today()','EXECUTE') as agent_ro")).rows[0];
+  assert.equal(acl.authority, false,
+    "clara._book_today() must STAY unreachable by clara_authenticated — the fix routes through the definer chain, it does not widen the authority (x42.s5c.1)");
+  assert.equal(acl.delegate, true, "clara.book_today() is what an INVOKER read door may call");
+  assert.equal(acl.runtime, false, "#660 ships no agent reach: the delegate is clara_authenticated's alone");
+  assert.equal(acl.agent_ro, false, "no agent read role reaches the delegate either");
+
+  const agree = (await roleQuery(ROLES.fnOwner,
+    "select (clara.book_today() = clara._book_today()) as same, "
+    + "(select count(*)::int from pg_proc where pronamespace='clara'::regnamespace and proname='book_today') as n"
+  )).rows[0];
+  assert.equal(agree.same, true, "the delegate must not be a second ANSWER — it returns the authority's");
+  assert.equal(agree.n, 1, "clara.book_today() must exist exactly once — an overload is a second answer");
+
+  // ...and the two bodies actually route through it. Line comments are stripped first, so a
+  // comment that merely NAMES the authority cannot satisfy a presence probe (0232's own idiom).
+  const bodies = (await rootQuery(
+    "select p.proname, regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') as src "
+    + "from pg_proc p where p.pronamespace = 'clara'::regnamespace "
+    + "and p.proname in ('get_client_financial_pack','propose_client_cash_accounts')")).rows;
+  assert.equal(bodies.length, 2, "both #660 reads exist exactly once each");
+  for (const b of bodies) {
+    assert.ok(b.src.includes("clara.book_today()"),
+      `${b.proname}: its money as-of must be READ from the house authority (clara.book_today() -> clara._book_today()), not derived by an expression of its own`);
+    assert.equal(b.src.includes("at time zone 'Asia/Kuala_Lumpur')::date"), false,
+      `${b.proname}: a second copy of the house legal-date derivation is still in the body`);
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // ARM (1) — BEHAVIOUR, under three session calendars.
+  // -----------------------------------------------------------------------------------------
+  const ZONES = ["UTC", "Pacific/Midway", "Pacific/Kiritimati"];
+  const seen = [];
+  for (const tz of ZONES) {
+    // Captured on BOTH sides of the reads, so a midnight-MYT crossing mid-cell is a pass rather
+    // than a flake — and so the assertion still cannot be satisfied by a date that is neither.
+    const before_ = await bookToday();
+    const got = await inZoneAsHuman(CAROL(), tz, async (c) => {
+      const sess = isoDay((await c.query("select current_date as d")).rows[0].d);
+      const p = await packOn(c, client);
+      const pr = await proposeOn(c, client);
+      return { tz, sess, asOf: p.period.as_of, start: p.period.start, propAsOf: pr.as_of, propTz: pr.timezone };
+    });
+    const after_ = await bookToday();
+    const window = [before_, after_];
+    assert.ok(window.includes(got.asOf),
+      `${tz}: the pack's default as-of is ${got.asOf}; the house book day was ${before_}…${after_} (the session said ${got.sess})`);
+    assert.ok(window.includes(got.propAsOf),
+      `${tz}: the proposal's as_of is ${got.propAsOf}; the house book day was ${before_}…${after_} (the session said ${got.sess})`);
+    // The month anchor is the SAME day's month — `date_trunc('month', <the book day>)`.
+    assert.equal(got.start, `${got.asOf.slice(0, 8)}01`,
+      `${tz}: the month-to-date window must be anchored on the book day's own month`);
+    assert.equal(got.propTz, "Asia/Kuala_Lumpur", `${tz}: the proposal still states the calendar it counted in`);
+    seen.push(got);
+  }
+  // NON-VACUITY, FORCED. Midway and Kiritimati bracket MYT, so at EVERY instant at least one of
+  // the three sessions is keeping a different date from the house. If none did, this cell
+  // measured nothing and must say so rather than pass.
+  const diverged = seen.filter((s) => s.sess !== s.asOf);
+  assert.ok(diverged.length > 0,
+    `no session calendar disagreed with the book day — the probe proved nothing. Measured: ${JSON.stringify(seen)}`);
+
+  // AND THE FUTURE WALL IS THE BOOK DAY'S, unconditionally: the day after the HOUSE's day has no
+  // actuals even for a session whose own calendar has already reached it (Kiritimati, UTC+14, is
+  // that session for six hours of every day).
+  const tomorrow = await bookToday(1);
+  let err = null;
+  try {
+    await inZoneAsHuman(CAROL(), "Pacific/Kiritimati", (c) => packOn(c, client, { asOf: tomorrow }));
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err, `an as-of of ${tomorrow} (the day after the book day) must be refused, not answered`);
+  assert.equal(err.code, CLR10, "a future as-of is a CLR10 caller defect");
+  assert.equal(reasonOf(err), "as_of_in_future", "…named as_of_in_future, whatever calendar the session keeps");
 });

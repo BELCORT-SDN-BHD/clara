@@ -30,7 +30,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
-  ROLES, asRoot, rootQuery, humanQuery, roleQuery, namedCall, opk, sha,
+  ROLES, asRoot, asHuman, rootQuery, humanQuery, roleQuery, namedCall, opk, sha,
   upsertAccount, createClient, freshResolution, getPool,
 } from "./rig-fixtures.mjs";
 import { draftEntryV3, approveEntry } from "./s6-helpers.mjs";
@@ -340,6 +340,37 @@ export function publishOn(client, { client: clientId, members: memberList, effec
     { name: "p_effective_from", cast: "date" },
     { name: "p_op_key", cast: "text" },
   ]), [clientId, JSON.stringify(memberList), effectiveFrom, opKey ?? opk("p660-pub")]);
+}
+
+/** #660 / DECISIONS §6.4 — run `fn(pgClient)` as a human (`clara_authenticated` carrying `sub`'s
+ *  jwt) with the SESSION timezone forced to `tz`. `asHuman` already rolls back, `reset role`s and
+ *  `reset all`s the pooled client on release (rig-helpers.mjs:150-174), in that order, so neither
+ *  the role nor the zone can leak to the next checkout. The zone is identifier-checked rather
+ *  than parameterised because `set time zone` takes no bind parameter. */
+export function inZoneAsHuman(sub, tz, fn) {
+  if (!/^[A-Za-z_/+-]+$/.test(tz)) throw new Error(`refusing a non-identifier timezone: ${tz}`);
+  return asHuman(sub, async (c) => {
+    await c.query(`set time zone '${tz}'`);
+    return fn(c);
+  });
+}
+
+/** The pack and the proposal called on a CALLER-SUPPLIED session, the way `publishOn` above is:
+ *  the book-day cell needs the call to run on the very backend whose timezone it set, while
+ *  `pack()` / `propose()` borrow an anonymous pooled client. Named arguments, as everywhere. */
+export async function packOn(client, clientId, { asOf = null, month = null } = {}) {
+  const r = await client.query(namedCall("get_client_financial_pack", [
+    { name: "p_client", cast: "uuid" },
+    { name: "p_as_of", cast: "date" },
+    { name: "p_month", cast: "date" },
+  ]), [clientId, asOf, month]);
+  return r.rows[0].result;
+}
+
+export async function proposeOn(client, clientId) {
+  const r = await client.query(
+    namedCall("propose_client_cash_accounts", [{ name: "p_client", cast: "uuid" }]), [clientId]);
+  return r.rows[0].result;
 }
 
 export { ROLES, rootQuery, humanQuery, roleQuery, opk, upsertAccount, getPool };

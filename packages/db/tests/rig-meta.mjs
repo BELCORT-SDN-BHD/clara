@@ -2516,12 +2516,26 @@ export const KNOWLEDGE_RETRIEVAL_0230_COHORT = [
 //   and petty cash has no derivable structural basis at all (0121:4749). The same fact is proven
 //   behaviourally by `p660.pack.no_agent_reach`, door by door and role by role.
 //
+//   AND A FOURTH NAME THAT IS NOT A DOOR: `book_today`, the book-day delegate 0232 installs so a
+//   SECURITY INVOKER read can reach the house date authority at all (DECISIONS 6.4 row 1). It is
+//   clara_authenticated-only like the three doors, so it is claimed here rather than left to fall
+//   out of operation-census as `unattributed`.
+//
 //   FUNCTION NAMES ONLY. `liveNames` below is built from pg_proc rows, so a cohort covers
 //   functions and nothing else: 0232's two new RELATIONS are asserted by the migration's own tail
 //   and by the battery, never here. clara._tf_cash_account_set_integrity is an ungranted trigger
 //   function and is covered by the grant-matrix sweep rather than by this roster.
 const CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS = [
   "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
+  // A FOURTH NAME, and it is a HELPER rather than a door (DECISIONS 6.4 row 1). `book_today` is a
+  // one-line SECURITY DEFINER delegate of `clara._book_today()`, installed by 0232 because the
+  // two reads above are SECURITY INVOKER and the house date authority has PUBLIC revoked with an
+  // ACL of {clara_fn_owner} alone -- a closed ACL `x42.s5c.1` pins as house law. It is here for
+  // the same reason every other granted name is: `clara_authenticated` can execute it, so it is a
+  // PUBLIC-boundary routine and operation-census's `unattributed` label reports any such routine
+  // no cohort claims. Model lanes gain nothing on it either, asserted by name in 0232's tail and
+  // behaviourally by `p660.pack.as_of_is_book_day`.
+  "book_today",
 ];
 export const CLIENT_FINANCIAL_PACK_0232_COHORT = [...CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS];
 // #660 END
@@ -2789,7 +2803,9 @@ export const ALLOWED = {
     ...KNOWLEDGE_RETRIEVAL_0230_HUMAN_FNS,
     // #660 [0232] the client home's money band — see the block above. All three doors are
     // clara_authenticated ONLY (viewer floor on both reads, admin floor on the publish door);
-    // clara_runtime, clara_agent_ro and every clara_wake_* role gain ZERO on all three.
+    // clara_runtime, clara_agent_ro and every clara_wake_* role gain ZERO on all three. The
+    // fourth name is the book-day delegate the two reads call (DECISIONS 6.4 row 1), on the same
+    // clara_authenticated-only grant.
     ...CLIENT_FINANCIAL_PACK_0232_HUMAN_FNS,
     // #635 [0233] the firm's legal standing (viewer floor), commercial state and model-usage
     // reads (admin floor) — see the block above. clara_authenticated ONLY; runtime, both agent
