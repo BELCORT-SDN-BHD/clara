@@ -29,7 +29,9 @@ node --test --test-concurrency=1 $GATES tests/accrual-adjustments.test.mjs
 
 The package test command includes the preintegration gates and serializes files within this package.
 Some fixtures create sibling databases or cluster roles; they need a disposable **cluster**, not
-merely an empty schema. Do not run the suite against the production project.
+merely an empty schema. Do not run the suite against the production project. A from-scratch chain
+re-applied into a fresh database on a cluster that already ran it once reds migration 0154's role
+census — see [../README.md#from-scratch-reapply-on-a-reused-cluster-867](../README.md#from-scratch-reapply-on-a-reused-cluster-867).
 
 Use matching PostgreSQL 17 client binaries for clone/dump tests; `PG_DUMP` and `PSQL` override PATH.
 The migration helper's `cloneAmbientDatabase` enforces the destructive guard against its source

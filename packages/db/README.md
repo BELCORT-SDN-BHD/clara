@@ -61,6 +61,57 @@ checksum. Filenames must be `NNNN_name.sql`; the runner rejects late insertion b
 frontier. Files with no leading digit, including `UNNUMBERED_*.sql`, are silently skipped.
 `CLARA_MIGRATIONS_DIR` selects an alternate chain and must be set correctly for a split test rig.
 
+### From-scratch reapply on a reused cluster (#867)
+
+Cluster roles (created by `create role`) are cluster-global, not per-database — `drop database`
+never removes them. Migration
+[0154_binding_proposal_pr_1.sql](migrations/0154_binding_proposal_pr_1.sql)'s tail pins the
+cluster-wide `clara%` role count at the literal `14`, a measured proof that 0154 itself mints no
+role. `0154` is applied and immutable; this section documents the hazard around it, it does not
+change it. Two migrations after 0154 mint four more roles:
+[0160_checkout_gate_c2_stripe_events.sql](migrations/0160_checkout_gate_c2_stripe_events.sql)
+(`clara_stripe_webhook`, `clara_stripe_webhook_login`) and
+[0163_checkout_gate_c3_folded_door.sql](migrations/0163_checkout_gate_c3_folded_door.sql)
+(`clara_auth_wall`, `clara_auth_wall_login`), each guarded by `if not exists` so a normal single
+from-scratch chain only creates them once.
+
+Re-applying the WHOLE chain from scratch into a **fresh database on a cluster that already ran the
+chain once** hits those four leftover roles before it reaches 0154 again: the count already reads
+`18`, not `14`, and 0154 raises `CLR10` — a cluster-reuse hazard, not a migration defect.
+
+**Preferred:** one from-scratch chain per cluster (a fresh disposable Postgres cluster, or a fresh
+container/instance). [tests/README.md](tests/README.md) states the same rule for the test rig.
+
+**If a cluster must be reused** (the same single working database is being wiped and re-migrated,
+so nothing else on the cluster still depends on the four roles once the old database is gone):
+[scripts/role-census-reset.mjs](scripts/role-census-reset.mjs) automates it —
+
+```sh
+node scripts/role-census-reset.mjs           # --check (default, read-only): reports whether a
+                                              # from-scratch reapply would pass 0154 today, and
+                                              # names anything on the cluster still depending on
+                                              # one of the four roles (pg_shdepend, cluster-wide)
+CLARA_ALLOW_DESTRUCTIVE=1 node scripts/role-census-reset.mjs --apply   # drops exactly those four
+                                              # roles, and ONLY if none of them has a live
+                                              # dependent anywhere on the cluster; otherwise it
+                                              # refuses outright (never a partial drop) and names
+                                              # what to `drop owned by <role>` first
+```
+
+The exact statements it runs, for the record: `drop role clara_stripe_webhook_login; drop role
+clara_stripe_webhook; drop role clara_auth_wall_login; drop role clara_auth_wall;` — after which a
+from-scratch chain passes 0154's census (14) and migrations 0160/0163 recreate the four roles
+fresh partway through the same chain (back to 18). The script reads 0154's pinned literal and the
+post-0154 role manifest from the migration files themselves (never a hand-kept copy), so a future
+migration minting another role is picked up automatically. Verified on this package's own rig
+(`packages/db/tests/role-census-reset.test.mjs`): the live cluster's count (18) minus its four
+minted roles matches 0154's pin (14) exactly, and dropping/recreating the two `_login` roles
+(no direct grants, membership only) round-trips cleanly with the checkout-gate-c2 (18/18) and
+checkout-gate-c3 (69/69) batteries re-run green afterward. The two base roles
+(`clara_stripe_webhook`, `clara_auth_wall`) stay blocked on any rig that still has a live
+checkout-gate lane, by design — that lane's own table grants are the dependents `DROP ROLE`
+correctly refuses on, and the script reports that refusal by name rather than guessing past it.
+
 Read the repository frontier from `migrations/` and the target frontier from:
 
 ```sql
