@@ -134,6 +134,52 @@ test("#957 AC2: redo refuses when the destructive guard is not satisfied, and ch
   }
 });
 
+// L05-S04 (fix round): AC2 above only exercises the FIRST half of assertDestructiveAllowed (the
+// CLARA_ALLOW_DESTRUCTIVE=1 check) — every cell in this file connects to 127.0.0.1, which
+// targetIsEphemeral() accepts regardless of database name, so the guard's SECOND limb (refusing a
+// non-ephemeral target with no CLARA_DESTRUCTIVE_TARGET confirmation) is never reached on the redo
+// path, even though the lane brief named it explicitly ("refuse on a non-rig target"). This cell
+// proves it directly and stays connection-free (clientFactory throws if ever called), the same
+// idiom the "no migration file on disk" cell below uses: `assertNoTargetSplit()` then
+// `assertDestructiveAllowed()` both run before `byVersion.has(redo)` is even checked, so a fake,
+// unreachable, non-loopback host is enough — nothing here needs a real second Postgres.
+test("#957: redo refuses on a NON-RIG (non-ephemeral) target even with CLARA_ALLOW_DESTRUCTIVE=1, opening no connection", async () => {
+  const TARGET_ENV_KEYS = ["DATABASE_URL", "WORKFLOW_POSTGRES_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER"];
+  const saved = Object.fromEntries(TARGET_ENV_KEYS.map((k) => [k, process.env[k]]));
+  const dir = mkdtempSync(join(tmpdir(), "clara-migrate-redo-nonrig-"));
+  try {
+    writeFileSync(join(dir, "0001_only.sql"), "create table clara.redo_nonrig_marker(x pg_catalog.int4);", "utf8");
+    delete process.env.DATABASE_URL;
+    delete process.env.WORKFLOW_POSTGRES_URL;
+    process.env.PGHOST = "prod-pooler.example-clara.internal"; // NOT loopback -> not ephemeral by host
+    process.env.PGPORT = "5432";
+    process.env.PGDATABASE = "clara_live"; // does not end in _ci/_test/_tmp/_temp/_scratch/_ephemeral
+    process.env.PGUSER = "postgres";
+    process.env.CLARA_ALLOW_DESTRUCTIVE = "1";
+    delete process.env.CLARA_DESTRUCTIVE_TARGET;
+
+    await assert.rejects(
+      migrate({
+        dir,
+        log: silent,
+        redo: "0001_only",
+        clientFactory() {
+          throw new Error("must never connect — the non-ephemeral refusal must fire before any connection opens");
+        },
+      }),
+      /REFUSED for non-ephemeral target/,
+      "the lane brief named this explicitly: redo must refuse on a non-rig target even with the destructive flag set, unless CLARA_DESTRUCTIVE_TARGET names it exactly",
+    );
+  } finally {
+    for (const k of TARGET_ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    rmSync(dir, { recursive: true, force: true });
+    restoreGuardEnv();
+  }
+});
+
 test("#957 AC3: redo refuses a version that is not the highest applied version, and changes nothing", async () => {
   process.env.CLARA_ALLOW_DESTRUCTIVE = "1";
   delete process.env.CLARA_DESTRUCTIVE_TARGET;
