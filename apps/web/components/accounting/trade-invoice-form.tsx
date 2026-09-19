@@ -302,7 +302,9 @@ export function TradeInvoiceFormView({
 
   async function send(key: string): Promise<SubmitTradeInvoiceWorkResult> {
     const wire = toTradeInvoiceWire(draft, knownCodes);
-    if (wire === null) return { kind: "invalid_basis", field: null, reason: "invalid_basis" };
+    // A LOCAL refusal never carries candidates: only the door knows which parties answer to a
+    // name, so the empty list here is a fact rather than a placeholder.
+    if (wire === null) return { kind: "invalid_basis", field: null, reason: "invalid_basis", candidates: [] };
     return submit(session, {
       clientId, intentKey: key, kind: wire.kind, invoice: wire.invoice, basis: wire.basis,
     });
@@ -324,15 +326,19 @@ export function TradeInvoiceFormView({
       const field = fieldForServerPath(res.field);
       // D12(a): `party_ambiguous` carries its candidates VERBATIM, and they are rendered INLINE as
       // a choice rather than announced and thrown away.
-      // D12(a)'s candidate list rides the refusal's own detail. `lib/wire.ts` surfaces
-      // `detail.reason` and discards every other detail key today, so this reads DEFENSIVELY
-      // through unknown: when the list is there it is rendered verbatim, and when it is not the
-      // banner is the door's sentence alone. Named as a residual in the report rather than faked.
-      const detail = (res as unknown as { detail?: unknown }).detail;
-      const raw = detail && typeof detail === "object"
-        ? (detail as { candidates?: unknown }).candidates
-        : undefined;
-      const candidates: PartyCandidate[] = Array.isArray(raw) ? (raw as PartyCandidate[]) : [];
+      // D12(a)'s candidate list rides the refusal's own `detail.candidates`, which
+      // `submitTradeInvoiceWork` unfolds onto a first-class `candidates` field — the shared
+      // `lib/wire.ts` keeps `detail.reason` and discards every other detail key, so the route
+      // unfolds this ONE refusal itself rather than widening the shared responder. Read
+      // DEFENSIVELY all the same: a refusal that carries none leaves the banner the door's
+      // sentence alone.
+      const candidates: PartyCandidate[] = (res.candidates ?? [])
+        .map((c) => ({
+          counterparty_id: typeof c.counterparty_id === "string" ? c.counterparty_id : "",
+          name: typeof c.name === "string" ? c.name : "",
+          registration_no: typeof c.registration_no === "string" ? c.registration_no : null,
+        }))
+        .filter((c) => c.counterparty_id !== "" && c.name !== "");
       setOutcome({ kind: "refused", reason: res.reason ?? "invalid_basis", field, candidates });
       focusField(field);
       return;

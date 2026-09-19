@@ -103,7 +103,25 @@ export type SubmitTradeInvoiceWorkResult =
     dueDate: string | null;
     dueDateSource: string | null;
   } & WorkAdmission)
-  | Exclude<SubmitJournalWorkResult, { kind: "accepted" }>;
+  /**
+   * D12(a) — `party_ambiguous` is the ONE refusal on this lane that carries DATA, so its arm is
+   * widened HERE rather than on the shared `invalid_basis` shape every door returns. The route
+   * unfolds the door's typed candidate list onto the 400 body (`workRoutes.ts`'s trade-invoice
+   * catch), and the form renders those candidates INLINE as a choice: a person told "more than
+   * one party answers to that name" and given nothing to click has been informed, not helped.
+   * Every OTHER refusal leaves `candidates` empty, which is what the banner's plain arm reads.
+   */
+  | { kind: "invalid_basis"; field: string | null; reason: string | null; candidates: PartyCandidateWire[] }
+  | Exclude<SubmitJournalWorkResult, { kind: "accepted" } | { kind: "invalid_basis" }>;
+
+/** ONE candidate, exactly as `clara.admit_trade_invoice_work` raises it. Read defensively: a door
+ *  that raised a shape this does not expect leaves the banner its sentence rather than crashing. */
+export type PartyCandidateWire = {
+  counterparty_id?: unknown;
+  name?: unknown;
+  registration_no?: unknown;
+  tin?: unknown;
+};
 
 export type RetryWorkResult =
   | ({ kind: "accepted" } & WorkAdmission)
@@ -366,7 +384,19 @@ export async function submitTradeInvoiceWork(
       };
   }
   if (res.status === 400) {
-    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+    // The candidate list rides `detail.candidates` and is read DEFENSIVELY: an absent or
+    // non-array detail yields an empty list, never a guess, and the banner is the door's own
+    // sentence alone.
+    const detail = body.detail;
+    const raw = detail !== null && typeof detail === "object"
+      ? (detail as { candidates?: unknown }).candidates
+      : undefined;
+    return {
+      kind: "invalid_basis",
+      field: str(body.field),
+      reason: str(body.reason),
+      candidates: Array.isArray(raw) ? (raw as PartyCandidateWire[]) : [],
+    };
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };

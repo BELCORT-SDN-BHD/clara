@@ -1355,6 +1355,35 @@ export function workRoutes(): express.Router {
       });
     } catch (err) {
       if (sendAuthError(res, err)) return;
+      // D12(a) — `party_ambiguous` IS THE ONE REFUSAL THAT CARRIES DATA. The door raises it with
+      // the candidate list VERBATIM in its typed detail, because the person has to pick and a
+      // sentence they cannot act on is worse than no sentence. `sendAdmissionError` answers the
+      // other thirteen faithfully but keeps only `detail.reason` (its own note at the
+      // `invalid_source_ref` arm says why: the browser must not have to parse Postgres detail), so
+      // this ONE arm is unfolded HERE, inside this lane's own route, rather than widening the
+      // shared responder for every door in the file.
+      if (reasonOf(err) === "party_ambiguous") {
+        const raw = (err as { detail?: unknown })?.detail;
+        let candidates: unknown[] = [];
+        if (typeof raw === "string" && raw.length > 0) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              const list = (parsed as Record<string, unknown>).candidates;
+              if (Array.isArray(list)) candidates = list;
+            }
+          } catch {
+            /* a plain-text detail carries no candidates — the banner is the door's sentence alone */
+          }
+        }
+        res.status(400).json({
+          error: "invalid_basis",
+          field: fieldOf(err) ?? "invoice.counterparty",
+          reason: "party_ambiguous",
+          detail: { candidates },
+        });
+        return;
+      }
       sendAdmissionError(res, err, "trade invoice admission");
     }
   });

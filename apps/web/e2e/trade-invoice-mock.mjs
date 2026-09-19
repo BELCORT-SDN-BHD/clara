@@ -130,6 +130,93 @@ const POSTED_INVOICE = {
   outstanding_cents: 106000,
 };
 
+
+// ---------------------------------------------------------------------------------------------
+// AC5's WORK-DETAIL WORLD. `get_trade_invoice` alone cannot show the mutual links: the block that
+// renders them lives inside the posted-results section (`work-detail.tsx`'s `renderPosted`, which
+// is null while `entry` is), exactly as #638's own claim-origin line does. So this lane answers
+// the FIVE id-scoped relation reads the Work detail makes for the ONE Work it minted, and falls
+// through for every other id — the same shape `journal-work-mock.mjs`, `accrual-mock.mjs`,
+// `prepayments-mock.mjs` and `work-list-mock.mjs` already use for `/rest/v1/accounting_work`.
+// It still answers NEITHER `list_accounting_work` NOR `list_entry_links`: those are LIST reads
+// other lanes drive, and claiming them would replace their fixtures.
+// ---------------------------------------------------------------------------------------------
+
+const FIRM_ID = "65565f00-6556-4655-8655-65565565f00a";
+const RECORDER = "65565u01-6556-4655-8655-65565565u01a";
+const TASK_ID = "65509t01-6550-4655-8655-655065509t01";
+
+const WORK_ROW = {
+  id: TI.workId,
+  firm_id: FIRM_ID,
+  client_id: TI.clientId,
+  purpose: "journal_entry",
+  status: "completed",
+  initiator: RECORDER,
+  initiated_by: RECORDER,
+  initiator_role: "bookkeeper",
+  intent_key: "ti-walk-intent",
+  logical_op_id: `work:${TI.workId}:journal_entry:1`,
+  basis: {
+    posting_date: "2026-03-31",
+    memo: "Alpha Supplies bill, office paper",
+    currency: "MYR",
+    lines: [
+      { account_code: TI.expense, debit_cents: 100000, credit_cents: 0, description: "Office paper" },
+      { account_code: TI.sst, debit_cents: 6000, credit_cents: 0, description: "SST input" },
+      { account_code: TI.payable, debit_cents: 0, credit_cents: 106000, description: "Alpha Supplies" },
+    ],
+  },
+  basis_digest: "ti-walk-digest",
+  basis_origin: "user_direct",
+  source_refs: [{ kind: "document", document_id: TI.documentId }],
+  current_task_id: TASK_ID,
+  bundle: null,
+  result: { entry_id: TI.entryId },
+  error: null,
+  created_at: "2026-03-31T02:00:00.000Z",
+  updated_at: "2026-03-31T02:00:05.000Z",
+};
+
+const TASK_ROW = {
+  id: TASK_ID,
+  client_id: TI.clientId,
+  status: "completed",
+  kind: "accounting_work",
+  created_at: "2026-03-31T02:00:00.000Z",
+  updated_at: "2026-03-31T02:00:05.000Z",
+};
+
+const ENTRY_ROW = {
+  id: TI.entryId,
+  client_id: TI.clientId,
+  status: "approved",
+  posting_date: "2026-03-31",
+  memo: "Alpha Supplies bill, office paper",
+  currency: "MYR",
+  document_id: TI.documentId,
+  coding_kind: null,
+  reversed_by: null,
+  reverses: null,
+  created_at: "2026-03-31T02:00:05.000Z",
+};
+
+const ENTRY_LINES = [
+  { id: `${TI.entryId.slice(0, -1)}1`, entry_id: TI.entryId, line_no: 1, account_code: TI.expense, debit_cents: 100000, credit_cents: 0, description: "Office paper", counterparty_id: null },
+  { id: `${TI.entryId.slice(0, -1)}2`, entry_id: TI.entryId, line_no: 2, account_code: TI.sst, debit_cents: 6000, credit_cents: 0, description: "SST input", counterparty_id: null },
+  { id: `${TI.entryId.slice(0, -1)}3`, entry_id: TI.entryId, line_no: 3, account_code: TI.payable, debit_cents: 0, credit_cents: 106000, description: "Alpha Supplies", counterparty_id: TI.vendorId },
+];
+
+const RECEIPT_ROW = {
+  id: TI.receiptId,
+  client_id: TI.clientId,
+  work_id: TI.workId,
+  logical_op_id: `work:${TI.workId}:journal_entry:1`,
+  outcome: "committed",
+  effects: { entry_id: TI.entryId },
+  created_at: "2026-03-31T02:00:05.000Z",
+};
+
 const state = {
   /** intentKey -> { workId, payload } */
   intents: new Map(),
@@ -196,6 +283,44 @@ export async function handleTradeInvoiceSupabase(request, response, path, url, s
     if (client !== TI.clientId) return false;
     const kind = kindFilter?.startsWith("eq.") ? kindFilter.slice(3) : null;
     sendJson(response, 200, kind === "customer" ? CUSTOMERS : VENDORS, cors);
+    return true;
+  }
+
+  // THE WORK DETAIL'S OWN FIVE READS, each answering for THIS lane's one Work / entry / task and
+  // falling through otherwise. `eq.` is the only operator these five use; anything else (the Work
+  // LIST's `in.(…)`, a range, an unfiltered sweep) falls through untouched.
+  const eq = (name) => {
+    const raw = url.searchParams.get(name);
+    return raw !== null && raw.startsWith("eq.") ? raw.slice(3) : null;
+  };
+
+  if (request.method === "GET" && path === "/rest/v1/accounting_work") {
+    if (eq("id") !== TI.workId) return false;
+    sendJson(response, 200, [WORK_ROW], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/agent_tasks_visible") {
+    if (eq("id") !== TASK_ID) return false;
+    sendJson(response, 200, [TASK_ROW], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/journal_entries") {
+    if (eq("id") !== TI.entryId) return false;
+    sendJson(response, 200, [ENTRY_ROW], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/journal_lines") {
+    if (eq("entry_id") !== TI.entryId) return false;
+    sendJson(response, 200, ENTRY_LINES, cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/operation_receipts") {
+    if (eq("work_id") !== TI.workId) return false;
+    sendJson(response, 200, [RECEIPT_ROW], cors);
     return true;
   }
 
