@@ -127,6 +127,8 @@ function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolea
       description={t("proposeDescription")}
       confirmLabel={t("proposeTrigger")}
       busy={busy}
+      // A CLOSED DIALOG ENDS THE DECISION: the next press is a new one and mints a new key.
+      onClosed={() => decision.renew()}
       onConfirm={() => act(async () => {
         const opKey = decision.key(authorityIntent("propose", { clientId, value: cadence }));
         await proposeDepreciationAuthority(sessionTokenAccessor, { clientId, cadence, opKey });
@@ -173,6 +175,8 @@ function SignDialog({ clientId, authorityId, busy, act, error }: {
       description={t("signDescription")}
       confirmLabel={t("signTrigger")}
       busy={busy}
+      // A CLOSED DIALOG ENDS THE DECISION: the next press is a new one and mints a new key.
+      onClosed={() => decision.renew()}
       refusal={toDialogRefusal(error)}
       confirmDisabled={idBlank || idMalformed}
       onConfirm={() => act(async () => {
@@ -238,6 +242,8 @@ function RetireDialog({ clientId, authorityId, busy, act }: { clientId: string; 
       description={t("retireDescription")}
       confirmLabel={t("retireTrigger")}
       busy={busy}
+      // A CLOSED DIALOG ENDS THE DECISION: the next press is a new one and mints a new key.
+      onClosed={() => decision.renew()}
       confirmDisabled={!reason.trim()}
       onConfirm={() => act(async () => {
         const opKey = decision.key(authorityIntent("retire", { clientId, authorityId, value: reason.trim() }));

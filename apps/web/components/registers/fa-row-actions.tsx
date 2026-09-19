@@ -116,6 +116,8 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act, error }: R
       busy={busy}
       refusal={toDialogRefusal(error)}
       refusalFocusId={faRefusalControlId(`fa-revise-${asset.id}`, error)}
+      // A CLOSED DIALOG ENDS THE DECISION: the next press is a new revision and mints a new key.
+      onClosed={() => decision.renew()}
       confirmDisabled={!effectiveFrom || reasonBlank || !particularsReadyToSubmit(particulars)}
       onConfirm={() =>
         act(async () => {
