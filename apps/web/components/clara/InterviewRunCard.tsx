@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
@@ -62,6 +63,10 @@ export function InterviewRunCard({
   const [startError, setStartError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  // #900 — the ONE genuinely field-shaped part of this card: htmlFor/id wiring for the answer
+  // textarea's new visible `FieldLabel` (owner ruling, 2026-09-18: only this control recomposes
+  // onto Field; the run chrome below keeps its own markup).
+  const answerId = useId();
   const syncedTerminalRef = useRef<string | null>(null);
   // H-28 — the last park index this card has already told the checklist about. `null` is "no
   // park observed yet on this run", which is a DIFFERENT fact from park 0 and is why the very
@@ -280,19 +285,33 @@ export function InterviewRunCard({
           {state ? (
             state.pendingPark ? (
               <form className="flex flex-col gap-2" onSubmit={(e) => void submit(e)}>
-                <Textarea
-                  aria-label={t("answer.label")}
-                  placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void submit();
-                    }
-                  }}
-                  disabled={run.busy}
-                />
+                {/* #900 — the answer input, and ONLY the answer input, recomposed onto `Field`
+                    (appendix D #28, the `work-question-form.tsx:70` / `OnboardingItemRow.tsx`
+                    precedent this card had not yet followed). `aria-label` stays alongside the
+                    new visible `FieldLabel` — redundant, and deliberately so: two existing cells
+                    (`interview-run-keyboard.test.tsx`, `onboarding-progress-sync.test.tsx`)
+                    already key off it, and this ticket recomposes labelling, not the control's
+                    existing accessible name. */}
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={answerId}>{t("answer.label")}</FieldLabel>
+                    <Textarea
+                      id={answerId}
+                      aria-label={t("answer.label")}
+                      placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void submit();
+                        }
+                      }}
+                      disabled={run.busy}
+                    />
+                    <FieldDescription>{t("answer.fieldDescription")}</FieldDescription>
+                  </Field>
+                </FieldGroup>
                 <div className="flex flex-wrap gap-2">
                   <Button type="submit" size="sm" disabled={run.busy || draft.trim().length === 0}>
                     {run.busy ? t("answer.sending") : t("answer.send")}

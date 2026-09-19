@@ -70,6 +70,7 @@ components/clara/composer-attachment.test.tsx
 components/clara/composer-field-wiring.test.tsx
 components/clara/composer-keyboard.test.tsx
 components/clara/interview-run-a11y.test.tsx
+components/clara/interview-run-field-composition.test.tsx
 components/clara/interview-run-keyboard.test.tsx
 components/clara/onboarding-amend-and-chart.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx

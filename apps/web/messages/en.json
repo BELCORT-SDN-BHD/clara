@@ -5977,6 +5977,7 @@
       "label": "Your answer",
       "placeholder": "Type your answer",
       "confirmPlaceholder": "Confirm or correct this answer",
+      "fieldDescription": "Sent to Clara as your answer to the open question above.",
       "send": "Send",
       "sending": "Sending..."
     },
