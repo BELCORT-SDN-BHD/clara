@@ -322,6 +322,11 @@ export function reviseFixedAssetParticulars(
      *  retrospective, and neither of them this door's act). */
     changeClass: FaChangeClass;
     changeReason: string;
+    /** #651 fix-round 1 (adversarial review ADV-651-8) — ONE DECISION, ONE KEY. Held by the open
+     *  dialog for the life of the decision, so a retry after a lost response is the SAME
+     *  operation rather than a second revision. `reviseIntent` below is the tuple it is keyed on;
+     *  `useDepreciationDecisionKey` (lib/registers/depreciation.ts) is the holder. */
+    opKey: string;
   },
 ): Promise<unknown> {
   return callDoor(
@@ -341,10 +346,31 @@ export function reviseFixedAssetParticulars(
         change_reason: args.changeReason,
       },
       p_effective_from: args.effectiveFrom,
-      p_op_key: crypto.randomUUID(),
+      p_op_key: args.opKey,
     },
     { session },
   );
+}
+
+/** The intent tuple a PROSPECTIVE REVISION decision is identified by: every value the door is
+ *  being asked to write. Editing any of them inside the open dialog is a different decision and
+ *  earns a new key; pressing Confirm twice on the same one does not. Particulars are serialised
+ *  key-sorted so an object built in a different order is still the same intent. */
+export function reviseIntent(args: {
+  clientId: string;
+  assetId: string;
+  particulars: FaParticularsInput;
+  effectiveFrom: string;
+  changeClass: FaChangeClass;
+  changeReason: string;
+}): string {
+  const p = args.particulars as Record<string, unknown>;
+  const particulars = Object.keys(p)
+    .sort()
+    .map((k) => `${k}=${JSON.stringify(p[k] ?? null)}`)
+    .join(",");
+  return [args.clientId, args.assetId, args.effectiveFrom, args.changeClass, args.changeReason, particulars]
+    .join("|");
 }
 
 /** clara.dispose_fixed_asset(p_client, p_asset, p_disposal_date,

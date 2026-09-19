@@ -21,9 +21,10 @@ import { faRefusalControlId } from "@/lib/registers/fa-refusal-field";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
 import { fmtCents } from "@/lib/registers/money";
 import {
-  completeFixedAssetParticulars, reviseFixedAssetParticulars, disposeFixedAsset,
+  completeFixedAssetParticulars, reviseFixedAssetParticulars, reviseIntent, disposeFixedAsset,
   FA_CHANGE_CLASSES, FA_IMPLEMENTED_CHANGE_CLASSES,
 } from "@/lib/registers/fixed-assets";
+import { useDepreciationDecisionKey } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { FixedAssetRow, FaParticularsInput, FaChangeClass } from "@/lib/registers/fixed-assets";
 import type { AccountRow } from "@/lib/registers/accounts";
@@ -89,6 +90,11 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act, error }: R
   const [changeClass, setChangeClass] = useState<FaChangeClass>("estimate");
   const [changeReason, setChangeReason] = useState("");
   const reasonBlank = changeReason.trim() === "";
+  // #651 fix-round 1 (adversarial review ADV-651-8) — ONE DECISION, ONE KEY. A revision is a
+  // supersede-forward INSERT: a retry after a lost response that minted a second key would be a
+  // second revision of the same asset, not the same one. Editing any value in the form is a
+  // different decision and earns a new key (`reviseIntent`).
+  const decision = useDepreciationDecisionKey();
   const [particulars, setParticulars] = useState<FaParticularsInput>({
     method: (asset.method ?? "straight_line") as FaParticularsInput["method"],
     useful_life_months: asset.useful_life_months,
@@ -113,9 +119,13 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act, error }: R
       confirmDisabled={!effectiveFrom || reasonBlank || !particularsReadyToSubmit(particulars)}
       onConfirm={() =>
         act(async () => {
-          await reviseFixedAssetParticulars(sessionTokenAccessor, {
+          const intent = reviseIntent({
             clientId, assetId: asset.id, particulars, effectiveFrom,
             changeClass, changeReason: changeReason.trim(),
+          });
+          await reviseFixedAssetParticulars(sessionTokenAccessor, {
+            clientId, assetId: asset.id, particulars, effectiveFrom,
+            changeClass, changeReason: changeReason.trim(), opKey: decision.key(intent),
           });
         })
       }

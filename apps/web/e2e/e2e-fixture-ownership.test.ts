@@ -417,9 +417,10 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   "fixed-asset-mock.mjs": { unscopeable: [], debt: [] },
   // #651 — every handler is scoped to one of this lane's OWN two client ids (`OURS()`) or to one
   // of its own asset ids (`detailFor()` returns null otherwise), and falls through in every other
-  // case, so nothing is declared here. THREE of its verbs are also answered by
-  // `fixed-asset-mock.mjs` — `get_fixed_asset`, `get_depreciation_authority` and
-  // `list_depreciation_runs` — and all three are declared in SHARED_RPC_VERBS below. It reads the
+  // case, so nothing is declared here. FIVE of its verbs are also answered by
+  // `fixed-asset-mock.mjs` — `get_fixed_asset`, `get_depreciation_authority`,
+  // `list_depreciation_runs`, `list_fixed_assets` and `fa_register_tie` — and SHARED_RPC_VERBS
+  // below is the source of truth for that set rather than this sentence. It reads the
   // POST body through the SHARED `readCachedJson` (`mock-dispatch.mjs`), so declining another
   // lane's client leaves that lane's body fully readable.
   "depreciation-mock.mjs": { unscopeable: [], debt: [] },

@@ -10,6 +10,7 @@ import {
   runDepreciationManual,
   previewDepreciationRun,
   depreciationIntent,
+  authorityIntent,
   useDepreciationDecisionKey,
   faSkipListStartsOpen,
   FA_SKIP_REASONS,
@@ -59,10 +60,10 @@ test("getDepreciationAuthority: posts p_client only, resolves the envelope verba
   assert.deepEqual(resolved, envelope);
 });
 
-test("proposeDepreciationAuthority: posts p_client + p_cadence with a fresh op_key", async () => {
+test("proposeDepreciationAuthority: posts p_client + p_cadence with the decision's op_key", async () => {
   const { impl, calls } = captureFetch({ authority_id: "au1", client_id: "c1", cadence: "monthly", status: "proposed" });
   await withMockedFetch(impl, async () => {
-    await proposeDepreciationAuthority(fakeSession("tok"), { clientId: "c1", cadence: "monthly" });
+    await proposeDepreciationAuthority(fakeSession("tok"), { clientId: "c1", cadence: "monthly", opKey: "k-propose" });
   });
   assert.match(calls[0]!.url, /\/rpc\/propose_depreciation_authority$/);
   assert.equal(calls[0]!.body.p_client, "c1");
@@ -75,7 +76,7 @@ test("signDepreciationAuthority: posts p_client + p_authority + the REQUIRED ins
   await withMockedFetch(impl, async () => {
     await signDepreciationAuthority(fakeSession("tok"), {
       clientId: "c1", authorityId: "au1",
-      authorityRef: { kind: "accounting_work", id: "w-1" },
+      authorityRef: { kind: "accounting_work", id: "w-1" }, opKey: "k-sign",
     });
   });
   assert.match(calls[0]!.url, /\/rpc\/sign_depreciation_authority$/);
@@ -90,10 +91,53 @@ test("signDepreciationAuthority: posts p_client + p_authority + the REQUIRED ins
 test("retireDepreciationAuthority: posts p_reason alongside p_client/p_authority", async () => {
   const { impl, calls } = captureFetch({ authority_id: "au1", status: "retired" });
   await withMockedFetch(impl, async () => {
-    await retireDepreciationAuthority(fakeSession("tok"), { clientId: "c1", authorityId: "au1", reason: "client switched vendor" });
+    await retireDepreciationAuthority(fakeSession("tok"), { clientId: "c1", authorityId: "au1", reason: "client switched vendor", opKey: "k-retire" });
   });
   assert.match(calls[0]!.url, /\/rpc\/retire_depreciation_authority$/);
   assert.equal(calls[0]!.body.p_reason, "client switched vendor");
+});
+
+// #651 fix-round 1 (adversarial review ADV-651-8) — ONE DECISION, ONE KEY, ON EVERY AUTHORITY
+// DOOR, not only on the run door. A key minted INSIDE the wrapper makes every retry a new
+// operation, which the database's replay ladder cannot recognise: on `sign` that is user-visible,
+// because the second call reserves a fresh key, reaches 0227's `authority_already_live` arm and
+// refuses instead of handing back the receipt the first call already earned.
+test("#651 proposeDepreciationAuthority / signDepreciationAuthority / retireDepreciationAuthority carry the CALLER's op key verbatim", async () => {
+  const propose = captureFetch({ authority_id: "au1", status: "proposed" });
+  await withMockedFetch(propose.impl, async () => {
+    await proposeDepreciationAuthority(fakeSession("tok"), { clientId: "c1", cadence: "monthly", opKey: "decided-propose" });
+  });
+  assert.equal(propose.calls[0]!.body.p_op_key, "decided-propose");
+
+  const sign = captureFetch({ authority_id: "au1", status: "live" });
+  await withMockedFetch(sign.impl, async () => {
+    await signDepreciationAuthority(fakeSession("tok"), {
+      clientId: "c1", authorityId: "au1",
+      authorityRef: { kind: "accounting_work", id: "w-1" }, opKey: "decided-sign",
+    });
+  });
+  assert.equal(sign.calls[0]!.body.p_op_key, "decided-sign");
+
+  const retire = captureFetch({ authority_id: "au1", status: "retired" });
+  await withMockedFetch(retire.impl, async () => {
+    await retireDepreciationAuthority(fakeSession("tok"), {
+      clientId: "c1", authorityId: "au1", reason: "wrong cadence", opKey: "decided-retire",
+    });
+  });
+  assert.equal(retire.calls[0]!.body.p_op_key, "decided-retire");
+});
+
+test("#651 authorityIntent: the same decision is one intent; changing WHAT is decided is another", () => {
+  const sign = authorityIntent("sign", { clientId: "c1", authorityId: "au1", value: "accounting_work:w-1" });
+  assert.equal(sign, authorityIntent("sign", { clientId: "c1", authorityId: "au1", value: "accounting_work:w-1" }),
+    "two attempts at the same signature are ONE decision");
+  assert.notEqual(sign, authorityIntent("sign", { clientId: "c1", authorityId: "au1", value: "accounting_work:w-2" }),
+    "citing a DIFFERENT instruction is a different decision and earns a new key");
+  assert.notEqual(sign, authorityIntent("retire", { clientId: "c1", authorityId: "au1", value: "accounting_work:w-1" }),
+    "…and so is a different ACT on the same authority");
+  assert.notEqual(authorityIntent("propose", { clientId: "c1", value: "monthly" }),
+    authorityIntent("propose", { clientId: "c1", value: "annual" }),
+    "…and so is a different cadence");
 });
 
 test("listDepreciationRuns: posts p_client, unwraps the .runs array (never the raw envelope)", async () => {

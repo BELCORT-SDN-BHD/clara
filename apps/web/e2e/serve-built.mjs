@@ -710,8 +710,9 @@ async function handleSupabase(request, response, url) {
   // its own and must reach it.
   if (await handleFixedAssetSupabase(request, response, path, url, sendJson, cors)) return;
   // #651's depreciation lane. DISPATCHED AFTER #639's, and that order IS load-bearing rather than
-  // incidental: the two lanes share three verbs (`get_fixed_asset`, `get_depreciation_authority`,
-  // `list_depreciation_runs`, all declared in `SHARED_RPC_VERBS`), each answering only for its own
+  // incidental: the two lanes share five verbs (`get_fixed_asset`, `get_depreciation_authority`,
+  // `list_depreciation_runs`, `list_fixed_assets` and `fa_register_tie` — all declared in
+  // `SHARED_RPC_VERBS`, which is that set's source of truth), each answering only for its own
   // client or asset ids and falling through otherwise — so either order works, and this one keeps
   // the older lane's fixtures first. It answers `/rest/v1/clients` the same honest id-scoped way.
   if (await handleDepreciationSupabase(request, response, path, url, sendJson, cors)) return;

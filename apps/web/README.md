@@ -397,11 +397,17 @@ beside a neutral sentence; it is never dropped and never guessed. The skipped li
 when every reason is benign: a row skipped for incomplete particulars renders the list OPEN, because
 it is work somebody still owes.
 
-**One decision, one key.** `runDepreciationManual` used to mint `crypto.randomUUID()` inside itself,
-so "the response was lost, click again" answered the retry with a refusal instead of the receipt it
-had already earned. `lib/registers/depreciation.ts`' `useDepreciationDecisionKey` derives the key
-from a hash of the intent tuple (client, period start, period end) and holds it for the life of the
-open decision, on `components/work/work-cancel-dialog.tsx:95`'s shape.
+**One decision, one key — on every FA door, not only the run.** These wrappers used to mint
+`crypto.randomUUID()` inside themselves, so "the response was lost, click again" answered the retry
+with a refusal instead of the receipt it had already earned. `lib/registers/depreciation.ts`'
+`useDepreciationDecisionKey` mints one key per OPEN DECISION, keyed on the intent tuple, and holds
+it until the decision changes or ends — on `components/work/work-cancel-dialog.tsx:95`'s shape. The
+tuples are `depreciationIntent` (client, period start, period end), `authorityIntent` (the act, the
+authority, the value being decided) and `reviseIntent` (every value the revision door is asked to
+write, particulars key-sorted). **Signing is where a person actually meets this**: the sign door's
+replay identity is {client, authority}, so a second key reaches 0227's `authority_already_live` arm
+and refuses. `completeFixedAssetParticulars` and `disposeFixedAsset` still mint their own key —
+#639's original shape, untouched by this branch and carried as a follow-up.
 
 **Five readings of one asset, addressable.** `fixed-asset-detail.tsx`' tab id lives in `?tab=`, so a
 pasted link lands on the reading it names and Back leaves the page rather than walking five tabs.

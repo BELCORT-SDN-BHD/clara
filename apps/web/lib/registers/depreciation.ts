@@ -67,11 +67,14 @@ export function getDepreciationAuthority(session: SessionTokenAccessor, clientId
  *  already exists — retire it first. */
 export function proposeDepreciationAuthority(
   session: SessionTokenAccessor,
-  args: { clientId: string; cadence: "monthly" | "annual" },
+  args: { clientId: string; cadence: "monthly" | "annual"; opKey: string },
 ): Promise<unknown> {
+  // #651 — ONE DECISION, ONE KEY (see `authorityIntent` / `useDepreciationDecisionKey` below).
+  // The caller holds the key for the life of the open dialog; minting one here would make every
+  // retry a NEW operation the database's replay ladder cannot recognise.
   return callDoor(
     "propose_depreciation_authority",
-    { p_client: args.clientId, p_cadence: args.cadence, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_cadence: args.cadence, p_op_key: args.opKey },
     { session },
   );
 }
@@ -85,14 +88,18 @@ export function proposeDepreciationAuthority(
  *  refusal verbatim on attempt. */
 export function signDepreciationAuthority(
   session: SessionTokenAccessor,
-  args: { clientId: string; authorityId: string; authorityRef: FaAuthorityRef },
+  args: { clientId: string; authorityId: string; authorityRef: FaAuthorityRef; opKey: string },
 ): Promise<unknown> {
   return callDoor(
     "sign_depreciation_authority",
     {
       p_client: args.clientId,
       p_authority: args.authorityId,
-      p_op_key: crypto.randomUUID(),
+      // #651 — ONE DECISION, ONE KEY, and on THIS door it is the one a person meets: the sign
+      // door's replay identity is {client, authority} (0227), so a retry that mints a fresh key
+      // reserves a new operation, reaches the `authority_already_live` arm and refuses instead of
+      // handing back the receipt the lost response already earned.
+      p_op_key: args.opKey,
       // #651 [0227] — REQUIRED and RESOLVED. The door refuses CLR38 `authority_ref_invalid`
       // (constraint object | kind | id) on a malformed one and `authority_ref_unresolved` when it
       // names no row in this firm AND client. Both refusals render verbatim, with their code.
@@ -107,11 +114,13 @@ export function signDepreciationAuthority(
  *  `authority_not_live` if already retired. */
 export function retireDepreciationAuthority(
   session: SessionTokenAccessor,
-  args: { clientId: string; authorityId: string; reason: string },
+  args: { clientId: string; authorityId: string; reason: string; opKey: string },
 ): Promise<unknown> {
+  // #651 — ONE DECISION, ONE KEY. A second retirement of the same authority refuses CLR38
+  // `authority_not_live`; with the caller's key the retry returns the first receipt instead.
   return callDoor(
     "retire_depreciation_authority",
-    { p_client: args.clientId, p_authority: args.authorityId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_authority: args.authorityId, p_reason: args.reason, p_op_key: args.opKey },
     { session },
   );
 }
@@ -271,8 +280,26 @@ export function depreciationIntent(args: { clientId: string; periodStart: string
   return `${args.clientId}|${args.periodStart}|${args.periodEnd}`;
 }
 
+/** The intent tuple an AUTHORITY CEREMONY decision is identified by — the act, the authority it
+ *  acts on, and the value being decided (the cadence proposed, the instruction cited, the reason
+ *  given). Two attempts at the same decision are ONE intent; changing what is being decided inside
+ *  the open dialog is a different one and earns a new key.
+ *
+ *  #651 fix-round 1 (adversarial review ADV-651-8): "one decision, one key" was applied to the run
+ *  door alone, so propose / sign / retire each minted a key inside the wrapper and a retry after a
+ *  lost response was a new operation. The doors were already idempotent; only the key transport
+ *  was not. */
+export function authorityIntent(
+  act: "propose" | "sign" | "retire",
+  args: { clientId: string; authorityId?: string | null; value?: string | null },
+): string {
+  return `${act}|${args.clientId}|${args.authorityId ?? ""}|${args.value ?? ""}`;
+}
+
 /** A stable key per OPEN DECISION: minted on first ask, reused for every attempt at the SAME
- *  intent, renewed when the intent changes or the caller ends the decision. */
+ *  intent, renewed when the intent changes or the caller ends the decision. ONE hook serves every
+ *  FA door on this lane — the run dialog and the three authority ceremonies — because they all
+ *  need the same thing: a key that survives a retry and dies with the decision. */
 export function useDepreciationDecisionKey(): { key: (intent: string) => string; renew: () => void } {
   const ref = useRef<{ intent: string; key: string } | null>(null);
   return {

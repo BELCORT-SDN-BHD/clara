@@ -22,6 +22,8 @@ import {
   proposeDepreciationAuthority,
   signDepreciationAuthority,
   retireDepreciationAuthority,
+  authorityIntent,
+  useDepreciationDecisionKey,
   type FaAuthorityRef,
   type FaDepreciationAuthorityEnvelope,
 } from "@/lib/registers/depreciation";
@@ -115,6 +117,9 @@ export function AuthorityCeremony({
 function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const [cadence, setCadence] = useState<"monthly" | "annual">("monthly");
+  // #651 fix-round 1 — ONE DECISION, ONE KEY: the same key for every attempt at THIS proposal,
+  // a new one the moment the cadence changes.
+  const decision = useDepreciationDecisionKey();
   return (
     <FaDoorDialog
       triggerLabel={t("proposeTrigger")}
@@ -122,7 +127,10 @@ function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolea
       description={t("proposeDescription")}
       confirmLabel={t("proposeTrigger")}
       busy={busy}
-      onConfirm={() => act(async () => { await proposeDepreciationAuthority(sessionTokenAccessor, { clientId, cadence }); })}
+      onConfirm={() => act(async () => {
+        const opKey = decision.key(authorityIntent("propose", { clientId, value: cadence }));
+        await proposeDepreciationAuthority(sessionTokenAccessor, { clientId, cadence, opKey });
+      })}
     >
       <div className="grid gap-1.5">
         <Label htmlFor="fa-authority-cadence">{t("cadenceLabel")}</Label>
@@ -151,6 +159,10 @@ function SignDialog({ clientId, authorityId, busy, act, error }: {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const [refKind, setRefKind] = useState<FaAuthorityRef["kind"]>("accounting_work");
   const [refId, setRefId] = useState("");
+  // #651 fix-round 1 (ADV-651-8) — THE DOOR A LOST RESPONSE IS ACTUALLY MET ON. Signing twice with
+  // two keys refuses CLR38 `authority_already_live`; with one key the retry returns the receipt
+  // the first attempt earned. Correcting the cited instruction is a different decision.
+  const decision = useDepreciationDecisionKey();
   const idBlank = refId.trim() === "";
   const idMalformed = !idBlank && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(refId.trim());
 
@@ -164,8 +176,10 @@ function SignDialog({ clientId, authorityId, busy, act, error }: {
       refusal={toDialogRefusal(error)}
       confirmDisabled={idBlank || idMalformed}
       onConfirm={() => act(async () => {
+        const opKey = decision.key(authorityIntent("sign",
+          { clientId, authorityId, value: `${refKind}:${refId.trim()}` }));
         await signDepreciationAuthority(sessionTokenAccessor, {
-          clientId, authorityId, authorityRef: { kind: refKind, id: refId.trim() },
+          clientId, authorityId, authorityRef: { kind: refKind, id: refId.trim() }, opKey,
         });
       })}
     >
@@ -214,6 +228,8 @@ function SignDialog({ clientId, authorityId, busy, act, error }: {
 function RetireDialog({ clientId, authorityId, busy, act }: { clientId: string; authorityId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const [reason, setReason] = useState("");
+  // #651 fix-round 1 — ONE DECISION, ONE KEY. A second retirement refuses `authority_not_live`.
+  const decision = useDepreciationDecisionKey();
   return (
     <FaDoorDialog
       triggerLabel={t("retireTrigger")}
@@ -223,7 +239,10 @@ function RetireDialog({ clientId, authorityId, busy, act }: { clientId: string; 
       confirmLabel={t("retireTrigger")}
       busy={busy}
       confirmDisabled={!reason.trim()}
-      onConfirm={() => act(async () => { await retireDepreciationAuthority(sessionTokenAccessor, { clientId, authorityId, reason: reason.trim() }); })}
+      onConfirm={() => act(async () => {
+        const opKey = decision.key(authorityIntent("retire", { clientId, authorityId, value: reason.trim() }));
+        await retireDepreciationAuthority(sessionTokenAccessor, { clientId, authorityId, reason: reason.trim(), opKey });
+      })}
     >
       <div className="grid gap-1.5">
         <Label htmlFor="fa-authority-retire-reason">{t("reasonLabel")}</Label>

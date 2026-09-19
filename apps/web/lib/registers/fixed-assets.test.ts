@@ -6,6 +6,7 @@ import {
   faRegisterTie,
   completeFixedAssetParticulars,
   reviseFixedAssetParticulars,
+  reviseIntent,
   disposeFixedAsset,
 } from "./fixed-assets";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -122,6 +123,7 @@ test("reviseFixedAssetParticulars: posts p_effective_from AND the change classif
       effectiveFrom: "2026-09-01",
       changeClass: "estimate",
       changeReason: "the plant survey revised the life",
+      opKey: "decided-revise",
     });
   });
   const body = calls[0]!.body;
@@ -136,7 +138,30 @@ test("reviseFixedAssetParticulars: posts p_effective_from AND the change classif
     method: "none", start_date: "2026-01-01",
     change_class: "estimate", change_reason: "the plant survey revised the life",
   });
+  // #651 fix-round 1 (adversarial review ADV-651-8) — ONE DECISION, ONE KEY: the caller's key
+  // reaches the door verbatim, so a retry after a lost response is the SAME revision rather than a
+  // second supersede-forward insert.
+  assert.equal(body.p_op_key, "decided-revise");
   assert.equal(Object.keys(body).length, 5, "…and the door still takes exactly five arguments");
+});
+
+test("#651 reviseIntent: one decision while the form is unchanged, a new one the moment any value is edited", () => {
+  const base = {
+    clientId: "c1", assetId: "a1",
+    particulars: { method: "straight_line" as const, useful_life_months: 36, start_date: "2026-01-01" },
+    effectiveFrom: "2026-09-01", changeClass: "estimate" as const, changeReason: "survey",
+  };
+  assert.equal(reviseIntent(base), reviseIntent({ ...base }), "the same revision is ONE decision");
+  assert.equal(reviseIntent(base),
+    reviseIntent({ ...base, particulars: { start_date: "2026-01-01", useful_life_months: 36, method: "straight_line" } }),
+    "…and the particulars' key ORDER is not part of the decision");
+  assert.notEqual(reviseIntent(base), reviseIntent({ ...base, effectiveFrom: "2026-10-01" }),
+    "moving the effective date is a different revision");
+  assert.notEqual(reviseIntent(base),
+    reviseIntent({ ...base, particulars: { ...base.particulars, useful_life_months: 48 } }),
+    "…and so is changing the life");
+  assert.notEqual(reviseIntent(base), reviseIntent({ ...base, changeReason: "a different reason" }),
+    "…and so is re-writing the reason");
 });
 
 test("disposeFixedAsset: posts every door argument by exact p_ name, cost portion defaults to null", async () => {
