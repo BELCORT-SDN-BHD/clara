@@ -117,6 +117,17 @@ test("900 — the answer textarea is a labelled Field: a real <label> element, a
 
       assert.match(textOf(body), /Sent to Clara as your answer to the open question above\./,
         "900 — the Field carries a description, the same composition work-question-form's note field and OnboardingItemRow's resolve control use");
+
+      // L07-A05 (fix round) — a visible FieldDescription is not an ANNOUNCED one: it is a bare
+      // <p> with no id and no context wiring (components/ui/field.tsx), so nothing associates it
+      // with the control unless the control's aria-describedby names it explicitly — the same
+      // wiring work-question-form.tsx's own controls use for their own associated text.
+      const describedBy = textarea!.getAttribute!("aria-describedby");
+      assert.ok(describedBy, "900 — the answer control must carry aria-describedby, or the help text is never announced");
+      const description = findIn(body, (n) => n.getAttribute?.("id") === describedBy);
+      assert.ok(description, "900 — aria-describedby must resolve to an actual node in the DOM");
+      assert.match(textOf(description!), /Sent to Clara as your answer to the open question above\./,
+        "900 — the resolved node must BE the description, not some other id");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();

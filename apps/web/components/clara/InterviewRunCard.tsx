@@ -67,6 +67,7 @@ export function InterviewRunCard({
   // textarea's new visible `FieldLabel` (owner ruling, 2026-09-18: only this control recomposes
   // onto Field; the run chrome below keeps its own markup).
   const answerId = useId();
+  const answerDescriptionId = `${answerId}-description`;
   const syncedTerminalRef = useRef<string | null>(null);
   // H-28 — the last park index this card has already told the checklist about. `null` is "no
   // park observed yet on this run", which is a DIFFERENT fact from park 0 and is why the very
@@ -298,6 +299,7 @@ export function InterviewRunCard({
                     <Textarea
                       id={answerId}
                       aria-label={t("answer.label")}
+                      aria-describedby={answerDescriptionId}
                       placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
@@ -309,7 +311,14 @@ export function InterviewRunCard({
                       }}
                       disabled={run.busy}
                     />
-                    <FieldDescription>{t("answer.fieldDescription")}</FieldDescription>
+                    {/* L07-A05 (fix round) — an explicit id + aria-describedby, matching
+                        work-question-form.tsx's own association idiom: FieldDescription is a bare
+                        <p> with no id of its own (components/ui/field.tsx), and it renders as a
+                        SIBLING of the Textarea here (not nested inside FieldLabel the way
+                        work-question-form.tsx's note field nests it), so nothing associates the
+                        two without this. Without it the help text was visible-only — never
+                        announced to a screen reader. */}
+                    <FieldDescription id={answerDescriptionId}>{t("answer.fieldDescription")}</FieldDescription>
                   </Field>
                 </FieldGroup>
                 <div className="flex flex-wrap gap-2">
