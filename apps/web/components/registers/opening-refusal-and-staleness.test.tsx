@@ -348,6 +348,71 @@ const FINALIZED_SEED = { ...SEED_OPEN_UNTIED, state: "finalized", batch_n: 1, fi
 const FA_ITEM = { id: "ifa", firm_id: "f1", client_id: "c1", seed_id: "s1", item_kind: "fixed_asset", item_key: "van-1", entry_id: "efa", counterparty_id: null, fixed_asset_id: "fa1", item_ref: null, item_date: null, amount_cents: 8000000, sst_portion_cents: null, sst_rate_bp: null, sst_basis: null, state: "active", superseded_by_item: null, supersedes_item_id: null, created_by: "u1", created_at: "2026-01-15T00:00:00Z" };
 const GL_ITEM = { id: "igl", firm_id: "f1", client_id: "c1", seed_id: "s1", item_kind: "gl_balance", item_key: "cash-1", entry_id: "egl", counterparty_id: null, fixed_asset_id: null, item_ref: null, item_date: null, amount_cents: 500000, sst_portion_cents: null, sst_rate_bp: null, sst_basis: null, state: "active", superseded_by_item: null, supersedes_item_id: null, created_by: "u1", created_at: "2026-01-15T00:00:00Z" };
 
+test("987.L07-05: the SAME period-wall substitution renders correctly out of Supersede, a NON-DRAFT door", async () => {
+  // L07-05 / L07-A04 — `openingClosedPeriodRefusal` is keyed on this workbench's ONE shared
+  // sticky `error`, set by the SAME `act()` every governed door shares (opening-seed-workbench.tsx).
+  // `clara.supersede_opening_item` inserts journal lines too (opening-item-doors.ts's own header),
+  // so the period wall can refuse a SUPERSEDE exactly as it refuses a draft. This cell proves the
+  // reworded, door-neutral sentence ("cannot be changed here") still fits when the refused act was
+  // never a draft at all.
+  const ENTRY_ID = "e2222222-2222-4222-8222-222222222222";
+  const mock = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) return jsonResponse({ ...DRYRUN_EMPTY, state: "finalized" });
+    if (url.includes("/rest/v1/rpc/supersede_opening_item")) {
+      return jsonResponse({
+        code: "CLR19",
+        message: `entry ${ENTRY_ID} sits in closed fiscal year FY2026; its lines may not change -- the formal reopen path is the one way back in`,
+        details: JSON.stringify({
+          reason: "write_into_closed_period", fiscal_year_id: "fy1", fy_status: "closed", entry_id: ENTRY_ID,
+        }),
+      }, 400);
+    }
+    if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([FINALIZED_SEED]);
+    if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([]);
+    if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse([{ id: "plan1", state: "open", revision_token: "rev1", created_at: "2026-01-01T00:00:00Z" }]);
+    if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([]);
+    if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);
+    if (url.includes("/rest/v1/opening_items")) return jsonResponse([GL_ITEM]);
+    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse([]);
+    if (url.includes("/rest/v1/client_resolutions")) return jsonResponse([{ id: "r1" }]);
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(mock, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      const trigger = buttonsLabelled(h.container as never, "Supersede")[0];
+      assert.ok(trigger, "the non-FA row's Supersede trigger must render");
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const confirm = buttonsLabelled(body as never, "Supersede").find((b) => b !== trigger);
+      assert.ok(confirm, "the Supersede dialog's own Confirm must render");
+      await h.act(() => clickButton(confirm as never));
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const text = textOf(body as never);
+      assert.match(text, /CLR19/, "the same governed code still surfaces out of a non-draft door");
+      assert.match(text, /write_into_closed_period/, "the same reason token still surfaces");
+      assert.doesNotMatch(text, new RegExp(ENTRY_ID), "the raw journal-entry id must never reach them");
+      assert.doesNotMatch(text, /sits in closed fiscal year/, "the raw entry-centric sentence must not render");
+      assert.match(text, /opening basis/i, "the message must still speak in terms of the opening basis");
+      // NOT a bare doesNotMatch(/drafted/i) — OpeningSupersedeDialog's OWN static copy legitimately
+      // says "drafts a reversal", so that check would fail on sibling UI text having nothing to do
+      // with the refusal. The refusal SENTENCE itself is what must stay door-neutral:
+      assert.match(text, /cannot be changed here/, "the door-neutral wording must be the one that renders");
+      assert.doesNotMatch(text, /cannot be drafted here/, "the old draft-specific wording must be gone");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
 test("F7: a fixed_asset row's Supersede Confirm is DISABLED with a visible reason; a non-FA row's is ENABLED", async () => {
   const mock = (async (u: RequestInfo | URL) => {
     const url = String(u);

@@ -100,11 +100,21 @@ export function OpeningSeedWorkbench({
   // at the DRAFT with CLR19 `write_into_closed_period`, naming the fiscal year and the id of the
   // journal entry it would have created — the estate's ONE generic period-wall message, correct
   // everywhere else it fires. A person working an opening basis never typed a journal entry and is
-  // shown one anyway. The rule, the code and the firing point (draft, never approval) are exactly
-  // what they were; only the SENTENCE changes, and only inside this flow — every other caller of
-  // this same refusal (prepayments' own `explainClosedPeriod`, the bank/journals lanes, …) reads
-  // its message through `toDialogRefusal`/`ErrorMessage` untouched, because this substitution lives
-  // here, not in either of those shared renderers.
+  // shown one anyway. The rule, the code and the firing point are exactly what they were; only the
+  // SENTENCE changes, and only inside this flow — every other caller of this same refusal
+  // (prepayments' own `explainClosedPeriod`, the bank/journals lanes, …) reads its message through
+  // `toDialogRefusal`/`ErrorMessage` untouched, because this substitution lives here, not in either
+  // of those shared renderers.
+  //
+  // WORDED DOOR-NEUTRAL ON PURPOSE (fix round, L07-05/L07-A04). `error` is this workbench's ONE
+  // shared sticky failure — set by the SAME `act()` every governed door on this surface shares
+  // (draft, record target, keyed resolution, SUPERSEDE, fixed asset, approve seed, approve
+  // correction, cancel, reopen) — and `clara.supersede_opening_item` inserts journal lines too
+  // (opening-item-doors.ts's own header), so a supersede refused by the period wall reaches this
+  // SAME banner. The original wording ("cannot be drafted here") named an act that was not always
+  // the one refused; "cannot be changed here" is correct for every door on this workbench, not only
+  // the draft. See the 987.L07-05 cell below, which drives this refusal out of Supersede — a
+  // non-draft door — and asserts the sentence still fits.
   const openingClosedPeriodRefusal = isDoorRefusal(error) && error.code === "CLR19" && error.reason === "write_into_closed_period"
     ? error
     : null;
