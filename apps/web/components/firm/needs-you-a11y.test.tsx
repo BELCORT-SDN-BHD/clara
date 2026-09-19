@@ -54,7 +54,6 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
 }
 
 const ENVELOPE: ReviewQueueEnvelope = {
-  watermark: "w1",
   counts: { ready: 0, needs_review: 0, needs_you: 1, open_drafts: 0, open_questions: 1, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [
@@ -225,7 +224,6 @@ test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations"
 // "[object Undefined]"). This envelope is intentionally separate from the
 // shared ENVELOPE above so the other two tests' own assertions are untouched.
 const HOSTILE_ENVELOPE: ReviewQueueEnvelope = {
-  watermark: "w2",
   counts: { ready: 0, needs_review: 1, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [
@@ -347,7 +345,6 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
 }
 
 const T7_ENVELOPE: ReviewQueueEnvelope = {
-  watermark: "w3",
   counts: { ready: 0, needs_review: 3, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 1, compliance_watches: 0, lint_findings: 1 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [
@@ -425,7 +422,6 @@ test("firm needs-you inbox: uncoded_filing / coding_task / lint_finding rows, di
 // client-workspace root (/clients/:id) — a link to the root would ALSO match a
 // substring-only assertion, which is exactly why this asserts the full href.
 const SEEDING_ENVELOPE: ReviewQueueEnvelope = {
-  watermark: "w4",
   counts: { ready: 0, needs_review: 1, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
   sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
   rows: [

@@ -240,7 +240,6 @@ export type ReviewQueueSweep = {
 export type ReviewQueueCursor = { tuple: string[] };
 
 export type ReviewQueueEnvelope = {
-  watermark: string;
   counts: ReviewQueueCounts;
   sweep: ReviewQueueSweep;
   /** 0016+: per-client SST-registration figures + a staleness flag. Present on

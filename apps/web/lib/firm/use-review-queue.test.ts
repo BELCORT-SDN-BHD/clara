@@ -7,6 +7,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderHook } from "../../test/hookHarness";
 import { useReviewQueue } from "./use-review-queue";
 import type { ReviewQueueEnvelope, ReviewQueueRow } from "./needs-you";
@@ -47,7 +50,6 @@ function row(id: string): ReviewQueueRow {
 
 function envelope(rows: ReviewQueueRow[], nextCursor: ReviewQueueEnvelope["next_cursor"]): ReviewQueueEnvelope {
   return {
-    watermark: "1",
     counts: {
       ready: 0,
       needs_review: rows.length,
@@ -83,6 +85,21 @@ async function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Pr
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
 }
+
+// #903 (item 2) — `ReviewQueueEnvelope.watermark` was typed but never read by this hook (nor by
+// `listReviewQueue`, nor rendered anywhere): a repo-wide search found zero consumers of either
+// the type or a `.watermark` property access against a review-queue envelope. Deletion is the
+// evidence-backed default the ticket's own triage settled on, over threading it through to a
+// renderer that has never existed. This is a SOURCE pin, not a DOM one: there is nothing to
+// mount that would prove an absent field is absent.
+test("903 — watermark is fully ABSENT from ReviewQueueEnvelope, not half-wired: no type field, no reader", () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const needsYouSource = readFileSync(join(dir, "needs-you.ts"), "utf8");
+  assert.doesNotMatch(needsYouSource, /watermark/i,
+    "the review-queue envelope type must not declare a field this build never reads");
+  const hookSource = readFileSync(join(dir, "use-review-queue.ts"), "utf8");
+  assert.doesNotMatch(hookSource, /watermark/i, "the hook must not (re-)introduce a read of a field the type no longer carries");
+});
 
 test("initial load: populates rows/counts from page 1, hasMore reflects a FULL page", async () => {
   const page1 = envelope([row("a"), row("b")], { tuple: ["1", "c1", "", "t", "b"] });
