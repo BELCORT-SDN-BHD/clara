@@ -26,7 +26,7 @@ import {
   CHART, financialClient, deactivate, makeCarryDownOnly, linkReversal, postEntry,
   stampPreFixCloseReceipt, plantBankStatement,
   pack, propose, publish, members, reasonOf, trialBalanceCash,
-  rootQuery, humanQuery,
+  rootQuery, humanQuery, upsertAccount,
 } from "./client-financial-pack-fixtures.mjs";
 
 const CLR04 = "CLR04";
@@ -301,6 +301,18 @@ test("p660.pack.pre_coverage_point + floor_fallback_no_seed — a point before t
   assert.equal(p.cash.coverage, "partial");
   assert.equal(p.cash.coverage_reason, "pre_coverage");
 
+  // AND THE COMPARISON OBEYS THE SAME AVAILABILITY. The preceding month-end is before the floor
+  // and `points[]` says so; a comparison line beside the headline reading "against RM 0.00" would
+  // make ONE read say two different things about ONE date -- the fabricated zero this ticket's
+  // own risk section names.
+  const priorPoint = p.cash.points.find((x) => x.as_of === p.cash.comparison.period.end);
+  assert.equal(priorPoint.available, false, "this fixture's preceding month-end is before the floor");
+  assert.equal(p.cash.comparison.value_cents, null,
+    "the comparison asserts a number the points of the same read call unknown");
+  assert.equal(p.cash.comparison.delta_cents, null);
+  assert.equal(p.cash.comparison.delta_pct, null);
+  assert.equal(p.cash.comparison.sign_change, false);
+
   // THE CARRY-DOWN HALF. This fixture client's plan carries BOTH `first_year_zero_opening`
   // (answered) and `carry_down_deferred` (resolved) — the rig's own legacy-activation bridge
   // (`rig-fixtures.mjs:88-96`). The estate's precedence says the opening is KNOWN there
@@ -399,6 +411,44 @@ test("p660.pack.future_as_of_refused / month_not_first_day_refused — both are 
   assert.equal(reasonOf(e4), "invalid_client");
 });
 
+test("p660.pack.cash_set_published_after_books_start - ONE revision plus a backdated import is not a version change, and the read does not say it is", async (t) => {
+  if (await gate(t)) return;
+  const { client, accounts } = await financialClient(ALICE(), "afterpub");
+  // THE ORDINARY ONBOARDING PATH, in its own order: publish the cash set on day one (the client
+  // has no books yet, so the door stamps today MYT), THEN import the client's history. Every
+  // backdated month then falls between the coverage floor and the version's effective_from --
+  // and `first_version_after_books_start` cannot prevent it, because it can only compare against
+  // the books that existed AT PUBLISH TIME.
+  await publishBank(client, accounts);
+  await postEntry(ALICE(), BOB(), { client, date: "2026-05-10", lines: sale(rm(400)) });
+  await postEntry(ALICE(), BOB(), { client, date: "2026-07-14", lines: sale(rm(600)) });
+
+  const rev = await rootQuery(
+    "select count(*)::int n from clara.cash_account_set_versions where client_id = $1", [client]);
+  assert.equal(rev.rows[0].n, 1, "this fixture publishes exactly ONE version");
+
+  const p = await pack(CAROL(), client);
+  // THE NUMBER IS RIGHT; THE SENTENCE BESIDE IT MUST BE TOO. A permanent amber saying "the
+  // definition of cash changed during this trend" on a client whose definition never changed
+  // teaches readers to ignore the warning that matters.
+  assert.notEqual(p.cash.coverage_reason, "cash_set_version_changed_in_series",
+    "one revision has never changed");
+  for (const point of p.cash.points) {
+    assert.notEqual(point.reason, "cash_set_version_changed_in_series",
+      `${point.as_of} names a version change that never happened`);
+  }
+  // It IS honest to say the definition was DECLARED after these months were booked. That is a
+  // different sentence, and this is it.
+  assert.equal(p.cash.coverage, "partial");
+  assert.equal(p.cash.coverage_reason, "cash_set_published_after_books_start");
+  const early = p.cash.points.filter((x) => x.as_of >= "2026-05-10" && x.as_of < p.cash.set.effective_from);
+  assert.ok(early.length > 0, "this fixture was expected to have points inside the books but before the publish");
+  for (const point of early) {
+    assert.equal(point.reason, "cash_set_published_after_books_start");
+    assert.equal(point.available, true, "the number is knowable -- only the declaration is younger");
+  }
+});
+
 test("p660.pack.closing_transfer_excluded + unmarked_history_no_false_positive — the close entry is out of profit, and a year-end CORRECTION is in", async (t) => {
   if (await gate(t)) return;
   const { client, accounts } = await financialClient(ALICE(), "ct");
@@ -447,6 +497,38 @@ test("p660.pack.unmarked_history_partial — an approved entry carrying close_re
   assert.equal(BigInt(p.income.value_cents), BigInt(0));
   assert.equal(p.profit.status, "ok", "the read still answers — it discloses rather than refuses");
   assert.notEqual(p.profit.value_cents, null);
+});
+
+test("p660.pack.unmarked_history_series_disclosed - the disclosure covers every month the CHART draws, not only the selected one", async (t) => {
+  if (await gate(t)) return;
+  const { client, accounts } = await financialClient(ALICE(), "unmarked6");
+  // The unmarked close sits in a month the chart DRAWS but the selected period does not contain.
+  // The exclusion predicate cannot see it (that is the whole point of the disclosure), so its
+  // amount is counted into that bar -- and a disclosure scoped to the selected period alone would
+  // leave five of the six drawn months silently uncovered.
+  await postEntry(ALICE(), BOB(), { client, date: "2026-01-06", lines: sale(rm(900)) });
+  const stale = await postEntry(ALICE(), BOB(), { client, date: "2026-01-20", memo: "pre-0120 close",
+    lines: [{ code: CHART.sales, debit: rm(900) }, { code: CHART.retained, credit: rm(900) }],
+    flags: { is_year_end: true } });
+  await stampPreFixCloseReceipt(stale, { client, firm: FIRM_A(), actor: ALICE() });
+  await postEntry(ALICE(), BOB(), { client, date: "2026-03-09", lines: sale(rm(500)) });
+  await publishBank(client, accounts);
+
+  const p = await pack(CAROL(), client, { month: "2026-03-01" });
+  // The SELECTED period is clean, and the period-scoped count says so honestly.
+  assert.equal(p.unmarked_closing_entries, 0);
+  assert.equal(p.profit.coverage_reason, null);
+  // The SERIES is not, and the read says so rather than drawing six bars and disclosing one.
+  assert.equal(p.unmarked_closing_entries_series, 1,
+    "the six-month series carries an unmarked close the response never mentions");
+  assert.equal(p.series_coverage_reason, "closing_transfer_unmarked_history");
+  // And a clean six months says nothing at all.
+  const { client: clean, accounts: cleanAccounts } = await financialClient(ALICE(), "unmarked6b");
+  await postEntry(ALICE(), BOB(), { client: clean, date: "2026-03-09", lines: sale(rm(500)) });
+  await publishBank(clean, cleanAccounts);
+  const q = await pack(CAROL(), clean, { month: "2026-03-01" });
+  assert.equal(q.unmarked_closing_entries_series, 0);
+  assert.equal(q.series_coverage_reason, null);
 });
 
 test("p660.pack.reopen_mirror_excluded — the reopen mirror carries the original's marker through, so profit does not swing by twice the roll", async (t) => {
@@ -523,6 +605,35 @@ test("p660.pack.mtd_comparison_capped — a 31-day month-to-date compares agains
   assert.equal(Number(p.profit.comparison.delta_pct), 75);
   // Balances compare with the PRECEDING MONTH-END, not the prior period's whole interval.
   assert.equal(p.cash.comparison.period.end, "2026-02-28");
+});
+
+test("p660.pack.historic_comparison_full_prior_month - a WHOLE historic month compares against the WHOLE prior month, even when the prior month is longer", async (t) => {
+  if (await gate(t)) return;
+  const { client, accounts } = await financialClient(ALICE(), "hist");
+  // January has 31 days and February 2026 has 28. AC4 gives HISTORY the prior FULL month, so a
+  // February read compares 2026-01-01..2026-01-31. The elapsed-day rule the MTD arm uses would
+  // stop at 2026-01-28 and silently drop the 30 January sale -- and the SAME response's series
+  // row for January would then contradict the comparison line beside the headline.
+  await postEntry(ALICE(), BOB(), { client, date: "2026-01-15", lines: sale(rm(100)) });
+  await postEntry(ALICE(), BOB(), { client, date: "2026-01-30", lines: sale(rm(900)) });
+  await postEntry(ALICE(), BOB(), { client, date: "2026-02-10", lines: sale(rm(100)) });
+  await publishBank(client, accounts);
+
+  const p = await pack(CAROL(), client, { month: "2026-02-01" });
+  assert.equal(p.profit.comparison.period.start, "2026-01-01");
+  assert.equal(p.profit.comparison.period.end, "2026-01-31", "the prior month was truncated");
+  assert.equal(BigInt(p.profit.comparison.value_cents), BigInt(rm(1000)));
+  assert.equal(BigInt(p.profit.comparison.delta_cents), BigInt(rm(100) - rm(1000)));
+  assert.equal(Number(p.profit.comparison.delta_pct), -90);
+  // ONE READ MAY NOT CONTRADICT ITSELF: the series row labelled January and the comparison
+  // labelled January are the same interval, so they are the same number.
+  const jan = p.series.find((m) => m.month === "2026-01-01");
+  assert.equal(BigInt(jan.profit_cents), BigInt(p.profit.comparison.value_cents),
+    "the series and the comparison disagree about January inside one response");
+  // income and expense inherit the same interval, once, from the same door.
+  assert.equal(p.income.comparison.period.end, "2026-01-31");
+  assert.equal(BigInt(p.income.comparison.value_cents), BigInt(rm(1000)));
+  assert.equal(p.expense.comparison.period.end, "2026-01-31");
 });
 
 test("p660.pack.zero_denominator + sign_change — delta_pct is NULL on a zero comparison (the amount is still shown), and a profit/loss transition is named", async (t) => {
@@ -603,6 +714,51 @@ test("p660.pack.composition_bounded — composition rows carry an entry id that 
   assert.equal(live.rows[0].n, ids.length);
   // Opening / movement / closing reconcile for the period.
   assert.equal(BigInt(bank.opening_cents) + BigInt(bank.movement_cents), BigInt(bank.closing_cents));
+
+  // THE PROFIT COMPOSITION LIVES IN THE PROFIT GROUP, where the browser's parser reads it
+  // (`apps/web/lib/dashboard/financial-pack.ts` hydrates `raw.profit.composition`). A top-level
+  // spelling hydrates to [] forever, and the drilldown renders nothing against the real door
+  // while a hand-written fixture keeps the cell green -- the exact break AC8 exists to prevent.
+  const sales = p.profit.composition.find((x) => x.account_code === CHART.sales);
+  assert.ok(sales, "profit.composition carries no row for the income account that moved");
+  assert.equal(sales.entries_total, 22);
+  assert.equal(sales.entries.length, 20);
+  assert.equal(sales.entries_truncated, true);
+  assert.equal(sales.account_type, "income");
+  assert.ok(!Object.prototype.hasOwnProperty.call(p, "profit_composition"),
+    "the composition has two spellings on one wire");
+  // The ACCOUNT level carries its own pair too, and here nothing is cut.
+  assert.equal(p.cash.composition_truncated, false);
+  assert.equal(p.cash.composition_total, 1);
+  assert.equal(p.profit.composition_truncated, false);
+  assert.equal(p.profit.composition_total, p.profit.composition.length);
+});
+
+test("p660.pack.composition_account_cap_disclosed - the 50-ACCOUNT cap reports itself, so a table that sums to less than the headline above it says why", async (t) => {
+  if (await gate(t)) return;
+  const { client, accounts } = await financialClient(ALICE(), "cap50");
+  // 51 expense accounts, one line each, in ONE entry: an ordinary Malaysian SME chart of accounts,
+  // not an edge case. The brief caps the list at 50 rows per group AND requires each level to
+  // carry its own `truncated` + `rows_total`; the entry level had both and the account level had
+  // neither, so the table under the chart listed 50 accounts summing to less than the headline
+  // directly above it with nothing saying the list had been cut.
+  const lines = [];
+  for (let i = 0; i < 51; i++) {
+    const code = String(5100 + i);
+    await upsertAccount(ALICE(), { client, code, name: "Sundry " + i, type: "expense", opKey: opk("p660-coa") });
+    lines.push({ code, debit: rm(10) });
+  }
+  lines.push({ code: CHART.bank, credit: rm(510) });
+  await postEntry(ALICE(), BOB(), { client, date: "2026-03-05", memo: "51 accounts", lines });
+  await publishBank(client, accounts);
+
+  const p = await pack(CAROL(), client, { month: "2026-03-01" });
+  assert.equal(p.profit.composition.length, 50, "the account cap is 50 rows per group");
+  assert.equal(p.profit.composition_total, 51, "the wire does not say how many accounts there are");
+  assert.equal(p.profit.composition_truncated, true, "a cut list that does not say it was cut");
+  assert.equal(BigInt(p.expense.value_cents), BigInt(rm(510)));
+  const shown = p.profit.composition.reduce((a, x) => a + BigInt(x.movement_cents), 0n);
+  assert.equal(shown, BigInt(rm(500)), "the table shows 50 of the 51 accounts");
 });
 
 test("p660.pack.empty_population_not_zero — a complete read over an empty population is ok + 0 + no_posted_entries", async (t) => {
@@ -887,4 +1043,25 @@ test("p660.pack.cash_set_members_sealed — a member cannot be added to a versio
     + "account_id, ordinal, member_reason) values ($1, $2, $3, $4, 9, 'declared_cash')",
     [v.cash_account_set_version_id, FIRM_A(), client, accounts[CHART.petty]]),
   "adding a member after the version's transaction");
+
+  // AND SEALED AGAINST REMOVAL AND EDITING, which is the half that was missing. The version row's
+  // `member_count` / `members_sha256` are checked once, by the DEFERRABLE trigger on the VERSIONS
+  // table, at creation time -- so a member deleted afterwards would leave the frozen sha
+  // describing a membership that no longer exists and the pack reporting a stale member_count
+  // over the survivors, with nothing ever raising. A version is SUPERSEDED, never edited.
+  await assertRaises("CLR08", () => rootQuery(
+    "delete from clara.cash_account_set_members where cash_account_set_version_id = $1",
+    [v.cash_account_set_version_id]),
+  "removing a member after the version's transaction");
+  await assertRaises("CLR08", () => rootQuery(
+    "update clara.cash_account_set_members set member_reason = 'declared_cash' "
+    + "where cash_account_set_version_id = $1", [v.cash_account_set_version_id]),
+  "editing a member after the version's transaction");
+
+  // The membership the pack reads is therefore still the one the version froze.
+  const after = await rootQuery(
+    "select member_count, (select count(*)::int from clara.cash_account_set_members m "
+    + "where m.cash_account_set_version_id = v.id) as live from clara.cash_account_set_versions v "
+    + "where v.id = $1", [v.cash_account_set_version_id]);
+  assert.equal(after.rows[0].member_count, after.rows[0].live);
 });

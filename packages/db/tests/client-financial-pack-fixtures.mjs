@@ -271,4 +271,4 @@ export async function trialBalanceCash(sub, client, asOf, codes) {
   return BigInt(r.rows[0].v);
 }
 
-export { ROLES, rootQuery, humanQuery, roleQuery, opk };
+export { ROLES, rootQuery, humanQuery, roleQuery, opk, upsertAccount };

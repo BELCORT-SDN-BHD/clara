@@ -394,8 +394,19 @@ declare
   v_sha     bytea;
 begin
   if tg_relid = 'clara.cash_account_set_members'::regclass then
-    -- (a) MEMBERS ARE SEALED TO THE CREATING TRANSACTION. A later INSERT would silently change
-    -- the membership a published figure was computed over, with no new revision to point at.
+    -- (a) MEMBERS ARE SEALED TO THE CREATING TRANSACTION, AGAINST EVERY VERB. A later INSERT
+    -- would silently change the membership a published figure was computed over, with no new
+    -- revision to point at. An UPDATE or a DELETE is worse: `member_count` and the frozen
+    -- `members_sha256` on the version row are recomputed by the DEFERRABLE trigger on the
+    -- VERSIONS table, which is never asked again after the creating transaction commits -- so a
+    -- member removed afterwards would leave the sha describing a membership that no longer
+    -- exists, and the pack reporting a stale member_count over the survivors, with nothing ever
+    -- raising. A version is SUPERSEDED, never edited.
+    if tg_op <> 'INSERT' then
+      raise exception 'cash-account-set members are sealed after version creation'
+        using errcode = 'CLR08',
+        detail = jsonb_build_object('reason', 'cash_set_members_sealed', 'attempted', tg_op)::text;
+    end if;
     select * into v from clara.cash_account_set_versions where id = new.cash_account_set_version_id;
     if not found or v.created_xid <> pg_current_xact_id() then
       raise exception 'cash-account-set members are sealed after version creation'
@@ -458,7 +469,7 @@ create constraint trigger t_cash_account_set_version_integrity
   deferrable initially deferred for each row
   execute function clara._tf_cash_account_set_integrity();
 create trigger t_cash_account_set_member_integrity
-  before insert on clara.cash_account_set_members
+  before insert or update or delete on clara.cash_account_set_members
   for each row execute function clara._tf_cash_account_set_integrity();
 
 -- ==============================================================================================
@@ -551,9 +562,15 @@ begin
   end if;
 
   v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  -- FOR UPDATE, so two admins publishing at once SERIALISE rather than race: the second waits on
+  -- the first, then re-reads the row under READ COMMITTED and sees what the first did with it.
+  -- The unique index `uq_cash_account_set_versions_current` and `unique (client_id, revision)`
+  -- keep the STATE correct either way; what the lock and the typed refusal below add is a
+  -- SENTENCE for the loser, instead of a raw 23505 naming an internal constraint on a screen.
   select v.id, v.effective_from into v_cur_id, v_cur_from
     from clara.cash_account_set_versions v
-   where v.client_id = p_client and v.state = 'published';
+   where v.client_id = p_client and v.state = 'published'
+     for update;
 
   if v_cur_id is null then
     -- THE FIRST VERSION, AND THE TRAP THIS DOOR EXISTS TO PREVENT. A first version whose
@@ -596,12 +613,23 @@ begin
   end if;
 
   v_sha := clara._hash(to_jsonb(v_ids));
-  insert into clara.cash_account_set_versions(
-      firm_id, client_id, revision, state, effective_from, member_count, members_sha256,
-      definition_version, created_by)
-    values (c.firm, p_client, v_next, 'published', v_from, v_n, v_sha,
-            'clara.cash-account-set/v1', c.actor)
-    returning id into v_version;
+  -- A CONCURRENT PUBLISH IS A TYPED REFUSAL, NOT A CONSTRAINT NAME. Every other refusal on this
+  -- door carries an errcode and a detail.reason the browser maps to a sentence; the loser of a
+  -- race must not be the one caller who receives `duplicate key value violates unique constraint
+  -- "cash_account_set_versions_client_id_revision_key"` instead of "somebody just published a new
+  -- version -- reload and try again".
+  begin
+    insert into clara.cash_account_set_versions(
+        firm_id, client_id, revision, state, effective_from, member_count, members_sha256,
+        definition_version, created_by)
+      values (c.firm, p_client, v_next, 'published', v_from, v_n, v_sha,
+              'clara.cash-account-set/v1', c.actor)
+      returning id into v_version;
+  exception when unique_violation then
+    raise exception 'another version of this cash account set was published while this one was being written'
+      using errcode = 'CLR11',
+      detail = jsonb_build_object('reason', 'cash_set_version_raced')::text;
+  end;
 
   insert into clara.cash_account_set_members(
       cash_account_set_version_id, firm_id, client_id, account_id, ordinal, member_reason)
@@ -762,6 +790,9 @@ declare
   v_set_rev      int;
   v_set_from     date;
   v_set_count    int;
+  v_set_multi    boolean := false;
+  v_prev_known   boolean := true;
+  v_pl_prev_known boolean := true;
   v_cash_status  text;
   v_cash_cov     text;
   v_cash_reason  text;
@@ -776,6 +807,7 @@ declare
   v_prev_start   date;
   v_prev_stop    date;
   v_unmarked     int := 0;
+  v_unmarked_ser int := 0;
   v_pop          int := 0;
   v_pl_cov       text;
   v_pl_reason    text;
@@ -784,7 +816,9 @@ declare
   v_series       jsonb := '[]'::jsonb;
   v_series_start date;
   v_cash_comp    jsonb := '[]'::jsonb;
+  v_cash_comp_n  int := 0;
   v_profit_comp  jsonb := '[]'::jsonb;
+  v_profit_comp_n int := 0;
 begin
   -- THE INLINE FLOOR at VIEWER rank (0214:262-274's three predicates). See the header: every
   -- relation below is already table-SELECT-granted to the whole clara_authenticated role behind a
@@ -905,6 +939,10 @@ begin
     end if;
   end if;
 
+  -- THE PRECEDING MONTH-END IS EITHER KNOWABLE OR IT IS NOT, and the comparison beside the
+  -- headline obeys the same answer `points[]` gives for that date.
+  v_prev_known := v_floor is null or v_prev_end >= v_floor;
+
   -- ==========================================================================================
   -- CASH. ONE cash-set version -- the one whose window contains the as-of -- applied to ALL SIX
   -- POINTS. A trend whose membership changes between points is not a trend.
@@ -918,6 +956,11 @@ begin
      where v.client_id = p_client
        and v.effective_from <= v_as_of
        and (v.effective_to is null or v.effective_to >= v_as_of);
+
+    -- MORE THAN ONE REVISION, OR ONLY ONE? The two shapes below say different things about a
+    -- point that precedes this version's window, and only one of them is ever true.
+    select count(*) > 1 into v_set_multi
+      from clara.cash_account_set_versions v where v.client_id = p_client;
 
     if v_set_id is null then
       -- NEVER 0. "We do not know which accounts are cash" and "cash is zero" are different
@@ -961,7 +1004,21 @@ begin
       -- (`points[].reason`); this is which one the GROUP names when both are true of the series.
       if v_floor is not null
          and exists (select 1 from unnest(v_points) d where d >= v_floor and d < v_set_from) then
-        v_cash_cov := 'partial'; v_cash_reason := 'cash_set_version_changed_in_series';
+        v_cash_cov := 'partial';
+        -- AND THE SENTENCE BESIDE THE NUMBER IS THE TRUE ONE. A point inside the books but before
+        -- this version's effective_from means one of two different things:
+        --   · MORE THAN ONE revision exists -> the definition of cash really did CHANGE inside
+        --     this trend, and an earlier point was computed under a membership the trend does not
+        --     use. That is the warning this read exists to raise.
+        --   · EXACTLY ONE revision exists -> nothing changed at all. The set was simply DECLARED
+        --     after those months were booked, which is the ORDINARY onboarding order (publish the
+        --     cash set on day one, import the client's history afterwards) and is the one case
+        --     `first_version_after_books_start` cannot refuse, because at publish time there were
+        --     no books to compare the date against.
+        -- Naming the first when the second is true puts a permanent amber on a client whose
+        -- definition never changed, which teaches readers to ignore the warning that matters.
+        v_cash_reason := case when v_set_multi then 'cash_set_version_changed_in_series'
+                              else 'cash_set_published_after_books_start' end;
       elsif v_floor is not null and v_points[1] < v_floor then
         v_cash_cov := 'partial'; v_cash_reason := 'pre_coverage';
       end if;
@@ -981,7 +1038,10 @@ begin
                                    else (array[v_c1, v_c2, v_c3, v_c4, v_c5, v_c6])[p.k] end,
                'available',   not (v_floor is not null and p.d < v_floor),
                'reason',      case when v_floor is not null and p.d < v_floor then 'pre_coverage'
-                                   when p.d < v_set_from then 'cash_set_version_changed_in_series'
+                                   when p.d < v_set_from and v_set_multi
+                                     then 'cash_set_version_changed_in_series'
+                                   when p.d < v_set_from
+                                     then 'cash_set_published_after_books_start'
                                    else null end) order by p.k), '[]'::jsonb)
         into v_point_rows
         from unnest(v_points) with ordinality p(d, k);
@@ -990,62 +1050,66 @@ begin
       -- PERIOD, and the movement's own entries -- CAPPED at 20 per account and 50 accounts per
       -- group. A cumulative opening is a number, not an enumerable population; the
       -- account-filtered ledger is #670's.
-      select coalesce(jsonb_agg(to_jsonb(y) order by y.account_code), '[]'::jsonb) into v_cash_comp
+      -- THE ACCOUNT LEVEL CARRIES ITS OWN `truncated` + `rows_total`, exactly as the entry level
+      -- does. A table listing 50 accounts that sums to less than the headline directly above it,
+      -- with nothing saying the list was cut, is the same class of silent wrongness as a
+      -- fabricated zero. `count(*) over ()` is evaluated BEFORE the LIMIT, so the total costs no
+      -- second pass, and the key is stripped from each row rather than repeated on all of them.
+      select coalesce(jsonb_agg(to_jsonb(y) - 'rows_total' order by y.account_code), '[]'::jsonb),
+             coalesce(max(y.rows_total), 0)
+        into v_cash_comp, v_cash_comp_n
         from (
-          select a.account_id    as account_id,
+          select count(*) over ()::int as rows_total,
+                 a.account_id    as account_id,
                  a.account_code  as account_code,
                  a.name          as name,
                  m.member_reason as member_reason,
-                 coalesce((select sum(jl.debit_cents - jl.credit_cents)
-                             from clara.journal_lines jl
-                             join clara.journal_entries je on je.id = jl.entry_id
-                            where jl.client_id = p_client and jl.account_code = a.account_code
-                              and je.status = 'approved' and je.posting_date < v_start), 0)::bigint
-                   as opening_cents,
-                 coalesce((select sum(jl.debit_cents - jl.credit_cents)
-                             from clara.journal_lines jl
-                             join clara.journal_entries je on je.id = jl.entry_id
-                            where jl.client_id = p_client and jl.account_code = a.account_code
-                              and je.status = 'approved'
-                              and je.posting_date between v_start and v_as_of), 0)::bigint
-                   as movement_cents,
-                 coalesce((select sum(jl.debit_cents - jl.credit_cents)
-                             from clara.journal_lines jl
-                             join clara.journal_entries je on je.id = jl.entry_id
-                            where jl.client_id = p_client and jl.account_code = a.account_code
-                              and je.status = 'approved' and je.posting_date <= v_as_of), 0)::bigint
-                   as closing_cents,
-                 coalesce((select jsonb_agg(to_jsonb(r) order by r.ord)
-                             from (select je.id as entry_id,
-                                          je.posting_date::text as posting_date,
-                                          je.memo as memo,
-                                          sum(jl.debit_cents - jl.credit_cents)::bigint as amount_cents,
-                                          row_number() over (
-                                            order by abs(sum(jl.debit_cents - jl.credit_cents)) desc,
-                                                     je.posting_date desc, je.id) as ord
-                                     from clara.journal_lines jl
-                                     join clara.journal_entries je on je.id = jl.entry_id
-                                    where jl.client_id = p_client and jl.account_code = a.account_code
-                                      and je.status = 'approved'
-                                      and je.posting_date between v_start and v_as_of
-                                    group by je.id, je.posting_date, je.memo
-                                    order by abs(sum(jl.debit_cents - jl.credit_cents)) desc,
-                                             je.posting_date desc, je.id
-                                    limit 20) r), '[]'::jsonb) as entries,
-                 (select count(distinct je.id)::int
-                    from clara.journal_lines jl
-                    join clara.journal_entries je on je.id = jl.entry_id
-                   where jl.client_id = p_client and jl.account_code = a.account_code
-                     and je.status = 'approved'
-                     and je.posting_date between v_start and v_as_of) as entries_total,
-                 (select count(distinct je.id)
-                    from clara.journal_lines jl
-                    join clara.journal_entries je on je.id = jl.entry_id
-                   where jl.client_id = p_client and jl.account_code = a.account_code
-                     and je.status = 'approved'
-                     and je.posting_date between v_start and v_as_of) > 20 as entries_truncated
+                 q.opening       as opening_cents,
+                 q.movement      as movement_cents,
+                 q.closing       as closing_cents,
+                 q.entries       as entries,
+                 q.n             as entries_total,
+                 q.n > 20        as entries_truncated
             from clara.cash_account_set_members m
             join clara.coa_accounts a on a.account_id = m.account_id and a.client_id = p_client
+            -- ONE SCAN PER MEMBER ACCOUNT, three FILTERED aggregates over it. This used to be six
+            -- correlated subqueries that each re-read the same account's approved lines -- on the
+            -- heaviest read of the client home, polled every thirty seconds while the tab is
+            -- visible. The three bounds are unchanged (< period start; within the period; <= the
+            -- as-of), so the numbers are the same numbers and `p660.pack.composition_bounded`'s
+            -- opening + movement = closing assertion still holds them to it.
+            cross join lateral (
+              select coalesce(sum(jl.debit_cents - jl.credit_cents)
+                       filter (where je.posting_date < v_start), 0)::bigint as opening,
+                     coalesce(sum(jl.debit_cents - jl.credit_cents)
+                       filter (where je.posting_date between v_start and v_as_of), 0)::bigint as movement,
+                     coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as closing,
+                     count(distinct je.id) filter (
+                       where je.posting_date between v_start and v_as_of)::int as n,
+                     coalesce((select jsonb_agg(to_jsonb(r) order by r.ord)
+                                 from (select je2.id as entry_id,
+                                              je2.posting_date::text as posting_date,
+                                              je2.memo as memo,
+                                              sum(jl2.debit_cents - jl2.credit_cents)::bigint as amount_cents,
+                                              row_number() over (
+                                                order by abs(sum(jl2.debit_cents - jl2.credit_cents)) desc,
+                                                         je2.posting_date desc, je2.id) as ord
+                                         from clara.journal_lines jl2
+                                         join clara.journal_entries je2 on je2.id = jl2.entry_id
+                                        where jl2.client_id = p_client
+                                          and jl2.account_code = a.account_code
+                                          and je2.status = 'approved'
+                                          and je2.posting_date between v_start and v_as_of
+                                        group by je2.id, je2.posting_date, je2.memo
+                                        order by abs(sum(jl2.debit_cents - jl2.credit_cents)) desc,
+                                                 je2.posting_date desc, je2.id
+                                        limit 20) r), '[]'::jsonb) as entries
+                from clara.journal_lines jl
+                join clara.journal_entries je on je.id = jl.entry_id
+               where jl.client_id = p_client and jl.account_code = a.account_code
+                 and je.status = 'approved'
+                 and je.posting_date <= v_as_of
+            ) q
            where m.cash_account_set_version_id = v_set_id
            order by a.account_code
            limit 50) y;
@@ -1062,12 +1126,24 @@ begin
   -- ==========================================================================================
   if v_visible then
     v_prev_start := (date_trunc('month', v_start) - interval '1 month')::date;
-    -- THE COMPARISON INTERVAL, CAPPED. An MTD run to the 31st compares against the prior month's
-    -- LAST DAY when that month is shorter -- 2026-03-31 MTD compares 2026-02-01..2026-02-28,
-    -- never a date that does not exist.
-    v_prev_stop := least(
-      (v_prev_start + ((v_as_of - v_start) * interval '1 day'))::date,
-      (v_prev_start + interval '1 month' - interval '1 day')::date);
+    -- THE COMPARISON INTERVAL, AND IT IS TWO RULES RATHER THAN ONE (AC4).
+    --
+    --   · A COMPLETE MONTH -- a named historic month read to its own last day, or a month-to-date
+    --     read on the last day of the month -- compares against the prior month IN FULL. Applying
+    --     the elapsed-day rule here would TRUNCATE a longer predecessor to the selected month's
+    --     own length (February against January drops three days; April, June, September and
+    --     November drop one -- five of twelve month pairs, every year), and the SAME response's
+    --     series row for that month would then contradict the comparison line beside the headline.
+    --   · AN IN-PROGRESS MONTH-TO-DATE compares against the same ELAPSED stretch of the prior
+    --     month, capped at that month's last day when it is shorter: 2026-03-31 MTD compares
+    --     2026-02-01..2026-02-28, never a date that does not exist.
+    if v_as_of >= v_month_end then
+      v_prev_stop := (v_prev_start + interval '1 month' - interval '1 day')::date;
+    else
+      v_prev_stop := least(
+        (v_prev_start + ((v_as_of - v_start) * interval '1 day'))::date,
+        (v_prev_start + interval '1 month' - interval '1 day')::date);
+    end if;
 
     select coalesce(sum(case when a.account_type = 'income'
                              then jl.credit_cents - jl.debit_cents else 0 end) filter (
@@ -1095,6 +1171,13 @@ begin
 
     v_profit   := coalesce(v_income, 0) - coalesce(v_expense, 0);
     v_profit_p := coalesce(v_income_p, 0) - coalesce(v_expense_p, 0);
+
+    -- A COMPARISON PERIOD ENTIRELY BEFORE THE COVERAGE FLOOR IS UNKNOWN, NOT ZERO -- the same
+    -- rule `points[]` already applies to the cash trend, applied to the line beside the headline.
+    -- "This client earned nothing in January" and "this client's books do not start until March"
+    -- are different sentences, and printing the first for the second turns the whole current
+    -- figure into apparent growth from nothing.
+    v_pl_prev_known := v_floor is null or v_prev_stop >= v_floor;
 
     -- THE UNMARKED-HISTORY DETECTOR, PRECISE AND SEPARATE FROM THE EXCLUSION. An approved entry
     -- inside the period with closing_transfer = false AND either its own close_receipt_id (only
@@ -1154,11 +1237,28 @@ begin
            and je.posting_date <= least((m.d + interval '1 month' - interval '1 day')::date, v_as_of)
       ) s;
 
+    -- THE DISCLOSURE COVERS EVERY MONTH THE CHART DRAWS, not only the selected one. An unmarked
+    -- pre-0120 close is invisible to the exclusion predicate (that is the whole reason this read
+    -- DISCLOSES instead of repairing), so one sitting three months back is counted into that
+    -- month's bar. A disclosure scoped to the selected period alone would cover one of the six
+    -- months drawn beside it and say nothing about the other five.
+    select count(*)::int into v_unmarked_ser from clara.journal_entries e
+     where e.client_id = p_client
+       and e.status = 'approved'
+       and e.posting_date between v_series_start and v_as_of
+       and e.closing_transfer = false
+       and (e.close_receipt_id is not null
+            or exists (select 1 from clara.journal_entries o
+                        where o.id = e.reversal_of and o.close_receipt_id is not null));
+
     -- PROFIT COMPOSITION: per income/expense account over the selected period, with its capped
     -- movement entries. Each entry row is what the browser addresses as ?entry=<id>.
-    select coalesce(jsonb_agg(to_jsonb(y) order by y.account_code), '[]'::jsonb) into v_profit_comp
+    select coalesce(jsonb_agg(to_jsonb(y) - 'rows_total' order by y.account_code), '[]'::jsonb),
+           coalesce(max(y.rows_total), 0)
+      into v_profit_comp, v_profit_comp_n
       from (
-        select a.account_id   as account_id,
+        select count(*) over ()::int as rows_total,
+               a.account_id   as account_id,
                a.account_code as account_code,
                a.name         as name,
                a.account_type as account_type,
@@ -1249,14 +1349,23 @@ begin
       'coverage_reason',    v_cash_reason,
       -- THE COMPARISON LIVES HERE, ONCE. The browser recomputes none of it, and #669's tiles
       -- inherit the same three rules rather than re-deriving them.
-      'comparison',         case when v_cash_status = 'ok' then jsonb_build_object(
-                              'value_cents', v_c5,
-                              'delta_cents', v_c6 - v_c5,
-                              'delta_pct',   case when v_c5 = 0 then null
+      --
+      -- AND IT OBEYS THE SAME AVAILABILITY AS `points[]`. The preceding month-end of a client
+      -- whose books start this month is BEFORE the coverage floor: the trend point for that date
+      -- already says `available:false, value_cents:null, reason:'pre_coverage'`, and a comparison
+      -- asserting "against RM 0.00" for the same date would make ONE read say two different
+      -- things about ONE date -- and would print the whole balance as growth from nothing.
+      'comparison',         case when v_cash_status <> 'ok' then null else jsonb_build_object(
+                              'value_cents', case when v_prev_known then v_c5 else null end,
+                              'delta_cents', case when v_prev_known then v_c6 - v_c5 else null end,
+                              'delta_pct',   case when not v_prev_known or v_c5 = 0 then null
                                              else round(((v_c6 - v_c5)::numeric / abs(v_c5)) * 100, 2) end,
-                              'sign_change', v_c6 <> 0 and v_c5 <> 0 and sign(v_c6) <> sign(v_c5),
+                              'sign_change', v_prev_known and v_c6 <> 0 and v_c5 <> 0
+                                             and sign(v_c6) <> sign(v_c5),
+                              'available',   v_prev_known,
+                              'reason',      case when v_prev_known then null else 'pre_coverage' end,
                               'period', jsonb_build_object('start', v_prev_end::text,
-                                                           'end', v_prev_end::text)) else null end,
+                                                           'end', v_prev_end::text)) end,
       'set',                case when v_set_id is null then null else jsonb_build_object(
                               'version_id',            v_set_id,
                               'revision',              v_set_rev,
@@ -1264,7 +1373,9 @@ begin
                               'member_count',          v_set_count,
                               'applied_to_all_points', true) end,
       'points',             v_point_rows,
-      'composition',        v_cash_comp),
+      'composition',        v_cash_comp,
+      'composition_total',  v_cash_comp_n,
+      'composition_truncated', v_cash_comp_n > 50),
 
     'profit', jsonb_build_object(
       'value_cents',        case when v_pl_status = 'ok' then v_profit else null end,
@@ -1276,16 +1387,27 @@ begin
       'definition_version', 'clara.client-financial-pack/v1',
       'source_watermark',   v_watermark,
       'coverage',           v_pl_cov, 'coverage_reason', v_pl_reason,
-      'comparison',         case when v_pl_status = 'ok' then jsonb_build_object(
-                              'value_cents', v_profit_p,
-                              'delta_cents', v_profit - v_profit_p,
-                              'delta_pct',   case when v_profit_p = 0 then null
+      'comparison',         case when v_pl_status <> 'ok' then null else jsonb_build_object(
+                              'value_cents', case when v_pl_prev_known then v_profit_p else null end,
+                              'delta_cents', case when v_pl_prev_known then v_profit - v_profit_p else null end,
+                              'delta_pct',   case when not v_pl_prev_known or v_profit_p = 0 then null
                                              else round(((v_profit - v_profit_p)::numeric
                                                          / abs(v_profit_p)) * 100, 2) end,
-                              'sign_change', v_profit <> 0 and v_profit_p <> 0
+                              'sign_change', v_pl_prev_known and v_profit <> 0 and v_profit_p <> 0
                                              and sign(v_profit) <> sign(v_profit_p),
+                              'available',   v_pl_prev_known,
+                              'reason',      case when v_pl_prev_known then null
+                                                  else 'pre_coverage' end,
                               'period', jsonb_build_object('start', v_prev_start::text,
-                                                           'end', v_prev_stop::text)) else null end),
+                                                           'end', v_prev_stop::text)) end,
+      -- THE COMPOSITION LIVES IN THE GROUP IT IS ABOUT, beside the cash group's own. A top-level
+      -- spelling is a key no consumer of the ENVELOPE can reach: the browser hydrates each figure
+      -- group through one parser (`apps/web/lib/dashboard/financial-pack.ts`), so a composition
+      -- outside the group hydrates to nothing and the drilldown under the chart renders nothing
+      -- at all -- against the real door, while a hand-written fixture keeps its cell green.
+      'composition',        v_profit_comp,
+      'composition_total',  v_profit_comp_n,
+      'composition_truncated', v_profit_comp_n > 50),
 
     'income', jsonb_build_object(
       'value_cents',        case when v_pl_status = 'ok' then v_income else null end,
@@ -1297,16 +1419,19 @@ begin
       'definition_version', 'clara.client-financial-pack/v1',
       'source_watermark',   v_watermark,
       'coverage',           v_pl_cov, 'coverage_reason', v_pl_reason,
-      'comparison',         case when v_pl_status = 'ok' then jsonb_build_object(
-                              'value_cents', v_income_p,
-                              'delta_cents', v_income - v_income_p,
-                              'delta_pct',   case when v_income_p = 0 then null
+      'comparison',         case when v_pl_status <> 'ok' then null else jsonb_build_object(
+                              'value_cents', case when v_pl_prev_known then v_income_p else null end,
+                              'delta_cents', case when v_pl_prev_known then v_income - v_income_p else null end,
+                              'delta_pct',   case when not v_pl_prev_known or v_income_p = 0 then null
                                              else round(((v_income - v_income_p)::numeric
                                                          / abs(v_income_p)) * 100, 2) end,
-                              'sign_change', v_income <> 0 and v_income_p <> 0
+                              'sign_change', v_pl_prev_known and v_income <> 0 and v_income_p <> 0
                                              and sign(v_income) <> sign(v_income_p),
+                              'available',   v_pl_prev_known,
+                              'reason',      case when v_pl_prev_known then null
+                                                  else 'pre_coverage' end,
                               'period', jsonb_build_object('start', v_prev_start::text,
-                                                           'end', v_prev_stop::text)) else null end),
+                                                           'end', v_prev_stop::text)) end),
 
     'expense', jsonb_build_object(
       'value_cents',        case when v_pl_status = 'ok' then v_expense else null end,
@@ -1318,20 +1443,28 @@ begin
       'definition_version', 'clara.client-financial-pack/v1',
       'source_watermark',   v_watermark,
       'coverage',           v_pl_cov, 'coverage_reason', v_pl_reason,
-      'comparison',         case when v_pl_status = 'ok' then jsonb_build_object(
-                              'value_cents', v_expense_p,
-                              'delta_cents', v_expense - v_expense_p,
-                              'delta_pct',   case when v_expense_p = 0 then null
+      'comparison',         case when v_pl_status <> 'ok' then null else jsonb_build_object(
+                              'value_cents', case when v_pl_prev_known then v_expense_p else null end,
+                              'delta_cents', case when v_pl_prev_known then v_expense - v_expense_p else null end,
+                              'delta_pct',   case when not v_pl_prev_known or v_expense_p = 0 then null
                                              else round(((v_expense - v_expense_p)::numeric
                                                          / abs(v_expense_p)) * 100, 2) end,
-                              'sign_change', v_expense <> 0 and v_expense_p <> 0
+                              'sign_change', v_pl_prev_known and v_expense <> 0 and v_expense_p <> 0
                                              and sign(v_expense) <> sign(v_expense_p),
+                              'available',   v_pl_prev_known,
+                              'reason',      case when v_pl_prev_known then null
+                                                  else 'pre_coverage' end,
                               'period', jsonb_build_object('start', v_prev_start::text,
-                                                           'end', v_prev_stop::text)) else null end),
+                                                           'end', v_prev_stop::text)) end),
 
     'series',             v_series,
-    'profit_composition', v_profit_comp,
     'unmarked_closing_entries', v_unmarked,
+    -- THE SIX MONTHS THE CHART DRAWS, DISCLOSED AS ONE FACT. `unmarked_closing_entries` is about
+    -- the SELECTED period; this pair is about the whole series beside it, so a bar three months
+    -- back carrying an unmarked pre-0120 close is not silently drawn as if it were clean.
+    'unmarked_closing_entries_series', v_unmarked_ser,
+    'series_coverage_reason', case when v_unmarked_ser > 0
+                                   then 'closing_transfer_unmarked_history' else null end,
     -- NOT A FIGURE GROUP, AND DELIBERATELY SO. Receivables and payables are #669's tiles over
     -- this same envelope; a bank STATEMENT balance is #657/#675's and is a third party's claim
     -- about an account rather than this ledger's. Neither is aggregated here, and the tail
