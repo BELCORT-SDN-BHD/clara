@@ -96,6 +96,29 @@ it, and a cohort row in [rig-meta.mjs](rig-meta.mjs) that names every object the
 the rig census stays wholly-present-or-wholly-absent. `counterparty-identity.test.mjs` +
 `counterparty-identity-preintegration-gate.mjs` (migration `0215`, #647) is the current example.
 
+## document_regions.field_path literals, kept honest (#857)
+
+`clara._assert_field_path` (migration 0191) is enforced at `clara.persist_document_extraction`
+alone — the table accepts anything written to it directly, and both `packages/db/tests/` and
+`packages/runtime/tests/` do write it directly (71 raw `insert into clara.document_regions`
+statements across 35 files, at last count — the ONLY two trees that ever bypass the audited
+door). `scripts/check-document-region-field-paths.mjs` (repo root, chained into the root `lint`
+script beside `check-dead-citations.mjs`) scans exactly those two trees for a literal
+`field_path` value — an inline SQL string literal positioned at the column's own slot in a raw
+insert, or a `field_path: "…"` object-literal property one step removed from it — and refuses one
+that does not conform to 0191's grammar, read from 0191's own source text rather than duplicated
+by hand. A `$N` placeholder, a variable or a `${…}`-interpolated template literal carries no
+literal to check statically and is skipped; an evidence-CITATION object
+(`{ region_idx, quote, field_path }`, the chat/prompt-tool shape, unrelated to this table) is
+excluded by its own `region_idx` marker. `scripts/check-document-region-field-paths.selftest.mjs`
+proves the detector against seeded fixtures and re-verifies the real two trees are clean today.
+
+This is the LINT half of #857 only. The ticket's other half — a `clara.document_regions` table
+`CHECK` built on a boolean sibling of `clara._assert_field_path` — needs a new migration, which a
+wave-1 lane may not cut (docs/plan/active/riders-2026-09-20/WORK-ORDER.md rule 5); left to a
+follow-up. The lint is preventive on its own (every literal conforms today) but structural only
+once the `CHECK` lands — see this ticket's final report.
+
 ## World contamination and T10b (#866)
 
 `rig-isolation.test.mjs`'s T10b asserts that `clara_agent_ro` and the two wake roles can
