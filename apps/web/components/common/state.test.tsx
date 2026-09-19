@@ -29,7 +29,11 @@ function findByTestId(node: Stub, id: string): Stub | null {
 
 test("896.testid — a data-testid passed to StateBanner is queryable in the rendered DOM", async () => {
   const h = await renderComponent(
-    createElement(StateBanner, { tone: "error", "data-testid": "my-banner", children: "Something failed" }),
+    // `createElement` (unlike JSX) gets no compiler exemption for `data-*` attributes on a typed
+    // component's props — that leniency is JSX-attribute-checking-specific, not a property React's
+    // own types declare. The cast is the test's own concession to that, not evidence against #896's
+    // fix (the DOM assertion below is what actually proves the attribute reached the root).
+    createElement(StateBanner, { tone: "error", "data-testid": "my-banner", children: "Something failed" } as never),
   );
   try {
     const node = findByTestId(h.container as Stub, "my-banner");
@@ -71,11 +75,11 @@ test("896.no-drift — the other 56 call sites' rendered output is unaffected: n
   // A bordered decision box with every optional slot filled, none of them touched by the rest
   // spread — proves the change is additive, not a reshuffle of the existing props.
   const h = await renderComponent(
-    createElement(
-      StateBanner,
-      { tone: "warning", title: "Heads up", code: "CLR01", silent: true, action: createElement("button", null, "Retry") },
-      "The body text",
-    ),
+    createElement(StateBanner, {
+      tone: "warning", title: "Heads up", code: "CLR01", silent: true,
+      action: createElement("button", null, "Retry"),
+      children: "The body text",
+    }),
   );
   try {
     const text = h.text();

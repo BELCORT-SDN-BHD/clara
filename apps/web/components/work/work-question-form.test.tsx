@@ -256,7 +256,7 @@ test("an invalid value is refused LOCALLY, names its constraint, and FOCUSES the
   }
 });
 
-test("#896 — an OPERATIONAL failure (not a governed refusal) renders a banner queryable by its own data-testid", async () => {
+test("896 — an OPERATIONAL failure (not a governed refusal) renders a banner queryable by its own data-testid", async () => {
   // `clara.answer_work_question` returning a non-CLR 500 classifies as a WireError (lib/wire.ts),
   // which `answerWorkQuestion` maps to `refusal.kind: "failed"` — the one branch this form renders
   // through `<StateBanner data-testid="work-question-failed">` (work-question-form.tsx). Before
