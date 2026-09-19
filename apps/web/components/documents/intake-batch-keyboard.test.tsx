@@ -134,12 +134,18 @@ test("FOCUS RETURNS TO THE TRIGGER when the cancel dialog closes", async () => {
   await h.unmount();
 });
 
-test("the READ-ONLY mount (the firm leaf) offers no Stop control at all", async () => {
+test("the FIRM-LEAF mount (clientId null) still reaches Stop, and its trigger is focusable", async () => {
+  // FIX ROUND 1 (STANDARDS `firm-leaf-cancel-unreachable`). This cell used to assert the OPPOSITE
+  // — that the firm leaf offers no Stop — which is how the inversion survived review: the brief
+  // and the component's own prop comment both said "read-only APART FROM CANCEL", and the
+  // `readOnly` flag gated that one button and nothing else. The flag is gone; the two mounts
+  // differ by `clientId` alone.
   const h = await renderComponent(App(createElement(IntakeBatchCard, {
-    state: READY, clientId: null, facet: "all", onFacetChange: () => {}, onRefresh: () => {}, readOnly: true,
+    state: READY, clientId: null, facet: "all", onFacetChange: () => {}, onRefresh: () => {},
   } as never)));
   for (let i = 0; i < 2; i += 1) await h.settle();
   const trigger = findIn(h.container as Stub, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Stop this batch");
-  assert.equal(trigger, null);
+  assert.ok(trigger, "the one act a firm-wide board needs is reachable from it");
+  assert.notEqual((trigger as Stub).tabIndex, -1, "…and by keyboard, like every other control here");
   await h.unmount();
 });
