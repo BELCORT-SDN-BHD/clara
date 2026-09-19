@@ -44,6 +44,11 @@ export const ACTIVITY = {
   documentId: "a2a2a2a2-2222-4777-8777-a2a2a2a20102",
   workReceiptId: "a2a2a2a2-2222-4777-8777-a2a2a2a20103",
   workId: "a2a2a2a2-2222-4777-8777-a2a2a2a20104",
+  // #853 — a SECOND Work id, so a `p_work` filter cell can prove two values return different,
+  // correctly scoped pages rather than the same one twice. `secondWorkEventId`/
+  // `secondWorkReceiptId` are this Work's own receipt row, the same shape `workId`'s row takes.
+  secondWorkId: "a2a2a2a2-2222-4777-8777-a2a2a2a20114",
+  secondWorkReceiptId: "a2a2a2a2-2222-4777-8777-a2a2a2a20115",
   entryOriginalId: "a2a2a2a2-2222-4777-8777-a2a2a2a20105",
   entryReplacementId: "a2a2a2a2-2222-4777-8777-a2a2a2a20106",
   correctionOriginalEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20107",
@@ -118,6 +123,18 @@ const WORK_ROW = eventRow({
   occurred_at: "2026-09-01T02:00:00.000Z",
   object_kind: "entry", object_id: ACTIVITY.entryOriginalId,
   work_id: ACTIVITY.workId, receipt_id: ACTIVITY.workReceiptId,
+  status: "approved", kind: "work",
+});
+
+// #853 — the SECOND Work's own receipt row, so a `p_work` filter cell has two DIFFERENT,
+// non-null `work_id`s to distinguish. Otherwise identical in shape to WORK_ROW.
+const SECOND_WORK_ROW = eventRow({
+  id: ACTIVITY.secondWorkReceiptId,
+  source: "operation_receipt",
+  event_type: "journal_entry",
+  occurred_at: "2026-09-01T02:30:00.000Z",
+  object_kind: "entry", object_id: ACTIVITY.entryReplacementId,
+  work_id: ACTIVITY.secondWorkId, receipt_id: ACTIVITY.secondWorkReceiptId,
   status: "approved", kind: "work",
 });
 
@@ -244,8 +261,8 @@ const PIPELINE_HUMAN_ROW = eventRow({
 
 const PAGE_1 = [
   REPORT_ROW, AGENT_RECEIPT_ROW, CONVERSATION_MAINTENANCE_ROW, CLOSE_ROW,
-  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SWEEP_ROW, DOCUMENT_ROW,
-  ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
+  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SECOND_WORK_ROW, SWEEP_ROW,
+  DOCUMENT_ROW, ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
 ].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
 const PAGE_2_NEW_ROW = eventRow({
@@ -290,8 +307,17 @@ export async function handleActivitySupabase(request, response, path, url, sendJ
         return true;
       }
       const kinds = Array.isArray(body.p_kinds) ? body.p_kinds : null;
-      const rows = kinds ? PAGE_1.filter((r) => kinds.includes(r.kind)) : PAGE_1;
-      sendJson(response, 200, { rows, next_cursor: kinds ? null : PAGE_2_CURSOR, truncated: !kinds }, cors);
+      let rows = kinds ? PAGE_1.filter((r) => kinds.includes(r.kind)) : PAGE_1;
+      // #853 — mirrors migration 0202's own predicate, `p_work is null or work_id = p_work`:
+      // ABSENT (the shape every current spec sends), nothing is filtered by Work at all, so this
+      // branch changes NOTHING about today's behaviour. PRESENT, only rows minted for that exact
+      // Work survive — never rows with a null `work_id` — which is why the fixture needed a
+      // SECOND Work (`SECOND_WORK_ROW`) to prove two `p_work` values scope to different pages
+      // rather than the same one twice.
+      const work = typeof body.p_work === "string" ? body.p_work : null;
+      if (work !== null) rows = rows.filter((r) => r.work_id === work);
+      const paginated = !kinds && work === null;
+      sendJson(response, 200, { rows, next_cursor: paginated ? PAGE_2_CURSOR : null, truncated: paginated }, cors);
       return true;
     }
     return false;

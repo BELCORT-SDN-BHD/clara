@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { ACTIVITY, handleActivitySupabase } from "./activity-mock.mjs";
 import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 import { handleL7Supabase, L7_RPC_VERBS } from "./bank-close-registers-mock.mjs";
 import { handleCheckoutMock } from "./fs4-checkout-mock.mjs";
@@ -1811,4 +1812,45 @@ test("#902 · HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT and mints no i
   const onboardingMatch = /HOME_ONBOARDING_CLIENT = \{\s*id: "([0-9a-f-]+)"/.exec(homeBoard);
   assert.ok(onboardingMatch, "home-board-mock.mjs must still declare HOME_ONBOARDING_CLIENT's id in this shape");
   assert.notEqual(HOME_WORK_PACK_CLIENT.id, onboardingMatch![1]);
+});
+
+// ---------------------------------------------------------------------------
+// #853 · `list_activity` HONOURS `p_work`, mirroring migration 0202's own predicate
+// (`p_work is null or work_id = p_work`) — the e2e mock ignored it entirely before this ticket.
+// ---------------------------------------------------------------------------
+
+async function listActivity(body: Record<string, unknown>): Promise<{ rows: Array<{ id: string; work_id: string | null }> }> {
+  let sent: { rows: Array<{ id: string; work_id: string | null }> } | undefined;
+  const sendJson = (_response: unknown, _status: number, payload: unknown) => {
+    sent = payload as never;
+  };
+  const request = fakeJsonPost(body);
+  const handled = await handleActivitySupabase(
+    request as never, {} as never, "/rest/v1/rpc/list_activity",
+    new URL("https://example.test/rest/v1/rpc/list_activity") as never, sendJson as never, {} as never,
+  );
+  assert.equal(handled, true, "list_activity must answer this lane's own client");
+  assert.ok(sent, "list_activity must have called sendJson");
+  return sent!;
+}
+
+test("#853 · two different p_work values against the same client return different, correctly scoped pages", async () => {
+  const firstWork = await listActivity({ p_client: ACTIVITY.clientId, p_work: ACTIVITY.workId });
+  const secondWork = await listActivity({ p_client: ACTIVITY.clientId, p_work: ACTIVITY.secondWorkId });
+
+  assert.deepEqual(firstWork.rows.map((r) => r.id), [ACTIVITY.workReceiptId]);
+  assert.deepEqual(secondWork.rows.map((r) => r.id), [ACTIVITY.secondWorkReceiptId]);
+  assert.notDeepEqual(firstWork.rows, secondWork.rows, "the two Work-scoped pages must actually differ, or this proves nothing");
+  for (const row of firstWork.rows) assert.equal(row.work_id, ACTIVITY.workId);
+  for (const row of secondWork.rows) assert.equal(row.work_id, ACTIVITY.secondWorkId);
+});
+
+test("#853 · every existing shape (no p_work at all) is UNCHANGED — activity-feed-walk.spec.ts sends none", async () => {
+  const noWork = await listActivity({ p_client: ACTIVITY.clientId });
+  const explicitlyUndefined = await listActivity({ p_client: ACTIVITY.clientId, p_work: undefined });
+  assert.deepEqual(noWork, explicitlyUndefined);
+  // Both Work rows are present when nothing filters by Work — the pre-#853 shape, preserved.
+  const ids = noWork.rows.map((r) => r.id);
+  assert.ok(ids.includes(ACTIVITY.workReceiptId));
+  assert.ok(ids.includes(ACTIVITY.secondWorkReceiptId));
 });
