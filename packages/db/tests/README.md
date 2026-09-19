@@ -120,6 +120,45 @@ skip — clone a sibling first (`create database <sibling> template <source>`, n
 on the source) and bootstrap the World only on the sibling. `RIG.md` in an active wave plan
 restates this per-lane; this section is the durable copy.
 
+## The opening-balance evidence-link race, and a measured gap (#854)
+
+`coding-lane-evidence-link.test.mjs`'s `cle.race.*` cells and `opening-balance-evidence-link.test.mjs`'s
+`obw.race.*` cells share ONE two-session driver, `humanHoldThenContend`
+(`coding-lane-evidence-link-fixtures.mjs`): side `a` runs and holds a transaction open, side `b`
+fires and must be PROVEN blocked (`wait_event_type = 'Lock'` and `pg_blocking_pids` naming `a`'s
+backend — a schedule that never blocked proves nothing about a race) before `a` commits and `b`
+resolves against `a`'s committed state.
+
+`clara.approve_opening_seed` / `clara.approve_opening_correction` refuse `CLR31 not_serializable`
+outside a genuinely SERIALIZABLE transaction, so driving the opening lane through this helper needs
+`side.isolation = "serializable"` — the ONLY level it accepts. A SERIALIZABLE side can also lose at
+**commit** rather than at the statement its `run()` awaited (PostgreSQL defers a `40001`
+serialization failure discovery to `COMMIT` in this shape); `commitOrCapture` folds that outcome
+into the same `out.a`/`out.b` shape a statement-level refusal already uses, so a cell asserts one
+shape regardless of where Postgres actually raised it.
+
+**What `obw.race.evidence_then_opening` measured, twice, reproducibly:** `clara.documents` is
+locked `FOR UPDATE` by both the coding lane and the opening lane purely for serialization
+(`clara._lock_document_binding`) — neither lane's body ever changes a column on that row.
+PostgreSQL's SERIALIZABLE "second updater" protection fires only when the row a transaction waited
+on was actually **updated or deleted** by the transaction that held the lock, never when it was
+merely locked and released. So when `attach_entry_evidence` (plain, holds first) commits a document
+it only locked, the blocked `approve_opening_seed` (SERIALIZABLE, contends) is granted the SAME,
+byte-identical row, sees no reason to abort, and evaluates its own conflict probe against a
+snapshot taken BEFORE the attachment committed — which never saw the live link. **Both sides
+commit.** The reverse arrival order (`obw.race.opening_then_evidence`) does not have this hole: the
+contender there (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per
+statement once unblocked.
+
+This is a genuine double-posting gap in migration 0213's opening-lane wall, MEASURED by the two
+`obw.race.*` cells and left UNREPAIRED here — #854's own brief puts "repair either wall, either
+approver or the document lock helper" and "any repair if both sides can commit" explicitly out of
+scope, since fixing it needs either a new migration (a wave-1 lane may not cut one) or a change to
+`clara._lock_document_binding`/`clara.approve_opening_seed`, both named out of scope in the ticket.
+`obw.race.evidence_then_opening` asserts the CURRENT (double-posting) outcome as a regression
+sentinel; a future repair updates that one assertion, deliberately, rather than the test going red
+by surprise. Filed as a follow-up issue at the same time (see this ticket's final report).
+
 ## Owner-level fixture DML, where it is unavoidable
 
 A cell that needs a state no verb can produce says so in source and builds it as the superuser,
