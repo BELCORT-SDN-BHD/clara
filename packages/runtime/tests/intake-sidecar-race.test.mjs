@@ -28,7 +28,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, open, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,7 +50,7 @@ after(async () => {
 });
 
 const {
-  intakePaths, listIntakeMetaEntries, listIntakeMetas, readIntakeMeta, writeIntakeMeta,
+  intakePaths, listIntakeMetaEntries, listIntakeMetas, readIntakeMeta, spoolConfig, sweepSpoolTtl, writeIntakeMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
 
@@ -84,6 +84,27 @@ function entryDouble(id, { ageMs, body }) {
 }
 
 const refuse = (what) => () => { throw new Error(`${what} must not be reached in this cell`); };
+
+/**
+ * A spool directory of this cell's OWN, restored when it ends.
+ *
+ * Fix round 1 (review finding L09-B): every filesystem cell here shared ONE spool directory, so
+ * `p966.expire` — which sweeps the REAL directory — passed only because `p966.race`'s leftover
+ * sidecar was still inside the five-second quiet window when it ran. Proven by shortening the
+ * window, which is not that cell's subject at all (it ages its own fixture by a minute):
+ * `CLARA_INTAKE_SIDECAR_QUIET_MS=1 node --test tests/intake-sidecar-race.test.mjs` failed it with
+ * `2 !== 1`. Any stall over five seconds — a loaded ten-lane rig, a slower CI box, the whole
+ * runtime suite — would have done the same. A quiet window is a guard against a live upload; it
+ * was never cell isolation, and a gate cell that reds for a reason unrelated to its subject is
+ * worse than no cell. `node:test` runs these serially, so the env swap is safe.
+ */
+async function ownSpool(t) {
+  const previous = process.env.CLARA_SPOOL_DIR;
+  const dir = await mkdtemp(join(root, "spool-"));
+  process.env.CLARA_SPOOL_DIR = dir;
+  t.after(() => { process.env.CLARA_SPOOL_DIR = previous; });
+  return dir;
+}
 
 // ---------------------------------------------------------------------------
 // 1 · THE HOST PROPERTY, measured rather than assumed.
@@ -128,7 +149,8 @@ test("p966.stat_is_not_a_handle: reading directory METADATA never blocks a renam
 
 const ATTEMPTS = 500;
 
-test(`p966.race: ${ATTEMPTS} sidecar writes against concurrent belt-shaped sweeps record ZERO EPERM-class failures`, async () => {
+test(`p966.race: ${ATTEMPTS} sidecar writes against concurrent belt-shaped sweeps record ZERO EPERM-class failures`, async (t) => {
+  await ownSpool(t);
   const id = randomUUID();
   await writeIntakeMeta(id, sidecar(id, 0));
 
@@ -216,7 +238,8 @@ test("p966.quiet: the quiet window does not eat the BUDGET — ten still get rea
 // 4 · WHAT THE BELT STILL DOES — the guard is a skip, not a retirement.
 // ---------------------------------------------------------------------------
 
-test("p966.expire: an intake past its 15-minute capability is still failed through the DB writer and its spool cleared", async () => {
+test("p966.expire: an intake past its 15-minute capability is still failed through the DB writer and its spool cleared", async (t) => {
+  await ownSpool(t);
   const id = randomUUID();
   const meta = sidecar(id, 1, { expiresAt: new Date(Date.now() - 1000).toISOString() });
   await writeIntakeMeta(id, meta);
@@ -239,7 +262,8 @@ test("p966.expire: an intake past its 15-minute capability is still failed throu
   await assert.rejects(readFile(intakePaths(id).bytes), { code: "ENOENT" }, "…as are the spooled bytes");
 });
 
-test("p966.resume: an intake left mid-flight by a crash is still driven, once it is past the guard", async () => {
+test("p966.resume: an intake left mid-flight by a crash is still driven, once it is past the guard", async (t) => {
+  await ownSpool(t);
   const id = randomUUID();
   await writeIntakeMeta(id, sidecar(id, 1, { status: "verified" }));
   const old = new Date(Date.now() - 60_000);
@@ -266,7 +290,8 @@ test("p966.resume: an intake left mid-flight by a crash is still driven, once it
 // 5 · THE LISTING — the shape the belt now consumes.
 // ---------------------------------------------------------------------------
 
-test("p966.listing: the metadata listing carries mtime and a lazy read, and opens nothing by itself", async () => {
+test("p966.listing: the metadata listing carries mtime and a lazy read, and opens nothing by itself", async (t) => {
+  await ownSpool(t);
   const id = randomUUID();
   await writeIntakeMeta(id, sidecar(id, 7));
   const entries = (await listIntakeMetaEntries()).filter((e) => e.name === `intake-${id}.json`);
@@ -278,7 +303,8 @@ test("p966.listing: the metadata listing carries mtime and a lazy read, and open
   assert.equal((await entry.read()).n, 7, "…and it reads the same body listIntakeMetas would have returned");
 });
 
-test("p966.listing: listIntakeMetas keeps its old contract — one code path, not two that drift", async () => {
+test("p966.listing: listIntakeMetas keeps its old contract — one code path, not two that drift", async (t) => {
+  await ownSpool(t);
   const good = randomUUID();
   await writeIntakeMeta(good, sidecar(good, 3));
   const badName = `intake-${randomUUID()}.json`;
@@ -289,4 +315,129 @@ test("p966.listing: listIntakeMetas keeps its old contract — one code path, no
   assert.deepEqual(rows.find((r) => r.file === badName), { corrupt: true, file: badName },
     "…and an unparseable one still comes back as the same `{corrupt, file}` marker, so every existing caller is unchanged");
   await rm(join(process.env.CLARA_SPOOL_DIR, badName), { force: true });
+});
+
+// ---------------------------------------------------------------------------
+// 6 · THE BUDGET IS A BUDGET FOR ACTIONS — junk in the spool must not spend it.
+// ---------------------------------------------------------------------------
+
+// The three shapes `read()` hands back that carry NO intake to act on: the `{corrupt, file}`
+// marker, a body whose `intakeId` never made it to disk, and `null` (the sidecar was collected
+// between the listing and the read). Before #966 no number of them could hide a crashed intake,
+// because the filter ran BEFORE the ten were taken (origin/main's `intake.mjs`:
+// `listIntakeMetas().filter(row => row && !row.corrupt && row.intakeId)` and only then
+// `.slice(0, 10)`). That is the contract these cells hold the new shape to.
+
+const corruptEntry = () => {
+  const id = randomUUID();
+  return entryDouble(id, { ageMs: 60_000, body: { corrupt: true, file: `intake-${id}.json` } });
+};
+const idlessEntry = () => entryDouble(randomUUID(), { ageMs: 60_000, body: { schemaVersion: 1, status: "spooled" } });
+const goneEntry = () => entryDouble(randomUUID(), { ageMs: 60_000, body: null });
+
+const crashedEntry = () => {
+  const id = randomUUID();
+  return entryDouble(id, { ageMs: 60_000, body: sidecar(id, 1, { status: "verified" }) });
+};
+
+/** The belt's deferred arm as positive evidence that a sidecar was not merely OPENED but carried
+ *  into `finalizeDocumentIntake` — the same double `p966.resume` uses, for the same reason. */
+const drive = (entries, log) => recoverPendingDocumentIntakes({
+  withRuntime: async (fn) => fn({ query: async () => ({ rows: [{ receipt: null }] }) }),
+  enqueue: async () => ({ runId: "x" }),
+  listEntries: async () => entries,
+  log,
+});
+
+test("p966.budget: sidecars the belt cannot USE never spend the ten slots it acts with", async () => {
+  // Five unparseable, four with no `intakeId`, three already collected — twelve files ahead of the
+  // one intake a crash left behind, which is two more than the belt's whole action budget.
+  const junk = [...Array.from({ length: 5 }, corruptEntry), ...Array.from({ length: 4 }, idlessEntry),
+    ...Array.from({ length: 3 }, goneEntry)];
+  const crashed = crashedEntry();
+
+  const log = [];
+  const out = await drive([...junk, crashed], (m) => log.push(m));
+
+  assert.equal(crashed.reads, 1,
+    "TWELVE unreadable sidecars ahead of one crashed intake must not blind the belt: ten ACTION slots "
+    + "spent on files that carry no intake is a human's uploaded document silently never appearing");
+  assert.equal(out.deferred, 1, "…and the crashed intake is carried into the finalize path, not merely opened");
+  assert.ok(log.some((m) => m.includes("9") && m.includes(junk[0].name)),
+    "…and the skip is not silent: ONE bounded line per sweep for the NINE files a human could go and look at "
+    + `(a sidecar that vanished between the listing and the read is not an event), naming one of them (got ${JSON.stringify(log)})`);
+});
+
+test("p966.budget: …and the READ bound survives — a sweep still opens a bounded number of sidecars", async () => {
+  // The open bound is what the ticket exists for: an open is the handle a live intake's next
+  // rename collides with. So the belt reads past junk, but not forever — and this cell pins the
+  // residual honestly rather than claiming there is none. `sweepSpoolTtl` is what clears it.
+  const junk = Array.from({ length: 60 }, corruptEntry);
+  const crashed = crashedEntry();
+
+  const out = await drive([...junk, crashed], () => {});
+
+  assert.equal(junk.filter((e) => e.reads > 0).length, 30,
+    "thirty opens — three times the action budget — and then the sweep stops rather than reading the whole directory");
+  assert.equal(crashed.reads, 0, "…so sixty unusable sidecars DO still delay recovery: the TTL reaper below is what ends that");
+  assert.deepEqual(out, { recovered: 0, deferred: 0, expired: 0 });
+});
+
+test("p966.reap: the TTL sweep reaps an UNREADABLE sidecar too — the blind window has an end", async (t) => {
+  await ownSpool(t);
+  // The bound above is honest, not comfortable: junk the belt reads past is junk that has to go
+  // away on its own, or a crashed intake sits behind it for as long as somebody keeps the file
+  // there. The TTL sweep matched `intake-<uuid>.(bin|json)` ONLY, so a sidecar whose name was not
+  // a uuid — exactly the shape a foreign or half-written file takes — was never reaped by anybody.
+  const dir = spoolConfig().dir;
+  const stale = join(dir, "intake-00junk-1.json");
+  const fresh = join(dir, "intake-00junk-2.json");
+  await writeFile(stale, "{ not json");
+  await writeFile(fresh, "{ not json");
+  const old = new Date(Date.now() - 3 * 60 * 60_000); // past any ttl: the floor is 15 minutes, the default 60
+  await utimes(stale, old, old);
+
+  const { spoolRemoved } = await sweepSpoolTtl();
+
+  assert.ok(spoolRemoved >= 1, "the stale unreadable sidecar is reaped");
+  await assert.rejects(readFile(stale), { code: "ENOENT" }, "…it is really gone");
+  assert.equal(await readFile(fresh, "utf8"), "{ not json",
+    "…and a sidecar inside the TTL is left exactly where it is: this reaper has never been allowed to race a live capability");
+  await rm(fresh, { force: true });
+});
+
+test("p966.giveup: a rename that will never succeed costs the intake the DEADLINE and no more", async (t) => {
+  // Fix round 1 (review finding L09-C). The retry exists for a handle that lives MICROSECONDS —
+  // the recovery belt's own read. A handle that is never released (a stuck indexer or AV scan;
+  // #693 already shows Defender holding files on this host) is a different animal: every intake
+  // status transition goes through `atomicJson`, so whatever this deadline is, a stuck handle
+  // costs it ONCE PER TRANSITION PER INTAKE, on the latency-sensitive intake path, across a
+  // hundred-child batch — the exact workload #636/#966 were measured on. At the first cut's two
+  // seconds that was measured here at `EPERM after 2003 ms`. The knob is the answer, not the
+  // retry: 250 ms is still a thousand times a reader's handle.
+  const dir = await ownSpool(t);
+  const id = randomUUID();
+  await writeIntakeMeta(id, sidecar(id, 1));
+
+  const held = await open(intakePaths(id).meta, "r");
+  const started = Date.now();
+  let code = "ok";
+  try {
+    await writeIntakeMeta(id, sidecar(id, 2));
+  } catch (err) {
+    code = err?.code ?? String(err);
+  }
+  const elapsed = Date.now() - started;
+  await held.close();
+
+  if (process.platform === "win32") {
+    assert.equal(code, "EPERM",
+      "the ORIGINAL error, unchanged: the retry is a bounded WAIT, never a swallow — a caller that is told the write landed when it did not is worse than a caller that is told it failed");
+    assert.ok(elapsed < 1000,
+      `a permanently held handle must cost the intake the deadline and stop (took ${elapsed} ms) — every second here is a second of a human's upload`);
+  } else {
+    assert.equal(code, "ok", "POSIX renames over an open destination; there is nothing to give up on here");
+  }
+  assert.deepEqual((await readdir(dir)).filter((n) => n.endsWith(".tmp")), [],
+    "…and the temp file goes with it: a transient write failure must not grow the spool with files the TTL sweep does not match");
 });

@@ -430,9 +430,29 @@ export async function finalizeDocumentIntake(options) {
   }
 }
 
-/** How many sidecars ONE sweep may open and act on. Unchanged from the belt's first cut; what
- *  changed (#966) is that it is now a bound on OPENS too, not only on actions. */
+/** How many sidecars ONE sweep may ACT on. Unchanged from the belt's first cut. */
 const RECOVERY_BATCH = 10;
+
+/**
+ * How many sidecars ONE sweep may OPEN while looking for those ten (#966, fix round 1).
+ *
+ * THE BUDGET IS A BUDGET FOR ACTIONS, NOT FOR READS. The first cut of this change took
+ * `RECOVERY_BATCH` off the raw listing, so a sidecar the belt CANNOT USE — the `{corrupt, file}`
+ * marker, a `null` from a sidecar collected between the listing and the read, a body whose
+ * `intakeId` never landed — spent one of the ten. Ten such files sitting ahead of a crashed intake
+ * in `readdir` order blinded the belt entirely and silently: the human's uploaded document simply
+ * never appeared. Before #966 that could not happen, because the filter ran BEFORE the slice
+ * (`listIntakeMetas().filter(row => row && !row.corrupt && row.intakeId).slice(0, 10)`); this
+ * restores that property while keeping the open bound the ticket exists for.
+ *
+ * The open bound is kept — and kept SEPARATE — because an open is the handle a live intake's next
+ * `rename()` collides with, so "read the whole directory until ten usable ones turn up" is the
+ * cost this ticket removed. 3x leaves room for the realistic junk count (zero, or one sidecar
+ * racing its own `removeIntakeSpool`) many times over. The residual is stated rather than hidden:
+ * more than thirty settled-but-unusable sidecars ahead of a crashed one still delay it, until
+ * `sweepSpoolTtl` reaps them — which it now does whatever they are named.
+ */
+const RECOVERY_OPEN_BUDGET = RECOVERY_BATCH * 3;
 
 /**
  * How long a sidecar must have been QUIET before this belt may open it (#966).
@@ -461,10 +481,12 @@ const RECOVERABLE_STATES = ["spooled", "canonical", "received", "verifying", "ve
  * (the plaintext token is gone).
  *
  * READS NOTHING IT COULD HAVE SKIPPED (#966). The sweep takes the spool's DIRECTORY METADATA,
- * drops every sidecar inside the quiet window without opening it, and only then opens — at most
- * `RECOVERY_BATCH` of them, the same number it has always been willing to act on. The quiet skip
- * happens BEFORE the budget is taken, so a spool full of live uploads cannot starve the belt of
- * the crashed intake sitting behind them.
+ * drops every sidecar inside the quiet window without opening it, and only then opens — enough of
+ * them to ACT on `RECOVERY_BATCH`, the same number it has always been willing to act on, under a
+ * separate and larger bound on opens (`RECOVERY_OPEN_BUDGET`). The quiet skip happens BEFORE
+ * either budget is taken, so a spool full of live uploads cannot starve the belt of the crashed
+ * intake sitting behind them, and a sidecar that carries no intake costs a read but never one of
+ * the ten (see `RECOVERY_OPEN_BUDGET`'s own header for what the first cut of this got wrong).
  *
  * @param {{withRuntime:Function, enqueue:Function, log?:(m:string)=>void,
  *          listEntries?:() => Promise<Array<{mtimeMs:number, read:() => Promise<any>}>>,
@@ -477,9 +499,22 @@ export async function recoverPendingDocumentIntakes({
   const out = { recovered: 0, deferred: 0, expired: 0 };
   const sweepStartedAt = Date.now();
   const settled = (await listEntries()).filter((entry) => sweepStartedAt - entry.mtimeMs >= quietMs);
-  for (const entry of settled.slice(0, RECOVERY_BATCH)) {
+  let opened = 0;
+  let handled = 0;
+  const unusable = [];
+  for (const entry of settled) {
+    if (handled >= RECOVERY_BATCH || opened >= RECOVERY_OPEN_BUDGET) break;
+    opened += 1;
     const meta = await entry.read();
-    if (!meta || meta.corrupt || !meta.intakeId) continue;
+    if (!meta || meta.corrupt || !meta.intakeId) {
+      // `null` is a sidecar collected between the listing and the read — a sweep racing a
+      // `removeIntakeSpool` is not an event and is not worth a line. The other two shapes are a
+      // file a human may have to go and look at, so they are counted and reported ONCE per sweep
+      // below: thirty lines every two seconds is how a real signal gets grepped past.
+      if (meta) unusable.push(entry.name ?? entry.path ?? "(unnamed)");
+      continue;
+    }
+    handled += 1;
     if (Date.parse(meta.expiresAt) <= Date.now()) {
       await withRuntime((client) =>
         callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt", [
@@ -500,6 +535,9 @@ export async function recoverPendingDocumentIntakes({
       out.deferred += 1;
       log(`[reconcile] intake recovery deferred intake=${meta.intakeId}: ${err?.message ?? err}`);
     }
+  }
+  if (unusable.length) {
+    log(`[reconcile] intake recovery skipped ${unusable.length} unreadable sidecar(s) this sweep: ${unusable.slice(0, 3).join(", ")}`);
   }
   return out;
 }

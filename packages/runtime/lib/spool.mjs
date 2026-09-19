@@ -53,9 +53,20 @@ export async function ensureSpoolDir() {
 
 /** The Windows locking codes a `rename()` over a destination ANOTHER HANDLE HOLDS OPEN raises. */
 const RENAME_CONTENDED = new Set(["EPERM", "EACCES", "EBUSY"]);
-/** How long `renameIntoPlace` may keep retrying before it surfaces the failure. Generous against a
- *  microsecond-scale reader handle, and still an order of magnitude inside any caller's patience. */
-const RENAME_RETRY_MS = Math.max(0, Number(process.env.CLARA_SPOOL_RENAME_RETRY_MS || 2000));
+/**
+ * How long `renameIntoPlace` may keep retrying before it surfaces the failure.
+ *
+ * 250 ms, not the 2000 ms this shipped with in its first cut (#966, fix round 1). The deadline is
+ * a budget for a CONTENDED window, and the contention this exists for is a reader's handle, which
+ * lives for microseconds — 250 ms is already a thousand times that. What the deadline also buys is
+ * the cost of a handle that is never released (a stuck indexer or AV scan): every intake status
+ * transition goes through `atomicJson`, so a stuck handle costs the FULL deadline once per
+ * transition per intake, on the intake path, across a hundred-child batch. Measured on this rig at
+ * two seconds: `EPERM after 2003 ms`. The failure is the same either way; only the stall differs,
+ * and `tests/intake-sidecar-race.test.mjs`'s `p966.giveup` pins it. `CLARA_SPOOL_RENAME_RETRY_MS`
+ * remains the knob for an operator who knows their host holds files for longer.
+ */
+const RENAME_RETRY_MS = Math.max(0, Number(process.env.CLARA_SPOOL_RENAME_RETRY_MS || 250));
 
 /**
  * `rename(from, to)` THAT A CONCURRENT READ CANNOT FAIL (#966).
@@ -76,8 +87,9 @@ const RENAME_RETRY_MS = Math.max(0, Number(process.env.CLARA_SPOOL_RENAME_RETRY_
  * package takes no dependency for six lines and the deadline belongs to the caller's latency
  * budget, not to a library's.
  *
- * NOT A SILENT SWALLOW: past the deadline the original error is thrown, unchanged. And ONLY the
- * three contention codes retry — `ENOENT`, `ENOSPC` and every other failure surface immediately.
+ * NOT A SILENT SWALLOW: past the deadline the original error is thrown, unchanged, and the caller
+ * waits no longer than the deadline for that answer (`p966.giveup`). And ONLY the three contention
+ * codes retry — `ENOENT`, `ENOSPC` and every other failure surface immediately.
  */
 async function renameIntoPlace(from, to) {
   const deadline = Date.now() + RENAME_RETRY_MS;
@@ -422,12 +434,25 @@ export async function spoolHealth() {
   }
 }
 
+/**
+ * Which files in the spool this reaper owns.
+ *
+ * It used to demand a uuid (`intake-[0-9a-f-]{36}`), which meant the ONE shape nothing else can
+ * clean up — an intake file whose name is not a uuid, i.e. a foreign or malformed file no
+ * `removeIntakeSpool(id)` will ever be called for — was the one shape it left behind forever
+ * (#966, fix round 1: such a file also costs the recovery belt a read on every sweep). Nothing
+ * legitimate loses by the wider match: every path this package writes comes from `intakePaths()`,
+ * which enforces the uuid itself, and `atomicJson`'s temp files end in `.tmp` and are still not
+ * matched — they are removed by the writer that made them.
+ */
+const SPOOL_REAPABLE = /^intake-.+\.(?:bin|json)$/i;
+
 export async function sweepSpoolTtl(now = Date.now()) {
   const { dir, ttlMs } = spoolConfig();
   await ensureSpoolDir();
   let removed = 0;
   for (const name of await readdir(dir)) {
-    if (!/^intake-[0-9a-f-]{36}\.(?:bin|json)$/i.test(name)) continue;
+    if (!SPOOL_REAPABLE.test(name)) continue;
     const path = join(dir, name);
     try {
       const s = await stat(path);

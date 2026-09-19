@@ -1303,10 +1303,16 @@ SettleFailed` counters ride `runReconcilerSweep`'s returned object, and a belt f
 `beltErrors` as `"chat clarify reconcile"` (logged with the estate's `[reconcile] <belt> error:`
 idiom) instead of being a log line only the leader could see. The estate law still holds: a FAILED
 belt contributes no counters at all, so `"chatClarifyResumed" in swept` is positive evidence that
-the belt ran.
+the belt was REACHED and did not throw — not that it did any work: the belt returns the same
+zeroed counter bag, and issues no statement at all, when `resumeHook` is absent or the delivery
+columns are not there yet.
 
 **Order.** The belt runs first of the belts and immediately after the heartbeat — the heartbeat is
-not a belt but the sweep's one deliberate fail-fast. The order is load-bearing: `reconcileTasks`'
+not a belt but the sweep's one deliberate fail-fast. Say the consequence out loud, because an
+incident is the wrong time to rediscover it: a sweep that cannot record its own beat now skips
+this belt too, where the leader's old standalone call ran regardless. That follows the heartbeat's
+own argument (nothing that breaks a single-row upsert would spare a belt on the same connection),
+and the next sweep is ~2 s away. The order is load-bearing: `reconcileTasks`'
 section C would mirror engine truth onto the same parked chat turn as `cancelled`/`engine_lost`,
 and only this belt writes the honest `expired` + `clarify_closed` terminal.
 
@@ -1328,17 +1334,34 @@ destination another handle holds open fails `EPERM` — so a sweep landing betwe
 
 - **The writer.** `lib/spool.mjs`'s `atomicJson` now renames through `renameIntoPlace`, which
   retries only `EPERM` / `EACCES` / `EBUSY` against a deadline (`CLARA_SPOOL_RENAME_RETRY_MS`,
-  default 2000 ms) and surfaces every other failure immediately. A reader's handle lives for
+  default 250 ms) and surfaces every other failure immediately. A reader's handle lives for
   microseconds, so the retry turns a hard failure into a sub-millisecond wait — the shape
   `graceful-fs` has shipped for a decade. A rename that still fails takes its temp file with it.
+  The deadline is 250 ms rather than the 2000 ms of the first cut because a handle that is NEVER
+  released (a stuck indexer or AV scan) costs the full deadline once per status transition per
+  intake, on the intake path — measured at `EPERM after 2003 ms`. The answer is the same either
+  way; only the stall differs.
 - **The reader.** `listIntakeMetaEntries()` returns DIRECTORY METADATA — `{name, path, mtimeMs,
   read()}` — and opens nothing. `stat()` does not hold a handle a rename can block; `open()` does.
   The belt's recency guard (always there, always five seconds) now runs on `mtimeMs` BEFORE the
-  open rather than on the sidecar's `updatedAt` field after it, and the open budget is the same ten
-  the belt was already willing to act on. The quiet skip happens BEFORE the budget is taken, so a
-  spool full of live uploads cannot starve the belt of the crashed intake behind them.
-  `listIntakeMetas` / `listTaskMetas` keep their exact old contract, expressed over the lazy shape
-  so the two cannot drift. The knob is `CLARA_INTAKE_SIDECAR_QUIET_MS` (default 5000).
+  open rather than on the sidecar's `updatedAt` field after it. The quiet skip happens BEFORE any
+  budget is taken, so a spool full of live uploads cannot starve the belt of the crashed intake
+  behind them. `listIntakeMetas` / `listTaskMetas` keep their exact old contract, expressed over
+  the lazy shape so the two cannot drift. The knob is `CLARA_INTAKE_SIDECAR_QUIET_MS` (default
+  5000).
+- **The budget is a budget for ACTIONS** (fix round 1). The first cut took its ten off the raw
+  listing, so a sidecar carrying no intake — the `{corrupt, file}` marker, a body with no
+  `intakeId`, a file collected between the listing and the read — spent one of the ten, and ten
+  such files ahead of a crashed intake blinded the belt silently. Before #966 that was impossible,
+  because the filter ran before the slice. The belt now reads until it has ACTED on ten
+  (`RECOVERY_BATCH`) under a separate, larger bound on opens (`RECOVERY_OPEN_BUDGET`, 3x), because
+  an open is still the handle a live rename collides with. Unreadable sidecars are reported once
+  per sweep — `[reconcile] intake recovery skipped N unreadable sidecar(s) this sweep: …` — never
+  once per file. The residual is stated rather than hidden: more than thirty settled-but-unusable
+  sidecars ahead of a crashed one still delay it, and `sweepSpoolTtl` is what ends that — it now
+  reaps any `intake-*.(bin|json)` past the TTL, not only uuid-named ones, which is the one shape
+  no `removeIntakeSpool(id)` will ever be called for. (`atomicJson`'s `.tmp` files stay unmatched;
+  the writer that made them removes them.)
 
 **A consequence, stated.** An intake whose capability has already expired but whose sidecar was
 written in the last five seconds is expired on the NEXT sweep rather than this one. That is the
@@ -1347,7 +1370,10 @@ guard doing its job: a sidecar written moments ago belongs to a request still in
 **Evidence.** `tests/intake-sidecar-race.test.mjs` — the host property measured both ways (a held
 read handle IS `EPERM`; a `stat` is not), 500 writes against concurrent sweeps with zero failures
 (428 of 500 failed before the fix), the quiet-window sidecar never opened (counted double), the
-ten-open budget, the expiry arm, and the listing contract. `tests/intake-db.test.mjs` carries the
+ten-action budget past twelve unusable sidecars, the thirty-open bound, the give-up deadline under
+a permanently held handle, the TTL reap of an unreadable sidecar, the expiry arm, and the listing
+contract. Every cell that touches the filesystem takes its own spool directory, so the suite's
+result never depends on the order its cells ran in or on how long the box took between them. `tests/intake-db.test.mjs` carries the
 end-to-end recovery cell (`p966 the belt still recovers a crashed mid-flight intake`) and the
 abandoned-sidecar expiry cell, both of which now age their fixture's mtime rather than sweeping
 against a file they wrote in the same millisecond.
