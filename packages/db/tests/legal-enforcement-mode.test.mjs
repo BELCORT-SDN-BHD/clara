@@ -136,12 +136,19 @@ test("p1008.db.default_is_prompt the migration leaves the platform in PROMPT, an
   assert.equal(await predicateMode(), stored.mode,
     "default_is_prompt: clara._legal_enforcement_mode() answers the STORED row, not a literal");
 
-  // The migration's own landing value, read from the ledger's first receipt rather than from the
-  // live row (this battery moves the row, and a later re-run would otherwise read its own work).
-  const asMigrated = await rootQuery(
-    `select count(*)::int as n from clara.legal_enforcement
-      where id and mode is not null`);
-  assert.equal(asMigrated.rows[0].n, 1, "default_is_prompt: exactly ONE configuration row");
+  const rows = await rootQuery("select count(*)::int as n from clara.legal_enforcement");
+  assert.equal(rows.rows[0].n, 1, "default_is_prompt: exactly ONE configuration row");
+
+  // THE LANDING VALUE, FROM A FACT THIS BATTERY NEVER MOVES. The live row is arranged by nearly
+  // every cell below, so reading it here would be reading this file's own work; the COLUMN DEFAULT
+  // is catalog, it is what 0234 declares, and it is what a row re-created from the schema would
+  // carry. The migration asserts the seeded row itself at apply time, in its own §A seed block.
+  const column = await rootQuery(
+    `select column_default, is_nullable from information_schema.columns
+      where table_schema='clara' and table_name='legal_enforcement' and column_name='mode'`);
+  assert.match(column.rows[0].column_default ?? "", /'prompt'/,
+    "default_is_prompt: 0234 declares prompt as the mode column's default — the beta reading is the landing value");
+  assert.equal(column.rows[0].is_nullable, "NO", "default_is_prompt: a NULL mode is unrepresentable");
 });
 
 test("p1008.db.relation_posture the mode lives behind FORCE RLS with ZERO application-role DML", async (t) => {
