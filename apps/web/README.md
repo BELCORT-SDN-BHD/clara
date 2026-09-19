@@ -420,3 +420,17 @@ the Work AND on `components/work/work-question-form.tsx`:
 **IT NEVER CLEARS A TYPED ANSWER.** The banner is additive — no draft is discarded, no field is
 reset, nothing is disabled — and `components/work/work-question-drift-banner.test.tsx` holds
 that with a drift that resolves only after the person has typed.
+
+**ONE FACT, ONE READ, ONE STORY — and the coalescer is where that is enforced.** The Sources
+block and the question form are two independent consumers of the same drift fact, and the form
+renders once per PENDING question card, so a Work detail could spend `1 + N` identical door calls
+and — worse — let the block and the banner disagree when a capture lands between two reads.
+`lib/work/knowledge.ts` therefore holds an **in-flight coalescer** keyed by `(work id, resolved
+session accessor)`: consumers that mount in the same tick share one request and one answer. The
+fix is NOT a prop drilled down from `work-detail.tsx`, because the same form is also mounted by
+the Clara chat lane (`components/parts/WorkCards.tsx`) and by Needs-you
+(`components/firm/work-question-affordance.tsx`), where there is no owner to drill from. It is a
+coalescer and **not a cache**: an entry lives only while its request is in flight, so the block's
+"re-read" button still makes a real call, a caller that brings its own `AbortSignal` keeps its own
+request (one component's unmount must not abort another's read), and two different accessors are
+two auth contexts that never share an answer. `lib/work/knowledge.test.ts` holds all four.

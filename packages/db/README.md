@@ -607,6 +607,34 @@ relevant moved" would be a claim about keys nobody wrote down. The envelope also
 the last attempt's face word, reason, tier counts and key NAMES — so B3's Work detail needs no
 eighth door for one panel.
 
+**The moved-key scan applies the same per-applicability shadow the READ applied** (`0192:1355-1363`,
+copied into `retrieve_knowledge` and into the seventh door). A firm default that is shadowed for
+this client is a record the run provably did not read, so intersecting it with the read-set on the
+key name would report `relevant` for a basis that did not move — and the Work detail would tell a
+person "a record this Work read has changed" about a record it never read. Two deliberate
+non-symmetries around it, both asserted: the scan applies **no `state`/`superseded_at` filter**,
+because a withdrawn record is a revision at a higher version and "the exception you were relying on
+was withdrawn" is the most relevant thing that can happen to a basis; and the **watermark stays
+unshadowed**, because it is the shipped `0192:1333-1335` expression the read itself records, so
+`drifted` keeps meaning "something in your scope moved" while `relevant` means "and it was yours".
+
+**What a read-set row may contain is walled by the column, not only by the writer.** `keys` has a
+grammar (`^[a-z][a-z0-9_]{0,62}$` — stricter than the catalog's own `btrim(...) <> ''`, which the
+file's header records for the next key-minting migration) and a 400-key cap; `tiers` is a closed
+vocabulary `{core, requested, remainder}` of non-negative integers; `as_of` must be a **finite**
+date (`infinity` is a real date value, and this relation can never delete a row); and
+`payload_digest` records the facts the row carries. The reason is the file's own: the read-set must
+not become a payload slot by the back door, on an APPEND-ONLY relation that both drift doors hand
+back verbatim to the human lane and the runtime lane alike.
+
+**A replay is named.** `record_work_knowledge_read` stays replay-idempotent on `(work_id, run_id,
+seq)` — a WDK re-execution lands on the original row — but the receipt now carries `replayed`,
+`payload_digest`, `stored_digest` and `payload_match`, so a re-execution that carried **different**
+facts (first attempt `ok`, second `denied` because a record was withdrawn mid-flight) is reported
+rather than answered with a silent `ok`. It does not refuse the way `clara._reserve_op` does on the
+same mismatch: an op-key governs a WRITE, this governs a record OF A READ, and a diagnostic write
+that could settle a Work would be worse than the divergence it reports.
+
 **Non-goals, stated here as well as in the file**: #658 captures nothing, corrects nothing,
 promotes nothing, accrues no experience and writes no wiki/OKF page (#663's engine); it registers
 no domain event; it mints no knowledge key and no per-key side table; it widens no

@@ -20,6 +20,7 @@
 
 import { callDoor, DoorError, DoorRefusal } from "@/lib/doors";
 import { isUuidShape } from "@/lib/client-id";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { KnowledgeReadStatus } from "@/lib/registers/knowledge";
 
@@ -63,12 +64,62 @@ export type WorkKnowledgeDriftRead =
   | { kind: "denied" }
   | { kind: "unreadable"; message: string };
 
+/** `token` identifies THIS request, so the cleanup can only ever remove its own entry — a plain
+ *  promise comparison cannot be written without referring to the promise inside its own
+ *  initializer, and deleting by key alone would evict a newer request's entry. */
+type InFlight = {
+  accessor: SessionTokenAccessor;
+  promise: Promise<WorkKnowledgeDriftRead>;
+  token: symbol;
+};
+
+/**
+ * ONE FACT, ONE READ, ONE STORY — the in-flight reads, keyed by Work.
+ *
+ * B3's Work detail mounts TWO independent consumers of this one fact: `WorkKnowledgeBlock` in the
+ * `keepMounted` Sources tab, which fires on every visit, and `WorkQuestionForm`'s effect, which
+ * fires for EVERY pending question card. That was >= 2 identical door calls per page load, and it
+ * opened a window in which the Sources block and the drift banner could disagree — a capture
+ * landing between the two reads gives one `drifted:false` and the other `drifted:true`. The brief
+ * ruled exactly this for the sibling read (§3 Web 3: "a second `get_work_execution_trace` read on
+ * one page would double the request and split the honesty story across two components").
+ *
+ * PROP-DRILLING FROM `work-detail.tsx` CANNOT FIX IT, which is why the fix lives here: the same
+ * form is also mounted by `components/parts/WorkCards.tsx` (the Clara chat lane) and by
+ * `components/firm/work-question-affordance.tsx` (Needs-you), where no Sources block exists and
+ * there is no owner to drill from. Coalescing at the READER fixes all three at once.
+ *
+ * IT IS A REQUEST COALESCER, NOT A CACHE. An entry lives only while its request is in flight and
+ * is dropped the moment it settles, so nothing is ever served stale and the block's explicit
+ * "re-read" button still makes a real call. Callers that bring their own `AbortSignal` own their
+ * request's lifetime and are never coalesced — one component unmounting must not abort another's
+ * read. The key includes the RESOLVED accessor (`lib/doors.ts:120`'s own `opts.session ??
+ * sessionTokenAccessor`), so two callers share an answer only when they would have sent the same
+ * bearer token; in the app they always do, because the singleton is the blessed one.
+ */
+const inFlight = new Map<string, InFlight>();
+
 /** clara.work_knowledge_drift(p_work uuid) — viewer+, firm from the session. */
 export async function readWorkKnowledgeDrift(workId: string, opts: Opts = {}): Promise<WorkKnowledgeDriftRead> {
   // A malformed id never reaches PostgREST — on a `uuid` argument it is HTTP 400 `22P02`, which
   // throws, and a throw on a route reaches the error boundary instead of the scoped state this
   // section owns (the guard `lib/work/diagnostics.ts` states for the same defect).
   if (!isUuidShape(workId)) return { kind: "unreadable", message: "work id is not a uuid" };
+  if (opts.signal) return driftOnce(workId, opts);
+  const accessor = opts.session ?? sessionTokenAccessor;
+  const pending = inFlight.get(workId);
+  if (pending && pending.accessor === accessor) return pending.promise;
+  const token = Symbol("work-knowledge-drift");
+  const promise = driftOnce(workId, { session: accessor }).finally(() => {
+    if (inFlight.get(workId)?.token === token) inFlight.delete(workId);
+  });
+  // A concurrent read under a DIFFERENT accessor keeps its own request and does not evict the
+  // first one's entry: two auth contexts must never be handed one answer.
+  if (!pending) inFlight.set(workId, { accessor, promise, token });
+  return promise;
+}
+
+async function driftOnce(workId: string, opts: Opts): Promise<WorkKnowledgeDriftRead> {
   try {
     const out = await callDoor<unknown>("work_knowledge_drift", { p_work: workId }, opts);
     if (out === null || typeof out !== "object" || Array.isArray(out)) {

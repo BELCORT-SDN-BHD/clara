@@ -395,6 +395,7 @@ lib/work/diagnostics.test.ts
 lib/work/evidence.test.ts
 lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
+lib/work/knowledge.test.ts
 lib/work/periodic-adjustment-draft.test.ts
 lib/work/periodic-adjustment.test.ts
 lib/work/question-fields.test.ts
