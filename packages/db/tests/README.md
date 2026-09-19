@@ -309,14 +309,25 @@ every Work that is NOT a trade invoice (`p655.post.control_leg_still_refused` â€
 door, not a hole), the three due-date bases end to end (`p655.due.stated` / `.terms_fallback` /
 `.absent`), the polarity matrix refusing a negative total, a cross-domain party and a credit-shaped
 payload BY NAME and as typed CLR10s rather than bare 23514s (`p655.polarity.matrix`), replay and
-its race (`p655.replay.one_receipt` asserts the second call writes NOTHING, `p655.replay.race`
-that a concurrent pair leaves a typed conflict), atomicity (`p655.atomic.no_partial`), the
-authority floors with no existence oracle (`p655.authority.floors`), admission-time party
+its race (`p655.replay.one_receipt` asserts the second call writes NOTHING; `p655.replay.race`
+races the SAME payload with itself and then a DIVERGENT pair -- two parties, two references, one
+key -- and asserts that exactly one caller is answered, that the other leaves as
+`intent_payload_conflict`, and that the answered caller's party, kind and due-date basis are the
+ones the surviving row holds. That divergent arm is the cell that caught the door answering a
+raced loser about somebody else's invoice), the residual it does NOT close
+(`p655.duplicate.same_reference_is_NOT_probed` measures that one supplier bill number under two
+intent keys lands twice and doubles the payable -- "duplicate" on this lane means a replayed
+INTENT, and a same-document-number probe is nobody's yet), atomicity (`p655.atomic.no_partial`),
+the authority floors with no existence oracle (`p655.authority.floors`) and the two ladder tokens
+the first cut never drove (`p655.authority.cited_and_inactive`: a document that already backs a
+posted entry, and an archived client), admission-time party
 ambiguity carrying its candidates (`p655.party.resolution`), the control tie-out from zero
 (`p655.tieout.control`), LADDER 1 unwinding a reversal unchanged (`p655.reversal.unwinds`), the
 two-lane equivalence proof (`p655.parity.source_vs_direct` â€” a coding-lane bill and a Work-lane
 trade invoice for the same facts move the same control account by the same signed cents with the
-same due date), the grant posture including the absent attestation (`p655.grants`), the three
+same due date -- asserted against the RULE by name, `posting_date + terms`, on a fixture whose
+document date is 27 days earlier, so the cell states which anchor the estate implements instead of
+only that two lanes agree), the grant posture including the absent attestation (`p655.grants`), the three
 re-derived catalog censuses (`p655.census.writers`), the append-only belts (`p655.appendonly`) and
 the read's viewer floor (`p655.read.floor`).
 

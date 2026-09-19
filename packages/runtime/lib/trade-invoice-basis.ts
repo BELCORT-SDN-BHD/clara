@@ -427,7 +427,16 @@ export function basisFromTradeInvoice(input: StartTradeInvoiceWorkInput): {
 //   5. The SAME result mapping `runStartJournalWork` already has: a `WorkAcceptedPart` on success,
 //      and the database's typed `(code, detail.reason)` handed back on a refusal. The answer
 //      carries `invoice_id`, `kind`, `counterparty_id`, `due_date` and `due_date_source` beside
-//      `work_id` / `task_id` / `logical_op_id` / `status` / `replayed`.
+//      `work_id` / `task_id` / `logical_op_id` / `status` / `replayed` — and those four typed
+//      facts ALWAYS describe the row `invoice_id` names, including when two admissions raced
+//      under one key: the door re-reads the surviving row and raises `intent_payload_conflict`
+//      rather than folding the loser's party onto the winner's invoice (fix round 1, ADV-655-1;
+//      cell p655.replay.race's divergent arm). A `replayed:true` answer is therefore safe to
+//      render verbatim.
+//      THE REFUSAL MAP IS `TRADE_INVOICE_REFUSALS` ABOVE, EIGHTEEN TOKENS: the fourteen
+//      DECISIONS.md:50 fixes, plus `invalid_kind`, `invalid_particulars`, `invalid_currency` and
+//      `invalid_tax_facts`. The ladder binds and the number describes; one reason names one
+//      thing, so the stanza must not collapse the last three back into the first.
 //   6. The prompt stanza must say "I've QUEUED it": the tool ADMITS and posts nothing. The entry is
 //      written moments later by a `claraWork` run under a wake credential minted OBO the same
 //      human, with the database rechecking role, period, chart and cents at commit.

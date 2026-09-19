@@ -909,15 +909,17 @@ the whole lane's admission. Its 202 carries `invoice_id`, the RESOLVED `counterp
 import closure of every frozen workflow, so at the cut every byte of it is hash-locked — exactly
 what happened to `lib/periodic-adjustment-basis.ts` at v19 and `lib/staff-expense-claim-basis.ts`
 at v20. **Which is why every durable rule lives in migration 0225 and none lives here.** The module
-carries the `.strict()` schema, the two builders, the local refusal mapper (the door's own fifteen
-tokens, as messages) and a DISPLAY helper that names the domain and the item kind without naming a
+carries the `.strict()` schema, the two builders, the local refusal mapper (the door's own
+**eighteen** tokens, as messages — fourteen from DECISIONS.md:50 plus `invalid_kind`, and, after
+the fix round's F2, `invalid_particulars`, `invalid_currency` and `invalid_tax_facts`, because one
+reason must name one thing or a person is shown a sentence about the wrong field) and a DISPLAY helper that names the domain and the item kind without naming a
 chart account — it has no chart. It carries **no object spread anywhere**, because
 `scripts/check-parts-parity.mjs` refuses one ("unclassifiable object spread") in any module it
 walks, and this module enters that walk at the cut; measured — the guard refused an earlier draft.
 
 **The successor contract this lane hands over** is written in full at the foot of that module: the
 tool name, the `.strict()` input schema, the door call with its argument order FIXED, the
-deterministic op key, the fifteen-token refusal map, the existing `work_accepted` part with **no**
+deterministic op key, the eighteen-token refusal map, the existing `work_accepted` part with **no**
 `WORK_ACCEPTED_PURPOSES` widening (a trade invoice is a `journal_entry`-purpose Work, exactly as
 #638's claim is), and the prompt stanza's "I've queued it" posture. Nothing is added to
 `claraWork_v4`: an ambiguous counterparty is refused AT ADMISSION precisely so no new mid-run

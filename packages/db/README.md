@@ -209,6 +209,25 @@ halves of that negative. `clara.get_trade_invoice(p_work)` is viewer-floored and
 other internals are ungranted to every application role. The door carries **no `p_attestation`**
 and `is_high_stakes` is unreachable from it.
 
+**A RACED PAIR UNDER ONE INTENT KEY IS ANSWERED ABOUT ITS OWN INVOICE, or refused.** The typed row
+is written with `on conflict (work_id) do nothing`, which converges the core's replay branch onto
+one row — but converging is not agreeing. The door's particulars comparison at step 4 runs on the
+UNLOCKED path, so two admissions under one key are both past it before either commits, and
+`clara._admit_accounting_work_core` compares only basis digest / purpose / source_refs /
+adjustment (0194:1171-1190) — nothing of the counterparty, the reference, the dates or the total.
+Step 8b therefore re-reads the surviving row and raises `intent_payload_conflict` when it is not
+the one this caller sent, the idiom the core already uses for its own race (0194:1239-1256).
+Measured before that arm existed: both callers left as SUCCESS and the loser was handed the
+winner's `invoice_id` folded together with its own party and due date. Cell `p655.replay.race`'s
+divergent arm.
+
+**ONE REASON NAMES ONE THING.** The door's raise ladder is the contract (DECISIONS.md:50), and it
+holds **eighteen** tokens: the fourteen that ruling fixes, plus `invalid_kind` for a kind that is
+neither admitted value, and — because `_assert_trade_invoice_basis` measurably raised one token
+for four different failures — `invalid_particulars`, `invalid_currency` and `invalid_tax_facts`.
+The runtime's wire half (`toDbTradeInvoice`) names the same four, so a browser cannot tell the two
+halves of one validation apart. `p655.polarity.matrix(d2)` drives each.
+
 **One measured correction to #638's eight-step body order.** The authority preamble runs BEFORE the
 payload half here, not after. Measured on clara_655 with the payload half first: an UNKNOWN client
 left as CLR10 `control_leg_missing` (the chart lookup inside `_assert_trade_invoice_basis` is
@@ -219,8 +238,10 @@ is exactly what 0194's no-existence-oracle rule forbids.
 **THE OPEN ITEM IS BORN BY A DEFERRED CONSTRAINT TRIGGER, and its ordering premise is MEASURED, not
 argued.** `t_je_open_item_birth` on `clara.journal_entries` is 0216's lane-agnostic instrument,
 declared identically and for 0216's stated reason. Enumerated from `pg_trigger` on clara_655
-(PG 17.11): twenty-three triggers, of which exactly ONE deferred constraint trigger reads
-`clara.open_items` at commit — `t_je_subledger_belt`. Deferred events for one row are queued in
+(PG 17.11), AFTER 0225 applies: **twenty-four** triggers, three of which touch `clara.open_items`
+(`t_je_open_item_birth`, `t_je_subledger_belt`, `t_snapshot_staleness`) and of which exactly ONE
+DEFERRED constraint trigger reads `clara.open_items` at commit — `t_je_subledger_belt`
+(`t_snapshot_staleness` is not deferred). Deferred events for one row are queued in
 trigger-NAME order and fire at commit in queue order, so the birth is named to sort before it
 ('o' < 's'), and `p655.rig.trigger_order` re-derives the whole ordering from the catalog rather
 than trusting this paragraph. The trigger resolves its subject through
