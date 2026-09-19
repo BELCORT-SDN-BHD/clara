@@ -254,6 +254,24 @@ test("p636.runtime.belt_dormant — an image older than 0229 boots dormant, neve
   assert.deepEqual(out, { batchCancelOk: true, batchCancelDormant: true, batchCancelSettled: 0, batchCancelChildren: 0 });
 });
 
+test("p636.runtime.belt_probe_unreadable — an UNREADABLE catalog read is batchCancelOk:FALSE and dormant:FALSE, never a silent dormancy", async () => {
+  // DECISIONS §6.3 on reports/integration-merge.md §5.2, and the reconciler-fa.mjs:74-89 law
+  // cloned: "absent" and "unreadable" must not report the same thing. Bare, this probe's throw
+  // escaped into reconciler.mjs's belt() wrapper — the assembly-level report reserved for a belt
+  // that could not contain its own failure — while the FA and ADJ belts beside it contained the
+  // identical injected failure. The cell above (`belt_dormant`) is the other half: a genuinely
+  // absent 0229 is still a clean ok:true no-op.
+  const log = [];
+  const client = { query: async () => { throw new Error("connection reset"); } };
+  const out = await reconcileIntakeBatchCancellations(client, { log: (m) => log.push(m) });
+  assert.equal(out.batchCancelOk, false,
+    "a failed read is 'we do not know' — the leader retries next cycle");
+  assert.equal(out.batchCancelDormant, false,
+    "…and it is NOT a missing 0229: reporting dormant would claim the surface is absent on the strength of a read that never landed");
+  assert.ok(log.some((m) => /intake batch cancellations: surface probe error — connection reset/.test(m)),
+    "the skip is logged with its cause, like every belt beside it");
+});
+
 test("p636.runtime.belt_resumes — the belt re-issues each parent's fan-out with its STORED decision", async () => {
   const fanned = [];
   const client = {

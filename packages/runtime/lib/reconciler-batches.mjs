@@ -33,6 +33,10 @@
 // batch will never finish stopping" are not the same number (fix round 1, ADV-636-03).
 
 import { resumeCancel } from "./intake-batches.mjs";
+// Same identity test as reconciler.mjs's isLeaderHalt, and the SAME import specifier
+// (./relay.mjs) reconciler-fa.mjs uses for it, so `instanceof` agrees with leader.mjs:218 —
+// see reconciler-fa.mjs:46-49 for why the specifier itself matters.
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const NOOP_LOG = /** @type {(message: string) => void} */ (() => {});
 const BATCH_SWEEP_LIMIT = Number(process.env.CLARA_INTAKE_BATCH_SWEEP_LIMIT || 20);
@@ -42,8 +46,31 @@ const BATCH_SWEEP_LIMIT = Number(process.env.CLARA_INTAKE_BATCH_SWEEP_LIMIT || 2
  * @param {{ log?: (m: string) => void, withRuntime?: (fn: any) => Promise<any> }} deps
  */
 export async function reconcileIntakeBatchCancellations(client, { log = NOOP_LOG, withRuntime = null } = {}) {
-  const present = await client.query(
-    "select to_regprocedure('clara.sweep_intake_batch_cancellations(integer)') is not null as ok");
+  // THE PROBE IS ISOLATED, AND "ABSENT" AND "UNREADABLE" MUST NOT REPORT THE SAME THING — the
+  // reconciler-fa.mjs:74-89 / reconciler-render.mjs:192-198 precedent, cloned rather than
+  // reinvented. Bare, this read's throw escaped into reconciler.mjs's belt() wrapper, which
+  // named the belt in `beltErrors` — the assembly-level report reserved for a belt that could
+  // NOT contain its own failure. Every daily belt beside it (FA, ADJ) contains the identical
+  // injected failure and reports `*Ok:false` instead, and DECISIONS §6.3 ruled this belt does
+  // the same: the belt reports its own failure with the cause, and the sweep behind it completes.
+  //
+  // `batchCancelDormant:false` is the half that carries the meaning: a catalog read that THREW
+  // is a connection or session problem, NOT a missing 0229, and answering dormant:true would
+  // tell a reader the surface is absent on the strength of a read that never landed.
+  let present;
+  try {
+    present = await client.query(
+      "select to_regprocedure('clara.sweep_intake_batch_cancellations(integer)') is not null as ok");
+  } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing, exactly as reconciler-fa.mjs does.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
+    log(`[reconcile] intake batch cancellations: surface probe error — ${err?.message ?? err}`);
+    return {
+      batchCancelOk: false, batchCancelDormant: false,
+      batchCancelSettled: 0, batchCancelChildren: 0,
+    };
+  }
   if (!present.rows[0]?.ok) {
     return { batchCancelOk: true, batchCancelDormant: true, batchCancelSettled: 0, batchCancelChildren: 0 };
   }
