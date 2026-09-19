@@ -22,7 +22,10 @@ enableDomInspection();
 
 const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-function row(basis: Record<string, unknown>, purpose = "payroll_obligation"): PeriodicAdjustmentRow {
+function row(
+  basis: Record<string, unknown>,
+  purpose: PeriodicAdjustmentRow["purpose"] = "payroll_obligation",
+): PeriodicAdjustmentRow {
   return {
     id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     work_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
