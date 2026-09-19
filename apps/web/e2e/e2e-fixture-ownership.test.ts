@@ -1555,6 +1555,40 @@ test("RPC-opener census · intake-batch-mock.mjs's real get_intake_batch verb is
   assert.deepEqual(census.get("get_intake_batch"), ["intake-batch-mock.mjs"]);
 });
 
+test("RPC-opener census · a synthetic rpc === \"…\" claimant and a synthetic path !== \"…\" claimant of the SAME undeclared verb are BOTH extracted AND flagged as a collision", () => {
+  // Fix round (L01-S3): the four cells above stop at `verbsInSource()` extraction — none of them
+  // is ever carried through to `verbCollisions`, so #863's own AC1 ("RED before / GREEN after,
+  // feeding the CENSUS a synthetic source") was only half built. This cell walks the SAME two
+  // spellings all the way to the collision gate, exactly as `rpcVerbCensus()` itself would: parse
+  // each synthetic source with `verbsInSource`, invert into `verb -> files`, then run
+  // `verbCollisions`. `list_entry_links` is deliberately the REAL declared share
+  // (`SHARED_RPC_VERBS` above) — using it under two claimant NAMES that are not on that declared
+  // list is exactly the shape a real regression would take: a widened opener finding a genuine
+  // extra or differently-spelled claimant nobody declared, not a made-up verb no real collision
+  // gate would ever see.
+  const sources: Record<string, string> = {
+    "synthetic-rpc-claimant-mock.mjs": 'if (request.method === "POST" && rpc === "list_entry_links") { return true; }',
+    "synthetic-guard-claimant-mock.mjs": 'if (request.method !== "POST" || path !== "/rest/v1/rpc/list_entry_links") return false;',
+  };
+  const owners = new Map<string, Set<string>>();
+  for (const [file, source] of Object.entries(sources)) {
+    for (const verb of verbsInSource(source)) {
+      const set = owners.get(verb) ?? new Set<string>();
+      set.add(file);
+      owners.set(verb, set);
+    }
+  }
+  // BOTH spellings were actually extracted, before the collision is even checked.
+  assert.deepEqual([...owners.keys()], ["list_entry_links"]);
+  const synthetic = new Map([...owners].map(([verb, set]) => [verb, [...set].sort()]));
+
+  const problems = verbCollisions(synthetic, SHARED_RPC_VERBS);
+  assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
+  assert.match(problems[0]!, /list_entry_links/);
+  assert.match(problems[0]!, /synthetic-guard-claimant-mock\.mjs/);
+  assert.match(problems[0]!, /synthetic-rpc-claimant-mock\.mjs/);
+});
+
 // --- THE CORE HANDOVER CENSUS (#625) ------------------------------------------
 //
 // `SHARED_RPC_VERBS` above catches one lane answering an RPC verb ANOTHER LANE also answers. It

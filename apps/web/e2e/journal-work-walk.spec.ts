@@ -835,8 +835,28 @@ test("#848: pressing Reactivate on the egress_not_authorized face reaches migrat
     await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
     await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
 
+    // THE onReactivated CONTRACT'S RE-READ HALF (fix round, L01-S1). `egressReactivateOpKeys`
+    // below proves the PRESS reached the door; on its own it says nothing about whether the page
+    // asked again afterwards — that claim needs the actual wire GET `useWorkDetail`'s `reload()`
+    // issues (`getAccountingWork` -> `GET /rest/v1/accounting_work?id=eq.<workId>`), watched
+    // directly rather than inferred from the op-key push, which fires on the PRESS regardless of
+    // whether any re-read follows it.
+    const detailReads: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() !== "GET") return;
+      const u = new URL(r.url());
+      // The mock server strips its own `supabasePrefix` (`/e2e-supabase` by default,
+      // `serve-built.mjs`'s own `path = url.pathname.slice(supabasePrefix.length)`) before
+      // matching routes, so the RAW pathname the browser actually requests carries that prefix —
+      // `endsWith` is what makes this listener agree with the mock's own routing.
+      if (u.pathname.endsWith("/rest/v1/accounting_work") && u.searchParams.get("id") === `eq.${JOURNAL_WORK.egressRefusedWorkId}`) {
+        detailReads.push(r.url());
+      }
+    });
+
     const button = page.getByRole("button", { name: "Re-activate AI processing for this client" });
     await expect(button, "owner-signed-in: the owner-only recovery action is offered").toBeVisible();
+    const readsBeforePress = detailReads.length;
     await button.click();
 
     // THE BANNER CONVERGES TO ACTIVE — the exact receipt copy, which also states what did NOT
@@ -846,9 +866,19 @@ test("#848: pressing Reactivate on the egress_not_authorized face reaches migrat
     // dispatches only, so the record on screen still reads exactly as refused as it did before.
     await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
 
-    // THE onReactivated CONTRACT: the press told the page to re-read, which reached the runtime
-    // proxy exactly once with a REAL, non-empty op key — the same evidence `cancelKeys` proves for
-    // cancel elsewhere in this lane.
+    // THE RE-READ ITSELF: `egress-reactivate-action.tsx`'s `press()` calls `setOutcome(result)`
+    // (the banner above) BEFORE `await onReactivated?.()` resolves, so the reload this asserts is
+    // POLLED for rather than assumed already landed just because the banner is visible. Exactly
+    // one more GET of this Work must land — no more (a stray second poll tick would mean the
+    // Work's own terminal status stopped being read as terminal) and no fewer (onReactivated was
+    // never wired, or never awaited).
+    await expect.poll(() => detailReads.length, {
+      message: "state.reload() (onReactivated) must issue exactly one more GET of this Work after the press",
+    }).toBe(readsBeforePress + 1);
+
+    // THE onReactivated CONTRACT'S OTHER HALF: the press reached the runtime proxy exactly once
+    // with a REAL, non-empty op key — the same evidence `cancelKeys` proves for cancel elsewhere
+    // in this lane.
     const after = await controlRead(page, { op: "egress_reactivate_keys" });
     const keys = after.keys as unknown[];
     expect(keys.length, "exactly one press reached the door").toBe(1);
@@ -881,12 +911,25 @@ test("#848: a governed no_consent refusal renders VERBATIM, never paraphrased", 
   }
 });
 
-test("#848: the mock enforces the owner floor — a forced denial answers the database's own CLR04", async ({ page }) => {
-  // A signed-in browser cannot demote its own session (every cell in this whole spec signs in as
-  // the same owner persona), so the owner-only dispatch this door enforces
-  // (`clara._human_ctx(clara.role_rank('owner'))`, migration 0211) is proven by arming the mock to
-  // answer exactly the refusal a below-owner caller would receive, rather than by a second sign-in
-  // this lane's fixture has no persona for.
+test("#848: a forced denial renders the database's own CLR04 owner-floor refusal", async ({ page }) => {
+  // RECORDED SUBSTITUTION (fix round, L01-S2): AC3 reads "the mock enforces owner-only dispatch,
+  // OR the door refusal renders when a lower rank is forced." Neither branch is delivered
+  // literally here. What this cell proves is narrower: the mock is ARMED (`egress_reactivate_
+  // answer: "denied"`) to answer the exact CLR04 shape `clara._human_ctx(clara.role_rank('owner'))`
+  // (migration 0211) gives a below-owner caller, and that shape renders verbatim with no success
+  // receipt — the same injected-refusal idiom `cancelAnswer`/`traceDenied` already use elsewhere
+  // in this lane, never a caller the mock actually inspected. Branch (b) (forcing a lower rank
+  // through the browser) is genuinely unreachable here: every cell in this whole spec signs in as
+  // the same owner persona, and the button itself is owner-gated in the UI
+  // (`work-detail.tsx`'s `canReactivateEgress={ownerHere}`), so a bookkeeper persona would never
+  // see it to press. Branch (a) (the mock deriving its CLR04 answer from the signed-in persona,
+  // the way `serve-built.mjs`'s own `/rest/v1/caller_context` derives `role_rank` from the
+  // sign-in email prefix) was reachable but is NOT what this cell does — wiring that derivation
+  // across `journal-work-mock.mjs` and the shared `serve-built.mjs` dispatch was judged out of
+  // this ticket's narrow scope (a walk arm, not a cross-module persona plumbing change to a file
+  // nine other lanes edit concurrently per the work order's rule 7). So: AC3 is met by simulating
+  // the wire answer, not by enforcement, and is recorded here as such rather than ticked as
+  // written.
   await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
   try {
     await control(page, { op: "egress_refused" });

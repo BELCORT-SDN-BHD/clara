@@ -8,6 +8,8 @@ pnpm --filter @clara/web e2e
 
 [`run.mjs`](run.mjs) builds `@clara/web`, starts the production Next.js server behind a local HTTPS proxy, and runs every `*.spec.ts` in this directory with Chromium. [`playwright.config.ts`](../playwright.config.ts) fixes the suite at one worker, no retries, no reused server, and retained traces on failure. OpenSSL must be available so the harness can create its temporary local certificate.
 
+Always run it as `pnpm --filter @clara/web e2e`, never a bare `npx playwright test` or an IDE's own Playwright runner: those invoke [`serve-built.mjs`](serve-built.mjs) directly and skip the build, silently serving a stale `.next/` (measured on the #648 fix round: a 19-minute-stale build produced a false failure with no other symptom). `serve-built.mjs` logs the `BUILD_ID` it is about to serve and its age at startup so a stale run is visible rather than silent.
+
 ## Fixture boundary
 
 The default suite uses [`serve-built.mjs`](serve-built.mjs). The browser and production bundle are real; Supabase, PostgREST responses, Stripe, and most runtime responses are deterministic local fixtures. The suite is suitable for route behavior, client state, accessibility, responsive layout, same-origin proxying, and request-shape checks. It does not prove live RLS, a deployed workflow, Cloudflare streaming, mail delivery, Stripe, or production configuration.
