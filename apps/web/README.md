@@ -1004,9 +1004,19 @@ the unit or the timezone the screen carried.
 
 `lib/work/api.ts` is the only reader of the runtime's durable-Work refusal bodies (they never go
 through `lib/wire.ts`). Those bodies now carry the governed door's WHOLE typed detail under one
-key, so this module surfaces it in one helper, `carrier()`, on the `invalid_basis` and the generic
-`conflict` arms — and a new structured key reaches a form with no new arm here and no new fold in
-`packages/runtime/src/workRoutes.ts`.
+key, so this module surfaces it in one helper, `carrier()`, on EVERY refusal arm a durable-Work
+door can answer with — and a new structured key reaches a form with no new arm here and no new
+fold in `packages/runtime/src/workRoutes.ts`.
+
+**Every door, not only the admission ones.** The five admission doors (`submitJournalWork`,
+`submitPeriodicAdjustmentWork`, `submitStaffExpenseClaimWork`, `submitTradeInvoiceWork`,
+`restateWork`) read the carrier on their `invalid_basis` and `conflict` arms; `retryWork` reads it
+on `not_retryable`, `cancelWork` on `conflict` and `invalid`, and `takeOverWork` on `not_takeable`,
+`confirm_basis` and `invalid`. The runtime carries the door's typed detail on every 400 and 409 it
+builds, including the ones those three doors answer, so an edge that read it on five of eight
+would have gone on discarding it exactly where the ticket says it must not. The ONE refusal that
+deliberately carries nothing is `transient`: PostgreSQL broke a deadlock, the statement never ran,
+and there is no state to describe.
 
 **It is spread, not assigned, and that is the compatibility promise.** A body with no typed detail
 yields `{}`, so `{kind, field, reason}` stays exactly `{kind, field, reason}` for every caller and

@@ -139,8 +139,10 @@ export type PartyCandidateWire = {
 export type RetryWorkResult =
   | ({ kind: "accepted" } & WorkAdmission)
   /** 409 — the Work is not in a state a new run may be admitted from. `status`
-   *  is the DB's current value, rendered verbatim beside the refusal. */
-  | { kind: "not_retryable"; status: string | null }
+   *  is the DB's current value, rendered verbatim beside the refusal, and
+   *  `detail` is #981's carrier: the rest of what the door said about the
+   *  state it found, present only when it said anything. */
+  | { kind: "not_retryable"; status: string | null; detail?: RefusalDetail }
   | { kind: "denied" }
   | { kind: "not_found" }
   | { kind: "unavailable"; message: string }
@@ -560,7 +562,7 @@ export async function retryWork(
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
-  if (res.status === 409) return { kind: "not_retryable", status: str(body.status) };
+  if (res.status === 409) return { kind: "not_retryable", status: str(body.status), ...carrier(body) };
   return {
     kind: "unavailable",
     message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
@@ -669,8 +671,9 @@ export type WorkCancelAnswer = {
 
 export type CancelWorkResult =
   | ({ kind: "answered" } & WorkCancelAnswer)
-  /** 409 with the DB's own `status` — rendered verbatim beside the refusal. */
-  | { kind: "conflict"; reason: string | null; status: string | null }
+  /** 409 with the DB's own `status` — rendered verbatim beside the refusal, plus #981's carrier
+   *  for whatever else the door said (the receipt that won the race, the responsible, …). */
+  | { kind: "conflict"; reason: string | null; status: string | null; detail?: RefusalDetail }
   /**
    * 409 `{error:'transient'}` — PostgreSQL broke a deadlock or a serialization failure and the
    * STATEMENT NEVER RAN. It is not a conflict with the world: the Work is in exactly the state it
@@ -680,7 +683,7 @@ export type CancelWorkResult =
   | { kind: "transient" }
   | { kind: "denied" }
   | { kind: "not_found" }
-  | { kind: "invalid"; reason: string | null }
+  | { kind: "invalid"; reason: string | null; detail?: RefusalDetail }
   | { kind: "unavailable"; message: string }
   | { kind: "lost"; message: string };
 
@@ -745,8 +748,8 @@ export async function cancelWork(
   // the database broke, and the statement never ran. Collapsing it into `conflict` told a preparer
   // "the database refused the request in the state it found" and sent them to read an unchanged row.
   if (res.status === 409 && str(body.error) === "transient") return { kind: "transient" };
-  if (res.status === 409) return { kind: "conflict", reason: str(body.error), status: str(body.status) };
-  if (res.status === 400) return { kind: "invalid", reason: str(body.reason) ?? str(body.error) };
+  if (res.status === 409) return { kind: "conflict", reason: str(body.error), status: str(body.status), ...carrier(body) };
+  if (res.status === 400) return { kind: "invalid", reason: str(body.reason) ?? str(body.error), ...carrier(body) };
   return {
     kind: "unavailable",
     message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
@@ -765,16 +768,17 @@ export type WorkTakeOver = WorkAdmission & {
 
 export type TakeOverWorkResult =
   | ({ kind: "accepted" } & WorkTakeOver)
-  /** 409 — the Work is not available to take over (still authorised, or its run is live). */
-  | { kind: "not_takeable"; status: string | null }
+  /** 409 — the Work is not available to take over (still authorised, or its run is live).
+   *  `detail` is #981's carrier, as on every other refusal this module reads. */
+  | { kind: "not_takeable"; status: string | null; detail?: RefusalDetail }
   /** 409 `{error:'transient'}` — see `CancelWorkResult`'s own arm: nothing happened, try again. */
   | { kind: "transient" }
   /** 400 — the basis was INTERPRETED and the colleague has not confirmed the one they read.
    *  `basisDigest` is what the resubmit must carry back. */
-  | { kind: "confirm_basis"; basisDigest: string | null; basisOrigin: string | null }
+  | { kind: "confirm_basis"; basisDigest: string | null; basisOrigin: string | null; detail?: RefusalDetail }
   | { kind: "denied" }
   | { kind: "not_found" }
-  | { kind: "invalid"; reason: string | null }
+  | { kind: "invalid"; reason: string | null; detail?: RefusalDetail }
   | { kind: "unavailable"; message: string }
   | { kind: "lost"; message: string };
 
@@ -824,12 +828,17 @@ export async function takeOverWork(
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
   if (res.status === 409 && str(body.error) === "transient") return { kind: "transient" };
-  if (res.status === 409) return { kind: "not_takeable", status: str(body.status) };
+  if (res.status === 409) return { kind: "not_takeable", status: str(body.status), ...carrier(body) };
   if (res.status === 400) {
     if (str(body.error) === "basis_confirmation_required") {
-      return { kind: "confirm_basis", basisDigest: str(body.basis_digest), basisOrigin: str(body.basis_origin) };
+      return {
+        kind: "confirm_basis",
+        basisDigest: str(body.basis_digest),
+        basisOrigin: str(body.basis_origin),
+        ...carrier(body),
+      };
     }
-    return { kind: "invalid", reason: str(body.reason) ?? str(body.error) };
+    return { kind: "invalid", reason: str(body.reason) ?? str(body.error), ...carrier(body) };
   }
   return {
     kind: "unavailable",

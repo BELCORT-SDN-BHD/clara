@@ -70,15 +70,18 @@ if (process.env.CLARA_SKIP_WORK_E2E === "1") {
 
 // --- Fail-closed local gate. BYTE-IDENTICAL to `periodic-adjustment-e2e.mjs`'s, deliberately: this
 // file spawns the same server against the same throwaway databases, and a gate that admitted one
-// more name here would be a second, looser answer to one question.
+// more name here would be a second, looser answer to one question. Both moved together to admit
+// the riders wave's per-lane `clara_l<NN>` (#980), and they stay one answer.
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
+const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|l\d{2})$/;
 if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("staff-expense-claim-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci}");
+  throw new Error(
+    "staff-expense-claim-e2e is hard-gated to a loopback host + PGDATABASE in "
+    + "{clara_rt_test, clara_wave_b_ci, clara_l<NN>}");
 }
 if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("staff-expense-claim-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
+    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci|l[0-9][0-9])(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
+  throw new Error("staff-expense-claim-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci|l<NN>)");
 }
 {
   const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
@@ -567,7 +570,16 @@ async function main() {
         sourceRefs: [{ kind: "document", documentId: "00000000-0000-4000-8000-000000638fff" }],
       }, ev.jwt);
       assert.equal(unfiled.status, 400, `an unfiled citation is a 400 (got ${unfiled.status} ${JSON.stringify(unfiled.body)})`);
-      assert.deepEqual(unfiled.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      // #981 · THE CARRIER, OVER THE REAL WIRE. The promoted keys are what they always were —
+      // that is the compatibility claim, and it is measured here off an actual HTTP response
+      // rather than off `workErrorResponse` — and the door's whole typed detail now rides beside
+      // them under `detail`, additively.
+      const { detail: unfiledDetail, ...unfiledPromoted } = unfiled.body;
+      assert.deepEqual(unfiledPromoted, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      assert.deepEqual(unfiledDetail,
+        { reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed" },
+        "the door's own object, verbatim: the category reason the wire overwrote, the DB's 1-based "
+        + "path, and the raw constraint token");
       console.log("[sec-e2e] PASS 7: an attached receipt rides admission -> commit -> evidence link; an unfiled one is a typed 400");
     } else {
       console.log("[sec-e2e] PASS 7: SKIPPED — migration 0182 (clara.entry_evidence_links) is not on this database");

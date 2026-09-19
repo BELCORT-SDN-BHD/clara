@@ -62,11 +62,21 @@
 //            browser posts it camelCase, so `toWireField` re-spells it — the SECOND and last
 //            translation this route performs, beside `source_refs` → `sourceRefs`, and it is a
 //            total function rather than a table so a new field cannot fall out of step. Its
-//            reasons are the database's own: `invalid_adjustment` folds to its `constraint`
-//            exactly as `invalid_basis` does, and `adjustment_all_zero`, `adjustment_lines_mismatch`,
-//            `adjustment_account_relationship`, `advance_not_enrolled`, `scope_overbroad`,
-//            `stale_basis` and the three `correction_target_*` tokens ride back under their own
-//            names. A locked period is CLR19 `write_into_closed_period`, which `workErrorStatus`
+//            reasons are the database's own, and NONE of them folds — `invalid_adjustment`
+//            included, despite what this note claimed from #643 until #981 measured it. It rides
+//            back under its own name exactly like `adjustment_all_zero`,
+//            `adjustment_lines_mismatch`, `adjustment_account_relationship`,
+//            `advance_not_enrolled`, `scope_overbroad`, `stale_basis` and the three
+//            `correction_target_*` tokens. `CONSTRAINT_FOLD_REASONS` below is the WHOLE roster of
+//            reasons whose wire `reason` is the `constraint` token, and it names three:
+//            `invalid_basis`, `invalid_source_ref`, `invalid_claim`
+//            (`work-routes-unit.test.mjs`'s "the three constraint folds are the only typing left"
+//            pins both halves). Whether `invalid_adjustment` SHOULD have been the fourth is a
+//            live question — this note and `apps/web/lib/work/journal-basis.ts`'s mapper were
+//            written as though it were — and a ticket of its own; moving a refusal's reason
+//            vocabulary was out of #981's scope. Either way the raw token is now readable on
+//            `detail.constraint`.
+//            A locked period is CLR19 `write_into_closed_period`, which `workErrorStatus`
 //            maps for the first time here — see its own note for why that code could not reach
 //            this surface before.
 //

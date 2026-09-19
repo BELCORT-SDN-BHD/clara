@@ -596,3 +596,94 @@ test("981.web: an UNNAMED 409 keeps the door's own reason on the carrier", async
     },
   );
 });
+
+test("981.web: EVERY durable-Work door reads the carrier — retry, cancel and take-over too", async () => {
+  // Reviewed finding L10-A2. The runtime carries the door's typed detail on EVERY 400 and 409
+  // `workErrorResponse` builds, and these three doors answer some of those. Before this cell the
+  // carrier stopped at the five ADMISSION doors, so the detail arrived here and was dropped —
+  // which is precisely the gap the ticket describes: a refusal gaining a structured key still
+  // needed a new arm in this file for take-over, retry and cancel.
+  //
+  // The promoted keys of each arm are asserted ALONGSIDE the carrier, because the compatibility
+  // promise is per-arm: `status`, `reason`, `basis_digest` keep their values and their spelling.
+
+  // retry — 409 `not_retryable`
+  await withFetch(
+    () => json({ error: "conflict", status: "running", detail: { reason: "run_already_terminal", status: "running", since: "2026-09-20T02:00:00Z" } }, 409),
+    async () => {
+      const out = await retryWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "not_retryable");
+      assert.equal(out.kind === "not_retryable" ? out.status : null, "running", "the promoted key is unchanged");
+      assert.deepEqual(out.kind === "not_retryable" ? out.detail : null,
+        { reason: "run_already_terminal", status: "running", since: "2026-09-20T02:00:00Z" });
+    },
+  );
+  await withFetch(
+    () => json({ error: "conflict", status: "running" }, 409),
+    async () => {
+      assert.deepEqual(await retryWork(auth, { workId: "w1", opKey: "k" }),
+        { kind: "not_retryable", status: "running" }, "no carrier, no new key");
+    },
+  );
+
+  // cancel — 409 `conflict` and 400 `invalid`
+  await withFetch(
+    () => json({ error: "already_terminal", status: "completed", detail: { reason: "already_terminal", receipt_id: "r-1" } }, 409),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "conflict");
+      assert.equal(out.kind === "conflict" ? out.reason : null, "already_terminal");
+      assert.equal(out.kind === "conflict" ? out.status : null, "completed");
+      assert.deepEqual(out.kind === "conflict" ? out.detail : null, { reason: "already_terminal", receipt_id: "r-1" });
+    },
+  );
+  await withFetch(
+    () => json({ error: "invalid_op_key", reason: "invalid_op_key", detail: { reason: "invalid_op_key", op_key: "" } }, 400),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "" });
+      assert.equal(out.kind, "invalid");
+      assert.equal(out.kind === "invalid" ? out.reason : null, "invalid_op_key");
+      assert.deepEqual(out.kind === "invalid" ? out.detail : null, { reason: "invalid_op_key", op_key: "" });
+    },
+  );
+  // A transient 409 carries NOTHING, here as at the runtime: the statement never ran, so there is
+  // no state to describe and the arm stays the bare marker every composer switches on.
+  await withFetch(
+    () => json({ error: "transient", detail: { reason: "serialization_failure" } }, 409),
+    async () => {
+      assert.deepEqual(await cancelWork(auth, { workId: "w1", opKey: "k" }), { kind: "transient" });
+    },
+  );
+
+  // take-over — 409 `not_takeable`, 400 `confirm_basis` and 400 `invalid`
+  await withFetch(
+    () => json({ error: "conflict", status: "running", detail: { reason: "work_not_takeable", status: "running", responsible: "u-7" } }, 409),
+    async () => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "not_takeable");
+      assert.equal(out.kind === "not_takeable" ? out.status : null, "running");
+      assert.deepEqual(out.kind === "not_takeable" ? out.detail : null,
+        { reason: "work_not_takeable", status: "running", responsible: "u-7" });
+    },
+  );
+  await withFetch(
+    () => json({
+      error: "basis_confirmation_required", basis_digest: "d-1", basis_origin: "clara_interpreted",
+      detail: { reason: "basis_confirmation_required", basis_digest: "d-1", interpreted_at: "2026-09-19T10:00:00Z" },
+    }, 400),
+    async () => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "confirm_basis");
+      assert.equal(out.kind === "confirm_basis" ? out.basisDigest : null, "d-1", "the promoted digest is unchanged");
+      assert.equal(out.kind === "confirm_basis" ? out.basisOrigin : null, "clara_interpreted");
+      assert.equal(out.kind === "confirm_basis" ? out.detail?.interpreted_at : null, "2026-09-19T10:00:00Z");
+    },
+  );
+  await withFetch(
+    () => json({ error: "invalid_op_key", reason: "invalid_op_key" }, 400),
+    async () => {
+      assert.deepEqual(await takeOverWork(auth, { workId: "w1", opKey: "" }),
+        { kind: "invalid", reason: "invalid_op_key" }, "no carrier, no new key");
+    },
+  );
+});

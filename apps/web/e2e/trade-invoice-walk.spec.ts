@@ -169,11 +169,20 @@ test("compose a bill → 202 → the Work page shows the persistent outcome, and
 });
 
 test("a refused party renders its candidates INLINE and preserves the draft", async ({ page }) => {
+  // THE CONTROL BODY IS THE DOOR'S WHOLE DETAIL, not just the key this page renders — reviewed
+  // finding L10-A6. Since #981 the runtime carries `clara._trade_invoice_resolve_party`'s typed
+  // object back verbatim under `detail`, and `candidates` is one key of it. A control body that
+  // sent only `candidates` left the mock standing in for a door that no longer exists, so this
+  // walk proved the component reads `detail.candidates` without ever exercising the carrier the
+  // real body arrives in.
   await control(page, {
     op: "refuse_next",
     field: "invoice.counterparty",
     reason: "party_ambiguous",
     detail: {
+      reason: "party_ambiguous",
+      name: TI.vendorName,
+      expected_counterparty_kind: "vendor",
       candidates: [
         { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565" },
         { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: "200101065566" },

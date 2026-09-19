@@ -1318,6 +1318,16 @@ ridden back under their own names. The trade-invoice fold is gone entirely; what
 this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
 it would loosen an access answer.
 
+**The carrier is measured over the real wire in three World e2es, not one.** `workErrorResponse` is
+driven as a pure function by `tests/work-routes-unit.test.mjs`; what an actual HTTP response
+carries is pinned by `tests/work-journal-e2e.mjs`, `tests/periodic-adjustment-e2e.mjs` and
+`tests/staff-expense-claim-e2e.mjs`, each of which reads the unfiled-document 400 off the socket,
+destructures `detail` out, asserts the promoted half is exactly what it was before #981, and
+asserts the door's own object beside it. All three carried the same pre-#981 literal
+`assert.deepEqual(body, {error, field, reason})`, and `node:assert/strict` deepEqual is
+deepStrictEqual — one additive key fails it. Any future change to the promoted half of a
+durable-Work refusal has to move those three lines together.
+
 ## #980 — the shared World harness's third script, and the trade-invoice lane's park and cancel
 
 `tests/work-journal-serve.mjs` is the child bootstrap nine standalone World e2es spawn. It offered
