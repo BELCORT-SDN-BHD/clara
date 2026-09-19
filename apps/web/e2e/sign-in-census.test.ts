@@ -59,11 +59,28 @@ function specFiles(): string[] {
  * `signup-confirm-pending.spec.ts` fill Email and Password and then click "Create account", which
  * no shared helper owns and which is the thing under test in both files.
  */
-const PASSWORD_FILL = /getByLabel\(\s*(?:(["'])Password\1|\/[^/\n]*password[^/\n]*\/[a-z]*)\s*\)\s*\.fill\(/i;
+const PASSWORD_LOCATOR = String.raw`getByLabel\(\s*(?:"Password"|'Password'|\/[^/\n]*password[^/\n]*\/[a-z]*)\s*\)`;
+
+/** The field filled straight off its own locator. */
+const PASSWORD_FILL = new RegExp(String.raw`${PASSWORD_LOCATOR}\s*\.fill\(`, "i");
+/** …and the field BOUND FIRST — `const password = page.getByLabel("Password"); await
+ *  password.fill(…)` — whose `.fill(` arrives later, through the variable. Symmetry with the
+ *  button half, which has read an indirected locator since this file was written: a census that
+ *  understood indirection on one half and not the other would stay GREEN against a local sign-in
+ *  reshaped in three keystrokes, which is the one thing this file exists not to do. */
+const PASSWORD_BINDING = new RegExp(
+  String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*[^;\n]*${PASSWORD_LOCATOR}`,
+  "gi",
+);
 const SIGN_IN_SUBMIT = /getByRole\(\s*(["'])button\1\s*,\s*\{\s*name:\s*(?:(["'])Sign in\2|\/[^/\n]*sign[\s_-]*in[^/\n]*\/[a-z]*)/i;
 
 export function reimplementsLoginForm(source: string): boolean {
-  return PASSWORD_FILL.test(source) && SIGN_IN_SUBMIT.test(source);
+  if (!SIGN_IN_SUBMIT.test(source)) return false;
+  if (PASSWORD_FILL.test(source)) return true;
+  for (const [, bound] of source.matchAll(PASSWORD_BINDING)) {
+    if (new RegExp(String.raw`\b${bound!}\s*\.fill\(`).test(source)) return true;
+  }
+  return false;
 }
 
 /**
@@ -216,6 +233,18 @@ test("#851 · THE VACUITY CONTROL: the detector actually detects, and does not o
     "await submit.click();",
   ].join("\n");
   assert.equal(reimplementsLoginForm(indirectOffender), true, "the indirect click shape must be caught too");
+
+  // THE SAME INDIRECTION ON THE OTHER HALF. The button half was written loose on purpose; the
+  // password half was not, and a local sign-in that binds its Password locator first is the same
+  // defect in the same style, in the same shape this file's own header argues a real offender
+  // takes.
+  const indirectPassword = [
+    'const password = page.getByLabel("Password");',
+    'await password.fill("Clara-e2e-password-1!");',
+    'const submit = page.getByRole("button", { name: "Sign in" });',
+    "await submit.click();",
+  ].join("\n");
+  assert.equal(reimplementsLoginForm(indirectPassword), true, "an indirected Password locator is the same form");
 
   // A compliant file, and the SIGN-UP form — neither is this form.
   assert.equal(
