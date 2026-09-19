@@ -109,14 +109,14 @@ test("900 — the answer textarea is a labelled Field: a real <label> element, a
       const textarea = findIn(body, (n) => n.tagName === "TEXTAREA" && n.getAttribute?.("aria-label") === "Your answer");
       assert.ok(textarea, "the answer textarea must still be findable by its (kept) aria-label");
       const id = textarea!.getAttribute!("id");
-      assert.ok(id, "#900 — the answer control must carry an id for FieldLabel's htmlFor to target");
+      assert.ok(id, "900 — the answer control must carry an id for FieldLabel's htmlFor to target");
 
       const label = findIn(body, (n) => n.tagName === "LABEL" && n.getAttribute?.("for") === id);
-      assert.ok(label, "#900 — a real, visible <label for=…> must associate with the answer control (was aria-label only)");
+      assert.ok(label, "900 — a real, visible <label for=…> must associate with the answer control (was aria-label only)");
       assert.match(textOf(label!), /Your answer/, "the label's own text names the control");
 
       assert.match(textOf(body), /Sent to Clara as your answer to the open question above\./,
-        "#900 — the Field carries a description, the same composition work-question-form's note field and OnboardingItemRow's resolve control use");
+        "900 — the Field carries a description, the same composition work-question-form's note field and OnboardingItemRow's resolve control use");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();
