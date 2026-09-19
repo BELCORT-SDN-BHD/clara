@@ -34,6 +34,14 @@ runs:
     # workflow/graphile_worker schemas first. Ephemeral clara_intake_ci only —
     # never the shared project; the URL omits the password (pg falls back to the
     # job-env PGPASSWORD for the throwaway service container).
+    # #967 — this step and the two below it deliberately SHARE one database and world to prove a
+    # real chain across upload, admission and batching. Neither of the first two used to drain the
+    # Workflow queue before exiting, so a normal run could carry roughly 1.27M lines of leftover
+    # concurrency-limit/retry noise into the third leg (packages/runtime/README.md's own #967 note,
+    # beside `tests/intake-admission-e2e.mjs`). The fix lives IN the two leg files (each now calls
+    # `tests/queue-drain.mjs`'s `waitForQueueDrain` right before its own `process.exit(0)`, since
+    # each leg's own process is the only one with an engine running to drive the drain) — nothing
+    # in this action's own step sequence changed.
     - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
       shell: bash -e {0}
       run: |

@@ -261,6 +261,14 @@ async function main() {
   assert.equal(parsed.length, 4);
   assert.ok(parsed.every((result) => result.regions.length === 20_001));
 
+  // #967 — DRAIN BEFORE EXIT, NOT A FIXED SLEEP. This process's own engine (leader loop, classify
+  // consumer) is the only one running against this database; the moment it exits, whatever it
+  // leaves non-terminal sits inert until the NEXT CI leg's fresh engine finds and re-attempts it —
+  // the measured ~1.27M-line cross-leg noise this ticket fixes. tests/queue-drain.mjs's own header
+  // says why this belongs at the END of THIS leg rather than at the START of the next one.
+  const { waitForQueueDrain } = await import("./queue-drain.mjs");
+  await waitForQueueDrain(rig, { log: (m) => console.log(m) });
+
   console.log("INTAKE E2E: PASS (HTTP stream/CORS/token lock -> Storage -> finalizer -> WDK OCR -> regions; SSE live under structured parse load)");
   process.exit(0);
 }

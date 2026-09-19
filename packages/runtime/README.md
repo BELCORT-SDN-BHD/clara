@@ -1001,6 +1001,23 @@ Standalone, like `intake-e2e.mjs` — not collected by `node --test`. Wired in
 `.github/actions/db-live-gates/action.yml` as its own step, reusing the same throwaway
 database and bootstrapped world the Slice-5 step just built.
 
+<!-- #967 -->
+**Drains its own queue before exiting.** Sharing one database and world across three CI legs
+proves a real cross-leg chain (this leg starts where `intake-e2e.mjs` stops), but nothing used to
+drain the Workflow queue between them: each leg's engine dies with its process, so anything it left
+non-terminal sat inert until the NEXT leg's fresh engine booted its own consumers and found it —
+measured at roughly 1.27 million log lines of leftover concurrency-limit/retry churn, dominated by
+`lib/classify.mjs`'s own capped-task line, before a normal passing run's THIRD leg finished. Both
+`intake-e2e.mjs` and this file now call `tests/queue-drain.mjs`'s `waitForQueueDrain` right before
+their own `process.exit(0)` — the same two censuses `lib/rollback-preflight.mjs` already exposes
+(`censusNonTerminalRuns`, `censusUnboundTasks`), bounded (30s default), never a fixed sleep, and
+each leg's own assertions already poll everything they admit to a terminal status first, so a clean
+run drains in well under a second. `tests/intake-batch-e2e.mjs` deliberately does NOT call it: it is
+the last leg on this database in the CI job and its own §5 scope ends with live rows on purpose (a
+declared-fact wait, a quota wait, an unassigned failed upload) that nothing downstream needs
+drained.
+<!-- /#967 -->
+
 NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
 between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
@@ -1298,7 +1315,11 @@ so the route's honest 429 never becomes a 500.
 needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
 MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
 rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
-reads and `writeIntakeMeta`'s `rename` (the #693 family).
+reads and `writeIntakeMeta`'s `rename` (the #693 family). Runs THIRD on the same shared
+`clara_intake_ci` database and world `intake-e2e.mjs` and `intake-admission-e2e.mjs` build (#967) —
+it does NOT call `tests/queue-drain.mjs` itself (nothing in the CI job follows it on this database),
+but it is the leg that inherits a clean queue from the two before it now draining their own before
+they exit.
 
 **THE BELT'S COUNTERS DISTINGUISH A REFUSAL FROM A DEAD END.** `reconciler-batches.mjs` returns
 `batchCancelFailed` for refusals and `batchCancelBlocked` for a parent whose EVERY child refused
