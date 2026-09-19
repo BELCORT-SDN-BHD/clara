@@ -494,16 +494,20 @@ filing's own history, not on the queue.
   (`lib/documents/use-settle-poll.ts`) while any row can still change. The predicate
   is "filed to this client, or mine and unattributed" — never "my uploads", because
   `clara.document_intakes` has no client column. **A tick costs ONE read.** The mount
-  pays THREE calls in two phases (`lib/documents/receipts.ts`'s `loadIntakeReceipts`,
+  pays FOUR calls in two phases (`lib/documents/receipts.ts`'s `loadIntakeReceipts`,
   #876): the masked intake view, the unassigned set and `caller_context` in one
   `Promise.all`, then — sequenced AFTER it, because the bounded set cannot be known
   before the intake rows are — a filings read BOUNDED to exactly those intake rows'
   document ids (`document_filings?document_id=in.(…)`, `reads.ts`'s
   `listActiveFilingsForDocuments`), never the client's whole active-filing set. That
-  fourth call replaced the pre-#876 shape (`document_filings?client_id=eq.<id>` inside
-  the same `Promise.all`, reading the client's ENTIRE active filing set to answer a
-  question about a handful of intake rows); the tradeoff is one extra serial round
-  trip per mount for a narrower, ID-bounded projection. Each tick re-reads the masked
+  fourth call replaced the pre-#876 shape (`document_filings?client_id=eq.<id>&select=
+  document_id` inside the same `Promise.all` — ONE column, the client's ENTIRE
+  active-filing set — to answer a question about a handful of intake rows); the
+  honest tradeoff is one extra serial round trip per mount and a nine-column
+  projection (`FILING_COLS`, same columns #876 asks for: "same projected columns"),
+  in exchange for a result bounded to the intake rows' own document ids instead of
+  the client's whole active-filing set — narrower in ROWS, wider in COLUMNS, not
+  simply "narrower". Each tick re-reads the masked
   view alone through `refreshIntakeReceipts` and rebuilds the rows against the kept
   derivation (filings included), and the full mount sequence is paid again exactly
   once, on the tick where the batch settles. Until fix round 1 (#633) the tick re-ran
