@@ -124,7 +124,7 @@ once the `CHECK` lands — see this ticket's final report.
 `rig-isolation.test.mjs`'s T10b asserts that `clara_agent_ro` and the two wake roles can
 `EXECUTE` nothing outside `pg_catalog`/`clara`. Once a Workflow/WDK **World** is bootstrapped
 on a database (`pnpm --filter @clara/runtime exec bootstrap`, [runtime README §engine-bootstrap]
-(../runtime/README.md)), that stops being true for a reason that has nothing to do with clara's
+(../../runtime/README.md)), that stops being true for a reason that has nothing to do with clara's
 RBAC: PostgreSQL grants `EXECUTE` on a newly-created function to `PUBLIC` by default, and
 `graphile-worker`'s own bootstrap never revokes it on `workflow`/`workflow_drizzle`/
 `graphile_worker`. Every role — including the two clara roles T10b checks — can then reach
@@ -135,7 +135,12 @@ was never scoped to police, not a leak in the grant matrix this package owns.
 named reason (`World contamination (#866): …`, distinct from the `unready` pre-integration skip)
 the moment any of them exist, so the cell never has to guess. On a database with **no** World
 bootstrapped it runs unchanged and still reds on a genuine RBAC leak — nothing about what the
-read/wake roles are actually granted changed.
+read/wake roles are actually granted changed. Two AC2 cells in `rig-isolation.test.mjs` pin
+exactly that: `T10b-AC2 worldSchemaPresent() reads false on a no-World rig` guards the skip arm
+from ever becoming universal by accident, and `T10b-AC2 a genuine PUBLIC-executable leak outside
+clara is named by agentReachableOutsideClara()` plants a real PUBLIC-executable function in a
+throwaway schema and asserts the enumeration names it (vacuity-controlled against a
+deliberately-neutered `agentReachableOutsideClara()`).
 
 **Recipe:** if your session needs both a bootstrapped World (for `WORKFLOW_POSTGRES_URL`-driven
 runtime work) and a clean T10b run, keep them on separate databases rather than relying on the

@@ -282,6 +282,47 @@ test("T10b agent_ro can EXECUTE nothing outside pg_catalog + clara", async (t) =
   assert.deepEqual(leaked, [], `agent_ro reaches functions outside pg_catalog/clara: ${leaked.join(", ")}`);
 });
 
+// #866 AC2 — the review's L04-S01 finding: the skip arm above can only ever pass or
+// skip, so nothing in the repository pinned that a genuine RBAC leak (one that has
+// nothing to do with a World bootstrap) still reds. These two cells close that gap
+// at the two seams the brief and worldSchemaPresent()'s own contract name: the
+// predicate must read false on an uncontaminated rig (so the skip arm cannot
+// silently swallow every run), and a PUBLIC-executable function planted outside
+// clara must be named by agentReachableOutsideClara() (the exact function T10b
+// calls). A throwaway schema is created and dropped in a finally, mirroring
+// x42-r8-tails.test.mjs's SCRATCH pattern, so a failed run never leaks a decoy
+// into the shared lane database.
+const T866_LEAK_SCHEMA = "x866_ac2_leak_probe";
+
+test("T10b-AC2 worldSchemaPresent() reads false on a no-World rig (the skip arm cannot become universal)", async (t) => {
+  if (unready(t)) return;
+  assert.equal(await worldSchemaPresent(), false,
+    "this rig has no workflow/workflow_drizzle/graphile_worker schema bootstrapped — " +
+    "if this ever reads true here, T10b's assertion arm below is not the one running");
+});
+
+test("T10b-AC2 a genuine PUBLIC-executable leak outside clara is named by agentReachableOutsideClara()", async (t) => {
+  if (unready(t)) return;
+  await rootQuery(`drop schema if exists ${T866_LEAK_SCHEMA} cascade`);
+  await rootQuery(`create schema ${T866_LEAK_SCHEMA}`);
+  try {
+    // No GRANT/REVOKE follows: PostgreSQL's own default is EXECUTE-to-PUBLIC on a
+    // freshly created function (the exact upstream behaviour #866's comment on
+    // WORLD_SCHEMAS names) — so agent_ro reaches this without any RBAC mistake
+    // beyond "the schema exists and nobody revoked the default".
+    await rootQuery(
+      `create function ${T866_LEAK_SCHEMA}.probe_leak() returns int language sql as $$ select 1 $$`,
+    );
+    const leaked = await agentReachableOutsideClara();
+    assert.ok(
+      leaked.some((l) => l.endsWith(`${T866_LEAK_SCHEMA}.probe_leak`)),
+      `expected agentReachableOutsideClara() to name ${T866_LEAK_SCHEMA}.probe_leak; got: ${leaked.join(", ") || "(nothing)"}`,
+    );
+  } finally {
+    await rootQuery(`drop schema if exists ${T866_LEAK_SCHEMA} cascade`);
+  }
+});
+
 // ===========================================================================
 // T13 — live revocation
 // ===========================================================================
