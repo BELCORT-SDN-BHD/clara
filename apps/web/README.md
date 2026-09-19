@@ -1031,3 +1031,39 @@ under `app/` and `components/` for a `<SelectValue>` with neither path (an AST c
 of `tsc`, so an `as any` or a `@ts-expect-error` at a call site is still caught) and for any file
 importing `@base-ui/react/select` directly instead of through this wrapper.
 
+## #956 — an abort now cancels a PENDING reconnect, not just the in-flight read
+
+**The defect.** `lib/clara/stream.ts`'s `runClaraTaskStream` reattaches after a backoff sleep on
+`detached` or an ungraceful close, and the loop only rechecks `signal.aborted` at the TOP of its
+next iteration — right before opening the next attach. A bare `await sleep(delayMs)` (real time in
+production: 1s → 2s → … → 30s cap) waits out the WHOLE delay first, so aborting a task while its
+loop is asleep between attaches only postpones that check, by up to the backoff, rather than
+stopping it. In the browser this is a stop button whose task keeps quietly reattaching in the
+background for up to 30s. In `use-clara-thread-stop.test.ts` it was worse: the "REFUSED ordinary
+stop re-attaches" cell retires its reattach with `claraThreadStore.abortStream(taskId)` in a
+`finally`, on the assumption that abort means "this task's reading is over" — the pending ~1s real
+timer outlived it, firing a stray `/stream` fetch into whichever mock the NEXT cell had installed
+by then. Passed 5/5 in isolation; failed under the loaded whole-suite run (#642's own reattach
+work named the mechanism while fixing something else in the same file; #956 is that defect, not a
+second one).
+
+**The fix, in two parts.** `stream.ts`'s `abortableSleep` races the backoff sleep against the
+signal's own `abort` event and resolves the instant either settles —
+`AbortController.abort()` dispatches `abort` SYNCHRONOUSLY, so the moment a caller aborts, the
+pending sleep resolves on its own next microtask and the loop's very next line (already
+`signal.aborted`-aware) returns before opening another attach. That alone is necessary but not
+sufficient: `withRunFetch`'s test stub returns an empty 200 for every `/stream` request, so EVERY
+cell that hydrates a "running" task opens a reattach loop that ends ungracefully and schedules a
+real backoff — whether or not that cell itself ever calls `abortStream`. Most didn't.
+`claraThreadStore.abortAllStreams()` (aborts every task this store still holds a handle for) run
+from a single file-level `test.afterEach` in `use-clara-thread-stop.test.ts` closes the rest: with
+both pieces, nothing a cell forgot to retire can survive past that cell's own boundary. Measured
+after the fix: 25/25 consecutive isolated runs, 5/5 whole-suite runs with no failure attributable
+to this file.
+
+**The regression.** `apps/web/tests/streamReattach.test.mjs` gained two cells proving the abort
+path directly against `runClaraTaskStream`: one that aborts mid-backoff against a `sleepImpl` that
+never resolves on its own (so the ONLY way the loop can end is the abort, and a `{ timeout: 2000 }`
+turns a regression back into a hang into a clear failure instead of a silent one), and one proving
+the already-aborted fast path never even starts the sleep.
+

@@ -279,6 +279,75 @@ test("the give-up ceiling lands the thread store in connection-lost with no furt
 });
 
 // ---------------------------------------------------------------------------
+// #956 — an abort DURING a pending backoff must cancel the reconnect, not just the
+// in-flight read. Before this fix, `await sleep(delayMs)` waited out the WHOLE delay
+// before the loop's own `if (signal.aborted) return` could run again — so aborting a
+// task while its reattach loop slept between attaches only POSTPONED that check by up
+// to the backoff, rather than stopping it. `use-clara-thread-stop.test.ts`'s "REFUSED
+// ordinary stop re-attaches" cell retires its reattach with exactly this abort call in
+// a `finally`, on the assumption that abort means "this task's reading is over" — the
+// pending ~1s real timer outlived it, firing a stray fetch into whichever mock the
+// NEXT test had installed by then (measured: passed 5/5 isolated, failed under the
+// loaded whole-suite run). See stream.ts's `abortableSleep` for the fix itself.
+// ---------------------------------------------------------------------------
+
+test("#956 aborting mid-backoff stops the reconnect loop without a further fetch, even though the injected sleep never resolves on its own", { timeout: 2000 }, async () => {
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    // An UNGRACEFUL close every time: the body ends with no message/done/detached
+    // event at all, so the loop always takes the "schedule a reconnect" branch.
+    return sseResponse([]);
+  };
+
+  const controller = new AbortController();
+  let sleepCalls = 0;
+  // A sleep that NEVER resolves on its own — if the loop's exit depended on the sleep
+  // settling rather than on the abort, this test would time out (the `{ timeout: 2000 }`
+  // above turns that into a clear failure instead of a silent hang).
+  const neverResolvingSleep = () => { sleepCalls += 1; return new Promise(() => {}); };
+
+  await runClaraTaskStream({
+    token: "tok",
+    taskId: "t-abort-backoff",
+    signal: controller.signal,
+    fetchImpl,
+    sleepImpl: neverResolvingSleep,
+    onEvent: () => {},
+    onReconnectAttempt: () => {
+      // The loop is now inside `abortableSleep`, backed by a sleep that will never
+      // settle by itself — queued (not called inline) so `abortableSleep` has already
+      // registered its `abort` listener by the time this runs; it is synchronous up
+      // to that point, exactly the race the production fix has to win.
+      queueMicrotask(() => controller.abort());
+    },
+  });
+
+  assert.equal(sleepCalls, 1, "precondition: the loop actually reached the backoff sleep once");
+  assert.equal(fetchCalls, 1, "an abort mid-backoff must open NO further read — the reattach the un-aborted loop would have made after this sleep must never happen");
+});
+
+test("#956 an abort BEFORE the backoff sleep is even entered skips it — the fast path", { timeout: 2000 }, async () => {
+  let fetchCalls = 0;
+  const controller = new AbortController();
+  let sleepCalls = 0;
+  await runClaraTaskStream({
+    token: "tok",
+    taskId: "t-abort-backoff-2",
+    signal: controller.signal,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      controller.abort(); // aborted synchronously, before onReconnectAttempt/abortableSleep run at all
+      return sseResponse([]);
+    },
+    sleepImpl: () => { sleepCalls += 1; return new Promise(() => {}); },
+    onEvent: () => {},
+  });
+  assert.equal(fetchCalls, 1);
+  assert.equal(sleepCalls, 0, "an already-aborted signal must never even start the sleep");
+});
+
+// ---------------------------------------------------------------------------
 // FIX 2 — a close with no message/done/detached at all is an error, not silence.
 // ---------------------------------------------------------------------------
 
