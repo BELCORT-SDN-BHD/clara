@@ -304,7 +304,10 @@ export function useTranscriptScroll<T extends HTMLElement = HTMLDivElement>(
       measure();
     };
     landingTimerRef.current = setTimeout(() => correct(LANDING_MAX_CORRECTIONS - 1), PROGRAMMATIC_WINDOW_MS);
-  }, [viewport, publishAtBottom, publishHasMoreBelow]);
+    // `measure` is in the closure now (the correction reads the element rather than a
+    // flag), so it belongs in the dependency list: it is itself memoised on `viewport` and
+    // the two publishers, so this adds no identity churn.
+  }, [viewport, measure, publishAtBottom, publishHasMoreBelow]);
 
   return { viewportRef, atBottom, hasMoreBelow, jumpToLatest, measure };
 }
