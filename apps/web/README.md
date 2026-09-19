@@ -410,9 +410,11 @@ open so Back closes, `router.replace` when the page was loaded directly at it, e
 parameter preserved, and a malformed id answered as not-found rather than folded into "nothing is
 open".
 
-**THE FIRM LEAF IS READ-ONLY APART FROM CANCEL.** `components/firm/documents/unassigned-sources.tsx`
-mounts the same card with `readOnly`, which governs the row affordances; Stop stays reachable there,
-because a person looking at a firm-wide board is exactly the person who needs to stop a batch.
+**THE TWO MOUNTS DIFFER ONLY BY `clientId`.** `components/firm/documents/unassigned-sources.tsx`
+mounts the same card with `clientId={null}`; `documents-workbench.tsx` mounts it with the real
+client's id. Nothing gates Cancel on either mount — the rows carry navigation, not acts, so there was
+never a second job for a read-only flag to do, and Stop is reachable on both for the same reason a
+person looking at a firm-wide board is exactly the person who needs to stop a batch.
 A TERMINAL batch offers no Stop on either mount — an affordance that could only refuse.
 
 **THE STOP DIALOG COUNTS WHAT IS STILL ARRIVING, NOT ONLY WHAT IS RUNNING.** `get_intake_batch`
