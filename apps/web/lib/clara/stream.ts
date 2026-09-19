@@ -478,6 +478,14 @@ function deliverEvent(opts: RunClaraTaskStreamOptions, event: SseEvent): void {
  *  their own abort, same as `apps/dashboard/app/chat/api.ts` `streamTask` callers do)
  *  — attach failures are never retried by this loop, only detaches/ungraceful closes.
  *
+ *  #642 — WITH ONE NAMED EXCEPTION, and it is not a transport fault: an attach the
+ *  route REFUSED (403/404 — this reader may not see this task). That is the same fact
+ *  a mid-stream revocation delivers as `revoked`, so it is delivered as `revoked` and
+ *  this function RETURNS. Rejecting it sent the caller down the transport path, which
+ *  is eight rounds of "Reconnecting…" at someone whose access has been removed. A
+ *  caller that resolves its own promise on the stream opening must therefore also
+ *  handle this read ending without ever opening — see `useClaraThread`'s `finally`.
+ *
  *  #734 — WHAT A REJECTION FROM THIS FUNCTION MEANS, now that it means one thing.
  *  This promise rejects for TRANSPORT faults only: the attach failed, the response
  *  was not ok, the body tore. It does NOT reject because a subscriber threw while
