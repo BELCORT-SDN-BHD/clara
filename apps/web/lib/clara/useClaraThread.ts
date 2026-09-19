@@ -18,6 +18,8 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
 import { readRunByTaskId, readThreadRunSnapshot, THREAD_RUN_LIVE_STATUSES } from "./turnRun";
+import { deriveIntentKey, transcriptPosition } from "./intentKey";
+import { FIRM_ALTITUDE } from "./useActiveThread";
 import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
 /** #630 — THE STOP-REPLY STATE MACHINE, as one value.
@@ -221,7 +223,7 @@ export function useClaraThread(
    *  text in the composer beside its own bubble in the transcript is an invitation to send it
    *  twice (`clearDraft`'s caller reads exactly this). A refused POST resolves false, so that
    *  text IS kept for the person to fix and resend. */
-  sendMessage: (text: string, attachments?: AttachmentPart[]) => Promise<boolean>;
+  sendMessage: (text: string, attachments?: AttachmentPart[], opts?: { altitude?: string }) => Promise<boolean>;
   retryConnection: () => Promise<void>;
   retryLoad: () => Promise<void>;
   /** #630 — STOP THE REPLY. Two acts under one press, and both are needed: aborting the SSE read
@@ -391,18 +393,90 @@ export function useClaraThread(
   }, [auth, threadId, loadAttempt]);
 
   const sendMessage = useCallback(
-    async (text: string, attachments: AttachmentPart[] = []) => {
+    async (text: string, attachments: AttachmentPart[] = [], opts: { altitude?: string } = {}) => {
       const trimmed = text.trim();
       if (!trimmed || !threadId) return false;
+
+      // #642 AC3 — ONE INTENT, ONE KEY. This used to be `crypto.randomUUID()`, minted per
+      // PRESS, which is the exact opposite of idempotency: it guaranteed the door saw a
+      // new intent every time, so its `turn_key` replay lookup (0006:954-960) could never
+      // fire from this surface and a retry after a dropped ack was admitted as a SECOND
+      // turn. The key is now a content address over the thread, the altitude, the trimmed
+      // text and the sorted attachment ids — see ./intentKey.ts for why a changed
+      // attachment set MUST derive a new key (the door returns before it reads
+      // `p_user_parts`, so a same-key repost with a different invoice drops it in silence).
+      //
+      // THE ADDRESS CARRIES THE CONVERSATION'S POSITION TOO (fix round 1, ADV-642-1).
+      // Content alone made every REPEAT of a sentence — "yes", "ok", "continue" — collide
+      // with the first one for the life of the session, and the door answered the second
+      // one with the turn it had already run. `before` is read here rather than after the
+      // derive precisely so the position is the one the person was looking at when they
+      // pressed Send.
+      const altitude = opts.altitude ?? FIRM_ALTITUDE;
+      const before = claraThreadStore.getThread(threadId);
+      const turnKey = deriveIntentKey({
+        threadId,
+        altitude,
+        draft: trimmed,
+        attachments,
+        transcriptPosition: transcriptPosition(before.messages),
+      });
+
+      // THE PRE-READ, AND EXACTLY WHEN IT IS OWED (appendix C §3's left column). It is owed
+      // when the previous send's outcome is UNKNOWN (`sendStatus === "error"` — a network
+      // failure or a 5xx tells us nothing about whether the turn landed) AND this is a
+      // DIFFERENT intent, because a different key cannot land on the door's replay branch
+      // and nothing else would stop a second turn. A SAME-key retry deliberately does NOT
+      // gate on it: the door's lookup runs under the per-firm advisory lock (0006:952) and
+      // is strictly better than any client read, which would race the admission it is
+      // meant to protect. Read BEFORE `beginSend`, so the error the reader is looking at
+      // stays on screen while this tab checks rather than being replaced by a blank
+      // "Sending…".
+      //
+      // AND THE LAST KEY IS READ FROM THE STORE, not from a mount-scoped ref (fix round 1,
+      // ADV-642-4). The `sendStatus === "error"` it is paired with lives in the
+      // module-level store and survives a rail close/reopen; a ref does not, so after any
+      // remount following a failed send `priorKey` was null, the gate was skipped, and a
+      // genuinely different intent posted with no state re-read at all. A null prior key
+      // with an unknown outcome is now "unknown and unattributable", which is a reason to
+      // look, not a reason to skip looking — `priorKey !== turnKey` is true for it.
+      const priorKey = before.lastIntentKey;
+      const outcomeUnknown = before.sendStatus === "error";
+      if (outcomeUnknown && priorKey !== turnKey) {
+        claraThreadStore.beginCheckingBeforeSend(threadId);
+        try {
+          const [snapshot, messages] = await Promise.all([
+            readThreadRunSnapshot(threadId, { session: auth }),
+            getMessages(auth, threadId),
+          ]);
+          claraThreadStore.hydrateMessages(threadId, messages);
+          claraThreadStore.hydrateRun(
+            threadId,
+            snapshot.run ? { taskId: snapshot.run.id, status: snapshot.run.status, startedAt: snapshot.run.created_at } : null,
+            snapshot.parkedClarify,
+          );
+        } catch {
+          // Fail-quiet, like the mount's own run read: a check that could not be made is
+          // not evidence of anything, and refusing to send because a read failed would
+          // strand the person with text they cannot post.
+        } finally {
+          claraThreadStore.endCheckingBeforeSend(threadId);
+        }
+      }
+
       // A NEW TURN IS NEVER THE STOPPED ONE, and it is never the turn an older press was for.
       const generation = sendGenRef.current + 1;
       sendGenRef.current = generation;
       pendingStopRef.current = null;
       setStop(STOP_IDLE);
-      claraThreadStore.beginSend(threadId);
+      // #642 — THE KEY THIS TAB POSTED IS RECORDED WHERE THE SEND STATE LIVES. It used to
+      // be a per-mount ref beside a module-level `sendStatus`, so a remount after a failed
+      // send lost the one fact that tells a retry from a new intent (ADV-642-4). It is an
+      // address within ONE conversation, so it lives on that conversation's own row.
+      claraThreadStore.beginSend(threadId, turnKey);
 
       const parts: ClaraPart[] = [{ type: "text", text: trimmed }, ...attachments];
-      const result = await postTurn(auth, threadId, trimmed, crypto.randomUUID(), attachments);
+      const result = await postTurn(auth, threadId, trimmed, turnKey, attachments);
       if (result.kind !== "accepted") {
         // THE PENDING STOP DIES WITH THE TURN IT WAS FOR. A turn the runtime refused was never
         // admitted, so there is nothing to cancel and nothing to say; carrying the intent forward
@@ -415,7 +489,15 @@ export function useClaraThread(
         claraThreadStore.markSendFailed(threadId, message);
         return false;
       }
-      claraThreadStore.markAccepted(threadId, result.taskId);
+      claraThreadStore.markAccepted(threadId, result.taskId, result.replayed);
+
+      // #642 AC3 — A REPLAY DRAWS NO SECOND BUBBLE. `markSent`'s `pendingUserParts` is
+      // the PROVISIONAL bubble for a turn this tab just admitted; on a replay the door
+      // returned the ORIGINAL task, whose user row is already in the persisted transcript
+      // this thread loaded, so painting a provisional copy beside it would show one
+      // intent twice — which is the very thing the content-addressed key exists to
+      // prevent. `null` (not `[]`) because an empty array still renders the dashed frame.
+      const provisional: ClaraPart[] | null = result.replayed ? null : parts;
 
       // …AND THE STOP THAT ARRIVED WHILE THIS WAS IN FLIGHT IS HONOURED HERE. The turn is admitted
       // — the runtime has a task and a run — so the honest act is to cancel THAT, not to pretend
@@ -428,7 +510,7 @@ export function useClaraThread(
       // `spendStop` records what actually happened, and the view renders THAT.
       if (pendingStopRef.current === generation) {
         pendingStopRef.current = null;
-        claraThreadStore.markSent(threadId, parts);
+        claraThreadStore.markSent(threadId, provisional);
         const settled = await spendStop(result.taskId);
         if (settled.phase === "failed" && settled.cause !== "finished") {
           // A REFUSED STOP LEAVES A LIVE TURN, AND THE TAB MUST NOT ABANDON IT. This arm used to
@@ -458,14 +540,25 @@ export function useClaraThread(
           // buffer to preserve here — no stream was ever opened for this turn — so this arm only
           // reports; it does not call `beginRetry`.
           const admissionCause = settled.cause;
+          let reattachHandled = false;
           const { controller, done } = openStream(result.taskId, () => {
-            claraThreadStore.markSent(threadId, parts);
+            reattachHandled = true;
+            claraThreadStore.markSent(threadId, provisional);
             setStop({ phase: "failed", cause: admissionCause, reattach: "reading" });
           });
           void done.catch((err: unknown) => {
             if (controller.signal.aborted) return;
+            reattachHandled = true;
             setStop({ phase: "failed", cause: admissionCause, reattach: "lost" });
             claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+          }).finally(() => {
+            // #642 (fix round 1, ADV-642-5) — a refused attach ends the read without opening
+            // it and without rejecting. `lost` is the true statement; `markSendFailed` is NOT,
+            // and is deliberately not called here — the turn was admitted, and erasing it is
+            // the defect the arm above already records by name.
+            if (reattachHandled || controller.signal.aborted) return;
+            claraThreadStore.markSent(threadId, provisional);
+            setStop({ phase: "failed", cause: admissionCause, reattach: "lost" });
           });
         }
         // TRUE, because the turn IS on the record: it was admitted and its bubble is in the
@@ -501,7 +594,7 @@ export function useClaraThread(
       return new Promise<boolean>((resolve) => {
         let opened = false;
         const { controller, done } = openStream(result.taskId, () => {
-          claraThreadStore.markSent(threadId, parts);
+          claraThreadStore.markSent(threadId, provisional);
           if (!opened) {
             opened = true;
             resolve(true);
@@ -518,7 +611,7 @@ export function useClaraThread(
             // it — so `markSent` is the true transition, not a cosmetic unlock.
             if (!opened) {
               opened = true;
-              claraThreadStore.markSent(threadId, parts);
+              claraThreadStore.markSent(threadId, provisional);
               // …and TRUE for the same reason the pending arm answers true: the turn was accepted
               // and is in the transcript, so its text must not also stay in the composer.
               resolve(true);
@@ -526,7 +619,25 @@ export function useClaraThread(
             return;
           }
           claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
-          if (!opened) resolve(false);
+          if (!opened) {
+            opened = true;
+            resolve(false);
+          }
+        }).finally(() => {
+          // #642 (fix round 1, ADV-642-5) — THE READ CAN END WITHOUT EVER OPENING, AND THE
+          // COMPOSER MAY NOT BE STRANDED BY IT. A revocation discovered at attach now
+          // delivers a `revoked` event and RETURNS rather than rejecting (one fact, one
+          // face — ./stream.ts), so neither the open callback nor the catch above runs and
+          // this promise would never settle: the composer and its attachment controls
+          // would stay disabled for the life of the mount, holding text the runtime had
+          // already accepted. `markSent` is the true transition for exactly the reason the
+          // abort arm above gives — `postTurn` accepted the turn, so it is on the record
+          // and its text must not also sit in the composer — and the revocation line, not
+          // this promise, is what tells the reader what happened.
+          if (opened) return;
+          opened = true;
+          claraThreadStore.markSent(threadId, provisional);
+          resolve(true);
         });
       });
     },
@@ -587,7 +698,14 @@ export function useClaraThread(
     // to read and `spendStop` has already retired its clock.
     if (settled.phase === "failed" && settled.cause !== "finished") {
       const cause = settled.cause;
+      // #642 (fix round 1, ADV-642-5) — WHICHEVER WAY THE READ ENDS, THE MACHINE RECORDS IT.
+      // A revocation found at attach now delivers a `revoked` event and RETURNS instead of
+      // rejecting (./stream.ts), so the `.catch` below would never run and the machine would
+      // sit in `attempting` for the life of the mount — the round-6 contract is that this
+      // state always says what happened to the read.
+      let handled = false;
       const { controller, done } = openStream(taskId, () => {
+        handled = true;
         // …AND THE BUFFER IS CLEARED HERE, NOT BEFORE (round-6 finding [5]). `beginRetry` resets
         // the stream slot to `initialClaraStreamState`, `provisionalChunks: []` — and that buffer
         // is the ONLY source of the live clarify card (ClaraThreadView's `foldLiveClarifyParts`).
@@ -603,6 +721,7 @@ export function useClaraThread(
       });
       void done.catch(() => {
         if (controller.signal.aborted) return;
+        handled = true;
         // A FAILED RE-ATTACH IS NOT A FAILED SEND. `markSendFailed` clears `activeTaskId`,
         // `turnStartedAt` and `turnStatus` — it would erase the very turn the refusal has just
         // told the reader is still running, which is the defect this arm exists to fix, arriving
@@ -614,6 +733,20 @@ export function useClaraThread(
         // path has no next attach (`runClaraTaskStream` never retries an attach failure), so the
         // buffer is simply the last true record of what reached this tab, parked question and all.
         claraThreadStore.markReattachFailed(threadId);
+        setStop({ phase: "failed", cause, reattach: "lost" });
+      }).finally(() => {
+        // The read ended without ever opening and without rejecting: the attach was
+        // REFUSED. `lost` is the true statement about this tab's read — "no more text will
+        // arrive here" — and the machine must say it, or the copy would sit in `attempting`
+        // for the life of the mount.
+        //
+        // THE STREAM STATE IS LEFT ALONE WHEN IT ALREADY SAYS `revoked`. A revocation is the
+        // stronger and later fact, and `markReattachFailed` writes `detached` — which the
+        // surface renders as "Reconnecting…", the exact sentence this fix exists to retire.
+        if (handled || controller.signal.aborted) return;
+        if (claraThreadStore.getThread(threadId).stream.status !== "revoked") {
+          claraThreadStore.markReattachFailed(threadId);
+        }
         setStop({ phase: "failed", cause, reattach: "lost" });
       });
     }

@@ -901,6 +901,67 @@
       "role": {
         "user": "You",
         "assistant": "Clara"
+      },
+      "jumpToLatest": "Jump to latest",
+      "accessRevoked": "You no longer have access to this reply. Ask an owner or an administrator at your firm if you think that is wrong.",
+      "alreadyAccepted": "Clara already had that message — this is the same request, not a second one.",
+      "checkingBeforeSend": "Checking what happened to your last message…",
+      "composerHint": "Enter sends. Shift+Enter starts a new line.",
+      "scope": {
+        "label": "Conversation scope",
+        "atFirm": "Firm-wide · {firm}",
+        "atClient": "{client} · {firm}",
+        "firmPlaceholder": "Your firm",
+        "clientPlaceholder": "This client"
+      },
+      "liveTools": {
+        "label": "What Clara is doing",
+        "state": {
+          "preparing": "preparing",
+          "running": "running",
+          "done": "done",
+          "failed": "failed",
+          "refused": "refused"
+        }
+      },
+      "tools": {
+        "add_bank_account": "Adding a bank account",
+        "assess_report_claim": "Checking a figure in the report",
+        "clarify": "Asking you a question",
+        "complete_bank_reconciliation": "Completing the bank reconciliation",
+        "compose_metric_preview": "Previewing a measure",
+        "draft_journal_entry": "Drafting a journal entry",
+        "draft_report_spec": "Drafting the report layout",
+        "get_bank_pack": "Reading the bank pack",
+        "get_context_pack": "Reading the client's context",
+        "get_journal_entry": "Reading a journal entry",
+        "list_journal_entries": "Listing journal entries",
+        "list_metric_catalog": "Listing the available measures",
+        "list_unassigned_documents": "Listing documents not yet filed",
+        "match_bank_line": "Matching a bank line",
+        "open_client_question": "Opening a question for the client",
+        "open_report_run": "Opening a report run",
+        "post_journal_entry": "Posting a journal entry",
+        "propose_bank_identifier_promotion": "Proposing a counterparty identifier",
+        "propose_bank_line_exception": "Proposing a bank-line exception",
+        "read_books_freeform": "Reading the books",
+        "read_document": "Reading a document",
+        "remember_client_information": "Recording something about the client",
+        "request_report_preview": "Requesting a report preview",
+        "resolve_and_book_bank_line": "Resolving and booking a bank line",
+        "resolve_bank_line_exception": "Resolving a bank-line exception",
+        "save_metric_definition_draft": "Saving a measure definition",
+        "seal_report_dataset": "Sealing the report dataset",
+        "settle_from_bank_line": "Settling from a bank line",
+        "start_accrual_work": "Configuring an accrual",
+        "start_journal_work": "Queueing journal Work",
+        "start_periodic_adjustment_work": "Queueing a periodic adjustment",
+        "start_staff_expense_claim_work": "Queueing a staff expense claim",
+        "trial_balance": "Reading the trial balance",
+        "unmatch_bank_match": "Undoing a bank match",
+        "upsert_bank_coa_account": "Adding an account for the bank line",
+        "void_bank_reconciliation": "Voiding a bank reconciliation",
+        "void_bank_statement": "Voiding a bank statement"
       }
     },
     "parts": {

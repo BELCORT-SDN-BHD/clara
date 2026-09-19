@@ -62,7 +62,7 @@
  * edit.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -70,7 +70,24 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const PROTECTED_COMPONENTS_PATH = join(WEB_ROOT, "scripts", "protected-components.json");
 const COMPONENTS_JSON_PATH = join(WEB_ROOT, "components.json");
-const SHADCN_BIN = join(WEB_ROOT, "node_modules", ".bin", "shadcn");
+/** THE PINNED LOCAL BINARY — and on Windows that is the `.CMD` shim, not the
+ *  extensionless one.
+ *
+ *  MEASURED (#642, 2026-09-19, Node 22.23.2 on Windows 11): `spawnSync` against
+ *  `node_modules/.bin/shadcn` (no extension — a POSIX shell script) returns
+ *  `status: null` with an `EINVAL`-class spawn error and NO output at all, so this
+ *  guard exited 1 SILENTLY on every clear payload: the refusal path printed its
+ *  reason, and the ALLOWED path printed nothing and installed nothing. The failure
+ *  looked exactly like "the registry does not resolve for this style", which is the
+ *  wrong conclusion — `node_modules/.bin/shadcn.CMD add avatar --dry-run` resolves
+ *  fine. Node 22 additionally refuses to execute a `.cmd`/`.bat` without a shell
+ *  (the CVE-2024-27980 fix), hence the `shell` flag and the quoted command below.
+ *  Nothing about the guard's DECISION changes — this only fixes how the binary the
+ *  guard has already cleared is invoked. */
+const SHADCN_BIN_BASE = join(WEB_ROOT, "node_modules", ".bin", "shadcn");
+const SHADCN_BIN = process.platform === "win32" && existsSync(`${SHADCN_BIN_BASE}.CMD`)
+  ? `${SHADCN_BIN_BASE}.CMD`
+  : SHADCN_BIN_BASE;
 
 /** THE ONE ENV VAR THAT LETS A DELIBERATE, REVIEWED OVERWRITE PROCEED — distinct
  *  from the underlying CLI's own `-o/--overwrite`, which this guard never lets
@@ -193,7 +210,15 @@ async function defaultResolveFiles(componentNames, config) {
  *  script did not itself consume, inheriting stdio so the CLI's own prompts
  *  and output still work for a run the guard has cleared. */
 function defaultSpawnAdd(args) {
-  const result = spawnSync(SHADCN_BIN, ["add", ...args], { cwd: WEB_ROOT, stdio: "inherit" });
+  // A `.CMD` needs a shell on Windows; the command is quoted because `shell: true`
+  // hands the string to `cmd.exe` verbatim and a workspace path may contain spaces.
+  const useShell = SHADCN_BIN.toLowerCase().endsWith(".cmd");
+  const command = useShell ? `"${SHADCN_BIN}"` : SHADCN_BIN;
+  const result = spawnSync(command, ["add", ...args], { cwd: WEB_ROOT, stdio: "inherit", shell: useShell });
+  if (result.status === null) {
+    // NEVER exit silently on a spawn that never ran — that is the whole finding above.
+    console.error(`[ui-add] could not run the pinned CLI at ${SHADCN_BIN}: ${result.error?.message ?? "unknown spawn failure"}`);
+  }
   return result.status ?? 1;
 }
 

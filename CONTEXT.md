@@ -543,3 +543,16 @@ _Avoid_: Treating `finalizeIntake`'s own advisory return as the receipt (only a 
 **Unassigned source**:
 An adopted document with no live filing: the firm holds it and its bytes are sealed and readable, but no client's shelf has claimed it. It is firm-visible, awaits exactly ONE attribution act, and leaves the population the moment that act lands. A document that is unassigned is not a document that failed — it is a document nobody has answered a question about yet.
 _Avoid_: An unprocessed or failed upload; a document whose filing was retired (that one has a history); a per-person inbox — the population is the firm's, not the uploader's.
+
+<!-- #642 -->
+**Turn key**:
+The caller's **content-addressed** identity for one message intent: a stable address over the conversation, the altitude, WHERE IN THE CONVERSATION the instruction was given, the message text and the set of documents attached to it. A retry of the SAME intent reuses it and the estate returns the turn it already admitted — a refused or lost send adds nothing to the transcript, so the retry stands in the same place; a CHANGED intent — including a changed attachment set, and including the same sentence given again after a turn has settled — derives a new one and is admitted as the new turn it is. It is what makes a lost acknowledgement safe in both directions: the same instruction is never accepted twice, and a corrected or repeated instruction is never swallowed by the first.
+_Avoid_: Treating a fresh uuid per press as idempotency; a session-scoped or handed-out key (either can silently resend, or silently DROP, a changed attachment); an address made of content alone (a repeated "yes" is a new instruction, not a retry).
+
+**Conversation scope**:
+The firm or client a conversation's executions belong to, named beside the composer so the person can see whose books an instruction will move before they send it. It is read-only here — switching scope is the shell's act — and it is never guessed: an identity that has not been positively read renders a neutral placeholder rather than the client whose name was on screen a moment ago.
+_Avoid_: Inferring it from the URL alone; a second scope switcher; a stale name carried across a switch.
+
+**Tool outcome**:
+What the transcript records about ONE step Clara took: *preparing*, *running*, *done*, *failed*, or *refused* — the tool ran and declined in its own typed vocabulary, which is not the same as failing. The states are read from what the run actually reported, live while the turn is still going and from the settled transcript afterwards; a step with no reported outcome says so rather than being assigned one.
+_Avoid_: Reading a tool-call count, prose or a shimmer as accounting completion; a *queued* state (nothing on the stream reports admission); presenting *preparing* as *queued*.

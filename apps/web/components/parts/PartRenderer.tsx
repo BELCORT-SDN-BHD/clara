@@ -3,6 +3,7 @@ import { useTranslations } from "next-intl";
 import type { ClaraPart } from "../../lib/parts/types";
 import { isStatusResolverType } from "../../lib/parts/catalog";
 import { toolStatusTone, type ToolCallStatus } from "../../lib/parts/toolStatus";
+import { chatToolLabel } from "@/lib/clara/toolLabel";
 import { Badge } from "./PartBadge";
 import { StateBanner } from "../common/state";
 import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
@@ -159,6 +160,10 @@ export function PartRenderer({
   const tAttachment = useTranslations("Clara.parts.attachment");
   const tClarify = useTranslations("Clara.parts.clarify");
   const tToolCall = useTranslations("Clara.parts.toolCall");
+  /** UI-32 (#642) — the tool LABELS live with the thread's own copy, beside the live
+   *  tool chips that render the same names while a turn is still running, so a settled
+   *  chip and a live chip can never call one tool two different things. */
+  const tThread = useTranslations("Clara.thread");
 
   if (part.type === "text") {
     return part.text.trim() ? <p className="max-w-prose text-sm text-foreground">{part.text}</p> : null;
@@ -200,7 +205,14 @@ export function PartRenderer({
     // entire visible output.
     return (
       <Badge tone={toolStatus ? toolStatusTone(toolStatus) : "neutral"}>
-        <span>{part.tool}</span>
+        {/* UI-32 (#642) — NO IMPLEMENTATION JARGON. This printed `part.tool` verbatim,
+            so a reader saw `start_accrual_work` in the place a human sentence belongs.
+            The label is a next-intl lookup over a CLOSED, measured list of the tool
+            tokens `chatTurn_v20` can call; a token this build has never heard of falls
+            back to the runtime's own word, which is honest, rather than to a prettified
+            version of it, which would read like a label while still being the
+            implementation's word. */}
+        <span>{chatToolLabel(part.tool, (key) => tThread(key))}</span>
         {toolStatus ? (
           // The tool NAME is the DB/runtime's own token and stays verbatim; the
           // OUTCOME word is this app's copy and routes through next-intl.

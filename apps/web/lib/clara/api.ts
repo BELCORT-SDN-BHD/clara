@@ -71,7 +71,13 @@ export type MessageRow = {
 };
 
 export type TurnResult =
-  | { kind: "accepted"; taskId: string }
+  /** #642 — `replayed` is the DOOR's own discriminant, read off the 202
+   *  (`packages/runtime/src/chatRoutes.ts`, which reads it off
+   *  `clara.begin_chat_turn`'s receipt: true from the turn_key replay branch at
+   *  0006:954-960, false from the fresh admission at :999). A caller that does not read
+   *  it cannot tell "we already have this turn" from "we just admitted this turn", which
+   *  is how a re-pressed Send came to draw a second bubble for one turn. */
+  | { kind: "accepted"; taskId: string; replayed: boolean }
   | { kind: "conflict"; message: string }
   | { kind: "limit"; message: string; resetCopy: string | null; resetUtc: string | null }
   | { kind: "error"; message: string };
@@ -228,7 +234,11 @@ export async function postTurn(
   // none of the four cases below and would fall through to `0: request failed`.
   if (res.type === "opaqueredirect") return { kind: "error", message: `post turn failed: ${REDIRECTED}` };
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 202) return { kind: "accepted", taskId: String(body.task_id) };
+  if (res.status === 202)
+    // Fail-closed on an OLD runtime that does not send the field: absent means "fresh",
+    // which is the reading that draws the turn rather than the one that silently swallows
+    // it. `=== true` rather than `Boolean(...)` so a stray "false" string cannot flip it.
+    return { kind: "accepted", taskId: String(body.task_id), replayed: body.replayed === true };
   if (res.status === 409)
     return { kind: "conflict", message: asString(body.message) ?? "this session already has a turn in progress" };
   if (res.status === 429)

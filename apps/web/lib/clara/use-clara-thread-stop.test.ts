@@ -1112,9 +1112,17 @@ test("630 a refused stop whose re-attach FAILS keeps the live buffer — the par
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   globalThis.fetch = (async (u: unknown) => {
     const url = String(u);
-    // The measured shape: no lane serves this task's stream (a CLR11 turn, a proxy that cannot
-    // reach the runtime), so the re-attach 404s and `runClaraTaskStream` never retries it.
-    if (/\/stream/.test(url)) return new Response("no such task", { status: 404 });
+    // The measured shape: no lane serves this task's stream — a proxy that cannot reach the
+    // runtime — so the re-attach fails and `runClaraTaskStream` never retries it.
+    //
+    // #642 (fix round 1, ADV-642-5) RE-ENCODED THIS FIXTURE, and only the fixture: it used to
+    // answer 404. A 404 on this route is `assertTaskStreamAccess`'s masked-view refusal ("you
+    // may not see this task"), and #642 now delivers that as the same `revoked` event a
+    // mid-stream revocation delivers — a different fact, with its own cell below. What this
+    // cell is about, in its own words, is the lane not being there, which
+    // `app/api/runtime/[...path]/route.ts` answers 502 (`runtime_unreachable`). The assertions
+    // are untouched.
+    if (/\/stream/.test(url)) return new Response(JSON.stringify({ error: "runtime_unreachable" }), { status: 502 });
     if (/agent_tasks_visible/.test(url)) {
       return new Response(
         JSON.stringify([{ id: "task-parked", status: "awaiting_input", created_at: "2026-09-12T00:00:00.000Z" }]),
@@ -1208,6 +1216,67 @@ test("630 a refused stop whose re-attach OPENS says so, and clears the buffer th
       // See the "re-attaches this tab's read" cell's own note: this stub's body never closes, so
       // the read outlives the unmount unless the task's own abort handle retires it.
       claraThreadStore.abortStream("task-open");
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});
+
+test("642 a refused stop whose re-attach is REFUSED says so, and does not keep a question that cannot be answered", async () => {
+  // Fix round 1, review finding ADV-642-5, on the stop path — the sibling of the cell
+  // above and the reason its fixture was re-encoded. A 404 (or 403) on the stream route is
+  // not "the lane is down": it is `assertTaskStreamAccess`'s masked-view refusal, and it is
+  // the SAME fact `streamRoute.ts` sends mid-stream as `revoked`. Read as a transport
+  // failure it produced "Reconnecting…" at a reader whose access was gone.
+  //
+  // THE LIVE BUFFER GOES WITH IT, deliberately, and that is the one place this differs from
+  // the transport arm above. The buffer's only job here is to draw the parked clarify card;
+  // a reader who may not read the stream may not answer the question either, so leaving the
+  // card up would invite an answer that every door will refuse. The honest surface says
+  // what happened instead.
+  const { useClaraThread } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  const THREAD_REATTACH_REFUSED = "b3b3b3b3-3333-4333-8333-b3b3b3b3b3b3";
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/\/stream/.test(url)) {
+      return new Response(JSON.stringify({ error: "not_found", message: "not found" }), { status: 404 });
+    }
+    if (/agent_tasks_visible/.test(url)) {
+      return new Response(
+        JSON.stringify([{ id: "task-refused", status: "awaiting_input", created_at: "2026-09-12T00:00:00.000Z" }]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) return refusal("CLR11", "no such task in this firm", "task_not_found");
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_REATTACH_REFUSED));
+    try {
+      await h.settle();
+      claraThreadStore.markAccepted(THREAD_REATTACH_REFUSED, "task-refused");
+      await h.act(async () => {
+        claraThreadStore.applyStreamEvent(THREAD_REATTACH_REFUSED, { event: "chunk", data: "which VAT code?" });
+      });
+      await h.act(async () => { await h.current.stopReply(); });
+      await settleUntil(h, () => reattachOf(h.current.stop) === "lost",
+        "the re-attach recording that it did not open", SETTLE_PASSES);
+
+      assert.equal(reattachOf(h.current.stop), "lost",
+        "the machine still records that the re-attach did NOT open");
+      const stream = claraThreadStore.getThread(THREAD_REATTACH_REFUSED).stream;
+      assert.equal(stream.status, "revoked",
+        "a refused attach is a revocation, not a detach — `detached` is what renders 'Reconnecting…'");
+      assert.equal(stream.revokedReason, "not_found", "…carrying the route's own word");
+      assert.equal(stream.provisionalChunks.length, 0,
+        "the parked question goes with the access that would have answered it");
+    } finally {
       await h.unmount();
     }
   } finally {

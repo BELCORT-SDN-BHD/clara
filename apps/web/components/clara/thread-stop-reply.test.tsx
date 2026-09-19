@@ -501,10 +501,18 @@ async function refusedStopText(
 }
 
 test("630 a refusal whose re-attach CANNOT open never claims this tab is reading again", async () => {
+  // #642 (fix round 1, ADV-642-5) RE-ENCODED THIS FIXTURE, and only the fixture. It used to
+  // answer 404, which on this route is `assertTaskStreamAccess`'s masked-view refusal ("you
+  // may not see this task") — a fact #642 now delivers as the same `revoked` event a
+  // mid-stream revocation delivers, and which is exclusive with every other status line
+  // including this refusal. What THIS cell is about is a re-attach that cannot open at all,
+  // which `app/api/runtime/[...path]/route.ts` answers 502 (`runtime_unreachable`). Every
+  // assertion below is untouched; the refusal arm that IS a refusal has its own cell after
+  // the next one.
   const { text, announcers } = await refusedStopText(
     THREAD_REFUSE_DEAD,
     TASK_REFUSE_DEAD,
-    () => new Response("no such task", { status: 404 }),
+    () => new Response(JSON.stringify({ error: "runtime_unreachable" }), { status: 502 }),
   );
 
   assert.match(text, /needs a bookkeeper role/, "precondition: the role refusal is on screen");
@@ -533,4 +541,58 @@ test("630 …and once the re-attach OPENS, the same line says so", async () => {
   assert.equal(announcers.length, 1,
     `both sentences live in ONE role=status: two regions is two announcements for one press; `
     + `saw ${JSON.stringify(announcers)}`);
+});
+
+const THREAD_REFUSE_REVOKED = "c7c7c7c7-1111-4111-8111-c7c7c7c7c7c7";
+const TASK_REFUSE_REVOKED = "d7d7d7d7-1111-4111-8111-d7d7d7d7d7d7";
+
+test("642 a refusal whose re-attach is REFUSED tells the reader THAT, and says it once", async () => {
+  // Fix round 1, review finding ADV-642-5, at the face, and the sibling of the two cells
+  // whose fixtures were re-encoded. When a re-attach comes back 403/404 the reader has lost
+  // access to the reply, which is a later and stronger fact than "your role cannot stop it":
+  // the stop refusal is about one door, the revocation is about the whole reply. It does not
+  // reuse `refusedStopText` precisely because that helper waits for the refusal line, and
+  // the point of this cell is that the refusal line stands down.
+  await withFetch(
+    (url) => {
+      if (url.includes("/stream")) {
+        return new Response(JSON.stringify({ error: "not_found", message: "not found" }), { status: 404 });
+      }
+      if (url.includes("/messages")) return json({ messages: [] });
+      if (url.includes("agent_tasks_visible")) {
+        return json([{ id: TASK_REFUSE_REVOKED, status: "running", created_at: new Date(Date.now() - 9_000).toISOString() }]);
+      }
+      if (url.includes("agent_interruptions")) return json([]);
+      if (url.includes("caller_context")) return json([]);
+      if (url.includes("/rpc/cancel_agent_task")) {
+        return refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role");
+      }
+      return json([]);
+    },
+    async () => {
+      const h = await renderComponent(App(THREAD_REFUSE_REVOKED));
+      try {
+        await settleUntil(h, () => h.find(buttonNamed("Stop reply")) !== null, "the Stop control");
+        await h.act(() => {
+          claraThreadStore.applyStreamEvent(THREAD_REFUSE_REVOKED, { event: "chunk", data: "half an answer" });
+        });
+        const stop = h.find(buttonNamed("Stop reply"));
+        assert.ok(stop, "the Stop control is offered for a live turn");
+        await h.act(() => clickButton(stop));
+        await settleUntil(h, () => /You no longer have access to this reply/.test(h.text()), "the revocation line");
+        for (let i = 0; i < 8; i += 1) await h.settle();
+
+        const text = h.text();
+        assert.doesNotMatch(text, /Reconnecting/, "a refused attach is not a flaky connection");
+        assert.doesNotMatch(text, /gone back to reading it/, "…and this tab is emphatically not reading it");
+        assert.doesNotMatch(text, /needs a bookkeeper role/,
+          "the stop refusal is about one door; the revocation is the later fact about all of them");
+        const announcers = collect(h.container as Stub, (n) => attrOf(n, "role") === "status").map((n) => textOf(n));
+        assert.equal(announcers.length, 1, `one press, one announcement; saw ${JSON.stringify(announcers)}`);
+        assert.match(announcers.at(0) ?? "", /You no longer have access to this reply/);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
 });
