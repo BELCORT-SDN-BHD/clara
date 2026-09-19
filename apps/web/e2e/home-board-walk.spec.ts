@@ -671,8 +671,12 @@ test("p659.home.drilldown — each count opens /work narrowed to exactly its pop
       // BOTH tokens, because the column counted both and the door published the split. A link
       // carrying only `failed` would open a smaller set than the number the person clicked.
       async () => { await expect(table()).toHaveCount(0); }],
+    // NO since/until ON THIS ONE (fix round 1, finding A2). The count is dated by the COMMITTED
+    // RECEIPT; `clara.list_accounting_work`'s since/until filter when the Work STARTED, so the
+    // narrowed list could be DISJOINT from the number clicked and "1" could open an empty page.
+    // The link is now a SUPERSET of the count, and the board says so before the click.
     ["1 Work posted for Rome Properties in the last seven days",
-      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=completed&since=2026-09-10&until=2026-09-16$`),
+      new RegExp(`/work\\?client=${CLIENT_ACTIVE}&status=completed$`),
       async () => { await expect(table().getByRole("link", { name: "Rates accrual" })).toBeVisible(); }],
   ] as const;
 

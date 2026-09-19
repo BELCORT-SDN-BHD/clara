@@ -149,18 +149,43 @@ test("ticket 659: each count link carries client= and status=, narrowed to exact
     assert.match(active!, /status=queued%2Crunning/);
     assert.match(attention!, /status=failed%2Crefused/,
       "the column counts BOTH tokens, so the link carries both — the click and the count are one population");
-    assert.match(recent!, /since=2026-09-13/, "and the recent link carries the pack's OWN window dates");
-    assert.match(recent!, /until=2026-09-19/);
+    // FIX ROUND 1, FINDING A2 — THE RECENT LINK CARRIES NO WEEK, AND THAT IS THE HONEST SHAPE.
+    // The count is dated by the COMMITTED RECEIPT; `clara.list_accounting_work`'s since/until
+    // filter `w.created_at`, when the Work STARTED. Passing the pack's window through that axis
+    // produced a list that can be DISJOINT from the number clicked — a Work started 30 days ago
+    // and posted 2 days ago is counted and is not in the list — so "1" could open an empty page.
+    // Dropping the dates makes the link a SUPERSET of the count instead: every Work the number
+    // counted is in it, and the surface says the list is not narrowed to the week.
+    assert.doesNotMatch(recent!, /since=/,
+      "the list door cannot narrow by receipt date, so it is not asked to narrow at all");
+    assert.doesNotMatch(recent!, /until=/);
+    assert.match(recent!, /^\/work\?client=c1&status=completed$/,
+      "client and status only — the population the count is drawn from, never a different week");
   } finally { await h.unmount(); }
 });
 
-test("ticket 659: an unreadable window drops the dates from the link AND says the column is undated", async () => {
+test("ticket 659: an unreadable window says the column is undated — and the link is the same either way", async () => {
   const h = await mount(state({ pack: pack([row()], { window: null }) }));
   try {
     const recent = hrefs(h).find((x) => x.includes("completed"));
     assert.ok(recent);
     assert.doesNotMatch(recent!, /since=/, "a guessed week is worse than no week");
     assert.match(h.text(), /could not be dated for this read/);
+    // Since fix round 1 the dated and undated arms build the SAME href — which is the point: the
+    // window's readability changes what the surface can SAY, never which population a click opens.
+    assert.match(recent!, /^\/work\?client=c1&status=completed$/);
+  } finally { await h.unmount(); }
+});
+
+test("ticket 659 (A2): the surface says what the RECENT LINK opens, not only what the count is dated by", async () => {
+  // The disclosure named the COUNT's basis and stopped there, so a professional could not know
+  // that the list behind the number is not the same seven days. Both halves are now before the
+  // click, which is D18.e's own "disclosed before the click" applied to the link as well.
+  const h = await mount(state());
+  try {
+    assert.match(h.text(), /dated by when each Work posted/, "the count's basis");
+    assert.match(h.text(), /not narrowed to (that|those) (week|seven days)|opens every completed Work/i,
+      "and what the link actually opens");
   } finally { await h.unmount(); }
 });
 

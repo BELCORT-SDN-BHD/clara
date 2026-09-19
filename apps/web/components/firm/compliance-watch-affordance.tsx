@@ -35,6 +35,8 @@ import {
   type ComplianceWatchConclusion,
 } from "@/lib/firm-admin/compliance";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { MemberName } from "@/components/common/member-name";
+import { useMemberNames } from "@/lib/members/use-member-names";
 import { ErrorMessage } from "./data-state";
 import type { NeedsYouAffordanceProps } from "./needs-you-affordances";
 
@@ -66,6 +68,19 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
   const t = useTranslations("FirmAdminCompliance.needsYou");
   const [disposition, setDisposition] = useState<WatchDisposition | null>(null);
   const [unreadable, setUnreadable] = useState(false);
+  // AN ATTRIBUTABLE ACTOR, NOT A uuid (fix round 1, finding A7). AC6 asks the receipt to be
+  // attributable, and `clara.compliance_watch_events.actor` is `text` holding a user id
+  // (0016:359-370, stamped `c.actor::text` at :1081-1091) — so the card printed
+  // "Acknowledged by 8a7b6c5d-0000-…" and a professional read a machine word where a colleague's
+  // name belongs. This resolves it through the SAME `clara.firm_members_visible` roster the
+  // activity band already uses, via the SAME shared cell (`MemberName`), so the fallback for an
+  // unresolvable id is written once and cannot drift between the two surfaces: the shortened id in
+  // the product's own monospace id treatment — never a guessed name, never a blank.
+  //
+  // The agent branch inside `MemberName` is unreachable from here by construction: all three
+  // compliance doors refuse an agent identity with CLR03 before any write
+  // (`p659.watch.agent_refused`), so no event on this trail can carry one.
+  const memberNames = useMemberNames(sessionTokenAccessor);
 
   const read = useCallback(async () => {
     try {
@@ -90,13 +105,16 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
   }
 
   const at = act.createdAt === null ? "" : businessDateTime(act.createdAt);
-  const actor = act.actor ?? "";
   const kind = act.eventKind ?? "";
+  // `t.rich` rather than a resolved STRING, so the actor slot is the shared `MemberName` cell
+  // itself — one rendering of "who is this uuid" across the product, rather than a second copy of
+  // its fallback rules living here.
+  const actor = () => <MemberName userId={act.actor} resolver={memberNames} showRole={false} />;
   const line =
-    kind === "acknowledged" ? t("receiptAct.acknowledged", { actor, at })
-      : kind === "snoozed" ? t("receiptAct.snoozed", { actor, at })
+    kind === "acknowledged" ? t.rich("receiptAct.acknowledged", { actor, at })
+      : kind === "snoozed" ? t.rich("receiptAct.snoozed", { actor, at })
         : kind === "re_armed" ? t("receiptAct.re_armed", { at })
-          : t("receiptAct.resolved", { actor, at });
+          : t.rich("receiptAct.resolved", { actor, at });
 
   return (
     <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">

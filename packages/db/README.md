@@ -145,11 +145,32 @@ the per-client aggregate plans `GroupAggregate` over `Index Scan using uq_accoun
 (6 700 rows, 2.3 ms; 4.7 ms for the whole join). No sequential scan appears anywhere. End to end the
 door answers a 100-client page in 17-18 ms at `p_preview=3` and 7-8 ms at `p_preview=0`.
 
-One sentence in 0231's own header is sharpened here rather than in the file, which is append-only:
-the disclosure token `onboarding_client_excluded_from_queue` covers `onboarding` **and** `archived`
-because the 0017 join excludes both, but its only door-reachable subject today is the ARCHIVED
-client — `clara.admit_accounting_work` refuses a client that is not `active`, so an onboarding
-client cannot accumulate Work in the first place.
+Three sentences in 0231's own header are sharpened here rather than in the file, which is
+append-only. **The disclosure token `onboarding_client_excluded_from_queue`** covers `onboarding`
+**and** `archived` because the 0017 join excludes both, but its only door-reachable subject today is
+the ARCHIVED client — `clara.admit_accounting_work` refuses a client that is not `active`, so an
+onboarding client cannot accumulate Work in the first place.
+
+**`p_preview = 0` really does call `clara._work_run_attempts` zero times, and it is now COUNTED
+rather than asserted.** The header says so; the body comment beside the join says the helper is
+"reached with no ids rather than with a null", and the two read as a contradiction. They are not,
+and the resolution is worth writing down because it is not obvious from the text: the argument
+handed to the helper is an EMPTY array and never a NULL one (which 0189 refuses), and *separately*
+the helper is not executed at all, because `v_preview_ids` is empty, the outer scan over
+`clara.accounting_work` yields no rows, and the inner function scan of a nested loop never runs.
+That zero is therefore a PLAN SHAPE rather than a guard in the SQL — which is exactly why it is
+measured: `p659.portfolio.preview_zero_calls_helper_zero_times` counts the calls through
+`pg_stat_user_functions` with `track_functions='all'` and `pg_stat_force_next_flush()` (0 across a
+`p_preview=0` call, 1 across a `p_preview=3` call). The empty-never-null argument is what keeps the
+door correct if a future plan shape ever does execute it.
+
+**The cursor grammar depends on a non-blank client name**, and a later lane that adds a rename door
+needs to know it. The mint is `lower(name)||'|'||id` and the decode raises CLR10 `invalid_cursor`
+when the name component is blank, so a client whose name were whitespace-only would mint a cursor
+the door then refuses, dead-ending paging at that row. It is unreachable today — `clara.create_client`
+refuses a blank name (CLR10) and there is no rename door anywhere in the estate, so
+`clara.clients.name` cannot become blank after birth through any door — which is why 0231 carries no
+guard for it. A rename door must refuse a blank name, or this fence must move.
 
 Two sentences in 0214's own header are corrected here rather than in the file, which is
 append-only. **The planner does not use `ix_accounting_work_client` for the active facet.** Forced

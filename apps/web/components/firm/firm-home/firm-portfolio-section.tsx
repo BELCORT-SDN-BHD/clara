@@ -214,7 +214,7 @@ export function FirmPortfolioSection({
         // THE NODE FOCUS COMES BACK TO (fix round 1, finding A3). The ref map and the marker are
         // keyed by the SAME id, so what is remembered and what is focused cannot drift.
         ref={(el) => { countLinks.current.set(id, el); }}
-        href={portfolioCountHref(kind, row.client_id, pack)}
+        href={portfolioCountHref(kind, row.client_id)}
         // ENTER ON AN ANCHOR IS DISPATCHED AS A CLICK, so one handler covers pointer and keyboard.
         onClick={() => rememberPortfolioReturnFocus(row.client_id, kind)}
         // AN EXPLICIT ACCESSIBLE NAME. axe is a violation scan, not a name assertion: five links

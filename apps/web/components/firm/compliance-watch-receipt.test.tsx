@@ -102,6 +102,17 @@ const ACKNOWLEDGED = {
   ],
 };
 
+/** The firm roster the receipt resolves its actor through — `clara.firm_members_visible`, the same
+ *  relation the activity band's `ActivityActorLine` already uses. */
+const ROSTER = [
+  {
+    user_id: "8a7b6c5d-0000-4000-8000-000000000001",
+    display_name: "Siti Rahman",
+    role: "bookkeeper",
+    created_at: "2026-01-01T00:00:00Z",
+  },
+];
+
 const NOT_ACKNOWLEDGED = { ...ACKNOWLEDGED, acknowledged_by: null, acknowledged_at: null, events: [ACKNOWLEDGED.events[0]] };
 
 /** `disposition` is a FUNCTION of the call index, so a cell can make the FIRST read answer
@@ -110,6 +121,10 @@ const NOT_ACKNOWLEDGED = { ...ACKNOWLEDGED, acknowledged_by: null, acknowledged_
 function mockFetchFactory(opts: {
   disposition: (call: number) => unknown;
   act?: { url: string; body: unknown; status: number };
+  /** #659 fix round 1 (A7): the firm roster the receipt resolves its actor through. `undefined`
+   *  means "this read fails", which is the state every cell was in before A7 and the state a real
+   *  browser is in when the roster read is refused — the receipt must still name the act. */
+  roster?: unknown[];
 }) {
   const calls: { url: string; body: Record<string, unknown> }[] = [];
   let dispositionCalls = 0;
@@ -124,6 +139,10 @@ function mockFetchFactory(opts: {
     }
     if (opts.act && u.includes(opts.act.url)) return jsonResponse(opts.act.body, opts.act.status);
     if (u.includes("/rpc/list_review_queue")) return jsonResponse(envelope());
+    if (u.includes("/firm_members_visible")) {
+      if (opts.roster === undefined) return jsonResponse({ message: "roster unavailable" }, 403);
+      return jsonResponse(opts.roster);
+    }
     for (const [path, body] of Object.entries(NO_GAPS)) {
       if (u.includes(path)) return jsonResponse(body);
     }
@@ -149,14 +168,16 @@ async function mount() {
 // ===========================================================================================
 
 test("C88.10: the receipt names the ACTOR and the INSTANT the write stamped, and the transition the table actually holds", async () => {
-  const { impl } = mockFetchFactory({ disposition: () => ACKNOWLEDGED });
+  const { impl } = mockFetchFactory({ disposition: () => ACKNOWLEDGED, roster: ROSTER });
   await withMockedEnv(impl, async () => {
     const { h } = await mount();
     try {
       const text = h.text();
       assert.match(text, /Disposition/, "the card carries a named block, not a loose sentence");
-      assert.match(text, /Acknowledged by 8a7b6c5d-0000-4000-8000-000000000001/,
-        "the actor is the one the DATABASE stamped, never the reader");
+      assert.match(text, /Acknowledged by Siti Rahman/,
+        "the actor is the one the DATABASE stamped — resolved to the colleague's NAME, never the reader's");
+      assert.doesNotMatch(text, /8a7b6c5d-0000-4000-8000-000000000001/,
+        "and a professional reads a person, not a uuid");
       assert.match(text, /State crossed → crossed/,
         "an acknowledgement is an overlay — it never erases the condition");
       assert.match(text, /Client informed; registration in progress\./,
@@ -166,7 +187,7 @@ test("C88.10: the receipt names the ACTOR and the INSTANT the write stamped, and
 });
 
 test("C88.10: it SURVIVES a remount — the receipt is table state, read back, not anything this component kept", async () => {
-  const { impl, dispositionCalls } = mockFetchFactory({ disposition: () => ACKNOWLEDGED });
+  const { impl, dispositionCalls } = mockFetchFactory({ disposition: () => ACKNOWLEDGED, roster: ROSTER });
   await withMockedEnv(impl, async () => {
     const first = await mount();
     let firstText = "";
@@ -177,7 +198,8 @@ test("C88.10: it SURVIVES a remount — the receipt is table state, read back, n
     // memory it holds is gone and the only thing that can bring the receipt back is a read.
     const second = await mount();
     try {
-      assert.match(second.h.text(), /Acknowledged by 8a7b6c5d-0000-4000-8000-000000000001/);
+      assert.match(second.h.text(), /Acknowledged by Siti Rahman/,
+        "the act, its actor and its instant all come from the table — the roster read is remade too");
       assert.ok(dispositionCalls() >= 2, "and it came back because the door was asked again");
     } finally { await second.h.unmount(); for (let i = 0; i < 3; i++) await second.h.settle(); }
   });
@@ -257,6 +279,23 @@ test("C88.10: the receipt names NO version number, and says why", async () => {
       assert.match(h.text(), /carries no version number/,
         "the absence is NAMED rather than filled with a figure nothing produced");
       assert.doesNotMatch(h.text(), /[Vv]ersion \d/, "and certainly not with an invented one");
+    } finally { await h.unmount(); for (let i = 0; i < 3; i++) await h.settle(); }
+  });
+});
+
+test("C88.10 (fix round 1, A7): an UNREADABLE roster falls back to the shortened id — never a blank, never a guess", async () => {
+  // The roster read can be refused, and the receipt is still the evidence that an act happened.
+  // `MemberName`'s own fallback is what renders here — the shortened id in the monospace treatment
+  // the product already uses for ids — so this surface cannot invent a name and cannot print
+  // nothing. `roster: undefined` makes the read answer 403, which is the real shape.
+  const { impl } = mockFetchFactory({ disposition: () => ACKNOWLEDGED });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount();
+    try {
+      const text = h.text();
+      assert.match(text, /Acknowledged by 8a7b6c5d/, "the id, shortened, rather than a blank");
+      assert.doesNotMatch(text, /Acknowledged by on/, "and never an empty actor slot");
+      assert.match(text, /State crossed → crossed/, "the rest of the receipt is unaffected");
     } finally { await h.unmount(); for (let i = 0; i < 3; i++) await h.settle(); }
   });
 });

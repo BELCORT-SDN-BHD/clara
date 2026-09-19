@@ -297,17 +297,34 @@ export async function getFirmPortfolioPack(opts: FirmPortfolioOptions = {}): Pro
  *   attention_failed  `?client=<id>&status=failed,refused` — both tokens, because the column
  *                     counts both and the door publishes the split so the link and the count are
  *                     the same population.
- *   recent_success    `?client=<id>&status=completed` plus the pack's OWN window dates, so a
- *                     drilldown cannot mean a different week. A window this build could not read
- *                     contributes no dates at all rather than a guessed one.
+ *   recent_success    `?client=<id>&status=completed` — AND NO WEEK, deliberately (fix round 1,
+ *                     finding A2). This link used to carry the pack's own `from_date`/`to_date`
+ *                     under the words "so a drilldown cannot mean a different week", which was the
+ *                     opposite of what it did. The COUNT is dated by the COMMITTED RECEIPT
+ *                     (`operation_receipts.created_at` inside the seven MYT dates, 0231); the list
+ *                     door's `since`/`until` filter `w.created_at` — when the Work STARTED
+ *                     (`0203_list_accounting_work_intent_key.sql:340-341`). Those are different
+ *                     axes, so the narrowed list could be DISJOINT from the number clicked: a Work
+ *                     started thirty days ago and posted two days ago is counted and is not in the
+ *                     list, and the professional who clicks "1" lands on an empty page. The reverse
+ *                     case is the door's own `uncounted_completions`.
+ *
+ *                     Dropping the dates makes the link a SUPERSET of the count instead of a
+ *                     possibly-disjoint neighbour: every Work the number counted is in it. That is
+ *                     the honest shape available today, and the surface says so before the click
+ *                     (`FirmHome.portfolio.recentDatedBy`). Narrowing a Work list by RECEIPT date
+ *                     is #905's residual, not this board's to invent.
  *
  * Composed from an EMPTY `URLSearchParams`, so nothing on the home's own address (its portfolio
  * filter, its cursor) can reach a drilldown.
  */
+// THE PACK IS NO LONGER AN ARGUMENT (fix round 1, finding A2). It was here for exactly one reason
+// — to hand the recent_success arm the window dates — and that arm no longer carries them, so the
+// parameter would now be a promise that a drilldown depends on the read it came from. It does not:
+// every count link is composed from the kind and the client alone.
 export function portfolioCountHref(
   kind: PortfolioCountKind,
   clientId: string,
-  pack: PortfolioPack,
 ): string {
   const empty = new URLSearchParams();
   if (kind === "active") {
@@ -320,19 +337,21 @@ export function portfolioCountHref(
       client: clientId, status: [...PORTFOLIO_ATTENTION_STATUSES],
     }).toString()}`;
   }
-  const dates = portfolioWindowDates(pack);
   return `/work?${applyWorkListUrlState(empty, {
     client: clientId,
     status: ["completed"],
-    since: dates?.from ?? null,
-    until: dates?.to ?? null,
+    // NO since/until — see this function's own doc comment. The window is still published on the
+    // envelope and still read by `portfolioWindowDates` below, because the SENTENCE needs it; what
+    // changed is that it no longer reaches a filter that means something else by it.
+    since: null,
+    until: null,
   }).toString()}`;
 }
 
-/** IS THE RECENT-SUCCESS DRILLDOWN DATED AT ALL, AND WITH WHICH TWO DAYS. ONE predicate with two
- *  readers — the href builder above and the board's own disclosure sentence — because the sentence
- *  promises a seven-day narrowing and the link drops the dates on exactly the arm where the window
- *  is unreadable. Two spellings of this question is how a count and its link drift apart. */
+/** THE TWO DAYS THE COUNT IS DATED BY, or null when this read could not resolve them. ONE reader
+ *  since fix round 1: the board's disclosure sentence. The href builder above no longer asks —
+ *  see its doc comment — so this answers what the surface may SAY about the column, never what a
+ *  click opens. */
 export function portfolioWindowDates(pack: PortfolioPack): { from: string; to: string } | null {
   const from = pack.window?.fromDate ?? null;
   const to = pack.window?.toDate ?? null;

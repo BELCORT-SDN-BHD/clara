@@ -177,7 +177,7 @@
         "unknownReason": "Part of this row could not be made ({reason})."
       },
       "queueExcludes": "The Needs you chips above cover active clients only ({statuses} are excluded from them, while their Work is still counted here).",
-      "recentDatedBy": "Recent success is dated by when each Work posted, between {from} and {to} — not by when it started.",
+      "recentDatedBy": "Recent success is dated by when each Work posted, between {from} and {to} — not by when it started. The Work list it opens is not narrowed to those seven days: it shows every completed Work for that client, because a Work list can only be narrowed by when work started.",
       "recentUndated": "Recent success could not be dated for this read, so its links carry no week.",
       "emptyRegisterTitle": "No clients yet",
       "emptyRegisterBody": "Add the first client and this table fills in: one row per client, with what is running, what needs attention, and what posted in the last seven days.",
@@ -4966,10 +4966,10 @@
       "receiptNone": "Nothing has been recorded on this watch yet.",
       "receiptUnreadable": "The disposition on this watch could not be read.",
       "receiptAct": {
-        "acknowledged": "Acknowledged by {actor} on {at}.",
-        "snoozed": "Snoozed by {actor} on {at}.",
+        "acknowledged": "Acknowledged by <actor></actor> on {at}.",
+        "snoozed": "Snoozed by <actor></actor> on {at}.",
         "re_armed": "Re-armed on {at}.",
-        "resolved": "Resolved by {actor} on {at}."
+        "resolved": "Resolved by <actor></actor> on {at}."
       },
       "receiptTransition": "State {before} → {after}.",
       "receiptRationale": "Rationale: {rationale}",
