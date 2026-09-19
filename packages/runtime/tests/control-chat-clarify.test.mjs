@@ -320,21 +320,21 @@ test("chat.part: the clarification-closed part this belt writes is the one the d
   );
 });
 
-test("chat.wiring: the SWEEP runs this belt FIRST, so the specific terminal beats the generic mirror", () => {
+test("chat.wiring: ONE caller drives this belt, and it is handed a real world resume", () => {
   // #852 moved the call from leader.mjs into runReconcilerSweep (the import edge that forced it
   // outside — chat-clarify -> control -> reconciler — was cut by lib/hook-resume.mjs). The ORDER
-  // this cell has always been about is unchanged and still load-bearing: reconcileTasks' section C
-  // would settle a parked chat turn with a lost run `cancelled`/engine_lost, so the chat-clarify
-  // arm has to decide first or #764's `expired` + clarify_closed terminal never happens. The
-  // runtime proof of that order lives in chat-clarify-sweep-wiring.test.mjs, which drives a whole
-  // sweep and reads the statement order off the client; this cell pins the WIRING.
-  const sweepSrc = readFileSync(new URL("../lib/reconciler.mjs", import.meta.url), "utf8");
-  const arm = sweepSrc.indexOf('await belt("chat clarify reconcile"');
-  const expiry = sweepSrc.indexOf('await belt("clarify expiry"');
-  const mirror = sweepSrc.indexOf('await belt("task reconcile"');
-  assert.ok(arm > 0 && expiry > 0 && mirror > 0, "wiring: all three belts are registered in the sweep");
-  assert.ok(arm < expiry && arm < mirror, "wiring: the chat-clarify belt is registered ahead of them");
-
+  // this cell used to scan leader.mjs for is still load-bearing — reconcileTasks' section C would
+  // settle a parked chat turn with a lost run `cancelled`/engine_lost, so the chat-clarify arm has
+  // to decide first or #764's `expired` + clarify_closed terminal never happens — but it is now
+  // proven BEHAVIOURALLY, one file over: chat-clarify-sweep-wiring.test.mjs's `#852 order` drives a
+  // whole sweep against a scripted client and reads the real statement order off it. Repointing
+  // this cell's indexOf at `await belt("chat clarify reconcile"` in reconciler.mjs would have made
+  // it the /tdd "implementation-coupled" shape (review finding STD-09-2): folding the belt
+  // registrations into a config array iterated in order preserves the order exactly and would red
+  // a cell whose subject never regressed. Verified before removing it, by moving the registration
+  // below `task reconcile`: the behavioural cell reds on "the chat-clarify belt is the FIRST belt",
+  // and reconciler.mjs was restored byte for byte (`sha256sum -c`). What stays here is what that
+  // file does not cover twice — this belt's own no-double-caller law, and the production wiring.
   const leaderSrc = readFileSync(new URL("../lib/leader.mjs", import.meta.url), "utf8");
   assert.ok(!/reconcileChatClarifies/.test(leaderSrc),
     "wiring: the leader no longer calls the belt itself — two callers a cycle would double-probe every resting row");
