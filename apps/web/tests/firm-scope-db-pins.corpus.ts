@@ -162,8 +162,8 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
     "0232_client_financial_pack.sql",
     {
       reason:
-        "Reviewed: the ONLY dynamic SQL in 0232 is a two-iteration do-block that enables and FORCES row level security and creates an owner policy and a firm-scoped human policy on the file's OWN two new relations (clara.cash_account_set_versions, clara.cash_account_set_members) — the same execute-format loop 0003:505-518 uses for the core tables. It emits ALTER TABLE and CREATE POLICY only and contains no CREATE VIEW of any kind, so neither P4 scope view can be a target; the two relation names it interpolates are string literals in the array beside it. Re-read in the fix round: the loop itself is byte-unchanged; the file's sha moved because the pack's comparison, composition, coverage-reason and disclosure arms were corrected, none of which is dynamic SQL.",
-      sha256: "289fc682c1625b4273a82b01cbbb8d36e691f6b93e23ae7ad5cd7e33e3281e64",
+        "Reviewed: the ONLY dynamic SQL in 0232 is a two-iteration do-block that enables and FORCES row level security and creates an owner policy and a firm-scoped human policy on the file's OWN two new relations (clara.cash_account_set_versions, clara.cash_account_set_members) — the same execute-format loop 0003:505-518 uses for the core tables. It emits ALTER TABLE and CREATE POLICY only and contains no CREATE VIEW of any kind, so neither P4 scope view can be a target; the two relation names it interpolates are string literals in the array beside it. Re-read in fix round 1 and again in fix round 2: the loop itself is byte-unchanged; the file's sha moved because the pack's comparison, composition, coverage-reason and disclosure arms were corrected (round 1) and because the publish door now re-reads the current version after its `select … for update` returns nothing (round 2, recheck NF-1) — none of which is dynamic SQL.",
+      sha256: "b0d0c56e60497de4b06d2dcf90dcca24be91032b58ddf6c804d01667abab15e8",
     },
   ],
 ]);
