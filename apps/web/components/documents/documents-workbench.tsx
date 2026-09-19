@@ -9,7 +9,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadFiledDocuments, loadFirmClients, loadOpenCandidates } from "@/lib/documents/loaders";
 import { isSettled, loadIntakeReceipts, refreshIntakeReceipts, type IntakeReceiptsLoad } from "@/lib/documents/receipts";
 import { useCapabilityRegistry } from "@/lib/documents/use-capability-registry";
-import { useSettlePoll } from "@/lib/documents/use-settle-poll";
+import { useSettlePoll, type SettlePollOptions } from "@/lib/documents/use-settle-poll";
 import { applyDocumentParam, documentUrl, parseDocumentParam } from "@/lib/documents/url-state";
 import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
@@ -49,8 +49,11 @@ export function DocumentsWorkbench({ clientId, settlePoll: settlePollOptions }: 
    *  establishes in this ticket. The shipped delay is 1.5 s and rises; a cell that must
    *  prove what ONE TICK COSTS cannot wait that out, and the fix round found the
    *  original bound cell passing with ZERO ticks because of exactly that. The ARM under
-   *  test is the same code either way. */
-  settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };
+   *  test is the same code either way.
+   *
+   *  STD-03 (code-review fix round) — PICKED from `use-settle-poll.ts`'s own exported
+   *  `SettlePollOptions` rather than hand-copied, matching `document-detail.tsx`'s own prop. */
+  settlePoll?: Pick<SettlePollOptions, "maxTicks" | "baseDelayMs" | "maxDelayMs">;
 }) {
   const t = useTranslations("ClientDocuments");
   const router = useRouter();

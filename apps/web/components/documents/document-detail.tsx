@@ -9,7 +9,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadDocumentDetail } from "@/lib/documents/loaders";
 import { readSourceDependents, readSourceRevisions, type CorrectionPreview } from "@/lib/documents/reads";
 import { listProcessingTasksForDocument } from "@/lib/documents/intake";
-import { useSettlePoll } from "@/lib/documents/use-settle-poll";
+import { useSettlePoll, type SettlePollOptions } from "@/lib/documents/use-settle-poll";
 import type { ProcessingStatus, ProcessingTaskRow } from "@/lib/documents/types";
 import { findEntryForDocument, type DocumentClaim } from "@/lib/work/evidence";
 import {
@@ -98,8 +98,11 @@ export function DocumentDetail({
   /** #904 — timing override for the processing-tasks settle poll below, the SAME shape
    *  `documents-workbench.tsx` already accepts for its own intake-receipts poll and forwards to
    *  `useIntakeBatch`. Unset in production (the hook's own defaults apply); a test passes a
-   *  zero-delay budget so a bounded poll can be observed without waiting out its real backoff. */
-  settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };
+   *  zero-delay budget so a bounded poll can be observed without waiting out its real backoff.
+   *  STD-03 (code-review fix round) — PICKED from `use-settle-poll.ts`'s own exported
+   *  `SettlePollOptions`, not hand-copied a third time, so a future field added there (or a rename)
+   *  is a one-place change. */
+  settlePoll?: Pick<SettlePollOptions, "maxTicks" | "baseDelayMs" | "maxDelayMs">;
 }) {
   const t = useTranslations("ClientDocuments");
   const router = useRouter();
@@ -125,13 +128,25 @@ export function DocumentDetail({
    *  `documents-workbench.tsx` already runs for the receipts list (`lib/documents/use-settle-poll.ts`)
    *  rather than inventing a second one.
    *
-   *  L07-02 (fix round) — `onTick` is `listProcessingTasksForDocument` ALONE, ONE read, matching
-   *  `use-settle-poll.ts`'s own onTick contract ("One read.") and the sibling receipts poll's law
-   *  (README.md, "A tick costs ONE read"). It USED to be the panel's whole-bundle `reload()` (five
-   *  or six reads a tick, up to ~72 over a poll's life) — the exact pattern fix round 1 removed from
-   *  the receipts poll for the same cost reason. `taskOverride` carries the freshest read; cleared
-   *  whenever `data` itself changes (a real `reload()`, from a mount, an act, or the manual Refresh
-   *  below) so a stale override can never shadow a fresher full bundle.
+   *  L07-02 (fix round) — an INTERMEDIATE tick (still at least one non-terminal task afterward) is
+   *  `listProcessingTasksForDocument` ALONE, ONE read, matching `use-settle-poll.ts`'s own onTick
+   *  contract ("One read.") and the sibling receipts poll's law (README.md, "A tick costs ONE
+   *  read"). `taskOverride` carries that freshest narrow read; cleared whenever `data` itself
+   *  changes (a real `reload()`, from a mount, an act, or the manual Refresh below) so a stale
+   *  override can never shadow a fresher full bundle.
+   *
+   *  CRS-07-02 (code-review fix round) — the SETTLING tick (the one where the LAST non-terminal
+   *  task turns terminal) is different: it is the one moment this panel KNOWS its mount-time `data`
+   *  is now stale, and narrowing that tick too left the extraction badge (`documentBadges(doc)`,
+   *  document-metadata.tsx, driven by `data.document.extraction_status`) and the Facts view
+   *  (`data.regions`) frozen at their mount values with no Refresh offered (the manual one below is
+   *  gated on the OPPOSITE case: exhausted with a task still non-terminal). This tick therefore pays
+   *  the full `reload()` exactly once — the SAME settled-tick law `documents-workbench.tsx` already
+   *  runs for the receipts poll (`narrowRef.current = false; // settled: pay the other three reads
+   *  once, then stop`) — and `reload()`'s own `loadDocumentDetail` already reads
+   *  `listProcessingTasksForDocument` as one of its five parallel reads (lib/documents/loaders.ts),
+   *  so the tasks strip is covered by that same read; `taskOverride` needs no explicit reset here
+   *  because the `data`-keyed effect above clears it the moment `reload()` lands.
    *
    *  `resetKey: documentId` restarts the budget on a different document even though this component
    *  is already React-`key`ed by it at the workbench (documents-workbench.tsx's own consumer
@@ -139,9 +154,19 @@ export function DocumentDetail({
   const [taskOverride, setTaskOverride] = useState<ProcessingTaskRow[] | null>(null);
   useEffect(() => { setTaskOverride(null); }, [data]);
   const tasks = taskOverride ?? data?.processingTasks ?? [];
+  const hasNonTerminalTask = tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status));
   const tasksPoll = useSettlePoll({
-    enabled: tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status)),
-    onTick: async () => { setTaskOverride(await listProcessingTasksForDocument(documentId)); },
+    enabled: hasNonTerminalTask,
+    onTick: async () => {
+      const next = await listProcessingTasksForDocument(documentId);
+      if (next.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))) {
+        setTaskOverride(next);
+        return;
+      }
+      // Settling tick: every task this read reports is now terminal. Pay the full bundle once so
+      // the extraction badge, Facts view and state panel catch up alongside the tasks strip.
+      await reload();
+    },
     resetKey: documentId,
     ...settlePoll,
   });
@@ -254,7 +279,7 @@ export function DocumentDetail({
         clientId={clientId}
         headingId={DOCUMENT_HEADING_ID}
         onShowExtraction={() => setExtractOpen(true)}
-        tasksExhausted={tasksPoll.exhausted && tasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status))}
+        tasksExhausted={tasksPoll.exhausted && hasNonTerminalTask}
         onRefreshTasks={() => void reload()}
       />
 

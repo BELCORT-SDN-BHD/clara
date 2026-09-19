@@ -53,8 +53,14 @@ const LIVE_INTAKE_ROW = {
  *  what the NEXT poll tick returns (the settle transition), the same shape
  *  `documents-workbench-refresh.test.tsx`'s own `receiptFetch` uses for the intake-receipts poll.
  *  `intakeRows` defaults to an empty queue (every 904 cell but the L07-07 one wants the RECEIPTS
- *  poll inert, so a tasks-poll assertion is never accidentally satisfied by the other poll). */
-function makeFetch(counts: Record<string, number>, tasks: () => unknown[], intakeRows: () => unknown[] = () => []): typeof fetch {
+ *  poll inert, so a tasks-poll assertion is never accidentally satisfied by the other poll).
+ *  `docRow` defaults to the fixed `DOC_ROWS[DOC_PDF]` literal every pre-existing cell relies on;
+ *  CRS-07-02's own cell is the only caller that varies it, so it can prove the `documents` relation
+ *  (and so the extraction badge derived from it) actually catches up on the settling tick. */
+function makeFetch(
+  counts: Record<string, number>, tasks: () => unknown[], intakeRows: () => unknown[] = () => [],
+  docRow: () => Record<string, unknown> = () => DOC_ROWS[DOC_PDF] as Record<string, unknown>,
+): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = String(input);
     const relation = /\/rest\/v1\/(?:rpc\/)?([a-z_]+)/.exec(url)?.[1] ?? "unknown";
@@ -62,7 +68,7 @@ function makeFetch(counts: Record<string, number>, tasks: () => unknown[], intak
     const body = (() => {
       switch (relation) {
         case "document_filings": return FILING_ROWS.filter((f) => f.document_id === DOC_PDF);
-        case "documents": return [DOC_ROWS[DOC_PDF]];
+        case "documents": return [docRow()];
         case "clients": return [{ id: DOCUMENTS_CLIENT, name: "Rome Properties", status: "active" }];
         case "document_processing_tasks_visible": return tasks();
         case "document_intakes_visible": return intakeRows();
@@ -112,13 +118,17 @@ async function settleUntil(
 async function withDetailOpen(
   tasks: () => unknown[],
   run: (h: Awaited<ReturnType<typeof renderComponent>>, counts: Record<string, number>) => Promise<void>,
-  opts: { intakeRows?: () => unknown[]; settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number } } = {},
+  opts: {
+    intakeRows?: () => unknown[];
+    docRow?: () => Record<string, unknown>;
+    settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };
+  } = {},
 ): Promise<void> {
   const counts: Record<string, number> = {};
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  globalThis.fetch = makeFetch(counts, tasks, opts.intakeRows);
+  globalThis.fetch = makeFetch(counts, tasks, opts.intakeRows, opts.docRow);
   configureSessionTokenSource(async () => "tok");
   const nav = makeNavigation();
   const tree = () => documentsApp(
@@ -280,5 +290,50 @@ test("904.L07-A02 — exhausted, with a task still non-terminal, is a VISIBLE en
       );
     },
     { settlePoll: TINY_POLL },
+  );
+});
+
+test("CRS-07-02 — the SETTLING tick pays the whole bundle once, so the extraction badge (and the rest of the panel) catch up with the tasks strip", async () => {
+  // Fix round (904) narrowed every tick to `listProcessingTasksForDocument` alone — correct for
+  // every INTERMEDIATE tick (904.L07-02 above), but the settling tick is different: it is the one
+  // moment the panel KNOWS the bundle it read at mount is now stale (a task just went terminal), and
+  // narrowing that tick too left the extraction badge (`documentBadges(doc)`, driven by `data.document
+  // .extraction_status`) and the rest of `data` frozen at their mount values forever after. This
+  // mirrors `documents-workbench.tsx`'s own settled-tick law for the receipts poll (`narrowRef.current
+  // = false; // settled: pay the other three reads once, then stop`) applied to this poll instead.
+  let done = false;
+  await withDetailOpen(
+    () => [taskRow(done ? "done" : "running")],
+    async (h, counts) => {
+      assert.match(h.text(), /extraction: running/, "the mount-time badge starts stale-able: running");
+      const before = {
+        documents: counts.documents ?? 0,
+        document_extractions: counts.document_extractions ?? 0,
+      };
+      done = true; // the next tick's task read AND document read both report the settled state.
+      await settleUntil(h, () => h.text().includes("Extraction complete"),
+        "the tasks strip to settle, same trigger as the plain 904 DONE cell");
+
+      assert.match(h.text(), /extraction: done/,
+        "the extraction badge must catch up on the SAME tick the tasks strip settles — no separate reload");
+      assert.doesNotMatch(h.text(), /extraction: running/, "the stale badge must not linger beside the fresh one");
+
+      // document_regions is NOT asserted here: this fixture's document_extractions is always empty,
+      // so loadDocumentDetail's own short-circuit (reads.ts's listRegionsForExtractionIds, "no
+      // current extraction ids -> []") correctly issues no document_regions call at all — that is
+      // the pre-existing, correct behaviour, not something CRS-07-02 changes.
+      assert.equal(counts.documents ?? 0, before.documents + 1,
+        "the settling tick pays the full bundle EXACTLY ONCE — the `documents` relation must grow by one, not zero and not repeatedly");
+      assert.equal(counts.document_extractions ?? 0, before.document_extractions + 1,
+        "document_extractions must grow by exactly one on the settling tick too (the same full reload)");
+
+      // The poll must still actually STOP once settled — CRS-07-02's fix must not turn the
+      // settling-tick's one-time full reload into a standing full-bundle poll.
+      const afterSettle = { documents: counts.documents ?? 0, tasks: counts.document_processing_tasks_visible ?? 0 };
+      for (let i = 0; i < 100; i++) await h.settle();
+      assert.equal(counts.documents, afterSettle.documents, "no further `documents` reads once every task is terminal");
+      assert.equal(counts.document_processing_tasks_visible, afterSettle.tasks, "no further tasks reads once every task is terminal");
+    },
+    { docRow: () => ({ ...DOC_ROWS[DOC_PDF], extraction_status: done ? "done" : "running" }) },
   );
 });
