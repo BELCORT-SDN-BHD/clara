@@ -106,6 +106,7 @@ components/common/money-input.staff-advance.test.tsx
 components/common/money-input.test.tsx
 components/common/p6-3-a11y.test.tsx
 components/common/route-error.test.tsx
+components/common/state.test.tsx
 components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx

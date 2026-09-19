@@ -256,6 +256,32 @@ test("an invalid value is refused LOCALLY, names its constraint, and FOCUSES the
   }
 });
 
+test("#896 — an OPERATIONAL failure (not a governed refusal) renders a banner queryable by its own data-testid", async () => {
+  // `clara.answer_work_question` returning a non-CLR 500 classifies as a WireError (lib/wire.ts),
+  // which `answerWorkQuestion` maps to `refusal.kind: "failed"` — the one branch this form renders
+  // through `<StateBanner data-testid="work-question-failed">` (work-question-form.tsx). Before
+  // #896, StateBanner's closed prop type and non-spreading root silently dropped that attribute,
+  // so this exact node was never queryable by it — the defect #896 fixed, proved at its own call
+  // site rather than only at StateBanner's own unit cells (components/common/state.test.tsx).
+  const s = stubStorage();
+  const doors = stubDoors((call) =>
+    call.fn === "answer_work_question" ? { status: 500, body: { message: "boom" } } : { status: 200, body: null },
+  );
+  const h = await renderComponent(
+    App({ record: record({ fields: [{ key: "amount_cents", label: "Amount", kind: "money", required: true }] }) }),
+  );
+  try {
+    await h.fireEvent(inputFor(h, "amount_cents")!, "change", (n) => setFieldValue(n, "1200.00"));
+    await press(h, byTestId(h, "work-question-submit")!);
+    assert.ok(byTestId(h, "work-question-failed"), "the failed banner must be queryable by its own data-testid");
+    assert.match(h.text(), /We could not tell whether your answer was recorded/, "the failed state still says so in prose");
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
 test("an accepted answer REPLACES the form with the accepted record — who, when, which version", async () => {
   const s = stubStorage();
   const accepted = record({
