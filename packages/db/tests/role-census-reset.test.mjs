@@ -86,7 +86,12 @@ test("rcr.check on this rig: 18 live, dropping the 4 minted roles matches 0154's
   assert.equal(result.minted.length, 4);
   assert.ok(result.currentCount >= 18, `expected at least the 18 roles this rig's chain mints, got ${result.currentCount}`);
   assert.equal(result.wouldReadAfterDrop, result.currentCount - 4);
-  assert.equal(result.matchesPin, result.wouldReadAfterDrop === 14);
+  // L04-S14: assert the value directly (14), not `wouldReadAfterDrop === 14` restated
+  // as `matchesPin`'s own definition -- that comparison can never fail, because
+  // matchesPin IS `wouldReadAfterDrop === pinned` and pinned was already asserted
+  // to be 14 two lines above. The two direct assertions below are the real pin.
+  assert.equal(result.wouldReadAfterDrop, 14);
+  assert.equal(result.matchesPin, true);
   // This rig's checkout-gate-c2/c3 batteries grant clara_stripe_webhook / clara_auth_wall
   // real table privileges in THIS database, so both base roles are BLOCKED right now --
   // that is the live, honest state, not a fixture. Their *_login halves carry no direct
@@ -98,6 +103,32 @@ test("rcr.check on this rig: 18 live, dropping the 4 minted roles matches 0154's
   assert.ok(byName.clara_auth_wall.deps.length > 0, "clara_auth_wall is granted real table privileges on this rig");
   assert.equal(result.safeToApply, false, "a live checkout-gate rig is never safe to apply against directly");
   assert.ok(lines.some((l) => l.includes("does NOT match") === false && l.includes("MATCHES")), "check logs the arithmetic verdict");
+});
+
+test("rcr.check never subtracts a non-clara-matching \"minted\" role from the clara% count (L04-S14)", async () => {
+  const dir = fixtureDir({
+    "0154_fake.sql": "do $$ begin\n  if (select count(*) from pg_roles where rolname like 'clara%') <> 0 then\n"
+      + "    raise exception 'x';\n  end if;\nend $$;\n",
+    // A migration that (hypothetically, never actually run -- this is static text
+    // rolesMintedAfterPin parses) mints a role sharing a name with a real, pre-existing
+    // cluster role that does NOT match `clara%`. rolesMintedAfterPin's regex has no
+    // opinion on role names, so it reports this one same as any other; check()'s
+    // subtraction must not, because clusterClaraRoleCount() never counted it in the
+    // first place.
+    "0200_decoy.sql": "create role postgres nologin;\n",
+  });
+  try {
+    const result = await check({ log: () => {}, migrationsDir: dir });
+    assert.deepEqual(result.minted.map((r) => r.name), ["postgres"], "the decoy is still reported (for visibility)");
+    assert.equal(result.minted[0].exists, true, "postgres is a real, pre-existing cluster role");
+    assert.equal(
+      result.wouldReadAfterDrop,
+      result.currentCount,
+      "a non-clara-matching \"minted\" role must not be subtracted from the clara% count",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("rcr.apply REFUSES outright while blocked -- proven, not assumed, and mutates nothing", async () => {

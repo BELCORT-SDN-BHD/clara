@@ -110,6 +110,18 @@ export async function clusterClaraRoleCount(client) {
   return r.rows[0].n;
 }
 
+/** True for any role name role-census-reset treats as "one of clara's own" -- the
+ * exact predicate clusterClaraRoleCount() counts by (`rolname like 'clara%'`).
+ * rolesMintedAfterPin()'s regex has no opinion on role names: it reports every
+ * `create role` a post-pin migration text contains. Without this filter, a
+ * future migration minting a role that does not start with `clara` would be
+ * subtracted from the clara% count in `check()` (silently wrong arithmetic) and
+ * dropped by `apply()` (a role this script has no business touching) -- see
+ * L04-S14. */
+function isClaraRole(name) {
+  return name.startsWith("clara");
+}
+
 function depLabel(row) {
   const kind = row.deptype === "a" ? "privilege" : row.deptype === "o" ? "ownership" : row.deptype === "m" ? "membership" : row.deptype;
   return `${row.datname} (${row.n} ${kind} dep${row.n === 1 ? "" : "s"})`;
@@ -144,7 +156,7 @@ export async function check({ log = console.log, migrationsDir = DEFAULT_MIGRATI
           : "exists, no shared dependents -- safe to drop";
       log(`- ${name} (minted by ${file}): ${status}`);
     }
-    const existing = rows.filter((r) => r.exists);
+    const existing = rows.filter((r) => r.exists && isClaraRole(r.name));
     const blocked = existing.filter((r) => r.deps.length > 0);
     const wouldReadAfterDrop = currentCount - existing.length;
     const matchesPin = wouldReadAfterDrop === pinned;
@@ -181,7 +193,7 @@ export async function apply({ log = console.log, migrationsDir = DEFAULT_MIGRATI
   await client.connect();
   try {
     for (const { name, exists } of result.minted) {
-      if (!exists) continue;
+      if (!exists || !isClaraRole(name)) continue;
       log(`drop role ${name};`);
       await client.query(`drop role "${name.replace(/"/g, '""')}"`);
     }

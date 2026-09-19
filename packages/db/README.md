@@ -98,10 +98,18 @@ CLARA_ALLOW_DESTRUCTIVE=1 node scripts/role-census-reset.mjs --apply   # drops e
                                               # what to `drop owned by <role>` first
 ```
 
-The exact statements it runs, for the record: `drop role clara_stripe_webhook_login; drop role
-clara_stripe_webhook; drop role clara_auth_wall_login; drop role clara_auth_wall;` — after which a
-from-scratch chain passes 0154's census (14) and migrations 0160/0163 recreate the four roles
-fresh partway through the same chain (back to 18). The script reads 0154's pinned literal and the
+The exact statements it runs, for the record (base role before its `_login` twin — the order
+`rolesMintedAfterPin()` reads off the migration files, `apply()` iterates, and
+`role-census-reset.test.mjs`'s "rcr.mint against the REAL migrations directory" cell pins):
+`drop role clara_stripe_webhook; drop role clara_stripe_webhook_login; drop role
+clara_auth_wall; drop role clara_auth_wall_login;` — after which a from-scratch chain is
+**expected** to pass 0154's census (14) and let migrations 0160/0163 recreate the four roles
+fresh partway through the same chain (back to 18). **Not yet verified end to end**: an actual
+from-scratch chain reapplied after this recipe, on a cluster that already ran the chain once, has
+not been run — RIG.md forbids a second from-scratch chain on this shared lane cluster, and
+provisioning a genuinely separate disposable cluster was out of reach for this lane. #867 stays
+open on this residual until a lane with a disposable cluster to spare runs the chain a second
+time and records the result here. The script reads 0154's pinned literal and the
 post-0154 role manifest from the migration files themselves (never a hand-kept copy), so a future
 migration minting another role is picked up automatically. Verified on this package's own rig
 (`packages/db/tests/role-census-reset.test.mjs`): the live cluster's count (18) minus its four
