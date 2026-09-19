@@ -201,8 +201,12 @@ export const workflows = {
   //
   // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0225, 0227 AND 0230 MUST BE LIVE BEFORE
   // THIS IMAGE SERVES A TURN, on top of v20's 0221/0222 and v19's 0192/0194. Without 0225 or 0227
-  // each new tool's door raises `undefined_function` (42883), which `authoringRefusal` does not
-  // read as a governed refusal, so the tool answers `internal` and the turn continues: CONTAINED.
+  // each new tool's door raises `undefined_function` (42883), which is not a CLR SQLSTATE, so v21's
+  // mappers classify it as a fault and the tool answers `internal` with its own sentence — the turn
+  // continues: CONTAINED. (v18/v19/v20 wrote this same line while guarding on `refused.ok === true`,
+  // an arm `authoringRefusal` can never take; under those bodies the model is handed `code:"42883"`
+  // and the door's raw signature instead. v21 classifies on the SQLSTATE and the predecessors are
+  // deployed, so this correction is stated rather than retro-fitted.)
   // Without 0230 the basis read classifies the missing function as `read_failed` and the block
   // says the knowledge could not be read — also contained, and HONEST rather than silent, which is
   // the whole reason that read was repointed. The REVERSE order is FREE.

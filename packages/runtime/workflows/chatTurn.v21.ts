@@ -53,9 +53,12 @@
 // `clara.admit_trade_invoice_work` (0225); `run_depreciation_period_for_client` calls
 // `clara.run_depreciation_period_for` (0227); the basis read calls `clara.retrieve_knowledge`
 // (0230). Against a database without 0225 or 0227 each tool raises `undefined_function` (42883),
-// which `authoringRefusal` does not classify as a governed refusal, so the tool answers `internal`
-// and the turn continues: CONTAINED, corrupting nothing, and it makes Clara refuse a thing she
-// just offered to do. Against a database without 0230 the basis read classifies the missing
+// which is NOT a CLR SQLSTATE, so this closure's mappers classify it as a fault and the tool
+// answers `internal` with its own sentence — the turn continues: CONTAINED, corrupting nothing,
+// and it makes Clara refuse a thing she just offered to do. (Fix round 1 made that true: the
+// mappers guarded on `refused.ok === true`, which `authoringRefusal` never answers, so the model
+// used to be handed `code:"42883"` and Postgres's own `function clara.… does not exist` text.
+// The classification is the SQLSTATE now, and `v21.refusals` is the cell that holds it.) Against a database without 0230 the basis read classifies the missing
 // function as `read_failed` and the block says the knowledge could not be read — also contained,
 // and HONEST rather than silent, which is the whole reason that read was repointed. The REVERSE
 // order is FREE: the three migrations against a v20 image add relations and verbs nothing calls.

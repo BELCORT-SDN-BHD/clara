@@ -830,11 +830,11 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.tools.ts": {
-      "sha256": "60ebe6c1de99971ee7b57f12cf43854bcc3d20d79b6fe3e054b5ab1b7e9dc4a7",
+      "sha256": "299fee53c17bd60953ceae01768db662987d99f4f455cdeac2ad819a6dd006c0",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.ts": {
-      "sha256": "37a23cc1f44c0900e65643ba84ec01384c028345489b54d67d46c38a07208c81",
+      "sha256": "4681a64544afb21cf216806e75cc3885b1e1e136df42df855f48a6a73f33b9fb",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.usage.ts": {

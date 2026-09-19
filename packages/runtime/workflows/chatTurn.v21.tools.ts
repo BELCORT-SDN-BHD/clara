@@ -210,15 +210,41 @@ async function sessionOfTask(c: PgExec, taskId: string): Promise<string | null> 
   return typeof row?.session_id === "string" ? row.session_id : null;
 }
 
+/** A GOVERNED REFUSAL IS A CLR SQLSTATE, AND NOTHING ELSE IS.
+ *
+ *  `isGovernedRefusalV21` is the whole classification, and it replaced a guard that could not
+ *  fire (fix round 1, review ADV-S-6). Both mappers used to ask `if (refused.ok === true)` —
+ *  `authoringRefusal` returns `{ok:false, …}` on EVERY path, so the arm was dead and a database
+ *  missing 0225 or 0227 handed the model `code:"42883"` with Postgres's own
+ *  `function clara.… does not exist` text, while three headers said it answered `internal`. The
+ *  test is the SQLSTATE the estate stamps its own refusals with — the same one
+ *  `lib/knowledge-retrieval.mjs:95-97` uses — so a missing migration, a lost connection and a
+ *  privilege error are all FAULTS, answered with this lane's own sentence, and only the database's
+ *  considered "no" reaches the model in the estate's words. */
+function isGovernedRefusalV21(code: unknown): boolean {
+  return typeof code === "string" && /^CLR\d{2}$/.test(code);
+}
+
+/** What a FAULT answers: this lane's own sentence, no code from the driver, no details. */
+function internalFaultV21(message: string): ToolRefusalV21 {
+  return { ok: false, code: "internal", reason: null, fix: null, message, details: {} };
+}
+
 /** The database's typed refusal, handed back with THIS lane's sentence when the estate knows the
- *  reason, and with the door's own message VERBATIM when it does not. `authoringRefusal` answers
- *  `{ok:true}` for an error it does not recognise as a governed refusal — that is a FAULT, not a
- *  "no", and it becomes `internal` rather than a sentence this module invented. */
-function tradeInvoiceRefusalFromError(error: unknown, internalMessage: string): ToolRefusalV21 {
+ *  reason, and with the door's own message VERBATIM when it does not. Anything that is not a
+ *  governed refusal is a FAULT, not a "no", and becomes `internal` rather than a sentence this
+ *  module invented or a signature the model should never see. EXPORTED because it is the contract
+ *  a reviewer has to be able to drive: the door call around it needs a database, this decision
+ *  does not. */
+export function tradeInvoiceRefusalFromError(error: unknown, internalMessage: string): ToolRefusalV21 {
   const refused = authoringRefusal(error as DbError);
-  if (refused.ok === true) {
-    return { ok: false, code: "internal", reason: null, fix: null, message: internalMessage, details: {} };
-  }
+  // THE FIRST LINE IS TYPE-LEVEL, THE SECOND IS THE CLASSIFICATION. `authoringRefusal` is declared
+  // as the union its sibling `authoring` returns, and its body returns the refusal arm on every
+  // path (`chatTurn.v11.tools.ts:109`), so the `ok` test narrows a type rather than describing a
+  // case the runtime can reach — which is exactly why it must not be the thing that decides
+  // `internal`. The SQLSTATE is.
+  if (refused.ok !== false) return internalFaultV21(internalMessage);
+  if (!isGovernedRefusalV21(refused.code)) return internalFaultV21(internalMessage);
   const reason = refused.reason;
   const known = typeof reason === "string" && isTradeInvoiceRefusal(reason);
   return {
@@ -236,11 +262,15 @@ function tradeInvoiceRefusalFromError(error: unknown, internalMessage: string): 
  *  reason that already carried `not_cadence_aligned` and `not_ended`, three facts a person must be
  *  able to tell apart — and falls through to the door's message VERBATIM when the triple is
  *  unmapped. */
-function depreciationRefusalFromError(error: unknown, internalMessage: string): ToolRefusalV21 {
+export function depreciationRefusalFromError(error: unknown, internalMessage: string): ToolRefusalV21 {
   const refused = authoringRefusal(error as DbError);
-  if (refused.ok === true) {
-    return { ok: false, code: "internal", reason: null, fix: null, message: internalMessage, details: {} };
-  }
+  // THE FIRST LINE IS TYPE-LEVEL, THE SECOND IS THE CLASSIFICATION. `authoringRefusal` is declared
+  // as the union its sibling `authoring` returns, and its body returns the refusal arm on every
+  // path (`chatTurn.v11.tools.ts:109`), so the `ok` test narrows a type rather than describing a
+  // case the runtime can reach — which is exactly why it must not be the thing that decides
+  // `internal`. The SQLSTATE is.
+  if (refused.ok !== false) return internalFaultV21(internalMessage);
+  if (!isGovernedRefusalV21(refused.code)) return internalFaultV21(internalMessage);
   const axis = refused.details.axis;
   return {
     ok: false,

@@ -471,6 +471,40 @@ test("v21.basis: the chat lane asks for `chat_turn` at v19's record cap, and the
   assert.ok(!/get_knowledge_pack/.test(impl), "and the preload really did move off v19's door");
 });
 
+test("v21.refusals: a FAULT answers `internal` — only a CLR reaches the model as the estate's word", () => {
+  // REVIEW ADV-S-6. Both mappers guarded on `refused.ok === true`, which `authoringRefusal` never
+  // answers — it returns `{ok:false}` on every path — so the guard was dead and a missing
+  // migration handed the model Postgres's own `function clara.… does not exist` text under
+  // `code:"42883"`. Three headers (this body's, and registry.ts's two deploy-order paragraphs)
+  // stated the opposite as an operator-facing runbook line for two new doors. The classification
+  // is now the SQLSTATE, which is the same test `knowledge-retrieval.mjs:95-97` already uses.
+  const err = (code, message, detail) => Object.assign(new Error(message), detail ? { code, detail: JSON.stringify(detail) } : { code });
+  const missing = v21Tools.tradeInvoiceRefusalFromError(
+    err("42883", "function clara.admit_trade_invoice_work(uuid, uuid, text) does not exist"),
+    "The trade invoice could not be recorded. Nothing was recorded.",
+  );
+  assert.equal(missing.code, "internal", "a missing migration is a FAULT, not a considered no");
+  assert.equal(missing.reason, null);
+  assert.ok(!/does not exist/.test(missing.message), "and Postgres's own signature never reaches the model");
+  const transport = v21Tools.depreciationRefusalFromError(err("ECONNRESET", "read ECONNRESET"), "Nothing was charged.");
+  assert.equal(transport.code, "internal");
+  assert.equal(transport.message, "Nothing was charged.");
+  // a GOVERNED refusal still arrives with the estate's own sentence, unchanged
+  const governed = v21Tools.tradeInvoiceRefusalFromError(
+    err("CLR10", "the journal does not balance", { reason: "unbalanced_basis" }),
+    "unused",
+  );
+  assert.equal(governed.code, "CLR10");
+  assert.equal(governed.reason, "unbalanced_basis");
+  assert.equal(governed.message, v21Tools.TRADE_INVOICE_REFUSALS.unbalanced_basis);
+  const dep = v21Tools.depreciationRefusalFromError(
+    err("CLR04", "insufficient role", { reason: "insufficient_role" }),
+    "unused",
+  );
+  assert.equal(dep.code, "CLR04");
+  assert.ok(dep.message.length > 0, "the carrier's sentence map answers, or the door's own message does");
+});
+
 // ---------------------------------------------------------------------------
 // 5 · identity and the prompt
 // ---------------------------------------------------------------------------
