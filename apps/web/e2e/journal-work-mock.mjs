@@ -1268,6 +1268,17 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
     return true;
   }
 
+  // #636 (0229) — clara.intake_batch_members, read DIRECTLY under the caller's own JWT (0229 grants
+  // SELECT to clara_authenticated under FORCE RLS), never through a door. An empty array is what the
+  // relation answers for a Work no batch names, and lib/documents/intake-batch.ts stops there without
+  // ever reading clara.intake_batches — which is why no second arm is owed here.
+  if (request.method === "GET" && path === "/rest/v1/intake_batch_members") {
+    const workId = eqParam(url, "work_id");
+    if (workId !== JOURNAL_WORK.seededWorkId && workId !== JOURNAL_WORK.parkedCardWorkId) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
   if (request.method === "GET" && path === "/rest/v1/journal_entries") {
     const id = eqParam(url, "id");
     const documentId = eqParam(url, "document_id");
@@ -1797,12 +1808,13 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
   }
 
   // ===========================================================================================
-  // WAVE 2026-09-18, INTEGRATION — the three OTHER mount reads the Work detail now issues, each
+  // WAVE 2026-09-18, INTEGRATION — two of the three OTHER mount reads the Work detail now issues
   // answered here in #638 get_work_claim_origin's exact shape above: gated on THIS lane's own two
   // Work ids, answered with the door's own honest-empty value, and falling through on any foreign
   // id. Each lane (#655, #636, #658) taught only its OWN mock; this walk's #727 console census
   // (journal-work-walk.spec.ts:836) refuses ANY read the server turns away, so without these three
-  // arms the Work detail route 404s three times per mount on every journal-work walk. Declared in
+  // arms the Work detail route 404s on every journal-work walk. The third, the relation read
+  // clara.intake_batch_members, is answered beside the other GET arms in handleJournalWorkSupabase.
   // e2e-fixture-ownership.test.ts's SHARED_RPC_VERBS beside their owning lanes.
   // ===========================================================================================
 
@@ -1813,17 +1825,6 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
     const body = await readJson(request);
     if (body?.p_work !== JOURNAL_WORK.seededWorkId && body?.p_work !== JOURNAL_WORK.parkedCardWorkId) return false;
     sendJson(response, 200, null, cors);
-    return true;
-  }
-
-  // #636 (0229) — clara.intake_batch_members, read DIRECTLY under the caller's own JWT (0229 grants
-  // SELECT to clara_authenticated under FORCE RLS), never through a door. An empty array is what the
-  // relation answers for a Work no batch names, and lib/documents/intake-batch.ts stops there without
-  // ever reading clara.intake_batches — which is why no second arm is owed here.
-  if (request.method === "GET" && path === "/rest/v1/intake_batch_members") {
-    const workId = eqParam(url, "work_id");
-    if (workId !== JOURNAL_WORK.seededWorkId && workId !== JOURNAL_WORK.parkedCardWorkId) return false;
-    sendJson(response, 200, [], cors);
     return true;
   }
 
