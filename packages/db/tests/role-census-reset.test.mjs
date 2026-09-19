@@ -16,9 +16,11 @@ import {
   PIN_MIGRATION,
   pinnedRoleCount,
   rolesMintedAfterPin,
+  sharedDependents,
   check,
   apply,
 } from "../scripts/role-census-reset.mjs";
+import { makeClient } from "../lib/pg.mjs";
 
 function fixtureDir(files) {
   const dir = mkdtempSync(join(tmpdir(), "role-census-fixture-"));
@@ -141,4 +143,40 @@ test("rcr.apply REFUSES outright while blocked -- proven, not assumed, and mutat
   const after = await check({ log: () => {} });
   assert.equal(after.currentCount, before.currentCount, "a refused apply changes nothing");
   assert.deepEqual(after.minted.map((r) => r.exists), before.minted.map((r) => r.exists));
+});
+
+test("rcr.sharedDependents sees a SHARED-object dependency (dbid = 0), not only a per-database one (L04B-SPEC-05)", async () => {
+  // pg_shdepend's `dbid` column reads 0 when the DEPENDENT object is itself a shared,
+  // cluster-wide catalog object (a database or a tablespace) rather than something that
+  // lives inside one particular database. GRANT ... ON DATABASE is the plainest way to
+  // produce exactly that shape on a live cluster: the database itself is the dependent
+  // object, so the row it creates carries dbid = 0. sharedDependents()'s old INNER JOIN
+  // to pg_database required d.oid = sd.dbid to match a REAL row in pg_database, which
+  // dbid = 0 never does (no database has oid 0) -- so that join silently drops the row.
+  const client = makeClient();
+  await client.connect();
+  const roleName = "x867b_shared_probe";
+  try {
+    await client.query(`drop role if exists ${roleName}`);
+    await client.query(`create role ${roleName}`);
+    await client.query(`grant connect on database ${process.env.PGDATABASE} to ${roleName}`);
+    // Confirm the shape actually landed as dbid = 0 before trusting sharedDependents()'s
+    // answer about it -- an independent source of truth, not a re-derivation of the
+    // function under test.
+    const raw = await client.query(
+      "select sd.dbid from pg_shdepend sd join pg_authid a on a.oid = sd.refobjid where a.rolname = $1",
+      [roleName],
+    );
+    assert.deepEqual(raw.rows, [{ dbid: 0 }],
+      `precondition: GRANT ... ON DATABASE must produce exactly one dbid=0 pg_shdepend row, got ${JSON.stringify(raw.rows)}`);
+
+    const deps = await sharedDependents(client, roleName);
+    assert.ok(deps.length > 0,
+      `sharedDependents() must see the dbid=0 dependency it would otherwise silently drop, got ${JSON.stringify(deps)}`);
+    assert.equal(deps[0].deptype, "a", "the dependency is an ACL grant (deptype 'a')");
+  } finally {
+    await client.query(`revoke connect on database ${process.env.PGDATABASE} from ${roleName}`).catch(() => {});
+    await client.query(`drop role if exists ${roleName}`).catch(() => {});
+    await client.end();
+  }
 });

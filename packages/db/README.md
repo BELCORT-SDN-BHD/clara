@@ -119,6 +119,11 @@ checkout-gate-c3 (69/69) batteries re-run green afterward. The two base roles
 (`clara_stripe_webhook`, `clara_auth_wall`) stay blocked on any rig that still has a live
 checkout-gate lane, by design — that lane's own table grants are the dependents `DROP ROLE`
 correctly refuses on, and the script reports that refusal by name rather than guessing past it.
+The dependent-check (`sharedDependents()`) sees a SHARED-object dependency (a grant directly on a
+database or tablespace, `pg_shdepend.dbid = 0`) as well as a per-database one, so `apply()`'s
+"never a partial drop" contract holds even for that shape (L04B-SPEC-05; latent on today's rig —
+`role-census-reset.test.mjs` proves it against a planted `GRANT ... ON DATABASE`, not a live
+dependency this cluster happens to carry).
 
 Read the repository frontier from `migrations/` and the target frontier from:
 

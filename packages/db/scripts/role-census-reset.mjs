@@ -91,35 +91,65 @@ export async function roleExists(client, roleName) {
  * ownership, any membership) via the SHARED `pg_shdepend` catalog — visible
  * from any connection without connecting to the dependent database itself.
  * Non-empty means `DROP ROLE` will refuse. */
+/** L04B-SPEC-05: pg_shdepend's `dbid` column reads 0 when the DEPENDENT object is
+ * itself a shared, cluster-wide catalog object (a database or a tablespace) rather
+ * than something that lives inside one particular database -- `GRANT ... ON
+ * DATABASE` is the plainest way to produce this (the database itself becomes the
+ * dependent object). An INNER JOIN to pg_database requires `d.oid = sd.dbid` to
+ * match a real row, which dbid = 0 never does (no database has oid 0), so it
+ * silently dropped exactly the dependency shape `apply()`'s own contract ("REFUSES
+ * outright ... never a partial drop") most needs to see. LEFT JOIN plus a coalesced
+ * label keeps every row. */
 export async function sharedDependents(client, roleName) {
   const r = await client.query(
-    `select d.datname, sd.deptype, count(*)::int as n
+    `select coalesce(d.datname, '<shared object>') as datname, sd.deptype, count(*)::int as n
        from pg_shdepend sd
-       join pg_database d on d.oid = sd.dbid
+       left join pg_database d on d.oid = sd.dbid
        join pg_authid a on a.oid = sd.refobjid
       where a.rolname = $1
-      group by d.datname, sd.deptype
+      group by coalesce(d.datname, '<shared object>'), sd.deptype
       order by 1, 2`,
     [roleName],
   );
   return r.rows;
 }
 
+/** The ONE definition of "one of clara's own" roles -- a SQL `LIKE` pattern,
+ * translated once (below) into an equivalent JS predicate, rather than the
+ * pattern living once as SQL text and once as a hand-kept `startsWith` (L04-STD-02:
+ * a future change to the SQL side, e.g. escaping a literal underscore, would
+ * silently stop matching what a hand-kept JS copy still accepted, reintroducing
+ * the exact class of arithmetic drift L04-S14 found). */
+export const CLARA_ROLE_LIKE = "clara%";
+
+/** Translates a SQL `LIKE` pattern (the two wildcards only: `%` and `_`) into an
+ * equivalent JS RegExp, so a JS predicate can ask the SAME question a `like`
+ * clause does, from one literal instead of two hand-synchronized ones. */
+function likeToRegExp(pattern) {
+  const escaped = pattern
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/%/g, ".*")
+    .replace(/_/g, ".");
+  return new RegExp(`^${escaped}$`);
+}
+
+const CLARA_ROLE_PATTERN = likeToRegExp(CLARA_ROLE_LIKE);
+
 export async function clusterClaraRoleCount(client) {
-  const r = await client.query("select count(*)::int as n from pg_roles where rolname like 'clara%'");
+  const r = await client.query("select count(*)::int as n from pg_roles where rolname like $1", [CLARA_ROLE_LIKE]);
   return r.rows[0].n;
 }
 
 /** True for any role name role-census-reset treats as "one of clara's own" -- the
- * exact predicate clusterClaraRoleCount() counts by (`rolname like 'clara%'`).
- * rolesMintedAfterPin()'s regex has no opinion on role names: it reports every
- * `create role` a post-pin migration text contains. Without this filter, a
- * future migration minting a role that does not start with `clara` would be
- * subtracted from the clara% count in `check()` (silently wrong arithmetic) and
- * dropped by `apply()` (a role this script has no business touching) -- see
- * L04-S14. */
+ * exact predicate clusterClaraRoleCount() counts by, derived from the SAME
+ * `CLARA_ROLE_LIKE` literal (see above). rolesMintedAfterPin()'s regex has no
+ * opinion on role names: it reports every `create role` a post-pin migration text
+ * contains. Without this filter, a future migration minting a role that does not
+ * match `clara%` would be subtracted from the clara% count in `check()` (silently
+ * wrong arithmetic) and dropped by `apply()` (a role this script has no business
+ * touching) -- see L04-S14. */
 function isClaraRole(name) {
-  return name.startsWith("clara");
+  return CLARA_ROLE_PATTERN.test(name);
 }
 
 function depLabel(row) {
