@@ -1324,6 +1324,16 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   get_work_claim_origin: [
     "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs",
   ],
+  // WAVE 2026-09-18, INTEGRATION — the two OTHER doors the Work detail now reads on EVERY mount,
+  // for the same structural reason get_work_claim_origin above is read: a trade invoice and a
+  // knowledge read-set are both invisible in accounting_work.purpose, so the surface has to ask.
+  // The owning lane answers a real row for its own Work ids; journal-work-mock.mjs answers the
+  // door's own honest-empty value (SQL NULL / the 0230:845-848 no-observation envelope) for its
+  // two, and every arm falls through on a foreign id. clara.intake_batch_members is a RELATION
+  // read, not an rpc, so the census below cannot see it and it carries no row here — its arm in
+  // journal-work-mock.mjs states the same gate.
+  get_trade_invoice: ["journal-work-mock.mjs", "trade-invoice-mock.mjs"],
+  work_knowledge_drift: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   // #653 x #640 — the FOUR plan lifecycle doors. A prepayment schedule CONFIGURES an
   // `amortisation_schedule` accounting plan, so pause / resume / end / catch-up on it are
   // `clara.pause_accounting_plan` and its siblings called on that plan's id. The web surface
