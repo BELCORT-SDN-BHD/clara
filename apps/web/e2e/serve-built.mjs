@@ -37,6 +37,10 @@ import { handleJournalsTableSupabase } from "./journals-table-mock.mjs";
 // deliberately NOT first: it answers nothing the journals lane needs, and #548's ordering
 // note above is the one claim in this import block that is load-bearing.
 import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
+// #657. Dispatched ABOVE the home board, beside its sibling bank lane — see the dispatch site
+// below and bank-match-mock.mjs own header for the measurement that makes the position
+// load-bearing rather than cosmetic.
+import { handleP657Supabase } from "./bank-match-mock.mjs";
 // The documents-viewer walk's own lane (C-07 / D2 / D3), the same file-disjoint shape.
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
@@ -697,6 +701,16 @@ async function handleSupabase(request, response, url) {
   // not sorted, and a lane whose verbs another arm answers unconditionally dispatches ABOVE it).
   if (await handleTradeInvoiceSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
+  // #657 the /bank Matching lane. POSITION IS LOAD-BEARING and NOT sorted (DECISIONS §6.1):
+  // home-board-mock.mjs answers list_bank_statements and list_bank_accounts UNCONDITIONALLY
+  // through its EMPTY_RPCS array (home-board-mock.mjs:107-108, dispatched at :139-142,
+  // returning []), so a bank lane dispatched BELOW handleHomeBoardSupabase silently receives []
+  // for both and renders an empty account selector with no error anywhere. Every branch here is
+  // scoped to this lane own client or line ids and falls through otherwise, so the honest
+  // empties still answer every other walk. Do NOT move this below the home board, and do NOT
+  // declare those two verbs in SHARED_RPC_VERBS: the ownership census cannot see an
+  // array-dispatched arm, so a declaration would fail its own 2+ claimant reverse check.
+  if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
@@ -726,6 +740,8 @@ async function handleSupabase(request, response, url) {
   // It sits AFTER the plan lane because the two share the four plan lifecycle verbs, each gated on
   // its own plan id — a declared share rather than a collision (see e2e-fixture-ownership.test.ts).
   if (await handlePrepaymentsSupabase(request, response, path, url, sendJson, cors)) return;
+  // #657: this arm answers list_bank_statements / list_bank_accounts UNCONDITIONALLY through
+  // EMPTY_RPCS, which is why the bank-match lane above must stay ABOVE it.
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {

@@ -509,3 +509,55 @@ the party, the two dates, the reference and, once posted, the entry, the open it
 outstanding. The other half was already built and needed nothing:
 `components/journals/journal-entry-row.tsx` already renders a back-link to the Work from
 `clara.list_entry_links`' `work_id`.
+## #657 — the /bank Matching tab, and the two laws it changed
+
+**`/bank`'s six-way sub-nav is URL as truth.** `?tab=` addresses the strip (`accounts`,
+`statements`, `matching`, `exceptions`, `reconciliation`, `agency`) and `?line=` addresses the
+Matching tab's detail pane, copied verbatim from `components/registers/registers-workbench.tsx`'s
+shape — a `TABS` tuple, an `isTab` guard, `useSearchParams` and `router.replace`. Before #657 the
+strip was in-page `useState`, whose own comment called that "a deliberate simplification", so a
+reload or a shared link could not reach the Matching tab at all. **No new route and no
+`lib/navigation/tree.ts` row**: `/bank` is still ONE segment, and `?tab=` is a query.
+`router.replace` creates no history entry — the house's existing behaviour on the registers
+workbench, and the right answer for a sub-nav, where a tab is a view of one page rather than a
+place. **A multi-selection stays OUT of the URL**: a selection set is a draft, not an address.
+
+**ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
+key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
+flag}` — the same tuple `clara._reserve_op` hashes server-side — plus each selected entry's
+WORLD GENERATION, so "same intent ⇒ same key" is a property of the DATA rather than of a
+component's lifecycle, and there is no state to reset. The renewal rule is written out in full in
+that module's header; the short form is: the key renews on an intentional human act that changes
+WHAT is being submitted, or on a change to the WORLD it is deciding about, and on nothing else.
+
+The generation is `<count>:<newest match_id>:<newest status>` off the candidate row's own
+`match_history` (which migration 0226 put on the wire). Without it, `match → unmatch → resubmit
+the identical selection` — an ordinary re-decision — hashed to the FIRST key, and `_reserve_op`,
+which knows nothing about whether the match its stored result describes is still live, replayed
+the dead match's receipt: a persistent "no new cash entry was created" block naming a match the
+database had recorded as `unmatched`, beside a line that never left the unmatched report. An
+unmatch flips that newest history row, so the re-decision hashes differently; a lost response, a
+reload and a re-render write nothing and leave it byte-identical. It is KEY MATERIAL ONLY and
+never reaches the wire body. Its residual: the generation is only as fresh as the read it came
+from, so a concurrent unmatch between the last candidate read and the submit can still reach the
+replay; the surface re-reads after every act, which is a mitigation, not a proof.
+
+This deliberately DIFFERS from the house posture, which is left alone: `lib/members/doors.ts`
+mints a fresh uuid per call on purpose, and `work-cancel-dialog.tsx`'s `useDecisionKey` mints one
+per OPEN DIALOG. Both are right for a decision whose identity lives in a component's lifecycle. A
+bank match's does not — the surface reloads unconditionally after every act, failed or not, so a
+second press after a lost response is a re-render away from the first, and with a per-call uuid
+the database saw two operations and refused the second with `already_matched`: a refusal for
+something that had already succeeded. The other three verbs in `match-doors.ts` keep the uuid.
+
+**A refusal now preserves the draft** — the typed cents, the ticked rows and the ack flag — so a
+human changes one thing and resubmits. Retyping an amount you already typed is how a human ends
+up typing a different one, and an unchanged draft resubmits as the SAME operation.
+
+**MEASURED, and why there is no Combobox** (AC13). `pnpm --filter @clara/web ui:add combobox
+--dry-run` REFUSES on this project: the payload would overwrite `components/ui/button.tsx`, which
+is on `scripts/protected-components.json` because it carries owner-ruled fixes. `ui:add popover
+--dry-run` exits non-zero inside the shadcn CLI itself on this project's `base-nova` style with
+`"registries": {}`. Overriding the guard with `CLARA_UI_ADD_OVERWRITE=1` would clobber an owner
+ruling to buy a picker, so the candidate surface uses a search field over a `Table` instead —
+AC13's own named fallback — and #657 changes neither `apps/web/package.json` nor the lockfile.

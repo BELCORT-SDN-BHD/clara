@@ -417,7 +417,7 @@ How an open item's due date was decided: STATED on the document, derived from th
 _Avoid_: Today's date, or any date invented when neither the document nor the terms supply one; the posting date as the anchor for agreed terms; a due date presented without saying where it came from.
 
 **Settlement allocation**:
-The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much.
+The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much. Matching a bank statement line to an already-approved booking IS an allocation of this kind: it creates no journal entry, no open item and no allocation object of its own, and the client's general-ledger cash on that account reads the same number before and after.
 _Avoid_: A new cash movement merely because an existing movement is matched.
 
 **Observed bank debit**:
@@ -564,3 +564,52 @@ _Avoid_: Inferring it from the URL alone; a second scope switcher; a stale name 
 **Tool outcome**:
 What the transcript records about ONE step Clara took: *preparing*, *running*, *done*, *failed*, or *refused* — the tool ran and declined in its own typed vocabulary, which is not the same as failing. The states are read from what the run actually reported, live while the turn is still going and from the settled transcript afterwards; a step with no reported outcome says so rather than being assigned one.
 _Avoid_: Reading a tool-call count, prose or a shimmer as accounting completion; a *queued* state (nothing on the stream reports admission); presenting *preparing* as *queued*.
+**Settlement candidate row**:
+A DERIVED row that offers a decision and stores nothing. It is computed from live facts every
+time it is read, it never becomes an object with its own lifecycle, and it clears itself the
+moment the underlying facts stop producing it — nobody dismisses it, nobody closes it, and
+nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
+chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
+act. #657's pending bank line is its first instance.
+_Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
+that survives the fact that produced it; a suggestion the product acts on by itself.
+
+**Match basis**:
+The DETERMINISTIC evidence for pairing one bank statement line with one already-approved
+booking: whether the amounts are exactly equal, the signed whole-day distance between the line's
+date and the entry's posting date, whether the canonical counterparty's identifier or name-family
+token appears as a whole word in the line's description, and what the line's own description
+looks like. Every fact is one a professional can check against the statement in front of them.
+_Avoid_: A confidence score; a percentage; a ranking; a model's opinion presented as evidence; a
+"suggested match" the product would apply without a human choosing it.
+
+**Bank match**:
+A group that allocates one or more bank statement lines against one or more ALREADY-APPROVED
+journal entries on the same bank account, to the cent, with the sum of the lines equal to the sum
+of the entries. It records that an existing movement has been seen on the statement; it books
+nothing.
+_Avoid_: A posting; a cash entry; a way to create the entry it matches (that is a booking act);
+a partial allocation of a line (a line belongs to at most one live group, always at full amount).
+
+**Statement line**:
+One row of a bank statement as the bank stated it: its date, its description, its signed amount
+and its position in the running balance. It is evidence supplied from outside, never a figure
+the product computed, and it carries no page or region citation — the statement carries the
+provenance (its document, its digest and its filename), the line does not.
+_Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
+something tie.
+
+**Remaining capacity**:
+How much of one approved journal entry's movement on a given bank account is still unallocated,
+measured PER SIDE in absolute cents: the entry's gross debit (or credit) on that account minus
+every pending or live match member already drawn against that side. It is the bound a new match
+is refused against, by name and with its side.
+_Avoid_: An entry's balance; a netted single figure across both sides; a limit the face computes
+(the database is the authority and refuses at write time).
+
+**Bank line exception**:
+A statement line recorded as a bank error or a dispute rather than as something to clear. It
+takes the line out of the unmatched report by design and blocks matching by name, and it is
+resolved through its own door — not by matching around it, not by a suspense account and not by
+a write-off.
+_Avoid_: A line that is merely unmatched; a way to make a statement tie; an adjustment.

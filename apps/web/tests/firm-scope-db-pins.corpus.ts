@@ -157,4 +157,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "b0e7bb8b94ff7b2cc85da610a87d25105287a61ed1cfcb060ff0fa206830e93c",
     },
   ],
+  // #657 (0226) — the bank match-evidence lane. Its dynamic SQL is the 0129 caller-loop family:
+  // pg_get_functiondef splices that recut a CLOSED, LITERAL roster of named FUNCTIONS, each read
+  // by its exact regprocedure and re-installed with one counted anchor replaced.
+  [
+    "0226_bank_match_evidence.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of named functions: clara._match_bank_line_core(...) (its terminal _finish_op payload, one counted anchor), clara._agent_bank_receipt(...) (two counted anchors — the INSERT column list and the VALUES tail), and the THIRTEEN clara._agent_*_core bodies spelled out in this file own v_sigs array, exactly as 0129:1063-1106 does. Every target is read by its exact pinned signature, every anchor is asserted to occur EXACTLY once before replacing, and every body returns jsonb, uuid or void — the file contains no `create [or replace] view` of any spelling, static or spliced, so neither P4 scope view is reachable by construction rather than by inspection of a rendered string. Its two new functions, the recut clara.list_bank_match_candidates and the whole-body recut of clara._agent_get_bank_pack_core are all STATIC DDL the lexer inspects directly (a first cut spliced the pack body dynamically and was reverted for exactly that reason). The file's own prestate pins the pre-image prosrc sha256 of all five recut bodies plus two non-regression pins, and its tail re-reads owner, SECURITY DEFINER, search_path, ACL and a single-pg_proc-row census over every name it installs and recuts.",
+      sha256: "55b6e27952393d9a5327c1ae4ced980494facfffe93623765de232c342511b50",
+    },
+  ],
 ]);

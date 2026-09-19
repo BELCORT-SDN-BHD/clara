@@ -2341,6 +2341,34 @@ export const TRADE_INVOICES_0225_COHORT = [
   ...TRADE_INVOICES_0225_UNGRANTED_FNS,
 ];
 // #655 END
+// #657 [0226, matching bank evidence to an already-approved booking] — its own cohort for the
+// same "wholly present or wholly absent" reason 0193's, 0197's and 0224's carry.
+//
+//   ONE HUMAN READ, clara_authenticated ONLY. `clara.get_bank_line_matching_context(p_line)`
+//   answers everything ONE bank statement line can say about itself before a match is decided:
+//   its own facts, its statement's header/lineage/filename, the period coverage (the `tie`
+//   object LIFTED from clara.list_bank_statements rather than re-derived), the governing
+//   bank_line_exceptions row, clara._wdb_line_booking_block's payload verbatim, and one
+//   DETERMINISTIC basis row per candidate entry. clara_runtime, both agent read roles and all
+//   four wake lanes gain ZERO — which entry a bank line clears is a HUMAN judgement (0038's own
+//   law for this family) and the agent lane reads the pack, where its own gating lives.
+//
+//   ONE UNGRANTED HELPER, declared the 0020 way so an accidental grant FAILS and a
+//   disappearance is reported as a half-applied 0226: `_bank_op_key_task`, the TOTAL
+//   (IMMUTABLE STRICT, uuid-regex guarded, never-raising) reader of field 2 of a bank operation
+//   key. It is the one place that key schema is parsed, and it is reachable only from the
+//   definer bodies that own it.
+//
+//   `_wdb_line_booking_block` is DELIBERATELY NOT REPEATED HERE. 0226 makes it reachable from
+//   a granted wrapper for the first time, but the block itself is 0044's and already rides
+//   AF2_0044_UNGRANTED_FNS above; a second roster entry would be a second copy of one fact.
+//   0226's own tail re-asserts it still holds ZERO grants, and so does p657.db.acl.
+const BANK_MATCH_EVIDENCE_0226_HUMAN_FNS = ["get_bank_line_matching_context"];
+const BANK_MATCH_EVIDENCE_0226_UNGRANTED_FNS = ["_bank_op_key_task"];
+export const BANK_MATCH_EVIDENCE_0226_COHORT = [
+  ...BANK_MATCH_EVIDENCE_0226_HUMAN_FNS, ...BANK_MATCH_EVIDENCE_0226_UNGRANTED_FNS,
+];
+// #657 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2558,6 +2586,7 @@ export const ALLOWED = {
     // #625 [0224] the invited person's pre-password preview — see the block above.
     // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
     ...PREVIEW_INVITE_0224_HUMAN_FNS,
+    ...BANK_MATCH_EVIDENCE_0226_HUMAN_FNS, // 0226 [#657] the bank line matching-context read
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3024,6 +3053,10 @@ export async function grantMatrixFailures() {
   // admission door whose open item has no birth instrument, which is a narrower boundary nobody
   // chose.
   failures.push(...cohortFailures("#655 0225 trade-invoice lane", TRADE_INVOICES_0225_COHORT, liveNames));
+  // #657 [0226] — the granted line read and the ungranted op-key reader ship as one lane; half
+  // of them is a wrapper with nothing to publish, or a parser nothing calls.
+  failures.push(...cohortFailures("#657 0226 bank match evidence lane", BANK_MATCH_EVIDENCE_0226_COHORT, liveNames));
+  // #657 END
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

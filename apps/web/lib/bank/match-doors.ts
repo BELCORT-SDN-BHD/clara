@@ -21,27 +21,66 @@
 //   complete_pending_match(p_client, p_match, p_op_key)
 
 import { callDoor, type CallDoorOptions } from "../doors";
+import { matchOpKeyFor } from "./match-opkey";
 import type { MatchEntryInput, BankAdjustmentInput, SettleAllocationInput, SettleReceipt } from "./match-types";
+import type { MatchReceipt } from "./matching-context-types";
 
+// #657 · D15 — ONE DECISION, ONE KEY, and only for `match_bank_line`.
+//
+// `opKey()` below is still a fresh uuid per call for the other three verbs, and that is the
+// HOUSE POSTURE, left alone deliberately (`lib/members/doors.ts:58-66` mints a fresh key on
+// purpose; `work-cancel-dialog.tsx`'s `useDecisionKey` mints one per open dialog). Both are
+// right for a decision whose identity lives in a component's lifecycle.
+//
+// `match_bank_line` is the one verb on this lane whose identity does NOT. The surface reloads
+// unconditionally after EVERY act, failed or not, so the human's second press of the same
+// button after a lost response is a re-render away from the first — and with a per-call uuid
+// the database saw two operations and refused the second with `already_matched`, a refusal for
+// something that had in fact already succeeded. So its key is DERIVED from the intent tuple
+// (see `match-opkey.ts` for the renewal rule, written out in full). Same intent, same key, by
+// construction rather than by remembering to hold one.
 const opKey = () => crypto.randomUUID();
 
 export async function matchBankLine(
   args: {
     clientId: string; lineIds: string[]; entries: MatchEntryInput[];
     adjustments?: BankAdjustmentInput[] | null; ackPeriodExceptions?: boolean;
+    /** #657 fix-round (review SP1 / A1) — each selected entry's WORLD GENERATION, keyed by
+     *  entry id, read off the candidate row's own `match_history` with
+     *  `entryGeneration()`. KEY MATERIAL ONLY: it never reaches the wire body, because
+     *  `clara._reserve_op` re-hashes the real arguments and refuses a key whose request hash
+     *  disagrees. An entry the caller does not describe contributes `null`, which is a value,
+     *  not an absence — a caller that cannot see the history must at least be stable. */
+    entryGenerations?: Readonly<Record<string, string | null>>;
   },
   opts: CallDoorOptions = {},
-): Promise<{ match_id: string }> {
+): Promise<MatchReceipt & { match_id: string; op_key: string }> {
+  const opKeyForThisDecision = matchOpKeyFor({
+    clientId: args.clientId,
+    lineIds: args.lineIds,
+    entries: args.entries.map((e) => ({
+      entry_id: e.entry_id,
+      matched_cents: e.matched_cents,
+      generation: args.entryGenerations?.[e.entry_id] ?? null,
+    })),
+    ackPeriodExceptions: args.ackPeriodExceptions ?? false,
+  });
   const body: Record<string, unknown> = {
-    p_client: args.clientId, p_lines: args.lineIds, p_entries: args.entries,
+    p_client: args.clientId, p_lines: args.lineIds,
+    // The door's arity, exactly: a generation is key material and must not widen p_entries.
+    p_entries: args.entries.map((e) => ({ entry_id: e.entry_id, matched_cents: e.matched_cents })),
     p_adjustments: args.adjustments ?? null,
     p_ack_period_exceptions: args.ackPeriodExceptions ?? false,
-    p_op_key: opKey(),
+    p_op_key: opKeyForThisDecision,
   };
-  const out = (await callDoor("match_bank_line", body, opts)) as { match_id?: string; id?: string } | null;
+  const out = (await callDoor("match_bank_line", body, opts)) as MatchReceipt | null;
   const id = out?.match_id ?? out?.id;
   if (!id) throw new Error("match_bank_line returned no match_id");
-  return { match_id: id };
+  // `op_key` is the key THIS CALL SENT, not a field the door echoes — `_finish_op`'s payload
+  // (0038:4233-4238, widened by 0226 §6) does not carry one. It is still the key the receipt is
+  // stored under, because `clara._reserve_op` stores by (firm, fn, op_key); the outcome block
+  // labels it as the operation key so a human can quote it, and claims nothing more (review A6).
+  return { ...out, match_id: id, op_key: opKeyForThisDecision } as MatchReceipt & { match_id: string; op_key: string };
 }
 
 export async function unmatchBankMatch(

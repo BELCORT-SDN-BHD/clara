@@ -741,3 +741,60 @@ list-form) `apps/web` caller, and the batteries in `tests/` that pin them are na
 `grant select … to clara_authenticated` (0182:360) under FORCE RLS
 `firm_id = clara.jwt_firm()` (:358-359); a SECURITY DEFINER wrapper would REMOVE that
 guarantee and force a hand re-implementation of it, for zero new capability.
+
+## #657 — matching bank evidence to an already-approved booking (migration 0226)
+
+**One new granted read, one new ungranted helper, five measured recuts, no new table.**
+
+`clara.get_bank_line_matching_context(p_line uuid) returns jsonb` — bookkeeper floor, firm from
+the session, EXECUTE to `clara_authenticated` and nobody else. It answers everything ONE bank
+statement line can say about itself before a match is decided: its own facts, its statement's
+header, lineage, `source_doc_sha256` (a column on `bank_statements` since 0038 that no other read
+emitted) and `documents.original_filename`, the period coverage, the governing
+`bank_line_exceptions` row, `clara._wdb_line_booking_block`'s payload verbatim, and one
+deterministic basis row per candidate entry.
+
+**THE GRANTED-WRAPPER / UNGRANTED-BLOCK IDIOM, and why it is the shape.**
+`clara._wdb_line_booking_block(uuid,uuid,uuid)` (0044:2459) has answered "what did this line
+cause to exist, and is any of it still outstanding?" since 0044 and is `revoke`d from PUBLIC at
+0044:2780 — it had ZERO consumers in `apps/web` or `packages/runtime`, a named door with no UI.
+Granting it would publish a PREDICATE; the wrapper publishes its ANSWER, which is the same
+posture 0219's identity read takes over the deliberately ungrantable `name_family_*` family. The
+block's grant state is asserted both in 0226's prestate (before the wrap) and in its tail (after).
+
+**THE TWO-COPY CANDIDATE DISCIPLINE.** `clara.list_bank_match_candidates(uuid,uuid)` and the copy
+inlined in `clara._agent_get_bank_pack_core` are the same projection written twice — the agent
+lane cannot call the public read because that read calls `clara._human_ctx`. Nothing fails at
+runtime if only one moves. So 0226 types the projection IDENTICALLY IN BOTH BODIES, between the
+sentinel comments `/* P657-CAND-BEGIN */` and `/* P657-CAND-END */`, as two static
+`create or replace` statements — and the TAIL is what keeps them honest: it reads both marked
+regions out of the live catalog, whitespace-normalises them and refuses if they differ, and
+`p657.db.pack-parity` proves the same thing behaviourally, field for field, against real data.
+**A future change to the candidate projection edits BOTH bodies by hand**, and the tail plus
+that cell are what catch a hand that edits only one.
+
+A first cut did splice instead — write the projection once in the public read, then extract that
+exact text out of the freshly recut catalog body and re-install the pack core around it — and it
+had to be REVERTED: `apps/web/test/sqlFunctionCensus.ts` refuses a dynamic statement it cannot
+resolve to exactly one function definition (`sql_function_census_unresolved_execute`). The
+splice-by-construction guarantee is therefore not available here; two typed copies plus an
+executable equality assertion is what this estate's census leaves standing.
+
+The three additions: `counterparty_name` (the name of
+`clara._canonical_counterparty(p_client, …)`, so a merged payer reads as its SURVIVOR),
+`high_stakes` = `clara.is_high_stakes(entry_id)` (replacing a hardcoded `false` that told every
+human no candidate was ever high-stakes), and a DB-bounded `match_history`
+(`order by acted_at desc limit 5`).
+
+**THE STRUCTURED TASK BINDING (C33.8).** `clara._agent_verify_inputs_digest` was DROP+CREATEd from
+`(uuid,text,text)` to `(uuid,text,uuid)`: the two `split_part` calls that derived and compared a
+task id out of an operation key are gone, and the comparison is
+`coalesce(r.wake_task_id, clara._bank_op_key_task(r.op_key)) = p_task` — a STORED column first,
+with a total, never-raising key reader as the fallback for rows written before 0226 (the table is
+append-only, so no backfill is lawful). `clara._agent_bank_receipt` now writes
+`bank_agent_receipts.wake_task_id`. **`clara._bank_op_key_task(text)` is the ONE place the bank
+operation-key schema is parsed** — IMMUTABLE, STRICT, uuid-regex guarded, ungranted.
+
+**LOUD, for every future bank-family pin.** 0226 re-patches the THIRTEEN `clara._agent_*_core`
+bodies rostered at 0129:1067-1081, so every one of them has a NEW `prosrc` sha. A later migration
+pinning any of them must measure against #657's POST-image, never 0129's.

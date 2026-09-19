@@ -363,3 +363,45 @@ counterparty (CLR23), which `ineligibleAssetEntry` births at approve the x56/x37
 
 `prepayment-0223-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run does
 not preload it and fails loudly on a database without the lane, because a skip is not evidence.
+
+## `bank-line-existing-booking.test.mjs` — #657 (migration 0226)
+
+Eleven cells, all through `humanQuery` least-privileged personas except where a catalog fact or a
+labelled fixture needs root. The centre is `p657.db.no-new-cash`: matching an already-approved
+booking must leave `journal_entries`, `journal_lines`, `open_items`, `open_item_allocations` and
+`list_bank_statements`' own `tie.gl_balance_cents` all unchanged, and write exactly one
+`op_receipts` row. Nothing in the estate asserted that negative before — `x38.a` stops at group
+ties and `snap()` serves only `x38.y` — which is why the same argument had to be re-made in every
+review.
+
+**`bank-no-new-cash.mjs` is a FIXTURE module, not a test.** It exports `snapshotNoNewCash`,
+`assertNoNewCash` and `assertReceiptStatesNoNewCash` so #666 and #667, which land on this chassis
+next, prove the same negative the same way rather than each writing a slightly different "nothing
+was created".
+
+The other ten: `one-receipt-under-retry` (a replayed key returns the BYTE-IDENTICAL enriched
+receipt), `rematch-needs-a-new-key` (the other half of that fact, and the premise the FACE's key
+renewal clause rests on: after an `unmatch_bank_match`, replaying the SAME key returns the DEAD
+match's receipt and writes nothing, so only a RENEWED key re-decides), `capacity-race` (two sessions, two lines, ONE entry — blocking PROVEN behind a gate, in
+`x38.g`'s shape, then a refusal naming `already_matched` with its `side`), `candidate-enrichment`,
+`pack-parity` (the two marked candidate projections are identical), `matching-context`,
+`exception-context`, `opkey-parse-free`, `digest-census` (exactly thirteen cores, all at #657's
+post-image) and `acl`.
+
+**Two measured constraints a later hand will otherwise re-discover.**
+(1) `clara._agent_bank_receipt` derives `acting_actor` from `clara.wake_context()`, which returns
+ZERO rows without a live wake secret — so a rig session CANNOT call that writer at all
+(`null value in column "acting_actor"`). `p657.db.opkey-parse-free` therefore arranges both row
+shapes as labelled fixture INSERTs and asserts the writer's own storing of the column from its
+source; the writer is exercised for real by `packages/runtime/tests/g1-wake-bank-e2e.test.mjs`
+under a REAL `bank_agent` credential.
+(2) `_draft_entry_core` stamps `journal_lines.counterparty_id` only under a vendor BINDING and
+only on a payable/receivable-class line, so a Dr bank / Cr revenue receipt — the #657 shape —
+never carries one through the ordinary draft path (measured: zero of 48 journal_lines on a fresh
+rig). The battery's `bankEntryWithCounterparty` stamps it on the DRAFT, where the line is still
+mutable, and approves through the real door afterwards; it also re-reads `revision_token` after
+that DML, because the fixture write moves it and the approve carries an optimistic-concurrency
+check.
+
+`bank-match-evidence-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
+does not preload it and fails LOUDLY on a database without 0226, because a skip is not evidence.
