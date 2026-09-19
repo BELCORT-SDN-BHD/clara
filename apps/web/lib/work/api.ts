@@ -75,8 +75,11 @@ export type SubmitJournalWorkResult =
    *  attachment conflict opens IMPACT OR CORRECTION on the entry that already
    *  stands there, and must never be resolved by rotating the intent key and
    *  submitting again — that would be the second effect the rule exists to
-   *  prevent. Both ids are present only when the response carried them. */
-  | { kind: "source_conflict"; entryId: string | null; documentId: string | null }
+   *  prevent. Both ids are present only when the response carried them, and
+   *  `detail` (#981) carries the rest of what the door said about the entry
+   *  that already stands there — this arm is built by the same `answer()` as
+   *  every other refusal, so it carries the same object. */
+  | { kind: "source_conflict"; entryId: string | null; documentId: string | null; detail?: RefusalDetail }
   | { kind: "denied" }
   | { kind: "not_found" }
   /** The server answered and is not accepting: 503, or any other 5xx. */
@@ -296,7 +299,7 @@ export async function submitPeriodicAdjustmentWork(
     // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and the
     // two doors share the response map that builds both bodies (`workErrorResponse`).
     if (str(body.error) === "source_already_posted") {
-      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id), ...carrier(body) };
     }
     return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
@@ -359,7 +362,7 @@ export async function submitStaffExpenseClaimWork(
     // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and all
     // three doors share the response map that builds both bodies (`workErrorResponse`).
     if (str(body.error) === "source_already_posted") {
-      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id), ...carrier(body) };
     }
     return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
@@ -445,7 +448,7 @@ export async function submitTradeInvoiceWork(
     // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and all
     // four doors share the response map that builds both bodies (`workErrorResponse`).
     if (str(body.error) === "source_already_posted") {
-      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id), ...carrier(body) };
     }
     return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
@@ -513,7 +516,7 @@ export async function submitJournalWork(
     // already stands on it. Collapsing them would offer "try again" for the one
     // case where trying again is exactly what must not happen.
     if (str(body.error) === "source_already_posted") {
-      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id), ...carrier(body) };
     }
     return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }
@@ -865,8 +868,10 @@ export async function takeOverWork(
 export type RestateWorkResult =
   | ({ kind: "accepted" } & WorkAdmission & { supersedes: string | null })
   /** 409 — the predecessor is not in a state a successor may replace: it posted, it settled, or
-   *  it already has one. `reason` is the database's own token, rendered rather than re-worded. */
-  | { kind: "not_restatable"; reason: string | null; status: string | null }
+   *  it already has one. `reason` is the database's own token, rendered rather than re-worded,
+   *  and `detail` (#981) carries the rest of the door's sentence — `superseded_by` above all,
+   *  the successor that already exists, which no promoted key on this arm names. */
+  | { kind: "not_restatable"; reason: string | null; status: string | null; detail?: RefusalDetail }
   | { kind: "invalid_basis"; field: string | null; reason: string | null; detail?: RefusalDetail }
   | { kind: "conflict"; workId: string | null; detail?: RefusalDetail }
   | { kind: "denied" }
@@ -919,7 +924,7 @@ export async function restateWork(
     // retired, which no key rotation fixes.
     const reason = str(body.reason) ?? str(body.error);
     if (reason === "not_restatable" || reason === "already_superseded" || reason === "not_restatable_purpose") {
-      return { kind: "not_restatable", reason, status: str(body.status) };
+      return { kind: "not_restatable", reason, status: str(body.status), ...carrier(body) };
     }
     return { kind: "conflict", workId: str(body.work_id), ...carrier(body) };
   }

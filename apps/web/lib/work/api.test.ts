@@ -16,7 +16,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  cancelWork, probeWork, retryWork, submitJournalWork, submitTradeInvoiceWork, takeOverWork,
+  cancelWork, probeWork, restateWork, retryWork, submitJournalWork, submitPeriodicAdjustmentWork,
+  submitStaffExpenseClaimWork, submitTradeInvoiceWork, takeOverWork,
   type JournalBasisWire,
 } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -686,4 +687,105 @@ test("981.web: EVERY durable-Work door reads the carrier — retry, cancel and t
         { kind: "invalid", reason: "invalid_op_key" }, "no carrier, no new key");
     },
   );
+});
+
+test("981.web: `source_conflict` carries the door's typed detail too — the arm round one left bare", async () => {
+  // Reviewed findings L10S-1 / STD-2. `workErrorResponse` builds the `source_already_posted` 409
+  // through the SAME `answer()` as every other refusal, so the door's object IS on that body.
+  // This edge promoted the two ids off it and threw the rest away, which is exactly the cost the
+  // ticket exists to retire: a structured key gained on THIS refusal still needed a new arm here.
+  const detail = {
+    reason: "source_already_posted",
+    entry_id: "e-1",
+    document_id: "d-1",
+    posted_at: "2026-09-01T00:00:00Z",
+  };
+  await withFetch(
+    () => json({ error: "source_already_posted", entry_id: "e-1", document_id: "d-1", detail }, 409),
+    async () => {
+      const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "source_conflict");
+      assert.equal(out.kind === "source_conflict" ? out.entryId : null, "e-1", "the promoted ids are unchanged");
+      assert.equal(out.kind === "source_conflict" ? out.documentId : null, "d-1");
+      assert.deepEqual(out.kind === "source_conflict" ? out.detail : null, detail,
+        "…and the door's own object is readable whole");
+    },
+  );
+  // …and a body with NO carrier is byte-for-byte the result this arm always returned.
+  await withFetch(
+    () => json({ error: "source_already_posted", entry_id: "e-1", document_id: "d-1" }, 409),
+    async () => {
+      assert.deepEqual(await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS }),
+        { kind: "source_conflict", entryId: "e-1", documentId: "d-1" });
+    },
+  );
+});
+
+test("981.web: the three SIBLING admission doors read that same carrier, not just the journal one", async () => {
+  // `submitPeriodicAdjustmentWork`, `submitStaffExpenseClaimWork` and `submitTradeInvoiceWork`
+  // each reuse `SubmitJournalWorkResult`'s `source_conflict` arm BECAUSE the four routes share
+  // `workErrorResponse` — so the arm has to read the shared body the same way on all four, or the
+  // reuse claim in this module's own doc comment is false for three of them.
+  const detail = { reason: "source_already_posted", entry_id: "e-2", document_id: "d-2", posted_at: "2026-08-14" };
+  const body = { error: "source_already_posted", entry_id: "e-2", document_id: "d-2", detail };
+  const calls: ReadonlyArray<[string, () => Promise<{ kind: string; detail?: unknown }>]> = [
+    ["periodic adjustment", () => submitPeriodicAdjustmentWork(auth, {
+      clientId: "c1", intentKey: "i1", purpose: "accrual", basis: BASIS, adjustment: {},
+    })],
+    ["staff expense claim", () => submitStaffExpenseClaimWork(auth, {
+      clientId: "c1", intentKey: "i1", claim: {},
+    })],
+    ["trade invoice", () => submitTradeInvoiceWork(auth, {
+      clientId: "c1", intentKey: "i1", kind: "supplier_bill", invoice: {}, basis: {},
+    })],
+  ];
+  for (const [door, call] of calls) {
+    await withFetch(() => json(body, 409), async () => {
+      const out = await call();
+      assert.equal(out.kind, "source_conflict", door);
+      assert.deepEqual(out.detail, detail, `${door}: the door's own object is readable whole`);
+    });
+    await withFetch(() => json({ error: "source_already_posted", entry_id: "e-2", document_id: "d-2" }, 409), async () => {
+      assert.deepEqual(await call(), { kind: "source_conflict", entryId: "e-2", documentId: "d-2" },
+        `${door}: no carrier, no new key`);
+    });
+  }
+});
+
+test("981.web: `restateWork`'s 409 carries the carrier — `superseded_by` and all", async () => {
+  // Reviewed finding STD-2. `workErrorResponse`'s restate arm answers
+  // `{error, reason, status, superseded_by}` through `answer()`, so the door's object rides with
+  // it; this edge returned `{kind, reason, status}` and dropped everything else, including the
+  // successor id the surface needs to offer a link to the Work that already replaced this one.
+  const detail = {
+    reason: "already_superseded",
+    status: "cancelled",
+    superseded_by: "work-77",
+    superseded_at: "2026-09-19T09:00:00Z",
+  };
+  await withFetch(
+    () => json({
+      error: "already_superseded", reason: "already_superseded", status: "cancelled",
+      superseded_by: "work-77", detail,
+    }, 409),
+    async () => {
+      const out = await restateWork(auth, { workId: "w1", opKey: "k", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "not_restatable");
+      assert.equal(out.kind === "not_restatable" ? out.reason : null, "already_superseded",
+        "the promoted keys are unchanged");
+      assert.equal(out.kind === "not_restatable" ? out.status : null, "cancelled");
+      assert.deepEqual(out.kind === "not_restatable" ? out.detail : null, detail,
+        "…and the successor the door named is readable, not dropped");
+    },
+  );
+  // …and the bodies that carry no detail are byte-for-byte what this arm always returned.
+  for (const reason of ["not_restatable", "already_superseded", "not_restatable_purpose"]) {
+    await withFetch(
+      () => json({ error: reason, reason, status: "posted" }, 409),
+      async () => {
+        assert.deepEqual(await restateWork(auth, { workId: "w1", opKey: "k", intentKey: "i1", basis: BASIS }),
+          { kind: "not_restatable", reason, status: "posted" }, `${reason}: no carrier, no new key`);
+      },
+    );
+  }
 });

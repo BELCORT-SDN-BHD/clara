@@ -1008,13 +1008,18 @@ key, so this module surfaces it in one helper, `carrier()`, on EVERY refusal arm
 door can answer with — and a new structured key reaches a form with no new arm here and no new
 fold in `packages/runtime/src/workRoutes.ts`.
 
-**Every door, not only the admission ones.** The five admission doors (`submitJournalWork`,
+**Every door, and every ARM of every door.** The five admission doors (`submitJournalWork`,
 `submitPeriodicAdjustmentWork`, `submitStaffExpenseClaimWork`, `submitTradeInvoiceWork`,
-`restateWork`) read the carrier on their `invalid_basis` and `conflict` arms; `retryWork` reads it
-on `not_retryable`, `cancelWork` on `conflict` and `invalid`, and `takeOverWork` on `not_takeable`,
-`confirm_basis` and `invalid`. The runtime carries the door's typed detail on every 400 and 409 it
-builds, including the ones those three doors answer, so an edge that read it on five of eight
-would have gone on discarding it exactly where the ticket says it must not. The ONE refusal that
+`restateWork`) read the carrier on their `invalid_basis` and `conflict` arms; the four that can
+refuse a document already backing a posted entry read it on `source_conflict` too, and
+`restateWork` on `not_restatable`; `retryWork` reads it on `not_retryable`, `cancelWork` on
+`conflict` and `invalid`, and `takeOverWork` on `not_takeable`, `confirm_basis` and `invalid`. The
+runtime carries the door's typed detail on every 400 and 409 it builds, so an edge that read it on
+some arms only would have gone on discarding it exactly where the ticket says it must not — which
+is what the first round of this ticket did on those five call sites, and what review findings
+L10S-1 and STD-2 caught. `source_conflict` and `not_restatable` are the two that most need it:
+the first is built by the same `answer()` as its `conflict` sibling, and the second is the only
+place the door names `superseded_by`, the successor a surface has to link to. The ONE refusal that
 deliberately carries nothing is `transient`: PostgreSQL broke a deadlock, the statement never ran,
 and there is no state to describe.
 
