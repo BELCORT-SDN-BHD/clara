@@ -38,6 +38,7 @@
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, humanQuery, namedCall, opk, insertUser, seedAdmission, createFirm, createClient,
+  ROLES, withActor,
 } from "./rig-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
@@ -233,4 +234,83 @@ export async function routinePosture(sig) {
             encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
        from pg_proc p where p.oid = to_regprocedure($1)`, [sig]);
   return r.rows[0] ?? null;
+}
+
+/** One person's ACTIVE membership row in one firm. The three member doors (`add_member`,
+ *  `set_member_role`, `remove_member`) take the MEMBERSHIP id, never the (firm, person) pair, so a
+ *  cell that wants to demote or remove somebody has to look it up. A root READ, not DML. */
+export async function membershipOf(firm, user) {
+  const r = await rootQuery(
+    `select id, role, status from clara.firm_memberships
+      where firm_id = $1 and user_id = $2 and status = 'active'`, [firm, user]);
+  return r.rows[0] ?? null;
+}
+
+// ===========================================================================================
+// 4 · THE CONCURRENT FIRST DISPATCH, MADE DETERMINISTIC.
+// ===========================================================================================
+
+/** TWO FIRST DISPATCHES FOR ONE CLIENT, PROVABLY INSIDE EACH OTHER'S MINT WINDOW.
+ *
+ *  A bare `Promise.all([prepare(), prepare()])` is NOT this race and must not be mistaken for it:
+ *  MEASURED on the rehearsal rig (fix round 1), the first call commits before the second's
+ *  `not exists` guard runs, so the second never enters the mint arm at all — that pair stays green
+ *  even against a `prepare_egress_dispatch` whose `on conflict do nothing` has been DELETED, which
+ *  is the one defect the cell exists to catch.
+ *
+ *  So the window is FORCED, in `withWorkRowLocked`'s own two-connection shape: session A opens a
+ *  transaction and mints WITHOUT committing; session B then enters the same arm, sees no committed
+ *  consent and BLOCKS on `uq_client_egress_purpose_consents_one_live` behind A's uncommitted
+ *  tuple. The block is OBSERVED in `pg_stat_activity` from a third session before A is allowed to
+ *  commit, and `blocked` comes back with the two verdicts so the cell can assert the contention
+ *  actually happened rather than trust the scheduler. Both sessions carry a `statement_timeout`,
+ *  so a wall that never lifts fails the cell instead of hanging the battery. */
+export async function racedFirstDispatch({ firm, client, seqA, seqB, timeoutMs = 15000 }) {
+  const call = namedCall("prepare_egress_dispatch", [
+    { name: "p_firm", cast: "uuid" }, { name: "p_client", cast: "uuid" },
+    { name: "p_purpose", cast: "text" }, { name: "p_event_seq", cast: "bigint" },
+    { name: "p_event_type", cast: "text" }, { name: "p_document_sha256", cast: "text" },
+  ]);
+  const args = (seq) => [firm, client, "accounting_work", String(seq), "work.segment", null];
+
+  let minted = null; const aMinted = new Promise((r) => { minted = r; });
+  let release = null; const aHeld = new Promise((r) => { release = r; });
+  let a = null; let b = null; let blocked = false;
+
+  const runA = withActor({ role: ROLES.runtime }, async (c) => {
+    await c.query(`set statement_timeout = ${Number(timeoutMs)}`);
+    await c.query("begin");
+    a = (await c.query(call, args(seqA))).rows[0].result;
+    minted();                              // …minted, and NOT committed
+    await aHeld;
+    await c.query("commit");
+  });
+  runA.catch(() => {});                     // awaited below; this only silences the early-reject warning
+
+  let runB = null;
+  try {
+    await Promise.race([aMinted, runA]);    // if A fails before it mints, fail here, not in a hang
+    runB = withActor({ role: ROLES.runtime }, async (c) => {
+      await c.query(`set statement_timeout = ${Number(timeoutMs)}`);
+      await c.query("begin");
+      b = (await c.query(call, args(seqB))).rows[0].result;
+      await c.query("commit");
+    });
+    runB.catch(() => {});
+    // OBSERVE THE CONTENTION from a THIRD session rather than assuming the scheduler produced it.
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && !blocked) {
+      const w = await rootQuery(
+        `select count(*)::int as n from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'
+            and query ilike '%prepare_egress_dispatch%'`);
+      if (w.rows[0].n > 0) blocked = true;
+      else await new Promise((r) => { setTimeout(r, 25); });
+    }
+  } finally {
+    release();
+    await runA;
+    if (runB) await runB;
+  }
+  return { a, b, blocked };
 }

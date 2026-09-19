@@ -27,7 +27,8 @@
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  CLR, PG, assertRaises, endPool, ensureReady, insertUser, opk, roleQuery, ROLES, rootQuery,
+  addMember, CLR, PG, assertRaises, endPool, ensureReady, insertUser, opk, removeMember, roleQuery,
+  ROLES, rootQuery, setMemberRole,
 } from "./rig-fixtures.mjs";
 import { markSkip, printSkipCount } from "./wave-a-helpers.mjs";
 import { assertPair } from "./work-journal-fixtures.mjs";
@@ -41,8 +42,8 @@ import { clearOperator } from "./p4t2-fixtures.mjs";
 import {
   ENFORCEMENT_STEM, ENFORCEMENT_REASON, MODE_ENFORCE, MODE_PROMPT,
   acceptKind, acceptancesOf, auditRows, egressBasis, forceMode, getEnforcementMode,
-  legalStanding, predicateMode, publishNextVersion, routinePosture, setEnforcementMode,
-  storedEnforcement, virginFirm,
+  legalStanding, membershipOf, predicateMode, publishNextVersion, racedFirstDispatch,
+  routinePosture, setEnforcementMode, storedEnforcement, virginFirm,
 } from "./legal-enforcement-mode-fixtures.mjs";
 
 const MIGRATION = "0234_legal_enforcement_mode.sql";
@@ -747,4 +748,141 @@ test("p1008.db.no_manufactured_acceptance 0234 inserted no acceptance row, and n
   assert.deepEqual(await prepareEgressDispatch({ firm: sc.firm, client: sc.client, eventSeq: nextSeq() }), UNKNOWN);
   assert.equal((await acceptancesOf(sc.owner)).length, before,
     "no_manufactured_acceptance: a refused dispatch created no acceptance on that person's behalf");
+});
+
+// ===========================================================================================
+// 7 · HOSTILE PROVENANCE, AND THE FIRST DISPATCH UNDER CONTENTION.
+//
+// The cells above prove the prompt arm answers live for the RIGHT person and refuses a firm whose
+// owner holds nothing. They never seed an acceptance held by the WRONG person, and they never take
+// the accepting owner away — so a recut that dropped `m.role='owner'` or `m.status='active'` from
+// the owner selection would leave every one of them green. The first two below pin the other half:
+// WHOSE acceptance may found this firm's basis, and what happens the moment that person stops
+// being an active owner of it. The third pins the one shape the battery called through only ONE
+// session at a time: the concurrent FIRST dispatch, where the mint is decided by the relation's
+// partial uniques rather than by the guard's own `not exists`.
+// ===========================================================================================
+
+test("p1008.db.prompt_wrong_person an acceptance held by ANYONE but an active OWNER of THIS firm founds nothing, in either mode", async (t) => {
+  if (unready(t)) return;
+  const sc = await virginFirm("wrongperson");
+  assert.deepEqual(await acceptancesOf(sc.owner), [],
+    "prompt_wrong_person: mandatory setup — THIS firm's owner holds no acceptance of any kind");
+
+  // (i) A NON-OWNER MEMBER OF THIS FIRM, holding REAL acceptances of BOTH currently published
+  //     kinds — the strongest acceptance a person can hold, on the wrong person.
+  const admin = await insertUser("p1008", "wrongperson_admin");
+  await addMember(sc.owner, { firm: sc.firm, user: admin, role: "admin", opKey: opk("p1008-wp-add") });
+  await acceptKind(admin, "dpa", { opKey: opk("p1008-wp-dpa") });
+  await acceptKind(admin, "terms", { opKey: opk("p1008-wp-terms") });
+  assert.equal((await acceptancesOf(admin)).length, 2,
+    "prompt_wrong_person: …and that member really does hold both, through the estate's own door");
+
+  // (ii) ANOTHER FIRM'S OWNER, holding both. Their acceptance is real and it founds THEIR basis;
+  //      it must be worth nothing here.
+  const other = await virginFirm("wrongperson_other");
+  await acceptKind(other.owner, "dpa");
+  await acceptKind(other.owner, "terms");
+  await forceMode(MODE_PROMPT);
+  assert.equal((await egressBasis(other.firm, other.client)).live, true,
+    "prompt_wrong_person: control — the OTHER firm IS live on its own owner's acceptances");
+
+  for (const mode of [MODE_PROMPT, MODE_ENFORCE]) {
+    await forceMode(mode);
+    assert.deepEqual(await egressBasis(sc.firm, sc.client), { live: false },
+      `prompt_wrong_person[${mode}]: an admin's acceptance and a stranger's acceptance found NOTHING here`);
+    assert.deepEqual(await prepareEgressDispatch({ firm: sc.firm, client: sc.client, eventSeq: nextSeq() }), UNKNOWN,
+      `prompt_wrong_person[${mode}]: …and the dispatch is the SAME uniform negative`);
+  }
+  assert.equal(await synthesisedConsent(sc.client), null,
+    "prompt_wrong_person: nothing was minted in anybody's name");
+});
+
+test("p1008.db.prompt_owner_leaves demoting or removing the ACCEPTING owner withdraws the prompt basis at once", async (t) => {
+  if (unready(t)) return;
+  const sc = await virginFirm("ownerleaves");
+  await acceptKind(sc.owner, "dpa");
+  await forceMode(MODE_PROMPT);
+  const founded = await egressBasis(sc.firm, sc.client);
+  assert.equal(founded.live, true, "prompt_owner_leaves: mandatory setup — the basis is live under prompt");
+  assert.equal(founded.owner, sc.owner, "prompt_owner_leaves: …founded on THIS person");
+
+  // A SECOND OWNER WHO HAS ACCEPTED NOTHING. The last-owner wall (CLR09) forbids demoting or
+  // removing the only owner, so the acts below need somebody else to hold the role — and their
+  // presence is itself an assertion: an owner with no acceptance must not shadow the one with one.
+  const second = await insertUser("p1008", "ownerleaves_second");
+  await addMember(sc.owner, { firm: sc.firm, user: second, role: "owner", opKey: opk("p1008-ol-add") });
+  assert.equal((await egressBasis(sc.firm, sc.client)).owner, sc.owner,
+    "prompt_owner_leaves: a second owner holding nothing does not move the basis off the one who accepted");
+
+  const membership = await membershipOf(sc.firm, sc.owner);
+  assert.ok(membership, "prompt_owner_leaves: the accepting owner's ACTIVE membership resolves");
+
+  // DEMOTED — same person, same acceptance, no longer an owner.
+  await setMemberRole(second, { membership: membership.id, role: "admin", opKey: opk("p1008-ol-demote") });
+  assert.deepEqual(await egressBasis(sc.firm, sc.client), { live: false },
+    "prompt_owner_leaves: the accepting person is no longer an OWNER — the basis is gone, with the uniform negative's bytes");
+  assert.deepEqual(await prepareEgressDispatch({ firm: sc.firm, client: sc.client, eventSeq: nextSeq() }), UNKNOWN,
+    "prompt_owner_leaves: …and the dispatch is refused");
+
+  // PROMOTED BACK — it was the ROLE that founded the basis, not the person.
+  await setMemberRole(second, { membership: membership.id, role: "owner", opKey: opk("p1008-ol-promote") });
+  assert.equal((await egressBasis(sc.firm, sc.client)).live, true,
+    "prompt_owner_leaves: putting the role back puts the basis back");
+
+  // REMOVED — the membership itself stops being active.
+  await removeMember(second, { membership: membership.id, opKey: opk("p1008-ol-remove") });
+  assert.equal(await membershipOf(sc.firm, sc.owner), null,
+    "prompt_owner_leaves: mandatory setup — that membership is no longer ACTIVE");
+  assert.deepEqual(await egressBasis(sc.firm, sc.client), { live: false },
+    "prompt_owner_leaves: an acceptance held by a person who left this firm founds nothing");
+  assert.deepEqual(await prepareEgressDispatch({ firm: sc.firm, client: sc.client, eventSeq: nextSeq() }), UNKNOWN);
+  assert.equal(await synthesisedConsent(sc.client), null,
+    "prompt_owner_leaves: no consent was ever minted for this client — every prepare here was refused");
+});
+
+test("p1008.db.prompt_first_dispatch_race two CONCURRENT first dispatches under prompt mint exactly ONE consent", async (t) => {
+  if (unready(t)) return;
+  const sc = await virginFirm("race");
+  await acceptKind(sc.owner, "dpa");
+  await forceMode(MODE_PROMPT);
+  assert.equal(await synthesisedConsent(sc.client), null,
+    "prompt_first_dispatch_race: mandatory setup — this client has never been dispatched for");
+
+  // TWO SESSIONS INSIDE EACH OTHER'S MINT WINDOW, deterministically: session A mints and holds its
+  // transaction open, session B enters the same arm, sees no committed consent and BLOCKS on
+  // `uq_client_egress_purpose_consents_one_live`, and only then is A allowed to commit. The block
+  // itself is OBSERVED from a third session, because a race this cell merely HOPED for would be no
+  // test at all — measured on this rig, a bare `Promise.all` of two dispatches does not overlap.
+  const { a, b, blocked } = await racedFirstDispatch({
+    firm: sc.firm, client: sc.client, seqA: nextSeq(), seqB: nextSeq(),
+  });
+  assert.equal(blocked, true,
+    "prompt_first_dispatch_race: the second dispatch was OBSERVED waiting on a lock inside the first's "
+    + "mint window — without that this cell proves nothing");
+  assert.equal(a.verdict, "granted", "prompt_first_dispatch_race: BOTH dispatches are authorised");
+  assert.equal(b.verdict, "granted",
+    "prompt_first_dispatch_race: …including the loser of the mint race, which finds the winner's consent");
+  assert.notEqual(a.authorization_id, b.authorization_id,
+    "prompt_first_dispatch_race: …with one authorization each, because each is its own intent");
+
+  assert.equal((await consentRows(sc.client)).length, 1,
+    "prompt_first_dispatch_race: EXACTLY ONE consent — the race did not mint the client's lawful basis twice");
+  assert.equal((await activationRows(sc.client)).length, 1,
+    "prompt_first_dispatch_race: …exactly ONE activation");
+
+  const consent = await synthesisedConsent(sc.client);
+  const audits = await auditRows(sc.firm, "derive_client_egress_purpose");
+  assert.equal(audits.length, 1,
+    "prompt_first_dispatch_race: …ONE audit row: the loser writes no second receipt for a row it did not create");
+  assert.equal(audits[0].args.consent, consent.id,
+    "prompt_first_dispatch_race: …and it names the consent that actually exists");
+  assert.equal(audits[0].args.enforcement_mode, MODE_PROMPT);
+
+  const events = await eventsOfType(sc.firm, "egress.purpose_consent_derived", sc.client);
+  assert.equal(events.length, 1, "prompt_first_dispatch_race: …and ONE event");
+  assert.equal(events[0].payload.consent_id, consent.id);
+  assert.equal(events[0].payload.enforcement_mode, MODE_PROMPT);
+  assert.equal(events[0].payload.legal_acceptance_id, consent.legal_acceptance_id,
+    "prompt_first_dispatch_race: the one record on the ledger cites the one acceptance the one consent cites");
 });
