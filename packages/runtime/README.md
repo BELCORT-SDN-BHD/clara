@@ -358,8 +358,16 @@ Other configuration groups:
 - Models/auth: `OPENAI_API_KEY`; `SUPABASE_JWT_ISSUER`, `SUPABASE_JWT_AUD`, and either
   `SUPABASE_JWT_JWKS_URL` or `SUPABASE_JWT_SECRET`.
 - Intake: `CLARA_INTAKE_CORS_ORIGINS` (exact origins), `CLARA_SPOOL_DIR`,
-  `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN`, `CLARA_CLAMD_SOCKET`,
-  `CLARA_CLAMD_MANAGED`. The Fly volume mounts at `/data`.
+  `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN` (its reaper owns EVERY `intake-*.(bin|json)` in
+  `CLARA_SPOOL_DIR` since #966, not only uuid-named ones — point `CLARA_SPOOL_DIR` at a directory
+  nothing else writes), `CLARA_CLAMD_SOCKET`,
+  `CLARA_CLAMD_MANAGED`, `CLARA_INTAKE_SIDECAR_QUIET_MS` (default 5000) and
+  `CLARA_SPOOL_RENAME_RETRY_MS` (default 250). The Fly volume mounts at `/data`.
+  The last two are the two halves of the #966 intake/sweep race; raise
+  `CLARA_SPOOL_RENAME_RETRY_MS` on a host whose AV scanner or indexer holds spool files open for
+  longer than a reader does (the failure it buys time for is a live intake failed with an untyped
+  `internal`). Both are explained under "#966 — the intake recovery belt can no longer fail a live
+  intake".
 - Storage: `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`.
   Runtime custody requires the dedicated insert/read role; browser requests receive neither
   this credential nor a signed Storage URL. `realConfig()` refuses `anon`, `authenticated`
@@ -1349,13 +1357,22 @@ destination another handle holds open fails `EPERM` — so a sweep landing betwe
   behind them. `listIntakeMetas` / `listTaskMetas` keep their exact old contract, expressed over
   the lazy shape so the two cannot drift. The knob is `CLARA_INTAKE_SIDECAR_QUIET_MS` (default
   5000).
-- **The budget is a budget for ACTIONS** (fix round 1). The first cut took its ten off the raw
-  listing, so a sidecar carrying no intake — the `{corrupt, file}` marker, a body with no
-  `intakeId`, a file collected between the listing and the read — spent one of the ten, and ten
-  such files ahead of a crashed intake blinded the belt silently. Before #966 that was impossible,
-  because the filter ran before the slice. The belt now reads until it has ACTED on ten
-  (`RECOVERY_BATCH`) under a separate, larger bound on opens (`RECOVERY_OPEN_BUDGET`, 3x), because
-  an open is still the handle a live rename collides with. Unreadable sidecars are reported once
+- **The ten are ten sidecars that CARRY AN INTAKE** (fix round 1; wording corrected in fix round 2
+  after review finding SPEC-3). The first cut took its ten off the raw listing, so a sidecar
+  carrying no intake — the `{corrupt, file}` marker, a body with no `intakeId`, a file collected
+  between the listing and the read — spent one of the ten, and ten such files ahead of a crashed
+  intake blinded the belt silently. Before #966 that was impossible, because the filter ran before
+  the slice. The belt now reads past those without spending a slot (`RECOVERY_BATCH`), under a
+  separate, larger bound on opens (`RECOVERY_OPEN_BUDGET`, 3x), because an open is still the handle
+  a live rename collides with. **It is not ten actions in the wider sense, deliberately:** a
+  sidecar that carries a real intake in a status the belt cannot act on — `uploading`, `receiving`,
+  a large body still streaming, whose last status write is older than the quiet window — spends a
+  slot while nothing is done with it, exactly as it did before #966. Exempting those would let one
+  sweep open up to thirty live sidecars instead of ten, tripling the belt's handle-taking on the
+  very files this ticket exists to stop touching; and unlike `{corrupt}` junk, a live sidecar
+  clears itself, because it carries a 15-minute capability and the expiry arm is an action the belt
+  always takes. `tests/intake-sidecar-race.test.mjs`'s `p966.budget: a settled LIVE upload DOES
+  spend one of the ten` pins both halves. Unreadable sidecars are reported once
   per sweep — `[reconcile] intake recovery skipped N unreadable sidecar(s) this sweep: …` — never
   once per file. The residual is stated rather than hidden: more than thirty settled-but-unusable
   sidecars ahead of a crashed one still delay it, and `sweepSpoolTtl` is what ends that — it now

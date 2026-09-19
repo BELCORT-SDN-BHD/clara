@@ -203,7 +203,7 @@ test("p966.quiet: a sidecar written inside the quiet window is NEVER opened duri
     "'uploading' is not one of the belt's actionable states — it is read and left alone");
 });
 
-test("p966.budget: a sweep opens at most the TEN sidecars it can act on, never the whole directory", async () => {
+test("p966.budget: a sweep opens at most TEN sidecars that carry an intake, never the whole directory", async () => {
   const entries = Array.from({ length: 25 }, () => {
     const id = randomUUID();
     return entryDouble(id, { ageMs: 60_000, body: sidecar(id, 1, { status: "uploading" }) });
@@ -214,7 +214,8 @@ test("p966.budget: a sweep opens at most the TEN sidecars it can act on, never t
     listEntries: async () => entries,
   });
   assert.equal(entries.filter((e) => e.reads > 0).length, 10,
-    "the belt acts on at most ten and must now OPEN at most ten — opening all 25 is the cost this ticket removes");
+    "the belt takes at most ten slots and must now OPEN at most ten — opening all 25 is the cost this ticket removes "
+    + "(these ten carry an intake, so they spend a slot each although 'uploading' is not actionable: see the LIVE-upload cell below)");
   assert.deepEqual(entries.slice(0, 10).map((e) => e.reads), Array(10).fill(1), "…the first ten, each exactly once");
 });
 
@@ -381,6 +382,49 @@ test("p966.budget: …and the READ bound survives — a sweep still opens a boun
     "thirty opens — three times the action budget — and then the sweep stops rather than reading the whole directory");
   assert.equal(crashed.reads, 0, "…so sixty unusable sidecars DO still delay recovery: the TTL reaper below is what ends that");
   assert.deepEqual(out, { recovered: 0, deferred: 0, expired: 0 });
+});
+
+test("p966.budget: a settled LIVE upload DOES spend one of the ten — the carve-out is for junk, not for uploads", async () => {
+  // Review finding SPEC-3. The budget above is ten ACTIONS in the sense the carve-out was built
+  // for — a sidecar that carries NO intake costs a read and no slot. It is not ten actions in the
+  // wider sense: a sidecar that carries a real intake in a status this belt cannot act on
+  // (`uploading`, `receiving` — a 20 MB body still streaming, whose last status write is minutes
+  // old and so past the quiet window) spends a slot while nothing is done with it. That is
+  // origin/main's behaviour byte for byte (its filter was `row && !row.corrupt && row.intakeId`,
+  // which also let a live status through into the ten) and it is DELIBERATE here, not an
+  // oversight: exempting live uploads would let one sweep open up to RECOVERY_OPEN_BUDGET of them
+  // instead of ten, tripling the belt's handle-taking on exactly the files #966 exists to stop
+  // touching. The two junks are not alike — this one clears itself and the other does not, which
+  // is what the second half of this cell pins.
+  const live = Array.from({ length: 10 }, () => {
+    const id = randomUUID();
+    return entryDouble(id, { ageMs: 60_000, body: sidecar(id, 1, { status: "uploading" }) });
+  });
+  const crashed = crashedEntry();
+
+  const blinded = await drive([...live, crashed], () => {});
+
+  assert.deepEqual(live.map((e) => e.reads), Array(10).fill(1), "each live sidecar is opened once…");
+  assert.equal(crashed.reads, 0,
+    "…and ten of them DO hide the crashed intake behind them for this sweep — the residual SPEC-3 names, "
+    + "pinned rather than claimed away");
+  assert.deepEqual(blinded, { recovered: 0, deferred: 0, expired: 0 });
+
+  // THE CEILING, which corrupt junk has not got: a live sidecar carries a 15-minute capability,
+  // and the belt's expiry arm is an action it always takes. So the blind window ends by itself
+  // within the capability's life — where `{corrupt}` junk blinds the belt until `sweepSpoolTtl`.
+  const stale = live.map((e) => {
+    const id = randomUUID();
+    return entryDouble(id, { ageMs: 60_000, body: sidecar(id, 1, { status: "uploading", expiresAt: new Date(Date.now() - 1000).toISOString() }) });
+  });
+  const behind = crashedEntry();
+
+  const cleared = await drive([...stale, behind], () => {});
+
+  assert.equal(cleared.expired, 10, "every past-capability live sidecar is expired — the slot is spent on an ACTION");
+  assert.equal(behind.reads, 0, "…this sweep is still full, so the crashed intake waits one more cycle…");
+  const after = await drive([behind], () => {});
+  assert.equal(after.deferred, 1, "…and the NEXT sweep, with those ten gone, carries it into the finalize path");
 });
 
 test("p966.reap: the TTL sweep reaps an UNREADABLE sidecar too — the blind window has an end", async (t) => {

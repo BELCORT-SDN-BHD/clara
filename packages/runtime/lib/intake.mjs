@@ -436,7 +436,7 @@ const RECOVERY_BATCH = 10;
 /**
  * How many sidecars ONE sweep may OPEN while looking for those ten (#966, fix round 1).
  *
- * THE BUDGET IS A BUDGET FOR ACTIONS, NOT FOR READS. The first cut of this change took
+ * THE TEN ARE TEN SIDECARS THAT CARRY AN INTAKE. The first cut of this change took
  * `RECOVERY_BATCH` off the raw listing, so a sidecar the belt CANNOT USE — the `{corrupt, file}`
  * marker, a `null` from a sidecar collected between the listing and the read, a body whose
  * `intakeId` never landed — spent one of the ten. Ten such files sitting ahead of a crashed intake
@@ -451,6 +451,19 @@ const RECOVERY_BATCH = 10;
  * racing its own `removeIntakeSpool`) many times over. The residual is stated rather than hidden:
  * more than thirty settled-but-unusable sidecars ahead of a crashed one still delay it, until
  * `sweepSpoolTtl` reaps them — which it now does whatever they are named.
+ *
+ * IT IS NOT TEN ACTIONS IN THE WIDER SENSE, AND THAT IS DELIBERATE (review finding SPEC-3, fix
+ * round 2). A sidecar that carries a REAL intake in a status this belt cannot act on —
+ * `uploading`, `receiving`, a large body still streaming whose last status write is older than the
+ * quiet window — spends one of the ten while nothing is done with it. That is origin/main's
+ * behaviour byte for byte (its filter, `row && !row.corrupt && row.intakeId`, let a live status
+ * through into the ten too). Moving the increment below the `RECOVERABLE_STATES` gate would let
+ * one sweep open up to `RECOVERY_OPEN_BUDGET` live sidecars instead of `RECOVERY_BATCH`, tripling
+ * the handle-taking on exactly the files #966 exists to stop touching — and it buys little,
+ * because the two junks are not alike: a live sidecar carries a 15-minute capability and the
+ * expiry arm above is an action the belt always takes, so it clears ITSELF, where `{corrupt}` junk
+ * waits for `sweepSpoolTtl`. Pinned by `tests/intake-sidecar-race.test.mjs`'s `p966.budget: a
+ * settled LIVE upload DOES spend one of the ten`.
  */
 const RECOVERY_OPEN_BUDGET = RECOVERY_BATCH * 3;
 
@@ -482,8 +495,8 @@ const RECOVERABLE_STATES = ["spooled", "canonical", "received", "verifying", "ve
  *
  * READS NOTHING IT COULD HAVE SKIPPED (#966). The sweep takes the spool's DIRECTORY METADATA,
  * drops every sidecar inside the quiet window without opening it, and only then opens — enough of
- * them to ACT on `RECOVERY_BATCH`, the same number it has always been willing to act on, under a
- * separate and larger bound on opens (`RECOVERY_OPEN_BUDGET`). The quiet skip happens BEFORE
+ * them to reach `RECOVERY_BATCH` sidecars THAT CARRY AN INTAKE, the same number it has always been
+ * willing to take, under a separate and larger bound on opens (`RECOVERY_OPEN_BUDGET`). The quiet skip happens BEFORE
  * either budget is taken, so a spool full of live uploads cannot starve the belt of the crashed
  * intake sitting behind them, and a sidecar that carries no intake costs a read but never one of
  * the ten (see `RECOVERY_OPEN_BUDGET`'s own header for what the first cut of this got wrong).
