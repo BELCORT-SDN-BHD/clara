@@ -165,8 +165,16 @@ const PRINT_CLOSURE_MODULE =
     : null;
 // #849 — `--retire <path> --ruling <ref>`: moves one currently-registered entry to the `retired`
 // record. Parsed here, alongside --print-closure, for the same reason (after --compare-base).
+// L05-S02 (fix round) — RETIRE_FLAG is tracked separately from RETIRE_PATH so a bare `--retire`
+// (no path token following it, or the very next token belongs to another flag) is a REFUSAL
+// rather than a silent, un-flagged fall-through to an ordinary verify: every other malformed
+// invocation of this command already fails loud, and this one must too.
 const RETIRE_INDEX = process.argv.indexOf("--retire");
-const RETIRE_PATH = RETIRE_INDEX !== -1 ? (process.argv[RETIRE_INDEX + 1] ?? null) : null;
+const RETIRE_FLAG = RETIRE_INDEX !== -1;
+const RETIRE_PATH =
+  RETIRE_FLAG && process.argv[RETIRE_INDEX + 1] && !process.argv[RETIRE_INDEX + 1].startsWith("--")
+    ? process.argv[RETIRE_INDEX + 1]
+    : null;
 const RULING_INDEX = process.argv.indexOf("--ruling");
 const RETIRE_RULING = RULING_INDEX !== -1 ? (process.argv[RULING_INDEX + 1] ?? null) : null;
 
@@ -280,6 +288,15 @@ function main() {
   });
 
   const manifest = loadManifest();
+
+  if (RETIRE_FLAG && !RETIRE_PATH) {
+    // L05-S02 (fix round) — `--retire` with no path argument (or with another flag immediately
+    // after it) used to fall through the `if (RETIRE_PATH)` gate below into an ordinary verify,
+    // reporting success (exit 0) with no hint the command was ignored. Fail loud instead, the
+    // same fail-closed shape every other malformed `--retire` invocation already uses.
+    console.error("freeze-lint: --retire requires a path argument (usage: --retire <path> --ruling <ref>); no manifest write.");
+    return 1;
+  }
 
   if (RETIRE_PATH) {
     // A deliberate local ceremony act, exactly like --update and --lock-deployed: it writes the

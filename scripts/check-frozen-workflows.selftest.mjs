@@ -14,6 +14,7 @@
 // No dependencies — Node built-ins only.
 
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -551,8 +552,18 @@ testCase("#849 targeted print-closure on a module NO entry reaches -> says so, l
 
 testCase("#849 REAL repo canary: filtering the real closure to lib/work-trace.mjs matches the #815 unfiltered attribution exactly", () => {
   const filtered = formatClosureReport(closure /* the module-level real closure computed above for #815 */, "packages/runtime/lib/work-trace.mjs");
-  for (const entry of reachedBy("packages/runtime/lib/work-trace.mjs")) {
+  const reaching = new Set(reachedBy("packages/runtime/lib/work-trace.mjs"));
+  for (const entry of reaching) {
     if (!filtered.includes(entry)) throw new Error(`expected ${entry} in filtered report:\n${filtered}`);
+  }
+  // L05-S03 (fix round): the inclusion loop above would still pass a filter that is a complete
+  // no-op (one that ignores its argument and returns the FULL, unfiltered report) — it never
+  // checks that anything is EXCLUDED. Assert the other half against the same real tree: at least
+  // one real @frozen entry that does NOT reach this module must be ABSENT from the filtered report.
+  const nonReaching = [...closure.byEntry.keys()].filter((entry) => !reaching.has(entry));
+  if (nonReaching.length === 0) throw new Error("test fixture assumption broken: every real entry reaches this module, so exclusion cannot be proven here");
+  for (const entry of nonReaching) {
+    if (filtered.includes(entry)) throw new Error(`${entry} does NOT reach lib/work-trace.mjs and must be EXCLUDED from the filtered report:\n${filtered}`);
   }
 });
 
@@ -603,6 +614,42 @@ testCase("#849 retireFrozenEntry refuses when --ruling is missing or blank", () 
   if (withoutRuling.ok) throw new Error("expected ok:false — no ruling cited");
   const withUndefinedRuling = retireFrozenEntry(manifest, RETIRE_PATH_849, undefined, false);
   if (withUndefinedRuling.ok) throw new Error("expected ok:false — no ruling cited");
+});
+
+// L05-S02 (fix round): every refusal above is exercised through the pure retireFrozenEntry, but
+// the "no path given at all" case lives in check-frozen-workflows.mjs's OWN argv wiring (the
+// `if (RETIRE_PATH)` gate around the whole retire block), which retireFrozenEntry never sees and
+// which this file cannot import directly (`process.exit(main())` runs at module load). Spawn the
+// real CLI instead, the same through-the-CLI pattern scripts/ops/dsn-pipe.selftest.mjs uses.
+testCase("#849 `--retire` with NO path argument REFUSES (exit 1) instead of silently falling through to an ordinary verify", () => {
+  const manifestPath = join(REPO_ROOT, "frozen-workflows.json");
+  const before = readFileSync(manifestPath, "utf8");
+  const result = spawnSync(process.execPath, [join(HERE, "check-frozen-workflows.mjs"), "--retire"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  const after = readFileSync(manifestPath, "utf8");
+  if (after !== before) throw new Error("--retire with no path argument must not write the manifest");
+  if (result.status === 0) {
+    throw new Error(`--retire with no path argument must REFUSE (exit 1); got exit 0 with stdout:\n${result.stdout}`);
+  }
+  if (!/--retire requires a path argument/i.test(result.stderr)) {
+    throw new Error(`expected a usage message naming the missing path argument; got stderr:\n${result.stderr}`);
+  }
+});
+
+testCase("#849 `--retire --ruling <ref>` (the path slot holding the NEXT flag, not a path) also REFUSES rather than treating \"--ruling\" as the path", () => {
+  const manifestPath = join(REPO_ROOT, "frozen-workflows.json");
+  const before = readFileSync(manifestPath, "utf8");
+  const result = spawnSync(process.execPath, [join(HERE, "check-frozen-workflows.mjs"), "--retire", "--ruling", "#810 owner ruling 2026-09-15"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  const after = readFileSync(manifestPath, "utf8");
+  if (after !== before) throw new Error("--retire with a flag (not a path) in the path slot must not write the manifest");
+  if (result.status === 0) {
+    throw new Error(`--retire with no real path must REFUSE (exit 1); got exit 0 with stdout:\n${result.stdout}`);
+  }
 });
 
 // --- (e) enqueue-site provenance --------------------------------------------

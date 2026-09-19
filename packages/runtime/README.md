@@ -713,7 +713,7 @@ The question an author actually asks is the INVERSE of the full report above —
 ```sh
 node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs
 # freeze-lint closure report — module "packages/runtime/lib/work-trace.mjs" is locked by 6 of
-# 312 @frozen entry file(s):
+# 299 @frozen entry file(s):
 #   packages/runtime/workflows/claraWork.v3.impl.ts
 #   ...
 ```
