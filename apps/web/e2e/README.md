@@ -28,6 +28,24 @@ pnpm --filter @clara/web e2e
 
 On PowerShell, set those environment variables before running the command.
 
+### Gating on one spec, and `--no-build` (#630, #851)
+
+Extra arguments reach Playwright, so a lane gates on the spec it touched instead of borrowing the whole suite's wall-clock:
+
+```sh
+pnpm --filter @clara/web e2e -- documents-viewer-walk
+```
+
+[`run.mjs`](run.mjs) rebuilds `@clara/web` before every invocation, which is right after an edit and pure cost when the same code is being measured twice. `--no-build` skips that build and runs Playwright against the `.next/` already on disk:
+
+```sh
+pnpm --filter @clara/web e2e -- --no-build documents-viewer-walk
+```
+
+- **A bare run is unchanged.** With the flag absent the build happens and the argument list Playwright receives is exactly what it always was — held by [`run-args.test.ts`](run-args.test.ts) against the historical expression itself, not against a copied list.
+- **The flag is the runner's own and never reaches Playwright.** [`run-args.mjs`](run-args.mjs) matches it by exact equality: `--no-builds` or a spec filter that merely reads like the flag is forwarded untouched, because a loose match would silently widen a one-spec gate into the whole suite (the failure #630 recorded for a stray `--`).
+- **Use it for a REPEAT measurement, never for the first run after an edit.** A stale `.next/` proves the app as it was. Three consecutive runs of one walk, or #804's five cold-start runs, are what it is for.
+
 ## One worker, one host (#706)
 
 The harness is single-worker by construction and it must not share a machine with another test suite while it runs.

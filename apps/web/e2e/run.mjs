@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseRunArgs } from "./run-args.mjs";
+
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(webRoot, "../..");
 // Both ports are overridable so two lanes can run this harness at once — the
@@ -79,20 +81,30 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-console.log("[e2e] building @clara/web before starting the browser walk");
-run(["--filter", "@clara/web", "build"]);
+// #851 — `--no-build` IS THE RUNNER'S OWN FLAG, and `run-args.mjs` (a pure module, held by
+// `run-args.test.ts`) is what tells it apart from a spec filter. `pnpm --filter @clara/web e2e --
+// --no-build documents-viewer-walk` re-runs one spec against the `.next/` build already on disk,
+// which is what makes repeated evidence — three consecutive runs of one walk, #804's five
+// cold-start runs — cost one build instead of five. IT CHANGES NOTHING ABOUT A BARE RUN: with the
+// flag absent `build` is true and `passthrough` is exactly the list this file forwarded before.
+//
+// THE BUILD IS THE DEFAULT AND STAYS THE DEFAULT, deliberately. A stale `.next/` proves the app as
+// it was, not as it is, so the flag is for a repeat measurement of code that has not moved — never
+// for the first run after an edit, and never for a lane's gate on the spec it touched.
+const { build, passthrough } = parseRunArgs(process.argv.slice(2));
+
+if (build) {
+  console.log("[e2e] building @clara/web before starting the browser walk");
+  run(["--filter", "@clara/web", "build"]);
+} else {
+  console.log("[e2e] --no-build: reusing the existing .next build, NOT rebuilding @clara/web");
+}
 console.log("[e2e] starting next start and Playwright against the built app");
 // #630 — EXTRA ARGUMENTS REACH PLAYWRIGHT. `pnpm --filter @clara/web e2e -- work-cancel-walk`
 // runs ONE spec through this harness rather than the whole walk. It changes nothing about a bare
 // run (the list is empty), and it exists so a lane can gate on the spec it touched without
 // borrowing the whole suite's wall-clock — the alternative, calling `playwright test` directly,
 // is what makes every sign-in hit the real Supabase (this file's own header states why).
-// STRIP A LEADING `--` (measured 2026-09-12, pnpm 10.33.0): `pnpm --filter
-// @clara/web e2e -- work-cancel-walk` forwards the separator ITSELF in argv, so
-// playwright received `test -- work-cancel-walk`, treated the separator as end
-// of options and ran the WHOLE suite — the documented "gate on the spec you
-// touched" form silently borrowed the entire suite's wall-clock. A separator is
-// never a spec filter, so dropping it costs nothing and makes the sentence above
-// true.
-const passthrough = process.argv.slice(2).filter((arg) => arg !== "--");
+// The separator strip and the `--no-build` claim both live in `run-args.mjs`, with their measured
+// reasons, because a spawn-on-import script is a seam no unit cell can reach.
 run(["--filter", "@clara/web", "exec", "playwright", "test", ...passthrough]);
