@@ -684,6 +684,18 @@ three, asserted door by door and role by role in 0232's own tail and again behav
   `for update`) and the loser is refused CLR11 `cash_set_version_raced` — a typed refusal the face
   can turn into a sentence, never a raw 23505 naming an internal constraint.
 
+  **AND THE LOCK ALONE IS NOT ENOUGH, WHICH IS A MEASURED FACT.** Under READ COMMITTED the waiter's
+  statement snapshot is taken BEFORE it blocks, so when the winner commits, EvalPlanQual re-checks
+  the row the waiter was queued on against its LATEST version — now `superseded` — the
+  `state = 'published'` predicate fails, the row drops out, and the winner's new published row is
+  invisible to that same pre-block snapshot. The waiter therefore reads NO current version at all.
+  The door does not read that null as "this client has never had one": it RE-READS in a separate
+  statement (a fresh snapshot) and, if any version row exists, refuses `cash_set_version_raced`.
+  Without the re-read the loser was refused CLR10 `first_version_after_books_start` — a true
+  sentence about a different mistake, which would send an admin off to check a books-start date
+  that had nothing to do with what happened. Cell: `p660.set.publish_race_loser_code`, two real
+  backends, the block proved from `pg_blocking_pids` rather than slept through.
+
 - `clara.propose_client_cash_accounts(p_client)` — STABLE SECURITY INVOKER, **viewer** floor. Lists
   every `is_bank_account` row of the client, ACTIVE OR INACTIVE, with its cumulative approved
   balance and whether it is already a member. It NEVER proposes declared cash or petty cash under

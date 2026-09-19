@@ -323,6 +323,16 @@ itself), `cash_set_published_after_books_start` (one revision plus a backdated i
 version change), `unmarked_history_series_disclosed` (the disclosure covers all six drawn months)
 and the `cash_set_members_sealed` extension (sealed against UPDATE and DELETE, not only INSERT).
 
+FIX ROUND 2 ADDED ONE MORE, `p660.set.publish_race_loser_code` (recheck NF-1), and it is the only
+cell in this battery that needs TWO REAL BACKENDS: `select … for update` is the mechanism under
+test and a lock is only a lock when a second transaction actually waits on it. The local
+`twoSessions` / `asHumanSession` / `waitBlockedByOrThrow` helpers in
+`client-financial-pack-fixtures.mjs` are copies of `binding-proposal-pr-1-helpers.mjs:22-67` and
+`checkout-convergence-fixtures.mjs:364-384` — the house idiom is a LOCAL copy per lane, and the
+block is proved from `pg_blocking_pids` rather than slept through. The cell was red first for the
+exact shape the recheck measured: the loser was refused CLR10 `first_version_after_books_start`
+instead of CLR11 `cash_set_version_raced`.
+
 FOUR FIXTURE SHORTCUTS, EACH LABELLED in `client-financial-pack-fixtures.mjs`'s header, because
 each builds a condition no live writer can produce:
 

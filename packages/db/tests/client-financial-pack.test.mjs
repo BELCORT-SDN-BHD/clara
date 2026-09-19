@@ -25,8 +25,9 @@ import { markSkip, printSkipCount } from "./wave-a-helpers.mjs";
 import {
   CHART, financialClient, deactivate, makeCarryDownOnly, linkReversal, postEntry,
   stampPreFixCloseReceipt, plantBankStatement,
-  pack, propose, publish, members, reasonOf, trialBalanceCash,
+  pack, propose, publish, publishOn, members, reasonOf, trialBalanceCash,
   rootQuery, humanQuery, upsertAccount,
+  twoSessions, asHumanSession, waitBlockedByOrThrow,
 } from "./client-financial-pack-fixtures.mjs";
 
 const CLR04 = "CLR04";
@@ -883,6 +884,81 @@ test("p660.pack.publish_first_version_covers_history — a null effective_from i
     members(accounts, [CHART.bank, "bank_registry"], [CHART.bank2, "bank_registry"]),
     { effectiveFrom: "2026-01-07" }), "a later version that does not move forward");
   assert.equal(reasonOf(e3), "effective_from_not_after_current");
+});
+
+test("p660.set.publish_race_loser_code — the LOSER of a concurrent publish is told it lost, not that its date predates the books", async (t) => {
+  if (await gate(t)) return;
+  const { client, accounts } = await financialClient(ALICE(), "race");
+  await postEntry(ALICE(), BOB(), { client, date: "2026-01-10", lines: sale(rm(400)) });
+  const v1 = await publishBank(client, accounts);
+  assert.equal(v1.revision, 1);
+  assert.equal(v1.effective_from, "2026-01-10", "revision 1 covers the books from their start");
+
+  // WHY TWO REAL BACKENDS. `select … for update` is the whole mechanism under test, and a lock is
+  // only a lock when a second transaction actually waits on it. Under READ COMMITTED, the waiter's
+  // statement snapshot is taken BEFORE it blocks: when the holder commits, EvalPlanQual re-checks
+  // the locked row against its LATEST version, that version is now `superseded`, so the waiter's
+  // `state = 'published'` predicate fails and the row DROPS OUT — while the winner's brand new
+  // published row is invisible to that same pre-block snapshot. The waiter therefore reads NO
+  // current version at all, which is indistinguishable, to the pre-fix code, from "this client has
+  // never had one". That is the shape this cell pins.
+  const members2 = members(accounts, [CHART.bank, "bank_registry"], [CHART.bank2, "bank_registry"]);
+  const members3 = members(accounts, [CHART.bank2, "bank_registry"]);
+  const outcome = await twoSessions(async (a, b) => {
+    const pidA = await asHumanSession(a, ALICE());
+    const pidB = await asHumanSession(b, ALICE());
+
+    // THE WINNER, HELD OPEN. Its version row is taken `for update` and not yet committed.
+    await a.query("begin");
+    const won = (await publishOn(a, { client, members: members2, effectiveFrom: "2026-04-01",
+      opKey: opk("p660-race-a") })).rows[0].result;
+    assert.equal(won.revision, 2, "the winner minted revision 2 inside its own transaction");
+
+    // THE LOSER, blocking on the winner's row lock — PROVED from pg_stat_activity, never slept.
+    await b.query("begin");
+    const losing = publishOn(b, { client, members: members3, effectiveFrom: "2026-05-01",
+      opKey: opk("p660-race-b") })
+      .then((r) => ({ error: null, result: r.rows[0].result }))
+      .catch((error) => ({ error, result: null }));
+    const waitEvent = await waitBlockedByOrThrow(pidB, pidA);
+    assert.ok(["transactionid", "tuple"].includes(waitEvent),
+      `the loser waits on the version ROW, not on something else (wait_event was ${waitEvent})`);
+
+    await a.query("commit");
+    const lost = await losing;
+    await b.query("rollback");
+    return { won, lost };
+  });
+
+  const { lost } = outcome;
+  assert.ok(lost.error, "the loser was allowed to publish a THIRD revision out of a two-way race");
+  // THE WHOLE POINT. `first_version_after_books_start` is a true sentence about a DIFFERENT
+  // mistake — "you dated your FIRST version after the books began" — and it would send an admin
+  // who simply lost a race off to check a books-start date that has nothing to do with it.
+  assert.notEqual(reasonOf(lost.error), "first_version_after_books_start",
+    "the race's loser was refused as though it were publishing a first version");
+  assert.equal(lost.error.code, CLR11, `the loser's SQLSTATE (detail: ${lost.error.detail})`);
+  assert.equal(reasonOf(lost.error), "cash_set_version_raced");
+  assert.notEqual(lost.error.code, "23505", "a raw constraint name never reaches a screen");
+
+  // AND THE STATE IS THE WINNER'S, EXACTLY. Two revisions, not three; revision 1 closed the day
+  // before the winner's date; revision 2 published from the winner's date, not the loser's.
+  const rows = (await rootQuery(
+    "select revision, state, effective_from::text as f, effective_to::text as t "
+    + "from clara.cash_account_set_versions where client_id = $1 order by revision", [client])).rows;
+  assert.equal(rows.length, 2, "the loser left a row behind");
+  assert.deepEqual(rows.map((r) => [r.revision, r.state, r.f, r.t]), [
+    [1, "superseded", "2026-01-10", "2026-03-31"],
+    [2, "published", "2026-04-01", null],
+  ]);
+
+  // …and the read the client home draws resolves that winner, so the race left nothing to repair.
+  const p = await pack(CAROL(), client, { month: "2026-04-01" });
+  assert.equal(p.cash.status, "ok");
+  assert.deepEqual(
+    { revision: p.cash.set.revision, from: p.cash.set.effective_from, members: p.cash.set.member_count },
+    { revision: 2, from: "2026-04-01", members: 2 },
+    "the version the read resolves in April is the WINNER's, not a set the loser half-wrote");
 });
 
 test("p660.pack.publish_petty_cash_is_a_human_declaration — petty cash enters ONLY by a stated reason, and it reaches book cash", async (t) => {

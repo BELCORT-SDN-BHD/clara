@@ -31,7 +31,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ROLES, asRoot, rootQuery, humanQuery, roleQuery, namedCall, opk, sha,
-  upsertAccount, createClient, freshResolution,
+  upsertAccount, createClient, freshResolution, getPool,
 } from "./rig-fixtures.mjs";
 import { draftEntryV3, approveEntry } from "./s6-helpers.mjs";
 
@@ -271,4 +271,75 @@ export async function trialBalanceCash(sub, client, asOf, codes) {
   return BigInt(r.rows[0].v);
 }
 
-export { ROLES, rootQuery, humanQuery, roleQuery, opk, upsertAccount };
+// ============================================================================================
+// TWO REAL SESSIONS, AND THE INTERLEAVE PROVED RATHER THAN SLEPT THROUGH.
+//
+// `publish_client_cash_account_set` takes the current published version `for update`, so the
+// only honest way to test what the LOSER of a concurrent publish is told is two dedicated
+// backends with two open transactions. Copied locally from `binding-proposal-pr-1-helpers.mjs:
+// 22-67` / `checkout-convergence-fixtures.mjs:364-384` rather than cross-imported, exactly as
+// those two copied it from `legal-acceptance.test.mjs` — the house idiom for this helper is a
+// local copy per lane, so a lane's probe never moves when another lane edits its own.
+// ============================================================================================
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll (bounded) until backend `pid` is observably WAITING on a lock held by `blockerPid`, and
+ *  return the `wait_event` that proves WHICH lock it waits on. Never a sleep: a sleep proves
+ *  nothing about whether the block actually happened. */
+export async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      `select wait_event_type as wet, wait_event as we, pg_blocking_pids(pid) as blockers
+         from pg_stat_activity where pid = $1`, [pid]);
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) {
+      return row.we;
+    }
+    await sleep(25);
+  }
+  throw new Error(
+    `waitBlockedByOrThrow: backend ${pid} never observably blocked on ${blockerPid} within ${timeoutMs}ms`);
+}
+
+/** Two dedicated pooled clients, released cleanly whatever happens. `rollback` -> `reset role`
+ *  -> `reset all` on each, in that order: RESET ALL does NOT reset the role, and a SET ROLEd
+ *  connection returned to the pool poisons the next rootQuery. */
+export async function twoSessions(fn) {
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  try {
+    return await fn(c1, c2);
+  } finally {
+    for (const c of [c1, c2]) {
+      try { await c.query("rollback"); } catch { /* not in a txn */ }
+      try { await c.query("reset role"); } catch { /* already reset */ }
+      try { await c.query("reset all"); } catch { /* already reset */ }
+      c.release();
+    }
+  }
+}
+
+/** Put a pooled client into a human (`clara_authenticated` + jwt) session and return its backend
+ *  pid. `false` on set_config so the claim survives the explicit BEGIN the race needs. */
+export async function asHumanSession(client, sub) {
+  await client.query(`set role ${ROLES.authenticated}`);
+  await client.query("select set_config('request.jwt.claims', $1, false)",
+    [JSON.stringify({ sub, role: "authenticated" })]);
+  return Number((await client.query("select pg_backend_pid() as pid")).rows[0].pid);
+}
+
+/** The publish door, called by NAMED arguments on a caller-supplied session (the two-session
+ *  race needs the call to run on a backend whose transaction the test controls; `publish()`
+ *  above borrows an anonymous pooled client and commits it). */
+export function publishOn(client, { client: clientId, members: memberList, effectiveFrom = null, opKey = null }) {
+  return client.query(namedCall("publish_client_cash_account_set", [
+    { name: "p_client", cast: "uuid" },
+    { name: "p_members", cast: "jsonb" },
+    { name: "p_effective_from", cast: "date" },
+    { name: "p_op_key", cast: "text" },
+  ]), [clientId, JSON.stringify(memberList), effectiveFrom, opKey ?? opk("p660-pub")]);
+}
+
+export { ROLES, rootQuery, humanQuery, roleQuery, opk, upsertAccount, getPool };

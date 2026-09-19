@@ -500,6 +500,7 @@ declare
   v_version uuid;
   v_ids     uuid[];
   v_n       int;
+  v_seen    int;
   v_sha     bytea;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
@@ -563,16 +564,43 @@ begin
 
   v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
   -- FOR UPDATE, so two admins publishing at once SERIALISE rather than race: the second waits on
-  -- the first, then re-reads the row under READ COMMITTED and sees what the first did with it.
-  -- The unique index `uq_cash_account_set_versions_current` and `unique (client_id, revision)`
-  -- keep the STATE correct either way; what the lock and the typed refusal below add is a
-  -- SENTENCE for the loser, instead of a raw 23505 naming an internal constraint on a screen.
+  -- the first. What it sees when the wait ends is NOT simply "what the first did with it" --
+  -- EvalPlanQual can hand it an empty result instead, which the branch below re-reads for by
+  -- name. The unique index `uq_cash_account_set_versions_current` and `unique (client_id,
+  -- revision)` keep the STATE correct either way; what the lock, the re-read and the typed
+  -- refusals add is a SENTENCE for the loser -- and the RIGHT sentence -- instead of a raw 23505
+  -- naming an internal constraint on a screen, or a books-start refusal about a date it never
+  -- got wrong.
   select v.id, v.effective_from into v_cur_id, v_cur_from
     from clara.cash_account_set_versions v
    where v.client_id = p_client and v.state = 'published'
      for update;
 
   if v_cur_id is null then
+    -- A NULL HERE IS NOT PROOF OF ABSENCE -- IT IS ALSO WHAT LOSING THE RACE LOOKS LIKE.
+    -- The `for update` above is the right lock, but under READ COMMITTED its statement snapshot
+    -- is taken BEFORE it blocks. When the winner commits, EvalPlanQual re-checks the row this
+    -- statement was waiting on against its LATEST version -- now `superseded` -- so the
+    -- `state = 'published'` predicate fails and the row drops out of the result; and the winner's
+    -- brand new published row was inserted after this statement's snapshot, so it is invisible
+    -- too. The loser therefore reads NOTHING and, without this re-read, would fall into the
+    -- first-version branch below and be refused `first_version_after_books_start`: a true
+    -- sentence about a DIFFERENT mistake, which would send an admin who simply lost a race off
+    -- to check a books-start date that has nothing to do with what happened.
+    --
+    -- The re-read is a SEPARATE statement, so (this function being volatile, READ COMMITTED)
+    -- it takes a FRESH snapshot and sees whatever the winner committed. Any version row at all
+    -- settles it: every publish path in this file inserts a `published` row, so a client with
+    -- rows and no visible current one is a client whose current one was moved out from under
+    -- this call -- never a client publishing its first.
+    select count(*)::int into v_seen
+      from clara.cash_account_set_versions v where v.client_id = p_client;
+    if v_seen > 0 then
+      raise exception 'another version of this cash account set was published while this one was being written'
+        using errcode = 'CLR11',
+        detail = jsonb_build_object('reason', 'cash_set_version_raced')::text;
+    end if;
+
     -- THE FIRST VERSION, AND THE TRAP THIS DOOR EXISTS TO PREVENT. A first version whose
     -- effective_from is later than the client's earliest approved posting_date makes EVERY
     -- historic month unreadable -- the six-point trend would resolve no version at those points
