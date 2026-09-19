@@ -266,7 +266,7 @@ function bigPack(n, over = {}) {
   }, over);
 }
 
-test("kr.14 every printed line NAMES its record — the id the three id-taking tools take is in the block", () => {
+test("kr.19 every printed line NAMES its record — the id the three id-taking tools take is in the block", () => {
   const block = renderRetrievedKnowledge(bigPack(6));
   const lines = block.split(NL).filter((l) => l.startsWith("- "));
   assert.equal(lines.length, 6);
@@ -281,7 +281,7 @@ test("kr.14 every printed line NAMES its record — the id the three id-taking t
   assert.match(block, /source=/, "where the fact came from");
 });
 
-test("kr.15 the print caps are the LANE's ask, not one number for two lanes", () => {
+test("kr.20 the print caps are the LANE's ask, not one number for two lanes", () => {
   const pack = bigPack(55);
   const work = renderRetrievedKnowledge(pack).split(NL).filter((l) => l.startsWith("- "));
   const chat = renderRetrievedKnowledge(pack, { maxRecords: 60, maxValueChars: 300 })
@@ -291,7 +291,7 @@ test("kr.15 the print caps are the LANE's ask, not one number for two lanes", ()
   assert.ok(chat[0].length > work[0].length, "and clips a value at ITS char bound, not the Work lane's");
 });
 
-test("kr.16 a print-clipped view reports what it SHOWED, and reads as partial", () => {
+test("kr.21 a print-clipped view reports what it SHOWED, and reads as partial", () => {
   const pack = bigPack(55);
   const view = renderedView(pack);
   assert.equal(view.records_shown, 40, "records_shown answers 'what did Clara see', not 'what did the door return'");
@@ -306,7 +306,7 @@ test("kr.16 a print-clipped view reports what it SHOWED, and reads as partial", 
   assert.deepEqual(whole, { records_shown: 6, truncated: false });
 });
 
-test("kr.17 a turn with no client is told there is no client — not that a read failed", () => {
+test("kr.22 a turn with no client is told there is no client — not that a read failed", () => {
   const block = renderRetrievedKnowledge({ status: "unavailable", reason: "no_client", records: [] });
   assert.ok(!/did not succeed/.test(block),
     "no read was attempted, so reporting a failed read makes a Home turn hedge about a client that does not exist");
@@ -426,7 +426,7 @@ test("kr.16 no module-level `node:` import — the measured WDK constraint, asse
 // lib/capability-registry-v2.mjs — a SIBLING of the hash-locked v1, never an edit to it
 // ---------------------------------------------------------------------------------------------
 
-test("kr.17 registry v2 carries v1's five entries UNCHANGED and adds exactly two", async () => {
+test("kr.17 registry v2 carries v1's five entries UNCHANGED and adds exactly three", async () => {
   const v1 = await import("../lib/capability-registry.mjs");
   const v2 = await import("../lib/capability-registry-v2.mjs");
   assert.equal(v1.CAPABILITY_REGISTRY_VERSION, "clara-capability-registry/v1",
@@ -435,17 +435,27 @@ test("kr.17 registry v2 carries v1's five entries UNCHANGED and adds exactly two
   const before = v1.capabilityIds();
   const after = v2.capabilityIdsV2();
   assert.deepEqual(after.filter((id) => before.includes(id)).sort(), [...before].sort());
+  // THREE, since fix round 1: the drift read stopped borrowing the preload's id (review ADV-S-10),
+  // because one id for two doors is a row no reader can tell apart on a run with a resume.
   assert.deepEqual(after.filter((id) => !before.includes(id)).sort(),
-    ["accounting_work.inspect_knowledge_source", "accounting_work.retrieve_knowledge"]);
+    [
+      "accounting_work.inspect_knowledge_source",
+      "accounting_work.read_knowledge_drift",
+      "accounting_work.retrieve_knowledge",
+    ]);
   for (const id of before) {
     assert.deepEqual(v2.capabilityV2(id), v1.capability(id),
       `${id} must be carried by REFERENCE, so the two registries cannot describe it differently`);
   }
 });
 
-test("kr.18 both new capabilities are model-bound under the accounting_work purpose", async () => {
+test("kr.18 all three new capabilities are model-bound under the accounting_work purpose", async () => {
   const v2 = await import("../lib/capability-registry-v2.mjs");
-  for (const id of ["accounting_work.retrieve_knowledge", "accounting_work.inspect_knowledge_source"]) {
+  for (const id of [
+    "accounting_work.retrieve_knowledge",
+    "accounting_work.inspect_knowledge_source",
+    "accounting_work.read_knowledge_drift",
+  ]) {
     assert.equal(v2.isModelBoundV2(id), true,
       "retrieved knowledge goes INTO the model's context, so a dispatch authorization is owed");
     assert.equal(v2.purposeForV2(id), "accounting_work");
