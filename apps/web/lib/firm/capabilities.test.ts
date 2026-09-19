@@ -209,6 +209,9 @@ const ALL_FALSE: FirmCapabilities = {
   canRevokeVendorBinding: false,
   canSignVendorBinding: false,
   canClassifyTurnover: false,
+  // #635 — the firm's own commercial state (plan, payment record, processing caps). Admin floor,
+  // mirroring clara.get_firm_commercial_state's own `_human_ctx` at 0233:342.
+  canReadFirmCommercialState: false,
 };
 
 test("firmCapabilities: the four unknown-rank shapes ALL deny — the gate fails CLOSED (裁-187)", () => {

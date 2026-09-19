@@ -417,8 +417,16 @@ test("[gate 7] the surviving pages_per_day readers are EXACTLY gate 6's KEPT fam
     `select coalesce(string_agg(p.proname, ', ' order by p.proname),'(none)') as n
        from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
       where ns.nspname='clara' and regexp_replace(p.prosrc,'--[^\n]*','','g') like '%pages\\_per\\_day%'`);
+  // WIDENED BY #635 (0233_firm_commercial_settings.sql), deliberately and with the reason beside
+  // the name. `clara.get_firm_commercial_state` READS `pages_per_day` — it does not GATE on it.
+  // It is the firm Settings page's admin-floored read, projecting the firm's four stored
+  // `clara.firm_document_limits` numbers (or NULLs, when the firm has no row) so the surface can
+  // render "processing caps set by the operator" beside the plan. It enforces nothing, raises no
+  // CLR18 and writes nothing, so it is NOT a live usage gate and gate 6's KEPT family is
+  // unchanged — which is exactly the classification this closed-world census exists to force a
+  // new name to state out loud.
   assert.equal(r.rows[0].n,
-    "_reserve_document_ingest, _resize_document_reservation, _settle_document_reservation, _tf_firm_document_limits_upsert, settle_ingest_reservation",
+    "_reserve_document_ingest, _resize_document_reservation, _settle_document_reservation, _tf_firm_document_limits_upsert, get_firm_commercial_state, settle_ingest_reservation",
     `the pages_per_day readers moved: ${r.rows[0].n}. A NEW name here is an unclassified live usage gate; a MISSING one is a KEPT bound that was removed by accident`);
 });
 

@@ -912,3 +912,72 @@ hand-edited.
 
 `packages/reporting-render/lib/chart.mjs` is the FROZEN PDF chart runtime. It is never referenced,
 never imported and shares no code with this; nothing here hand-rolls a second SVG chart.
+## `/settings/firm` — the firm's commercial destination (#635)
+
+This is where a firm reads its own legal, commercial and model-usage state. Five cards over
+migration 0233's three governed reads, on the one existing address — there is no new route, so
+`tests/firm-scope-fourth-entrance.test.ts` and `tests/firm-scope-surfaces.test.ts` stay green
+(verified, not assumed), and the page still makes exactly ZERO extra `requireFirmScope()` calls: the
+identity card reads the scope the layout already provided.
+
+**ACCEPTING A NEW LEGAL VERSION HERE IS THE ONLY REMEDY IN THE PRODUCT** for a withdrawn derived
+model-egress authority. `clara._accounting_work_egress_live` (0195:875) requires ONE active OWNER
+holding acceptances of BOTH currently published legal kinds; a newer publication withdraws that the
+moment it lands (0195:890-892), with no sweep and no second switch. Until this page, the sentence
+`WorkDetail.egressNotAuthorized.body` shows a person standing in front of blocked Work — "an owner
+must accept the current versions" — had no destination: the only accept surface was `(entry)`'s
+signup stage, which a signed-in owner never sees again. `components/firm-admin/accept-legal-dialog.tsx`
+is that destination, and it imports `lib/registration/legal-reads.ts` and `legal-doors.ts`
+UNCHANGED rather than forking them, so the op-key, verbatim-digest and stale-re-read properties are
+the same ones the signup journey already proves.
+
+**What this page deliberately does not have**, each because the estate cannot honestly offer it:
+no price while `billing_plans.amounts_ruled` is false (the flag is the render condition, so an
+owner ruling shows a figure with no code change); no "Manage billing" control at any rank (nothing
+in this estate can change a firm's commercial arrangement — `billing_plans` has no door, and
+`firm_registration_payments` is written only by the Stripe webhook lane); no editor for the
+processing caps (`clara.firm_document_limits` has no human writer at all, 0196:36-40); no seat
+count; no chart; and no firm identity fact — the registered name, registration number and address
+live on `/settings/setup`, which this page links to and owns none of.
+
+**Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
+governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:
+the `denied` state has no `data` field, so a live demotion cannot leave a stale plan or payment
+behind a disabled control. It does NOT re-read `clara.caller_context` to notice the demotion — that
+is the child-side re-read P4-6 rules out, and it would make the surface trust a mirrored rank
+instead of the wall. NAMED RESIDUAL: a tab that is never refocused and never navigated keeps its
+last payload until one of those happens; closing that needs a server-push channel this estate does
+not have.
+
+**The accept control is gated on the CALLER's own acceptance, not on the firm's.**
+`standing_live` needs ONE active owner holding BOTH current acceptances, so two owners holding the
+two halves is a state where every kind reads `firm_accepted: true` and standing is still false
+(`p635.db.legal_standing_two_people` asserts exactly that). A control gated on `!firm_accepted`
+disappeared in precisely that state, leaving the firm with no in-app remedy at all. The gate is
+`can_accept_for_firm && !standing_live && status = 'published' && my_accepted_version <> version`:
+a control for the owner who can actually move the wall, and none while standing is live. The hint
+everyone else reads names the MOST RECENT acceptance on record — not "whoever sorts first accepted
+the previous ones", which is false whenever one kind's acceptance is still current.
+
+**An answer carries the month it is an answer for.** The window label, the CSV's provenance header
+and the download filename follow the period the instant it changes; the rows follow the door, which
+is a round trip later. So `FirmSettingsPanel` stamps the month onto the usage answer and the card
+renders nothing until the two agree — otherwise the provenance header that exists so a spreadsheet
+cannot lose the window would state a window its rows did not come from.
+
+**An unreadable read is never an empty one.** `loadFirmAiUsage` THROWS when the payload is not a
+table (the two sibling reads already did), so a refusal-shaped body reaches the card as a failure
+with a retry rather than as "No model calls in this period." Rows the build cannot decode are still
+dropped — a silently zeroed row is worse — but the COUNT comes back, the card says so beside the
+money column, and the CSV carries it, exactly as `unpriced_calls` is carried. Likewise, a firm with
+NO current billing plan (`uq_billing_plans_current`, 0163:207, permits zero) reads "No plan is
+current for this firm" and keeps its payment line, invoice explanation and capacity numbers, rather
+than dropping the whole answer behind a transport failure.
+
+**The model-usage window is UTC, and the page says so.** `clara.get_llm_usage_summary` filters rows
+by `(created_at at time zone 'utc')::date` (0110:750), so the month the card labels is a UTC month
+and not an `Asia/Kuala_Lumpur` one. `lib/firm/usage-period.ts` derives the bounds the way the door
+does and the card prints them. The CSV is client-side only — no route, no door, no byte path — and
+its first two lines carry the firm, that exact window and the currency, so a spreadsheet cannot lose
+the unit or the timezone the screen carried.
+

@@ -848,6 +848,76 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_legal_standing") {
+    // #635 — `/settings/firm` now READS. `firm-navigation-walk.spec.ts:175-197` walks that route
+    // as an owner AND as a bookkeeper with no mock for these three verbs, and
+    // `shell-migration-walk.spec.ts:131-140` lands on it after a redirect. The SAME reasoning
+    // #626 records for `get_my_preferences` above: a generic, HONEST default here keeps every
+    // other spec free of an unhandled-route 404 for a call it never asked about, and
+    // `firm-commercial-walk.spec.ts` installs its own `page.route` pairs (Playwright's
+    // last-registered-wins order) for every scenario it actually cares about.
+    //
+    // `can_accept_for_firm` FOLLOWS THE CORE'S OWN EMAIL-PREFIX PERSONA (the caller_context arm
+    // above): `owner@` is rank 3 and may accept for the firm; `bookkeeper@` and `viewer@` may
+    // not. A default that said "true" for everybody would render the accept control to a
+    // bookkeeper in every unrelated spec — precisely the class 裁-187 exists to prevent.
+    const owner = state.email.startsWith("owner@");
+    sendJson(response, 200, {
+      documents: [
+        {
+          kind: "terms", version: 1, status: "published", title: "Terms of Service (Clara beta)",
+          effective_from: "2026-09-12T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+          firm_accepted: true, accepted_at: "2026-09-18T14:00:00.000Z",
+          accepted_by: SUBJECT, accepted_by_name: "E2E Owner",
+          my_accepted_version: owner ? 1 : null, my_accepted_at: owner ? "2026-09-18T14:00:00.000Z" : null,
+        },
+        {
+          kind: "dpa", version: 1, status: "published", title: "Data processing agreement (clara-beta-2026-08-a)",
+          effective_from: "2026-08-30T16:00:00.000Z", published_at: "2026-09-18T13:46:54.777Z",
+          firm_accepted: true, accepted_at: "2026-09-18T14:00:00.000Z",
+          accepted_by: SUBJECT, accepted_by_name: "E2E Owner",
+          my_accepted_version: owner ? 1 : null, my_accepted_at: owner ? "2026-09-18T14:00:00.000Z" : null,
+        },
+      ],
+      standing_live: true,
+      can_accept_for_firm: owner,
+      masked: false,
+    }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_commercial_state") {
+    // #635 — ADMIN-FLOORED in the database (0233:342), so the default REFUSES below rank 2 the
+    // way the real door does. `serve-built.mjs`'s CORE has no rank-2 persona (owner@=3,
+    // bookkeeper@=1, viewer@=0) and this lane does NOT add one: nine lanes share that arm.
+    // Admin rank is proven in the DB battery and in the unit cells instead — a named residual.
+    if (!state.email.startsWith("owner@")) {
+      sendJson(response, 403, { code: "CLR04", message: "insufficient role", details: null }, cors);
+      return;
+    }
+    sendJson(response, 200, {
+      firm: { id: FIRM_ID, name: "E2E Accounting", created_at: "2026-08-31T00:05:00.000Z", is_operator: true },
+      // THE BETA PLAN AS 0163:214-215 SEEDS IT: unruled, so no figure may render anywhere.
+      plan: { local_key: "clara-beta-2026", name: "Clara Beta", currency: "MYR", amount_cents: 0, amounts_ruled: false },
+      payment: { recorded: false, recorded_at: null, subscription_present: false, customer_present: false },
+      invoices: { available: false, reason: "not_collected" },
+      // The 0007/0090 column defaults, which is what a firm WITH a row carries.
+      capacity: { docs_per_day: 100, pages_per_day: 1000, ocr_concurrency: 2, llm_witness_concurrency: 2, source: "firm_document_limits" },
+    }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_firm_ai_usage") {
+    // #635 — admin-floored like its sibling, and EMPTY by default: an honest "no model calls in
+    // this period" rather than a fabricated figure on every unrelated spec's settings page.
+    if (!state.email.startsWith("owner@")) {
+      sendJson(response, 403, { code: "CLR04", message: "insufficient role", details: null }, cors);
+      return;
+    }
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
   if (request.method === "POST" && path === "/rest/v1/rpc/get_my_preferences") {
     // #626 — MotionPreferenceSync (components/app-shell/motion-preference-sync.tsx) is mounted
     // in the ROOT layout, so this call fires on EVERY signed-in page across the whole suite, not
