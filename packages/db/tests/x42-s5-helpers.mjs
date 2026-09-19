@@ -1253,12 +1253,20 @@ const KNOWLEDGE_RETRIEVAL_0230_CLOCK_NAMES = [
 // read is an instant; the date it derives is arm (B)'s subject.
 const FIRM_PORTFOLIO_PACK_0231_CLOCK_NAMES = ["get_firm_portfolio_pack"];
 
-// #660 [0232] - THREE names, and TWO OF THEM ARE THE WAVE'S ONE UNSETTLED QUESTION.
-// `get_client_financial_pack` and `propose_client_cash_accounts` each derive an MYT `v_today` that
-// goes on to bound LEDGER ROWS - see their block on arm (B)'s roster, which carries the
-// adjudication and the escalation. `publish_client_cash_account_set` derives one too, as the last
-// fallback of an `effective_from`. Here on arm (D) the reading is the ordinary one in all three:
-// the token itself is an instant, sampled once.
+// #660 [0232] - THREE names, and the two that were the wave's one unsettled question are now
+// SETTLED: DECISIONS 6.4 row 1 ruled the escalation and `get_client_financial_pack` /
+// `propose_client_cash_accounts` were RE-POINTED at the house derivation - see their block on arm
+// (B)'s roster, which carries the ruling. `publish_client_cash_account_set` derives a date too, as
+// the last fallback of an `effective_from`, and keeps its own CLASS 2 reading.
+//
+// ALL THREE STAY ON THIS ROSTER, and that is the point rather than an oversight: arm (D) detects a
+// BARE CLOCK TOKEN, and all three still read `now()` for `computed_at` / the instant they stamp.
+// Re-measured on the from-scratch 0001..0233 chain after the 6.4 fix: 0/0 in both directions, so
+// the ratchet is unmoved and this is a reclassification, not a removal. Here on arm (D) the
+// reading is the ordinary one in all three: the token itself is an instant, sampled once. The
+// delegate the two reads now call, `clara.book_today()`, adds NO name to either arm - it reads no
+// clock token and spells no zone, because it only delegates to `clara._book_today()`, which this
+// arm exempts by name.
 const CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES = [
   "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
 ];
@@ -1578,7 +1586,8 @@ const KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL = ["record_work_knowledge_read", "retri
 const KL_ROSTER_0231_FIRM_PORTFOLIO = ["get_firm_portfolio_pack"];
 
 // #660 [0232] - THREE names, and they do NOT share one adjudication. This is the block a later
-// reader should come to first.
+// reader should come to first. Two of the three were ESCALATED at integration and are now RULED
+// (DECISIONS 6.4 row 1): they are CONSUMERS of the house derivation, re-pointed in 0232 itself.
 //
 // `clara.publish_client_cash_account_set` is CLASS 2 and the reading is not close:
 // `v_from := coalesce(p_effective_from, v_books, v_today)` reaches `v_today` only when the caller
@@ -1590,7 +1599,7 @@ const KL_ROSTER_0231_FIRM_PORTFOLIO = ["get_firm_portfolio_pack"];
 // CONFIGURATION object, not a posting, a due date or an accounting period.
 //
 // `clara.get_client_financial_pack` and `clara.propose_client_cash_accounts` ARE MONEY DATES BY
-// 6.3's OWN ENUMERATION, and they are pinned here UNRESOLVED rather than folded in quietly:
+// 6.3's OWN ENUMERATION - they were escalated here unresolved, and DECISIONS 6.4 row 1 RULED them:
 //   * the pack derives `v_today`, then `v_as_of := least(v_month_end, v_today)` when no as-of was
 //     stated, refuses `p_as_of > v_today` as `as_of_in_future`, and anchors
 //     `v_start := date_trunc('month', v_today)::date`. `v_as_of` is what selects the actuals the
@@ -1598,16 +1607,30 @@ const KL_ROSTER_0231_FIRM_PORTFOLIO = ["get_firm_portfolio_pack"];
 //   * the proposal bounds its per-account balance with `je.posting_date <= v_today` over
 //     `clara.journal_lines` joined to approved `clara.journal_entries`, and echoes the same date
 //     as the envelope's `as_of`.
-// Both therefore derive an AS-OF from the session clock by their own expression, which 6.3 says
-// to re-point at `clara._book_today()`. THAT RE-POINT IS A MIGRATION EDIT of 0232, already applied
-// on every rig this wave measured, so 6.3's own escape applies: the integration fix worker STOPS
-// and reports instead of editing an applied migration behind the ledger checksum. Registered here
-// so the ratchet is exact and additions-only; ESCALATED in
-// `reports/integration-fix-1.md` so the ruling is the orchestrator's, not this file's. The
-// counter-argument the orchestrator will need is the one 0214's block already records: both
-// bodies take ONE `now()` sample and build `computed_at` from it too, so the authority - which
-// samples `statement_timestamp()` per statement - would let a pack straddling MYT midnight report
-// an as-of and a computed_at from two different days. It is a real trade, not a formality.
+// THE RULING: re-point both at the house derivation; `computed_at = now()` stays a sampling read.
+// 0232 was edited on a FRESH cluster (a new `rigint`, 0 clara% roles before the chain, so 0154's
+// role census is honest) and both bodies now read `clara.book_today()` - a one-line SECURITY
+// DEFINER delegate of `clara._book_today()` that 0232 installs for exactly this reason: both reads
+// are SECURITY INVOKER, and `clara._book_today()` has PUBLIC revoked with an ACL of
+// {clara_fn_owner} alone, which `x42.s5c.1` pins as a house law by asserting clara_authenticated
+// is REFUSED 42501 on it. MEASURED before the fix on the 0001..0233 chain: zero SECURITY INVOKER
+// bodies in the catalog call the authority; every caller is a definer body. The delegate is 0042
+// S5.20's own remedy for its own problem (a DELEGATE, not a copy - its words for
+// `clara._fa_today()`), so exactly one body still COMPUTES the house date, and the delegate adds
+// no name to either arm because it reads no clock and spells no zone.
+//
+// SO THESE TWO ARE NOW **CONSUMERS OF THE HOUSE DERIVATION**, not CLASS 2 pins and no longer
+// escalated. They stay on this roster - the arm (B) detector reads the ZONE STRING, which both
+// still carry as the `timezone` key their envelopes publish so a face can state the calendar it
+// counted in. Re-measured on the fresh from-scratch chain after the fix: 0 extra / 0 missing, so
+// nothing was removed and the ratchet is exact. Proven by `p660.pack.as_of_is_book_day`.
+//
+// THE COUNTER-ARGUMENT, KEPT because the ruling weighed it rather than missed it (0214's block
+// records the same one): both bodies take ONE `now()` sample and build `computed_at` from it,
+// while `clara._book_today()` samples `statement_timestamp()` per STATEMENT, so a call straddling
+// MYT midnight can report an as-of and a `computed_at` from two different days. 6.4 accepted that
+// cost: a MONEY date must be the book day regardless, and `computed_at` is a sampled instant, not
+// a money date.
 const KL_ROSTER_0232_CLIENT_FINANCIAL = [
   "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
 ];
