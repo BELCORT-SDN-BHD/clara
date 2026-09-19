@@ -395,6 +395,7 @@ export function DocumentsWorkbench({ clientId, settlePoll: settlePollOptions }: 
               clientsClr={clients.clr}
               onFiledChanged={refreshFiled}
               onNotFound={() => reportMissing(selectedId)}
+              settlePoll={settlePollOptions}
             />
           )}
         </aside>

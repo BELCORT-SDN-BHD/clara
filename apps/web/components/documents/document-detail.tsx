@@ -8,6 +8,8 @@ import { useReadErrKind } from "@/lib/parts/read-err-kind";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadDocumentDetail } from "@/lib/documents/loaders";
 import { readSourceDependents, readSourceRevisions, type CorrectionPreview } from "@/lib/documents/reads";
+import { useSettlePoll } from "@/lib/documents/use-settle-poll";
+import type { ProcessingStatus } from "@/lib/documents/types";
 import { findEntryForDocument, type DocumentClaim } from "@/lib/work/evidence";
 import {
   applyDocumentTabParam, documentUrl, parseDocumentTabParam, type DocumentTab,
@@ -73,8 +75,12 @@ import { EmptyState, LoadingState } from "@/components/common/state";
  */
 export const DOCUMENT_HEADING_ID = "document-detail-heading";
 
+/** #904 — the `ProcessingStatus` values a task can still move FROM. Module-scoped: a fresh Set
+ *  every render would be harmless but pointless churn for a lookup this cheap. */
+const NON_TERMINAL_TASK_STATUS: ReadonlySet<ProcessingStatus> = new Set(["queued", "held_egress", "running"]);
+
 export function DocumentDetail({
-  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged, onNotFound,
+  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged, onNotFound, settlePoll,
 }: {
   documentId: string;
   clientId: string;
@@ -88,6 +94,11 @@ export function DocumentDetail({
    *  URL change plus a standing "not available in this client" state, and neither belongs to a
    *  panel that is about to unmount. Called once per settled read, never while one is in flight. */
   onNotFound?: () => void;
+  /** #904 — timing override for the processing-tasks settle poll below, the SAME shape
+   *  `documents-workbench.tsx` already accepts for its own intake-receipts poll and forwards to
+   *  `useIntakeBatch`. Unset in production (the hook's own defaults apply); a test passes a
+   *  zero-delay budget so a bounded poll can be observed without waiting out its real backoff. */
+  settlePoll?: { maxTicks?: number; baseDelayMs?: number; maxDelayMs?: number };
 }) {
   const t = useTranslations("ClientDocuments");
   const router = useRouter();
@@ -103,6 +114,27 @@ export function DocumentDetail({
     sessionTokenAccessor,
     () => readKind.wrap(() => loadDocumentDetail(documentId, clientId, t)),
   );
+
+  /** #904 — THE PROCESSING TASKS REFRESH LIVE, bounded, while any of them is still moving.
+   *
+   *  BEFORE THIS, a task that moved `running` -> `done` (or `failed`) while the panel stayed open
+   *  was invisible until a manual reload — #650's final report named this the workbench's own gap
+   *  (the intake-receipts settle poll below covers the PRE-FILING queue, not a filed document's own
+   *  extraction/OCR tasks). This reuses the SAME bounded, backed-off, hidden-tab-paused idiom
+   *  `documents-workbench.tsx` already runs for the receipts list (`lib/documents/use-settle-poll.ts`)
+   *  rather than inventing a second one — `onTick` is the panel's OWN whole-bundle `reload`, which is
+   *  safe to call in the background: the render below gates on `loading && !data` (never bare
+   *  `loading`), so an in-flight background reload never blanks a panel that already has data.
+   *
+   *  `resetKey: documentId` restarts the budget on a different document even though this component
+   *  is already React-`key`ed by it at the workbench (documents-workbench.tsx's own consumer
+   *  contract) — belt, matching `use-settle-poll.ts`'s own stated reason for the option existing. */
+  useSettlePoll({
+    enabled: data !== null && data.processingTasks.some((task) => NON_TERMINAL_TASK_STATUS.has(task.status)),
+    onTick: () => void reload(),
+    resetKey: documentId,
+    ...settlePoll,
+  });
 
   /** #646 — the source lineage, its OWN hydrated cell. It is a different read at a different floor
    *  (`clara.list_source_revisions` is bookkeeper+, while the detail bundle is a set of viewer-level

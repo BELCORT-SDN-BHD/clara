@@ -112,6 +112,7 @@ components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/correction-impact-sheet.test.tsx
+components/documents/document-detail-live-refresh.test.tsx
 components/documents/document-facts-table.test.tsx
 components/documents/document-kind-labels.test.tsx
 components/documents/document-metadata-viewer-gate.test.tsx
