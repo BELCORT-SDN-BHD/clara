@@ -29,10 +29,12 @@ import { chatTurn_v17 } from "./chatTurn.v17.js";
 import { chatTurn_v18 } from "./chatTurn.v18.js";
 import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { chatTurn_v20 } from "./chatTurn.v20.js";
+import { chatTurn_v21 } from "./chatTurn.v21.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
 import { claraWork_v4 } from "./claraWork.v4.js";
+import { claraWork_v5 } from "./claraWork.v5.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -170,7 +172,46 @@ export const workflows = {
   // ROLLBACK TO v19 stops offering the two tools and changes no database state; claims and accruals
   // already admitted keep their own surfaces and their queued Work runs under the unchanged
   // claraWork pin. The standing parked-run preflight still applies.
-  chatTurn: chatTurn_v20,
+  //
+  // #655 + #651 + #658 (THE WAVE 2026-09-18 SHARED SUCCESSOR): REPOINTED v20 -> v21. v21 adds
+  // exactly TWO tools, ONE step, ZERO wire kinds and ZERO terminals.
+  //   · `start_trade_invoice_work` (#655) admits a sales invoice or a supplier bill as a
+  //     `journal_entry`-purpose Work with typed particulars in `clara.trade_invoices`. It ADMITS
+  //     and posts nothing, it mints the `work_accepted` card v18 already declared, and
+  //     `WORK_ACCEPTED_PURPOSES` is UNWIDENED for v20's own reason (a fourth purpose cannot post
+  //     without recutting the posting core).
+  //   · `run_depreciation_period_for_client` (#651) clears a client's DUE depreciation periods
+  //     against an authority an admin already signed. It POSTS — through a door that settles its
+  //     own receipt — and it mints NO card at all, which is why it is deliberately OUT of
+  //     `hasCodingIntent_v21`: C-19's remedy sentence would be false beside charges that were in
+  //     fact posted (chatTurn.v21.tools.ts states the measurement).
+  //   · the knowledge preload moves from `clara.get_knowledge_pack`'s recency view to the bounded,
+  //     core-first `clara.retrieve_knowledge` (#658), and a read that does not succeed is a TYPED
+  //     STATUS on the step's own answer plus a sentence in the block — never a null that reads as
+  //     "this client has nothing recorded". `clara.get_context_pack` is NOT recut and NOT
+  //     repointed, not one byte, and `loadContextStepV10` is still called for the history.
+  // NO NEW PART KIND, so `apps/web` owes no reader change and parts-parity is green at this
+  // commit — the second chat repoint in a row that owes no parity work.
+  //
+  // WHAT THE WAVE ASKED FOR AND THIS IMAGE DOES NOT CARRY, recorded here because a reader will look
+  // for it: #656's `read_opening_source` (its own stanza rules it into a FUTURE `chatTurn_vN`, not
+  // this one), #636's `open_intake_batch` and #660's `read_client_financial_pack` (both
+  // contract-only this wave, DECISIONS D5), and — carried forward from v20's note — #653's and
+  // #647's, whose doors still do not exist for this lane.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0225, 0227 AND 0230 MUST BE LIVE BEFORE
+  // THIS IMAGE SERVES A TURN, on top of v20's 0221/0222 and v19's 0192/0194. Without 0225 or 0227
+  // each new tool's door raises `undefined_function` (42883), which `authoringRefusal` does not
+  // read as a governed refusal, so the tool answers `internal` and the turn continues: CONTAINED.
+  // Without 0230 the basis read classifies the missing function as `read_failed` and the block
+  // says the knowledge could not be read — also contained, and HONEST rather than silent, which is
+  // the whole reason that read was repointed. The REVERSE order is FREE.
+  //
+  // ROLLBACK TO v20 stops offering the two tools, returns the knowledge preload to
+  // `clara.get_knowledge_pack`, and changes no database state. Trade-invoice Works already
+  // admitted keep their durable surfaces and their queued Work still runs under the claraWork pin;
+  // depreciation periods already charged are journal entries and stay charged.
+  chatTurn: chatTurn_v21,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -267,7 +308,36 @@ export const workflows = {
   // stays ANSWERABLE under a v3 image (the doors and the read doors are the database's), but the
   // resumed v3 run has no tool call to match the answer to and will settle without using it — so a
   // rollback should drain v4's parked questions first, not only its runs.
-  claraWork: claraWork_v4,
+  //
+  // #658 (+ riders #847 and #882(a)) — THE WAVE 2026-09-18 CUT: REPOINTED v4 -> v5.
+  //   · the knowledge preload moves from `clara.get_knowledge_pack` to the bounded, core-first
+  //     `clara.retrieve_knowledge`, and the run RECORDS what it read through
+  //     `clara.record_work_knowledge_read` — the read-set row that makes "what did Clara actually
+  //     see?" a question with an answer;
+  //   · a read that does not succeed is now TERMINAL (`knowledge_read_failed`, recoverable,
+  //     nothing posted). This is the ONE place v5 is stricter than v4, it is the point of the cut,
+  //     and DECISIONS §6.2.0 R-D ratified both the strictness and its all-or-nothing shape: the
+  //     door is atomic, so there is no per-tier signal to be subtler with;
+  //   · TWO new reads in the roster (`read_knowledge_source`, `read_knowledge_history`), neither of
+  //     which writes a row or mints a part kind;
+  //   · a resumed run is told whether the basis moved while it waited, and a RELEVANT drift spends
+  //     ONE EXISTING `budget.replans`. Budgets do not move;
+  //   · the bundle digest finally covers each tool's JSON SCHEMA and its declared dependencies
+  //     (ARCHITECTURE:435-445 — binding since v4, unmet by v4).
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION AND IT IS LOUDER THAN v4's. MIGRATION 0230 MUST BE
+  // LIVE BEFORE THIS IMAGE RUNS ANY WORK, on top of v4's 0192/0216 and v3's 0195. Against a
+  // database without it the knowledge read classifies the missing function as `read_failed`, which
+  // under this body is `knowledge_read_failed` — so EVERY Work stops, refusing to post rather than
+  // posting blind. Contained, corrupting nothing, and impossible to miss, which is the correct
+  // failure for a deploy-order mistake. The REVERSE order is FREE.
+  //
+  // ROLLBACK TO v5 -> v4 returns the preload to `clara.get_knowledge_pack`, stops offering the two
+  // reads, stops recording read-sets and stops checking drift; no database state changes and
+  // read-set rows already written stay readable. A Work parked on a v5 question stays ANSWERABLE
+  // under a v4 image, but the resumed v4 run will not be told about drift — so a rollback should
+  // drain parked questions first rather than assume they resume identically.
+  claraWork: claraWork_v5,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -856,6 +926,11 @@ export { chatTurn_v18 };
 // for every version.
 export { chatTurn_v19 };
 export { chatTurn_v20 };
+// #655 + #651 + #658 repointed `chatTurn:` v20 -> v21. v20 remains exported by policy (c) — it is
+// the rollback target and the body any run parked on a v20 clarify hook resumes into at cutover —
+// and the pinned v21 body is exported too so the rollback preflight can use the same uniform
+// census for every version.
+export { chatTurn_v21 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -868,6 +943,11 @@ export { claraWork_v2 };
 // every version.
 export { claraWork_v3 };
 export { claraWork_v4 };
+// #658 (+ riders #847, #882(a)) repointed `claraWork:` v4 -> v5. v4 remains exported by policy (c)
+// — it is the rollback target and the body any Work parked on a v4 question hook resumes into at
+// cutover — and the pinned v5 body is exported too so the rollback preflight can use the same
+// uniform census for every version.
+export { claraWork_v5 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -946,10 +1026,12 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v18",
   "chatTurn_v19",
   "chatTurn_v20",
+  "chatTurn_v21",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
   "claraWork_v4",
+  "claraWork_v5",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -987,8 +1069,8 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v20",
-  claraWork: "claraWork_v4",
+  chatTurn: "chatTurn_v21",
+  claraWork: "claraWork_v5",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v3",

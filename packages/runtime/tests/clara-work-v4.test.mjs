@@ -404,13 +404,21 @@ test("v4.errors: the router is a pure delegation to v3 — every prior mapping i
   assert.ok(!/openai|anthropic|gpt|claude|vendor/i.test(String(payload.message)), "and it names no provider");
 });
 
-test("v4.registry: claraWork is pinned at v4 and v1..v3 stay exported (policy (c))", () => {
-  assert.equal(registry.workflowPins.claraWork, "claraWork_v4");
-  assert.equal(registry.workflows.claraWork, registry.claraWork_v4);
-  for (const body of ["claraWork_v1", "claraWork_v2", "claraWork_v3"]) {
+test("v4.registry: v1..v4 all stay exported and rostered (policy (c))", () => {
+  // THIS CELL NO LONGER ASSERTS THAT v4 IS THE PIN. The wave 2026-09-18 cut repointed
+  // `claraWork:` to v5, and a cell that hard-codes the current pin fails at every future cut while
+  // testing nothing about the closure it is named for. What the registry owes v4 after a repoint
+  // is policy (c) — the body stays exported and stays in the provenance roster, because it is the
+  // rollback target and the body any Work parked on a v4 question hook resumes into — and that is
+  // what is asserted here. `tests/registry-view.test.mjs` owns "the pin, the dispatch table and
+  // the roster agree" for every class at once.
+  for (const body of ["claraWork_v1", "claraWork_v2", "claraWork_v3", "claraWork_v4"]) {
     assert.equal(typeof registry[body], "function", `${body} is still exported — a parked run resumes into its own body`);
+    assert.ok(registry.workflowBodies.includes(body), `${body} is still in the provenance roster`);
   }
-  assert.ok(registry.workflowBodies.includes("claraWork_v4"), "and the provenance roster carries the new body");
+  const pin = registry.workflowPins.claraWork;
+  assert.equal(registry.workflows.claraWork, registry[pin],
+    "whatever the pin is, the dispatch table and the pin roster name ONE body");
 });
 
 test("v4.tools: the recording tool hands over V4's digest, never v3's", () => {
