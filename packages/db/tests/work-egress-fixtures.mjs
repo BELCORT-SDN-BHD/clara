@@ -172,6 +172,31 @@ export async function publishNewerLegal(kind, { title = null, body = null } = {}
   return version;
 }
 
+// #1008
+/** LABELLED FIXTURE DML (root): put the platform's LEGAL ENFORCEMENT MODE at `mode` and answer the
+ *  value that was there, so a cell can put it back.
+ *
+ *  WHY ROOT. `clara.legal_enforcement` (0234) carries FORCE ROW LEVEL SECURITY and no application
+ *  role holds any privilege on it; its only human writer, `clara.set_legal_enforcement_mode`, is
+ *  floored on the OPERATOR FIRM's owner, and the estate admits exactly one operator firm at a time.
+ *  Minting one here would put a second, irrelevant authority inside every cell that arranged the
+ *  mode — the same disposition `publishNewerLegal` above carries for the publish door.
+ *
+ *  FRONTIER-TOLERANT. On a chain below 0234 the relation does not exist and there IS no mode: the
+ *  estate behaves exactly as `enforce`, so a cell asking for `enforce` is asking for what it
+ *  already has and this is a no-op. */
+export async function forceLegalEnforcementMode(mode) {
+  try {
+    const before = await rootQuery("select e.mode from clara.legal_enforcement e where e.id");
+    await rootQuery("update clara.legal_enforcement set mode = $1 where id", [mode]);
+    return before.rows[0]?.mode ?? null;
+  } catch {
+    noteLane(`forceLegalEnforcementMode(${mode}): clara.legal_enforcement is absent -- this chain is below #1008's frontier, where the estate has only the enforce rule`);
+    return null;
+  }
+}
+// #1008
+
 /** Give (firm, client) the derived accounting_work egress basis: an ACTIVE OWNER of the firm who
  *  has accepted both current published legal documents. `owner` is the user whose acceptance is
  *  taken (it must actually hold the owner role in that firm). */
