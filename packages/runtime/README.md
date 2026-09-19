@@ -918,6 +918,32 @@ which moment `clara.create_opening_seed` re-checks the document's kind (CLR02 fo
 `opening_balance_doc` / `management_account`). The worst case of a false positive is a few extra
 evidence rows on a document nobody ever ties, never a number that reaches an accounting effect.
 
+**What a BAD region costs, priced honestly (fix-round, review finding A6).** The sentence above is
+about a region the database ACCEPTS. One it does not accept is dearer: `_derive_opening_region_fact`
+RAISES CLR31 over an `opening_tb.line` whose `monetary_cents` disagrees with the text it re-derives
+(0017:1488-1499), from inside `persist_document_extraction`'s region loop (0017:1587) — so the raise
+aborts the WHOLE persist and the document loses the entire extraction it earned, its invoice or
+payslip regions included. Before this wiring that abort was structurally unreachable; it is
+reachable now on every azure-di layout pass. `disagreeingOpeningRegion` therefore re-checks the
+database's own invariant before emission and drops the WHOLE set if any element fails it — the
+all-or-nothing law one layer lower. The cost is pinned by
+`tests/wave-b-opening-parse.test.mjs`'s A6 cell, which persists a contradicting region through the
+REAL writer and measures that the whole extraction is lost.
+
+**The refusal travels; it is not thrown away (fix-round, review finding A1).** The producer is
+all-or-nothing, so a trial balance it REFUSES — it does not balance, one row is OCR-mangled —
+emits zero regions. Keeping only `.regions` at the OCR pass made that byte-identical to a document
+that is not a trial balance at all: both reached `parseOpeningTargets` as zero rows, and the route
+answered its keyed-fallback signal `no_opening_tb_lines`, which the face renders as an INFORMATION
+banner offering to key the balances — over a document whose own figures the machine had just found
+inconsistent. `normalizeAzureLayout` now writes `{status, reason, refusals}` under the envelope key
+`opening_tb_refusal` (the estate's `corroboration_ineligible` idiom, 0009:148 — no new field_path,
+no CHECK widening, no migration), and `readOpeningRefusal` reads it back off the newest done
+extraction when zero lines came home, answering 422 with the reader's reason VERBATIM plus
+`source_refusal: true` and the failing row keys. `not_a_trial_balance` and a clean read carry no
+such key, so the keyed fallback stays exactly what it was. `producer_error` is deliberately NOT
+carried: it is an internal fault, not a verdict about the document.
+
 **It never throws.** This runs inside an OCR normalisation that has already succeeded; a producer
 fault must not destroy an extraction the document legitimately earned. Every path is contained and
 reports itself as `producer_error` with a named reason. Fail-quiet HERE is fail-closed DOWNSTREAM,

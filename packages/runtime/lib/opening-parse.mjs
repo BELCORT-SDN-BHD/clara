@@ -143,6 +143,59 @@ export async function readTieRegions(client, { documentId, firmId }) {
   return r.rows;
 }
 
+/**
+ * #656 (fix-round, adversarial A1) — THE REFUSAL THE READER MADE, READ BACK.
+ *
+ * The in-line producer (`lib/opening-tb-produce.mjs`, wired at `egress.mjs`'s OCR pass) is
+ * ALL-OR-NOTHING: a trial balance it refuses — it does not balance, or one row is OCR-mangled —
+ * emits ZERO `opening_tb.line` regions and states its reason on the extraction ENVELOPE. Without
+ * reading that back, a refused read is byte-identical here to a document that is not a trial
+ * balance, and this route answers the keyed-fallback signal `no_opening_tb_lines`, which the face
+ * renders as an INFORMATION banner offering to key the balances. Over a document whose printed
+ * figures the machine has just found internally inconsistent, that is not merely missing
+ * information: it invites a person to hand-key an unreliable source.
+ *
+ * The key is the literal `egress.mjs` writes (`OPENING_TB_REFUSAL_ENVELOPE_KEY` in
+ * `opening-tb-produce.mjs`), spelled out here rather than imported on purpose — the door must not
+ * gain an import edge into the producer, which would freeze the producer the day a Clara tool
+ * imports this door. `tests/opening-tb-produce.test.mjs` pins the two literals equal.
+ */
+export const OPENING_TB_REFUSAL_ENVELOPE_KEY = "opening_tb_refusal";
+
+/** The longest producer reason this route will quote. Our own runtime writes it, but a reason is
+ *  still text landing in a professional's face, and an unbounded one is not. */
+const REFUSAL_REASON_MAX = 500;
+
+/** The NEWEST done extraction of this document — the one whose reading governs — and nothing but
+ *  its refusal marker. Read only when zero TB lines came back, so the ordinary path costs nothing.
+ *  `clara_runtime` holds SELECT on `document_extractions` (0008); the envelope is the same jsonb
+ *  `persist_document_extraction` stored verbatim. */
+const SELECT_OPENING_REFUSAL_SQL =
+  `select de.envelope -> $3 as refusal
+     from clara.document_extractions de
+    where de.document_id = $1 and de.firm_id = $2 and de.status = 'done'
+    order by de.extracted_at desc, de.version_n desc, de.id desc
+    limit 1`;
+
+/**
+ * The producer's named refusal for this document, or null when it made none. STRUCTURAL: an
+ * envelope that does not carry exactly the shape the producer writes is treated as no refusal at
+ * all, so a malformed marker degrades to today's answer rather than to a blank banner.
+ * @returns {Promise<{reason:string, refusals:Array<object>}|null>}
+ */
+export async function readOpeningRefusal(client, { documentId, firmId }) {
+  const r = await client.query(SELECT_OPENING_REFUSAL_SQL, [documentId, firmId, OPENING_TB_REFUSAL_ENVELOPE_KEY]);
+  const marker = r.rows[0]?.refusal ?? null;
+  if (!marker || typeof marker !== "object" || Array.isArray(marker)) return null;
+  if (marker.status !== "refused") return null;
+  const reason = typeof marker.reason === "string" ? marker.reason.trim() : "";
+  if (reason === "") return null;
+  return {
+    reason: reason.slice(0, REFUSAL_REASON_MAX),
+    refusals: Array.isArray(marker.refusals) ? marker.refusals : [],
+  };
+}
+
 // --- typed error mapping -----------------------------------------------------------
 
 /** True iff a thrown error is a typed clara refusal (CLR##). */
@@ -293,7 +346,28 @@ export async function parseOpeningTargets(client, { seedId, firmId, reassert }) 
     };
   }
   if (lines.length === 0) {
-    // The keyed-fallback signal (WB-R15): the surface yielded no parseable TB line.
+    // ZERO LINES HAS TWO MEANINGS AND THEY ARE NOT THE SAME ANSWER (#656 fix-round, A1).
+    //   · the reader REFUSED a trial balance it did read (it does not balance; a row is
+    //     unparseable) — its reason names what is wrong and the person must go and look at the
+    //     document. Answered VERBATIM, in the `unparseable` family but NOT as the keyed-fallback
+    //     token, so the face renders it as a warning carrying the reason rather than as an
+    //     information banner offering to key the balances.
+    //   · the document is not a trial balance this reader knows — the keyed-fallback signal
+    //     (WB-R15), unchanged.
+    const refused = await readOpeningRefusal(client, { documentId: seed.tie_document_id, firmId });
+    if (refused) {
+      return {
+        http: 422,
+        body: {
+          status: "unparseable",
+          reason: refused.reason,
+          source_refusal: true,
+          failing_rows: refused.refusals
+            .map((r) => (r && typeof r.row_key === "string" ? r.row_key : null))
+            .filter((k) => k !== null),
+        },
+      };
+    }
     return { http: 422, body: { status: "unparseable", reason: "no_opening_tb_lines" } };
   }
 

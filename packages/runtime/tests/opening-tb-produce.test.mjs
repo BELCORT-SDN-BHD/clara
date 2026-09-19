@@ -26,9 +26,13 @@ process.env.RELAY_TEST_MODE ??= "1";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { produceOpeningTbRegions, OPENING_TB_FIELD_PATH } from "../lib/opening-tb-produce.mjs";
+import {
+  produceOpeningTbRegions, OPENING_TB_FIELD_PATH, OPENING_TB_REFUSAL_ENVELOPE_KEY,
+  disagreeingOpeningRegion,
+} from "../lib/opening-tb-produce.mjs";
+import { cellsToOpeningTb as realRead } from "../lib/opening-tb-cells.mjs";
 import { normalizeAzureLayout } from "../lib/egress.mjs";
-import { parseOpeningTbLine } from "../lib/opening-parse.mjs";
+import { parseOpeningTbLine, OPENING_TB_REFUSAL_ENVELOPE_KEY as PARSE_SIDE_REFUSAL_KEY } from "../lib/opening-parse.mjs";
 import { BALANCED, HEADER, cell, tbRow } from "./kdoc-opening-tb-testkit.mjs";
 
 /** The shape `normalizeAzureLayout` builds for one `tables.N.cells.M` region (egress.mjs:154-172):
@@ -219,4 +223,147 @@ test("normalizeAzureLayout still works on a payload with no tables at all", () =
   }, TASK);
   assert.equal(out.regions.length, 1);
   assert.equal(out.regions[0].field_path, "pages.1.lines.0");
+});
+
+// ---------------------------------------------------------------------------
+// 6 — THE REFUSAL MUST SURVIVE THE PASS (#656 fix-round, adversarial A1).
+//
+// The wiring used to read ONLY `.regions` off the producer's envelope, so a trial balance the
+// reader REFUSED (it does not balance; one row is OCR-mangled) came out of `normalizeAzureLayout`
+// byte-indistinguishable from a document that is not a trial balance at all: zero regions, no
+// reason, nothing downstream could tell the two apart. The consumer then answered its
+// keyed-fallback signal (`no_opening_tb_lines`) and the face offered an INFORMATION banner —
+// "key the balances instead" — over a document whose printed figures the machine had just found
+// internally inconsistent. That is the one failure mode D13.2 exists to prevent.
+//
+// The reason now travels on the EXTRACTION ENVELOPE, the free jsonb `persist_document_extraction`
+// already stores verbatim (`0009:148` reads `envelope->>'corroboration_ineligible'` the same way —
+// the house idiom for a producer marker, and the reason this needs no new field_path, no CHECK
+// widening and no migration).
+// ---------------------------------------------------------------------------
+
+test("a REFUSED trial balance leaves its reason on the ENVELOPE — a refusal is never byte-identical to 'not a trial balance'", () => {
+  const unbalanced = [
+    ...HEADER(),
+    ...tbRow(1.43, { code: "310-000", label: "CASH AT BANK", dr: "105,000.00" }),
+    ...tbRow(1.71, { code: "910-000", label: "SHARE CAPITAL", cr: "40,000.00" }),
+  ];
+  const out = normalizeAzureLayout(azurePayload(unbalanced), TASK);
+  assert.equal(out.regions.filter((r) => r.field_path === OPENING_TB_FIELD_PATH).length, 0,
+    "all-or-nothing: a refused read emits no line");
+  const refusal = out.envelope[OPENING_TB_REFUSAL_ENVELOPE_KEY];
+  assert.ok(refusal, "the refusal must be carried, not discarded — nothing else downstream can state it");
+  assert.equal(refusal.status, "refused");
+  assert.match(refusal.reason, /does not balance/, "the reason is the producer's own, verbatim");
+  assert.ok(Array.isArray(refusal.refusals), "every failing row travels with it");
+});
+
+test("a REFUSED row-level read carries the failing ROW KEYS, so the reason can send a person to the line", () => {
+  const withBadRow = [...BALANCED(), ...tbRow(2.83, { code: "920-000", label: "RESERVES", dr: "9OO.00" })];
+  const out = normalizeAzureLayout(azurePayload(withBadRow), TASK);
+  const refusal = out.envelope[OPENING_TB_REFUSAL_ENVELOPE_KEY];
+  assert.equal(refusal.status, "refused");
+  assert.match(refusal.reason, /unparseable_amount/);
+  assert.ok(refusal.refusals.length >= 1);
+  assert.ok(refusal.refusals.every((r) => typeof r.row_key === "string" && r.row_key.length > 0));
+});
+
+test("a document that is NOT a trial balance carries NO refusal marker — the keyed fallback stays the keyed fallback", () => {
+  const ledger = [
+    cell(0.45, 1.15, "Date"), cell(2.04, 1.15, "Description 1"),
+    cell(5.85, 1.15, "Debit (MYR)"), cell(6.64, 1.15, "Credit (MYR)"),
+    cell(0.45, 1.35, "Code : 310-000 CASH AT BANK"),
+  ];
+  const out = normalizeAzureLayout(azurePayload(ledger), TASK);
+  assert.equal(OPENING_TB_REFUSAL_ENVELOPE_KEY in out.envelope, false,
+    "a document nobody claims is a trial balance must not be reported as a refused one");
+  // …and neither does a clean read, or every good extraction would carry a refusal key.
+  const ok = normalizeAzureLayout(azurePayload(BALANCED()), TASK);
+  assert.equal(OPENING_TB_REFUSAL_ENVELOPE_KEY in ok.envelope, false);
+  assert.equal(ok.regions.filter((r) => r.field_path === OPENING_TB_FIELD_PATH).length, 5);
+});
+
+test("the envelope key the PRODUCER writes is the one the CONSUMER reads — pinned in both directions", () => {
+  assert.equal(OPENING_TB_REFUSAL_ENVELOPE_KEY, "opening_tb_refusal");
+  assert.equal(OPENING_TB_REFUSAL_ENVELOPE_KEY, PARSE_SIDE_REFUSAL_KEY,
+    "opening-parse.mjs reads this key back out of the stored envelope; a drift here is a silent "
+    + "return to the defect A1 named");
+});
+
+// ---------------------------------------------------------------------------
+// 7 — A BAD REGION COSTS THE DOCUMENT ITS WHOLE EXTRACTION (#656 fix-round, adversarial A6).
+//
+// The wiring is KIND-BLIND by ruling (D13.1), and the module header used to price the worst case
+// of a false positive at "a few extra evidence rows on a document nobody ever ties". That was one
+// step short. `clara._derive_opening_region_fact` does not ignore a malformed `opening_tb.line`
+// region: it RAISES CLR31 (`opening_extraction_monetary_mismatch` when `monetary_cents` disagrees
+// with the text it re-derives), from inside `clara.persist_document_extraction`'s region loop
+// (0017:1587) — which aborts the WHOLE persist and costs the document the extraction it earned,
+// payslip regions and all. Before this branch no production caller emitted such a region, so the
+// abort was structurally unreachable; it is reachable now, on every azure-di layout pass.
+//
+// So the adapter re-checks the DB's own invariant one layer earlier and drops the WHOLE set when
+// it fails — the all-or-nothing law applied to the emission itself.
+// ---------------------------------------------------------------------------
+
+test("the emission guard catches a region whose monetary_cents disagrees with its own text", () => {
+  const good = produceOpeningTbRegions(tableRegions(BALANCED())).regions;
+  assert.equal(disagreeingOpeningRegion(good), null, "the real producer's own regions agree, every one");
+
+  const drifted = good.map((r, i) => (i === 2 ? { ...r, monetary_cents: "999" } : r));
+  const hit = disagreeingOpeningRegion(drifted);
+  assert.ok(hit, "a region the DB would raise CLR31 over must never leave this module");
+  assert.equal(hit.monetary_cents, "999");
+
+  // The text is the other half of the same triple: a region whose text was rewritten after its
+  // cents were computed is caught from the other side.
+  assert.ok(disagreeingOpeningRegion(good.map((r, i) => (i === 0 ? { ...r, text_content: "310-000 CASH AT BANK RM 1.00 DR" } : r))));
+});
+
+test("a reader whose regions do not agree with their own text forfeits the WHOLE document, not the row", () => {
+  // The injected reader is the seam: it returns a well-formed `ok` reading whose regions carry a
+  // drifted `monetary_cents`, which is exactly what a future `toRegion` bug would produce.
+  const out = produceOpeningTbRegions(tableRegions(BALANCED()), {
+    readCells: (cells) => {
+      const read = realRead(cells);
+      return { ...read, regions: read.regions.map((r, i) => (i === 1 ? { ...r, monetary_cents: "1" } : r)) };
+    },
+  });
+  assert.deepEqual(out.regions, [], "one contradicting region drops the set — never a partial basis");
+  assert.equal(out.status, "refused");
+  assert.match(out.reason, /does not agree with its own text|monetary/i);
+  assert.ok(out.refusals.length >= 1, "the failing region is named");
+});
+
+// ---------------------------------------------------------------------------
+// 8 — THE ELEMENT SHAPE, PINNED FOR THE MIRROR NEXT DOOR (#656 fix-round, adversarial A8).
+//
+// `packages/db/tests/opening-ledger-source.test.mjs`'s `produceTbRegions` helper drives the REAL
+// `clara.persist_document_extraction`, but it hand-builds the region payload rather than calling
+// this producer (packages/db has no dependency on packages/runtime, and adding a cross-package
+// relative import to get one would be a new precedent for a test helper). So the twelve
+// `p656.tie.*` cells prove the DATABASE's behaviour over a MIRROR of what this module emits — and
+// if `toRegion` drifts, that whole family stays green while production breaks. The one place the
+// real producer's bytes meet the real writer is the World leg
+// (`tests/opening-ledger-source-e2e.mjs`).
+//
+// This cell is the pin that makes the drift loud HERE instead: it states the element shape in
+// full. If it reds, the mirror at `opening-ledger-source.test.mjs:141-151` is stale and must move
+// with it.
+// ---------------------------------------------------------------------------
+
+test("the emitted element shape is EXACTLY what the db battery's mirror writes — a drift reds here, loudly", () => {
+  const [region] = produceOpeningTbRegions(tableRegions(BALANCED())).regions;
+  assert.deepEqual(Object.keys(region).sort(),
+    ["engine_confidence", "field_path", "locator", "locator_kind", "monetary_cents", "monetary_raw", "text_content"],
+    "the key set the mirror in packages/db/tests/opening-ledger-source.test.mjs writes by hand");
+  assert.equal(region.locator_kind, "page_polygon");
+  assert.deepEqual(Object.keys(region.locator).sort(), ["page_number", "polygon"],
+    "`persist_document_extraction` stores the locator verbatim; the mirror writes these two keys");
+  assert.equal(region.field_path, "opening_tb.line");
+  assert.equal(region.engine_confidence, null);
+  assert.match(region.monetary_raw, /^[0-9,]+\.[0-9]{2}$/, "the printed figure, as the document set it");
+  assert.match(region.monetary_cents, /^[0-9]+$/, "cents as a DECIMAL STRING — the DB casts (elem->>'monetary_cents')::bigint");
+  assert.match(region.text_content, /^[0-9A-Z-]+ .+ RM [0-9,]+\.[0-9]{2} (DR|CR)$/,
+    "the canonical text 0017's own regexp re-derives the triple from");
 });

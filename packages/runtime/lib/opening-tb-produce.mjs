@@ -39,6 +39,20 @@
 // So the worst case of a false positive is a few extra evidence rows on a document nobody ever
 // ties — never a number that reaches an accounting effect.
 //
+// ── WHAT A BAD REGION COSTS, PRICED HONESTLY (fix-round, adversarial A6) ─────────────────────
+// The sentence above is about a region the database ACCEPTS. A region it does not accept is
+// dearer than "a few extra rows": `clara._derive_opening_region_fact` RAISES CLR31 over an
+// `opening_tb.line` whose `monetary_cents` disagrees with the text it re-derives, or whose amount
+// is not positive (0017:1488-1499), and it is called from inside `clara.persist_document_
+// extraction`'s region loop (0017:1587) — so the raise aborts the WHOLE persist and the document
+// loses the entire extraction it legitimately earned, its invoice or payslip regions included.
+// Before this wiring existed no production caller emitted such a region at all, so that abort was
+// structurally unreachable; it is reachable now, on every azure-di layout pass, for every document
+// kind, in every firm. `IT NEVER THROWS` below does NOT cover it: the raise is on the database
+// side, one call later. That is why `disagreeingOpeningRegion` re-checks the database's own
+// invariant here and drops the WHOLE set rather than shipping a row that would cost the document
+// its extraction.
+//
 // ── IT NEVER THROWS ──────────────────────────────────────────────────────────────────────────
 // This runs INSIDE an OCR normalisation that has already succeeded. A producer fault must not
 // destroy an extraction the document legitimately earned, so every path below is contained and
@@ -46,6 +60,9 @@
 // DOWNSTREAM, because emitting nothing is exactly what the lane did before this module existed.
 
 import { cellsToOpeningTb } from "./opening-tb-cells.mjs";
+// The mirror of `clara._derive_opening_region_fact`'s own grammar — the same function the reader
+// self-checks with, used here on the EMITTED element (see `disagreeingOpeningRegion`).
+import { parseOpeningTbLine } from "./opening-parse.mjs";
 
 /** The ONE literal `0017`'s `_derive_opening_region_fact` and `ck_document_regions_opening_fact_0017`
  *  admit for an opening fact. It is a literal, not a namespace — see
@@ -55,6 +72,54 @@ export const OPENING_TB_FIELD_PATH = "opening_tb.line";
 /** The prefix `normalizeAzureLayout` gives every table-cell region (`egress.mjs:154-172`). */
 const TABLE_FIELD_PREFIX = "tables.";
 
+/**
+ * #656 (fix-round, adversarial A1) — THE KEY THE REFUSAL TRAVELS UNDER, on the extraction
+ * ENVELOPE rather than in a region.
+ *
+ * WHY THE ENVELOPE. The producer's whole contract is all-or-nothing: a trial balance it refuses
+ * emits NO `opening_tb.line` region at all (F-H5). Before this key existed, `normalizeAzureLayout`
+ * kept only `.regions` and dropped `status`/`reason`/`refusals`, so a REFUSED trial balance and a
+ * document that is not a trial balance left byte-identical evidence — and the consumer
+ * (`opening-parse.mjs`) answered both with its keyed-fallback signal `no_opening_tb_lines`, which
+ * the face renders as an INFORMATION banner offering to key the balances. A professional whose
+ * opening trial balance does not balance was invited to hand-key figures the machine had just
+ * found internally inconsistent. The reason has to survive the pass for any surface to say so.
+ *
+ * `document_extractions.envelope` is the free jsonb the writer already stores verbatim, and this
+ * estate already carries producer markers there (`envelope->>'corroboration_ineligible'`,
+ * `0009:148` / `0015:634` / `0092:215`). So the refusal needs NO new `field_path`, no widening of
+ * `ck_document_regions_opening_fact_0017` (which admits `opening_tb.line` and nothing else), and
+ * no migration.
+ *
+ * THE LITERAL IS WRITTEN TWICE, deliberately, exactly as the `corroboration_ineligible` markers
+ * are: once here (the producer side, used by `egress.mjs`) and once in `opening-parse.mjs` (the
+ * consumer side), so the parse door does NOT gain an import edge into this module — an edge the
+ * header above warns would freeze this file the day a Clara tool imports the door. The two
+ * literals are pinned equal by `tests/opening-tb-produce.test.mjs`'s last cell.
+ */
+export const OPENING_TB_REFUSAL_ENVELOPE_KEY = "opening_tb_refusal";
+
+/**
+ * The envelope entry for one producer run, or `null` when there is nothing to report.
+ *
+ * ONLY `refused` is carried, and that is a judgement rather than an omission:
+ *   · `ok` / `not_a_trial_balance` — nothing to say. A document nobody claims is a trial balance
+ *     must not be reported as a refused one, or every invoice in the estate would carry a refusal.
+ *   · `producer_error` — an INTERNAL fault, not a verdict about the document. The reader never
+ *     judged the figures, so quoting it at a professional as a refusal of THEIR document would be
+ *     the same misattribution from the other direction; the keyed path stays the honest answer and
+ *     the fault is the operator's to find (the status is still in the return value here).
+ * @param {{status:string, reason:string|null, refusals:Array<object>}} out
+ */
+export function openingRefusalEnvelopeEntry(out) {
+  if (!out || out.status !== "refused") return null;
+  return {
+    status: "refused",
+    reason: String(out.reason ?? "the opening trial balance on this document was refused"),
+    refusals: Array.isArray(out.refusals) ? out.refusals : [],
+  };
+}
+
 /** The empty envelope, with the reason the caller must be able to show a human. */
 const nothing = (status, reason) => ({ status, reason, regions: [], refusals: [], totals: null });
 
@@ -63,6 +128,10 @@ const nothing = (status, reason) => ({ status, reason, regions: [], refusals: []
  *
  * @param {Array<object>} regions the FULL region array `normalizeAzureLayout` has built; this
  *   function selects the `tables.*` elements itself and never mutates the array it is given.
+ * @param {{readCells?: (cells: Array<object>) => object|null}} [deps] the reader seam. Production
+ *   passes NOTHING and gets `cellsToOpeningTb`; it exists so the emission guard below can be
+ *   exercised over a reading that drifts, which is the only way to prove the all-or-nothing law
+ *   holds at the ADAPTER and not merely inside the reader.
  * @returns {{
  *   status: 'ok'|'not_a_trial_balance'|'refused'|'producer_error',
  *   reason: string|null,
@@ -76,7 +145,35 @@ const nothing = (status, reason) => ({ status, reason, regions: [], refusals: []
  * DECIMAL STRINGS: they are BigInt in the reader, JSON has no bigint, and the database casts
  * `(elem->>'monetary_cents')::bigint`.
  */
-export function produceOpeningTbRegions(regions) {
+/**
+ * #656 (fix-round, adversarial A6) — THE DATABASE'S OWN INVARIANT, RE-CHECKED BEFORE EMISSION.
+ *
+ * `clara._derive_opening_region_fact` re-derives `(account, amount, side)` from an
+ * `opening_tb.line`'s `text_content` and RAISES `opening_extraction_monetary_mismatch` (CLR31)
+ * when the supplied `monetary_cents` disagrees — inside `persist_document_extraction`'s region
+ * loop, so the raise costs the document its whole extraction. The reader already proves the
+ * triple once (`opening-tb-cells.mjs`'s `text_does_not_round_trip` self-check); this is the
+ * ADAPTER's own re-check of the EMITTED element, so a future drift in `toRegion` (a renamed key,
+ * a cents field that stops being a decimal string, a text rewritten after the cents were
+ * computed) is refused HERE, where it costs nothing, instead of at the writer, where it costs the
+ * document.
+ *
+ * @param {ReadonlyArray<object>} regions the elements about to be emitted
+ * @returns {object|null} the first region that does not agree with its own text, or null
+ */
+export function disagreeingOpeningRegion(regions) {
+  for (const region of regions ?? []) {
+    if (!region || typeof region !== "object") return region ?? {};
+    if (region.field_path !== OPENING_TB_FIELD_PATH) return region;
+    const fact = parseOpeningTbLine(region.text_content);
+    if (!fact) return region;
+    if (typeof region.monetary_cents !== "string" || region.monetary_cents !== String(fact.amountCents)) return region;
+    if (!(fact.amountCents > 0)) return region;
+  }
+  return null;
+}
+
+export function produceOpeningTbRegions(regions, { readCells = cellsToOpeningTb } = {}) {
   try {
     if (!Array.isArray(regions)) return nothing("not_a_trial_balance", "no table cells on this extraction");
     const cells = regions.filter(
@@ -84,7 +181,7 @@ export function produceOpeningTbRegions(regions) {
     );
     if (cells.length === 0) return nothing("not_a_trial_balance", "no table cells on this extraction");
 
-    const read = cellsToOpeningTb(cells);
+    const read = readCells(cells);
 
     // `null` is the CONSERVATIVE default and the loudest thing it means is "I learned nothing":
     // the caller must behave exactly as it did before this module existed.
@@ -100,6 +197,25 @@ export function produceOpeningTbRegions(regions) {
         totals: null,
       };
     }
+    // THE EMISSION GUARD (A6). One region the database would raise over costs the document its
+    // whole extraction, so a disagreement drops the WHOLE set — the same all-or-nothing law the
+    // reader applies to its rows, applied one layer lower.
+    const bad = disagreeingOpeningRegion(read.regions);
+    if (bad) {
+      return {
+        status: "refused",
+        reason: "an opening trial-balance row does not agree with its own text and was not emitted",
+        regions: [],
+        refusals: [{
+          reason: "region_does_not_agree_with_text",
+          detail: typeof bad?.monetary_cents === "string" ? bad.monetary_cents : null,
+          row_key: typeof bad?.text_content === "string" ? bad.text_content.slice(0, 120) : "unknown_row",
+          text: typeof bad?.text_content === "string" ? bad.text_content.slice(0, 200) : "",
+        }],
+        totals: null,
+      };
+    }
+
     return {
       status: "ok",
       reason: null,
