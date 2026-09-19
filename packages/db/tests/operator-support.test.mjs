@@ -787,14 +787,14 @@ async function forceOpenedAt(intent, isoTimestamp) {
   }
 }
 
-cell("os.15 arm 1 id tie-break -- two intents sharing one `opened_at` instant, neither carrying "
+cell("os.19 arm 1 id tie-break -- two intents sharing one `opened_at` instant, neither carrying "
   + "the money: the lateral's third key (`i.id desc`) is the only thing that can decide", async () => {
   // #844 — os.14 (above) pins the SECOND key (the money-carrying status beats `opened_at desc`)
   // but every world it and every other cell in this file builds gives a registration at most one
   // intent PAIR with distinct `opened_at` values, so the THIRD key has been provable only by
   // reading migration 0188's own text (verified at 65fde7f3). This cell builds the one world in
   // which it is observable at all: three intents, two sharing the exact same `opened_at`.
-  const world = await openedCheckout(operator.owner, { tag: "os15" });
+  const world = await openedCheckout(operator.owner, { tag: "os19" });
 
   // THREE MINTED INTENTS, not one reused. `clara.open_checkout_intent` (0186 §G) reuses only an
   // UNSTAMPED, STILL-`open` intent, and separately refuses CLR09 `checkout_in_progress` outright
@@ -804,9 +804,9 @@ cell("os.15 arm 1 id tie-break -- two intents sharing one `opened_at` instant, n
   // predecessor straight to `cancelled` is what clears the door for the next mint without ever
   // putting it through the one state this cell must avoid.
   const first = world.intent;
-  await forceStatus(first, "cancelled", "#844 os.15 superseded, to open the next intent");
+  await forceStatus(first, "cancelled", "#844 os.19 superseded, to open the next intent");
   const second = (await openIntent(world.sub, world.email, world.registration)).intent_id;
-  await forceStatus(second, "cancelled", "#844 os.15 superseded, to open the next intent");
+  await forceStatus(second, "cancelled", "#844 os.19 superseded, to open the next intent");
   const third = (await openIntent(world.sub, world.email, world.registration)).intent_id;
   const intents = await intentsOf(world.registration);
   assert.equal(intents.length, 3, "the registration carries exactly three checkout intents");

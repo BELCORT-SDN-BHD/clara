@@ -735,20 +735,23 @@ later file in the same sweep does not inherit this one's arrangement.
 `legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0234, because a skip is not evidence.
 
-## `operator-support.test.mjs` os.15 — #844
+## `operator-support.test.mjs` os.19 — #844
 
 os.14 (#774) pins the arm-1 lateral's SECOND ordering key (a money-carrying intent status beats a
 bare `opened_at desc`), but every world it or any other cell in the file builds gives a
 registration at most one intent pair with distinct `opened_at` values — so migration 0188's THIRD
-key (`i.id desc`) was provable only by reading the migration's own text. os.15 builds the one
+key (`i.id desc`) was provable only by reading the migration's own text. os.19 builds the one
 world in which it is observable at all: three checkout intents on one registration, two forced to
 the exact same `opened_at` instant, none of the three carrying the money.
+
+(Numbered os.19, not os.15: the file's own section-7 series already runs os.15 through os.18 —
+the new cell originally shipped as a second, colliding "os.15" and was renumbered in fix-round 1.)
 
 **Minting three intents without ever landing one in `session_created` or `processing`.**
 `clara.open_checkout_intent` (0186 §G) reuses only an unstamped, still-`open` intent, and
 separately refuses CLR09 `checkout_in_progress` outright while ANY intent sits in
 `session_created` or `processing` — so os.14's own "stamp then pay" idiom would BLOCK the next
-open rather than merely fail to be reused. os.15 instead force-transitions each intended
+open rather than merely fail to be reused. os.19 instead force-transitions each intended
 predecessor straight `open -> cancelled` (the transition table's first lawful row, no session
 stamp needed) between opens.
 
@@ -767,7 +770,7 @@ root.
 **Acceptance #3 ("the cell fails if the id key is removed") is checked by reversing the key's
 direction, not omitting it.** Without any id clause Postgres does not promise which of two
 `opened_at`-tied rows a bare `LIMIT 1` returns, so that comparison would prove nothing
-reproducible. os.15 runs a companion `SELECT` — the identical predicate from 0188's arm-1 lateral,
+reproducible. os.19 runs a companion `SELECT` — the identical predicate from 0188's arm-1 lateral,
 never the deployed function or the migration body — with `i.id desc` reversed to `i.id asc`, and
 reads that it deterministically names the OTHER (loser) intent; a second companion run with the
 shipped direction is asserted to agree with the door, confirming the companion query is faithful.
