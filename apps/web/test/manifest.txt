@@ -142,11 +142,13 @@ components/firm/add-client-control.test.tsx
 components/firm/agent-task-detail.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
+components/firm/client-home/client-cash-summary.test.tsx
 components/firm/client-home/client-financial-charts.test.tsx
 components/firm/client-home/client-home-money-a11y.test.tsx
 components/firm/client-home/client-home-money-keyboard.test.tsx
 components/firm/client-home/client-identity-band-knowledge.test.tsx
 components/firm/client-home/client-onboarding-progress-opening-link.test.tsx
+components/firm/client-home/client-profit-summary.test.tsx
 components/firm/client-home/client-work-attention.test.tsx
 components/firm/client-scope-invalidation.test.tsx
 components/firm/client-workspace-overview.test.tsx
