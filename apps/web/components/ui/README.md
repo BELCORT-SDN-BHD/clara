@@ -63,6 +63,25 @@ today) from `package.json` and the lockfile via `pnpm remove`, no manual revert 
 `CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn` package survive deliberately,
 instead of a second refusal vocabulary for this one name.
 
+**The ordering, and the window it leaves (L05-S07, 2026-09-20 fix round).** This is a drop AFTER
+the pinned CLI writes, never a pre-filter BEFORE it: `ui-add.mjs`'s `main()` runs `spawnAdd` (the
+real `shadcn add`) first and only then calls `stripLocalDependencies`. Between those two calls,
+`package.json` and `pnpm-lock.yaml` genuinely DO carry `cn` — an interrupt in that window (a killed
+process, a crashed machine) leaves exactly the hand-revert this guard exists to abolish, and every
+such install writes the lockfile twice (once for the CLI's own `pnpm add`, once for this guard's
+`pnpm remove`). This was not the preferred shape; it is what the pinned CLI's own surface allows.
+`node_modules/.bin/shadcn add --help` (pinned 4.19.0, checked at the same time as this note) offers
+no flag to skip or filter its dependency-install step — `-y`/`-o`/`-a`/`-p`/`--dry-run`/`--diff`/
+`--view` only — and pre-declaring a fake local `cn` package in `package.json` before the CLI runs
+would need this repo to ship a real (if empty) `cn` package for the installer to find satisfied,
+trading one workaround for a stranger one. A caller who cannot tolerate the window (a fully
+unattended pipeline, say) should run `--dry-run` first, confirm `cn` is the only local dependency
+named, and treat a failure between the two spawns as a signal to re-run `git status` and revert
+`package.json`/`pnpm-lock.yaml` by hand before retrying — the same hand-revert #642 already
+described, now a documented fallback rather than the every-time norm. A follow-up that wants the
+pre-filter shape instead would need to intercept the pinned CLI's own package-manager invocation,
+which is out of this ticket's scope.
+
 ### Proof
 
 `scripts/check-ui-add-guard.selftest.mjs` (wired into `pnpm lint`) is this guard's own positive
