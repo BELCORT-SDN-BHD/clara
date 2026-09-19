@@ -51,6 +51,26 @@ function resolveSelectValueLabel<Value>(
   return undefined
 }
 
+// fix-round ADV-2 (#1005): a value that is well-formed but absent from the roster (an archived
+// client, a stale initiator id, a purpose newer than a caller's known list) used to fall through
+// `resolveSelectValueLabel` to `undefined`, and `SelectValue`'s own `?? placeholder` then rendered
+// the SAME string the trigger shows when NOTHING is filtered — a real, applied filter read as "All
+// clients". "no value" and "a value I cannot label" are different states and must render
+// differently. Callers with a roster built from a runtime list (never the fixed `KNOWN_*`/enum
+// case, which cannot drift) build their array-form `items` through this helper instead of a bare
+// literal, so the currently selected value ALWAYS has an entry — synthesized, distinguishable from
+// the placeholder — when the roster does not carry it. It changes nothing about what is actually
+// filtered: every caller still passes the real, unmodified value through untouched.
+export function withUnmatchedFallback<Value>(
+  items: ReadonlyArray<SelectValueItem<Value>>,
+  value: Value | null | undefined,
+  unmatchedLabel: React.ReactNode
+): ReadonlyArray<SelectValueItem<Value>> {
+  if (value == null) return items
+  if (items.some((item) => Object.is(item.value, value))) return items
+  return [...items, { value, label: unmatchedLabel }]
+}
+
 type SelectValueProps<Value = unknown> = Omit<
   SelectPrimitive.Value.Props,
   "children"

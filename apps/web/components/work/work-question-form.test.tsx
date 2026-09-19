@@ -20,7 +20,7 @@ import { renderComponent, clickButton, setFieldValue } from "../../test/hookHarn
 import { configureSessionTokenSource } from "../../lib/session-accessor";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { WorkQuestionForm } from "./work-question-form";
-import type { WorkQuestionRecord } from "../../lib/work/questions";
+import { workAnswerDraftKey, writeWorkAnswerDraft, type WorkQuestionRecord } from "../../lib/work/questions";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -690,6 +690,45 @@ test("an ACCOUNT field offers the client's chart when it has one, and a typed co
       "an unreadable chart degrades to a typed code, never to an empty picker");
   } finally {
     await withoutChart.unmount();
+    s.restore();
+  }
+});
+
+// fix-round SPEC-1005-1/ADV-9 — the account field's Select is the one #1005 call site in this
+// file. `test/hookHarness.ts` cannot open a Base UI Select's portalled popup, but this component
+// does not need it: a PRESET draft (the same mechanism `answer accepted ELSEWHERE converges onto
+// the authoritative record and KEEPS the draft` already relies on, per this file's own header)
+// puts the field in a SELECTED state before the first render, exactly like `select.test.tsx`'s own
+// preset-value cells.
+test("[1005]: a preset account-field draft shows the account's LABEL on first render, never the raw code", async () => {
+  const s = stubStorage();
+  const rec = record({ fields: [{ key: "account", label: "Which account?", kind: "account", required: true }] });
+  writeWorkAnswerDraft(
+    workAnswerDraftKey({ userId: USER, firmId: rec.firm_id, clientId: rec.client_id, questionId: rec.question_id, version: rec.question_version }),
+    { account: "6100" },
+  );
+  const h = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(WorkQuestionForm, {
+        record: rec,
+        userId: USER,
+        accounts: [
+          { account_code: "6100", name: "Rent", is_active: true },
+          { account_code: "9999", name: "Retired", is_active: false },
+        ],
+      }),
+    }),
+  );
+  try {
+    const trigger = byTestId(h, "work-question-account-account");
+    assert.ok(trigger, "the account Select must be mounted");
+    const text = h.text();
+    assert.match(text, /6100 · Rent/, "the trigger must show the composed account label from the preset draft");
+  } finally {
+    await h.unmount();
     s.restore();
   }
 });

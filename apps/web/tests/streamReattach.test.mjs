@@ -347,6 +347,42 @@ test("#956 an abort BEFORE the backoff sleep is even entered skips it — the fa
   assert.equal(sleepCalls, 0, "an already-aborted signal must never even start the sleep");
 });
 
+test("fix-round ADV-4: a REJECTING sleepImpl ends that backoff instead of hanging forever or raising an unhandled rejection", { timeout: 2000 }, async () => {
+  // PROVED pre-fix: `abortableSleep`'s `sleepImpl(ms).then(finish)` (one argument) leaves a
+  // rejection with no handler at all — `void` discards the promise, so node:test reports an
+  // unhandled rejection AND the awaited `runClaraTaskStream` promise never settles (this test
+  // would time out). The fix (`.then(finish, finish)`) makes a rejecting sleep end the backoff
+  // exactly like an elapsed one — the loop reattaches once more, then the SECOND backoff's
+  // (never-resolving) sleep is what the real abort below actually races.
+  let fetchCalls = 0;
+  const fetchImpl = async () => { fetchCalls += 1; return sseResponse([]); };
+  const controller = new AbortController();
+  let attempts = 0;
+  let sleepCalls = 0;
+  const sleepImpl = () => {
+    sleepCalls += 1;
+    if (sleepCalls === 1) return Promise.reject(new Error("transport clock exploded"));
+    return new Promise(() => {}); // never resolves on its own — only the abort below can end it
+  };
+
+  await runClaraTaskStream({
+    token: "tok",
+    taskId: "t-reject-backoff",
+    signal: controller.signal,
+    fetchImpl,
+    sleepImpl,
+    onEvent: () => {},
+    onReconnectAttempt: () => {
+      attempts += 1;
+      if (attempts === 2) queueMicrotask(() => controller.abort());
+    },
+  });
+
+  assert.equal(sleepCalls, 2, "a rejecting sleep must not hang: the loop must reach a SECOND backoff sleep");
+  assert.equal(fetchCalls, 2, "exactly one more reattach happens after the rejected sleep, before the real abort ends the loop");
+  assert.equal(attempts, 2, "the reconnect-attempt counter must advance past the rejected sleep, not get stuck on it");
+});
+
 // ---------------------------------------------------------------------------
 // FIX 2 — a close with no message/done/detached at all is an error, not silence.
 // ---------------------------------------------------------------------------

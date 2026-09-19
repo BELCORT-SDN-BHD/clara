@@ -49,35 +49,60 @@ function parse(unit: SourceUnit): ts.SourceFile {
   return ts.createSourceFile(unit.path, unit.code, ts.ScriptTarget.Latest, true, kind);
 }
 
+/** fix-round ADV-3 — a QUALIFIED tag name (`<Select.Value>`, reached via a bare
+ *  `import { Select } from "@base-ui/react"` rather than our own wrapper) used to make this
+ *  return `null`, so `<Select.Value />` was never counted as a `SelectValue`-shaped call site at
+ *  all. Returns a dotted name for a property access (`"Select.Value"`) so the two checks below can
+ *  recognise it, alongside the plain-identifier case our own `<SelectValue>` uses. */
 function tagNameOf(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement): string | null {
   const name = node.tagName;
-  return ts.isIdentifier(name) ? name.text : null;
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isPropertyAccessExpression(name) && ts.isIdentifier(name.expression) && ts.isIdentifier(name.name)) {
+    return `${name.expression.text}.${name.name.text}`;
+  }
+  return null;
+}
+
+/** True for our own wrapper's tag (`SelectValue`) OR a bypass reaching Base UI's part directly
+ *  (`Value`, or `<Anything.Value>` — the ONLY compound part named `Value` anywhere this app's own
+ *  `components/ui/*` wrappers use is Select's; ADV-3 verified none of Base UI's other primitives
+ *  this app imports — Dialog, Menu, Tabs, Tooltip, … — are reached through a `.Value` part). */
+function isSelectValueTag(tagName: string | null): boolean {
+  if (tagName === null) return false;
+  return tagName === "SelectValue" || tagName === "Value" || tagName.endsWith(".Value");
 }
 
 function hasItemsAttribute(attrs: ts.JsxAttributes): boolean {
   return attrs.properties.some((p) => ts.isJsxAttribute(p) && ts.isIdentifier(p.name) && p.name.text === "items");
 }
 
-/** A JSX expression child that is (or immediately returns/wraps) a function —
- *  the two shapes `select.tsx`'s own discriminated union accepts as `children`. */
+/** A JSX expression child that IS a function — the one shape `select.tsx`'s own discriminated
+ *  union accepts as `children`.
+ *
+ *  fix-round SPEC-1005-3 — this used to ALSO accept a bare identifier or property-access
+ *  reference (`{value}`, `{row.value}`) on the theory that it might name a function defined
+ *  elsewhere, which is exactly the shape of the real defect (`<SelectValue>{value}</SelectValue>`,
+ *  a plain non-function value): CONFIRMED, that bypass ran through this census clean before this
+ *  fix. No real call site in this codebase needs that allowance — the one function-child call site
+ *  (`client-period-selector.tsx`) always passes an INLINE arrow function — so the fix is to accept
+ *  only the two node kinds that make a value a function BY CONSTRUCTION: an arrow function or a
+ *  function expression, never a reference this census cannot verify resolves to one. */
 function childIsFunction(children: ts.NodeArray<ts.JsxChild>): boolean {
   for (const child of children) {
     if (!ts.isJsxExpression(child) || !child.expression) continue;
     const expr = child.expression;
     if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return true;
-    // An identifier/property-access reference to a function defined elsewhere
-    // (e.g. `{resolveLabel}`) — still a legitimate function-child path; a plain
-    // string/template/conditional literal is not.
-    if (ts.isIdentifier(expr) || ts.isPropertyAccessExpression(expr)) return true;
   }
   return false;
 }
 
 type Violation = { file: string; line: number; reason: string };
 
-function censusFile(path: string): Violation[] {
+/** The scan logic, over an already-read `code` string — split out of `censusFile` so the two
+ *  regression cells below can hand it a SYNTHETIC source under a fake (never-read-from-disk) path,
+ *  the same probe shape ADV-2/ADV-3 used against a temporary file, without touching the worktree. */
+function censusSource(path: string, code: string): Violation[] {
   const violations: Violation[] = [];
-  const code = readFileSync(path, "utf8");
   const source = parse({ path, code });
 
   function loc(node: ts.Node): number {
@@ -87,22 +112,45 @@ function censusFile(path: string): Violation[] {
   function visit(node: ts.Node) {
     // Bypass detection: importing Base UI's OWN Select parts outside our wrapper.
     if (path !== OWN_WRAPPER_PATH && ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      if (node.moduleSpecifier.text === "@base-ui/react/select") {
+      const specifier = node.moduleSpecifier.text;
+      if (specifier === "@base-ui/react/select") {
         violations.push({
           file: path,
           line: loc(node),
           reason: "imports @base-ui/react/select directly — go through components/ui/select.tsx's SelectValue instead",
         });
       }
+      // fix-round ADV-3 — the exact-specifier check above is invisible to the ROOT barrel
+      // (`@base-ui/react`, a real export per its own package.json, CONFIRMED against the
+      // installed package's exports map): `import { Select } from "@base-ui/react"` reaches the
+      // identical Select primitive by a different path. Named-binding-scoped rather than "any
+      // @base-ui/react import" — this app's OTHER wrapper files legitimately import the root
+      // package's other primitives without going through a select-specific wrapper at all.
+      const namedBindings = node.importClause?.namedBindings;
+      if (specifier === "@base-ui/react" && namedBindings && ts.isNamedImports(namedBindings)) {
+        for (const el of namedBindings.elements) {
+          if ((el.propertyName ?? el.name).text === "Select") {
+            violations.push({
+              file: path,
+              line: loc(node),
+              reason: "imports Select from the @base-ui/react root barrel directly — go through components/ui/select.tsx's SelectValue instead",
+            });
+          }
+        }
+      }
     }
 
-    if (ts.isJsxSelfClosingElement(node) && tagNameOf(node) === "SelectValue") {
+    // The wrapper's OWN internals (`<SelectPrimitive.Value>`, a `.Value` property-access tag,
+    // fed `{resolveChildren}` — an identifier, not an inline function literal) are exempt from
+    // both checks below: this file IS the label-resolving mechanism the checks exist to enforce
+    // everywhere else, not a call site of it.
+    if (path !== OWN_WRAPPER_PATH && ts.isJsxSelfClosingElement(node) && isSelectValueTag(tagNameOf(node))) {
       if (!hasItemsAttribute(node.attributes)) {
         violations.push({ file: path, line: loc(node), reason: "<SelectValue> has neither items= nor a function child (self-closing, no children possible)" });
       }
     }
 
-    if (ts.isJsxElement(node) && tagNameOf(node.openingElement) === "SelectValue") {
+    if (path !== OWN_WRAPPER_PATH && ts.isJsxElement(node) && isSelectValueTag(tagNameOf(node.openingElement))) {
       const hasItems = hasItemsAttribute(node.openingElement.attributes);
       const hasFnChild = childIsFunction(node.children);
       if (!hasItems && !hasFnChild) {
@@ -115,6 +163,10 @@ function censusFile(path: string): Violation[] {
 
   visit(source);
   return violations;
+}
+
+function censusFile(path: string): Violation[] {
+  return censusSource(path, readFileSync(path, "utf8"));
 }
 
 describe("#1005 census: every <SelectValue> call site names a label source", () => {
@@ -146,5 +198,48 @@ describe("#1005 census: every <SelectValue> call site names a label source", () 
       });
     }
     assert.ok(selectValueSites >= 11, `expected at least the 11 known SelectValue call sites, found ${selectValueSites}`);
+  });
+});
+
+describe("fix-round ADV-3/SPEC-1005-3: the two confirmed blind spots are closed", () => {
+  const FIXTURE_PATH = join(WEB_ROOT, "components", "zz-fixture-never-read-from-disk.tsx");
+
+  it("catches <SelectValue>{value}</SelectValue> — an identifier child that is NOT a function (SPEC-1005-3, PROVED against the pre-fix logic to render 0 violations)", () => {
+    const code = `
+      import { SelectValue } from "@/components/ui/select";
+      function Broken({ value }: { value: string }) {
+        return <SelectValue>{value}</SelectValue>;
+      }
+    `;
+    const violations = censusSource(FIXTURE_PATH, code);
+    assert.equal(violations.length, 1, "an identifier child must be treated as a non-function, unlabelled render");
+    assert.match(violations[0]!.reason, /neither items= nor a function child/);
+  });
+
+  it("catches <Select.Value /> reached via the @base-ui/react ROOT barrel, bypassing our wrapper entirely (ADV-3, PROVED against the pre-fix logic to render 0 violations)", () => {
+    const code = `
+      import { Select } from "@base-ui/react";
+      function Bypass() {
+        return (
+          <Select.Root>
+            <Select.Value />
+          </Select.Root>
+        );
+      }
+    `;
+    const violations = censusSource(FIXTURE_PATH, code);
+    assert.ok(violations.length >= 2, `expected both the import bypass and the qualified-tag bypass to be flagged, got ${violations.length}`);
+    assert.ok(violations.some((v) => v.reason.includes("root barrel")), "the root-barrel import must be flagged");
+    assert.ok(violations.some((v) => v.reason.includes("self-closing")), "the qualified <Select.Value /> tag must be flagged even though tagNameOf is not a plain identifier");
+  });
+
+  it("still passes a legitimate function-child call site through untouched (no false positive from the SPEC-1005-3 tightening)", () => {
+    const code = `
+      import { SelectValue } from "@/components/ui/select";
+      function Fine({ value }: { value: unknown }) {
+        return <SelectValue>{(v: unknown) => String(v)}</SelectValue>;
+      }
+    `;
+    assert.deepEqual(censusSource(FIXTURE_PATH, code), []);
   });
 });

@@ -440,7 +440,17 @@ async function defaultSleep(ms: number): Promise<void> {
  *  it, this promise resolves on its own next microtask — no more waiting out the timer.
  *  Never rejects: an abort during backoff is the caller ending the read on purpose,
  *  not a transport fault, and the loop's very next line already reads `signal.aborted`
- *  and returns before opening another attach. */
+ *  and returns before opening another attach.
+ *
+ *  fix-round ADV-4 — PROVED: `sleepImpl(ms).then(finish)` (one argument) leaves a REJECTING
+ *  `sleepImpl` with no handler on that branch at all. `void` discards the returned promise, so
+ *  the rejection became an unhandled rejection — visible in Node, invisible in a browser — AND
+ *  `finish` was never called, so this promise (and the `await` in `runClaraTaskStream` below)
+ *  hung forever: a stream that can never be aborted again, because the reattach loop never
+ *  reaches its own `signal.aborted` recheck. `sleepImpl` is a normal timer in production (it does
+ *  not reject), but the same two-argument form this promise ALREADY uses for its abort listener
+ *  (settle once, from whichever arm reaches `finish` first) is the correct shape for its OTHER
+ *  input too: a failing clock ends the backoff exactly the way an elapsed one does, never a hang. */
 function abortableSleep(
   ms: number,
   signal: AbortSignal,
@@ -456,7 +466,7 @@ function abortableSleep(
       resolve();
     };
     signal.addEventListener("abort", finish, { once: true });
-    void sleepImpl(ms).then(finish);
+    void sleepImpl(ms).then(finish, finish);
   });
 }
 

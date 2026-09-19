@@ -495,6 +495,34 @@ test("[1005]: with no filter chosen, all three triggers show their ALL-sentinel 
   });
 });
 
+// fix-round ADV-2: a well-formed but unresolvable filter value (a client id no longer in the
+// roster, a purpose newer than KNOWN_PURPOSES, a former member's id) used to fall back to the
+// SAME "All …"/"Anyone" label the trigger shows when nothing is filtered at all — a real, applied
+// filter read as unfiltered. All three must read as filtered-but-unresolvable instead.
+test("[ADV-2]: a client/purpose/initiator value absent from its roster reads as filtered, never as 'All …'", async () => {
+  const MISSING_CLIENT = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const MISSING_INITIATOR = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: `client=${MISSING_CLIENT}&purpose=vendor_bill_stub&initiator=${MISSING_INITIATOR}`,
+      load: emptyPage,
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.doesNotMatch(text, /All clients/, "an applied client filter must not read as 'All clients'");
+      assert.doesNotMatch(text, /All kinds/, "an applied purpose filter must not read as 'All kinds'");
+      assert.doesNotMatch(text, /\bAnyone\b/, "an applied initiator filter must not read as 'Anyone'");
+      assert.doesNotMatch(text, new RegExp(MISSING_CLIENT), "the raw client id must never render as trigger text");
+      assert.doesNotMatch(text, new RegExp(MISSING_INITIATOR), "the raw initiator id must never render as trigger text");
+      assert.doesNotMatch(text, /vendor_bill_stub/, "the raw purpose value must never render as trigger text");
+      assert.match(text, /not in this list/i, "each unresolved trigger must say the value is filtered but unresolvable");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("a DENIED list asks the addressed-row door nothing — one banner, not two", async () => {
   await withMockedEnv(async () => {
     let rowReads = 0;

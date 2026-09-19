@@ -71,3 +71,21 @@ test("[1005]: with no client chosen, the trigger shows the 'All clients' label, 
     await h.unmount();
   }
 });
+
+// fix-round ADV-2: a well-formed client id that is NOT in the `clients` roster (an archived or
+// out-of-scope client reached via a bookmarked/hand-edited URL) used to fall back to the exact
+// same "All clients" label the trigger shows when nothing is filtered, so an applied filter read
+// as unfiltered. It must render something distinguishable from BOTH the placeholder and any real
+// client's name — proving the label is neither "no value" nor a lucky roster hit.
+test("[ADV-2]: a client id absent from the roster reads as filtered, never as 'All clients'", async () => {
+  const missingClientId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const h = await mount(App({ client: missingClientId, kinds: [], since: null, until: null, event: null }));
+  try {
+    const text = h.text();
+    assert.doesNotMatch(text, /All clients/, "an applied-but-unresolvable filter must not read as 'All clients'");
+    assert.doesNotMatch(text, new RegExp(missingClientId), "the raw id must never render as trigger text");
+    assert.match(text, /not in this list/i, "the trigger must say the value is filtered but unresolvable");
+  } finally {
+    await h.unmount();
+  }
+});

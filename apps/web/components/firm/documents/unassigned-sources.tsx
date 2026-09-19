@@ -72,7 +72,7 @@ import { DocumentKindControl } from "@/components/documents/document-kind-contro
 import { DoorFeedback } from "@/components/documents/door-feedback";
 import type { ClientRow } from "@/lib/documents/types";
 
-type UnassignedRow = Awaited<ReturnType<typeof listUnassignedDocuments>>[number] & {
+export type UnassignedRow = Awaited<ReturnType<typeof listUnassignedDocuments>>[number] & {
   original_filename?: string | null;
   byte_size?: number | null;
   created_at?: string | null;
@@ -187,8 +187,12 @@ export function UnassignedSources() {
   );
 }
 
-function SourceRow({
-  row, clients, busy, asked, capabilityIndex, onFile, act,
+/** Exported ONLY so `unassigned-sources.test.tsx` can mount this row in isolation with the client
+ *  Select already SELECTED (`initialClientId`) — `UnassignedSources` above takes no props at all,
+ *  so there is no other seam to preset that state through without a popup-opening test harness
+ *  seam this repo does not have. See `initialClientId`'s own doc comment. */
+export function SourceRow({
+  row, clients, busy, asked, capabilityIndex, onFile, act, initialClientId,
 }: {
   row: UnassignedRow;
   clients: ClientRow[];
@@ -197,10 +201,15 @@ function SourceRow({
   capabilityIndex: Parameters<typeof CapabilityTiers>[0]["index"];
   onFile: (clientId: string) => Promise<boolean>;
   act: (fn: () => Promise<void>) => Promise<boolean>;
+  /** fix-round SPEC-1005-1 — no production caller sets this; it exists so a test can mount this
+   *  row with the client Select already SELECTED and assert its trigger's text on first render,
+   *  the way every other #1005 call site's own cell does, without a popup-opening seam this
+   *  repo's test harness does not have. */
+  initialClientId?: string;
 }) {
   const t = useTranslations("FirmDocuments");
   const tDoc = useTranslations("ClientDocuments");
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(initialClientId ?? "");
   const name = row.original_filename ?? row.id;
 
   return (

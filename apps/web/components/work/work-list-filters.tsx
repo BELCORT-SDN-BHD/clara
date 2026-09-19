@@ -28,7 +28,7 @@ import { FilterIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldContent, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, withUnmatchedFallback } from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -112,10 +112,14 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
                 <SelectTrigger id="work-filter-client" className="w-full">
                   <SelectValue
                     placeholder={t("filterClientAll")}
-                    items={[
-                      { value: ALL, label: t("filterClientAll") },
-                      ...(clients ?? []).map((c) => ({ value: c.id, label: c.name })),
-                    ]}
+                    items={withUnmatchedFallback(
+                      [
+                        { value: ALL, label: t("filterClientAll") },
+                        ...(clients ?? []).map((c) => ({ value: c.id, label: c.name })),
+                      ],
+                      state.client,
+                      t("filterClientUnknown")
+                    )}
                   />
                 </SelectTrigger>
                 <SelectContent>
@@ -141,10 +145,14 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
               <SelectTrigger id="work-filter-purpose" className="w-full">
                 <SelectValue
                   placeholder={t("filterPurposeAll")}
-                  items={[
-                    { value: ALL, label: t("filterPurposeAll") },
-                    ...KNOWN_PURPOSES.map((p) => ({ value: p, label: t(`purposeLabels.${p}`) })),
-                  ]}
+                  items={withUnmatchedFallback(
+                    [
+                      { value: ALL, label: t("filterPurposeAll") },
+                      ...KNOWN_PURPOSES.map((p) => ({ value: p, label: t(`purposeLabels.${p}`) })),
+                    ],
+                    state.purpose[0] ?? null,
+                    t("filterPurposeUnknown")
+                  )}
                 />
               </SelectTrigger>
               <SelectContent>
@@ -169,10 +177,14 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
               <SelectTrigger id="work-filter-initiator" className="w-full">
                 <SelectValue
                   placeholder={t("filterInitiatorAll")}
-                  items={[
-                    { value: ALL, label: t("filterInitiatorAll") },
-                    ...memberOptions.map(([id, name]) => ({ value: id, label: name })),
-                  ]}
+                  items={withUnmatchedFallback(
+                    [
+                      { value: ALL, label: t("filterInitiatorAll") },
+                      ...memberOptions.map(([id, name]) => ({ value: id, label: name })),
+                    ],
+                    state.initiator,
+                    t("filterInitiatorUnknown")
+                  )}
                 />
               </SelectTrigger>
               <SelectContent>

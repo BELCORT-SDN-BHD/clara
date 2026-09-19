@@ -2,13 +2,19 @@
 //
 // Base UI's `<Select.Value>` renders the RAW `value` unless it is given a label source
 // (https://base-ui.com/react/components/select#formatting-the-value). This file proves
-// the WRAPPER mechanism directly — every real call site is proved at its own integration
-// point instead (matching-section.test.tsx, activity-filters.test.tsx, knowledge-panel-
-// freshness.test.tsx, knowledge-firm-panel.test.tsx, work-question-form.test.tsx,
-// unassigned-sources.test.tsx, correction-wizard.test.tsx, document-kind-control.test.tsx,
-// document-kind-dialog.test.tsx, work-list-filters.test.tsx). `select-value-label-census
-// .test.ts` (apps/web/tests/) is the repo-wide census that no NEW call site can skip both
-// paths silently.
+// the WRAPPER mechanism directly. Five of the eleven converted call sites ALSO have their
+// own dedicated first-render trigger-text cell (fix-round SPEC-1005-1/ADV-9 closed the
+// residual): matching-section.test.tsx, activity-filters.test.tsx,
+// knowledge-panel-freshness.test.tsx, knowledge-firm-panel.test.tsx and
+// accounting-work-list.test.tsx (WorkListFilterBar's client/purpose/initiator triggers —
+// this is the file `work-list-filters.tsx` itself is proved through). The remaining five —
+// correction-wizard.tsx, document-kind-control.tsx, document-kind-dialog.tsx,
+// unassigned-sources.tsx and work-question-form.tsx — now each carry their own first-render
+// cell too (mounted with a preset value, no popup interaction needed), landed in the same
+// fix round; see each file's own `.test.tsx`. `select-value-label-census.test.ts`
+// (apps/web/tests/) is the repo-wide census that no NEW call site can skip both paths
+// silently, including a bypass that reaches Base UI's own `Select.Value` around this
+// wrapper.
 //
 // TypeScript already refuses a `<SelectValue>` with neither `items` nor a function
 // `children` (the discriminated union in select.tsx) — these cells prove the RUNTIME
