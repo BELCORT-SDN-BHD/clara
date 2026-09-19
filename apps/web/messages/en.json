@@ -154,13 +154,58 @@
     "seeAgentActivity": "See all agent activity",
     "activityHeading": "Recent activity",
     "activityEmpty": "No firm activity recorded yet.",
-    "activityNotDeployed": "The firm activity timeline is not available yet. When it is, this column will show what happened across the firm — who did what, for which client, and when. Clara's own runs are on the activity page meanwhile.",
+    "activityKindResidual": "Some events are still filed under the wrong kind by the activity door (#861). The sentence and the person are right; the category may not be.",
+    "portfolio": {
+      "heading": "Client portfolio",
+      "seeRegister": "Open the client register",
+      "tableLabel": "Clients, with the Work waiting on each",
+      "columnClient": "Client",
+      "columnStatus": "Status",
+      "columnActive": "Running",
+      "columnAttention": "Needs attention",
+      "columnRecent": "Recent success",
+      "statusUnknown": "Status not recorded",
+      "countUnknown": "could not be read",
+      "countLabel": {
+        "active": "{count, plural, one {# Work running for {client}} other {# Work running for {client}}}",
+        "attention_failed": "{count, plural, one {# Work needing attention for {client}} other {# Work needing attention for {client}}}",
+        "recent_success": "{count, plural, one {# Work posted for {client} in the last seven days} other {# Work posted for {client} in the last seven days}}"
+      },
+      "coverage": {
+        "onboarding_client_excluded_from_queue": "The Needs you chips above exclude this client — the review queue counts active clients only.",
+        "completions_without_receipt": "{count, plural, one {# finished Work carries no dated receipt, so it is not in Recent success.} other {# finished Work carry no dated receipt, so they are not in Recent success.}}",
+        "retry_label_preview_only": "Retry labels cover only part of this page. The counts are whole.",
+        "unknownReason": "Part of this row could not be made ({reason})."
+      },
+      "queueExcludes": "The Needs you chips above cover active clients only ({statuses} are excluded from them, while their Work is still counted here).",
+      "recentDatedBy": "Recent success is dated by when each Work posted, between {from} and {to} — not by when it started. The Work list it opens is not narrowed to those seven days: it shows every completed Work for that client, because a Work list can only be narrowed by when work started.",
+      "recentUndated": "Recent success could not be dated for this read, so its links carry no week.",
+      "emptyRegisterTitle": "No clients yet",
+      "emptyRegisterBody": "Add the first client and this table fills in: one row per client, with what is running, what needs attention, and what posted in the last seven days.",
+      "emptyFilteredTitle": "No client matches this view",
+      "emptyFilteredBody": "No client on this page of the register matches the narrowing in the address bar.",
+      "emptyFilteredMorePages": "This firm has more clients than fit on one page — clear the filters and use Next to look further along the register.",
+      "clearFilters": "Clear the filters",
+      "firstClientPrompt": "This firm has no clients yet. Start with the first one.",
+      "zeroWorkload": "Every client is clear: nothing is running and nothing needs attention. That is a different answer from the review queue above, which is about what is waiting on a person.",
+      "denied": "Work records need a bookkeeper role.",
+      "deniedWhy": "The Needs you numbers above are read at a lower floor and are still yours.",
+      "error": "The portfolio could not be read.",
+      "retry": "Try again",
+      "readAt": "Read at {at}.",
+      "neverRead": "This portfolio has not been read yet.",
+      "delayed": "This read is taking longer than usual — the numbers are from the time above, not from now.",
+      "pageTruncated": "This is the first {count} clients by name. Use Next for the rest.",
+      "paginationLabel": "Portfolio pages",
+      "firstPage": "First page",
+      "nextPage": "Next page"
+    },
     "seeInbox": "See the full inbox",
     "seeActivity": "See all activity",
     "clientsEmpty": "No clients yet.",
     "clientsLine": "{active} active · {onboarding} onboarding · {archived} archived",
     "clientsOther": "{count, plural, one {# client has another status} other {# clients have another status}}",
-    "notBuilt": "A firm-wide close status per client is not built. Close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one."
+    "notBuilt": "A firm-wide close status per client is still not built: close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one. And organising work in batches across clients does not exist at this altitude — the portfolio counts Work per client and links into the list that owns it."
   },
   "NeedsYou": {
     "heading": "Needs you",
@@ -196,6 +241,7 @@
       "uncoded_filing": "Open the documents tab",
       "coding_task": "Open the documents tab",
       "open_question": "Open the documents tab",
+      "compliance_watch": "Open the tax tab",
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
       "staff_advance_incomplete": "Open the registers tab"
@@ -5470,7 +5516,20 @@
         "registration_recorded": "Registration recorded",
         "not_liable_documented": "Not liable — documented"
       },
-      "evidencePlaceholder": "Evidence"
+      "evidencePlaceholder": "Evidence",
+      "receiptHeading": "Disposition",
+      "receiptNone": "Nothing has been recorded on this watch yet.",
+      "receiptUnreadable": "The disposition on this watch could not be read.",
+      "receiptAct": {
+        "acknowledged": "Acknowledged by <actor></actor> on {at}.",
+        "snoozed": "Snoozed by <actor></actor> on {at}.",
+        "re_armed": "Re-armed on {at}.",
+        "resolved": "Resolved by <actor></actor> on {at}."
+      },
+      "receiptTransition": "State {before} → {after}.",
+      "receiptRationale": "Rationale: {rationale}",
+      "receiptEvidence": "Evidence: {evidence}",
+      "receiptNoVersion": "This record carries no version number — the transition above is what the database keeps."
     },
     "compliance": {
       "heading": "Compliance register",

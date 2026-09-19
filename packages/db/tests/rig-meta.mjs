@@ -2189,6 +2189,24 @@ export const CODING_LANE_LINK_0197_COHORT = [...CODING_LANE_LINK_0197_UNGRANTED_
 const CLIENT_WORK_PACK_0214_HUMAN_FNS = ["get_client_work_pack"];
 export const CLIENT_WORK_PACK_0214_COHORT = [...CLIENT_WORK_PACK_0214_HUMAN_FNS];
 
+// #659 [0231, Firm Home's portfolio table + the compliance-watch disposition receipt] — its own
+// cohort for the same "wholly present or wholly absent" reason 0214's carries.
+//
+//   TWO read doors — clara_authenticated ONLY, both. `get_firm_portfolio_pack` is SECURITY INVOKER
+//   over clara.clients, clara.accounting_work and clara.operation_receipts (all three already
+//   granted, all three behind forced firm-scoped RLS) with 0189's own three inline predicates for
+//   its bookkeeper floor, and it reaches clara.agent_tasks ONLY through 0189's already-granted
+//   DEFINER helper with at most 101 preview ids. `get_compliance_watch_disposition` is SECURITY
+//   DEFINER because clara.compliance_watches and clara.compliance_watch_events carry no
+//   application-role grant at all (0016:396-414) — an INVOKER body would see nothing — and it
+//   grants nothing on either relation. clara_runtime, the agent role and both wake roles gain ZERO
+//   on both names: a portfolio board and a disposition receipt are human reads of a human's own
+//   queue. 0231 creates no other function and recuts nothing, so this cohort is two names.
+const FIRM_PORTFOLIO_PACK_0231_HUMAN_FNS = [
+  "get_firm_portfolio_pack", "get_compliance_watch_disposition",
+];
+export const FIRM_PORTFOLIO_PACK_0231_COHORT = [...FIRM_PORTFOLIO_PACK_0231_HUMAN_FNS];
+
 // #647 [0215, counterparty identity provenance + the correction history] — its own cohort for the
 // same "wholly present or wholly absent" reason 0192's and 0193's carry: folding these names into
 // an older roster would red every database between the two frontiers, and cohortFailures() fails
@@ -2688,6 +2706,11 @@ export const ALLOWED = {
     // ONLY, bookkeeper-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
     ...CLIENT_WORK_PACK_0214_HUMAN_FNS,
+    // #659 [0231] Firm Home's portfolio table (bookkeeper-floored, SECURITY INVOKER) and the
+    // compliance-watch disposition receipt (bookkeeper-floored, SECURITY DEFINER over two
+    // relations no application role can read) — see the block above. clara_authenticated ONLY;
+    // clara_runtime, the agent role and both wake roles gain ZERO.
+    ...FIRM_PORTFOLIO_PACK_0231_HUMAN_FNS,
     // #649 [0219] the identity-candidates read (admin floor) + the onboarding-facts settle door
     // (bookkeeper floor) — see the block above. clara_authenticated ONLY; clara_runtime, the
     // agent role and both wake roles gain ZERO.
@@ -3169,6 +3192,14 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
   // #812
   failures.push(...cohortFailures("#650 0214 client work-pack read lane", CLIENT_WORK_PACK_0214_COHORT, liveNames));
+  // #659 [0231] — bimodal like 0222's and 0217's: wholly present once 0231 applies, wholly absent
+  // before it, because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
+  // A PARTIAL cohort is still a failure, which is the half that matters.
+  const portfolioLive = FIRM_PORTFOLIO_PACK_0231_COHORT.filter((n) => liveNames.has(n));
+  if (portfolioLive.length !== 0) {
+    failures.push(...cohortFailures("#659 0231 firm portfolio + watch disposition lane",
+      FIRM_PORTFOLIO_PACK_0231_COHORT, liveNames));
+  }
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));

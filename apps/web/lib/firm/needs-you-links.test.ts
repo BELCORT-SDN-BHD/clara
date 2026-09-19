@@ -28,14 +28,68 @@ test("each row kind opens the tab that owns its verbs", () => {
 });
 
 test("a row with no owning tab keeps the workspace root, and SAYS it is the root", () => {
-  // `seeding_proposal` is one row per CLIENT (裁-17, 0146), not one per object, and
-  // `compliance_watch` is settled on a FIRM admin surface with no client tab at all. Sending
-  // either to a tab would be a guess; the root is the honest destination and the label
-  // follows it, so a click's destination is never oversold.
-  for (const kind of ["seeding_proposal", "compliance_watch"]) {
+  // `seeding_proposal` is one row per CLIENT (裁-17, 0146), not one per object. Sending it to a
+  // tab would be a guess; the root is the honest destination and the label follows it, so a
+  // click's destination is never oversold.
+  for (const kind of ["seeding_proposal"]) {
     assert.equal(needsYouRowHref(row(kind)), `/clients/${CLIENT}`);
     assert.equal(hasOwningTab(row(kind)), false);
   }
+});
+
+// --- #659: the two repoints ------------------------------------------------------------------
+
+test("ticket 659: a compliance_watch row opens the TAX tab, where the three acts are actually mounted", () => {
+  // The old destination was the workspace root, under a comment claiming the watch "renders on
+  // the firm admin compliance surface, which is NOT client-scoped". That stopped being true when
+  // `components/tax/SstWatchSection.tsx` began mounting `ComplianceWatchAffordance` on
+  // `/clients/:id/tax` — acknowledge, snooze and resolve are one click from there.
+  assert.equal(needsYouRowHref(row("compliance_watch")), `/clients/${CLIENT}/tax`);
+  assert.equal(hasOwningTab(row("compliance_watch")), true, "and the LABEL says which tab it opens");
+});
+
+test("ticket 659 (fix round 1, A1): a work_question row keeps the workspace ROOT — the queue row cannot address its Work", () => {
+  // THE REPOINT THIS TICKET SHIPPED AND THIS FIX WITHDREW. The brief instructed
+  // `work_question` -> `workDetailHref(row.client_id, row.task_id)` on the premise that "the row
+  // carries the parked run in task_id". The premise is true; the conclusion is not. `task_id` is
+  // an `agent_tasks` id — `list_review_queue` selects `wqi.task_id` while the accounting Work
+  // reaches the row only through `join clara.accounting_work wqw on wqw.id = wqi.work_id`, a
+  // DIFFERENT column that the row does not publish. `/clients/:id/work/<agent_task_id>` therefore
+  // resolves nothing: `loadWorkDetail` -> `getAccountingWork` returns null for an id that is not an
+  // `accounting_work.id` (lib/work/reads.ts).
+  //
+  // MEASURED ON A REAL ROW, not asserted here against a uuid this file made up — which is exactly
+  // how the original cell passed while the link was broken. `packages/db/tests/firm-portfolio-pack
+  // .test.mjs`'s `p659.links.work_question_row_cannot_address_its_work` opens a real question
+  // through the real doors and asserts `row.task_id !== work.id`, plus that NO field of the row
+  // carries the Work id. When that last assertion reds, the deep link has become buildable and
+  // this cell is the other half of the change.
+  const TASK = "33333333-3333-4333-8333-333333333333";
+  assert.equal(
+    needsYouRowHref({ ...row("work_question"), task_id: TASK }),
+    `/clients/${CLIENT}`,
+    "the honest destination is the workspace root, as it was before this ticket",
+  );
+  assert.equal(hasOwningTab({ row_kind: "work_question" }), false,
+    "and the LABEL says 'Open the client', so a click's destination is never oversold");
+  // The id is not merely unused — it must not reach a path at all.
+  assert.doesNotMatch(needsYouRowHref({ ...row("work_question"), task_id: TASK }) ?? "", /work/);
+});
+
+test("ticket 659: the repointed kind resolves to a REAL message key, so no raw next-intl path reaches the eye", async () => {
+  // `oldest-waiting-list.tsx` renders `t(\`openTab.${row.row_kind}\`)` whenever `hasOwningTab` is
+  // true. Before this ticket `NeedsYou.openTab` carried seven keys and `compliance_watch` was not
+  // among them, so the repoint alone would have shipped a key path to a professional.
+  const messages = (await import("../../messages/en.json", { with: { type: "json" } })).default as {
+    NeedsYou: { openTab: Record<string, string> };
+  };
+  const label = messages.NeedsYou.openTab.compliance_watch;
+  assert.equal(typeof label, "string", "NeedsYou.openTab.compliance_watch must exist");
+  assert.ok((label ?? "").length > 0, "NeedsYou.openTab.compliance_watch must not be empty");
+  // And the key for the WITHDRAWN repoint is gone with it: `hasOwningTab` answers false for
+  // `work_question`, so this label could only ever have been a promise nothing renders.
+  assert.equal(messages.NeedsYou.openTab.work_question, undefined,
+    "a label for a destination this build does not offer is a claim with no referent");
 });
 
 test("an UNKNOWN row kind degrades to the root rather than throwing or guessing", () => {

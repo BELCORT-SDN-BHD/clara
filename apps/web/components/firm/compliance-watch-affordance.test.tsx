@@ -77,6 +77,18 @@ function mockFetchFactory(actResponse: { url: string; body: unknown; status: num
     if (init?.body) calls.push({ url: u, body: JSON.parse(String(init.body)) });
     if (u.includes(actResponse.url)) return jsonResponse(actResponse.body, actResponse.status);
     if (u.includes("/rpc/list_review_queue")) return jsonResponse(envelope());
+    // #659 — the affordance now reads its own disposition receipt on mount and after every act
+    // (C88.10). These cells are about the three ACTS, so the receipt answers honest-empty here;
+    // compliance-watch-receipt.test.tsx drives the echo itself.
+    if (u.includes("/rpc/get_compliance_watch_disposition")) {
+      return jsonResponse({
+        watch_id: "w1", client_id: "c1", service_group: "digital_services",
+        watch_kind: "sst_registration", state: "crossed",
+        acknowledged_by: null, acknowledged_at: null, snoozed_until: null,
+        resolved_conclusion: null, resolved_by: null, resolved_at: null, resolved_evidence: null,
+        updated_at: "2026-07-01T00:00:00Z", events: [],
+      });
+    }
     for (const [path, body] of Object.entries(NO_GAPS)) {
       if (u.includes(path)) return jsonResponse(body);
     }

@@ -394,7 +394,18 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // that merely lands on `/clients/:id`). It holds no fixture: both facets are `count: 0` with no
   // rows, so there is nothing in it for a sibling walk to resolve as its own — the N4/N5 property.
   // A walk that wants a POPULATED band overlays its own `page.route`.
-  "home-board-mock.mjs": { unscopeable: [], debt: ["/rest/v1/rpc/get_client_work_pack"] },
+  // #659 added the SECOND handler this reader can see: `/rest/v1/rpc/get_firm_portfolio_pack`,
+  // Firm Home's own portfolio table. It is UNSCOPEABLE rather than debt, and the distinction is the
+  // same one #650's row draws from the other side: that door takes NO client argument at all. Its
+  // subject is the caller's own firm, which arrives as a JWT claim rather than as a discriminant in
+  // the request, so there is nothing in the body to gate on — unlike `get_client_work_pack`, whose
+  // `p_client` is right there and simply not used. It holds no fixture either (zero rows), so the
+  // N4/N5 property that makes the rest of this file safe holds for it too, and a walk that wants a
+  // POPULATED portfolio overlays its own `page.route`.
+  "home-board-mock.mjs": {
+    unscopeable: ["/rest/v1/rpc/get_firm_portfolio_pack"],
+    debt: ["/rest/v1/rpc/get_client_work_pack"],
+  },
   // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
   // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
   // above, which is the state a lane mock should be in.
@@ -1523,4 +1534,47 @@ test("client-id census POSITIVE CONTROL · two lanes at one address ARE caught",
   const problems = clientIdCollisions(synthetic);
   assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
   assert.match(problems[0]!, /fake-lane-a-mock\.mjs, fake-lane-b-mock\.mjs/);
+});
+
+// ===============================================================================================
+// #659 (fix round 1, finding A12) — A LANE THAT DEPENDS ON ANOTHER LANE'S VERB, DECLARED.
+//
+// Firm Home now renders a recent-activity band off `clara.list_activity` (D18.f's swap). #659
+// added NO handler for that verb, because it could not usefully add one: `serve-built.mjs`
+// dispatches `handleActivitySupabase` far ABOVE `handleHomeBoardSupabase`, so an arm in
+// `home-board-mock.mjs` would never be reached, and moving either dispatch position is forbidden
+// by the wave's §6.1 ruling (#657 dispatches between them).
+//
+// The consequence is real and belongs to the census rather than to a paragraph in a report: every
+// OTHER lane's walk that merely lands on `/` now renders #632's activity fixtures inside Firm
+// Home's band. The two columns above cannot express it — this lane declares no handler for the
+// verb, so there is nothing for the reader to classify — which is exactly how a cross-lane
+// dependency stays invisible until it breaks. These two cells make it a checked fact instead.
+// ===============================================================================================
+
+test("#659 · Firm Home's activity band is answered by #632's lane, and the dispatch order that makes that true is pinned", () => {
+  const serveBuilt = readFileSync(SERVE_BUILT, "utf8");
+  const activityAt = serveBuilt.indexOf("handleActivitySupabase(request");
+  const homeBoardAt = serveBuilt.indexOf("handleHomeBoardSupabase(request");
+  assert.ok(activityAt > 0, "the activity lane is still dispatched");
+  assert.ok(homeBoardAt > 0, "the home-board lane is still dispatched");
+  assert.ok(
+    activityAt < homeBoardAt,
+    "activity-mock.mjs MUST stay above home-board-mock.mjs: Firm Home's recent-activity band is "
+    + "answered by #632's fixtures, and every walk that lands on `/` sees them. If this order is "
+    + "ever inverted, home-board-mock.mjs must grow its own honest-empty `list_activity` arm in "
+    + "the same change — otherwise the band silently changes what every other lane's walk renders.",
+  );
+});
+
+test("#659 · home-board-mock.mjs answers NO list_activity verb — the dependency above is real, not a duplicate", () => {
+  // A POSITIVE CONTROL on the claim: if this lane ever grows its own arm, the comment above stops
+  // being true and this cell is where that is noticed.
+  const homeBoard = readFileSync(join(E2E_DIR, "home-board-mock.mjs"), "utf8");
+  assert.doesNotMatch(
+    homeBoard, /rpc\/list_activity/,
+    "home-board-mock.mjs answers no list_activity verb; if it grows one, update the dependency "
+    + "note above and this lane's declaration, because the arm would be dead code under the "
+    + "current dispatch order",
+  );
 });

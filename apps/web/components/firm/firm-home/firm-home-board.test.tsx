@@ -8,6 +8,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent } from "../../../test/hookHarness";
@@ -49,11 +51,59 @@ const ENVELOPE = {
   rows: [QUEUE_ROW], next_cursor: null,
 };
 
-const TIMELINE = [{
-  seq: 7, event_type: "entry_posted", event_description: "An entry was posted.",
-  client_id: "c1", actor: "u1", on_behalf_of: null, via_wake_kind: null,
-  created_at: "2026-09-04T01:12:00Z",
+// #659 (D18.f) — Recent activity reads clara.list_activity now, not clara.list_firm_timeline, so
+// the board can render WHO did each thing through the one shared actor cell. The sentence is still
+// the database's own; what is new beside it is the person.
+const ACTIVITY = {
+  rows: [{
+    id: "ev-7", source: "event", event_type: "entry_posted", description: "An entry was posted.",
+    client_id: "c1", actor: "11111111-1111-4111-8111-111111111111", on_behalf_of: null,
+    via_wake_kind: null, occurred_at: "2026-09-04T01:12:00Z",
+    object_kind: "entry", object_id: "e1", work_id: null, receipt_id: null, document_id: null,
+    original_entry_id: null, replacement_entry_id: null, status: "approved", kind: "journal",
+  }],
+  next_cursor: null, truncated: false,
+};
+
+const MEMBERS = [{
+  membership_id: "m1", user_id: "11111111-1111-4111-8111-111111111111",
+  display_name: "Tao", email: "tao@example.com", role: "owner", status: "active",
+  created_at: "2026-01-01T00:00:00Z", removed_at: null,
 }];
+
+// #659 — the portfolio pack. TWO clients, one of them archived, so the board's own disclosure and
+// its count links are exercised by the happy path rather than only by the portfolio's own cells.
+const PORTFOLIO = {
+  computed_at: "2026-09-19T02:00:00.000Z",
+  preview_limit: 3,
+  page_limit: 50,
+  window: {
+    from: "2026-09-12T16:00:00Z", to: "2026-09-19T16:00:00Z",
+    from_date: "2026-09-13", to_date: "2026-09-19", timezone: "Asia/Kuala_Lumpur", days: 7,
+  },
+  rows: [
+    {
+      client_id: "c1", name: "Rome Properties", status: "active",
+      active: 4, attention_failed: 1, failed: 1, refused: 0, recent_success: 2,
+      uncounted_completions: 0, coverage: "ok", coverage_reason: null, preview: [],
+    },
+    {
+      client_id: "c2", name: "Bee Creative", status: "onboarding",
+      active: 1, attention_failed: 0, failed: 0, refused: 0, recent_success: 0,
+      uncounted_completions: 0, coverage: "partial",
+      coverage_reason: "onboarding_client_excluded_from_queue", preview: [],
+    },
+  ],
+  next_cursor: null, truncated: false, coverage: "ok", coverage_reason: null,
+  sources: {
+    work: { computed_at: "2026-09-19T02:00:00.000Z" },
+    review_queue: { signal: "watermark", excludes: ["onboarding", "archived"] },
+    compliance: { signal: "stale_evaluator", window_hours: 48 },
+    lint: { signal: "stale_evaluator" },
+    sweep: { signal: "last_finalized_at" },
+  },
+  needs_you_ref: { source: "list_review_queue.counts", floor: "viewer", excludes: ["onboarding", "archived"] },
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -85,16 +135,34 @@ function wire(overrides: Record<string, () => Response> = {}): typeof fetch {
     if (url.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
     if (url.includes("/rest/v1/agent_tasks_visible")) return jsonResponse([]);
     if (url.includes("/rpc/list_review_queue")) return jsonResponse(ENVELOPE);
-    if (url.includes("/rpc/list_firm_timeline")) return jsonResponse(TIMELINE);
+    if (url.includes("/rpc/list_activity")) return jsonResponse(ACTIVITY);
+    if (url.includes("/rpc/get_firm_portfolio_pack")) return jsonResponse(PORTFOLIO);
+    if (url.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
     throw new Error(`unexpected fetch: ${url}`);
   };
 }
 
-async function mount() {
+const router = { replace: () => {}, refresh: () => {}, push: () => {}, back: () => {}, forward: () => {}, prefetch: () => {} };
+
+async function mount(search = "") {
+  // #659 — the board reads `?status=&attention=&q=&cursor=` through `useSearchParams` now, so the
+  // three App-Router contexts the real route always supplies are supplied here too.
   const h = await renderComponent(
-    createElement(NextIntlClientProvider, { locale: "en", messages, children: createElement(FirmHomeBoard) }),
+    createElement(NextIntlClientProvider, {
+      locale: "en", messages, timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(
+        SearchParamsContext.Provider as never,
+        { value: new URLSearchParams(search) as never },
+        createElement(
+          AppRouterContext.Provider as never,
+          { value: router as never },
+          createElement(PathnameContext.Provider as never, { value: "/" as never },
+            createElement(FirmHomeBoard) as never),
+        ),
+      ),
+    }),
   );
-  for (let i = 0; i < 6; i++) await h.settle();
+  for (let i = 0; i < 8; i++) await h.settle();
   return h;
 }
 
@@ -170,7 +238,7 @@ test("Firm Home: the close roll-up is an honest NotBuiltNote — never a fabrica
   await withMockedEnv(wire(), async () => {
     const h = await mount();
     try {
-      assert.match(h.text(), /A firm-wide close status per client is not built/);
+      assert.match(h.text(), /A firm-wide close status per client is still not built/);
       assert.match(h.text(), /Statutory deadlines are not recorded yet/);
       // Pinned so a later lane cannot quietly replace the note with a number.
       assert.doesNotMatch(h.text(), /gates met|close ready|0 of 7/i);
@@ -178,48 +246,63 @@ test("Firm Home: the close roll-up is an honest NotBuiltNote — never a fabrica
   });
 });
 
-test("Firm Home: an ABSENT firm timeline renders the honest not-deployed note, never an error and never a fake feed", async () => {
+test("Firm Home (ticket 659, D18.f): a 404 on list_activity is a REAL read failure — the not-deployed arm has no honest referent any more", async () => {
+  // THE REPLACED CELL, and the reason is the swap. `clara.list_firm_timeline` had a not-deployed
+  // arm because a database could predate migration 0174; `clara.list_activity` exists in every
+  // database at this frontier (0181:218 -> 0202:204), so a 404 from it is deployment skew, a
+  // misnamed argument or an outage — and painting any of those as "not built yet" is the same lie
+  // in the opposite direction. Without this cell the swap would have quietly retired the coverage
+  // the old one carried while leaving it green.
   await withMockedEnv(
-    wire({ "/rpc/list_firm_timeline": () => jsonResponse({ code: "PGRST202", message: "could not find function" }, 404) }),
+    wire({ "/rpc/list_activity": () => jsonResponse({ code: "PGRST202", message: "could not find function" }, 404) }),
     async () => {
       const h = await mount();
       try {
-        assert.match(h.text(), /The firm activity timeline is not available yet/);
-        assert.doesNotMatch(h.text(), /Something went wrong/, "an absent read is not a failure");
-        assert.doesNotMatch(h.text(), /No firm activity recorded yet/, "and it is not an honest-empty claim either");
+        // The SHARED typed banner, the one `DataState` renders for every `kind: "not_found"` read
+        // in this app — not a bespoke sentence this surface writes about itself.
+        assert.match(h.text(), /This isn't available yet\./,
+          "a 404 renders as the typed read failure it is, through the shared classifier");
+        assert.doesNotMatch(h.text(), /The firm activity timeline is not available yet/,
+          "the dedicated not-deployed note is GONE — it described a pre-0174 database and this read is not that one");
+        assert.doesNotMatch(h.text(), /No firm activity recorded yet/,
+          "and a failed read is never an honest-empty claim");
       } finally { await h.unmount(); }
     },
   );
 });
 
-test("Firm Home: a DEPLOYED timeline renders the DB's own sentence, day-grouped — and a 403 renders as a failure, not as 'not built'", async () => {
+test("Firm Home (ticket 659, D18.f): recent activity renders the DB's own sentence day-grouped AND the person who did it — and a 403 is still a failure", async () => {
   await withMockedEnv(wire(), async () => {
     const h = await mount();
     try {
-      assert.match(h.text(), /An entry was posted\./, "event_description is the DB's own sentence, printed verbatim");
+      assert.match(h.text(), /An entry was posted\./, "the sentence is the DB's own, printed verbatim");
       assert.match(h.text(), /2026-09-04/, "the day header is the business-timezone calendar day");
+      assert.match(h.text(), /Tao/,
+        "and the ACTOR is rendered now — list_firm_timeline carried the uuid and this board dropped it");
+      assert.match(h.text(), /wrong kind by the activity door/,
+        "with the door's own kind-ladder defect NAMED on the surface rather than patched in the browser");
     } finally { await h.unmount(); }
   });
   await withMockedEnv(
-    wire({ "/rpc/list_firm_timeline": () => jsonResponse({ message: "forbidden" }, 403) }),
+    wire({ "/rpc/list_activity": () => jsonResponse({ message: "forbidden" }, 403) }),
     async () => {
       const h = await mount();
       try {
         assert.match(h.text(), /can't read this yet/, "a grant failure is a real answer about the caller");
-        assert.doesNotMatch(h.text(), /timeline is not available yet/);
+        assert.doesNotMatch(h.text(), /The firm activity timeline is not available yet/);
       } finally { await h.unmount(); }
     },
   );
 });
 
-test("Firm Home: ONE failed read does not blank the others — a dead client register leaves the queue and the timeline standing", async () => {
+test("Firm Home: ONE failed read does not blank the others — a dead client register leaves the queue and recent activity standing", async () => {
   await withMockedEnv(
     wire({ "/rest/v1/clients": () => jsonResponse({ message: "boom" }, 500) }),
     async () => {
       const h = await mount();
       try {
         assert.match(h.text(), /Needs you: 3/, "the queue section still renders its real numbers");
-        assert.match(h.text(), /An entry was posted\./, "and so does the timeline");
+        assert.match(h.text(), /An entry was posted\./, "and so does recent activity");
         assert.match(h.text(), /Something went wrong/, "while the failed section shows its own failure");
         // The register failing must not fabricate a client mix.
         assert.doesNotMatch(h.text(), /active · .* onboarding/);
