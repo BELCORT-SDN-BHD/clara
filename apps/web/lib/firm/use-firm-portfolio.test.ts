@@ -340,3 +340,57 @@ test("the composing hook does NOT edit use-review-queue.ts — four surfaces sha
     "adding the listener there would change three other surfaces' request profile with a cell for none of them");
   assert.doesNotMatch(shared, /addEventListener/);
 });
+
+test("fix round 1 (A10): a SUPERSEDED read cannot clear `loading` while the current one is still in flight", async () => {
+  // THE FRAME THIS CELL FORBIDS: `pack` empty and `loading` false, with a read outstanding — which
+  // `firm-portfolio-section.tsx` renders as the zero-client Empty, "No clients yet", to a firm that
+  // has clients. The epoch guard protected the DATA (`if (epoch !== epochRef.current) return`) but
+  // the `finally` cleared the busy flags UNCONDITIONALLY, so the slower of two page reads turned
+  // the board off on its way out.
+  //
+  // The shape: turn to a new page (which clears `pack` and re-arms `hasLoadedOnceRef`, so BOTH
+  // reads are first-loads), fire a second trigger while it is in flight, then settle them OUT OF
+  // ORDER — the older one last.
+  await withTimers(async ({ fireFocus }) => {
+    let cursor: string | null = null;
+    const gates: ((p: PortfolioPack) => void)[] = [];
+    const h = await renderHook(() => useFirmPortfolio({
+      cursor,
+      load: async () => {
+        if (cursor === null) return packWith(2);
+        return new Promise<PortfolioPack>((resolve) => { gates.push(resolve); });
+      },
+      now: () => 1,
+    }));
+    try {
+      await settle(h);
+      assert.equal(h.current.pack.rows.length, 2);
+
+      cursor = "cGFnZTI=";
+      await h.rerender();
+      await h.settle();
+      assert.equal(h.current.loading, true, "the page turn cleared the rows and put the board on the skeleton");
+      assert.equal(h.current.pack.rows.length, 0);
+
+      // A second trigger lands mid-flight: a return to the tab, the 30 s tick, or a client record
+      // change. Now TWO reads are outstanding and the first one is already superseded.
+      await h.act(() => { fireFocus(); });
+      await h.settle();
+      assert.equal(gates.length, 2, "two reads are in flight");
+
+      // The OLDER read settles first. It must contribute nothing at all — not its rows, and not
+      // the end of the board's busy state.
+      await h.act(async () => { gates[0](packWith(9)); });
+      await settle(h);
+      assert.equal(h.current.pack.rows.length, 0, "the superseded read's DATA is dropped (this already held)");
+      assert.equal(h.current.loading, true,
+        "and the board stays on the skeleton: an empty pack with loading=false is the 'No clients yet' Empty");
+
+      // The current read settles and the board is whole.
+      await h.act(async () => { gates[1](packWith(5)); });
+      await settle(h);
+      assert.equal(h.current.loading, false);
+      assert.equal(h.current.pack.rows.length, 5);
+    } finally { await h.unmount(); }
+  });
+});

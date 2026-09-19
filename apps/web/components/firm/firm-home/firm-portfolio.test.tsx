@@ -286,3 +286,69 @@ test("ticket 659: visiblePortfolioRows narrows by status, name and attention —
   assert.deepEqual(ids(visiblePortfolioRows(rows, s({ attention: "caught_up" }), new Set(["a"]))), ["c"],
     "caught up means no Work running, none needing attention, and nothing waiting on a person");
 });
+
+// --- fix round 1: the three findings the adversarial lens measured on this section --------------
+
+test("ticket 659 (A5): an UNKNOWN count withholds the reassurance — 'every client is clear' is a KNOWN zero", async () => {
+  // The bug this cell exists for: `(r.active ?? 0) === 0` reads "I could not find out what is
+  // running" as "nothing is running" and prints the one sentence that tells a principal to stop
+  // looking. The count cell already prints "could not be read" — so before this cell, ONE screen
+  // could carry both sentences at once.
+  const h = await mount(state({ pack: pack([row({ active: null, attentionFailed: null, recentSuccess: null })]) }));
+  try {
+    assert.match(h.text(), /could not be read/, "the cell is honest about the null");
+    assert.doesNotMatch(
+      h.text(),
+      /Every client is clear/,
+      "a count this build could not read cannot be evidence that there is nothing to do",
+    );
+  } finally { await h.unmount(); }
+});
+
+test("ticket 659 (A5): `caught_up` drops a row whose counts are unknown, and so do `active` and `failed`", () => {
+  const unknown = row({ client_id: "u", name: "Unknown Co", active: null, attentionFailed: null });
+  const s = (over: Record<string, unknown>) => ({
+    status: [], attention: null, q: null, cursor: null, ...over,
+  }) as never;
+  // All three narrowings ask a question about a NUMBER. A row with no number is not an answer to
+  // any of them — it is the row a professional must go and look at, and `caught_up` claiming it is
+  // the exact inverse of the truth.
+  assert.deepEqual(visiblePortfolioRows([unknown], s({ attention: "caught_up" }), new Set()), []);
+  assert.deepEqual(visiblePortfolioRows([unknown], s({ attention: "active" }), new Set()), []);
+  assert.deepEqual(visiblePortfolioRows([unknown], s({ attention: "failed" }), new Set()), []);
+});
+
+test("ticket 659 (A4): the filtered-Empty makes a PAGE-local claim, never a firm-wide one", async () => {
+  // `visiblePortfolioRows` narrows the CURRENT KEYSET PAGE — the door takes no filter argument at
+  // all. On a firm with more than one page, a matching client can simply be on a later page, so
+  // "the firm has clients — none of them matches" is a sentence the build cannot support.
+  const h = await mount(
+    state({ pack: pack([row({ name: "Rome Properties" })], { truncated: true, nextCursor: "Y3Vyc29y" }) }),
+    "q=zeta",
+  );
+  try {
+    assert.doesNotMatch(h.text(), /The firm has clients/, "the page cannot speak for the firm");
+    assert.match(h.text(), /on this page/i, "it says which population it actually searched");
+    assert.match(h.text(), /later page|Next/i, "and where the rest of the register is");
+  } finally { await h.unmount(); }
+});
+
+test("ticket 659 (A6): an undated completion is disclosed even when another coverage reason wins the row", async () => {
+  // `coverage_reason` is a strict precedence in the door, so an archived client that ALSO carries
+  // a finished Work with no receipt publishes only the status token — and the `recent_success = 0`
+  // beside it was shown with no explanation at all.
+  const h = await mount(state({
+    pack: pack([row({
+      status: "archived", recentSuccess: 0, uncountedCompletions: 1,
+      coverage: "partial", coverageReason: "onboarding_client_excluded_from_queue",
+    })]),
+  }));
+  try {
+    assert.match(h.text(), /review queue counts active clients only/, "the precedence winner still shows");
+    assert.match(
+      h.text(),
+      /carries no dated receipt/,
+      "and the undated completion, which is why Recent success reads 0, shows beside it",
+    );
+  } finally { await h.unmount(); }
+});

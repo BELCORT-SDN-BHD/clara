@@ -167,10 +167,18 @@ export function useFirmPortfolio(args: UseFirmPortfolioArgs = {}): FirmPortfolio
         setStaleError(error);
       }
     } finally {
-      // UNCONDITIONAL (`use-work-list.ts`'s own argument): this call's busy flags always clear when
-      // IT settles; only the DATA is epoch-gated.
-      setLoading(false);
-      setRefreshing(false);
+      // EPOCH-GATED, LIKE THE DATA (fix round 1, finding A10). This used to be unconditional on
+      // `use-work-list.ts`'s argument that "this call's busy flags always clear when IT settles" —
+      // which is true of a hook whose data survives a page turn, and false of this one. A page
+      // change here clears `pack` to EMPTY and re-arms `hasLoadedOnceRef`, so BOTH the page read
+      // and any trigger that lands during it are first-loads; when the SUPERSEDED one settles last
+      // it dropped its data (above) and then turned `loading` off anyway, leaving an empty pack
+      // with `loading === false` — which `firm-portfolio-section.tsx` renders as the zero-client
+      // Empty, "No clients yet", to a firm that has clients and a read still in flight.
+      if (epoch === epochRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
       // THE NEIGHBOURING NUMBERS MOVE WITH THIS ONE. The review-queue chips and the portfolio table
       // sit on one page and answer one question between them; a board that refreshed half of
       // itself would be worse than one that refreshed neither.

@@ -103,12 +103,19 @@ function rowMatchesAttention(
 ): boolean {
   if (attention === null) return true;
   if (attention === "needs_you") return needsYouClients.has(row.client_id);
-  if (attention === "active") return (row.active ?? 0) > 0;
-  if (attention === "failed") return (row.attentionFailed ?? 0) > 0;
+  // UNKNOWN IS NOT ZERO, AND IT IS NOT A MATCH EITHER (fix round 1, finding A5). Each of the three
+  // narrowings below asks a question about a NUMBER. A count the door could not read is not an
+  // answer to any of them: `?? 0` would have made an unknown row disappear from `active`/`failed`
+  // AND appear under `caught_up`, which is the exact inverse of the truth — that row is the one a
+  // professional most needs to go and look at. `portfolio-pack.ts`'s header forbids the same `?? 0`
+  // by name; this is that rule at the one place the rows are narrowed.
+  if (attention === "active") return row.active !== null && row.active > 0;
+  if (attention === "failed") return row.attentionFailed !== null && row.attentionFailed > 0;
   // `caught_up` is the DESIGNED zero, not a grid of them: no Work running, none needing attention,
-  // and nothing waiting on a person for this client.
-  return (row.active ?? 0) === 0
-    && (row.attentionFailed ?? 0) === 0
+  // and nothing waiting on a person for this client. A null on either count means this build cannot
+  // say that, so the row is not offered as one that is clear.
+  return row.active === 0
+    && row.attentionFailed === 0
     && !needsYouClients.has(row.client_id);
 }
 
@@ -185,15 +192,28 @@ export function FirmPortfolioSection({
     );
   };
 
-  const coverageWord = (row: PortfolioRow) => {
+  // THE ROW'S COVERAGE SENTENCES — PLURAL, and that is the fix (fix round 1, finding A6). The door
+  // publishes ONE `coverage_reason` chosen by a strict precedence (0231), so a client that is both
+  // archived AND carries a finished Work with no dated receipt publishes only the status token. The
+  // undated completion is the reason `Recent success` reads 0 on that row, and rendering it off the
+  // precedence winner meant that zero was shown with no explanation at all. `uncounted_completions`
+  // is a COUNT on the row, not a token, so it is asked independently and the two sentences stack.
+  const coverageWords = (row: PortfolioRow): string[] => {
+    const out: string[] = [];
     const reason = row.coverageReason;
-    if (reason === null) return null;
-    const text = isPortfolioRowCoverageReason(reason)
-      ? t(`portfolio.coverage.${reason}`, { count: row.uncountedCompletions ?? 0 })
-      // A token this build has not enumerated is shown as itself rather than swallowed: the row
-      // still says it is not whole, and the machine word is recoverable from the screen.
-      : t("portfolio.coverage.unknownReason", { reason });
-    return <span className="text-xs text-warning">{text}</span>;
+    if (reason !== null) {
+      out.push(isPortfolioRowCoverageReason(reason)
+        ? t(`portfolio.coverage.${reason}`, { count: row.uncountedCompletions ?? 0 })
+        // A token this build has not enumerated is shown as itself rather than swallowed: the row
+        // still says it is not whole, and the machine word is recoverable from the screen.
+        : t("portfolio.coverage.unknownReason", { reason }));
+    }
+    // Never twice: when the precedence winner IS the undated-completion token, the sentence above
+    // already carries the count.
+    if ((row.uncountedCompletions ?? 0) > 0 && reason !== "completions_without_receipt") {
+      out.push(t("portfolio.coverage.completions_without_receipt", { count: row.uncountedCompletions ?? 0 }));
+    }
+    return out;
   };
 
   // ----- the state machine. Seven arms, seven sentences; see this file's header. ---------------
@@ -244,11 +264,19 @@ export function FirmPortfolioSection({
       );
     }
     if (rows.length === 0 && filtered) {
+      // A PAGE-LOCAL CLAIM, because a page-local filter is all this build has (fix round 1, finding
+      // A4). `visiblePortfolioRows` narrows the CURRENT KEYSET PAGE — the door takes no filter
+      // argument at all (`portfolio-url-state.ts`) — so on a firm with more than one page a client
+      // that exists and matches is simply further along the register. The old sentence ("the firm
+      // has clients — none of them matches") told a principal something the page never measured.
       return (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>{t("portfolio.emptyFilteredTitle")}</EmptyTitle>
-            <EmptyDescription>{t("portfolio.emptyFilteredBody")}</EmptyDescription>
+            <EmptyDescription>
+              {t("portfolio.emptyFilteredBody")}
+              {pack.truncated ? ` ${t("portfolio.emptyFilteredMorePages")}` : ""}
+            </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
             <Button type="button" variant="outline" size="sm" onClick={() => push(EMPTY_PORTFOLIO_FILTERS)}>
@@ -280,7 +308,11 @@ export function FirmPortfolioSection({
                 >
                   {row.name ?? t("clientUnnamed")}
                 </Link>
-                {row.coverageReason !== null ? <div className="mt-0.5">{coverageWord(row)}</div> : null}
+                {coverageWords(row).map((text) => (
+                  <div key={text} className="mt-0.5">
+                    <span className="text-xs text-warning">{text}</span>
+                  </div>
+                ))}
               </TableCell>
               <TableCell className="text-muted-foreground">
                 <Badge tone={STATUS_TONE[row.status ?? ""] ?? "neutral"}>
@@ -300,10 +332,15 @@ export function FirmPortfolioSection({
   // EVERY CLIENT CLEAR is a DESIGNED state, not a grid of zeros (Xero/QuickBooks' own discipline),
   // and it is a different sentence from the queue's "nothing is waiting": one is about Work, the
   // other about the review queue, and they can legitimately disagree.
+  //
+  // AND IT REQUIRES A KNOWN ZERO (fix round 1, finding A5). `(r.active ?? 0) === 0` read "I could
+  // not find out what is running" as "nothing is running" and printed the one sentence on this
+  // board that tells a principal to stop looking — on the same screen as the count cell's own
+  // "could not be read". One null anywhere on the page withholds the reassurance.
   const caughtUp = portfolio.denied === null
     && !portfolio.loading
     && pack.rows.length > 0
-    && pack.rows.every((r) => (r.active ?? 0) === 0 && (r.attentionFailed ?? 0) === 0);
+    && pack.rows.every((r) => r.active === 0 && r.attentionFailed === 0);
 
   return (
     <section aria-labelledby="firm-home-portfolio" className="flex flex-col gap-3">
