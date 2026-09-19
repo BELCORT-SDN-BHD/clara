@@ -465,7 +465,29 @@ export function signatureIdentity(sig) {
  *  handled only `''`, so `E'it\'s harmless'` under-skipped at `\'`, desynced every literal
  *  after it, and a real `execute 'select … clara.wiki_pages'` that followed went UNSEEN —
  *  a fail-open in the security gate. `escapes` is true only when the opening quote is
- *  immediately introduced by a word-boundaried E/e, matching PostgreSQL's own lexer. */
+ *  immediately introduced by a word-boundaried E/e, matching PostgreSQL's own lexer.
+ *
+ *  #959 — THE MASKER'S CONTRACT ON AN UNTERMINATED TOKEN. If no closing quote exists before
+ *  the end of the input, this used to return `s.length` — "the string runs to the end of the
+ *  file". Every CALLER that skips quoted content this way (this masker's own comment-blanking
+ *  loop, `topLevelView`'s literal-blanking loop, `readParens`' paren balancer, `concatChains`'
+ *  literal-chain walk) then jumps straight to end-of-input too, so ANY comment or real code
+ *  after the unclosed quote is silently treated as still being "inside the string" and is
+ *  never looked at again — measured: one unbalanced `'` earlier in a migration's `do $tag$ …
+ *  $tag$` block desynchronised `censusReadOffsets`'s own re-mask of that block and left a
+ *  later comment mentioning `pg_get_functiondef(` unmasked, which `parseCoRPatches` then read
+ *  as a real (unattributable) target — an assertion-only tail classified as a change-of-record
+ *  patch with an unresolved EXECUTE target (#657 fix round 1).
+ *
+ *  THE CHOSEN CONTRACT (stated once, here, for every caller): BOUNDED, not reported. An
+ *  unterminated quote is treated as ONE ORDINARY CHARACTER — scanning resumes at the very next
+ *  position — rather than as an unbounded skip to end-of-input. A real `--`/`/* *\/` comment
+ *  later in the same input is therefore still found and masked. This was chosen over making the
+ *  masker throw on unparseable input because every caller above depends on `maskComments`
+ *  always returning a same-length STRING (never an exception) — genuinely unbalanced quotes are
+ *  themselves a SQL syntax error PostgreSQL would refuse at parse time, so recovering enough to
+ *  keep classifying the REST of the file correctly is more useful here than failing the whole
+ *  scan closed on one already-invalid file. */
 function skipQuoted(s, i) {
   const escapes = (s[i - 1] === "E" || s[i - 1] === "e")
     && !/[A-Za-z0-9_]/.test(s[i - 2] ?? " ");
@@ -476,15 +498,19 @@ function skipQuoted(s, i) {
     if (s[j + 1] === "'") { j += 2; continue; }           // '' in BOTH forms
     return j + 1;
   }
-  return s.length;
+  return i + 1; // #959 — UNTERMINATED: bounded (see the contract note above), not s.length.
 }
 
-/** Index just past the dollar-quoted string starting at `i`, or `i` when there is none. */
+/** Index just past the dollar-quoted string starting at `i`, or `i` when there is none —
+ *  the SAME "no match" value an unterminated tag now returns too (#959, see skipQuoted's
+ *  contract note above): every caller already treats `i` (unchanged) as "not a dollar-quote
+ *  here, advance by one ordinary character", so an OPEN tag with no matching CLOSE gets the
+ *  identical bounded treatment as no tag at all, instead of swallowing to end of input. */
 function skipDollar(s, i) {
   const m = /^\$[A-Za-z0-9_]*\$/.exec(s.slice(i));
   if (!m) return i;
   const close = s.indexOf(m[0], i + m[0].length);
-  return close < 0 ? s.length : close + m[0].length;
+  return close < 0 ? i : close + m[0].length;
 }
 
 /** Blank out `--` and `/* *\/` comments, preserving length (so offsets stay valid) and
