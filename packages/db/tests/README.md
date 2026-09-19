@@ -140,7 +140,13 @@ exactly that: `T10b-AC2 worldSchemaPresent() reads false on a no-World rig` guar
 from ever becoming universal by accident, and `T10b-AC2 a genuine PUBLIC-executable leak outside
 clara is named by agentReachableOutsideClara()` plants a real PUBLIC-executable function in a
 throwaway schema and asserts the enumeration names it (vacuity-controlled against a
-deliberately-neutered `agentReachableOutsideClara()`).
+deliberately-neutered `agentReachableOutsideClara()`). The first of those two ALSO carries a
+named skip arm (L04B-SPEC-03): its own job is to guard T10b's skip arm from becoming universal on
+a CLEAN rig, which has nothing to say about a genuinely World-contaminated one — without the
+guard's own skip, it reds on exactly the rig shape T10b's skip exists to make pass, defeating its
+own requirement. Reproduced on a cloned sibling database with only a bare `create schema
+workflow` (no full bootstrap needed — `worldSchemaPresent()` checks namespace existence alone):
+red before the fix, skip after, T10b itself unaffected either way.
 
 **Recipe:** if your session needs both a bootstrapped World (for `WORKFLOW_POSTGRES_URL`-driven
 runtime work) and a clean T10b run, keep them on separate databases rather than relying on the

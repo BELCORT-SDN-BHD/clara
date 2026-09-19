@@ -296,6 +296,19 @@ const T866_LEAK_SCHEMA = "x866_ac2_leak_probe";
 
 test("T10b-AC2 worldSchemaPresent() reads false on a no-World rig (the skip arm cannot become universal)", async (t) => {
   if (unready(t)) return;
+  // L04B-SPEC-03: this guard exists to catch T10b's own skip arm silently becoming
+  // universal on a CLEAN rig — it has nothing to say about a rig that genuinely IS
+  // World-contaminated, which is exactly the configuration AC1 (T10b itself, above)
+  // exists to make skip. Without this arm, the guard cell reds on precisely the rig
+  // shape #866 set out to stop reddening, which defeats its own requirement.
+  if (await worldSchemaPresent()) {
+    t.skip("World contamination (#866): a Workflow/WDK World is bootstrapped on this database "
+      + "(workflow/workflow_drizzle/graphile_worker schema present) — the guard this cell exists "
+      + "to prove (the skip arm cannot become universal) is moot on a rig where the skip arm is "
+      + "the CORRECT outcome; run this cell on a database with no World bootstrapped instead "
+      + "(RIG.md)");
+    return;
+  }
   assert.equal(await worldSchemaPresent(), false,
     "this rig has no workflow/workflow_drizzle/graphile_worker schema bootstrapped — " +
     "if this ever reads true here, T10b's assertion arm below is not the one running");
