@@ -540,14 +540,25 @@ export function useClaraThread(
           // buffer to preserve here — no stream was ever opened for this turn — so this arm only
           // reports; it does not call `beginRetry`.
           const admissionCause = settled.cause;
+          let reattachHandled = false;
           const { controller, done } = openStream(result.taskId, () => {
+            reattachHandled = true;
             claraThreadStore.markSent(threadId, provisional);
             setStop({ phase: "failed", cause: admissionCause, reattach: "reading" });
           });
           void done.catch((err: unknown) => {
             if (controller.signal.aborted) return;
+            reattachHandled = true;
             setStop({ phase: "failed", cause: admissionCause, reattach: "lost" });
             claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+          }).finally(() => {
+            // #642 (fix round 1, ADV-642-5) — a refused attach ends the read without opening
+            // it and without rejecting. `lost` is the true statement; `markSendFailed` is NOT,
+            // and is deliberately not called here — the turn was admitted, and erasing it is
+            // the defect the arm above already records by name.
+            if (reattachHandled || controller.signal.aborted) return;
+            claraThreadStore.markSent(threadId, provisional);
+            setStop({ phase: "failed", cause: admissionCause, reattach: "lost" });
           });
         }
         // TRUE, because the turn IS on the record: it was admitted and its bubble is in the
@@ -608,7 +619,25 @@ export function useClaraThread(
             return;
           }
           claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
-          if (!opened) resolve(false);
+          if (!opened) {
+            opened = true;
+            resolve(false);
+          }
+        }).finally(() => {
+          // #642 (fix round 1, ADV-642-5) — THE READ CAN END WITHOUT EVER OPENING, AND THE
+          // COMPOSER MAY NOT BE STRANDED BY IT. A revocation discovered at attach now
+          // delivers a `revoked` event and RETURNS rather than rejecting (one fact, one
+          // face — ./stream.ts), so neither the open callback nor the catch above runs and
+          // this promise would never settle: the composer and its attachment controls
+          // would stay disabled for the life of the mount, holding text the runtime had
+          // already accepted. `markSent` is the true transition for exactly the reason the
+          // abort arm above gives — `postTurn` accepted the turn, so it is on the record
+          // and its text must not also sit in the composer — and the revocation line, not
+          // this promise, is what tells the reader what happened.
+          if (opened) return;
+          opened = true;
+          claraThreadStore.markSent(threadId, provisional);
+          resolve(true);
         });
       });
     },
@@ -669,7 +698,14 @@ export function useClaraThread(
     // to read and `spendStop` has already retired its clock.
     if (settled.phase === "failed" && settled.cause !== "finished") {
       const cause = settled.cause;
+      // #642 (fix round 1, ADV-642-5) — WHICHEVER WAY THE READ ENDS, THE MACHINE RECORDS IT.
+      // A revocation found at attach now delivers a `revoked` event and RETURNS instead of
+      // rejecting (./stream.ts), so the `.catch` below would never run and the machine would
+      // sit in `attempting` for the life of the mount — the round-6 contract is that this
+      // state always says what happened to the read.
+      let handled = false;
       const { controller, done } = openStream(taskId, () => {
+        handled = true;
         // …AND THE BUFFER IS CLEARED HERE, NOT BEFORE (round-6 finding [5]). `beginRetry` resets
         // the stream slot to `initialClaraStreamState`, `provisionalChunks: []` — and that buffer
         // is the ONLY source of the live clarify card (ClaraThreadView's `foldLiveClarifyParts`).
@@ -685,6 +721,7 @@ export function useClaraThread(
       });
       void done.catch(() => {
         if (controller.signal.aborted) return;
+        handled = true;
         // A FAILED RE-ATTACH IS NOT A FAILED SEND. `markSendFailed` clears `activeTaskId`,
         // `turnStartedAt` and `turnStatus` — it would erase the very turn the refusal has just
         // told the reader is still running, which is the defect this arm exists to fix, arriving
@@ -696,6 +733,20 @@ export function useClaraThread(
         // path has no next attach (`runClaraTaskStream` never retries an attach failure), so the
         // buffer is simply the last true record of what reached this tab, parked question and all.
         claraThreadStore.markReattachFailed(threadId);
+        setStop({ phase: "failed", cause, reattach: "lost" });
+      }).finally(() => {
+        // The read ended without ever opening and without rejecting: the attach was
+        // REFUSED. `lost` is the true statement about this tab's read — "no more text will
+        // arrive here" — and the machine must say it, or the copy would sit in `attempting`
+        // for the life of the mount.
+        //
+        // THE STREAM STATE IS LEFT ALONE WHEN IT ALREADY SAYS `revoked`. A revocation is the
+        // stronger and later fact, and `markReattachFailed` writes `detached` — which the
+        // surface renders as "Reconnecting…", the exact sentence this fix exists to retire.
+        if (handled || controller.signal.aborted) return;
+        if (claraThreadStore.getThread(threadId).stream.status !== "revoked") {
+          claraThreadStore.markReattachFailed(threadId);
+        }
         setStop({ phase: "failed", cause, reattach: "lost" });
       });
     }

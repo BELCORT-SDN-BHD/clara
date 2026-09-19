@@ -120,3 +120,80 @@ test("VACUITY CONTROL — the same harness DOES reattach on `detached`, so the c
     assert.equal(sleeps.length, 1, "…after one backoff sleep");
   })();
 });
+
+test("p642.web.revoked_is_not_reconnecting — a revocation discovered at ATTACH time is the SAME fact, not a flaky transport", async () => {
+  // Fix round 1, review finding ADV-642-5. The hole was only half closed: `streamRoute.ts`
+  // can only send the `revoked` FRAME once the SSE headers are out, and its attach-time
+  // authorisation answers an HTTP status BEFORE that (`res.status(err.status).json(…)`
+  // precedes `res.status(200).set({Content-Type: text/event-stream})`). Every revocation
+  // discovered at attach — the reattach after a `detached`, a rail reopen, a scope switch
+  // back, any remount while the membership is already gone — therefore came back as 403 or
+  // 404, which `openTaskStream` turned into a plain `Error` and the caller read as a
+  // transport failure: backoff 1s→2s→4s…, up to eight attempts of "Reconnecting…", then a
+  // generic give-up. The person who has lost access was told their connection was flaky —
+  // the exact sentence this ticket set out to retire, on the path the new `revoked` case
+  // never sees.
+  const attaches: number[] = [];
+  const sleeps: number[] = [];
+  const seen: { event: string; data: unknown }[] = [];
+  await runClaraTaskStream({
+    token: "tok",
+    taskId: "t1",
+    signal: new AbortController().signal,
+    fetchImpl: (async () => {
+      attaches.push(1);
+      return new Response(JSON.stringify({ error: "no_membership", message: "no active firm membership" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+    onEvent: (evt) => seen.push({ event: evt.event, data: evt.data }),
+    sleepImpl: async (ms: number) => { sleeps.push(ms); },
+  });
+
+  assert.deepEqual(seen.map((e) => e.event), ["revoked"], "one fact, one face — the same event the mid-stream arm delivers");
+  assert.equal((seen.at(0)?.data as { reason?: string } | undefined)?.reason, "no_membership",
+    "…carrying the route's own code, which the surface maps to copy and never renders raw");
+  assert.equal(attaches.length, 1, "it must not reattach into a refusal that will be repeated");
+  assert.deepEqual(sleeps, [], "…nor sleep on a backoff it will never use");
+});
+
+test("p642.web.revoked_is_not_reconnecting — a 404 at attach is `not_found`, exactly as the mid-stream arm words it", async () => {
+  const seen: { event: string; data: unknown }[] = [];
+  await runClaraTaskStream({
+    token: "tok",
+    taskId: "t1",
+    signal: new AbortController().signal,
+    fetchImpl: (async () => new Response(JSON.stringify({ error: "not_found", message: "not found" }), {
+      status: 404, headers: { "content-type": "application/json" },
+    })) as typeof fetch,
+    onEvent: (evt) => seen.push({ event: evt.event, data: evt.data }),
+    sleepImpl: async () => {},
+  });
+  assert.deepEqual(seen.map((e) => e.event), ["revoked"]);
+  assert.equal((seen.at(0)?.data as { reason?: string } | undefined)?.reason, "not_found",
+    "the same word `streamRoute.ts:157` uses, so one fact reads one way wherever it is discovered");
+});
+
+test("VACUITY CONTROL — an attach that failed for a TRANSPORT reason still rejects, and is not dressed as a revocation", async () => {
+  // A 500, a torn proxy or an unreachable runtime says nothing about this reader's
+  // access. It must keep reaching the caller's own `.catch`, which is what paints "could
+  // not send that message" and the stream-lost banner. Without this arm, "treat a failed
+  // attach as a revocation" would pass the two cells above and quietly tell every reader
+  // with a flaky network that their access had been removed.
+  const seen: string[] = [];
+  await assert.rejects(
+    runClaraTaskStream({
+      token: "tok",
+      taskId: "t1",
+      signal: new AbortController().signal,
+      fetchImpl: (async () => new Response(JSON.stringify({ error: "internal" }), {
+        status: 500, headers: { "content-type": "application/json" },
+      })) as typeof fetch,
+      onEvent: (evt) => seen.push(evt.event),
+      sleepImpl: async () => {},
+    }),
+    /stream attach failed \(500\)/,
+  );
+  assert.deepEqual(seen, [], "and nothing was announced to the reader on its way out");
+});

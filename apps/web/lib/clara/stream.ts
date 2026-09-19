@@ -312,6 +312,21 @@ export interface OpenTaskStreamOptions {
  *  and it matters MOST here: an unauthenticated 307 to `/login`, followed, is a 200
  *  `text/html` body this reader would parse as SSE — no events, a graceless close, and
  *  eight silent reattach attempts. Manual, `res.ok` is false and the attach throws. */
+/** The attach was REFUSED because this reader may not see this task — not because the
+ *  transport failed. It carries the route's status and code so `runClaraTaskStream` can
+ *  deliver the same `revoked` event the mid-stream arm delivers, instead of retrying a
+ *  refusal that will be repeated identically eight times. */
+export class StreamAccessRevokedError extends Error {
+  readonly status: number;
+  readonly reason: string | null;
+  constructor(status: number, reason: string | null) {
+    super(`stream attach refused (${status})`);
+    this.name = "StreamAccessRevokedError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
 export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<AsyncGenerator<SseEvent>> {
   const doFetch = opts.fetchImpl ?? fetch;
   const res = await doFetch(`/api/runtime/tasks/${encodeURIComponent(opts.taskId)}/stream`, {
@@ -326,8 +341,39 @@ export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<Async
   // next reader hunting for a runtime error that never happened. Same gate, same 307, so
   // the same phrase, imported rather than re-typed.
   if (res.type === "opaqueredirect") throw new Error(`stream attach failed: ${REDIRECTED}`);
+  // #642 (fix round 1, ADV-642-5) — A REVOCATION DISCOVERED AT ATTACH IS A REVOCATION.
+  // `streamRoute.ts` can only write the `revoked` FRAME after the SSE headers are out, and
+  // its attach-time authorisation answers before that, so the reattach after a `detached`,
+  // a rail reopen or any remount into a membership that is already gone comes back as a
+  // status rather than as an event. Read as a transport failure it produced up to eight
+  // rounds of "Reconnecting…" at someone whose access had been removed — the sentence this
+  // ticket exists to retire, on the one path the mid-stream arm never sees.
+  //
+  // 403 AND 404 ONLY, deliberately. They are the two the route's own masked-view law
+  // produces for "this reader may not see this task" (`lib/authz.mjs`: `no_membership`,
+  // `not_found`), and they are the same facts the mid-stream arm sends. A 401 is about
+  // THIS TAB'S TOKEN, not about a membership — "you no longer have access to this reply"
+  // would be an assertion the response does not make — so it stays a transport rejection.
+  if (res.status === 403 || res.status === 404) {
+    throw new StreamAccessRevokedError(res.status, await readRefusalCode(res, res.status));
+  }
   if (!res.ok || !res.body) throw new Error(`stream attach failed (${res.status})`);
   return readSseEvents(res.body);
+}
+
+/** The route's own refusal code, or `null` when the body cannot be read. NEVER guessed: an
+ *  unreadable body is not evidence of a reason, and the surface renders copy keyed off this
+ *  rather than the token itself (the masked-view law — a reason must never become an
+ *  existence oracle). 404 is worded `not_found` exactly as `streamRoute.ts`'s mid-stream
+ *  arm words it, so one fact reads one way wherever it is discovered. */
+async function readRefusalCode(res: Response, status: number): Promise<string | null> {
+  if (status === 404) return "not_found";
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    return typeof body?.error === "string" && body.error.length > 0 ? body.error : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +496,19 @@ export async function runClaraTaskStream(opts: RunClaraTaskStreamOptions): Promi
 
   for (;;) {
     if (opts.signal.aborted) return;
-    const events = await openTaskStream(opts);
+    let events: AsyncGenerator<SseEvent>;
+    try {
+      events = await openTaskStream(opts);
+    } catch (err) {
+      // #642 (fix round 1, ADV-642-5) — the attach was REFUSED, not broken. One fact, one
+      // face: the reader gets the same `revoked` event a mid-stream revocation delivers,
+      // the loop stops exactly as it does for that event, and nothing is retried.
+      if (err instanceof StreamAccessRevokedError) {
+        deliverEvent(opts, { event: "revoked", data: { taskId: opts.taskId, reason: err.reason } });
+        return;
+      }
+      throw err;
+    }
     opts.onOpen?.();
     let sawProgress = false; // some event OTHER than the closing `detached` signal itself
     let detached = false;

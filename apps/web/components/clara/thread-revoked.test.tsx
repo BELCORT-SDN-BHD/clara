@@ -22,7 +22,7 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { ClaraThreadView } from "./ClaraThreadView";
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { claraThreadStore } from "../../lib/clara/threadStore";
 import messages from "../../messages/en.json";
@@ -40,12 +40,22 @@ const TOKEN = `x.${Buffer.from(JSON.stringify({ sub: CALLER })).toString("base64
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+/** How the stream endpoint answers, for the cells that drive a real attach. `null` means
+ *  no cell in flight is using it and a request would be a bug in the fixture. */
+let streamAnswer: (() => Response) | null = null;
+
 function withFetch(run: () => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (method === "POST" && url.includes("/turns")) return json({ task_id: TASK, replayed: false }, 202);
+    if (url.includes(`/tasks/${TASK}/stream`)) {
+      if (!streamAnswer) throw new Error("no stream answer is armed for this cell");
+      return streamAnswer();
+    }
     if (url.includes("/messages")) return json({ messages: [] });
     if (url.includes("/rest/v1/")) return json([]);
     throw new Error(`unexpected fetch: ${url}`);
@@ -172,6 +182,56 @@ test("p642.web.revoked_is_not_reconnecting — the turn clock retires, because t
       // The task id is still a FACT and is kept, exactly as `markTurnStopped` keeps it.
       assert.equal(claraThreadStore.getThread(THREAD).activeTaskId, TASK);
     } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p642.web.revoked_is_not_reconnecting — a REFUSED ATTACH says the same thing, and does not strand the composer", async () => {
+  // Fix round 1, review finding ADV-642-5, at the face. A revocation discovered when the
+  // read is OPENED (the reattach after a `detached`, a rail reopen, a scope switch back)
+  // comes back as an HTTP status, not as an SSE frame, because `streamRoute.ts` answers
+  // its authorisation before the SSE headers exist. It used to be read as a flaky
+  // transport: eight rounds of "Reconnecting…" at a person whose membership had been
+  // removed.
+  //
+  // AND THE SECOND HALF OF THE CELL IS THE COMPOSER. Turning a rejection into an event
+  // means the attach no longer REJECTS, and the send path resolves its promise on the
+  // stream opening or on that rejection — so an arm that only stopped the loop would have
+  // left the composer disabled for the life of the mount, which is a worse defect than
+  // the one being fixed.
+  claraThreadStore.reset(THREAD);
+  streamAnswer = () => json({ error: "no_membership", message: "no active firm membership" }, 403);
+  await withFetch(async () => {
+    const h = await renderComponent(view());
+    try {
+      await settle(h);
+      const textarea = h.find((n: Stub) => n.tagName === "TEXTAREA");
+      assert.ok(textarea, "the composer must be mounted");
+      await h.act(() => setFieldValue(textarea, "book the invoice from Rome"));
+      const propsKey = Object.keys(textarea).find((k) => k.startsWith("__reactProps"));
+      const onKeyDown = propsKey
+        ? (textarea as Record<string, { onKeyDown?: (e: unknown) => unknown }>)[propsKey]?.onKeyDown
+        : undefined;
+      assert.ok(onKeyDown, "…and wired to Enter");
+      await onKeyDown({
+        key: "Enter", shiftKey: false, target: textarea, currentTarget: textarea,
+        nativeEvent: { key: "Enter", isComposing: false },
+        preventDefault() {}, stopPropagation() {}, persist() {},
+      });
+      await settle(h, 10);
+
+      const lines = statusLines(h);
+      assert.equal(lines.length, 1, `exactly one status line must speak; saw ${JSON.stringify(lines)}`);
+      assert.match(lines.at(0) ?? "", /You no longer have access to this reply/);
+      assert.doesNotMatch(h.text(), /Reconnecting/, "a refused attach is not a flaky connection");
+      assert.equal(claraThreadStore.getThread(THREAD).stream.status, "revoked");
+      // The turn WAS admitted (the 202 is on the record), so the send leaves `sending` and
+      // the person is not left holding a disabled composer with their text inside it.
+      assert.notEqual(claraThreadStore.getThread(THREAD).sendStatus, "sending",
+        "the composer must not stay busy for the life of the mount");
+    } finally {
+      streamAnswer = null;
       await h.unmount();
     }
   });
