@@ -213,7 +213,7 @@ test("a bounded set walks LOCALLY — one field per step, then a review, then ON
     await press(h, byTestId(h, "work-question-next")!);
     assert.ok(byTestId(h, "work-question-review"), "the last step is a REVIEW, not a submit surprise");
     assert.equal(doors.calls.filter((c) => c.fn !== "work_knowledge_drift").length, 0,
-      "nothing was sent while walking — local navigation is local. #658's drift READ is excluded by name: it is a read the form makes once on mount, and the invariant here is that walking writes nothing.");
+      "nothing was sent while walking — local navigation is local. The knowledge-drift READ (ticket 658) is excluded by name: it is a read the form makes once on mount, and the invariant here is that walking writes nothing. The ticket number is spelled out because a hash followed by three hex digits is a banned raw colour literal.");
   } finally {
     await h.unmount();
     doors.restore();
@@ -248,7 +248,7 @@ test("an invalid value is refused LOCALLY, names its constraint, and FOCUSES the
     assert.match(h.text(), /at most two decimal places/);
     assert.equal(activeElement(), inputFor(h, "amount_cents"), "the first invalid control took focus");
     assert.equal(doors.calls.filter((c) => c.fn !== "work_knowledge_drift").length, 0,
-      "and nothing was sent (#658's drift read excluded by name — see the walking cell above)");
+      "and nothing was sent (the ticket-658 drift read is excluded by name — see the walking cell above)");
   } finally {
     await h.unmount();
     doors.restore();

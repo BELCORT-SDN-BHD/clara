@@ -1182,7 +1182,10 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // mounts the SAME `EvidenceChooser` component (an accrual may cite the invoice its term was read
   // from), so it makes the same advisory read. `accrual-mock.mjs` gates on `ACC.clientId` before
   // answering and falls through otherwise, so it can answer for neither of the other two.
-  list_spoken_for_documents: ["accrual-mock.mjs", "documents-intake-mock.mjs", "journal-work-mock.mjs", "periodic-adjustment-mock.mjs", "work-knowledge-mock.mjs"],
+  list_spoken_for_documents: [
+    "accrual-mock.mjs", "documents-intake-mock.mjs", "journal-work-mock.mjs",
+    "periodic-adjustment-mock.mjs", "work-knowledge-mock.mjs",
+  ],
   // #633 x the chat-parity train — THE ATTRIBUTION PAIR, answered by two lanes because two
   // surfaces perform the same act: the chat composer files what it just attached, and the
   // documents tab / firm leaf file what a person just chose. `chat-parity-mock.mjs` answers
@@ -1233,7 +1236,9 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // on its own Work ids first: `staff-expense-claim-mock.mjs` answers a real claim for its own
   // register rows, while `journal-work-mock.mjs` and `plans-mock.mjs` answer the door's own SQL
   // NULL for Works that are not claims. Neither can answer for another lane's walk.
-  get_work_claim_origin: ["journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs"],
+  get_work_claim_origin: [
+    "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs",
+  ],
   // #653 x #640 — the FOUR plan lifecycle doors. A prepayment schedule CONFIGURES an
   // `amortisation_schedule` accounting plan, so pause / resume / end / catch-up on it are
   // `clara.pause_accounting_plan` and its siblings called on that plan's id. The web surface
