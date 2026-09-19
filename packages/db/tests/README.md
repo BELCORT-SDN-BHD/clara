@@ -314,6 +314,15 @@ runs this package against earlier frontiers. Cohorts are FUNCTION-name lists —
 from `pg_proc` rows — so 0232's two new RELATIONS are asserted by the migration's own tail and by
 this battery, never by the cohort.
 
+SEVEN CELLS WERE ADDED IN THE FIX ROUND, each for a defect a review found and each red before its
+fix: `historic_comparison_full_prior_month` (a complete month compares against the WHOLE prior
+month), the `pre_coverage_point` extension (an unavailable month-end produces no comparison amount),
+the `composition_bounded` extension (`profit.composition` lives in the profit group, where the
+browser's parser reads it), `composition_account_cap_disclosed` (51 accounts; the 50-row cap reports
+itself), `cash_set_published_after_books_start` (one revision plus a backdated import is not a
+version change), `unmarked_history_series_disclosed` (the disclosure covers all six drawn months)
+and the `cash_set_members_sealed` extension (sealed against UPDATE and DELETE, not only INSERT).
+
 FOUR FIXTURE SHORTCUTS, EACH LABELLED in `client-financial-pack-fixtures.mjs`'s header, because
 each builds a condition no live writer can produce:
 

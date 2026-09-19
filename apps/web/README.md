@@ -391,6 +391,13 @@ inherit the hydration rules rather than re-deriving them. Two rules carry the wh
 - **A number never arrives without its period.** A figure group missing ANY of its ten envelope
   fields hydrates as `unknown`, not as a number with a hole in it — an amount whose interval the
   reader cannot see is an unanswerable claim rather than a smaller truth.
+- **A comparison the door WITHHELD is said, not skipped.** `comparison.available:false` (with its
+  `reason`) is what the door sends for a period before this client's books begin; the face renders
+  the sentence rather than an amount, because "against RM 0.00" for a month-end the same read calls
+  unknown is a fabricated zero one line below the headline.
+- **The composition lives in the figure group it is about**, with its own `compositionTotal` /
+  `compositionTruncated` beside the entry level's pair, so a table cut at the door's 50-account cap
+  says "Showing 50 of 61 accounts" instead of quietly summing to less than the figure above it.
 
 NO CENTS ARITHMETIC HAPPENS IN THE BROWSER, and two source-reading cells keep it that way
 (`financial-pack.test.ts`, `period.test.ts`). Every delta, percentage, cap and series point is
@@ -435,6 +442,13 @@ disclosure", and a disclosure that renders only when something fails is not one.
 twice. At 640px and below the chart is out and the table is the whole disclosure — which is exactly
 why it could never be failure-only. `prefers-reduced-motion` disables the animation at the source
 (`isAnimationActive` is off), so it is never started rather than started and overridden.
+
+`components/ui/chart.tsx` imports `cn` from `@/lib/utils` like the other 25 files under
+`components/ui/`. The registry's generated file imported it from the `cn` npm package instead,
+which would have put a SECOND class-merging engine (and the only caret-ranged dependency in
+`apps/web`) into one design system, where a single Tailwind conflict could resolve two ways on one
+page; the package was dropped and the import re-pointed. Nothing else in the generated file was
+hand-edited.
 
 `packages/reporting-render/lib/chart.mjs` is the FROZEN PDF chart runtime. It is never referenced,
 never imported and shares no code with this; nothing here hand-rolls a second SVG chart.
