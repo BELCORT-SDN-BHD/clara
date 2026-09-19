@@ -67,6 +67,19 @@ function promptText(prompt) {
   return out;
 }
 
+/** How many times a named tool has been CALLED in this conversation. The replay leg needs a count
+ *  rather than a membership test: its whole subject is the SECOND call. */
+function callCount(prompt, toolName) {
+  let n = 0;
+  for (const message of prompt ?? []) {
+    if (typeof message?.content === "string") continue;
+    for (const part of message?.content ?? []) {
+      if (part?.type === "tool-call" && part.toolName === toolName) n += 1;
+    }
+  }
+  return n;
+}
+
 /** The tool names this conversation has ALREADY used, read off the prompt's own tool-call and
  *  tool-result parts. NOT a substring scan: both system prompts NAME their tools, so a text probe
  *  is true on the very first turn. */
@@ -141,7 +154,16 @@ const RUN_KNOWLEDGE_LINE = "[v21-serve] KNOWLEDGE BLOCK REACHED THE RUN PROMPT";
 const RECORD_READ_LINE = "[v21-serve] READ_KNOWLEDGE_SOURCE ANSWERED";
 let chatKnowledgeReported = false;
 let runKnowledgeReported = false;
-let recordReadReported = false;
+/** Which records this process has already reported an answer for.
+ *
+ * A SET, NOT A BOOLEAN, AND THE REASON IS A REAL HAZARD RATHER THAN TIDINESS. The throwaway
+ * databases these legs share (`clara_wave_b_ci`, `clara_rt_test`) carry every earlier run's Works,
+ * and a fresh engine's reconciler will happily dispatch one. That run calls this same script with
+ * the same `CLARA_V21_RECORD_ID` — a record belonging to ANOTHER firm — and the door correctly
+ * answers `record_not_in_scope`. A latch that reported only the FIRST answer therefore reported a
+ * stranger's refusal about half the time, and the e2e read it as this cut's tool failing. Keyed by
+ * record id, every answer is legible and the caller matches its own. */
+const recordReadReported = new Set();
 
 function envJson(name) {
   const raw = process.env[name];
@@ -155,6 +177,20 @@ function envJson(name) {
 
 const INVOICE_INPUT = envJson("CLARA_V21_INVOICE");
 const DEPRECIATION_INPUT = envJson("CLARA_V21_DEPRECIATION");
+/** This leg's own client.
+ *
+ * EVERY RUN-LANE PROBE IS GATED ON IT, and that is a correction rather than a precaution. These
+ * legs share throwaway databases that carry every earlier run's Works, and a fresh engine's
+ * reconciler will dispatch one: that run reaches this same script, reads the same env-supplied
+ * record id against ANOTHER firm, and is correctly refused `record_not_in_scope`. Without the gate
+ * the leg reported a stranger's refusal as its own tool failing — intermittently, which is the
+ * worst way to be wrong. The run envelope names its client verbatim
+ * (`claraWork.v1.impl.ts:192`), so the gate is one substring test on the prompt. */
+const CLIENT_ID = process.env.CLARA_V21_CLIENT_ID || null;
+/** How many times the chat half admits the SAME invoice, with a byte-identical payload, inside ONE
+ *  turn. Two is the replay leg: same task + same tool + same input = the same `stableOpKey`, so the
+ *  door must re-reserve and answer the ORIGINAL Work rather than admit a second. */
+const ADMIT_TIMES = Number(process.env.CLARA_V21_ADMIT_TIMES || "1");
 /** The record the RUN is told to look up in full. Absent means the run does not call the tool —
  *  which is how the leg keeps the predecessors' Works running on this same image unchanged. */
 const RECORD_ID = process.env.CLARA_V21_RECORD_ID || null;
@@ -193,8 +229,18 @@ const model = new MockLanguageModelV4({
       console.log(CHAT_KNOWLEDGE_LINE);
     }
     const used = toolsUsed(prompt);
-    if (INVOICE_INPUT !== null && !used.has("start_trade_invoice_work")) {
-      return { stream: simulateReadableStream({ chunks: toolChunks("v21i", "start_trade_invoice_work", INVOICE_INPUT), chunkDelayInMs: 2 }) };
+    const admits = callCount(prompt, "start_trade_invoice_work");
+    if (INVOICE_INPUT !== null && admits < ADMIT_TIMES) {
+      // THE SAME INPUT, DELIBERATELY BYTE-IDENTICAL on every pass. `stableOpKey(ctx.taskId, TOOL,
+      // input)` is the intent key, so a second call inside ONE turn re-reserves; a second TURN
+      // would carry a different task id and is a different request, which is why the replay
+      // property has to be measured here rather than across turns.
+      return {
+        stream: simulateReadableStream({
+          chunks: toolChunks(`v21i${admits}`, "start_trade_invoice_work", INVOICE_INPUT),
+          chunkDelayInMs: 2,
+        }),
+      };
     }
     if (DEPRECIATION_INPUT !== null && !used.has("run_depreciation_period_for_client")) {
       return {
@@ -213,7 +259,10 @@ const model = new MockLanguageModelV4({
     const text = promptText(prompt);
     const used = toolsUsed(prompt);
 
-    if (!runKnowledgeReported && text.includes(KNOWLEDGE_BLOCK_MARKER)) {
+    // THIS LEG'S OWN RUN, or none of the probes below speak for it. See CLIENT_ID above.
+    const mine = CLIENT_ID === null || text.includes(CLIENT_ID);
+
+    if (mine && !runKnowledgeReported && text.includes(KNOWLEDGE_BLOCK_MARKER)) {
       runKnowledgeReported = true;
       console.log(RUN_KNOWLEDGE_LINE);
     }
@@ -230,7 +279,7 @@ const model = new MockLanguageModelV4({
     // THE NEW READ, BEFORE THE WRITE, WHICH IS THE ORDER THE INSTRUCTIONS ASK FOR: look the record
     // up when the clipped line is not enough, then record. It spends one `toolCalls` from the same
     // twelve, so the budget is exercised rather than described.
-    if (RECORD_ID !== null && !used.has("read_knowledge_source")) {
+    if (mine && RECORD_ID !== null && !used.has("read_knowledge_source")) {
       return {
         content: [{
           type: "tool-call",
@@ -244,12 +293,13 @@ const model = new MockLanguageModelV4({
       };
     }
 
-    if (RECORD_ID !== null && !recordReadReported) {
+    if (mine && RECORD_ID !== null && !recordReadReported.has(RECORD_ID)) {
       const answer = toolOutput(prompt, "read_knowledge_source");
-      recordReadReported = true;
-      // ONE LINE NAMING WHAT CAME BACK. An `ok:false` prints its own reason, so a refusal is
-      // legible rather than indistinguishable from a tool nobody called.
+      recordReadReported.add(RECORD_ID);
+      // ONE LINE NAMING WHAT CAME BACK, AND WHICH RECORD IT WAS ABOUT. An `ok:false` prints its own
+      // reason, so a refusal is legible rather than indistinguishable from a tool nobody called.
       console.log(`${RECORD_READ_LINE} ${JSON.stringify({
+        record_id: RECORD_ID,
         ok: answer?.ok ?? null,
         reason: answer?.reason ?? null,
         keys: answer && typeof answer === "object" && answer.data && typeof answer.data === "object"

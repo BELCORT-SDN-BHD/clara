@@ -20,11 +20,14 @@
 //      `chat_task` source ref naming the REAL task and session; one `clara.trade_invoices` row
 //      lands beside it with the party the DOOR resolved, and the run posts one approved entry.
 //
-//   2. A REPLAYED TURN RE-RESERVES RATHER THAN ADMITTING A SECOND WORK. A SECOND chat turn, same
-//      session, same tool input, hands the tool a byte-identical payload; `stableOpKey` is
-//      deterministic, so the door answers the ORIGINAL Work. The measurement is a count: still one
-//      `accounting_work` row, still one `clara.trade_invoices` row, still one committed receipt.
-//      A unit cell can prove the KEY is stable; only this leg can prove the DOOR agrees.
+//   2. A REPLAYED CALL RE-RESERVES RATHER THAN ADMITTING A SECOND WORK. The scripted model calls
+//      the admission tool TWICE inside ONE turn with a byte-identical payload, so the intent key —
+//      `stableOpKey(taskId, tool, input)` — is the same both times and the door must answer the
+//      ORIGINAL Work. The measurement is a count: two tool results in the transcript, and still one
+//      `accounting_work` row, one `clara.trade_invoices` row, one committed receipt, one card. It
+//      is the SAME turn deliberately: a second TURN carries a different task id, mints a different
+//      key, and admits a second Work — correctly, because two turns are two requests. A unit cell
+//      can prove the key is stable; only this leg can prove the door agrees.
 //
 //   3. THE CHAT ENTRANCE #651 LEFT OPEN, AND THE HONEST SHAPE OF ITS EMPTY ANSWER. The same turn
 //      asks Clara to run depreciation for a client with no enrolled assets.
@@ -141,7 +144,7 @@ function spawnServe(extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
   const state = {
     exited: false, banner: null, serving: null,
-    chatKnowledge: false, runKnowledge: false, recordRead: null,
+    chatKnowledge: false, runKnowledge: false, recordReads: new Map(),
     stdout: "", stderr: "",
   };
   child.on("exit", () => {
@@ -159,13 +162,20 @@ function spawnServe(extra = {}) {
     }
     if (line.includes(CHAT_KNOWLEDGE_LINE)) state.chatKnowledge = true;
     if (line.includes(RUN_KNOWLEDGE_LINE)) state.runKnowledge = true;
-    if (line.includes(RECORD_READ_LINE) && state.recordRead === null) {
+    if (line.includes(RECORD_READ_LINE)) {
+      // KEYED BY RECORD, never "the first one seen". These databases are shared throwaways and an
+      // engine's reconciler will dispatch an EARLIER run's Work; that run reads the same env-supplied
+      // record id against a different firm and is correctly refused `record_not_in_scope`. Collecting
+      // by id lets this leg assert about ITS OWN record and leaves the stranger's answer visible
+      // rather than mistaken for it.
       const payload = line.slice(line.indexOf(RECORD_READ_LINE) + RECORD_READ_LINE.length).trim();
+      let parsed;
       try {
-        state.recordRead = JSON.parse(payload);
+        parsed = JSON.parse(payload);
       } catch {
-        state.recordRead = { unparsed: payload };
+        parsed = { unparsed: payload };
       }
+      if (typeof parsed.record_id === "string") state.recordReads.set(parsed.record_id, parsed);
       process.stdout.write(`[child] ${line}\n`);
     }
   };
@@ -342,10 +352,14 @@ async function main() {
     const captured = await rig.humanQuery(owner,
       `select clara.capture_knowledge(p_knowledge_key => 'sst_regime', p_value => $1::jsonb,
          p_basis => $2, p_op_key => $3, p_scope_kind => 'client', p_client => $4) as r`,
-      [JSON.stringify("registered"), "the client is SST registered from 2026-01-01", rig.opk("kn"), client]);
+      // `service_tax` is one of SST_REGIMES_V1's four admitted members (sales_tax / service_tax /
+      // both / not_registered) — the catalog validates the VALUE, not just the key, and a fixture
+      // that invented one is refused CLR10 `knowledge_value_invalid` before this leg ever boots.
+      [JSON.stringify("service_tax"), "the client's SST certificate, filed 2026-01-04", rig.opk("kn"), client]);
     const knowledge = captured.rows[0].r ?? {};
     const recordId = knowledge.record_id ?? knowledge.record?.record_id ?? null;
     assert.ok(recordId, `capture_knowledge named its record (got ${JSON.stringify(knowledge)})`);
+    console.log(`[v21-e2e] seeded knowledge record ${recordId} for client ${client} / firm ${firm}`);
 
     return { owner, firm, client, counterparty, recordId, jwt: await mint(owner) };
   }
@@ -372,6 +386,8 @@ async function main() {
     CLARA_V21_INVOICE: JSON.stringify(invoiceInput(one.counterparty)),
     CLARA_V21_DEPRECIATION: JSON.stringify({ client_id: one.client, through: "2026-03-31" }),
     CLARA_V21_RECORD_ID: one.recordId,
+    CLARA_V21_CLIENT_ID: one.client,
+    CLARA_V21_ADMIT_TIMES: "2",
   });
   try {
     await waitReady(45000, engine);
@@ -498,14 +514,16 @@ async function main() {
     console.log(`[v21-e2e] PASS 3: the block reached BOTH prompts, the read-set row carries keys=${JSON.stringify(read.keys)} at status=${read.status}, and the preload traced under registry v2`);
 
     // ---- 4. read_knowledge_source actually returned the record ----------
-    assert.ok(engine.state.recordRead, "the run called read_knowledge_source and the script reported its answer");
-    assert.equal(engine.state.recordRead.ok, true,
-      `the tool RETURNED DATA rather than a refusal (got ${JSON.stringify(engine.state.recordRead)})`);
-    assert.equal(engine.state.recordRead.record_status, "ok", "the door's own envelope rode through verbatim");
+    const mine = engine.state.recordReads.get(one.recordId);
+    assert.ok(mine,
+      `the run called read_knowledge_source for THIS leg's record (saw ${JSON.stringify([...engine.state.recordReads.keys()])})`);
+    assert.equal(mine.ok, true, `the tool RETURNED DATA rather than a refusal (got ${JSON.stringify(mine)})`);
+    assert.equal(mine.record_status, "ok", "the door's own envelope rode through verbatim");
     for (const k of ["record", "key", "source"]) {
-      assert.ok(engine.state.recordRead.keys?.includes(k),
-        `the envelope carries \`${k}\` (got ${JSON.stringify(engine.state.recordRead.keys)})`);
+      assert.ok(mine.keys?.includes(k), `the envelope carries \`${k}\` (got ${JSON.stringify(mine.keys)})`);
     }
+    assert.ok(!mine.keys.includes("bytes") && !mine.keys.includes("content"),
+      "and NOT the source document's bytes — that door is 0190's and is not reachable from a knowledge read");
     console.log("[v21-e2e] PASS 4: read_knowledge_source answered the run with the record, its key catalog and its source pins");
 
     // ---- 5. the transcript, and the C-19 measurement from the other side --
@@ -522,50 +540,42 @@ async function main() {
     }
     const accepted = parts.filter((x) => x.type === "work_accepted");
     assert.equal(accepted.length, 1,
-      `EXACTLY ONE work_accepted card — the invoice's. The depreciation run mints NO card (no existing kind can address`
-      + ` its receipt truthfully), and an absent card is the honest rendering (parts=${JSON.stringify(parts.map((x) => x.type))})`);
+      `EXACTLY ONE work_accepted card, from TWO admissions and a depreciation run. The two admissions`
+      + ` return the SAME work_id and \`toTypedParts_v21\` dedupes on it; the depreciation run mints NO`
+      + ` card at all (no existing kind can address its receipt truthfully), and an absent card is the`
+      + ` honest rendering of an absent Work (parts=${JSON.stringify(parts.map((x) => x.type))})`);
     assert.equal(String(accepted[0].work_id), String(invoiceWork.id));
     assert.equal(accepted[0].purpose, "journal_entry");
     assert.ok(!parts.some((x) => x.type === "refusal" && /could not be completed into a review card/.test(String(x.message ?? ""))),
       "C-19 did NOT append its incomplete-coding refusal: the depreciation tool is deliberately out of the intent signal,"
       + " so a turn that also posted nothing to a card is not accused of failing to");
 
-    // ---- 6. THE REPLAY: a second turn re-reserves, it does not re-admit --
-    const replayStarted = Date.now();
-    const replay = await api(
-      "POST",
-      `/api/chat/${sessionId}/turns`,
-      {
-        turnKey: `tk_${randomUUID().slice(0, 12)}`,
-        parts: [{ type: "text", text: "Record Alpha Supplies' March bill for RM1,060 including SST again please." }],
-      },
-      one.jwt,
-    );
-    assert.equal(replay.status, 202, `the replay turn is accepted (got ${replay.status})`);
-    // Wait for the turn to settle, then COUNT. The tool's op key is `stableOpKey(taskId, tool,
-    // input)` and the task differs, so what holds the line here is the DOOR's own intent
-    // reservation on the canonical payload — which is the half a unit cell cannot reach.
-    const replayBy = Date.now() + 90000;
-    let settled = false;
-    while (Date.now() < replayBy) {
-      const t = await rig.rootQuery("select status from clara.agent_tasks where id = $1", [replay.body.task_id]);
-      if (["completed", "failed", "cancelled", "expired"].includes(t.rows[0]?.status)) {
-        settled = true;
-        break;
-      }
-      await sleep(250);
-    }
-    assert.ok(settled, "the replay turn settled");
+    // ---- 6. THE REPLAY: the SAME turn admits twice and gets ONE Work ----
+    // WHY THE SAME TURN AND NOT A SECOND ONE, because the first draft of this leg got it wrong and
+    // the correction is the interesting part. The intent key is
+    // `stableOpKey(ctx.taskId, TOOL, input)`: a SECOND CHAT TURN carries a different task id, so it
+    // mints a different key and the door admits a second Work — correctly, because two turns are
+    // two requests. The property #655's stanza actually claims is that a REPLAYED CALL under one
+    // identity re-reserves, and the only place a World leg can produce that is inside one turn.
+    // The scripted model therefore calls `start_trade_invoice_work` TWICE with a byte-identical
+    // payload (CLARA_V21_ADMIT_TIMES=2), and the measurement is a count.
+    const admitCalls = await rig.rootQuery(
+      "select count(*)::int as n from clara.chat_messages m, jsonb_array_elements(m.parts) p"
+      + " where m.session_id = $1 and p->>'type' = 'tool_result' and p->>'tool' = 'start_trade_invoice_work'",
+      [sessionId]);
+    assert.equal(admitCalls.rows[0].n, 2,
+      `the model really did call the admission tool TWICE in one turn (got ${admitCalls.rows[0].n}) —`
+      + " without this control the count below would pass for the wrong reason");
     const worksAfter = await rig.rootQuery(
       "select count(*)::int as n from clara.accounting_work w join clara.trade_invoices t on t.work_id = w.id where w.client_id = $1",
       [one.client]);
     const invoicesAfter = await rig.rootQuery(
       "select count(*)::int as n from clara.trade_invoices where client_id = $1", [one.client]);
     assert.equal(worksAfter.rows[0].n, 1,
-      "STILL ONE trade-invoice Work after a second turn with the same payload — the door re-reserved rather than admitting a second");
-    assert.equal(invoicesAfter.rows[0].n, 1, "and still ONE clara.trade_invoices row");
+      "ONE trade-invoice Work after TWO identical admissions in one turn — the door re-reserved");
+    assert.equal(invoicesAfter.rows[0].n, 1, "and ONE clara.trade_invoices row");
     assert.equal(await countReceipts(invoiceWork.id), 1, "and still exactly one committed receipt");
-    console.log(`[v21-e2e] PASS 5: a replayed turn re-reserved the SAME Work in ${Date.now() - replayStarted}ms — one invoice, one Work, one receipt`);
+    console.log("[v21-e2e] PASS 5: two byte-identical admissions in ONE turn re-reserved the SAME Work — one invoice, one Work, one receipt");
   } finally {
     engine.child.kill("SIGKILL");
     await sleep(250);
