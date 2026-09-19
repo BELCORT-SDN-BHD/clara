@@ -19,6 +19,8 @@
 //   empty       — a real read, zero records (a successful "nothing recorded yet").
 //   denied      — `list_client_knowledge` answers 403 (an RLS/grant refusal, not "no data").
 //   sourceGone  — a record that NAMES a source document the documents read cannot return.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const KN = {
   clientOk: "644aa644-1111-4777-8777-644aa6440001",
@@ -68,17 +70,6 @@ const CLIENT_NAMES = {
 
 function clientRow(id) {
   return { id, name: CLIENT_NAMES[id], status: "active", created_at: "2026-01-01T00:00:00.000Z" };
-}
-
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
 }
 
 const NO_SOURCE = { document_id: null, extraction_id: null, region_id: null, field_path: null, work_id: null };
@@ -571,7 +562,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   const verb = path.slice("/rest/v1/rpc/".length);
 
   if (verb === "list_client_knowledge") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const client = body?.p_client ?? null;
     if (client === KN.clientDenied) {
       sendJson(response, 403, refusalBody("permission denied for function list_client_knowledge"), cors);
@@ -585,7 +576,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   }
 
   if (verb === "get_knowledge_record") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const row = recordById(body?.p_record ?? null);
     if (!row) return false;
     sendJson(response, 200, {
@@ -599,7 +590,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   // #658 — THE SEVENTH DOOR (DECISIONS.md:83). Exclusive to this lane and ID-SCOPED, so it needs
   // no `unscopeable` entry beside `list_firm_knowledge`: every id it answers was minted here.
   if (verb === "list_work_knowledge_reads_for_record") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const id = body?.p_record ?? null;
     if (id === KN.recordReadsDenied) {
       sendJson(response, 403,
@@ -613,7 +604,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   }
 
   if (verb === "get_knowledge_history") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const id = body?.p_record ?? null;
     if (!recordById(id)) return false;
     sendJson(response, 200, { record_id: id, revisions: historyFor(id) }, cors);
@@ -621,7 +612,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   }
 
   if (verb === "correct_knowledge") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const id = body?.p_record ?? null;
     // #654 fix round 1 — A FIRM RULE IS CORRECTED FROM THE FIRM REGISTER. It has no client and
     // therefore no `/clients/:id/knowledge/:record` detail route, so `recordById` (which knows
@@ -661,7 +652,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   }
 
   if (verb === "get_knowledge_applicability") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const client = body?.p_client ?? null;
     if (!client || !Object.prototype.hasOwnProperty.call(CLIENT_NAMES, client)) return false;
     sendJson(response, 200, applicabilityFor(client, String(body?.p_knowledge_key ?? "")), cors);
@@ -672,7 +663,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   // client-scope capture belongs to no walk in this lane and falls through, as does any key
   // outside this lane's own two.
   if (verb === "capture_knowledge") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_scope_kind !== "firm") return false;
     const key = String(body?.p_knowledge_key ?? "");
     if (key !== PROMOTED_KEY && key !== RACED_KEY) return false;
@@ -702,7 +693,7 @@ export async function handleKnowledgeSupabase(request, response, path, url, send
   }
 
   if (verb === "withdraw_knowledge") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const id = body?.p_record ?? null;
     // …and withdrawn from the same place. A withdrawal is TERMINAL, so the rule leaves the
     // register and every client that was reading it stops: the persistent outcome, not a toast.

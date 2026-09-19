@@ -878,6 +878,92 @@ test("N7 (L7) · a verb this lane does not own leaves the request body COMPLETEL
 });
 
 // ---------------------------------------------------------------------------
+// BODY-READER CENSUS (#862) — a private, per-file POST-body reader is the exact anti-pattern
+// this file's N7 cells above exist to guard AROUND: `readCachedJson` (`mock-dispatch.mjs`)
+// parses the body once and caches it on the request object, so any dispatch order across the
+// shared `serve-built.mjs` server reads back the SAME value; a private reader that drains the
+// raw stream (cached or not) is a second implementation of that contract, and #633/#647/#653
+// each independently rediscovered the hazard before this census existed to catch the next one
+// mechanically. This is a STRUCTURAL scan (source text), not a behavioural one — it does not
+// run any mock, it only reads what each one imports and defines.
+// ---------------------------------------------------------------------------
+
+/** A mock defining its OWN async body-reading function instead of importing the shared one. */
+const PRIVATE_BODY_READER_FUNCTION = /\b(?:export\s+)?(?:async\s+)?function\s+(readJson|readBody)\s*\(/;
+/** A mock draining the request stream directly rather than through any named function at all. */
+const PRIVATE_BODY_READER_STREAM = /request\.on\(\s*["'](?:data|end)["']/;
+
+/**
+ * `null` when `source` (the text of a `*-mock.mjs` file, real or synthetic) reads its POST body
+ * only through the shared `readCachedJson`; otherwise a one-line reason naming `mock` and the
+ * private shape found. Pure and synchronous so the real census below and its synthetic positive
+ * controls share one implementation — the same split `verbCollisions` (above) uses.
+ */
+function bodyReaderViolation(mock: string, source: string): string | null {
+  const fnMatch = PRIVATE_BODY_READER_FUNCTION.exec(source);
+  if (fnMatch) {
+    return `${mock} defines its own ${fnMatch[1]}(...) instead of importing readCachedJson from mock-dispatch.mjs`;
+  }
+  if (PRIVATE_BODY_READER_STREAM.test(source)) {
+    return `${mock} reads the request stream directly (request.on("data"/"end")) instead of importing readCachedJson from mock-dispatch.mjs`;
+  }
+  return null;
+}
+
+function bodyReaderCensus(mocks: readonly string[] = LANE_MOCKS): string[] {
+  const violations: string[] = [];
+  for (const mock of mocks) {
+    const source = readFileSync(join(E2E_DIR, mock), "utf8");
+    const violation = bodyReaderViolation(mock, source);
+    if (violation) violations.push(violation);
+  }
+  return violations;
+}
+
+test("body-reader census · no lane mock defines its own private request-body reader", () => {
+  assert.deepEqual(bodyReaderCensus(), []);
+});
+
+test("body-reader census POSITIVE CONTROL · a synthetic private readJson(...) IS caught", () => {
+  // SYNTHETIC source, not a real file — the exact shape #633/#647/#653 each fixed independently
+  // and `fixed-asset-mock.mjs` carried until #651 repointed it incidentally (this ticket's own
+  // history, told in the ticket comments rather than repeated here).
+  const synthetic = [
+    "async function readJson(request) {",
+    "  const chunks = [];",
+    "  for await (const chunk of request) chunks.push(chunk);",
+    "  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};",
+    "}",
+  ].join("\n");
+  const violation = bodyReaderViolation("fake-lane-mock.mjs", synthetic);
+  assert.match(violation ?? "", /fake-lane-mock\.mjs/);
+  assert.match(violation ?? "", /readJson/);
+});
+
+test("body-reader census POSITIVE CONTROL · a synthetic raw request.on(\"data\") reader IS caught", () => {
+  const synthetic = [
+    "function readBodyRaw(request) {",
+    '  let data = "";',
+    '  request.on("data", (chunk) => { data += chunk; });',
+    '  request.on("end", () => {});',
+    "}",
+  ].join("\n");
+  const violation = bodyReaderViolation("fake-lane-mock.mjs", synthetic);
+  assert.match(violation ?? "", /fake-lane-mock\.mjs/);
+});
+
+test("body-reader census · importing the shared readCachedJson does NOT trip the census", () => {
+  const synthetic = [
+    'import { readCachedJson } from "./mock-dispatch.mjs";',
+    "async function handle(request) {",
+    "  const body = await readCachedJson(request);",
+    "  return body;",
+    "}",
+  ].join("\n");
+  assert.equal(bodyReaderViolation("fake-lane-mock.mjs", synthetic), null);
+});
+
+// ---------------------------------------------------------------------------
 // F-05 (#619) — `fs4-checkout-mock.mjs`'s door-call ledger records only a VERB IT ACTUALLY
 // DISPATCHED, not every `/rest/v1/rpc/` POST that reaches it.
 // ---------------------------------------------------------------------------

@@ -32,6 +32,8 @@
 // (`e2e-fixture-ownership.test.ts` exists because three lanes learned the hard way that a handler
 // claiming a SHARED endpoint replaces everyone else's fixture). This lane claims no unfiltered
 // register, no shared session list and no firm-wide read.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const PA = {
   clientId: "64364364-6436-4643-8643-643643643643",
@@ -229,18 +231,6 @@ const HISTORY = [
  *  evidence chooser then rendered every document as free: a document already backing a posted entry
  *  was offered as available, which is the one thing the advisory read exists to prevent. Every lane
  *  mock in this directory caches under the SAME key for the same reason; this one now does too. */
-async function readJson(request) {
-  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  let parsed = {};
-  if (chunks.length > 0) {
-    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
-  }
-  request.__e2eParsedBody = parsed;
-  return parsed;
-}
-
 function send(response, status, body) {
   const payload = JSON.stringify(body);
   response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(payload) });
@@ -316,14 +306,14 @@ export async function handlePeriodicAdjustmentSupabase(request, response, path, 
   const verb = path.slice("/rest/v1/rpc/".length);
 
   if (verb === "list_spoken_for_documents") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== PA.clientId) return false;
     sendJson(response, 200, SPOKEN_FOR, cors);
     return true;
   }
 
   if (verb === "list_periodic_adjustments") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== PA.clientId) return false;
     // THE WINDOW IS THE DATABASE'S FILTER, and the mock applies it for the same reason it models
     // the idempotency: the surface's own behaviour is written against a filtered answer.
@@ -347,7 +337,7 @@ export async function handlePeriodicAdjustmentRuntime(request, response, url) {
   const path = url.pathname;
 
   if (request.method === "POST" && path === "/api/e2e-periodic-adjustment/control") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // SCOPED LIKE EVERY OTHER HANDLER HERE, and for the reason the file's header now states: a
     // control endpoint that mutates shared fixture state for ANY body is a lane claiming a shared
     // endpoint, which is exactly what `e2e-fixture-ownership.test.ts` exists to prevent. The sibling
@@ -388,7 +378,7 @@ export async function handlePeriodicAdjustmentRuntime(request, response, url) {
   }
 
   if (request.method === "POST" && path === "/api/work/periodic-adjustment") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // SCOPED BY THE REQUEST'S OWN CLIENT — another lane's admission falls through to the shared
     // fallback rather than being answered with this lane's Work.
     if (body?.clientId !== PA.clientId) return false;

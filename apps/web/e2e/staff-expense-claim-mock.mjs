@@ -34,6 +34,8 @@
 // `staff_advance_summary` are read by surfaces other lanes also drive, so this module answers
 // NEITHER — it reads `staff_advance_accounts` (its own client's, by `client_id`) and its own three
 // claim doors, and nothing else.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const SEC = {
   clientId: "63863863-6386-4638-8638-638638638638",
@@ -213,18 +215,6 @@ const HISTORY = [
 /** THE PARSE IS CACHED ON THE REQUEST — `periodic-adjustment-mock.mjs`'s own measured note applies
  *  verbatim: `for await (const chunk of request)` drains the stream exactly once, so an uncached
  *  re-read after a sibling hook has already read it sees `{}` and falls through silently. */
-async function readJson(request) {
-  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  let parsed = {};
-  if (chunks.length > 0) {
-    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
-  }
-  request.__e2eParsedBody = parsed;
-  return parsed;
-}
-
 function send(response, status, body) {
   const payload = JSON.stringify(body);
   response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(payload) });
@@ -281,7 +271,7 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
   const verb = path.slice("/rest/v1/rpc/".length);
 
   if (verb === "list_staff_expense_claims") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     if (body?.p_client !== SEC.clientId) return false;
     // THE WINDOW IS THE DATABASE'S FILTER, and the mock applies it for the same reason it models
     // the idempotency: the surface's own behaviour is written against a filtered answer.
@@ -295,7 +285,7 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
   }
 
   if (verb === "get_staff_expense_claim") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const row = HISTORY.find((r) => r.id === body?.p_claim) ?? null;
     if (row === null) return false;
     sendJson(response, 200, { ...row, status: [], advance_applications: [] }, cors);
@@ -303,7 +293,7 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
   }
 
   if (verb === "get_work_claim_origin") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     const row = HISTORY.find((r) => r.work_id === body?.p_work) ?? null;
     if (row === null) return false;
     sendJson(response, 200, {
@@ -334,7 +324,7 @@ export async function handleStaffExpenseClaimRuntime(request, response, url) {
   const path = url.pathname;
 
   if (request.method === "POST" && path === "/api/e2e-staff-expense-claim/control") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // SCOPED LIKE EVERY OTHER HANDLER HERE: a control endpoint that mutates shared fixture state
     // for ANY body is a lane claiming a shared endpoint.
     if (body?.client !== SEC.clientId) return false;
@@ -375,7 +365,7 @@ export async function handleStaffExpenseClaimRuntime(request, response, url) {
   }
 
   if (request.method === "POST" && path === "/api/work/staff-expense-claim") {
-    const body = await readJson(request);
+    const body = await readCachedJson(request);
     // SCOPED BY THE REQUEST'S OWN CLIENT — another lane's admission falls through to the shared
     // fallback rather than being answered with this lane's Work.
     if (body?.clientId !== SEC.clientId) return false;
