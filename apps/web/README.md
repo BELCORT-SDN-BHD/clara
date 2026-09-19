@@ -415,6 +415,21 @@ law is that it mints no numeral and re-derives no tie. C-25's defect was exactly
 worn as a tie figure, and `opening-dryrun-unchanged.test.tsx` re-measures that the totals did not
 resurrect it.
 
+**…and on a document-sourced basis the unmapped row STATES a fact rather than printing a zero**
+(fix-round, review finding A10). `unmappedCount` is structurally always 0 there — two database
+walls make every parsed target source-exact and chart-present — so "Not yet mapped: 0 line(s),
+Dr 0.00 / Cr 0.00" renders a CONSTANT as if it were a measurement, and a reader who does not know
+that reads it as "everything is mapped": C-25's defect one layer down. When every target is
+document-sourced (`isDocumentSourcedBasis`) the footer keeps the term and says why there is no
+count; a basis carrying a KEYED row keeps the numeric count, because there `unmapped_labels` is a
+real state a person can act on.
+
+**A refusal by the READER is a warning, not the keyed invitation.** A 422 whose reason is the
+producer's own sentence ("trial balance does not balance: DR … vs CR …") is not
+`no_opening_tb_lines`, so `isKeyedFallback` is false and the face renders the warning branch with
+the reason verbatim — never "key the balances instead" over a document the reader has just found
+internally inconsistent.
+
 **C3's seam.** `ENTRY_SELECT` now reads `is_opening_balance`, and an opening entry carries a badge
 linking back to `?tab=opening`. An approved opening item posts an ordinary entry with
 `origin='manual'` (0017:3375-3384), so before this the client's own books showed their opening

@@ -38,7 +38,7 @@ import { EmptyState } from "@/components/common/state";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fmtCents } from "@/lib/registers/money";
-import { openingCoverage, provenanceOf, shaShort } from "@/lib/registers/opening-source";
+import { isDocumentSourcedBasis, openingCoverage, provenanceOf, shaShort } from "@/lib/registers/opening-source";
 import type { OpeningSeedRow, OpeningTbTargetRow } from "@/lib/registers/opening-types";
 
 export function OpeningTargetDocumentPanel({
@@ -56,6 +56,9 @@ export function OpeningTargetDocumentPanel({
   const t = useTranslations("OpeningCarryDown.source");
   const tc = useTranslations("Common");
   const coverage = openingCoverage(targets);
+  // On a wholly document-sourced basis an unmapped line cannot exist (see the header's MEASURED
+  // note); the footer says so rather than printing a zero that could never be anything else.
+  const structurallyMapped = isDocumentSourcedBasis(targets);
 
   return (
     <div className="flex flex-col gap-2" data-testid="opening-target-document-panel">
@@ -142,16 +145,23 @@ export function OpeningTargetDocumentPanel({
                 })}
               </dd>
             </div>
-            <div className="flex gap-1">
-              <dt>{t("coverageUnmapped")}</dt>
-              <dd className={coverage.unmappedCount > 0 ? "text-warning" : undefined}>
-                {t("coverageCounts", { n: coverage.unmappedCount })}{" "}
-                {t("coverageCents", {
-                  debit: fmtCents(coverage.unmappedDebitCents, tc("centsUnsafe")),
-                  credit: fmtCents(coverage.unmappedCreditCents, tc("centsUnsafe")),
-                })}
-              </dd>
-            </div>
+            {structurallyMapped ? (
+              <div className="flex gap-1">
+                <dt>{t("coverageUnmapped")}</dt>
+                <dd>{t("coverageUnmappedImpossible")}</dd>
+              </div>
+            ) : (
+              <div className="flex gap-1">
+                <dt>{t("coverageUnmapped")}</dt>
+                <dd className={coverage.unmappedCount > 0 ? "text-warning" : undefined}>
+                  {t("coverageCounts", { n: coverage.unmappedCount })}{" "}
+                  {t("coverageCents", {
+                    debit: fmtCents(coverage.unmappedDebitCents, tc("centsUnsafe")),
+                    credit: fmtCents(coverage.unmappedCreditCents, tc("centsUnsafe")),
+                  })}
+                </dd>
+              </div>
+            )}
           </dl>
         </>
       )}

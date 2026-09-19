@@ -162,6 +162,22 @@ export type OpeningCoverage = {
  * still runs over both lanes because ONE panel renders a basis whichever way it was authored, and
  * a coverage figure that silently assumed a lane would be the quiet pass all over again.
  */
+/**
+ * True when EVERY target on this basis was written by the parse lane from the tie document.
+ *
+ * #656 fix-round (adversarial A10). On such a basis an unmapped line is not rare — it is
+ * STRUCTURALLY unreachable, by the two walls named above. So a surface that prints
+ * "Not yet mapped: 0 line(s)" there is rendering a CONSTANT as if it were a measurement, and a
+ * reader who does not know that reads it as "everything is mapped": C-25's quiet pass, one layer
+ * down. The face states the fact instead, and keeps the numeric count for a basis that carries a
+ * keyed row, where `unmapped_labels` is a real state a person can act on.
+ *
+ * An EMPTY basis is not "document-sourced" for this purpose: nothing has been read yet, so there
+ * is no structural claim to make.
+ */
+export const isDocumentSourcedBasis = (targets: readonly OpeningTbTargetRow[]): boolean =>
+  targets.length > 0 && targets.every((t) => t.provenance_kind === "document");
+
 export function openingCoverage(targets: readonly OpeningTbTargetRow[]): OpeningCoverage {
   const out: OpeningCoverage = {
     mappedCount: 0, unmappedCount: 0,

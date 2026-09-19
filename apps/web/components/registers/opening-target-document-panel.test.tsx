@@ -190,6 +190,54 @@ test("the footer states coverage as counts AND cents on both sides, labelled as 
   }
 });
 
+test("on a wholly document-sourced basis the footer STATES that an unmapped line is impossible, instead of printing a zero (fix-round A10)", async () => {
+  // R5, on the rendered face. `unmappedCount` is STRUCTURALLY always 0 here — two database walls
+  // make a parsed target both source-exact and chart-present — so "Not yet mapped: 0 line(s),
+  // Dr 0.00 / Cr 0.00" renders a CONSTANT as if it were a measurement, and a reader who does not
+  // know R5 reads it as "everything is mapped". That is C-25's defect one layer down: a figure
+  // that cannot say anything else, read as if it had.
+  const h = await mount([
+    target({ id: "t1", line_key: "a", debit_cents: 10_500_000, credit_cents: 0 }),
+    target({ id: "t2", line_key: "b", debit_cents: 0, credit_cents: 10_500_000 }),
+  ]);
+  try {
+    const footer = h.find((n) => n.tagName === "DL");
+    assert.ok(footer, "the coverage footer must still render");
+    const text = textOf(footer);
+    assert.match(text, /Mapped/, "the mapped side is a real measurement and stays");
+    assert.match(text, /2 line\(s\)/);
+    assert.doesNotMatch(text, /0 line\(s\)/,
+      "a count that can only ever be zero is not a coverage figure");
+    assert.doesNotMatch(text, /Dr RM 0\.00/, "…and neither is a zero on each side of it");
+    assert.match(text, /cannot carry an unmapped line/,
+      "…the structural fact is SAID instead, so the reader learns why there is no such count");
+    assert.match(text, /Not yet mapped/,
+      "the TERM stays, so the row a person looks for is still there to read");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("a basis carrying a KEYED row keeps the numeric unmapped count — it is a real state there", async () => {
+  const h = await mount([
+    target({ id: "t1", line_key: "a", debit_cents: 10_500_000, credit_cents: 0 }),
+    target({
+      id: "t2", line_key: "c", account_code: null, debit_cents: 0, credit_cents: 25_000,
+      provenance_kind: "keyed", document_id: null, source_sha256: null, extraction_ref: null, entered_by: "u9",
+    }),
+  ]);
+  try {
+    const footer = h.find((n) => n.tagName === "DL");
+    assert.ok(footer, "the coverage footer must still render");
+    const text = textOf(footer);
+    assert.match(text, /Not yet mapped/);
+    assert.match(text, /1 line\(s\)/);
+    assert.match(text, /250\.00/);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("a tied basis with nothing read yet renders the successful-empty state, not an error", async () => {
   const h = await mount([]);
   try {

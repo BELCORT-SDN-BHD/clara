@@ -3656,6 +3656,7 @@
       "coverageLabel": "How much of the source is mapped",
       "coverageMapped": "Mapped",
       "coverageUnmapped": "Not yet mapped",
+      "coverageUnmappedImpossible": "A document-sourced basis cannot carry an unmapped line — every figure is re-derived against this client's chart.",
       "coverageCounts": "{n} line(s)",
       "coverageCents": "Dr {debit} / Cr {credit}",
       "boundTo": "Bound to {document} (sha {sha}).",

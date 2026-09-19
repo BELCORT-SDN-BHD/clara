@@ -158,6 +158,32 @@ test("`no_opening_tb_lines` renders as INFORMATION with the keyed path named —
   });
 });
 
+test("fix-round A1 (ticket 656): a trial balance the READER refused is a WARNING carrying its reason — never the keyed-fallback invitation", async () => {
+  // The defect this cell stands against: the in-line producer's refusal used to be discarded at
+  // the OCR pass, so a trial balance that does not balance reached this surface as
+  // `no_opening_tb_lines` — an INFORMATION banner reading "this document has no trial-balance
+  // lines Clara can read, key the balances instead". That invites a professional to hand-key a
+  // document whose own printed figures the machine has just found inconsistent. The route now
+  // answers the producer's reason verbatim (`packages/runtime/lib/opening-parse.mjs`,
+  // `readOpeningRefusal`), and the face must treat it as the refusal it is.
+  const REFUSAL = "trial balance does not balance: DR 130000.00 vs CR 129000.00";
+  await withRoute(() => jsonResponse(
+    { status: "unparseable", reason: REFUSAL, source_refusal: true, failing_rows: [] }, 422), async () => {
+    const { h } = await mount();
+    try {
+      await click(h);
+      const text = h.text();
+      assert.ok(text.includes(REFUSAL), `the reader's own sentence must render verbatim; got: ${text}`);
+      assert.match(text, /Not read/, "the warning state, not the information state");
+      assert.doesNotMatch(text, /key the balances|type the balances/i,
+        "a document the reader REFUSED must not be offered as one to hand-key");
+      assert.equal(isKeyedFallback({ kind: "unparseable", reason: REFUSAL, unmappedAccounts: [] }), false);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("a chart gap names the accounts and points at where they are created", async () => {
   await withRoute(() => jsonResponse({
     status: "unparseable",
