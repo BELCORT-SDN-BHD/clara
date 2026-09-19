@@ -5,7 +5,7 @@
 // never a separate universe"). All state comes from `useClaraThread` /
 // `lib/clara/threadStore.ts`, the one source of truth both mount points read.
 
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -305,6 +305,22 @@ export function ClaraThreadView({
   // "Reconnecting…" forever. It must never become an EXISTENCE ORACLE — the copy says
   // what this reader can no longer do, never whether the task or the firm exists.
   const revoked = state.stream.status === "revoked";
+
+  // #642 (fix round 1, ADV-642-9) — THE COMPOSER'S IDS ARE PER INSTANCE. They were
+  // document-global literals on a component that is mounted from two places (the rail via
+  // `rail-mount.tsx`, and the two escalated `(full)` routes). Only one is ever mounted at a
+  // time today, which is exactly why a second one — a split view, a preview, a cell that
+  // renders both variants — would find it the hard way: `htmlFor` and `aria-describedby`
+  // bind to the FIRST match in the document, so the second composer would silently lose its
+  // accessible name and its hint.
+  const composerId = useId();
+  const composerHintId = `${composerId}-hint`;
+  // The send error already has exactly one home on screen (the banner below). The field
+  // POINTS at it rather than re-rendering it as a `FieldError`, which would be a second
+  // `role="alert"` copy of one sentence — the announce-twice defect this pass closed
+  // elsewhere, arriving by another road (ADV-642-6).
+  const composerErrorId = `${composerId}-error`;
+  const composerInvalid = state.sendStatus === "error" && state.sendError !== null;
 
   // #642 (fix round 1, ADV-642-2) — ONE PRESS, ONE ANNOUNCEMENT, as a single predicate
   // instead of a gate each line repeats. Every line in the status block below is written
@@ -712,8 +728,15 @@ export function ClaraThreadView({
             </Button>
           </div>
         )}
-        {state.sendStatus === "error" && state.sendError && (
-          <StateBanner tone="error">{t("sendError", { message: state.sendError })}</StateBanner>
+        {/* #642 (fix round 1, ADV-642-6) — AND THE COMPOSER POINTS AT IT. The field was
+            marked `aria-invalid` while `aria-describedby` named only the static hint, so a
+            screen-reader user heard "invalid" with no reason and no route to one. The id
+            goes on the ONE place this sentence already lives; a `FieldError` inside the
+            field would be a second `role="alert"` saying the same thing. */}
+        {composerInvalid && (
+          <div id={composerErrorId}>
+            <StateBanner tone="error">{t("sendError", { message: state.sendError })}</StateBanner>
+          </div>
         )}
         {/* #734 — THIS TAB'S OWN RENDERING FAILED, and that is a different sentence from
             the one above. A subscriber that threw while drawing a stream event used to
@@ -784,7 +807,7 @@ export function ClaraThreadView({
           clientId && threadId ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr_auto]",
         )}
       >
-        <FieldLabel htmlFor="clara-composer" className="sr-only">{t("composerLabel")}</FieldLabel>
+        <FieldLabel htmlFor={composerId} className="sr-only">{t("composerLabel")}</FieldLabel>
         {clientId && threadId ? (
           <ComposerAttachmentControl
             key={`${clientId}:${threadId}`}
@@ -797,7 +820,7 @@ export function ClaraThreadView({
           />
         ) : null}
         <textarea
-          id="clara-composer"
+          id={composerId}
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -813,11 +836,11 @@ export function ClaraThreadView({
           // merge taught this file. #642 moved the name onto the `sr-only` `FieldLabel`
           // above (the same string), so an `aria-label` here would now be the SECOND name
           // and would silently win over the label it duplicates.
-          aria-describedby="clara-composer-hint"
+          aria-describedby={composerInvalid ? `${composerHintId} ${composerErrorId}` : composerHintId}
           // AC7 — the field carries the invalid state its own error is about. `sendError`
           // is the only refusal that belongs to THIS control; a load failure is about the
           // conversation, not about what the person typed.
-          aria-invalid={state.sendStatus === "error" && state.sendError !== null ? true : undefined}
+          aria-invalid={composerInvalid ? true : undefined}
           disabled={!threadId || notSignedIn || busy}
           rows={variant === "rail" ? 2 : 3}
           // Stays a raw <textarea>: the Textarea primitive is `field-sizing-
@@ -842,7 +865,7 @@ export function ClaraThreadView({
           Shift+Enter starts a new line (H-24's own contract, now said out loud). It is a
           `FieldDescription` rather than a placeholder because a placeholder disappears
           the moment the person starts typing — which is exactly when they need it. */}
-      <FieldDescription id="clara-composer-hint">{t("composerHint")}</FieldDescription>
+      <FieldDescription id={composerHintId}>{t("composerHint")}</FieldDescription>
       </FieldGroup>
       </form>
       </div>

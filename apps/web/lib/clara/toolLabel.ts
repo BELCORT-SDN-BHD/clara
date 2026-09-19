@@ -13,8 +13,12 @@
 // THE LIST IS MEASURED, NOT GUESSED. These are the 37 keys of `buildToolsV20(...)`,
 // enumerated by CALLING it on this rig (packages/runtime/workflows/chatTurn.v20.tools.ts)
 // rather than by reading the files — v20 composes v19 which composes v18, and a
-// hand-walked union missed several. `clara-tool-labels.test.ts` is the gate that keeps
-// this list and `messages/en.json` from drifting apart.
+// hand-walked union missed several. `./toolLabel.test.ts` is the gate that keeps this list
+// and `messages/en.json` from drifting apart (it pins the count, asserts every token has a
+// label and every label a token, and drives the raw-token fallback). The name in this line
+// was wrong until the spec review of this branch went looking for the file: no
+// `clara-tool-labels.test.ts` has ever existed, which is the class of claim this ticket's
+// own evidence law exists to catch.
 //
 // A TOKEN THAT IS NOT ON THIS LIST IS NOT A DEFECT. A newer frozen body may ship a tool
 // this build has never heard of, and the honest thing for an old surface to do is show

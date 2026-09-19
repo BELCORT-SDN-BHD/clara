@@ -150,3 +150,34 @@ test("p642.web.live_tool_states — several steps keep FIRST-SEEN order", () => 
     ["read_document", "running"],
   ]);
 });
+
+test("p642.web.live_tool_states — a `tool-error` AFTER a `tool-result` reads *failed*, not *done*", () => {
+  // Fix round 1, review finding ADV-642-8. `done`, `failed` and `refused` all ranked 2 and
+  // the comparison is strict, so the FIRST of the three to arrive for a call id won
+  // forever: a step that returned and then threw kept reading *done*, which is the one
+  // direction this fold must never get wrong — AC4's whole subject is that the transcript
+  // may not overstate what a step achieved.
+  //
+  // The monotonic rank itself is kept, and it is load-bearing: the reattach replays from
+  // index 0 (`streamRoute.ts:113`), so without it a finished step would flicker back to
+  // *preparing* on every reconnect. Only `failed` is lifted above the other two terminals,
+  // because a thrown tool is the stronger statement about the same call.
+  const steps = foldLiveToolParts([
+    { type: "tool-call", toolCallId: "c1", toolName: "draft_journal_entry", input: {} },
+    { type: "tool-result", toolCallId: "c1", toolName: "draft_journal_entry", output: { ok: true } },
+    { type: "tool-error", toolCallId: "c1", toolName: "draft_journal_entry", error: "boom" },
+  ]);
+  assert.equal(steps.length, 1, "one call id is one chip");
+  assert.equal(steps.at(0)?.state, "failed");
+
+  // THE CONTROL, and the property the rank exists for: a replay from index 0 re-delivers
+  // the whole history, and the step must not walk backwards through it.
+  const replayed = foldLiveToolParts([
+    { type: "tool-input-start", id: "c2", toolName: "get_bank_pack" },
+    { type: "tool-call", toolCallId: "c2", toolName: "get_bank_pack", input: {} },
+    { type: "tool-error", toolCallId: "c2", toolName: "get_bank_pack", error: "boom" },
+    { type: "tool-input-start", id: "c2", toolName: "get_bank_pack" },
+    { type: "tool-call", toolCallId: "c2", toolName: "get_bank_pack", input: {} },
+  ]);
+  assert.equal(replayed.at(0)?.state, "failed", "a replay must not walk a finished step backwards");
+});

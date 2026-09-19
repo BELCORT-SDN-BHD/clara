@@ -196,3 +196,114 @@ test("H-24 (re-run, not copied) — Enter and the Send button still read ONE pre
     }
   });
 });
+
+test("p642.web.composer_field_wiring — an invalid composer SAYS WHY, through a description it actually points at", async () => {
+  // Fix round 1, review finding ADV-642-6. The field was marked `aria-invalid` when a send
+  // failed while `aria-describedby` named only the static Enter/Shift+Enter hint, and the
+  // error itself rendered as a banner elsewhere in the tree that the field never
+  // referenced. A screen-reader user heard "invalid" with no reason and no route to one.
+  //
+  // THE SENTENCE IS NOT DUPLICATED to fix that. A `FieldError` renders `role="alert"`, and
+  // the banner it would sit beside is already announced — two announcements and two copies
+  // of one sentence, which is the defect ADV-642-2 closes, arriving by another road. The
+  // field points AT the banner instead: one sentence, one home, described from the control
+  // that is invalid.
+  claraThreadStore.reset(THREAD);
+  const wire: Wire = { turns: 0 };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(view());
+    try {
+      await settle(h);
+      const before = String(get(find(h, (n) => n.tagName === "TEXTAREA"), "aria-describedby") ?? "");
+      assert.ok(before.length > 0, "the hint is described from the start");
+
+      await h.act(() => setFieldValue(find(h, (n) => n.tagName === "TEXTAREA"), "book the invoice"));
+      await pressEnter(find(h, (n) => n.tagName === "TEXTAREA"));
+      await settle(h);
+
+      const box = find(h, (n) => n.tagName === "TEXTAREA");
+      assert.equal(get(box, "aria-invalid"), "true", "precondition: the send failed");
+      const describedBy = String(get(box, "aria-describedby") ?? "");
+      const ids = describedBy.split(/\s+/).filter(Boolean);
+      assert.ok(ids.length >= 2, `an invalid field must describe its reason; saw "${describedBy}"`);
+      const texts = ids.map((id) => {
+        const node = find(h, (n) => get(n, "id") === id);
+        return (function textOf(n: Stub): string {
+          if (n.nodeType === 3) return String(n.nodeValue ?? "");
+          const kids = (n.childNodes as Stub[] | undefined) ?? [];
+          if (kids.length > 0) return kids.map(textOf).join("");
+          return typeof n.textContent === "string" ? n.textContent : "";
+        })(node);
+      });
+      assert.ok(texts.some((t) => /Enter sends/.test(t)), "the hint is still described");
+      assert.ok(texts.some((t) => /Could not send that message/.test(t)),
+        `…and so is the reason; the described nodes read ${JSON.stringify(texts)}`);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p642.web.composer_field_wiring — the composer's ids are per-INSTANCE, so two mounts do not steal each other's label", async () => {
+  // Fix round 1, review finding ADV-642-9. `clara-composer` and `clara-composer-hint` were
+  // document-global literals on a component mounted from two places (the rail, and the two
+  // escalated `(full)` routes). Today only one is ever mounted at a time, so nothing is
+  // broken — which is exactly why it would be found the hard way: the moment a second one
+  // is (a split view, a preview, a cell that renders both variants), `htmlFor`/
+  // `aria-describedby` bind to the FIRST match and the second composer silently loses its
+  // accessible name.
+  claraThreadStore.reset(THREAD);
+  const wire: Wire = { turns: 0 };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages,
+        timeZone: "Asia/Kuala_Lumpur",
+        children: [
+          createElement(ClaraThreadView, {
+            key: "rail",
+            auth: { getAccessToken: async () => TOKEN },
+            threadId: THREAD,
+            variant: "rail" as const,
+            clientId: CLIENT,
+          }),
+          createElement(ClaraThreadView, {
+            key: "full",
+            auth: { getAccessToken: async () => TOKEN },
+            threadId: THREAD,
+            variant: "full" as const,
+            clientId: CLIENT,
+          }),
+        ],
+      }) as ReactElement,
+    );
+    try {
+      await settle(h);
+      const boxes: Stub[] = [];
+      (function walk(node: Stub) {
+        if (node.tagName === "TEXTAREA") boxes.push(node);
+        for (const c of (node.childNodes as Stub[] | undefined) ?? []) walk(c);
+      })(h.container as Stub);
+      assert.equal(boxes.length, 2, "the fixture must mount BOTH composers, or this cell proves nothing");
+
+      const ids = boxes.map((b) => String(get(b, "id") ?? ""));
+      assert.ok(ids.every((id) => id.length > 0), "each composer has an id");
+      assert.notEqual(ids[0], ids[1], "…and it is its own");
+      const described = boxes.map((b) => String(get(b, "aria-describedby") ?? ""));
+      assert.notEqual(described[0], described[1], "…as is the hint it points at");
+      // Every label must point at a textarea that exists, and each at a DIFFERENT one.
+      const labelled: string[] = [];
+      (function walk(node: Stub) {
+        const forId = get(node, "for") ?? get(node, "htmlFor");
+        if (typeof forId === "string" && forId.length > 0) labelled.push(forId);
+        for (const c of (node.childNodes as Stub[] | undefined) ?? []) walk(c);
+      })(h.container as Stub);
+      for (const id of ids) {
+        assert.ok(labelled.includes(id), `the composer ${id} must be named by its OWN label; labels point at ${JSON.stringify(labelled)}`);
+      }
+    } finally {
+      await h.unmount();
+    }
+  });
+});

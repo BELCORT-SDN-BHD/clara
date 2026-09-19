@@ -62,8 +62,15 @@ export interface LiveToolStep {
 
 /** Monotonic rank — a step never moves BACKWARDS. The replay from index 0 re-delivers a
  *  finished call's whole history, so without this a completed step would flicker back to
- *  *preparing* on every reattach. */
-const RANK: Record<LiveToolState, number> = { preparing: 0, running: 1, done: 2, failed: 2, refused: 2 };
+ *  *preparing* on every reattach.
+ *
+ *  `failed` OUTRANKS THE OTHER TWO TERMINALS (fix round 1, ADV-642-8). All three used to
+ *  rank 2 against a strict comparison, so whichever arrived first won for good and a step
+ *  that returned and then threw went on reading *done* — the one direction this fold must
+ *  never get wrong, since AC4's whole subject is a transcript that may not overstate what a
+ *  step achieved. `done` and `refused` stay level because they are two readings of ONE
+ *  chunk (`tool-result` with or without a typed refusal) and can never race each other. */
+const RANK: Record<LiveToolState, number> = { preparing: 0, running: 1, done: 2, refused: 2, failed: 3 };
 
 function str(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
