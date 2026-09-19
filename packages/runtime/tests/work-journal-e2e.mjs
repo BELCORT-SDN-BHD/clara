@@ -567,9 +567,12 @@ async function main() {
       // reached the browser under the category name (`invalid_source_ref`) instead of its own.
       //
       // #981 · THE CARRIER, OVER THE REAL WIRE. The promoted keys are what they always were, and
-      // the door's whole typed detail now rides beside them — this is the only leg in the estate
-      // that reads that body off an actual HTTP response rather than from `workErrorResponse`
-      // directly, so it is where "the detail reaches the browser" stops being a unit claim.
+      // the door's whole typed detail now rides beside them — read off an actual HTTP response
+      // rather than from `workErrorResponse` directly, which is where "the detail reaches the
+      // browser" stops being a unit claim. THREE legs in the estate measure it that way, on the
+      // three doors that can raise this refusal: here, `periodic-adjustment-e2e.mjs` and
+      // `staff-expense-claim-e2e.mjs`, all three carrying the same literals — a change to the
+      // promoted half has to move the three together.
       const { detail: badDetail, ...badPromoted } = bad.body;
       assert.deepEqual(badPromoted, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
       assert.deepEqual(badDetail,
