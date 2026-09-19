@@ -167,16 +167,26 @@ shape regardless of where Postgres actually raised it.
 
 **What `obw.race.evidence_then_opening` measured, twice, reproducibly:** `clara.documents` is
 locked `FOR UPDATE` by both the coding lane and the opening lane purely for serialization
-(`clara._lock_document_binding`) — neither lane's body ever changes a column on that row.
+(`clara._lock_document_binding`) — neither lane's body ever changes a column on that row. When
+`attach_entry_evidence` (plain, holds first) commits a document it only locked, the blocked
+`approve_opening_seed` (SERIALIZABLE, contends) is granted the SAME, byte-identical row, sees no
+reason to abort, and evaluates its own conflict probe against a snapshot taken BEFORE the
+attachment committed — which never saw the live link. **Both sides commit.** The reverse arrival
+order (`obw.race.opening_then_evidence`) does not have this hole: the contender there
+(`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per statement once
+unblocked.
+
+**Mechanism — this lane's own reading, not a cited fact (L04-S07):** a plausible account is that
 PostgreSQL's SERIALIZABLE "second updater" protection fires only when the row a transaction waited
 on was actually **updated or deleted** by the transaction that held the lock, never when it was
-merely locked and released. So when `attach_entry_evidence` (plain, holds first) commits a document
-it only locked, the blocked `approve_opening_seed` (SERIALIZABLE, contends) is granted the SAME,
-byte-identical row, sees no reason to abort, and evaluates its own conflict probe against a
-snapshot taken BEFORE the attachment committed — which never saw the live link. **Both sides
-commit.** The reverse arrival order (`obw.race.opening_then_evidence`) does not have this hole: the
-contender there (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per
-statement once unblocked.
+merely locked and released, which would explain why a lock-only commit does not force the waiter
+to re-evaluate. An at-least-equally-plausible alternative this lane did not rule out: SSI aborts a
+transaction only at the PIVOT of a dangerous structure (an incoming AND an outgoing
+rw-antidependency — PostgreSQL docs, "Serializable Isolation Level"), and a single rw-conflict here
+may simply not be the shape SSI polices, which has nothing to do with the second-updater rule.
+Either mechanism is consistent with the measurement; neither is confirmed against the PostgreSQL
+source or a core committer. A successor fix should verify the actual mechanism before assuming
+either account, since the two point at different repairs.
 
 This is a genuine double-posting gap in migration 0213's opening-lane wall, MEASURED by the two
 `obw.race.*` cells and left UNREPAIRED here — #854's own brief puts "repair either wall, either
@@ -185,7 +195,12 @@ scope, since fixing it needs either a new migration (a wave-1 lane may not cut o
 `clara._lock_document_binding`/`clara.approve_opening_seed`, both named out of scope in the ticket.
 `obw.race.evidence_then_opening` asserts the CURRENT (double-posting) outcome as a regression
 sentinel; a future repair updates that one assertion, deliberately, rather than the test going red
-by surprise. Filed as a follow-up issue at the same time (see this ticket's final report).
+by surprise. **Not filed as a GitHub issue** (L04-S05: this correction — the fix-round worker that
+resolved this document may not write to GitHub either): recorded as a follow-up in
+`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-final.md` and
+`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-fixround-1.md`; repro is
+`obw.race.evidence_then_opening` verbatim. Whoever integrates this branch should file the issue
+before merge and replace this sentence with its number.
 
 ## Owner-level fixture DML, where it is unavoidable
 

@@ -208,17 +208,27 @@ test("obw.siblings_ok a multi-item seed on ONE tie document still approves every
 //
 // WHAT #854 FOUND, MEASURED TWICE ON THIS RIG (below): `clara.documents` is locked FOR UPDATE by
 // both lanes PURELY for serialization — neither lane's body ever changes a column on that row.
-// PostgreSQL's SERIALIZABLE "second updater" protection (the one thing that would force a
-// SERIALIZABLE transaction to re-read after waiting out a FOR UPDATE) fires only when the row it
-// waited on was ACTUALLY updated or deleted by the transaction that held the lock — never merely
-// locked and released. So when `attach_entry_evidence` (plain, holds first) commits a document it
-// only LOCKED (never wrote), the blocked `approve_opening_seed` (SERIALIZABLE, contends) is
-// granted the SAME, byte-identical row it already had in its own snapshot, sees no reason to
-// abort, and evaluates `clara._document_posting_entry` against a snapshot taken BEFORE the
-// attachment committed — which does not see the evidence link at all. BOTH sides commit. The
-// reverse order does not have this hole, because there the contender (`attach_entry_evidence`) is
-// plain READ COMMITTED, which always re-reads fresh per statement once unblocked — no isolation
-// trick is needed or possible for it to see what committed while it waited.
+// BOTH sides commit: `attach_entry_evidence` (plain, holds first) commits a document it only
+// LOCKED (never wrote); the blocked `approve_opening_seed` (SERIALIZABLE, contends) is then
+// granted the SAME, byte-identical row, sees no reason to abort, and evaluates
+// `clara._document_posting_entry` against a snapshot taken BEFORE the attachment committed —
+// which does not see the evidence link at all. The reverse order does not have this hole, because
+// there the contender (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads
+// fresh per statement once unblocked — no isolation trick is needed or possible for it to see
+// what committed while it waited.
+//
+// MECHANISM (this lane's OWN READING of the measurement above, not a cited fact — flagged per
+// L04-S07): a plausible account is that PostgreSQL's SERIALIZABLE "second updater" protection
+// (the one thing that would force a re-read after waiting out a FOR UPDATE) fires only when the
+// row waited on was ACTUALLY updated or deleted by the lock holder, never merely locked and
+// released — that would explain why a lock-only commit does not force the waiter to re-evaluate.
+// An at-least-equally-plausible alternative this lane did NOT rule out: SSI aborts a transaction
+// only when it sits at the PIVOT of a dangerous structure (an incoming AND an outgoing
+// rw-antidependency, PostgreSQL docs, "Serializable Isolation Level"); a single rw-conflict here
+// may simply not be the shape SSI polices at all, which has nothing to do with the second-updater
+// rule. Either way, the MEASUREMENT above (both sides commit, reproduced twice, deterministic)
+// stands on its own; a successor ticket repairing this should not assume either causal account
+// without checking the PostgreSQL source or asking a core committer.
 //
 // obw.race.evidence_then_opening below is written to PROVE this defect, not to paper over it —
 // #854's own brief anticipates exactly this ("if both sides can commit, that is a new defect for
@@ -226,21 +236,29 @@ test("obw.siblings_ok a multi-item seed on ONE tie document still approves every
 // explicitly OUT OF SCOPE for this ticket. Filed as a follow-up in this ticket's final report; the
 // cell stands as the regression sentinel until that follow-up lands.
 
-/** Asserts the loser's refusal is EITHER shape #854's brief names: the wall's own CLR13
- *  `source_already_posted` (a statement-time refusal, same as every sequential cell above), or a
- *  bare SERIALIZABLE `40001` (a commit-time discovery — Postgres's own machinery, not this
- *  estate's typed refusal, so it carries no `detail.reason`). Whichever one a given arrival order
- *  produces IS the finding (#854's brief, verbatim) — this does not favour either shape, it reads
- *  off whichever `humanHoldThenContend` observed and prints it into the assertion message so a
- *  human reading a failure (or this file's own history) sees which one this rig hit. */
-function assertLoserRefusal(loser, label) {
+/** Asserts the loser's refusal against `expectedShape`, one of the two shapes #854's brief
+ *  names: `"CLR13"` (the wall's own `source_already_posted`, a statement-time refusal, same as
+ *  every sequential cell above) or `"40001"` (a bare SERIALIZABLE commit-time discovery —
+ *  Postgres's own machinery, not this estate's typed refusal, so it carries no `detail.reason`).
+ *  The disjunction lives ONLY here, in the helper's contract: which shape a given arrival order
+ *  produces IS the finding (#854's brief, verbatim), so each CALL SITE pins the shape it actually
+ *  observed on this rig (L04-S06) rather than accepting either — a future change that makes an
+ *  arrival order's loser fail a different way than the one this file recorded reds here, by
+ *  name, instead of passing silently under the disjunction. */
+function assertLoserRefusal(loser, label, expectedShape) {
   assert.equal(loser.ok, false, `${label}: the contender loses`);
-  if (loser.code === "40001") {
+  assert.ok(expectedShape === "CLR13" || expectedShape === "40001",
+    `assertLoserRefusal(${label}): expectedShape must be "CLR13" or "40001", got ${JSON.stringify(expectedShape)}`);
+  const shape = loser.code === "40001" ? "40001" : "CLR13";
+  assert.equal(shape, expectedShape,
+    `${label}: expected the ${expectedShape} refusal shape; this rig produced ${shape} `
+    + `(${JSON.stringify(loser)}) — see assertLoserRefusal's own header for what each shape means`);
+  if (shape === "40001") {
     assert.equal(loser.detail?.reason, undefined,
       `${label}: a bare serialization failure carries no typed reason (got ${JSON.stringify(loser.detail)})`);
     return "40001";
   }
-  assert.equal(loser.code, CLR.conflict, `${label}: …CLR13 (or 40001 — see above)`);
+  assert.equal(loser.code, CLR.conflict, `${label}: …CLR13`);
   assert.equal(loser.detail.reason, EVIDENCE_REASON.sourceAlreadyPosted,
     `${label}: …source_already_posted, the same token the sequential cells raise`);
   return "CLR13";
@@ -271,7 +289,7 @@ test("obw.race.opening_then_evidence the opening approval holds; the evidence at
     "race.opening_then_evidence: the attachment must WAIT on the opening approval's document lock "
     + `— a schedule that never blocked proves nothing (wait_event_type ${out.waitEventType}/${out.waitEvent})`);
   assert.equal(out.waitEventType, "Lock", "race.opening_then_evidence: …on a LOCK");
-  const shape = assertLoserRefusal(out.b, "race.opening_then_evidence");
+  const shape = assertLoserRefusal(out.b, "race.opening_then_evidence", "CLR13");
 
   // MULTI-ITEM AWARE: the winner is a whole opening SEED (`s.drafts.all.length` items, all bound
   // to the same tie document by design — obw.siblings_ok above), not a single entry, so the
