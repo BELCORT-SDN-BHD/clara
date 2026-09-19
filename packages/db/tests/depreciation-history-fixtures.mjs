@@ -177,14 +177,33 @@ export const signWithRef = (sub, { client, authority, ref, opKey = null }) =>
     { name: "p_authority_ref", cast: "jsonb" },
   ], [client, authority, opKey ?? opk("p651sign"), ref === null ? null : JSON.stringify(ref)]);
 
+/** clara.propose_depreciation_authority(p_client, p_cadence, p_op_key) — bookkeeper+. Returns
+ *  the authority id the receipt names. */
+export async function proposeAuthority(sub, { client, cadence = "monthly", opKey = null }) {
+  const proposed = await humanCall(sub, "propose_depreciation_authority", [
+    { name: "p_client" }, { name: "p_cadence" }, { name: "p_op_key" },
+  ], [client, cadence, opKey ?? opk("p651prop")]);
+  const id = idOf(proposed, "authority_id", "id");
+  assert.ok(id, `propose_depreciation_authority names the authority (got ${JSON.stringify(proposed)})`);
+  return id;
+}
+
+/** clara.retire_depreciation_authority(p_client, p_authority, p_reason, p_op_key) — ADMIN+.
+ *  0041 wrote it so a NEVER-SIGNED authority can be withdrawn too (it coalesces the signature
+ *  stamps rather than demanding them), which is the act `p651.authority.retire_unsigned` drives. */
+export const retireAuthority = (sub, { client, authority, reason = "p651 retired", opKey = null }) =>
+  humanCall(sub, "retire_depreciation_authority", [
+    { name: "p_client" }, { name: "p_authority" }, { name: "p_reason" }, { name: "p_op_key" },
+  ], [client, authority, reason, opKey ?? opk("p651retire")]);
+
+/** clara.get_depreciation_authority(p_client) — viewer+. The envelope the web surface reads. */
+export const authorityEnvelope = (sub, client) =>
+  humanCall(sub, "get_depreciation_authority", [{ name: "p_client" }], [client]);
+
 /** Propose (bookkeeper+) then sign (admin+) with a RESOLVING chat-task reference. */
 export async function liveAuthorityWithRef(client, { cadence = "monthly", ref = null } = {}) {
   const w = await faWorld();
-  const proposed = await humanCall(w.users.bob, "propose_depreciation_authority", [
-    { name: "p_client" }, { name: "p_cadence" }, { name: "p_op_key" },
-  ], [client, cadence, opk("p651prop")]);
-  const id = idOf(proposed, "authority_id", "id");
-  assert.ok(id, `propose_depreciation_authority names the authority (got ${JSON.stringify(proposed)})`);
+  const id = await proposeAuthority(w.users.bob, { client, cadence });
   const r = ref ?? (await mintChatTaskRef(client));
   const signed = await signWithRef(w.users.hana, { client, authority: id, ref: r });
   return { id, ref: r, signed, signedBy: w.users.hana, cadence };

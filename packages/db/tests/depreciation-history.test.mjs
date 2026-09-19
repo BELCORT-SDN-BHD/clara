@@ -24,6 +24,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   gate651, p651Client, fiscalYear, liveAuthorityWithRef, signWithRef, previewRun, runPeriodFor,
+  proposeAuthority, retireAuthority, authorityEnvelope,
   reviseClassified, completeWith, completeForWith, withdrawDraftAs, backdateAuthorityFloor,
   functionDef, regprocedureExists, roleHasExecute, draftDepreciationEntries,
   depreciationEntries, mintChatTaskRef,
@@ -400,7 +401,7 @@ test("p651.authority.floor an authority signed today makes the belt run FORWARD 
   assert.ok(manual.entry_id, "…and it really posted or drafted a period below the floor");
 });
 
-test("p651.authority.floor_sequencing RESIDUAL, PINNED: with the oracle floored, period_earlier_unmet no longer binds below the floor", async (t) => {
+test("p651.authority.floor_sequencing RESIDUAL, PINNED: below the floor period_earlier_unmet no longer binds, and the out-of-order run is a NOOP that charges nothing twice", async (t) => {
   if (await gate(t)) return;
   const { w, client } = await armed("auth_floor_seq", { from: -6, life: 60 });
 
@@ -408,27 +409,128 @@ test("p651.authority.floor_sequencing RESIDUAL, PINNED: with the oracle floored,
   const later = await runManualAndSettle(client, mon(-2));
   assert.notEqual(later.receipt.status, "noop", "the LATER period ran first");
 
-  const earlier = await caught(() => runManual(w.users.bob,
-    { client, periodStart: mon(-5).start, periodEnd: mon(-5).end }));
+  const chargesBefore = await clientCharges(client);
+  const runsBefore = await runRows(client);
+  assert.ok(chargesBefore.length > 0, "mandatory setup: the later run really charged the arrears");
 
-  // THE SLICE TOOK THE SECOND OF THE BRIEF'S TWO ANSWERS: the oldest-unmet bound is NOT re-derived
-  // unfloored for the caller-named path, because the only instruments that could do it are the ONE
-  // 1-arg oracle (whose consumer set is deepEqual-pinned by two live CI batteries) and a bypass
-  // parameter on it (a DROP + CREATE re-patching four call sites plus a rig-meta row, against
-  // §2.2 rule 4). So the `period_earlier_unmet` guarantee — the thing that pins the reducing-balance
-  // arithmetic so a run can never read around an unapproved period — STOPS BINDING BELOW THE FLOOR,
-  // and that exposure is pinned here as a RESIDUAL rather than left to be discovered.
-  if (earlier === null) {
-    noteLane("p651.authority.floor_sequencing RESIDUAL CONFIRMED: two pre-floor months ran OUT OF ORDER "
-      + "through run_depreciation_manual with no period_earlier_unmet refusal. Below authority_from the "
-      + "sequencing guarantee does not hold; the reducing-balance 'never read around an unapproved "
-      + "period' pin is therefore unenforced for caller-named pre-floor periods. Follow-up filed.");
-  } else {
-    noteLane(`p651.authority.floor_sequencing: the earlier period was refused by '${reasonToken(earlier)}' `
-      + `(${earlier.code}) — the exposure did not open on this fixture.`);
+  let earlierErr = null;
+  let earlierReceipt = null;
+  try {
+    earlierReceipt = await runManual(w.users.bob,
+      { client, periodStart: mon(-5).start, periodEnd: mon(-5).end });
+  } catch (error) {
+    earlierErr = error;
   }
-  assert.ok(earlier === null || reasonToken(earlier) !== null,
-    "whichever answer the estate gives, it is a NAMED one and this cell records which");
+
+  // THE SLICE TOOK THE SECOND OF THE BRIEF'S TWO ANSWERS (§3 item 3(a)): the oldest-unmet bound is
+  // NOT re-derived unfloored for the caller-named path, because the only instruments that could do
+  // it are the ONE 1-arg oracle (whose consumer set is deepEqual-pinned by two live CI batteries)
+  // and a bypass parameter on it (a DROP + CREATE re-patching four call sites plus a rig-meta row,
+  // against §2.2 rule 4). So the `period_earlier_unmet` guarantee — the thing that pins the
+  // reducing-balance arithmetic so a run can never read around an unapproved period — STOPS
+  // BINDING BELOW THE FLOOR.
+  //
+  // THIS CELL PINS THE EXPOSURE AS MEASURED FACT RATHER THAN LOGGING IT (adversarial review
+  // ADV-651-4: an assertion that holds in both branches pins nothing and occupies the slot of the
+  // one that would). Both halves are asserted, so a later change in EITHER direction reds here:
+  // if the guard ever binds again this cell fails on the first assertion and the residual is
+  // closed; if the exposure ever turns into a DOUBLE CHARGE it fails on the last two.
+  assert.equal(earlierErr, null,
+    "RESIDUAL, MEASURED: an out-of-order PRE-FLOOR period is admitted with no period_earlier_unmet "
+    + `refusal (got ${earlierErr ? `${reasonToken(earlierErr)} / ${earlierErr.code}` : "none"}) — below `
+    + "authority_from the sequencing guarantee does not hold");
+  assert.equal(earlierReceipt.status, "noop",
+    "…and what saves the arithmetic is that it is a NOOP: clara._fa_asset_charges already charged "
+    + "every uncharged month up to the LATER period's end, so the earlier run finds nothing left "
+    + "to charge. The exposure is real; the damage today is nil, and that is the whole finding");
+  assert.equal(earlierReceipt.entry_id ?? null, null, "…a noop persists nothing — no entry");
+  assert.deepEqual(await clientCharges(client), chargesBefore,
+    "…not one charge row moved, was added or was re-dated by the out-of-order run");
+  assert.deepEqual((await runRows(client)).map((r) => r.id), runsBefore.map((r) => r.id),
+    "…and no run row was written either");
+  noteLane("p651.authority.floor_sequencing RESIDUAL CONFIRMED AND PINNED: two pre-floor months ran "
+    + "OUT OF ORDER through run_depreciation_manual with no period_earlier_unmet refusal; the second "
+    + "run was a noop with the charge set and the run rows unchanged. Follow-up filed.");
+});
+
+test("p651.authority.retire_unsigned a NEVER-SIGNED authority can still be WITHDRAWN through the real admin door, and the lane reopens", async (t) => {
+  if (await gate(t)) return;
+  const w = await faWorld();
+  const client = await p651Client("auth_retire_unsigned");
+
+  // THE ACT: a firm proposes the wrong cadence and withdraws it before anyone signs. 0041 wrote
+  // `retire_depreciation_authority` for exactly this — it coalesces the signature stamps
+  // (0041:3393-3394) instead of demanding them, so `proposed -> retired` is a lawful edge and
+  // `clara._tf_fa_authority_transition` admits it by name. 0227 adds a WINDOW COLUMN and a CHECK
+  // over it; if the retire door does not stamp the floor the way it already stamps the signature,
+  // this lawful act dies on a raw 23514 check violation with no CLR code, no reason token and no
+  // remedy — in a dialog the admin is looking at (fa-authority-ceremony.tsx renders Retire for a
+  // PROPOSED authority too, only Sign is gated). Adversarial review ADV-651-1.
+  const auth = await proposeAuthority(w.users.bob, { client });
+  const before = (await authorityRows(client)).find((a) => a.id === auth);
+  assert.equal(before.status, "proposed", "mandatory setup: it is proposed and NEVER signed");
+  assert.equal(before.authority_from, null, "…and a proposed authority carries no window floor");
+  assert.equal(before.signed_at, null, "…nor a signature");
+
+  const receipt = await retireAuthority(w.users.hana,
+    { client, authority: auth, reason: "p651 wrong cadence, withdrawn before signature" });
+  assert.equal(receipt.status, "retired", "the admin door accepts the withdrawal and says so");
+
+  const after = (await authorityRows(client)).find((a) => a.id === auth);
+  assert.equal(after.status, "retired");
+  assert.equal(after.authority_from, mon(0).start,
+    "…and it leaves with a window floor stamped the same way the door already stamps the signature "
+    + "(coalesce), so ck_fa_authorities_window reads true of every non-proposed row forever");
+  assert.ok(after.signed_at, "…exactly as 0041's own coalesce already invents a signature stamp");
+
+  const env = await authorityEnvelope(w.users.bob, client);
+  assert.equal(env.authority, null,
+    "…and the READ is honest: a retired-only client shares the 'none proposed' state with a fresh "
+    + "one, which is what the surface already renders (lib/registers/depreciation.ts's F6 note)");
+
+  const again = await proposeAuthority(w.users.bob, { client, cadence: "annual" });
+  assert.ok(again && again !== auth,
+    "THE RECOVERY: the lane REOPENS — the corrected cadence can be proposed once the wrong one is gone");
+});
+
+test("p651.authority.floor_frozen once stamped, the window floor and the instruction reference never move again — not on the retire transition, not by a direct UPDATE", async (t) => {
+  if (await gate(t)) return;
+  const w = await faWorld();
+  const client = await p651Client("auth_frozen");
+  const au = await liveAuthorityWithRef(client);
+  const stamped = (await authorityRows(client)).find((a) => a.id === au.id);
+  assert.equal(stamped.authority_from, mon(0).start, "mandatory setup: the floor is stamped");
+  assert.ok(stamped.authority_ref, "…and so is the instruction it was signed under");
+
+  // (a) THE TRIGGER LAW ITSELF. D8's words are "written once at sign time and frozen", and 0227
+  // adds both columns to `v_frozen` — which is the allowlist of columns a LAWFUL TRANSITION may
+  // write, and says nothing about writing them TWICE. NO audited verb can attempt a second write,
+  // so the attempt is a LABELLED root UPDATE: the same instrument accounting-plans.test.mjs:450-456
+  // uses on the same law for clara.accounting_plans.authority_from, whose own comment is the
+  // argument — "a frozen column nobody tests is a promise". Adversarial review ADV-651-6.
+  for (const [col, value] of [
+    ["authority_from", "date '2020-01-01'"],
+    ["authority_ref", `'{"kind":"chat_task","id":"00000000-0000-4000-8000-0000000000ff"}'::jsonb`],
+  ]) {
+    const err = await refuses(
+      () => rootQuery(`update clara.fa_depreciation_authorities set ${col}=${value} where id=$1`, [au.id]),
+      "authority_immutable", `p651.frozen.${col}`);
+    assert.equal(err.code, "CLR38", `${col}: on the FA family's CLR38 axis`);
+    assert.equal(JSON.parse(String(err.detail)).column, col, "…and the refusal NAMES the column that moved");
+  }
+  const unmoved = (await authorityRows(client)).find((a) => a.id === au.id);
+  assert.equal(unmoved.authority_from, stamped.authority_from, "…nothing moved");
+  assert.deepEqual(unmoved.authority_ref, stamped.authority_ref);
+
+  // (b) THE AUDITED PATH: retiring a SIGNED authority carries both values through untouched — the
+  // door's coalesce writes the floor only when there is none.
+  await retireAuthority(w.users.hana, { client, authority: au.id, reason: "p651 retire after sign" });
+  const retired = (await authorityRows(client)).find((a) => a.id === au.id);
+  assert.equal(retired.status, "retired");
+  assert.equal(retired.authority_from, stamped.authority_from,
+    "the floor a signature stamped survives the retirement unchanged");
+  assert.deepEqual(retired.authority_ref, stamped.authority_ref,
+    "…and so does the instruction it was signed under");
 });
 
 // ===========================================================================================

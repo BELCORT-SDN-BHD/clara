@@ -23,7 +23,29 @@
 // `depreciation-history.test.mjs` (`p651.authority.ref_resolves`), and it drives the real door.
 
 import assert from "node:assert/strict";
-import { rootQuery } from "./rig-helpers.mjs";
+import { rootQuery, withActor } from "./rig-helpers.mjs";
+
+/** ONE CONNECTION, ONE TRANSACTION, for every fixture that has to turn a trigger off.
+ *
+ *  `alter table … disable trigger` is DDL: inside a transaction it takes ACCESS EXCLUSIVE and the
+ *  guard is off only for THIS transaction, so a concurrent session blocks instead of writing past
+ *  a disabled trigger, and a process killed mid-fixture rolls the disable back instead of leaving
+ *  the rig permanently unguarded. Run as three autocommitted `rootQuery` calls — which is how both
+ *  fixtures below were first written (adversarial review ADV-651-7) — the window is open to EVERY
+ *  session on the cluster, and `--test-concurrency=1` bounds it only within this package while the
+ *  estate runs real-DB cells from `packages/runtime` against the same database.
+ *
+ *  Migration 0227 does the same manoeuvre correctly for the same reason, inside the migration
+ *  runner's own per-migration transaction (0227:338-342, and its comment says so). */
+const withTriggerOff = (table, trigger, fn) =>
+  withActor({ transaction: true }, async (c) => {
+    await c.query(`alter table ${table} disable trigger ${trigger}`);
+    try {
+      return await fn(c);
+    } finally {
+      await c.query(`alter table ${table} enable trigger ${trigger}`);
+    }
+  });
 
 /** `true` once 0227's four-argument door is the one in the catalog. Cached per process; the
  *  arity cannot change under a running test process. */
@@ -51,7 +73,12 @@ export async function signTakesAuthorityRef() {
  *  snapshot" — the `f-a4-pr1c-fixtures.mjs:60` shape. The authority reference's own `kind` word
  *  (`chat_task`) names the RELATION the id lives in, and 0227's ladder resolves it against
  *  `clara.agent_tasks` by id, firm and client without reading `kind` — so this fixture is a real
- *  row of the real relation rather than a shape the ladder would never see in production. */
+ *  row of the real relation rather than a shape the ladder would never see in production.
+ *
+ *  THAT LAST SENTENCE IS ALSO THE NAMED RESIDUAL (adversarial review ADV-651-2): the ladder proves
+ *  the instruction's PROVENANCE, not that a person typed it, exactly as 0193:1500-1514 does for
+ *  accounting plans. Narrowing it is a cross-lane decision; 0227 §F's header carries the whole
+ *  argument and #651's fix-round report files the follow-up. */
 export async function mintChatTaskRef(client) {
   const c = await rootQuery("select firm_id from clara.clients where id = $1", [client]);
   const firm = c.rows[0]?.firm_id;
@@ -71,14 +98,13 @@ export async function mintChatTaskRef(client) {
     // an ACTIVE client, `chat_turn` a chat session, `wake` a wake intent, `accounting_work` a Work
     // row. An instruction naming a client still in onboarding is a real shape (a firm agrees the
     // depreciation policy while the client is being set up) that no audited verb can reach here, so
-    // the fixture writes it directly, LABELLED, with the trigger off for exactly that statement.
-    await rootQuery("alter table clara.agent_tasks disable trigger t_agent_task_insert");
-    try {
-      const t = await rootQuery(insert, params);
+    // the fixture writes it directly, LABELLED, with the trigger off for exactly that statement —
+    // and inside ONE transaction on ONE connection, so the window is transaction-scoped rather
+    // than cluster-wide (see `withTriggerOff` above).
+    return withTriggerOff("clara.agent_tasks", "t_agent_task_insert", async (c) => {
+      const t = await c.query(insert, params);
       return { kind: "chat_task", id: t.rows[0].id };
-    } finally {
-      await rootQuery("alter table clara.agent_tasks enable trigger t_agent_task_insert");
-    }
+    });
   }
 }
 
@@ -92,18 +118,15 @@ export async function mintChatTaskRef(client) {
  *  re-aim every pre-existing cell that asks the due oracle what to charge: those cells measure the
  *  ARITHMETIC, not the window.
  *
- *  `clara._tf_fa_authority_transition` refuses both a non-transition UPDATE and any write outside
- *  its sign/retire allowlist, so the trigger is disabled for exactly this one statement and
- *  re-enabled in a `finally`. This is fixture DML, never the thing under test. */
+ *  `clara._tf_fa_authority_transition` refuses a non-transition UPDATE, any write outside its
+ *  sign/retire allowlist, and — since 0227 §B.2 — any SECOND write to an already-stamped
+ *  `authority_from`, which is precisely the move below. So the trigger is disabled for exactly
+ *  this one statement, inside ONE transaction, and re-enabled before it commits. This is fixture
+ *  DML, never the thing under test: the enabled path is `p651.authority.floor_frozen`. */
 export async function backdateAuthorityFloor(authorityId, floorDate) {
-  try {
-    await rootQuery("alter table clara.fa_depreciation_authorities disable trigger t_fa_authorities_transition");
-    await rootQuery(
-      "update clara.fa_depreciation_authorities set authority_from = $2::date where id = $1",
-      [authorityId, floorDate]);
-  } finally {
-    await rootQuery("alter table clara.fa_depreciation_authorities enable trigger t_fa_authorities_transition");
-  }
+  await withTriggerOff("clara.fa_depreciation_authorities", "t_fa_authorities_transition", (c) =>
+    c.query("update clara.fa_depreciation_authorities set authority_from = $2::date where id = $1",
+      [authorityId, floorDate]));
   return floorDate;
 }
 

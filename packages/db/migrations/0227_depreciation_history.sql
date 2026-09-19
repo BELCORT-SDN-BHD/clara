@@ -83,6 +83,14 @@
 -- names and nothing else about the trigger moves — the transition graph, the DELETE refusal and
 -- the same-status refusal are byte-identical, re-asserted in §I (T.11).
 --
+-- …AND BECAUSE AN ALLOWLIST IS NOT A FREEZE, §B.2 splices the write-once wall for those same two
+-- columns into the same trigger (D8's own words), and §B.3 teaches
+-- `clara.retire_depreciation_authority` to stamp the window floor the way it already stamps the
+-- signature — without which this file's OWN `ck_fa_authorities_window` turns the lawful withdrawal
+-- of a never-signed authority into a raw 23514. Both are recuts of bodies the brief's roster does
+-- not name; both are repairs of damage this file would otherwise do, and both are pinned,
+-- postchecked and re-read in the tail like every other body here.
+--
 -- =====================================================================================
 -- THE REFUSAL VOCABULARY THIS FILE OWNS. Everything else it can raise is INHERITED and
 -- deliberately NOT re-spelled (CLR38 `authority_not_live` / `period_draft_outstanding` /
@@ -173,6 +181,7 @@ begin
       'clara._reserve_op(uuid,text,text,bytea)', 'clara._finish_op(uuid,text,text,jsonb)',
       'clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)', 'clara._hash(jsonb)',
       'clara.withdraw_draft(uuid,text,uuid,text)',
+      'clara.retire_depreciation_authority(uuid,uuid,text,text)',
       'clara._tf_fa_authority_transition()'] loop
     if to_regprocedure(v_sig) is null then
       raise exception '#651 prestate: prerequisite % is absent', v_sig using errcode='CLR10';
@@ -210,6 +219,10 @@ begin
        'efc9039d2ca43b5ab4f4ad797c9bb66dd8c35847eed399389b2728fa8fc9879d', 'recut'),
       ('clara._tf_fa_authority_transition()',
        '95aaa6f6eb9498d8ed5e1a229f0ad4757d95c587bf41093e5eda9e1ddd71865e', 'recut'),
+      -- THE RETIRE DOOR IS RECUT BECAUSE THIS FILE'S OWN CHECK BREAKS IT (§B.3). Measured on
+      -- clara_651 off pg_proc.prosrc, like every pin above.
+      ('clara.retire_depreciation_authority(uuid,uuid,text,text)',
+       '35b0facd3735e62d13120eb66e9fbe55ac1ae1db4efa0b9cee6b0fe313c57b00', 'recut'),
       -- NON-REGRESSION: this file must not move these, and §I re-reads them afterwards.
       ('clara.get_fixed_asset(uuid)',
        'da9333ebdd3bcaeea916f31651dbf0e87378a525e8c19fd98035141f6fd8be5a', 'unmoved'),
@@ -249,7 +262,7 @@ begin
     raise exception '#651 prestate: the close_prep wake source is not disabled' using errcode='CLR10';
   end if;
 
-  raise notice '#651 prestate: clean -- no change classification, no authority window, no period-open helper, no preview, no OBO run door; the nine recut bodies and the three non-regression bodies are at their measured pre-images; both 0042 splices are live; _fa_run_period_core has exactly three callers; close_prep is still disabled.';
+  raise notice '#651 prestate: clean -- no change classification, no authority window, no period-open helper, no preview, no OBO run door; the TEN recut bodies and the three non-regression bodies are at their measured pre-images; both 0042 splices are live; _fa_run_period_core has exactly three callers; close_prep is still disabled.';
 end
 $p651_pre$;
 
@@ -390,6 +403,116 @@ begin
       using errcode='CLR10';
   end if;
 end $p651_trig$;
+
+-- §B.2  …AND THE TWO SIGN-TIME COLUMNS ARE WRITE-ONCE, WHICH IS A SEPARATE LAW FROM THE ONE
+-- ABOVE. `v_frozen` is the allowlist of columns a LAWFUL TRANSITION may write; adding the two
+-- columns to it (B.1) makes them writable by EVERY admitted transition, which would leave D8's
+-- "written once at sign time and frozen" enforced by convention in two door bodies rather than by
+-- the trigger. 0193's own `_tf_accounting_plans_immutable` (0193:476-478) freezes the plan lane's
+-- `authority_ref` / `authority_from` by name, and accounting-plans.test.mjs:448-456 says why in as
+-- many words: "a frozen column nobody tests is a promise". This block writes the FA lane's half of
+-- that wall (the cell is `p651.authority.floor_frozen`).
+--
+-- SPLICED ON ITS OWN ANCHOR rather than folded into B.1: the anchor below is present in 0041's
+-- ORIGINAL body and in B.1's post-image alike, so the two blocks are independent and either can be
+-- read, re-run or reviewed without the other.
+do $p651_trig_freeze$
+declare v_sig text := 'clara._tf_fa_authority_transition()';
+        v_def text; v_anchor text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_anchor := '  if (to_jsonb(new) - v_frozen) is distinct from (to_jsonb(old) - v_frozen) then';
+  v_cnt := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+  if v_cnt <> 1 then
+    raise exception '#651 §B.2: the frozen-diff guard appears % time(s) (expected exactly once)', v_cnt
+      using errcode='CLR10';
+  end if;
+  v_def := replace(v_def, v_anchor,
+    $t$  -- 0227 (#651): WRITE-ONCE, and this is the wall rather than a convention. `v_frozen`
+  -- above admits the two sign-time columns to a lawful transition; it says nothing about writing
+  -- them TWICE. clara.sign_depreciation_authority stamps both on the proposed -> live edge and
+  -- clara.retire_depreciation_authority stamps a floor on a NEVER-SIGNED withdrawal (§B.3);
+  -- after that, no transition may move either one.
+  if old.authority_from is not null and new.authority_from is distinct from old.authority_from then
+    raise exception 'a depreciation authority window floor is written once and never moved'
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'authority_immutable', 'authority_id', old.id,
+          'column', 'authority_from')::text;
+  end if;
+  if old.authority_ref is not null and new.authority_ref is distinct from old.authority_ref then
+    raise exception 'a depreciation authority instruction reference is written once and never moved'
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'authority_immutable', 'authority_id', old.id,
+          'column', 'authority_ref')::text;
+  end if;
+$t$ || v_anchor);
+  execute v_def;
+
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('written once and never moved' in v_def) = 0
+     or position($m$'column', 'authority_from'$m$ in v_def) = 0
+     or position($m$'column', 'authority_ref'$m$ in v_def) = 0
+     or position('authority_transition_illegal' in v_def) = 0
+     or position('authority_never_deleted' in v_def) = 0 then
+    raise exception '#651 §B.2 postcheck: the write-once splice damaged the body' using errcode='CLR10';
+  end if;
+  -- ORDER IS LOAD-BEARING: the write-once wall must be reached BEFORE the transition-legality
+  -- raise, or a second write on an unlawful edge would be reported as an illegal transition and
+  -- the column that actually moved would never be named.
+  if position('written once and never moved' in v_def) > position('authority_transition_illegal' in v_def) then
+    raise exception '#651 §B.2 postcheck: the write-once wall is spliced AFTER the transition raise'
+      using errcode='CLR10';
+  end if;
+end $p651_trig_freeze$;
+
+-- §B.3  THE RETIRE DOOR STAMPS THE WINDOW FLOOR THE SAME WAY IT ALREADY STAMPS THE SIGNATURE.
+--
+-- THE DEFECT THIS CLOSES IS THIS FILE'S OWN (adversarial review ADV-651-1, fix-round 1).
+-- `ck_fa_authorities_window` above demands a floor on every `live`/`retired` row.
+-- `clara.retire_depreciation_authority` (0041:3361) is the ONE way a NEVER-SIGNED authority leaves
+-- `proposed` — a firm proposes the wrong cadence and withdraws it — and 0041 wrote it for exactly
+-- that case, coalescing `signed_by` / `signed_at` (0041:3393-3394) instead of demanding them. The
+-- transition trigger admits `proposed -> retired` by name, so nothing upstream stops the act; the
+-- CHECK would stop it, with a raw 23514 carrying no CLR code, no reason token and no remedy, in a
+-- dialog an admin is looking at (fa-authority-ceremony.tsx renders Retire for a proposed authority
+-- too; only Sign is gated on the status).
+--
+-- THE FIX IS ONE COALESCE, IN THE SAME UPDATE, in the same shape as the two beside it. A SIGNED
+-- authority's floor is therefore never moved by a retirement (§B.2 raises on that anyway), and a
+-- never-signed one leaves with the month it was withdrawn in — which is what the row's invented
+-- `signed_at` already says. Spliced off the LIVE body (0042's idiom) rather than transcribed.
+do $p651_retire$
+declare v_sig text := 'clara.retire_depreciation_authority(uuid,uuid,text,text)';
+        v_def text; v_anchor text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_anchor := '    signed_by = coalesce(au.signed_by, c.actor), signed_at = coalesce(au.signed_at, now())'
+    || E'\n    where id = p_authority;';
+  v_cnt := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+  if v_cnt <> 1 then
+    raise exception '#651 §B.3: the retire UPDATE''s signature-stamp tail appears % time(s) (expected exactly once)', v_cnt
+      using errcode='CLR10';
+  end if;
+  v_def := replace(v_def, v_anchor,
+    '    signed_by = coalesce(au.signed_by, c.actor), signed_at = coalesce(au.signed_at, now()),'
+    || E'\n' || $t$    -- 0227 (#651): THE WINDOW FLOOR, stamped exactly the way the two values before it are.
+    -- ck_fa_authorities_window demands one on every non-proposed row, and this door is the only
+    -- way a NEVER-SIGNED authority becomes `retired`. `coalesce` so a signed authority's floor is
+    -- carried through untouched.
+    authority_from = coalesce(au.authority_from, clara._fa_month_start(clara._fa_today()))$t$
+    || E'\n    where id = p_authority;');
+  execute v_def;
+
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('authority_from = coalesce(au.authority_from, clara._fa_month_start(clara._fa_today()))' in v_def) = 0
+     or position('signed_at = coalesce(au.signed_at, now())' in v_def) = 0
+     or position('authority_not_live' in v_def) = 0
+     or position('clara._reserve_op(c.firm' in v_def) = 0
+     or position('clara._finish_op(c.firm' in v_def) = 0
+     or position('role_rank(''admin'')' in v_def) = 0 then
+    raise exception '#651 §B.3 postcheck: the retire splice damaged the body' using errcode='CLR10';
+  end if;
+end $p651_retire$;
 
 -- =====================================================================================
 -- §C  THE CLASSIFICATION'S TRANSPORT — MEASUREMENT M1'S GREEN ARM.
@@ -990,8 +1113,18 @@ end $p651_oracle$;
 --
 -- THE RESOLUTION LADDER IS `clara.create_accounting_plan`'s (0193:1482-1514), carried onto the FA
 -- family's CLR38 axis so one surface renders one vocabulary. A Knowledge preference, a calculation
--- policy or a repeated debit has no row in either relation, so none of them can supply authority —
--- that sentence is AC5's "explicit instruction" made executable rather than commented.
+-- policy or a repeated debit has no row in either relation, so none of them can supply authority.
+--
+-- WHAT THAT LADDER PROVES, EXACTLY (adversarial review ADV-651-2, fix-round 1 — written here so
+-- the next reader does not have to re-derive it): it proves PROVENANCE, not INSTRUCTION. The
+-- reference must name a REAL row of `clara.accounting_work` or `clara.agent_tasks` in THIS firm
+-- and THIS client — which is what rules out a Knowledge preference, a policy or a standing rule,
+-- and it is the whole of AC5's executable half. It does NOT read the row's `kind`, `status`,
+-- `purpose` or author, so a machine-born task nobody typed also satisfies it. That is deliberate
+-- and it is the ESTATE's position rather than this file's: 0193:1500-1514 is byte-for-byte the
+-- same existence test, with the same comment, for the plan lane. Narrowing one lane and not the
+-- other would give a firm two different meanings for one word, so the narrowing is a cross-lane
+-- decision and a NAMED RESIDUAL here, not a quiet tightening. See #651's fix-round report.
 -- =====================================================================================
 
 drop function clara.sign_depreciation_authority(uuid,uuid,text);
@@ -1060,6 +1193,9 @@ begin
   end if;
   -- RESOLVED, not merely well-shaped, and in the SAME firm AND client. A Knowledge preference, a
   -- calculation policy or a repeated debit has no row here, so none of them can supply authority.
+  -- THE TEST IS EXISTENCE: it proves the instruction's PROVENANCE (a real row of this client's
+  -- own work or chat lane), NOT that a person typed it. `kind`, `status` and author are not read
+  -- — deliberately, and identically to 0193:1500-1514 for accounting plans. See §F's header.
   if v_ref_kind = 'accounting_work' then
     select exists (select 1 from clara.accounting_work w
                     where w.id = v_ref_id and w.firm_id = c.firm and w.client_id = p_client) into v_ok;
@@ -1401,7 +1537,10 @@ begin
       ('clara._fa_asset_json(uuid,date)', true, true, 'none'),
       ('clara._fa_complete_particulars_core(uuid,uuid,uuid,uuid,jsonb,text,text)', true, false, 'none'),
       ('clara.revise_fixed_asset_particulars(uuid,uuid,jsonb,date,text)', true, false, 'clara_authenticated'),
-      ('clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)', true, false, 'clara_authenticated')
+      ('clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)', true, false, 'clara_authenticated'),
+      -- §B.3's recut. It is spliced off its own live body, so its 0041 grant and owner survive;
+      -- this row is what PROVES that rather than assuming it (the 0018:188 scar in reverse).
+      ('clara.retire_depreciation_authority(uuid,uuid,text,text)', true, false, 'clara_authenticated')
     ) as t(sig, definer, is_stable, lane) loop
     select p.prosecdef::text || '|' || p.provolatile::text || '|' || coalesce(array_to_string(p.proconfig, ','), '')
            || '|' || p.proowner::regrole::text
@@ -1503,7 +1642,7 @@ begin
       'run_depreciation_period_for','sign_depreciation_authority','revise_fixed_asset_particulars',
       'complete_fixed_asset_particulars','_fa_complete_particulars_core','_fa_validate_particulars',
       '_fa_asset_json','_fa_oldest_unmet_period','_fa_run_period_core',
-      '_tf_fa_authority_transition']) as n loop
+      '_tf_fa_authority_transition','retire_depreciation_authority']) as n loop
     select count(*)::int into v_n from pg_proc p
      where p.pronamespace = 'clara'::regnamespace and p.proname = r.n;
     if v_n <> 1 then
@@ -1562,6 +1701,23 @@ begin
      or position('authority_immutable' in v_src) = 0
      or position('authority_transition_illegal' in v_src) = 0 then
     raise exception '#651 tail: the authority transition graph moved' using errcode='CLR10';
+  end if;
+  -- …AND THE WRITE-ONCE WALL (§B.2) IS IN THE COMMITTED BODY, ahead of the transition raise. D8's
+  -- "written once at sign time and frozen" is a trigger law here, not a convention two doors keep.
+  if position('written once and never moved' in v_src) = 0
+     or position($m$'column', 'authority_from'$m$ in v_src) = 0
+     or position($m$'column', 'authority_ref'$m$ in v_src) = 0
+     or position('written once and never moved' in v_src) > position('authority_transition_illegal' in v_src) then
+    raise exception '#651 tail: the sign-time columns are not frozen by the trigger' using errcode='CLR10';
+  end if;
+  -- …AND THE RETIRE DOOR STAMPS A FLOOR (§B.3), so a NEVER-SIGNED authority can still be withdrawn
+  -- without meeting ck_fa_authorities_window as a raw 23514.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.retire_depreciation_authority(uuid,uuid,text,text)'::regprocedure;
+  if position('authority_from = coalesce(au.authority_from, clara._fa_month_start(clara._fa_today()))' in v_src) = 0
+     or position('signed_at = coalesce(au.signed_at, now())' in v_src) = 0 then
+    raise exception '#651 tail: retire_depreciation_authority does not stamp the window floor'
+      using errcode='CLR10';
   end if;
 
   -- (T.12) THE WALL AND THE SKIP ASK THE SAME QUESTION. The fiscal-year selection fragment is
