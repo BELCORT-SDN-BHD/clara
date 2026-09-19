@@ -438,6 +438,58 @@ subledger hook's callers at FOUR. Measured on a migrated chain the live set is S
 model added `finalize_close` and `reopen_fiscal_year`. 0216's tail re-derives and re-pins the
 measured six, so a seventh is caught.
 
+### The depreciation-history lane (#651, migration 0227)
+
+Depreciation runs under an EXPLICIT, RESOLVED instruction with a FROZEN window; a locked period is
+refused at the RUNNING door instead of at approve; and every revision names what kind of change it
+is.
+
+| object | grant | what it is |
+|---|---|---|
+| `clara.fixed_assets.change_class` / `.change_reason` | — | The depreciation change class, stamped on the SUCCESSOR row by `revise_fixed_asset_particulars` and never back-filled. `ck_fixed_assets_change_class` is ONE-DIRECTIONAL on purpose: a two-directional form could not validate against a pre-existing hosted revision row, which carries neither column and which 0017's post-approval immutability wall makes unwritable. The REQUIREMENT that every new revision names a class lives in the door — the estate's standing "door enforces, CHECK guards shape" split. |
+| `clara.fa_depreciation_authorities.authority_kind` / `.authority_ref` / `.authority_from` | — | `clara.accounting_plans`' own shape (0193:415-430), relaxed to NULL-able for the backfill alone. The reference is REQUIRED at signature and RESOLVED against `clara.accounting_work` / `clara.agent_tasks` in the same firm AND client; `authority_from` is the first day of the SIGNING month in the book's `Asia/Kuala_Lumpur` calendar, written once and frozen. `clara._tf_fa_authority_transition`'s write allowlist gained exactly these two sign-time columns, or the door could not write them at all. |
+| `clara._fa_assert_period_open(uuid,date)` | NONE — ungranted | **The fixed-asset lane's whole locked-period law, in one body.** It selects the fiscal year containing `p_date` exactly the way `0056:656-662` does, returns silently when there is none or it is `open`/`reopened`, and otherwise raises CLR38 `period_request_invalid` / axis `period_closed` naming the year, its status and the reopen path. **#678 adopts it unchanged rather than minting a second predicate.** |
+| `clara.preview_depreciation_run(uuid)` | `clara_authenticated` | What the NEXT run would do: the period the DATABASE chose, per-asset amounts, the two GL legs, the skipped assets with reasons, and `mode_would_be`. It is `stable`, so the LANGUAGE refuses to let it write. The ungranted-core/granted-wrapper idiom: `clara._fa_compute_charges` stays ungranted and `rig-meta.mjs`' main sweep fails the moment a grant appears on it. |
+| `clara.run_depreciation_period_for(uuid,date,text,uuid)` | `clara_runtime` ONLY | The OBO machine door, on `complete_fixed_asset_particulars_for`'s live-authority ladder verbatim (including the measured `firms … for key share` then `firm_memberships … for share` lock pair). It DELEGATES to `clara._fa_run_period_core` and inserts nothing, and carries NO floor bypass. **A NEW NAME is mandatory, not stylistic:** `rig-meta.mjs:691-693` is an executable census that fails the moment `run_depreciation_manual` reaches a machine role, because that would give the maker-checker ladder a bypass. |
+| `clara.sign_depreciation_authority(uuid,uuid,text,jsonb)` | `clara_authenticated` | DROP + CREATE'd from three arguments to four — one `pg_proc` row per name, never an overload. The `0018:188` scar is the precedent: the old arity's grant died with it, so this file re-states the grant and the owner. |
+
+**The measurement that re-aimed this slice.** The spec said a run over a closed fiscal year drafts
+and dies at approve on 0056's entry-level CLR19. It does not. `clara._tf_period_wall_lines` — a
+BEFORE trigger on `clara.journal_lines` — refuses the LINE insert with the same reason token, the
+whole transaction rolls back, and NO draft survives. The real defect is one step further on: the due
+oracle then keeps advertising that same period, once per sweep, forever — which is exactly the
+failure `0042:4441` names in its own words and which `reconciler-fa.mjs:108-157` records as one
+`faFailed` per client per cycle and nothing louder. 0227 therefore does BOTH halves in one file: the
+wall moves to the running door (typed, before any work), AND the oracle skips a closed period and
+offers the next open one, reporting what it skipped under `skipped_closed`.
+
+**What a skip does NOT mean.** The skipped months' ARREARS are still charged by the next open
+period's run, because `clara._fa_asset_charges` charges every uncharged month up to the period end
+and 0227 does not touch that arithmetic (it is pinned NON-REGRESSION in the prestate and the tail).
+The charge ROWS keep their own `period_start`/`period_end`, so a reader sees which month each
+belongs to; the journal ENTRY is dated in the OPEN period, which is what keeps 0056's walls
+satisfied and the closed year's reported figures unmoved. `skipped_closed` means "this period will
+never be RUN in its own right", never "this money is gone".
+
+**The floor removes the agent catch-up lane's reach, deliberately.** `_agent_depreciation_catchup_core`
+derives every period it runs from `clara._depreciation_run_due_core` (a one-line passthrough to the
+floored oracle) and `p_through` bounds only the loop's upper exit, so after 0227 that parked lane can
+never propose a pre-floor period, and a future `closePrep_v2` inherits the loss. The human catch-up
+door `clara.run_depreciation_manual` (bookkeeper+, caller-named period, identical mechanics) is
+unchanged and is the one way back.
+
+**Two residuals this lane names rather than hides.** (1) The `period_earlier_unmet` sequencing
+guarantee — the thing that pins the reducing-balance arithmetic so a run can never read around an
+unapproved period — STOPS BINDING BELOW THE FLOOR for a caller-named period, because the only
+instruments that could re-derive it unfloored are the one 1-arg oracle (whose consumer set is
+`deepEqual`-pinned by two live CI batteries) or a bypass parameter on it (a DROP + CREATE against
+§2.2 rule 4). `p651.authority.floor_sequencing` pins the exposure. (2) `preview_depreciation_run`
+DUPLICATES the poster's leg aggregation rather than extracting it; the duplication is bound two ways
+— a normalized-fragment assertion in 0227's tail and the behavioural cell `p651.preview.matches_run`.
+
+**And one thing this file is not.** It does NOT unpark `close_prep`: the wake source stays
+registered-and-disabled, asserted in the prestate AND the tail in `0223:247-250`'s own idiom.
+
 ### Document source revision (#646, migration 0217)
 
 A document's own *reading* now has two governed human doors and two reads, all four

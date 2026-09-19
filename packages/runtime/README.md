@@ -114,6 +114,47 @@ the run's faithful echo and the digest comparison, so the final period's entry c
 rather than the revision's stored constant. Its model is SCRIPTED, so it is local, supplementary
 evidence per #653's AC8 — not a provider run and not hosted evidence.
 
+### The depreciation lane (#651) — one non-frozen module, one owed successor, and a belt that needed NO change
+
+`lib/depreciation-run.ts` is NOT imported by any workflow body and must not be until the wave's
+successor ceremony. It is the `lib/fixed-asset-acquisition.ts` trajectory exactly: written to be
+final, because `scripts/check-frozen-workflows.mjs`' IMPORT-ESCAPE hash-locks it with the closure
+the instant `chatTurn_v21` imports it.
+
+It carries the `.strict()` zod input that deliberately holds NO period — `clara._fa_run_period_core`
+refuses any caller-named window that is not the cadence's, so the period is the database's — the
+door's four arguments in the database's own order, and a CLR → sentence map keyed on
+`(code, reason, axis)` rather than on the code alone, because 0227 adds a NEW axis
+(`period_closed`) to a reason 0041 already used for two others (`not_ended`,
+`not_cadence_aligned`). An unmapped code degrades to the door's verbatim message; it is never
+swallowed and never guessed.
+
+**The floor sentence is part of the contract, not decoration.** The door carries no floor bypass, so
+Clara cannot reach a period earlier than the authority window, and the map says so and points the
+person at the human catch-up door `clara.run_depreciation_manual`.
+
+ONE SUCCESSOR CONTRACT IS WRITTEN IN THAT FILE'S FOOTER AND IT IS NOT CUT: **`chatTurn_v21` —
+`run_depreciation_period_for_client`**. A NEW door name is mandatory rather than stylistic:
+`packages/db/tests/rig-meta.mjs:691-693` is an executable census that fails the moment
+`run_depreciation_manual` reaches a machine role, because that would hand the maker-checker ladder a
+bypass. The contract reuses the existing receipt part shape and mints no
+`accounting_work.purpose` — depreciation posts through `journal_entries` directly and never reaches
+the Work lane.
+
+**`reconciler-fa.mjs` needed NO change, and that is the finding.** The authority floor and the
+closed-period skip are both DB-side, which is that module's own law (`reconciler-fa.mjs:15-20`): the
+belt asks `depreciation_run_due` and runs what it is told. `tests/reconcile-fa-unit.test.mjs`'
+`p651.belt.unchanged` pins the absence — the belt makes no run call on a not-due answer, runs
+exactly the period the oracle named when it skipped a closed one, and NO client-side mirror
+appeared (the module names neither `authority_from` nor `fiscal_years` nor `skipped_closed`).
+
+**Depreciation invokes NO Workflow, and that is a finding rather than an omission.** There is no
+standalone World leg for this lane and none is owed: `reconciler-fa.mjs:59-61` says in its own words
+that it is "a plain polled belt … it neither listens on a channel nor starts a workflow run". The
+durability evidence in its place is `tests/reconcile-fa.test.mjs` — one real-database end-to-end
+under the `clara_runtime` group role — which 0227 touched only to sign its authority through the
+new four-argument door.
+
 The bank-agent and close-prep wake engine/bodies exist. Their cadence sources ship disabled and
 their producer/activation work remains open. Reporting uses a separate
 [render service](../reporting-render/README.md). Tax computation and SST return issuance are

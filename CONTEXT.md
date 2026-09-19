@@ -516,6 +516,33 @@ journal entry.
 _Avoid_: A depreciation authority (that is the firm's permission to run it); a schedule (that is
 what these produce); a policy the product infers from the evidence; a second accounting entry.
 
+**Depreciation change class**:
+What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation
+the revision MINTED and never on the one it superseded. Three are recognised — an *estimate* change
+(the life, rate or residual was re-assessed; it applies FORWARD and leaves every charged period
+alone), a *policy* change and an *error* correction (both restate periods the books have already
+reported). Only an estimate change can be recorded today; the other two are refused by name and
+belong to the retrospective-restatement lane. Every revision carries a class and a non-blank reason,
+so a reader can tell the three apart a year later without asking anybody.
+_Avoid_: Treating an error correction as an estimate change; treating a policy change as
+prospective; a revision with no stated reason; reading an absent class on an older row as "estimate".
+
+**Depreciation authority window**:
+The span a signed depreciation authority actually reaches: from the first day of the month it was
+signed, in the book's own calendar, forward. It is written once at signature and never moves, so the
+unattended belt runs forward only and a signature is not permission to charge every past period. A
+period earlier than the floor is charged only by an explicit catch-up a person performs.
+_Avoid_: Reading a signature as permission to charge every past period; a window a later edit can
+move; a floor derived from the machine's clock rather than the book's calendar.
+
+**Depreciation run preview**:
+What the NEXT depreciation run would do, read before anything is written: the exact period the
+register chose (never one a caller named), the per-asset amounts, the two general-ledger legs, every
+asset that will be skipped with the reason in words, and whether the run will post or wait for
+approval. It writes nothing at all — no operation key, no receipt, no ledger row.
+_Avoid_: A projection presented as a posted figure; a period a person typed; a preview that reserves
+anything.
+
 **Dependent particulars question**:
 The ONE versioned question a Work opens after it has already posted an acquisition, asking for the
 depreciation particulars it could not know. It parks that Work and nothing else: the acquisition is
