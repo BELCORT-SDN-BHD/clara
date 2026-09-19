@@ -97,11 +97,21 @@ export function OpeningSeedWorkbench({
   // #987 — THE PERIOD WALL, IN THE OPENING BASIS'S OWN WORDS (#656 residual R2).
   //
   // `clara._tf_period_wall_lines` (0056_wave_e_close_model.sql:746-749) refuses `draft_opening_item`
-  // at the DRAFT with CLR19 `write_into_closed_period`, naming the fiscal year and the id of the
-  // journal entry it would have created — the estate's ONE generic period-wall message, correct
+  // at the DRAFT with CLR19 `write_into_closed_period`, naming the fiscal year LABEL and the id of
+  // the journal entry it would have created — the estate's ONE generic period-wall message, correct
   // everywhere else it fires. A person working an opening basis never typed a journal entry and is
   // shown one anyway. The rule, the code and the firing point are exactly what they were; only the
   // SENTENCE changes, and only inside this flow — every other caller of this same refusal
+  //
+  // CRS-07-04 (code-review fix round, RECORDED not fixed): the substitution below drops the
+  // fiscal-year LABEL too, which #987 never asked to remove — a client with more than one closed or
+  // closing year cannot tell FROM THIS REFUSAL ALONE which year is in the way. The refusal's own
+  // `detail` carries `fiscal_year_id` (0056:748-749) but no label, so recovering it here would mean
+  // this workbench growing its OWN fiscal-year read (`clara.list_fiscal_years`, lib/close/api.ts) —
+  // a new read, a new loading/error leg, and a lookup keyed against an id this component has never
+  // otherwise needed — for a label that is a minor, undeclared loss, not a missing rule or a wrong
+  // one. Left out on purpose this fix round (scope discipline, WORK-ORDER rule 5); flagged here and
+  // in the report for the owner to rule on rather than silently accepted.
   // (prepayments' own `explainClosedPeriod`, the bank/journals lanes, …) reads its message through
   // `toDialogRefusal`/`ErrorMessage` untouched, because this substitution lives here, not in either
   // of those shared renderers.
@@ -122,12 +132,28 @@ export function OpeningSeedWorkbench({
     ? <>{openingClosedPeriodRefusal.code}{openingClosedPeriodRefusal.reason ? ` · ${openingClosedPeriodRefusal.reason}` : ""}</>
     : null;
 
+  // CRS-07-01 (code-review fix round). `_tf_period_wall_lines` returns early only for
+  // `status in ('open','reopened')` (0056:735) — a fiscal year `status = 'closing'` (set by
+  // begin_close, and the wall's own FY lookup deliberately PREFERS it over 'open':
+  // `order by (fy.status in ('closing','closed')) desc`, 0056:733) fires this SAME CLR19 refusal,
+  // reachable any time a close run is in progress. "now closed" and "have that year reopened" are
+  // both wrong for that state: the year is not yet closed (a close run can still be abandoned —
+  // CloseLifecycle.doors.abandon — putting it back to open with no reopen ceremony at all), and
+  // `reopen_fiscal_year` (CloseLifecycle.doors.reopen: "Reopen this CLOSED fiscal year") answers a
+  // different door than the one that would actually get this basis moving again. `fy_status` is
+  // already on the refusal's own detail (0056:748-749; wire.ts's `RefusalError.detail`), so the two
+  // real states are told apart rather than guessed at.
+  const openingPeriodWallClosing = openingClosedPeriodRefusal?.detail?.fy_status === "closing";
+  const openingPeriodWallMessage = openingClosedPeriodRefusal
+    ? (openingPeriodWallClosing ? t("closingPeriodRefusal") : t("closedPeriodRefusal"))
+    : null;
+
   // CB-AE2E-004 / 裁-187: ONE conversion of this workbench's sticky failure into
   // the shape every governed dialog below reads — it renders verbatim inside the
   // dialog (which now stays open on a refusal) and it is the only thing that
   // reveals an attestation field.
   const dialogRefusal: DialogRefusal | undefined = openingClosedPeriodRefusal
-    ? { err: t("closedPeriodRefusal"), clr: { code: openingClosedPeriodRefusal.code, reason: openingClosedPeriodRefusal.reason } }
+    ? { err: openingPeriodWallMessage as string, clr: { code: openingClosedPeriodRefusal.code, reason: openingClosedPeriodRefusal.reason } }
     : toDialogRefusal(error);
 
   // (fix-round, browser leg) ONCE THE BASIS HAS LOADED, A LATER `loading` IS A REFRESH — never a
@@ -177,7 +203,7 @@ export function OpeningSeedWorkbench({
       </div>
 
       {openingClosedPeriodRefusal ? (
-        <StateBanner tone="error" code={openingRefusalCode}>{t("closedPeriodRefusal")}</StateBanner>
+        <StateBanner tone="error" code={openingRefusalCode}>{openingPeriodWallMessage}</StateBanner>
       ) : error ? <ErrorMessage error={error} /> : null}
       {/* NOT A DEFECT, recorded per the fix round: approve_opening_seed /
           approve_opening_correction assert `transaction_isolation =
