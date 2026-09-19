@@ -75,13 +75,20 @@ if (process.env.CLARA_SKIP_WORK_E2E === "1") {
 
 // --- Fail-closed local gate (the intake-e2e / kill-resume precedent).
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
+// #980 · the riders wave of 2026-09-20 gives each LANE its own cluster and database
+// (`clara_l<NN>`, riders/RIG.md). This file is the ONLY driver of the shared harness's `narrate`
+// script, so it is the only place the harness's third script (`ask_question`) can be shown not to
+// have moved the other two — and it could not be run at all while the gate named two fixed
+// databases. Still loopback-only, still fail-closed on anything else.
+const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|l\d{2})$/;
 if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("work-journal-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci}");
+  throw new Error(
+    "work-journal-e2e is hard-gated to a loopback host + PGDATABASE in "
+    + "{clara_rt_test, clara_wave_b_ci, clara_l<NN>}");
 }
 if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("work-journal-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
+    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci|l[0-9][0-9])(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
+  throw new Error("work-journal-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci|l<NN>)");
 }
 {
   const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
@@ -556,9 +563,19 @@ async function main() {
       );
       assert.equal(bad.status, 400, `an unfiled document is a 400 (got ${bad.status} ${JSON.stringify(bad.body)})`);
       // `reason` is the DATABASE's own `constraint` token, folded in by `workErrorResponse` —
-      // reviewed finding. `not_filed` is the arm only the database can reach, and `lib/wire.ts`
-      // surfaces nothing but `detail.reason`, so unfolded it never reached the browser at all.
-      assert.deepEqual(bad.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      // reviewed finding. `not_filed` is the arm only the database can reach, and unfolded it
+      // reached the browser under the category name (`invalid_source_ref`) instead of its own.
+      //
+      // #981 · THE CARRIER, OVER THE REAL WIRE. The promoted keys are what they always were, and
+      // the door's whole typed detail now rides beside them — this is the only leg in the estate
+      // that reads that body off an actual HTTP response rather than from `workErrorResponse`
+      // directly, so it is where "the detail reaches the browser" stops being a unit claim.
+      const { detail: badDetail, ...badPromoted } = bad.body;
+      assert.deepEqual(badPromoted, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      assert.deepEqual(badDetail,
+        { reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed" },
+        "the door's own object, verbatim: the category reason the wire overwrote, the DB's 1-based "
+        + "path, and the raw constraint token");
       console.log("[work-e2e] PASS 8: evidence rides admission -> commit -> link + receipt; a second Work on the same document is refused with no effect");
     } else {
       console.log("[work-e2e] PASS 8: SKIPPED — migration 0182 (clara.entry_evidence_links) is not on this database");
