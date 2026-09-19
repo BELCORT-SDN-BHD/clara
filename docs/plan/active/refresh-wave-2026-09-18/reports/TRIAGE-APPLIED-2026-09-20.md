@@ -2,7 +2,7 @@
 
 The owner confirmed `TRIAGE-AUDIT-2026-09-19.md` on 2026-09-19 ("都听你的建办"; the `list_firm_timeline` retirement: "可以"). The audit's own §4 bodies were placeholders, so every text was written fresh by a worker, re-verified against `main` (`dc9acfe1`) by a second worker (77 of 82 texts corrected, one rejected), and posted by a deterministic script. This file is the record of what was posted.
 
-**Held, not filed:** the trade-invoice duplicate-number guard (audit DRAFT-29). The owner is deciding it: the recommendation is a new follow-up that adds a warn-and-confirm probe at #655's admission door, not at #662.
+**Filed after the owner's ruling of 2026-09-20:** the trade-invoice duplicate guard (audit DRAFT-29) is #1007, `ready-for-agent`: warn-and-confirm at the recording step, on the document number or on counterparty + total + document date. The same day the owner answered #962 ("没有": no out-of-repo caller of `clara.get_llm_usage_summary`), which closed it, and the signed-in walk filed #1005 (select triggers show raw values).
 
 ## New issues filed (48)
 
