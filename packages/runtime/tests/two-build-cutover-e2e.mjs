@@ -1211,7 +1211,25 @@ async function main() {
         .catch(() => {});
     }
     await rig.endPool().catch(() => {});
-    if (process.env.CLARA_TWO_BUILD_REUSE !== "1") removeScratchTree();
+    // L06-850-B, fix round 1: the chatTurn scratch build (`chatBuildPromise`, started in the
+    // background above) may STILL BE RUNNING here — a failure in the claraWork leg, before this
+    // file's own `await chatBuildPromise` (around line 1039), reaches this `finally` while nitro
+    // is still writing into `.scratch/two-build/previous-chat`. `removeScratchTree()` below would
+    // then `rmSync()` that same directory out from under a live build: on Windows an open handle
+    // makes that throw EPERM/EBUSY, and a throw FROM A `finally` REPLACES whatever the `catch`
+    // above already threw — silently discarding the real assertion failure this whole file exists
+    // to surface (its own comment at the `catch`, "a drill whose failure cannot be read is a drill
+    // someone will re-run rather than diagnose"). Settle it first and swallow its own outcome —
+    // this finally's job is cleanup, not a second verdict on the background build — THEN remove
+    // the tree, itself guarded so a cleanup failure can never mask the real result either.
+    if (chatBuildPromise) await chatBuildPromise.catch(() => {});
+    if (process.env.CLARA_TWO_BUILD_REUSE !== "1") {
+      try {
+        removeScratchTree();
+      } catch (cleanupErr) {
+        console.error(`[tb-e2e] removeScratchTree() failed during cleanup, IGNORED (the real result above stands): ${cleanupErr?.message ?? cleanupErr}`);
+      }
+    }
   }
 
   console.log("\nTWO-BUILD CUTOVER E2E: ALL PASS");

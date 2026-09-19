@@ -23,6 +23,29 @@
 //     lane, which rides its own consumer loop rather than a workflow run
 //     (`DOCUMENT_LANES_WITHOUT_WORKFLOW`) and is exactly the lane #967's own measurement named.
 //
+// PLUS A THIRD CENSUS THESE TWO DELIBERATELY DO NOT COVER (L06-967-B, fix round 1):
+// `TERMINAL_RUN_STATUSES` (`lib/rollback-preflight.mjs`) counts `failed` as terminal, so a run an
+// earlier leg's queued work left NON-terminal, and which THIS leg's still-running engine then
+// drives to a genuine `failed`, simply stops appearing in `censusNonTerminalRuns` — the two
+// censuses above would call that "drained" even though what actually happened is exactly the
+// failure AC3 names ("a genuine failure left behind by an earlier leg's queued work"), not an
+// absence of one.
+//
+// A BASELINE, NOT A BLANKET RULE — measured on this rig's own reused `clara_intake_ci`
+// (fix round 1): the two legs' own ordinary exercise already leaves DOZENS of `failed`
+// `documentIngest_v2` runs behind as their OWN resolved scope (retry exhaustion on a document a
+// scenario means to reject, an admission refusal, and so on) — each one already terminal by the
+// time this leg's own assertions finish and this function is even called. Throwing on any
+// `failed` row's mere PRESENCE would make the gate red on nearly every ordinary run, which is
+// AC2's "no assertion weakened" in reverse. What AC3 actually asks to catch is narrower: a run
+// left QUEUED (non-terminal, so visible in `censusNonTerminalRuns`) reaching `failed` DURING this
+// specific wait, under THIS leg's own still-running engine — not a failure this leg, or an
+// earlier one, had already resolved and moved on from before the wait began. So the FIRST poll
+// only takes a baseline snapshot of `failed` ids; every later poll compares against exactly that
+// snapshot and throws the moment a NEW one appears, never on one the baseline already carried.
+// `intake-batch-e2e.mjs` (leg 3) runs strictly after both callers, so it can never be the source
+// of a run this baseline mistakes for pre-existing.
+//
 // BOUNDED, NEVER A FIXED SLEEP (#967's own ask, "reuse a readiness check... instead of a fixed
 // sleep"). Each leg's own assertions already poll everything THEY admit to a terminal status before
 // reaching this call, so a clean leg drains in well under a second; a genuine straggler gets the
@@ -42,6 +65,24 @@ const DEFAULT_DEADLINE_MS = 30000;
 const POLL_MS = 200;
 
 /**
+ * `workflow.workflow_runs` rows CURRENTLY `failed` — deliberately NOT read through
+ * `censusNonTerminalRuns` (`failed` is one of `TERMINAL_RUN_STATUSES` there, on purpose: a
+ * rollback preflight cares whether a body is still IN FLIGHT, not whether an earlier one lost).
+ * Returned as an id->name Map so callers can diff two snapshots by id.
+ * @param {(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>} query
+ * @returns {Promise<Map<string, string>>}
+ */
+async function censusFailedRuns(query) {
+  const r = await query(
+    `select id, name
+       from workflow.workflow_runs
+      where status = 'failed'
+      order by name`,
+  );
+  return new Map(r.rows.map((row) => [String(row.id), String(row.name)]));
+}
+
+/**
  * @param {{rootQuery:(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>}} rig
  * @param {{deadlineMs?:number, log?:(m:string)=>void}} [opts]
  * @returns {Promise<{waitedMs:number, polls:number}>}
@@ -53,9 +94,29 @@ export async function waitForQueueDrain(rig, opts = {}) {
   const startedAt = Date.now();
   const end = startedAt + deadlineMs;
   let polls = 0;
+  // Established on poll 1 — see the header note above on why this is a BASELINE diff and not a
+  // blanket "any failed row" rule.
+  let failedBaseline = null;
   for (;;) {
     polls += 1;
-    const [runs, unbound] = await Promise.all([censusNonTerminalRuns(query), censusUnboundTasks(query)]);
+    const [runs, unbound, failedNow] = await Promise.all([
+      censusNonTerminalRuns(query),
+      censusUnboundTasks(query),
+      censusFailedRuns(query),
+    ]);
+    if (failedBaseline === null) {
+      failedBaseline = failedNow;
+    } else {
+      const newlyFailed = [...failedNow].filter(([id]) => !failedBaseline.has(id));
+      if (newlyFailed.length > 0) {
+        throw new Error(
+          `waitForQueueDrain: a run left behind by an earlier leg's queued work FAILED while `
+            + `this leg's own engine drove it (#967 AC3) — a genuine failure, not noise, so this `
+            + `leg fails rather than draining it away.\n`
+            + `  newly failed: ${JSON.stringify(newlyFailed.map(([id, name]) => ({ id, name })))}`,
+        );
+      }
+    }
     if (runs.length === 0 && unbound.tasks.length === 0) {
       const waitedMs = Date.now() - startedAt;
       log(`[queue-drain] drained (polls=${polls}, waited=${waitedMs}ms)`);

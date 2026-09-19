@@ -42,6 +42,28 @@ runs:
     # `tests/queue-drain.mjs`'s `waitForQueueDrain` right before its own `process.exit(0)`, since
     # each leg's own process is the only one with an engine running to drive the drain) — nothing
     # in this action's own step sequence changed.
+    #
+    # AC1 MEASUREMENT (fix round 1, L06-967-A): this lane's rig cannot reproduce a truly FRESH
+    # ephemeral `clara_intake_ci` a second time (migration 0154 pins a cluster-wide `clara` role
+    # count; a second from-scratch migration chain on the same cluster fails it — reproduced,
+    # rolled back, see the lane's fix-round report), so this is NOT the controlled before/after
+    # pair AC1 asks for. What WAS measured, on this rig's own already-used world (`clara_intake_ci`,
+    # pre-dd3f8f1d copies of the two leg files, no drain): leg 1 = 238 lines, leg 2 = 1,109 lines,
+    # leg 3 (`intake-batch-e2e.mjs`, unchanged either way, piped through `wc -l`) = 11,309 lines,
+    # all three passing — real, but nowhere near the ~1.27M-line shape, because this rig's world
+    # was only moderately loaded, not loaded the way a long-lived shared runner producing the
+    # original measurement was. THE MECHANISM DID REPRODUCE QUALITATIVELY: leg 2's own log filled
+    # with the SAME leftover-task reconciliation line, once per stale row, that #967 names as the
+    # dominant noise source. No local run produced a clean POST-967 (WITH drain) number on the same
+    # world: once orphaned, permanently-undispatchable `ocr` tasks accumulate (0051 §2's own
+    # transport-less guard; see `reconciler-documents.mjs:396-413`), `waitForQueueDrain` correctly
+    # refuses to call the queue drained and TIMES OUT — a real behavior, but produced by running
+    # leg 1 a SECOND time on a world `intake-batch-e2e.mjs` (leg 3, which nothing follows in a real
+    # CI job) had already left residue on, an ordering no real CI run produces. THE FIRST CI RUN OF
+    # THIS STEP SEQUENCE is what proves AC1's actual number: a genuinely fresh ephemeral database,
+    # the real leg order, once. Update this comment with that run's line counts (with vs without
+    # the fix, from two separate job runs, since a single job never runs a leg twice) once they
+    # exist.
     - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
       shell: bash -e {0}
       run: |
@@ -387,6 +409,24 @@ runs:
         # the "differs by exactly one body" invariant (tests/two-build-cutover-e2e.mjs `bodiesA` /
         # `bodiesA2`) before anything is spawned.
         #
+        # THE RISK THIS TRADE CARRIES (fix round 1, L06-850-C): the local numbers below are ALL
+        # from a 24-core rig, where a background nitro build is close to free — which is why the
+        # mechanism looks clean here. GitHub-hosted runners have 2-4 cores, where the background
+        # build competes directly with the claraWork leg's own two spawned runtime images and its
+        # timing-sensitive polls (`FETCH_TIMEOUT_MS = 15000`, two-build-cutover-e2e.mjs:163). The
+        # lane's own review measured this directly (docs/plan/active/riders-2026-09-20/reports/
+        # wave1-lane06-review-spec.json, finding L06-850-C): host idle, the overlapped build took
+        # 5.1s; with one concurrent `pnpm typecheck` running it took 36.9s — 7x — and that run
+        # FAILED with a `pollTask` timeout inside the claraWork leg. This overlap trades CPU
+        # concurrency for wall clock, and that trade is UNMEASURED on a 2-4 core runner. Read the
+        # first CI run of this step for BOTH the step's own wall clock AND any new pollTask timeout
+        # in the claraWork leg — a timeout there, not just a slow step, is this trade's failure
+        # mode. No guard is added here; a cheap one, if the orchestrator wants it, is starting the
+        # background build only when `os.availableParallelism()` is comfortably above the number of
+        # images the leg spawns — left as an explicit decision because GitHub-hosted runners are
+        # exactly the low-parallelism case where such a guard would disable the fix on the platform
+        # it targets.
+        #
         # MEASURED LOCALLY (Windows host, packages/runtime/tests/two-build-cutover-e2e.mjs run
         # standalone against a bootstrapped clara_rt_test, RELAY_TEST_MODE=1 — this lane's own rig
         # has no CI runner access, so this is NOT the CI figure the two paragraphs above call for):
@@ -394,13 +434,17 @@ runs:
         # build 5.0s–6.2s; overlapped (post-#850) 32.3s–34.8s across two runs, same two scratch
         # builds, same assertions, all passing. The ~5s freed per run is this rig's own single
         # scratch-build cost, hidden behind the claraWork leg's own exercise rather than paid again
-        # after it — the qualitative effect AC3 asks for. THE CI NUMBER IS UNVERIFIED HERE: this
-        # rig's scratch build (5-6s) is over an order of magnitude faster than the 78.0s CI
-        # measurement below, so the ABSOLUTE seconds saved on a GitHub-hosted runner do not transfer
-        # from this measurement — only the mechanism does. The next CI run of this step is what
-        # proves the CI wall clock (both legs) that AC1 asks for; update this comment's 78.0s/124s
-        # pair with that run's numbers once it exists, the way the #637 fix-round review superseded
-        # its own 82.6s/3m25s.
+        # after it — the qualitative effect AC3 asks for. NO CI SCRATCH-BUILD COST HAS EVER BEEN
+        # RECORDED (fix round 1, L06-850-A: the 78.0s/124s pair below is a WINDOWS-HOST measurement
+        # from the #637 fix round, not a CI one — this paragraph previously mislabeled it as "the
+        # 78.0s CI measurement", contradicted by the very next paragraph's own "Windows-host
+        # measurements"). So neither the absolute seconds nor a ratio against this rig's 5-6s can be
+        # reasoned about yet: this rig's own number is over an order of magnitude faster than the
+        # Windows-host figure below, but that comparison is two WINDOWS HOSTS, not this rig vs CI.
+        # The next CI run of this step is what proves the CI wall clock (both legs) that AC1 asks
+        # for; update this comment with that run's numbers once it exists — a genuine CI figure,
+        # not a relabeled Windows one, the way the #637 fix-round review superseded its own
+        # 82.6s/3m25s with a re-measurement of the SAME kind.
         #
         # 78.0s for the scratch build and 124s for the whole file — Windows-host measurements,
         # re-measured at the #637 fix-round closure review (superseding this comment's earlier

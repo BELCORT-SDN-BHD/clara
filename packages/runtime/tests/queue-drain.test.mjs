@@ -1,19 +1,19 @@
 // #967 — unit cells for tests/queue-drain.mjs's own retry/timeout shape, entirely in-memory (no
-// database): a fake `rig.rootQuery` answers by SQL text (workflow_runs / agent_tasks /
-// document_processing_tasks), tracking which of the three queries `waitForQueueDrain`'s single poll
-// iteration has issued so far, so a batch's three queries always answer from the SAME simulated
-// database snapshot regardless of the order they happen to resolve in.
+// database): a fake `rig.rootQuery` answers by SQL text (the FAILED-runs census / workflow_runs /
+// agent_tasks / document_processing_tasks), tracking which of the four queries `waitForQueueDrain`'s
+// single poll iteration has issued so far, so a batch's four queries always answer from the SAME
+// simulated database snapshot regardless of the order they happen to resolve in.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { waitForQueueDrain } from "./queue-drain.mjs";
 
-/** @param {Array<{runs?:unknown[], agent?:unknown[], docs?:unknown[]}>} steps */
+/** @param {Array<{runs?:unknown[], agent?:unknown[], docs?:unknown[], failed?:Array<{id:string,name:string}>}>} steps */
 function fakeRig(steps) {
   let index = 0;
   const seen = new Set();
   const calls = [];
   const advanceIfComplete = () => {
-    if (seen.size === 3) {
+    if (seen.size === 4) {
       seen.clear();
       if (index < steps.length - 1) index += 1;
     }
@@ -23,6 +23,14 @@ function fakeRig(steps) {
     rootQuery: async (sql) => {
       calls.push(sql);
       const step = steps[Math.min(index, steps.length - 1)];
+      // MUST be checked before the plain `workflow_runs` match below — both queries read that
+      // same table, and the failed-runs census is the more specific pattern of the two.
+      if (/status = 'failed'/.test(sql)) {
+        seen.add("failed");
+        const rows = (step.failed ?? []).map((r) => ({ id: r.id, name: r.name, status: "failed" }));
+        advanceIfComplete();
+        return { rows };
+      }
       if (/workflow_runs/.test(sql)) {
         seen.add("runs");
         const rows = (step.runs ?? []).map((name) => ({ name, n: 1, oldest: null }));
@@ -75,4 +83,48 @@ test("waitForQueueDrain resolves immediately (one poll) when the database was al
   const rig = fakeRig([{ runs: [], agent: [], docs: [] }]);
   const result = await waitForQueueDrain(rig, { deadlineMs: 3000 });
   assert.equal(result.polls, 1, `a clean database should need exactly one poll, got ${result.polls}`);
+});
+
+test("waitForQueueDrain THROWS when a run left behind by an earlier leg's queued work FAILS while this leg's own engine drives it, even though both other censuses go on to read empty — #967 AC3, L06-967-B", async () => {
+  // The exact reproduced shape from the lane's own local run: a straggler was still
+  // NON-TERMINAL (counted in `runs` on the first poll, so `waitForQueueDrain` does not resolve
+  // yet and keeps polling under this leg's own still-running engine), then reached `failed` — a
+  // TERMINAL status, so it silently disappears from `censusNonTerminalRuns` on the next poll.
+  // Before this fix that disappearance reads as "drained" and the call resolves cleanly; a
+  // genuine failure is carried into the next leg's log as if nothing happened, which is the exact
+  // outcome AC3 names as the thing not to do.
+  const rig = fakeRig([
+    { runs: ["workflow//./workflows/documentIngest.v2//documentIngest_v2"], agent: [], docs: [], failed: [] },
+    { runs: [], agent: [], docs: [], failed: [{ id: "run-poisoned", name: "workflow//./workflows/documentIngest.v2//documentIngest_v2" }] },
+  ]);
+  await assert.rejects(
+    () => waitForQueueDrain(rig, { deadlineMs: 3000 }),
+    (err) => {
+      assert.match(err.message, /FAILED/, "names the failure mode, not a generic timeout");
+      assert.match(err.message, /run-poisoned/, "names the actual failed run, not just a generic count");
+      return true;
+    },
+  );
+});
+
+test("waitForQueueDrain does NOT throw on a run that was ALREADY failed before this leg's own drain wait began — a pre-existing failure is this leg's own already-resolved scope, not one newly drained away", async () => {
+  // Reproduces the real shape found on this rig's own reused `clara_intake_ci` (fix round 1):
+  // 106 `failed` `documentIngest_v2` runs already sitting on the database from these same legs'
+  // own prior local exercise, none of them "left behind by an earlier leg's queued work" in the
+  // AC3 sense — they were already terminal by the time ANY leg's drain call is reached. A blanket
+  // "any failed row present" rule would make this gate throw on nearly every local re-run; the
+  // baseline established on the FIRST poll is what keeps it silent on history and loud only on a
+  // NEW failure witnessed during this leg's own wait.
+  const rig = fakeRig([{ runs: [], agent: [], docs: [], failed: [{ id: "old-failure", name: "documentIngest_v2" }] }]);
+  const result = await waitForQueueDrain(rig, { deadlineMs: 3000 });
+  assert.equal(result.polls, 1, `a database whose only failures predate this wait should still drain in one poll, got ${result.polls}`);
+});
+
+test("waitForQueueDrain still resolves cleanly when no run has ever failed — the new census is not a false positive on ordinary drains", async () => {
+  const rig = fakeRig([
+    { runs: ["workflow//./workflows/documentIngest.v2//documentIngest_v2"], agent: [], docs: [], failed: [] },
+    { runs: [], agent: [], docs: [], failed: [] },
+  ]);
+  const result = await waitForQueueDrain(rig, { deadlineMs: 3000 });
+  assert.ok(result.polls >= 2, `expected at least 2 polls, got ${result.polls}`);
 });
