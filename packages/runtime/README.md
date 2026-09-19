@@ -1338,7 +1338,12 @@ answer comes back as a `tool-result` for `ask_question`. The branch is the shape
 `tests/work-question-serve.mjs` already drove for the journal lane, lifted into the shared file;
 `post` and `narrate` return before it and no existing caller sets the new value, which
 `tests/work-journal-e2e.mjs` — the estate's only `narrate` driver — confirms on the rig rather than
-by reading.
+by reading. The census behind "no existing caller" is one grep over `CLARA_WORK_TEST_SCRIPT`: all
+NINE spawners of this bootstrap `delete base.CLARA_WORK_TEST_SCRIPT` when they build the child env,
+so the `post` default applies; `accrual`, `plan-occurrence` and `prepayment-occurrence` re-set it to
+`"post"` explicitly on their crash legs; `work-journal-e2e.mjs` sets `"narrate"` on one leg; and
+only `trade-invoice-e2e.mjs:609` sets `"ask_question"`, with the scope var beside it. No other
+value is set anywhere in the repo.
 
 **The park IS the window, which is why one script serves both new legs.** While a run is parked
 the Work is live, the run holds the task and NOTHING has been admitted. `tests/work-cancel-serve.mjs`
@@ -1365,7 +1370,12 @@ good. `CLARA_WORK_ASK_ONLY_CLIENT` names the client whose Work may be asked; eve
 the `post` branch exactly as the default script would have taken it, and a caller that forgets the
 scope gets a loud child exit rather than a quiet park on a stranger's Work. Leg 6 admits a
 BYSTANDER Work for a second client in the same window and asserts it was never asked and settled on
-its own — the cell that says so.
+its own — the cell that says so. **This is a deviation from #980's own wording** and is recorded
+as one (reviewed finding L10S-3): the ticket says the third shape is "selectable the same way" as
+the other two, i.e. by `CLARA_WORK_TEST_SCRIPT` alone, and it takes two env vars instead. Deriving
+the scope from whatever envelope the process picked up first would put the choice back in the
+hands of queue order, which is the failure the gate exists to prevent; folding the two into one
+selector value (`ask_question:<client id>`) is open to a later lane.
 
 **Four World e2es' local gates now admit `clara_l<NN>`**, the per-lane database shape of the riders
 wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,

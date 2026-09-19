@@ -27,6 +27,17 @@
 //                           (#980), and `post` and `narrate` take exactly the branches they
 //                           always did.
 //
+// TWO KNOBS FOR THE THIRD SCRIPT, AND #980 ASKED FOR ONE — said plainly rather than left for the
+// next reader to trip over (reviewed finding L10S-3). The ticket's key-interfaces line says the
+// new shape is "selectable the same way" as `post` and `narrate`, i.e. by CLARA_WORK_TEST_SCRIPT
+// alone; it is not. `ask_question` ALSO requires CLARA_WORK_ASK_ONLY_CLIENT, and a caller that
+// sets only the script gets a loud child exit rather than a park. The deviation is deliberate:
+// the scope is the only thing keeping the park on the Work the leg is actually holding (next
+// paragraph), and deriving it from whatever envelope this process picked up first would restore
+// the failure the gate exists to prevent — on a rig where one stranded `awaiting_input` row costs
+// the NEXT leg a 90s timeout. A later lane may fold the two into one selector value
+// (`ask_question:<client id>`); no lane may quietly drop the scope.
+//
 // THE ask_question SCRIPT IS SCOPED TO ONE CLIENT, AND THE SCOPE IS MANDATORY — reviewed finding
 // L10-A3. ONE supervisor serves every queued accounting Work on the database, leftovers from
 // earlier legs and earlier crashed runs included (tests/work-cancel-e2e.mjs's `makeGate` says so
