@@ -102,7 +102,13 @@ export const tradeInvoicePartySchema = z
       .min(1)
       .max(64)
       .optional()
-      .describe("The tax identification number the document states, if it states one."),
+      .describe(
+        "The tax identification number the document states, if it states one. CARRIED FOR THE "
+        + "RECORD AND ECHOED IN A REFUSAL -- it is not a lookup key: the door resolves a party by "
+        + "id, then by registration number, then by normalised name or live alias "
+        + "(0225's clara._trade_invoice_resolve_party). A payload whose only identifier is a TIN "
+        + "leaves as party_unresolved.",
+      ),
   })
   .strict();
 
@@ -189,10 +195,17 @@ export type TradeInvoiceRefusal = {
 
 /**
  * THE DOOR'S OWN RAISE LADDER (DECISIONS.md:50 — "the count is descriptive, the door's own raise
- * ladder is the contract"). Fourteen tokens plus `invalid_kind`, which 0225's section B names
- * explicitly as the fifteenth: a `kind` that is neither admitted value and is not credit-shaped
- * either would otherwise leave as a bare 23514 out of the column CHECK, which 0194:1078-1081
- * forbids.
+ * ladder is the contract"). Fourteen tokens plus the FOUR that 0225's section B names explicitly,
+ * each for a failure that would otherwise leave as a bare 23514 out of a column CHECK, which
+ * 0194:1078-1081 forbids: `invalid_kind`, `invalid_particulars`, `invalid_currency` and
+ * `invalid_tax_facts`.
+ *
+ * WHY THE LAST THREE ARE NOT ONE TOKEN (review finding F2, fix round 1). The door used to raise
+ * `invalid_kind` for all four, and this map renders ONE sentence per token — so a caller who sent
+ * a non-MYR currency, or tax facts as an array, was told "a trade invoice is either a sales
+ * invoice or a supplier bill", which is false and sends them to correct a field that was already
+ * right. The form's own zod hides three of the four from a browser, but the chatTurn_v21 tool, an
+ * import path and any direct caller reach them. One reason names one thing.
  *
  * These strings are the SAME in the migration, in this module and in the chatTurn_v21 stanza. A
  * surface that renders a reason not in this map is rendering a reason nobody wrote.
@@ -214,6 +227,9 @@ export const TRADE_INVOICE_REFUSALS = {
   intent_payload_conflict: "That key already carries a different trade invoice.",
   period_locked: "The fiscal year containing that posting date is closed.",
   invalid_kind: "A trade invoice is either a sales invoice or a supplier bill.",
+  invalid_particulars: "Clara could not read the document's particulars as a record.",
+  invalid_currency: "This estate records trade invoices in MYR only.",
+  invalid_tax_facts: "Tax facts are carried as a record, exactly as the document states them.",
 } as const;
 
 export type TradeInvoiceRefusalReason = keyof typeof TRADE_INVOICE_REFUSALS;

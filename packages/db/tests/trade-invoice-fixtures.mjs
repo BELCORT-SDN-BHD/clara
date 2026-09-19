@@ -98,6 +98,12 @@ export const TI_REASON = {
   // admitted value and is not credit-shaped either. The brief fixed the map at FOURTEEN and said
   // "the ladder binds, the number describes".
   invalidKind: "invalid_kind",
+  // AND THE SIXTEENTH, SEVENTEENTH AND EIGHTEENTH (review finding F2): three payload-shape
+  // failures that `invalid_kind` used to answer for, each of which the door can now name. One
+  // reason names one thing, or the sentence a person is shown is about the wrong field.
+  invalidParticulars: "invalid_particulars",
+  invalidCurrency: "invalid_currency",
+  invalidTaxFacts: "invalid_tax_facts",
   // Raised by the birth trigger and by clara._tf_open_items_validate, not by the door.
   counterpartyKindMismatch: "counterparty_kind_mismatch",
   genericControlLeg: "generic_control_leg",

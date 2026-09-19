@@ -148,6 +148,10 @@ function App(props: {
   /** #634 — the entry's links read. DEFAULTED so no cell reaches a real socket:
    *  an empty answer is "the read succeeded and this entry has no links row". */
   loadLinks?: (clientId: string, entryIds: readonly string[]) => Promise<EntryLinkRow[]>;
+  /** #655 — `clara.get_trade_invoice`, injected so a cell can render the AC5 link block without a
+   *  socket. Undefined leaves the component's own read in place, which is what the door-census
+   *  cells above measure. */
+  loadTradeInvoice?: (workId: string, opts?: unknown) => Promise<unknown>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -167,6 +171,7 @@ function App(props: {
       scope: { roleRank: BOOKKEEPER_RANK, ...props.scope },
       storage: props.storage ?? null,
       loadLinks: (props.loadLinks ?? (async () => [])) as never,
+      ...(props.loadTradeInvoice === undefined ? {} : { loadTradeInvoice: props.loadTradeInvoice as never }),
     }),
   });
 }
@@ -1638,6 +1643,74 @@ function groupLabelled(h: { find: (p: (n: Stub) => boolean) => Stub | null }, la
     return typeof get === "function" && get.call(n, "aria-label") === label;
   });
 }
+
+test("655 AC5/AC12: the trade-invoice link block renders MONEY as money — the stated total and the outstanding, both in ringgit", async () => {
+  // S1 and S2 (fix round 1). The block interpolated `outstanding_cents` as a bare integer of sen,
+  // so a bookkeeper read "Outstanding: 106000" for RM 1,060.00 — a hundredfold misreading of the
+  // one number on the page that is about money, and not what AC12 means by exact values. Every
+  // other money value in this app renders through `<Money cents=… />` (components/journals/
+  // money.tsx, next-intl's formatter with currencyDisplay "narrowSymbol"), and so does this one
+  // now. The block's own comment also promised "the exact total", which it never rendered at all
+  // — leaving `TradeInvoice.link.total` authored and dead, and an ADMITTED invoice with no amount
+  // visible anywhere on the page, because the journal-lines table only exists once the entry
+  // posts.
+  const invoice = {
+    invoice_id: "11111111-1111-4111-8111-111111111111", work_id: WORK,
+    kind: "supplier_bill", domain: "ap",
+    counterparty_id: "22222222-2222-4222-8222-222222222222", counterparty_name: "Alpha Supplies",
+    counterparty_kind: "vendor", counterparty_registration_no: null,
+    document_date: "2026-03-04", due_date: "2026-04-03", due_date_source: "stated",
+    reference: "ALPHA-2026-0042", currency: "MYR", total_cents: 106_000, tax_facts: null,
+    source_document_id: null, recorded_by: USER, created_at: "2026-03-04T02:00:00Z",
+    state: "posted", entry_id: ENTRY, receipt_id: "receipt-1",
+    open_item_id: "33333333-3333-4333-8333-333333333333",
+    open_item_amount_cents: 106_000, open_item_due_date: "2026-04-03",
+    outstanding_cents: 106_000,
+  };
+  const h = await renderComponent(App({
+    loadTradeInvoice: async () => invoice,
+    load: async () => data({
+      work: workRow({ status: "completed", result: { entry_id: ENTRY, receipt_id: "receipt-1", posted_at: "2026-09-01T02:00:00Z" } }),
+      entry: {
+        id: ENTRY, client_id: CLIENT, status: "approved", posting_date: "2026-03-31", memo: "Alpha Supplies bill",
+        origin: "agent", document_id: null, coding_kind: null, revision_token: "rev", maker_actor: null,
+        checker_actor: null, approved_at: "2026-03-31T02:00:00Z", reversal_of: null, reversed_by: null,
+        reversal_reason: null, withdrawn_at: null, withdrawal_reason: null, created_at: "2026-03-31T02:00:00Z",
+      },
+      lines: [],
+      receipts: [],
+    }),
+  }));
+  try {
+    await settleUntil(h, () => String(h.text()).includes("Alpha Supplies"),
+      "the trade-invoice link block to render");
+    const text = String(h.text());
+    // `\s`, NOT a literal space: next-intl's narrowSymbol output separates "RM" from the number
+    // with U+202F, so a literal "RM 1,060.00" never matches a rendered amount — the vacuity
+    // journal-entries-table.test.tsx:105-111 already had to learn once.
+    const MONEY = /RM\s1,060\.00/g;
+    assert.match(text, MONEY,
+      "the outstanding renders in ringgit through the house Money component, never as raw sen");
+    assert.equal(text.includes("106000"), false,
+      "and the raw integer of sen appears nowhere on the page");
+    assert.ok(/Total/.test(text),
+      "the stated total is named — the block's own comment promises it and TradeInvoice.link.total was authored for it");
+    // TWO money facts, both formatted: the stated total and what is still outstanding.
+    assert.equal((text.match(MONEY) ?? []).length, 2,
+      "both the stated total and the outstanding render as money");
+    // AND NO RAW MESSAGE KEY ANYWHERE. Caught here for real: `tti` is scoped to
+    // `TradeInvoice.link`, and the block asks it for `domain.ap` — a key that lived under
+    // `TradeInvoice.domain` and NOT under `TradeInvoice.link`, so next-intl raised
+    // MISSING_MESSAGE and the direction noun rendered as its own key path. The walk never
+    // asserted the noun, so nothing caught it. It is asserted by NAME now.
+    assert.ok(text.includes("Payable"),
+      "the direction-aware noun renders as a word (C08.5), not as a missing-message key path");
+    assert.equal(/TradeInvoice\.link\./.test(text), false,
+      "no raw message key leaks into the page");
+  } finally {
+    await h.unmount();
+  }
+});
 
 test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Documents tab shows", async () => {
   await withStateDoor(documentState(), async (calls) => {

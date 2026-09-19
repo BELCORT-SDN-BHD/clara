@@ -253,6 +253,12 @@ test("every refusal is a BANNER carrying the door's code — and there is no toa
     ["wrong_control_domain", "which way the money runs"],
     ["period_locked", "fiscal year"],
     ["insufficient_role", "bookkeeper"],
+    // F2 (fix round 1) — the three payload-shape tokens the door used to answer for with
+    // `invalid_kind`'s sentence. Each renders its OWN words here, so a person who sent the wrong
+    // currency is not told to change the document type.
+    ["invalid_particulars", "particulars"],
+    ["invalid_currency", "MYR"],
+    ["invalid_tax_facts", "Tax facts"],
   ] as const) {
     const h = await renderComponent(App({
       submit: async () => ({ kind: "invalid_basis", field: "kind", reason }) as SubmitTradeInvoiceWorkResult,

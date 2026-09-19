@@ -149,6 +149,14 @@ test("compose a bill → 202 → the Work page shows the persistent outcome, and
   await expect(block).toContainText("Supplier bill");
   await expect(block).toContainText(TI.vendorName);
   await expect(block).toContainText("ALPHA-2026-0042");
+  // C08.5's DIRECTION-AWARE NOUN, asserted in the browser. The unit cell caught that this word
+  // was a missing message key rendering as its own key path, which no walk leg had ever looked
+  // at; a walk that never reads the word cannot notice that it is not a word.
+  await expect(block).toContainText("Payable");
+  // AC12's EXACT MONEY: ringgit, never the raw integer of sen. `\s` because next-intl's
+  // narrowSymbol output separates "RM" from the number with U+202F.
+  await expect(block).toContainText(/RM\s1,060\.00/);
+  await expect(block).not.toContainText("106000");
 
   await page.reload();
   const after = page.getByTestId("work-trade-invoice");
@@ -156,6 +164,7 @@ test("compose a bill → 202 → the Work page shows the persistent outcome, and
   await expect(after).toContainText("Supplier bill");
   await expect(after).toContainText(TI.vendorName);
   await expect(page.getByTestId("work-trade-invoice-links")).toContainText(TI.openItemId);
+  await expect(page.getByTestId("work-trade-invoice-links")).toContainText(/RM\s1,060\.00/);
 });
 
 test("a refused party renders its candidates INLINE and preserves the draft", async ({ page }) => {

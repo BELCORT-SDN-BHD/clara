@@ -472,6 +472,39 @@ test("p655.polarity.matrix a negative total, an AR party on an AP kind and a cre
     }),
     "p655.polarity.matrix(d): an unrecognised kind is a typed refusal, not a CHECK violation");
   assert.notEqual(bad.err.code, "23514");
+  assert.equal(bad.detail.kind, "proforma",
+    "p655.polarity.matrix(d): …and invalid_kind names the KIND, which is the one thing it is about");
+
+  // (d2) ONE REASON NAMES ONE THING (F2, fix round 1). `invalid_kind` used to answer four
+  // different failures — a malformed particulars object, an unrecognised kind, a currency that is
+  // not MYR, and tax facts that are not an object — while the runtime map and the message
+  // catalogue rendered the single sentence "A trade invoice is either a sales invoice or a
+  // supplier bill." For three of the four that sentence is simply false, and a person told it
+  // would go and change the one thing that was already right. The ladder is the contract
+  // (DECISIONS.md:50), so the ladder grows and each token names its own failure.
+  await refusesTi(client, "CLR10", TI_REASON.invalidParticulars,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(), kind: TI_KIND.bill, particulars: null, basis: billBasis(),
+    }),
+    "p655.polarity.matrix(d2): particulars that are not an object at all");
+  const cur = await refusesTi(client, "CLR10", TI_REASON.invalidCurrency,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(), kind: TI_KIND.bill,
+      particulars: billParticulars({ counterparty: vend, extra: { currency: "SGD" } }),
+      basis: billBasis(),
+    }),
+    "p655.polarity.matrix(d2): a currency this estate does not record");
+  assert.equal(cur.detail.currency, "SGD",
+    "p655.polarity.matrix(d2): …and the refusal names the currency that was sent");
+  const tax = await refusesTi(client, "CLR10", TI_REASON.invalidTaxFacts,
+    () => admitTradeInvoiceWork({
+      client, author: ALICE(), kind: TI_KIND.bill,
+      particulars: billParticulars({ counterparty: vend, taxFacts: ["SR", 6000] }),
+      basis: billBasis(),
+    }),
+    "p655.polarity.matrix(d2): tax facts that are not an object");
+  assert.equal(tax.detail.field, "tax_facts",
+    "p655.polarity.matrix(d2): …naming the field, not the kind");
 
   // (e) THE BASIS LAWS.
   await refusesTi(client, "CLR10", TI_REASON.controlLegMissing,

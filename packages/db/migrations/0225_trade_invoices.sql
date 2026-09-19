@@ -546,12 +546,21 @@ comment on function clara._trade_invoice_kind_of_entry(uuid) is
 --   source_already_posted · client_inactive · insufficient_role · invalid_intent_key ·
 --   intent_payload_conflict · period_locked
 --
--- AND ONE MORE THE LADDER MEASURABLY RAISES, named here rather than hidden: `invalid_kind`, for a
--- `p_kind` that is neither of the two admitted values and is not credit-shaped either. The brief
--- fixed the map at FOURTEEN and said "if your measured door ends up raising a fifteenth typed
--- reason, the map grows with it and the report names it". A bare 22P02/23514 out of the column
--- CHECK is exactly what 0194:1078-1081 forbids, so the fifteenth exists for the same reason the
--- fourth does.
+-- AND FOUR MORE THE LADDER MEASURABLY RAISES, named here rather than hidden. The brief fixed the
+-- map at FOURTEEN and said "if your measured door ends up raising a fifteenth typed reason, the
+-- map grows with it and the report names it"; a bare 22P02/23514 out of a column CHECK is exactly
+-- what 0194:1078-1081 forbids, so each of these exists for the same reason the fourth does:
+--
+--   invalid_kind          a `p_kind` that is neither admitted value and is not credit-shaped
+--   invalid_particulars   particulars that are not a JSON object at all
+--   invalid_currency      a currency this estate does not record trade invoices in
+--   invalid_tax_facts     tax facts sent as something other than an object
+--
+-- THE LAST THREE ARE SPLIT OUT RATHER THAN FOLDED INTO `invalid_kind` (review finding F2, fix
+-- round 1): one reason names ONE thing, or the single sentence the runtime map and the message
+-- catalogue render for that token — "a trade invoice is either a sales invoice or a supplier
+-- bill" — is false for three of the four failures, and the person is sent to correct the one
+-- field that was already right.
 -- =====================================================================================
 
 -- ---------------------------------------------------------------------------------
@@ -605,7 +614,7 @@ declare
 begin
   if p_particulars is null or jsonb_typeof(p_particulars) <> 'object' then
     raise exception 'a trade invoice requires its typed particulars' using errcode='CLR10',
-      detail='{"reason":"invalid_kind","field":"particulars"}';
+      detail='{"reason":"invalid_particulars","field":"particulars"}';
   end if;
   v_kind := btrim(coalesce(p_kind,''));
 
@@ -782,13 +791,13 @@ begin
   end if;
   if upper(btrim(coalesce(p_particulars->>'currency','MYR'))) <> 'MYR' then
     raise exception 'this estate records trade invoices in MYR only' using errcode='CLR10',
-      detail=jsonb_build_object('reason','invalid_kind','field','currency',
+      detail=jsonb_build_object('reason','invalid_currency','field','currency',
         'currency',btrim(coalesce(p_particulars->>'currency','')))::text;
   end if;
   if p_particulars ? 'tax_facts' and p_particulars->'tax_facts' <> 'null'::jsonb
      and jsonb_typeof(p_particulars->'tax_facts') <> 'object' then
     raise exception 'tax facts are carried as an object, exactly as stated' using errcode='CLR10',
-      detail='{"reason":"invalid_kind","field":"tax_facts"}';
+      detail='{"reason":"invalid_tax_facts","field":"tax_facts"}';
   end if;
 
   if not p_world then return; end if;
@@ -831,8 +840,10 @@ revoke all on function clara._assert_trade_invoice_basis(uuid,text,jsonb,jsonb,b
 comment on function clara._assert_trade_invoice_basis(uuid,text,jsonb,jsonb,boolean) is
   '#655: every payload law of a trade invoice, and (p_world => true) the world laws another '
   'admission can move. Raises the door''s own typed ladder -- credit_shape_not_admitted, '
-  'invalid_kind, invalid_total, control_leg_missing, wrong_control_domain, unbalanced_basis, '
-  'invalid_due_date, period_locked -- never a bare 23514. Ungranted to every application role.';
+  'invalid_kind, invalid_particulars, invalid_currency, invalid_tax_facts, invalid_total, '
+  'control_leg_missing, wrong_control_domain, unbalanced_basis, invalid_due_date, period_locked '
+  '-- never a bare 23514, and never one token for four different failures. Ungranted to every '
+  'application role.';
 
 -- ---------------------------------------------------------------------------------
 -- THE PARTY, RESOLVED THROUGH 0215's IDENTITY SURFACE (2026-09-15 D11: #655 CONSUMES identity
@@ -844,6 +855,17 @@ comment on function clara._assert_trade_invoice_basis(uuid,text,jsonb,jsonb,bool
 -- the existing shared question (`claraWork_v4`'s ASK_QUESTION_TOOL), which needs a live task and a
 -- hook token (0180:578) that an admission-time ambiguity has not got -- which is exactly why the
 -- ambiguity is resolved here and not parked.
+--
+-- WHAT RESOLVES A PARTY, AND WHAT MERELY TRAVELS WITH IT (ADV-655-8). The resolution keys are, in
+-- order: the counterparty id; the normalised registration number; the normalised name or a live
+-- alias. `tin` is NOT one of them -- it is accepted on the wire, carried, and echoed in the
+-- party_unresolved refusal so the person can see what was tried, and clara.counterparties.tin is
+-- read by 0215:1157-1164 only as a cross-client identity WATCH, never as a resolver. A payload
+-- whose only identifier is a TIN therefore leaves as party_unresolved even when a counterparty
+-- holds that TIN. Adding a TIN arm is a real improvement and a real precedence question (which
+-- wins when registration and TIN disagree, and whether a cross-client identifier may resolve
+-- inside one client's books); it is filed as a follow-up rather than decided here, and the tool
+-- schema's own description now says which keys resolve.
 --
 -- THE PARTY'S KIND IS THE DOMAIN. A sales invoice is owed BY a customer; a supplier bill is owed
 -- TO a vendor. `clara._tf_open_items_validate` enforces the same pairing on the item at birth, so

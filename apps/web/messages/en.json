@@ -1651,6 +1651,9 @@
       "intent_payload_conflict": "That intent was already recorded with different figures.",
       "period_locked": "The fiscal year containing that posting date is closed.",
       "invalid_kind": "A trade invoice is either a sales invoice or a supplier bill.",
+      "invalid_particulars": "Clara could not read the document's particulars as a record.",
+      "invalid_currency": "This estate records trade invoices in MYR only.",
+      "invalid_tax_facts": "Tax facts are carried as a record, exactly as the document states them.",
       "invalid_basis": "Clara could not read that submission."
     },
     "issues": {
@@ -1680,6 +1683,10 @@
       "kind": {
         "sales_invoice": "Sales invoice",
         "supplier_bill": "Supplier bill"
+      },
+      "domain": {
+        "ar": "Receivable",
+        "ap": "Payable"
       },
       "party": "Party",
       "documentDate": "Document date",

@@ -217,18 +217,28 @@ test("basis.local a lawful invoice returns null -- which never means the door wi
   assert.equal(ti.localTradeInvoiceRefusal(toolInput({ due_date: null, due_date_source: "absent" })), null);
 });
 
-test("basis.map the refusal map IS the door's raise ladder -- fourteen tokens plus invalid_kind", () => {
+test("basis.map the refusal map IS the door's raise ladder -- fourteen tokens plus the four the door measurably raises", () => {
   const names = Object.keys(ti.TRADE_INVOICE_REFUSALS).sort();
   assert.deepEqual(names, [
     "client_inactive", "control_leg_missing", "credit_shape_not_admitted", "insufficient_role",
-    "intent_payload_conflict", "invalid_due_date", "invalid_intent_key", "invalid_kind",
-    "invalid_total", "party_ambiguous", "party_unresolved", "period_locked",
+    "intent_payload_conflict", "invalid_currency", "invalid_due_date", "invalid_intent_key",
+    "invalid_kind", "invalid_particulars", "invalid_tax_facts", "invalid_total",
+    "party_ambiguous", "party_unresolved", "period_locked",
     "source_already_posted", "unbalanced_basis", "wrong_control_domain",
   ]);
-  assert.equal(names.length, 15,
-    "DECISIONS.md:50 fixes the map at FOURTEEN; 0225's measured door raises a fifteenth, invalid_kind, and the map grows with it -- the ladder binds, the number describes");
+  assert.equal(names.length, 18,
+    "DECISIONS.md:50 fixes the map at FOURTEEN; 0225's measured door raises four more -- the ladder binds, the number describes");
   for (const [, message] of Object.entries(ti.TRADE_INVOICE_REFUSALS)) {
     assert.ok(typeof message === "string" && message.length > 10, "every token carries a human message");
+  }
+  // ONE REASON, ONE THING (review finding F2). The three payload-shape tokens `invalid_kind` used
+  // to answer for must each say what they are about, or the map is a lie with a green census.
+  assert.match(ti.TRADE_INVOICE_REFUSALS.invalid_currency, /MYR|currency/i);
+  assert.match(ti.TRADE_INVOICE_REFUSALS.invalid_tax_facts, /tax/i);
+  assert.match(ti.TRADE_INVOICE_REFUSALS.invalid_particulars, /read|shape|object|particulars/i);
+  for (const token of ["invalid_currency", "invalid_tax_facts", "invalid_particulars"]) {
+    assert.notEqual(ti.TRADE_INVOICE_REFUSALS[token], ti.TRADE_INVOICE_REFUSALS.invalid_kind,
+      `${token} may not render the sentence about sales invoices and supplier bills`);
   }
 });
 

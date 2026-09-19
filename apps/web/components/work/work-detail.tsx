@@ -56,6 +56,10 @@ import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+// #655 — the house currency renderer (N9's ruling: `<Money>` is the render path for money in
+// JSX, `formatCents` only for non-JSX value positions). Cents are the storage unit, never the
+// reading unit.
+import { Money } from "@/components/journals/money";
 import { businessDateTime } from "@/lib/business-date";
 import { isUuidShape } from "@/lib/client-id";
 import { readClarifyQuestion } from "@/lib/journals/governance-doors";
@@ -796,6 +800,12 @@ function PostedEntrySection({
                     {tradeInvoice.due_date === null
                       ? tti("noDueDate")
                       : `${tti("dueDate")} ${tradeInvoice.due_date}`}
+                    {" · "}
+                    {/* THE STATED TOTAL, which is durable at ADMISSION and is the only amount on
+                        this page until the entry posts (the journal-lines table does not exist
+                        before that). Through `<Money>` like every other money value in the app —
+                        cents are the storage unit, never the reading unit. */}
+                    {tti("total")}: <Money cents={tradeInvoice.total_cents} />
                   </span>
                   {tradeInvoice.state !== "posted" ? (
                     <span className="block text-sm text-muted-foreground">{tti("admitted")}</span>
@@ -805,7 +815,7 @@ function PostedEntrySection({
                         <>
                           {tti("openItem")}: {tradeInvoice.open_item_id}
                           {tradeInvoice.outstanding_cents === null ? null : (
-                            <> · {tti("outstanding")}: {tradeInvoice.outstanding_cents}</>
+                            <> · {tti("outstanding")}: <Money cents={tradeInvoice.outstanding_cents} /></>
                           )}
                         </>
                       )}
