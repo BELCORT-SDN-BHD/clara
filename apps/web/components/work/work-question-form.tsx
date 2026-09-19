@@ -100,6 +100,12 @@ import type { WorkAnswerValue, WorkQuestionAccount } from "@/lib/work/questions"
  *  one; "none" is for a surface that already owns the announcement boundary. */
 export type WorkQuestionAnnounce = "self" | "none";
 
+/** fix-round STD-1005-4 — the account-field Select's ONE label function, so its `items=` and its
+ *  `SelectContent` options (both built from the same filtered roster) cannot read differently. */
+function accountOptionLabel(a: WorkQuestionAccount): string {
+  return a.name ? `${a.account_code} · ${a.name}` : a.account_code;
+}
+
 export type WorkQuestionFormProps = {
   record: WorkQuestionRecord;
   /** The signed-in person, for the draft key's user half. */
@@ -667,32 +673,38 @@ function QuestionField({
         // Either way `clara._assert_work_answer` is still the authority on whether the code is
         // active in this client's chart — this control only saves a person from typing it.
         accounts !== null && accounts.length > 0 ? (
-          <Select value={text} onValueChange={(v) => onChange(typeof v === "string" ? v : "")} disabled={disabled}>
-            <SelectTrigger
-              id={id}
-              aria-label={field.label}
-              aria-invalid={invalid || undefined}
-              aria-describedby={describedBy}
-              className="w-full"
-              ref={register as (el: HTMLButtonElement | null) => void}
-              data-testid={`work-question-account-${field.key}`}
-            >
-              <SelectValue
-                placeholder={t("accountPlaceholder")}
-                items={accounts.filter((a) => a.is_active).map((a) => ({
-                  value: a.account_code,
-                  label: a.name ? `${a.account_code} · ${a.name}` : a.account_code,
-                }))}
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {accounts.filter((a) => a.is_active).map((a) => (
-                <SelectItem key={a.account_code} value={a.account_code}>
-                  {a.name ? `${a.account_code} · ${a.name}` : a.account_code}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          // fix-round STD-1005-4 — ONE filtered roster and ONE label function, shared by the
+          // trigger's `items=` and the matching `SelectContent` options, so the two cannot read
+          // differently (before this, `accounts.filter(...)` and the label template literal were
+          // each written out twice).
+          (() => {
+            const activeAccounts = accounts.filter((a) => a.is_active);
+            return (
+              <Select value={text} onValueChange={(v) => onChange(typeof v === "string" ? v : "")} disabled={disabled}>
+                <SelectTrigger
+                  id={id}
+                  aria-label={field.label}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={describedBy}
+                  className="w-full"
+                  ref={register as (el: HTMLButtonElement | null) => void}
+                  data-testid={`work-question-account-${field.key}`}
+                >
+                  <SelectValue
+                    placeholder={t("accountPlaceholder")}
+                    items={activeAccounts.map((a) => ({ value: a.account_code, label: accountOptionLabel(a) }))}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeAccounts.map((a) => (
+                    <SelectItem key={a.account_code} value={a.account_code}>
+                      {accountOptionLabel(a)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            );
+          })()
         ) : (
           <Input
             id={id}

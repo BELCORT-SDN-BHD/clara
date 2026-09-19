@@ -104,6 +104,14 @@ export function MatchingSection({
   const [statementId, setStatementId] = useState<string | null>(null);
   const liveStatements = useMemo(() => (statements.data ?? []).filter((s) => s.status === "live"), [statements.data]);
 
+  // fix-round STD-1005-4 — ONE label function per roster, called from BOTH the trigger's `items=`
+  // and the matching `SelectContent` option, so the two literally cannot read differently: before
+  // this, each was its own inline template literal, correct only because both were kept in sync
+  // by hand at every edit.
+  const accountOptionLabel = (a: (typeof activeAccounts)[number]) =>
+    `${a.bank_name_display} ${a.account_number} · ${a.coa_account_code}`;
+  const periodOptionLabel = (s: (typeof liveStatements)[number]) => `${s.period_start} → ${s.period_end}`;
+
   // --- the unmatched-line report ---------------------------------------------------------
   const linesKind = useReadErrKind();
   const unmatchedLines = useHydratedPart(
@@ -258,16 +266,13 @@ export function MatchingSection({
                 <SelectTrigger id="matching-account" className="w-full">
                   <SelectValue
                     placeholder={t("accountPlaceholder")}
-                    items={activeAccounts.map((a) => ({
-                      value: a.id,
-                      label: `${a.bank_name_display} ${a.account_number} · ${a.coa_account_code}`,
-                    }))}
+                    items={activeAccounts.map((a) => ({ value: a.id, label: accountOptionLabel(a) }))}
                   />
                 </SelectTrigger>
                 <SelectContent>
                   {activeAccounts.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
-                      {a.bank_name_display} {a.account_number} · {a.coa_account_code}
+                      {accountOptionLabel(a)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -282,10 +287,7 @@ export function MatchingSection({
                   placeholder={t("periodPlaceholder")}
                   items={[
                     { value: "__all", label: t("periodAll") },
-                    ...liveStatements.map((s) => ({
-                      value: s.id,
-                      label: `${s.period_start} → ${s.period_end}`,
-                    })),
+                    ...liveStatements.map((s) => ({ value: s.id, label: periodOptionLabel(s) })),
                   ]}
                 />
               </SelectTrigger>
@@ -293,7 +295,7 @@ export function MatchingSection({
                 <SelectItem value="__all">{t("periodAll")}</SelectItem>
                 {liveStatements.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.period_start} → {s.period_end}
+                    {periodOptionLabel(s)}
                   </SelectItem>
                 ))}
               </SelectContent>
