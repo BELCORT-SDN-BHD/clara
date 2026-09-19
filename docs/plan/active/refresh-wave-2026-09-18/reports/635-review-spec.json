@@ -1,0 +1,18 @@
+{
+  "ticket": 635,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/635-review-spec.json",
+  "verdict": "accept",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "minor",
+      "category": "test-coverage",
+      "where": "apps/web/components/firm-admin/legal-standing-card.tsx:172-181 (ownerHint) and apps/web/components/firm-admin/legal-standing-card.test.tsx:105-119 (p635.web.legal_not_live_without_accept)",
+      "what": "The named branch of ownerHint (rendering 'legalNotLiveOwnerNamed', e.g. \"An owner of this firm must accept the current versions. Alice Tan accepted the previous ones.\") is fed by a test fixture (line 111: firmAccepted:false with acceptedByName:'Alice Tan' on the SAME document) that is a shape get_firm_legal_standing() cannot produce for an unmasked caller -- in the migration (0233:267-272) accepted_by_name for a document is populated from the same lateral join whose hit/miss also decides firm_accepted, so on one document firmAccepted:false forces acceptedByName:null. The realistic path to a non-null name while standing is not live is a DIFFERENT document (or a split-acceptance scenario across the two kinds, per p635.db.legal_standing_two_people) -- not the one this test builds. The test also never asserts which of the two hint strings (generic vs named) actually rendered: both share the same leading sentence, so the regex at line 116 (`/An owner of this firm must accept the current versions/`) passes either way. Net effect: the 'named' variant of the not-live-without-accept hint is unverified by any test, and the one test that supplies a name to exercise it does so with an input the production door cannot emit in that combination.",
+      "evidence": "Read packages/db/migrations/0233_firm_commercial_settings.sql:258-297 (firm_accepted and accepted_by_name both derive from the same `fa` lateral per document) and apps/web/components/firm-admin/legal-standing-card.tsx:172-181; grepped legal-standing-card.test.tsx and firm-commercial-walk.spec.ts for 'accepted the previous' / 'legalNotLiveOwnerNamed' / 'Alice Tan' -- the only hit besides the unrealistic fixture is the masked-attribution test at line 152, which asserts absence, not the named-hint text.",
+      "fix": "Either build the fixture from a realistic split-acceptance state (one kind firmAccepted:true with a name, the other false, standingLive still false) and assert the exact named sentence renders, or delete the unreachable-in-that-shape branch/test combination and simplify ownerHint to the single generic sentence if the split-acceptance case is not meant to carry a name in this card. Not blocking: no AC depends on this specific string, and the fallback (generic hint) is itself correct and tested."
+    }
+  ]
+}

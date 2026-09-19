@@ -1,0 +1,163 @@
+{
+  "ticket": 642,
+  "role": "recheck",
+  "recheck_of_report": "docs/plan/active/refresh-wave-2026-09-18/reports/642-fixround-1.md",
+  "recheck_of_head": "566665f07608c3f1db417cbe59dfea19212ca6df",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\642-recheck-1.json",
+  "rig": "PG 127.0.0.1:55703 clara_642, Playwright triple 3320/3321/3322, worktree C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "verdict": "accept",
+  "applied_findings": [
+    {
+      "id": "ADV-642-1 / STANDARDS F1",
+      "severity": "blocker",
+      "claim": "the turn key's address now carries the conversation's transcriptPosition alongside content, so a repeated identical utterance ('yes'/'ok'/'continue') after a settled turn derives a NEW key instead of colliding with the first one forever",
+      "commits": ["23ead783"],
+      "verified": true,
+      "evidence": "Read lib/clara/intentKey.ts (canonicalIntentAddress now folds input.transcriptPosition into the length-prefixed field list) and useClaraThread.ts (derives transcriptPosition(before.messages) from the store's persisted rows before deriving the key). Ran components/clara/thread-intent-key.test.tsx + lib/clara/intentKey.test.ts: 18/18 pass, including 'p642.web.repeated_utterance_is_a_NEW_intent' and 'p642.web.intent_key — `transcriptPosition` reads persisted rows only'. NOT VACUOUS, independently confirmed by reverting the fix (removed transcriptPosition from the fields array in canonicalIntentAddress) on this rig: exactly and only cell 6 ('p642.web.repeated_utterance_is_a_NEW_intent') reds, all 8 sibling cells (including the retry/changed-attachment/replay controls) stay green — proving the cell targets precisely the defect and nothing else. File restored via `git checkout` afterward; worktree confirmed clean."
+    },
+    {
+      "id": "ADV-642-2 / STANDARDS F2",
+      "severity": "major",
+      "claim": "the two new status lines (alreadyAccepted / checkingBeforeSend) drop their live role while anything else in the exclusive ladder is speaking, so a replayed-and-still-streaming send announces once, not twice",
+      "commits": ["859950d6"],
+      "verified": true,
+      "evidence": "Read ClaraThreadView.tsx:565-576 — the gate is now StateBanner's own `silent` decision (#629 §5), words retained, role dropped when the stream-status line is also active. Ran components/clara/thread-intent-key.test.tsx: 'p642.web.replayed_says_it_once — a replayed turn that is STILL STREAMING speaks with ONE status line' passes (both cells in this pair pass, 18/18 total in the file group)."
+    },
+    {
+      "id": "ADV-642-3",
+      "severity": "minor",
+      "claim": "lastSendReplayed now retires on the turn's own terminal (message/revoked), not only on the next beginSend, so the replay sentence does not outlive the turn it describes",
+      "commits": ["859950d6"],
+      "verified": true,
+      "evidence": "Read threadStore.ts:58-70 doc comment and the terminal-clearing sites; cell 'p642.web.replayed_says_it_once — the line retires with the turn it is about' passes."
+    },
+    {
+      "id": "spec F1",
+      "severity": "major",
+      "claim": "jumpToLatest's landing correction is no longer a single clock-timed check; it is a PENDING flag the correction re-measures, cancelled on arrival, retried bounded x3, closing the race where a trailing scroll event at the 1000ms deadline could strand the transcript short",
+      "commits": ["bb10d532", "1209dc93"],
+      "verified": true,
+      "evidence": "Read useTranscriptScroll.ts's reworked jumpToLatest/onScroll interaction. Ran lib/clara/useTranscriptScroll.test.ts: 11/11 pass, including 'the landing is not cancelled by the animation's OWN trailing scroll event' (fake-clock reproduction of the exact race the spec lens measured in the browser) and its control 'a reader who takes the scroll back AFTER the jump arrives is not dragged down again'. INDEPENDENTLY RE-RAN THE BROWSER WALK MYSELF on the assigned rig (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3320, NEXT_PORT=3321, RUNTIME_PORT=3322): `pnpm --filter @clara/web e2e chat-parity` -> 11 passed (45.2s), including p642.e2e.long_history_scroll — the exact test the spec lens found flaky at 36px short. This is real browser-level confirmation, not just the unit cell."
+    },
+    {
+      "id": "ADV-642-7",
+      "severity": "note",
+      "claim": "transcriptRevision is now a join (transcriptRevisionToken), not a sum, so two opposite-sign content changes landing in one commit no longer cancel and silently skip the append effect",
+      "commits": ["bb10d532"],
+      "verified": true,
+      "evidence": "Cell 'p642.web.scroll_holds_position — two opposite content changes in ONE commit are not a stationary revision' passes (part of the 11/11 run above)."
+    },
+    {
+      "id": "ADV-642-5",
+      "severity": "minor",
+      "claim": "an attach-time 403/404 (assertTaskStreamAccess's masked-view refusal) is now delivered as the same `revoked` SSE event a mid-stream revocation delivers, instead of being thrown as a transport failure that produced up to 8 rounds of 'Reconnecting…' at a person whose access was removed; the send-path promise now resolves (markSent) instead of hanging forever on an attach that never rejects and never opens",
+      "commits": ["40e4b2a0"],
+      "verified": true,
+      "evidence": "Read packages/runtime/lib/authz.mjs (confirms no_membership->403, not_found->404, both pre-SSE-header in streamRoute.ts:31-44) and apps/web/lib/clara/stream.ts (openTaskStream throws StreamAccessRevokedError only on 403/404, 401 still throws a plain transport error; runClaraTaskStream's attach-catch now delivers {event:'revoked'} and returns) and useClaraThread.ts's two new `.finally()` arms that call markSent+resolve/setStop when the attach ends without ever opening or rejecting. Ran lib/clara/stream-revoked.test.ts + components/clara/thread-revoked.test.tsx + lib/clara/use-clara-thread-stop.test.ts + components/clara/thread-stop-reply.test.tsx + tests/streamReattach.test.mjs together: 58/58 pass."
+    },
+    {
+      "id": "ADV-642-4",
+      "severity": "minor",
+      "claim": "the last-posted intent key moves from a per-mount useRef to the thread's module-level store row (beside sendStatus), so the distinct-resubmit pre-read is not silently skipped after a remount following a failed send",
+      "commits": ["23ead783"],
+      "verified": true,
+      "evidence": "Read threadStore.ts (new `lastIntentKey: string | null` field, written by beginSend's second arg) and useClaraThread.ts (priorKey now read as `before.lastIntentKey`, the dead `priorKey !== null` short-circuit removed). Cell 'p642.web.distinct_resubmit_reads_state_first — a REMOUNT does not lose the pre-read (the last key is not mount-scoped)' passes."
+    },
+    {
+      "id": "ADV-642-6",
+      "severity": "minor",
+      "claim": "aria-describedby now names the send-error banner's own id in addition to the static hint while the composer is invalid, so a screen-reader user hears why, not just 'invalid'",
+      "commits": ["debb156a"],
+      "verified": true,
+      "evidence": "Read ClaraThreadView.tsx: composerErrorId wraps the error banner div (:737), composerInvalid gates `aria-describedby={composerInvalid ? `${composerHintId} ${composerErrorId}` : composerHintId}` (:839). Deliberately NOT re-rendered as a second FieldError (avoids a second role=alert copy of one sentence, consistent with the round's own announce-once discipline). Ran components/clara/composer-field-wiring.test.tsx: 18/18 pass."
+    },
+    {
+      "id": "ADV-642-9",
+      "severity": "note",
+      "claim": "clara-composer / clara-composer-hint move from document-global literal ids to useId()-derived ids, so two mounted composer instances no longer share one label/description binding",
+      "commits": ["debb156a"],
+      "verified": true,
+      "evidence": "Read ClaraThreadView.tsx:8 (useId imported) and :316-317 (composerId/composerHintId derived via useId). Cell 'p642.web.composer_field_wiring — the composer's ids are per-INSTANCE, so two mounts do not steal each other's label' present and passing (part of the 18/18 composer-field-wiring run)."
+    },
+    {
+      "id": "ADV-642-8",
+      "severity": "note",
+      "claim": "failed now outranks done/refused in the tool-state fold, so a tool-error arriving after a tool-result for the same call id reads failed instead of being stuck at the first terminal",
+      "commits": ["debb156a"],
+      "verified": true,
+      "evidence": "Read liveTools.ts:73 — `RANK = { preparing: 0, running: 1, done: 2, refused: 2, failed: 3 }` (done/refused level, failed strictly above). Ran lib/clara/liveTools.test.ts: 18/18 pass including the new error-after-result and replay-monotonicity cells."
+    },
+    {
+      "id": "spec F2",
+      "severity": "minor",
+      "claim": "toolLabel.ts:16's comment now names the real gate file (toolLabel.test.ts) instead of a file that never existed (clara-tool-labels.test.ts)",
+      "commits": ["debb156a"],
+      "verified": true,
+      "evidence": "Read toolLabel.ts:13-21 — line 16 now reads '`./toolLabel.test.ts` is the gate...'; the old wrong name survives only inside the explanatory sentence describing the correction itself. `grep -rn clara-tool-labels` over tracked source returns only that one self-referential explanatory line."
+    },
+    {
+      "id": "ADV-642-5 (knock-on, ratification)",
+      "severity": "n/a (ratification, not a defect)",
+      "claim": "three landed #630 cells whose fixtures encoded 'the lane cannot serve this stream' as 404 are re-encoded to whatever status actually means transport failure now that 404 means masked-view refusal, with a sibling cell added for the refusal arm in each file",
+      "commits": ["40e4b2a0", "772ad7c9"],
+      "verified": true,
+      "evidence": "Read all three diffs. use-clara-thread-stop.test.ts and thread-stop-reply.test.tsx (both in 40e4b2a0) were re-encoded to 502 ({error:'runtime_unreachable'}) — confirmed against app/api/runtime/[...path]/route.ts:83 which really does answer 502 runtime_unreachable for an unreachable runtime. tests/streamReattach.test.mjs (772ad7c9) was re-encoded to 500, NOT 502 — its own commit message says so explicitly ('Only the FIXTURE changes, to 500... 500 is the status that means that') because this is a lower-level unit test of runClaraTaskStream against a raw fetchImpl mock with no web-proxy route in the loop, so 502's specific runtime_unreachable semantics don't apply there; 500 is a defensible generic non-40x transport-failure status for that abstraction level. Each of the three files gained a sibling cell for the 403/404 refusal arm. Ran all five affected files together: 58/58 pass."
+    }
+  ],
+  "deliberately_left_findings_judged": [
+    {
+      "id": "STANDARDS F3",
+      "severity": "note",
+      "judgment": "reason holds; independently re-confirmed",
+      "reasoning": "Not a left defect — the report says the stray untracked scratch file (zz-adversarial-642.test.tsx) was already gone before the fix round started. Independently confirmed: `git status --porcelain` in the worktree is empty and `find . -iname '*zz-adversarial*'` (excluding .next/node_modules) returns nothing."
+    },
+    {
+      "id": "ADV-642-10",
+      "severity": "note",
+      "judgment": "reason holds; independently re-confirmed",
+      "reasoning": "Verified-clean record, not a left defect. Independently re-confirmed the highest-value claim: `git diff 46a84750..HEAD --name-only` for the whole fix round touches exactly 21 files, none under packages/db/ or packages/runtime/src/ (only packages/runtime/README.md, a doc) and apps/web/test/manifest.txt has zero diff across the round (no new test FILE was added, matching the report's own claim), confirming the 'NO MIGRATION, again and on purpose' line holds for this round specifically, not just for the ticket as a whole."
+    }
+  ],
+  "ratification": [
+    {
+      "requested": "The intent key's address gains transcriptPosition (count + last id of persisted rows seen), a field the brief's literal list ({threadId, altitude, draft, attachments}) does not name.",
+      "brief_text_confirmed": "brief-642.md:256-257 (§3 web item 2) gives the literal address as 'a stable hash over threadId ‖ altitude ‖ draftText ‖ sorted(attachment.document_id)' and a binding clause at :275 that only fires for a 'session-scoped or handed-out key' alternative ('you must ship a user-facing your attachment change was not resent path and a named residual').",
+      "recommendation": "ratify",
+      "reasoning": "This closes a genuine, measured blocker the brief's literal spec did not anticipate: content-only addressing meant every repeated identical utterance ('yes' answering two different Clarify questions) collided with the first one for the life of the session, permanently, over an append-only table with no time/state bound in the door's replay lookup (0006_runtime_core.sql:954-960, `limit 1`). All four properties the brief gives reasons for in items (a)-(d) are verified still true after the change: (a) retry-reuses-key — a refused/lost send adds nothing to the transcript, so position is unchanged, confirmed by the still-green 'intent_key_survives_a_refusal' cell; (b) changed-attachment-gets-new-key — untouched, confirmed by 'THE BLOCKER'S CELL' cell; (c) distinct-resubmit pre-read — unaffected, and separately improved by ADV-642-4 in the same commit; (d) replayed:true says so once — unaffected, and separately fixed by ADV-642-2/3. Critically, this is NOT the 'session-scoped or handed-out key' alternative the brief's binding clause warns about: transcriptPosition is derived deterministically from persisted rows already in the store (never a random or server-handed value), so it does not introduce the silent-resend/silent-drop failure mode that clause exists to prevent, and the reload-recovery property (appendix C §3) is preserved for the case that actually matters (an un-admitted send). I found no DECISIONS.md ruling that conflicts with this. This is a policy/scope decision the wave owner should sign off on explicitly (as the fix round itself requests), but on the merits the reasoning holds and the fix is real, tested, and non-vacuous (independently confirmed by revert-and-red above)."
+    },
+    {
+      "requested": "Three cells' fixtures re-encoded from 404 to whatever status now means transport failure (404 having been claimed by the masked-view refusal), changing what a 404 means to two of #630's cells.",
+      "brief_text_confirmed": "brief-642.md:290-296 (§3 web item 5) only specifies the mid-stream revoked payload shape ('reason is not_found or the AuthError code, streamRoute.ts:157') and does not address attach-time 403/404 handling at all — this is a real gap in the brief's coverage that ADV-642-5 found and closed, not a contradiction of anything the brief states.",
+      "recommendation": "ratify",
+      "reasoning": "The underlying status-code facts are independently verified against source: no_membership->403 and not_found->404 both pre-SSE-header (packages/runtime/lib/authz.mjs, streamRoute.ts:31-44), and the web proxy's own unreachable arm really does answer 502 runtime_unreachable (app/api/runtime/[...path]/route.ts:83). Two of the three re-encoded cells correctly use 502 for that reason. One accuracy issue in the fix round's OWN report, not in the code: 642-fixround-1.md's ratification text states 'All three keep every assertion; only the status changes... to 502' uniformly, but the third cell (tests/streamReattach.test.mjs, commit 772ad7c9) was actually re-encoded to 500 — per that very commit's own message and diff, correctly and for a stated reason (it is a lower-level unit test with no web-proxy in the loop, so 500 stands in as the generic transport-failure status rather than the proxy-specific 502). This is a documentation-accuracy defect in the round's summary, not a code defect; recorded under new_defects_introduced_by_fixes below since it is new to this report and worth the wave owner's attention when ratifying, but it does not change the recommendation on the substance."
+    }
+  ],
+  "new_defects_introduced_by_fixes": [
+    {
+      "id": "RECHECK-1",
+      "severity": "note",
+      "category": "documentation-accuracy",
+      "where": "docs/plan/active/refresh-wave-2026-09-18/reports/642-fixround-1.md, 'Ratification requested' item 2",
+      "what": "The fix round's own report claims uniformly that 'Three landed cells had their FIXTURE re-encoded from 404 to 502... only the status changes, to the one the web proxy actually answers for their own stated premise... -> 502'. This is inaccurate for one of the three: tests/streamReattach.test.mjs (commit 772ad7c9) was re-encoded to 500, not 502, as that commit's own message states plainly ('Only the FIXTURE changes, to 500'). The 500 choice is itself defensible (that cell is a unit test of runClaraTaskStream against a raw fetchImpl mock, with no web-proxy route in the call path, so the proxy's specific 502 runtime_unreachable semantics do not apply there) — this is a reporting-accuracy defect in 642-fixround-1.md's summary text, not a code or test defect.",
+      "impact": "None on shipped behavior or test correctness — all affected tests pass and assert the right things. Matters only because AGENTS.md's evidence rule treats an inaccurate uniformity claim in a report as a claim that needs correcting before the wave owner rules on the attached ratification request.",
+      "fix": "Correct 642-fixround-1.md's ratification item 2 to say two cells moved to 502 and one (tests/streamReattach.test.mjs) moved to 500, with the one-line reason 772ad7c9 already gives."
+    }
+  ],
+  "observations": [
+    "The one whole-suite failure this recheck measured (lib/clara/use-clara-thread-stop.test.ts, '630 a stop the door says had ALREADY FINISHED does not re-attach', '2 !== 0' at :1021) is the same pre-existing, load-sensitive cross-cell leak both 642-final.md and 642-fixround-1.md already name and disclose (642-final.md's follow-up #3, present and documented BEFORE fix round 1 began). Confirmed unrelated to this round's changes two ways: (1) re-ran the file in isolation — 26/26 pass, matching both reports' isolation numbers; (2) the flaky cell is at line 1004 and every fix-round edit to this file (the fixture re-encoding at ~1112 and the new '642 a refused stop...' cell at 1228) sits AFTER it in file order, so nothing this round changed can be the source leaking INTO an earlier cell under node:test's sequential-by-file-order execution. The leaked-open count varies run to run (3 in the fixround's run 2, 2 in this recheck's run), consistent with a load-sensitive pre-existing timer leak rather than a new, deterministic regression.",
+    "All 13 distinct findings across the three lenses (spec 2, STANDARDS 3 — 2 of which alias adversarial findings, adversarial 10) are accounted for: 11 applied with a red-first cell, 1 applied as a comment-only correction (spec F2), 1 already resolved before the round (STANDARDS F3), 1 needing no action (ADV-642-10, re-verified clean). Fixround-1.md's claim that 'nothing was deliberately left' is accurate — there is no deliberately-left finding to judge for a reason-holds/reason-fails call beyond the two verified-clean records above."
+  ],
+  "measured_evidence": {
+    "pnpm_typecheck": "green, exit 0 (apps/web tsc --noEmit Done; packages/runtime tsc --noEmit Done)",
+    "pnpm_lint": "green, exit 0 for the whole root script including apps/web's eslint + check-token-contrast + check-test-manifest(+selftest) + check-message-keys(+selftest) + check-ui-add-guard.selftest, plus packages/db, packages/runtime and packages/reporting-render eslint",
+    "apps_web_whole_unit_suite": "4210 tests, 4207 pass, 1 fail, 2 skipped, 135 suites, exit 1 from run-tests.mjs — the 1 failure is the pre-existing use-clara-thread-stop.test.ts flake (see observations), 26/26 in isolation",
+    "playwright_chat_parity_e2e": "11 passed (45.2s) on the assigned rig (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3320, CLARA_E2E_NEXT_PORT=3321, RUNTIME_PORT=3322), including p642.e2e.long_history_scroll — the exact test spec F1 measured stranded 36px short pre-fix",
+    "targeted_intent_key_group": "components/clara/thread-intent-key.test.tsx + lib/clara/intentKey.test.ts: 18/18 pass",
+    "targeted_revocation_group": "lib/clara/stream-revoked.test.ts + components/clara/thread-revoked.test.tsx + lib/clara/use-clara-thread-stop.test.ts + components/clara/thread-stop-reply.test.tsx + tests/streamReattach.test.mjs: 58/58 pass",
+    "targeted_composer_tools_group": "components/clara/composer-field-wiring.test.tsx + lib/clara/liveTools.test.ts + lib/clara/toolLabel.test.ts: 18/18 pass",
+    "targeted_scroll_group": "lib/clara/useTranscriptScroll.test.ts: 11/11 pass",
+    "revert_and_red_check": "removed transcriptPosition from canonicalIntentAddress's field list on this rig -> exactly cell 'p642.web.repeated_utterance_is_a_NEW_intent' reds (1 fail of 9 in that file), all others including retry/changed-attachment/replay controls stay green; file restored via git checkout, worktree clean",
+    "no_migration_confirmed": "git diff 46a84750..HEAD --name-only lists 21 files, none under packages/db/ or packages/runtime/src/ (only packages/runtime/README.md, a doc); apps/web/test/manifest.txt has zero diff across the round",
+    "worktree_hygiene": "git status --short clean at both start and end of this recheck; HEAD unchanged at 566665f07608c3f1db417cbe59dfea19212ca6df throughout; no tracked file left modified by this recheck"
+  }
+}

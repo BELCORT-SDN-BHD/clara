@@ -1,0 +1,128 @@
+{
+  "ticket": 659,
+  "lens": "adversarial",
+  "lens_model": "claude-opus-5",
+  "lens_note": "CROSS-MODEL LANE ATTEMPTED AND FAILED. `codex exec --sandbox read-only -m gpt-5.6-sol -c model_reasoning_effort=xhigh --skip-git-repo-check -C C:\\Users\\zhant\\Desktop\\clara-wt\\659` ran at 2026-09-19 05:21 MYT and returned zero bytes on stdout with `ERROR: You've hit your usage limit. ... try again at 5:41 PM` on stderr (scratchpad codex-659-err.txt) — exactly the exhaustion DECISIONS.md §7 measured (reset 2026-09-19 17:41). The adversarial review below was therefore done on claude-opus-5 xhigh against the same refute-first target list, and every non-note finding carries a measured run on the #659 rig (clara_659 @ 127.0.0.1:55709) or on the built app.",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\659-review-adversarial.json",
+  "verified_green": "Re-ran the worker's own evidence before attacking it. packages/db: `node --test --test-concurrency=1 --import ./tests/firm-portfolio-pack-preintegration-gate.mjs tests/firm-portfolio-pack.test.mjs tests/compliance-watch-disposition.test.mjs` -> 21 pass / 0 fail (15 + 6, as claimed). apps/web: `pnpm --filter @clara/web e2e home-board` on 3380/3381/3382 -> 15 passed (50.9s), as claimed. The gate chain in packages/db/package.json holds 41 `-preintegration-gate.mjs` flags with `firm-portfolio-pack-` last, after `preview-invite-` (migration order, as the brief fixes). Four throwaway red cells (two under packages/db/tests, one under apps/web/components/firm/firm-home) were run and DELETED; `git status --porcelain` in the worktree is clean and no tracked file was modified by this review.",
+  "findings": [
+    {
+      "id": "A1",
+      "severity": "blocker",
+      "category": "correctness",
+      "where": "apps/web/lib/firm/needs-you-links.ts:101-102",
+      "what": "AC2's ONE new deep destination is built from the wrong id. `needsYouRowHref` returns `workDetailHref(row.client_id, row.task_id)` for a `work_question` row, but `list_review_queue`'s `work_question_rows` publishes `task_id` = `agent_interruptions.task_id` (an `agent_tasks` id), while the accounting Work is a DIFFERENT column, `agent_interruptions.work_id`. The link therefore addresses `/clients/:clientId/work/<agent_task_id>` — a Work-detail route that resolves nothing.",
+      "evidence": "MEASURED off live `pg_proc` on clara_659: `clara.list_review_queue`'s body contains `wqi.id question_id,wqi.task_id,...` in the same select whose Work join is `join clara.accounting_work wqw on wqw.id=wqi.work_id` (prosrc read this pass; the file text is packages/db/migrations/0180_work_questions.sql:1069-1078). `clara.open_work_question` inserts `(task_id, ..., work_id, ...) values (p_task, ..., w.id, ...)` — two different ids (0180_work_questions.sql:665-670). MEASURED column list of clara.agent_interruptions carries BOTH `task_id` and `work_id`. The consumer side: apps/web/lib/journals/types.ts:152-155 documents this field as \"keyed by TASK id (each pending interruption's OWN `task_id`, never the interruption's own id), resolved via `clara.agent_tasks_visible`\"; apps/web/app/(firm)/clients/[clientId]/work/[workId]/page.tsx:29-36 passes the path segment straight to `WorkDetail` as `workId`, which reaches `loadWorkDetail` -> `getAccountingWork(clientId, workId)` (apps/web/lib/work/reads.ts:190-193) and returns null for an id that is not an `accounting_work.id` — and that same loader reads the Work's own task separately as `work.current_task_id` (reads.ts:201), which is the id the queue row actually carries. The unit cell cannot catch this: apps/web/lib/firm/needs-you-links.test.ts:51-58 asserts the builder's output string against a made-up uuid (`33333333-...`), so it is true by construction; no db or browser cell follows a real `work_question` row to the Work page.",
+      "fix": "The Work id is not on the row today. Either (a) leave `work_question` on its pre-#659 fall-through to `/clients/<id>` and name the missing `work_id` column as a residual against 0180's queue row, or (b) add `work_id` to the `work_question_rows` CTE in a new migration and link off THAT, never off `task_id`. Whichever is chosen, the cell must be a real row (a db battery that opens a work question and asserts `row.task_id <> work.id`), not a synthetic uuid."
+    },
+    {
+      "id": "A2",
+      "severity": "major",
+      "category": "correctness",
+      "where": "apps/web/lib/firm/portfolio-pack.ts:299-330",
+      "what": "The `recent_success` count and the link it opens are different populations. The pack counts a client's Work by COMMITTED RECEIPT date (`operation_receipts.created_at` inside the seven-day MYT window); the drilldown opens `/work?client=<id>&status=completed&since=<from>&until=<to>`, and `clara.list_accounting_work` applies that window to `w.created_at` — when the Work STARTED. The module's own comment at :299-301 claims the opposite (\"so a drilldown cannot mean a different week\"), and the surface's disclosure sentence only describes the COUNT's basis, never the LINK's.",
+      "evidence": "MEASURED on clara_659 off live prosrc. Pack: `), recent as ( select o.client_id, count(distinct o.work_id) ... where o.outcome = 'committed' and o.created_at >= v_from and o.created_at < v_to` (packages/db/migrations/0231_firm_portfolio_pack.sql:478-486). List door: `and (p_since is null or w.created_at >= p_since) and (p_until is null or w.created_at < p_until)` (0203_list_accounting_work_intent_key.sql:340-341). The href builder passes the pack's own window dates unchanged (portfolio-pack.ts:323-329) and apps/web/lib/work/work-list.ts:117-118 converts them to that instant range. Failure scenario: a Work created 30 days ago and posted 2 days ago is counted (recent_success = 1) and is NOT in the list the count links to -> the professional clicks \"1\" and lands on an empty Work list. The reverse case exists too (a Work created inside the window, status `completed`, with no committed receipt — the door's own `uncounted_completions` case — is in the list and not in the count). The e2e leg does not measure this: apps/web/e2e/home-board-walk.spec.ts:675-677 asserts only the URL shape and a mock-supplied row.",
+      "fix": "Either drop `since`/`until` from the recent_success href (open `?client=<id>&status=completed` and say on the surface that the list is not narrowed to the week), or state the divergence in `FirmHome.portfolio.recentDatedBy` in the shape D18.e asked for — the count is receipt-dated, the list it opens is start-dated, #905 owns the receipt-dated window. Then correct portfolio-pack.ts:299-301, which currently asserts the divergence away."
+    },
+    {
+      "id": "A3",
+      "severity": "major",
+      "category": "vacuous-test",
+      "where": "apps/web/e2e/home-board-walk.spec.ts:693-694",
+      "what": "`p659.home.drilldown` claims \"focus returns to the control that left it\" and cannot measure it. The poll asserts `document.activeElement?.textContent` `.toContain(\"3\")` — a HARD-CODED literal inside a three-leg loop, where the sibling #650 cell at :504-506 correctly asserts `.toContain(name)`, the loop variable. Each portfolio count link renders only its number as text (`<Link ... aria-label={...}>{n}</Link>`, firm-portfolio-section.tsx:173-180), so the three legs' focused nodes would read \"3\", \"2\" and \"1\".",
+      "evidence": "MEASURED: `pnpm --filter @clara/web e2e home-board` -> 15 passed. If focus were restored to the clicked link, leg 2 (`\"2 Work needing attention for Rome Properties\"`) would yield textContent \"2\" and `.toContain(\"3\")` would FAIL. The suite is green, so `document.activeElement` is NOT that link on legs 2 and 3 — the poll is reading an ancestor/`<body>` whose textContent contains \"3\" (the board also renders \"Needs you: 3\"). The assertion therefore passes identically with focus restoration entirely absent, and nothing in firm-portfolio-section.tsx or use-firm-portfolio.ts restores focus after a `goBack`. AC7's \"keyboard/focus return\" and AC2's second half are green on an assertion that cannot fail.",
+      "fix": "Use the loop variable (`.toContain(name)` is still weak on a `<body>` read — prefer `page.evaluate(() => document.activeElement?.getAttribute('aria-label'))` and compare to `name`). If that reds, the focus-return obligation is unmet and belongs in the report as a gap, not as a green cell."
+    },
+    {
+      "id": "A4",
+      "severity": "major",
+      "category": "correctness",
+      "where": "apps/web/components/firm/firm-home/firm-portfolio-section.tsx:246-262",
+      "what": "The filtered-empty state makes a FIRM-WIDE claim out of a PAGE-LOCAL filter. `visiblePortfolioRows` narrows only `pack.rows` — the current keyset page of at most 50 clients (the door takes no filter argument, portfolio-url-state.ts:29-31) — but the Empty renders `FirmHome.portfolio.emptyFilteredBody`: \"The firm has clients — none of them matches the narrowing in the address bar.\" On a firm with more than one page, a client that exists and matches is simply on a later page.",
+      "evidence": "MEASURED with a throwaway cell mounted on the real component (deleted after the run): with `?q=zeta` and a pack whose `truncated` is true and `nextCursor` is set, the rendered text was \"... No client matches this viewThe firm has clients — none of them matches the narrowing in the address bar.Clear th...\" while the Next-page control was present on the same screen. Code path: firm-portfolio-section.tsx:158 (`visiblePortfolioRows(pack.rows, ...)`), :246 (`if (rows.length === 0 && filtered)`), :251 (`emptyFilteredBody`), messages/en.json `FirmHome.portfolio.emptyFilteredBody`. Failure scenario: a 60-client firm, `?status=archived`, the single archived client is row 55 -> the board tells a principal no client in the firm is archived.",
+      "fix": "Reword the sentence to the truth the build can support (\"No client on this page matches …\" plus the page number/Next hint), or push `status`/`q` into the door as real arguments and keep the firm-wide claim. The same page-local caveat applies to `?attention=needs_you`, which is derived from the review queue's own paged `rows` (firm-home-board.tsx:112-115)."
+    },
+    {
+      "id": "A5",
+      "severity": "major",
+      "category": "correctness",
+      "where": "apps/web/components/firm/firm-home/firm-portfolio-section.tsx:306 (and :106-112)",
+      "what": "`?? 0` turns \"this build could not read the count\" into \"every client is clear\" — the exact bug portfolio-pack.ts:11-13 and :5-9 forbid by name (\"UNKNOWN IS NOT ZERO\", \"the same `?? 0` anywhere in this file would be the same bug\"). `caughtUp` is computed as `pack.rows.every((r) => (r.active ?? 0) === 0 && (r.attentionFailed ?? 0) === 0)`, and `rowMatchesAttention`'s `caught_up`/`active`/`failed` arms do the same.",
+      "evidence": "MEASURED with a throwaway cell on the real component (deleted after the run): mounting `FirmPortfolioSection` with a single row whose `active`, `attentionFailed` and `recentSuccess` are all null rendered BOTH \"could not be read\" AND \"Every client is clear: nothing is running and nothing needs attention\" on one screen. A second cell measured `visiblePortfolioRows([unknownRow], {attention:'caught_up'}, new Set())` -> length 1: the `caught_up` narrowing KEEPS a client whose counts are unknown, and the `active`/`failed` narrowings drop it. The existing cell firm-portfolio.test.tsx:129-135 proves only the count CELL prints \"could not be read\"; nothing asserts the caught-up sentence is withheld.",
+      "fix": "Make `caughtUp` require a known zero (`r.active === 0 && r.attentionFailed === 0`) so a null suppresses the reassurance, and give `rowMatchesAttention` an explicit null arm. Add a cell that asserts \"Every client is clear\" is ABSENT when any count is null."
+    },
+    {
+      "id": "A6",
+      "severity": "major",
+      "category": "correctness",
+      "where": "packages/db/migrations/0231_firm_portfolio_pack.sql:522-530",
+      "what": "The row's single `coverage_reason` is a strict precedence, so a client that is BOTH onboarding/archived AND carries undated completions publishes only `onboarding_client_excluded_from_queue`. The browser renders exactly one coverage sentence off that token (firm-portfolio-section.tsx:188-199), so the `recent_success = 0` beside an undated completion is shown with no explanation at all — and the brief's rule (\"every row whose labels were cut carries coverage='partial' with coverage_reason='retry_label_preview_only'\") is likewise silently lost whenever an earlier arm wins.",
+      "evidence": "MEASURED on clara_659 with a throwaway battery cell (deleted after the run): one archived client, one Work admitted, claimed and settled `completed` with no receipt. The pack returned `{\"status\":\"archived\", ... \"recent_success\":0, \"coverage_reason\":\"onboarding_client_excluded_from_queue\", \"uncounted_completions\":1}` — the row really does carry an undated completion and the row's only published reason is the status one. `uncounted_completions` is on the row but the surface never reads it except as the count argument of the `completions_without_receipt` message it is not rendering (firm-portfolio-section.tsx:192).",
+      "fix": "Either publish `coverage_reasons` as an ARRAY (all applicable tokens) and render each, or keep the single token and render the `completions_without_receipt` sentence off `uncountedCompletions > 0` independently of `coverageReason`. State the chosen rule in the migration header, which today describes the precedence as if only one condition could apply at a time."
+    },
+    {
+      "id": "A7",
+      "severity": "minor",
+      "category": "correctness",
+      "where": "apps/web/components/firm/compliance-watch-affordance.tsx:98-112",
+      "what": "AC6 asks for an ATTRIBUTABLE actor on the disposition receipt; the receipt prints the raw user uuid. `clara.compliance_watch_events.actor` is `text` holding `c.actor::text` (a user id), and the card renders it straight into \"Acknowledged by {actor} on {at}\". The same lane, in the same commit, resolves an actor uuid to a display name for the activity band through `ActivityActorLine` (firm-recent-activity.tsx:35).",
+      "evidence": "packages/db/migrations/0016_a21_compliance_watch.sql:359-370 types `actor text`; :1081-1091 stamps `acknowledged_by=c.actor::text` and inserts the event with `c.actor::text`. The receipt's own cell PINS the uuid as correct: apps/web/components/firm/compliance-watch-receipt.test.tsx:98 fixtures `actor: \"8a7b6c5d-0000-4000-8000-000000000001\"` and :158-159 asserts `/Acknowledged by 8a7b6c5d-0000-4000-8000-000000000001/` with the comment \"the actor is the one the DATABASE stamped, never the reader\". A professional reading the card sees a uuid, not a colleague.",
+      "fix": "Resolve the actor through the same `firm_members_visible` roster the activity band already uses (or reuse `ActivityActorLine`), falling back to the uuid only when the roster does not answer, and repoint the cell at the resolved name."
+    },
+    {
+      "id": "A8",
+      "severity": "minor",
+      "category": "false-claim-in-source",
+      "where": "apps/web/components/firm/add-client-control.tsx:9-11",
+      "what": "The extracted module's header asserts a fact that is false in the same commit: \"`add-client-control.test.tsx` and `add-client-candidates.test.tsx` are repointed at this module in the same commit and assert exactly what they asserted before.\" Neither file was repointed; both still mount `ClientRegisterList`. The brief required the repoint (\"both import from the old location and must be repointed in the same commit\") and the worker's own report records the opposite as Assumption (2).",
+      "evidence": "apps/web/components/firm/add-client-control.test.tsx:34 `import { ClientRegisterList } from \"./client-register-list\";` and apps/web/components/firm/add-client-candidates.test.tsx:26 the same. Consequence: the extracted module has no direct unit cell — it is exercised only transitively, and its NEW property (mounting beside a state machine on a page with four re-read triggers) is proven only by the browser leg. Precedent this violates: app/(firm)/page.tsx:8-13's own rule that a stale claim in source is the same class of lie as a premature one.",
+      "fix": "Either repoint both cells at `./add-client-control` (the brief's instruction) or delete the sentence and say plainly that the two cells stay on `ClientRegisterList` as #649's AC1 evidence at its own surface — which is the defensible choice, but it has to be what the file says."
+    },
+    {
+      "id": "A9",
+      "severity": "minor",
+      "category": "vacuous-test",
+      "where": "packages/db/tests/firm-portfolio-pack.test.mjs:449, 469-476",
+      "what": "The cell titled \"... p_preview=0 calls the helper zero times\" never measures a call. It asserts only that each row's `preview` is `[]` and its `active` count is unaffected. The body in fact keeps `left join clara._work_run_attempts(v_labelled)` in the statement unconditionally with `v_labelled = '{}'`, so whether the helper executes is a PLANNER decision, not a guaranteed zero — and the migration contradicts itself about it: the header says \"`p_preview = 0` calls the helper NOT AT ALL — the cheap page\" (0231:118-120) while the body comment 40 lines later says \"p_preview = 0 reaches it with no ids rather than with a null\" (0231:495-497).",
+      "evidence": "packages/db/migrations/0231_firm_portfolio_pack.sql:498 `left join clara._work_run_attempts(v_labelled) a on a.work_id = w.id`; :496 the body comment; :118-120 the header claim; the closing tail NOTICE repeats \"cuts the preview array at 101 before clara._work_run_attempts is asked anything\". The helper itself tolerates an empty array (0189_work_list_reads.sql:269-272 refuses only a NULL array or >101 ids), so nothing is broken — the defect is a title and a header that assert a measurement the file never made.",
+      "fix": "Either guard the join (`case when v_preview > 0 then ...`, or skip pass 3's preview CTE entirely) and then measure the zero calls with `pg_stat_user_functions` / a session counter, or rewrite the cell title and the header to the truth: the helper is asked with an EMPTY array, which it admits."
+    },
+    {
+      "id": "A10",
+      "severity": "minor",
+      "category": "race",
+      "where": "apps/web/lib/firm/use-firm-portfolio.ts:163-171",
+      "what": "A superseded read clears the busy flags unconditionally, so a stale response can hand the board a `loading: false` + empty pack frame that renders the first-use \"No clients yet\" Empty while the current read is still in flight. The epoch guard protects the DATA but not `loading`.",
+      "evidence": "use-firm-portfolio.ts:146 `if (epoch !== epochRef.current) return;` on the success path and :157 on the error path, then :165-167 `setLoading(false); setRefreshing(false);` in `finally` with the comment \"UNCONDITIONAL\". The page-change effect at :175-186 sets `pack = EMPTY_PORTFOLIO_PACK` and `loading = true` before issuing the read, and `hasLoadedOnceRef` is reset to false, so a second trigger (focus, the 30 s tick, CLIENT_RECORD_CHANGED) that fires during a slow page turn produces epoch N+1; when the slower epoch N settles it returns early and then clears `loading`. firm-portfolio-section.tsx:238-245 then renders `pack.rows.length === 0` -> `portfolio.emptyRegisterTitle` (\"No clients yet\"). Failure scenario: click Next on a large register, alt-tab back while it loads -> the board briefly says the firm has no clients.",
+      "fix": "Gate the `finally` on the epoch (`if (epoch === epochRef.current) { setLoading(false); setRefreshing(false); }`), or keep `loading` true while `epochRef.current` names an outstanding read. A cell that starts two reads and settles them out of order would hold it."
+    },
+    {
+      "id": "A11",
+      "severity": "note",
+      "category": "dead-code",
+      "where": "apps/web/lib/firm/timeline.ts (whole file)",
+      "what": "D18.f's swap leaves `lib/firm/timeline.ts` — and with it `clara.list_firm_timeline` (0174) — with no production consumer, while `lib/firm/timeline.test.ts` stays in the run manifest and keeps testing it. The deleted `firm-timeline-section.tsx` was its only caller.",
+      "evidence": "`grep -rn \"firm/timeline\"` over apps/web returns only `lib/firm/timeline.test.ts:16` (the import under test) and two prose references in `lib/firm/activity.ts:31` and `lib/work/evidence.ts:129`. apps/web/test/manifest.txt:320 still lists `lib/firm/timeline.test.ts`. The worker's report names five follow-ups and this is not among them.",
+      "fix": "Name it as a residual in the report (a door and its wrapper are now unreferenced by the product) so a later lane deletes both deliberately rather than discovering a dead read."
+    },
+    {
+      "id": "A12",
+      "severity": "note",
+      "category": "test-fixture-bleed",
+      "where": "apps/web/e2e/home-board-mock.mjs:179-183",
+      "what": "#659 added a `get_firm_portfolio_pack` handler but NO `list_activity` handler, and the home board now reads `list_activity`. `serve-built.mjs` dispatches `handleActivitySupabase` at :609, far above `handleHomeBoardSupabase` at :720, so every OTHER lane's walk that merely lands on `/` now renders #632's activity fixtures in Firm Home's recent-activity band. The worker disclosed this in its report as a \"coverage change, named\"; the ownership census cannot see it because this lane declares no handler for the verb.",
+      "evidence": "apps/web/e2e/serve-built.mjs:609 vs :720 (measured this pass). apps/web/e2e/home-board-walk.spec.ts:254-258 states the same fact and overlays its own `page.route` for this lane only. The `e2e-fixture-ownership.test.ts` declaration added at :361-372 covers `get_firm_portfolio_pack` (unscopeable) and says nothing about `list_activity`.",
+      "fix": "Either answer `list_activity` from `home-board-mock.mjs` with an honest empty envelope (dispatch position unchanged — the new arm sits beside `get_firm_portfolio_pack`, above `EMPTY_RPCS`, which §6.1 permits since it is not the EMPTY_RPCS arm), or record the shared dependency in `SHARED_RPC_VERBS`/the lane declaration so the census owns it rather than a report paragraph."
+    },
+    {
+      "id": "A13",
+      "severity": "note",
+      "category": "robustness",
+      "where": "packages/db/migrations/0231_firm_portfolio_pack.sql:369-378",
+      "what": "The empty-name cursor fence would refuse a cursor the door itself minted, if a client's name were blank: the mint is `lower(name)||'|'||id` (0231:556-558) and the decode raises `invalid_cursor` when `btrim(name)` is empty. That would dead-end paging at that client. NOT reachable today, which is why this is a note and not a finding.",
+      "evidence": "MEASURED on clara_659 (throwaway cell, deleted after the run): `clara.create_client(p_name => '   ')` refuses CLR10 'client name and op_key are required'; a forged whitespace-name cursor is refused CLR10 'malformed portfolio cursor'; and `grep` over packages/db/migrations for a client-rename door found none, so `clara.clients.name` cannot become blank after birth through any door. The row only exists if someone writes it with owner DML.",
+      "fix": "Nothing to change. Worth one sentence in the migration header so a later lane that adds a rename door knows the cursor grammar depends on a non-blank name."
+    }
+  ],
+  "verdict": "fix_then_accept"
+}

@@ -1,0 +1,99 @@
+{
+  "ticket": 635,
+  "lens": "adversarial",
+  "lens_model": "claude-opus-5 (cross-model Codex lane ATTEMPTED and FAILED: `codex exec --sandbox read-only -m gpt-5.6-sol -c model_reasoning_effort=xhigh` ran to exit 0 with EMPTY stdout and stderr `ERROR: You've hit your usage limit ... try again at 5:41 PM` — exactly the exhaustion DECISIONS.md:268-271 predicted, so the adversarial lens ran on claude-opus-5 xhigh per that ruling)",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\635-review-adversarial.json",
+  "verdict": "fix_then_accept",
+  "findings": [
+    {
+      "id": "A1",
+      "severity": "major",
+      "category": "correctness/dead-end",
+      "where": "apps/web/components/firm-admin/legal-standing-card.tsx:127",
+      "what": "The accept control is gated on `!doc.firmAccepted`, but the wall it exists to repair (`standing_live`, 0195:896-906) requires ONE active owner to hold BOTH current acceptances. When two different owners hold the two halves, every kind reads `firm_accepted=true` while `standing_live=false` — so the warning renders 'Clara cannot use a model on any client's books until an owner of this firm accepts the current versions' and ZERO accept controls render. D2 / ARCHITECTURE §5.E's third recovery path, the whole reason this ticket exists, is unreachable in exactly that state.",
+      "evidence": "MEASURED. Throwaway red cell (written under the worktree, run, deleted; worktree left clean — `git status --porcelain` empty): `node --import ./test/bootstrap.mjs --import tsx --test components/firm-admin/zz-adversarial-635.test.tsx` printed `RED1 warning shown: true` and `RED1 accept trigger present: false`, and the assertion `acceptTrigger(h) !== null` failed `false !== true`. The state is not hypothetical: the branch's OWN database cell `packages/db/tests/firm-commercial-settings.test.mjs:196-215` (`p635.db.legal_standing_two_people`) asserts precisely it — `standing_live:false` with `documentOf(standing,'terms').firm_accepted === true` AND `documentOf(standing,'dpa').firm_accepted === true`. Reachable by an ordinary sequence: terms v2 is published (standing drops, both owners see a trigger), owner B accepts terms v2 first, owner A already holds dpa v1 — from that moment both kinds are `firm_accepted` and the firm has no in-app remedy at all. The existing card cells (`legal-standing-card.test.tsx`) never construct a `standingLive:false` payload with both kinds accepted, so nothing in the suite covers it.",
+      "fix": "Gate on the CALLER's own acceptance instead of the firm's: `standing.canAcceptForFirm && doc.status === 'published' && doc.myAcceptedVersion !== doc.version`. That renders a control for exactly the owner who can move `standing_live`, keeps the live case control-free, and needs no door change (`my_accepted_version` is already returned unmasked at every rank). Add a card cell for the split state."
+    },
+    {
+      "id": "A2",
+      "severity": "major",
+      "category": "race/provenance",
+      "where": "apps/web/components/firm-admin/firm-settings-panel.tsx:180-192 with apps/web/components/firm-admin/ai-usage-card.tsx:75-92,126",
+      "what": "Changing the month re-renders the window label and the CSV context from the NEW period immediately, while `usage` still holds the OLD month's rows: `readUsage` never sets the view back to LOADING before awaiting (`firm-settings-panel.tsx:180-188`), and `AiUsageCard` takes `period` and `view` as independent props. For the whole round trip the table shows last month's rows under this month's 'Covering … counted in UTC' line, the Download button stays live, and `buildUsageCsv` stamps the NEW window onto the OLD rows — the provenance header that exists so a spreadsheet cannot lose the window states a window the rows did not come from.",
+      "evidence": "MEASURED. Same throwaway cell, RED2: after `rerender` to period 2026-08 with the August read still in flight — `RED2 window line says August: true`, `RED2 September rows still rendered: true`, `RED2 download button present: true`, `RED2 csv filename: clara-model-usage-2026-08-utc.csv`, `RED2 csv line0: Clara model usage — Tan & Partners,2026-08-01 to 2026-08-31 (UTC)`, `RED2 csv line3: firm,september_only_kind,12,3000000,400000,12,0,340,USD`. Nothing in the suite covers it: `firm-settings-panel.test.tsx:100-108` mounts with a fixed period and `onPeriodChange: () => {}`, and the walk leg `apps/web/e2e/firm-commercial-walk.spec.ts:344-346` waits for the new answer before asserting. The epoch guard at `firm-settings-panel.tsx:181,184` fixes out-of-order RESPONSES; it does nothing about the render window before the first response.",
+      "fix": "One line: `setUsage(LOADING)` as the first statement of `readUsage` (the card already renders a skeleton at `ai-usage-card.tsx:130`). Stronger: carry the month inside the ready view (`ready({month, rows})`) and render/download only when it equals `period.month`, so the CSV can never be stamped with a window its rows did not come from."
+    },
+    {
+      "id": "A3",
+      "severity": "major",
+      "category": "vacuous-assertion",
+      "where": "packages/db/migrations/0233_firm_commercial_settings.sql:613 (guard) reading `v_code` last assigned at :584",
+      "what": "§C's T.3 guard `if position('users_visible' in v_code) <> 0 then raise '#635 tail: the standing door resolves a name through clara.users_visible'` tests the WRONG body. `v_code` is assigned only inside T.1's loop (:584) over the three new doors (:547-549), whose LAST iteration is `get_firm_ai_usage`. T.3 re-reads the standing door into `v_src` at :608 but never refreshes `v_code`, so the assertion is evaluated against `get_firm_ai_usage`'s source and passes unconditionally. The migration's own closing notice claims 'names resolved inside the definer body' on the strength of it.",
+      "evidence": "MEASURED on the rig (clara_635, 220 migrations), read-only probe run from `packages/db` and deleted: `T.1 loop order: get_firm_legal_standing -> get_firm_commercial_state -> get_firm_ai_usage`; `v_code after the loop belongs to: get_firm_ai_usage`; `position('users_visible' in v_code) = 0 (0 => the T.3 guard passes)`; simulation with the token injected into the standing body only: `standing body contains users_visible -> true | guard still evaluates v_code (ai_usage) -> false => guard verdict: PASS (vacuous)`. The live standing body does NOT use `users_visible` (the code is correct); it is the census that proves nothing.",
+      "fix": "After `select p.prosrc into v_src … get_firm_legal_standing()` at :608, recompute `v_code := regexp_replace(v_src, '--[^'||chr(10)||']*', '', 'g');` before :613 — or test `v_src` directly, since `users_visible` never appears in a comment in that body."
+    },
+    {
+      "id": "A4",
+      "severity": "minor",
+      "category": "failure-as-empty",
+      "where": "apps/web/lib/firm/commercial-reads.ts:312-315 and :320-323",
+      "what": "`decodeFirmUsageRows` returns `[]` for any non-array payload and silently DROPS any row it cannot decode; `loadFirmAiUsage` never throws. The card then renders the named-zero face 'No model calls in this period.' (`ai-usage-card.tsx:143-147`) for a payload that was in fact unreadable — the 'generic successful Empty state' AC3 forbids for a failure. The two sibling reads behave the other way and throw (`commercial-reads.ts:138`, `:248`). A dropped row also understates the period with no coverage note beside a money column.",
+      "evidence": "MEASURED with tsx against the branch's own modules: `decodeFirmUsageRows({code:'CLR99',message:'boom'})` -> `[]`; `decodeFirmUsageRows([<good row>, <row whose calls exceed MAX_SAFE_INTEGER>])` -> one row only, no signal that a second existed. The module's own comment at :273-275 says 'a usage table with one silently-zeroed row is worse than a table missing it' — but a table missing it reads as complete, which is the same defect one step further along.",
+      "fix": "Throw in `loadFirmAiUsage` when `raw` is not an array (mirroring :138 / :248), and return the dropped count from `decodeFirmUsageRows` so the card can show a coverage line and the CSV can carry it, the way `unpriced_calls` already is."
+    },
+    {
+      "id": "A5",
+      "severity": "minor",
+      "category": "weak-assertion",
+      "where": "apps/web/e2e/firm-commercial-walk.spec.ts:444",
+      "what": "The only browser evidence for AC6's 'keyboard/focus return' is `expect(focusTag).not.toBe('BODY')`. That passes if focus lands on ANY element — a different card's button, the dialog's former container, the page shell — so it does not test the property the brief names ('keyboard + focus return to the trigger after the dialog', brief §3 States, §4 leg 9). The report lists leg (9) as closing AC5/AC6's focus clause.",
+      "evidence": "Read at `apps/web/e2e/firm-commercial-walk.spec.ts:436-444`: the trigger handle is available two lines above (`const trigger = page.getByRole('button', { name: 'Accept for this firm' })`, :437) and is not compared to `document.activeElement`. No unit cell asserts focus return either (`accept-legal-dialog.test.tsx` mounts the dialog without the trigger).",
+      "fix": "Compare the active element to the trigger: `expect(await trigger.evaluate((el) => el === document.activeElement)).toBe(true)`."
+    },
+    {
+      "id": "A6",
+      "severity": "minor",
+      "category": "absence-as-failure",
+      "where": "apps/web/lib/firm/commercial-reads.ts:198,206-210 with firm-settings-panel.tsx:176",
+      "what": "`decodeFirmCommercialState` drops the WHOLE payload when the plan's `local_key`/`name`/`currency`/`amount_cents` are NULL. `clara.get_firm_commercial_state` returns exactly that when no `billing_plans` row carries `is_current` (0233:349-350 is a bare `select … where b.is_current` into a record). The result is `failed` → 'This could not be read.' with a retry, and the plan, the payment record, the invoice explanation, the four capacity numbers AND the identity card's 'In Clara since' (which rides the same answer, `firm-settings-panel.tsx:213`) all vanish. AC3 requires absence to carry an explanation; here an absent current plan is rendered as a transport failure.",
+      "evidence": "MEASURED: `decodeFirmCommercialState({firm:{…}, plan:{local_key:null,name:null,currency:null,amount_cents:null,amounts_ruled:false}, payment:{…}, invoices:{…}, capacity:{…}})` -> `null`. `packages/db/migrations/0163_checkout_gate_c3_folded_door.sql:207` is `create unique index uq_billing_plans_current on clara.billing_plans ((true)) where is_current` — it caps the current plan at ONE and permits ZERO, so the state is reachable and unrepresentable on the surface. No cell exercises it (`p635.db.commercial_plan_unruled` only reads the seeded row).",
+      "fix": "Make the plan nullable in the decoder (`plan: PlanState | null`) and give the card a 'no plan is current for this firm' face, or coalesce in the door and set a typed `plan.available:false` reason the way `invoices` already does."
+    },
+    {
+      "id": "A7",
+      "severity": "note",
+      "category": "integration-coupling",
+      "where": "packages/db/migrations/0233_firm_commercial_settings.sql:175-177 and :696-698",
+      "what": "0233 hard-pins the `sha256(prosrc)` of three bodies it does not change — `get_current_legal_documents()`, `accept_legal_document(text,integer,text,text)` and `_accounting_work_egress_live(uuid,uuid)` — in BOTH the prestate and the tail. Any later ticket that legitimately recuts one of those three at a migration number BELOW 0233 makes 0233 refuse to apply on a from-scratch chain, with a message ('has DRIFTED from its pinned body -- re-measure on a migrated rig') that blames drift rather than naming the recutting file. Fail-closed is the intent; the cost is a cross-ticket coupling the integrator should know about.",
+      "evidence": "Read at :169-179 (prestate loop) and :693-706 (T.8). No wave file 0225-0232 recuts any of the three (DECISIONS.md:78-86 §2.1 lists their recut sets: `_record_journal_entry_core`; the bank family; the FA family; none; none; none; none; none), so the pins hold for THIS integration. Unverified beyond this wave.",
+      "fix": "None required for this merge. Record the three pinned names in the integration note so a future recutter knows to re-measure 0233's constants in the same commit."
+    },
+    {
+      "id": "A8",
+      "severity": "note",
+      "category": "tautological-cell",
+      "where": "packages/db/tests/firm-commercial-settings.test.mjs:386-396",
+      "what": "`p635.db.commercial_invoices_constant` asserts `invoices.available === false` and `reason === 'not_collected'` against a door that writes those two literals inline (`0233:377-379`, `jsonb_build_object('available', false, 'reason', 'not_collected')`). The cell can only fail if somebody edits the door, so it proves no behaviour — it is a regression pin, not evidence that AC3's 'absence has an explanation and a support route' holds. The report lists it as AC3 evidence (`reports/635-final.md`, AC3 row).",
+      "evidence": "Read of both sides: the literal at 0233:377-379 and the assertion at firm-commercial-settings.test.mjs:388-392. The behavioural half does exist — `commercial-state-card.test.tsx` renders the explanation and asserts no 'Manage billing' control at any rank, and walk leg (1) sees the sentence — so the property is covered; only this cell's contribution is nil.",
+      "fix": "Nothing to change in code. In the report, cite the surface cell for AC3 and describe this one as the constant's regression pin."
+    },
+    {
+      "id": "A9",
+      "severity": "note",
+      "category": "money-formatting",
+      "where": "apps/web/lib/firm/commercial-format.ts:28-33",
+      "what": "`formatMoneyCents` prepends its own '-' when `cents < 0 && whole === 0`, then hands `whole` (which is `-0` in that branch) to `Intl.NumberFormat`, which itself renders '-0'. The result is a double-negative money string on a money surface.",
+      "evidence": "MEASURED: `formatMoneyCents(-50, 'USD')` -> `\"-USD -0.50\"`. Not reachable today — `spend_cents` is `coalesce(sum(...),0)` over a non-negative price table and `billing_plans.amount_cents` is 0 — so this is a latent defect, not a live one.",
+      "fix": "`const sign = cents < 0 ? '-' : ''; const whole = Math.abs(Math.trunc(cents / 100));` and drop the `whole === 0` special case."
+    },
+    {
+      "id": "A10",
+      "severity": "note",
+      "category": "posture",
+      "where": "packages/db/migrations/0233_firm_commercial_settings.sql:408-409",
+      "what": "`get_firm_ai_usage` carries neither `stable` nor `set plan_cache_mode = force_custom_plan`, while the two sibling reads carry both. Its body binds `clara.jwt_firm()` per call (:415), which is the firm-bound shape 0185:643-646's rule addresses; §C's T.2 (:593-599) deliberately exempts it and the brief only demanded the pin on 'the two new firm-bound reads', so this is within the letter of the brief.",
+      "evidence": "MEASURED on clara_635: `get_firm_ai_usage` provolatile `v`, proconfig `search_path=clara, pg_temp`; `get_firm_legal_standing` and `get_firm_commercial_state` both `s` with `search_path=clara, pg_temp,plan_cache_mode=force_custom_plan`. The base door `get_llm_usage_summary` is also `v` with the same cfg, so the wrapper MATCHES 0110's posture rather than regressing it — which is why this is a note and not a finding against the recut.",
+      "fix": "Optional: add `stable` and `set plan_cache_mode = force_custom_plan` to the wrapper and widen T.2's array to three names, so all three new doors share one posture."
+    }
+  ]
+}

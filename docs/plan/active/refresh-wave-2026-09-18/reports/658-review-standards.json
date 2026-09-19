@@ -1,0 +1,35 @@
+{
+  "ticket": 658,
+  "lens": "standards",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\658-review-standards.json",
+  "findings": [
+    {
+      "id": "S1",
+      "severity": "minor",
+      "category": "dead-code",
+      "where": "packages/runtime/lib/knowledge-retrieval.mjs:174-188 (the core_readable/core_unreadable branch in retrieveKnowledge); packages/db/migrations/0230_knowledge_retrieval.sql:401-412 (clara.retrieve_knowledge's only return jsonb_build_object(...))",
+      "what": "The runtime module checks answer.core_readable !== false and, when false, returns a distinct unavailable(\"core_unreadable\", ...) result, and successor-contract stanza (A) in reports/658-final.md describes the v5 terminal as firing 'when faceStatusOf is unknown/denied with reason core_unreadable, refused or read_failed on the core arm' as though core_unreadable is a live outcome. But clara.retrieve_knowledge is a single atomic PL/pgSQL statement (0230:265-413) with no code path that ever sets a core_readable key on its one success return, and any internal failure raises an exception the caller already maps to unavailable(\"refused\"/\"read_failed\", ...) two lines above the core_readable check. So core_unreadable can never actually be produced by the shipped door -- it is unreachable outside a hand-built test fixture.",
+      "evidence": "grep -rn \"core_readable\" packages/ apps/ returns exactly three lines: the comment and the check in knowledge-retrieval.mjs, and one synthetic literal in packages/runtime/tests/knowledge-retrieval.test.mjs:134 ({ ...ANSWER, core_readable: false }) that manually fabricates the field rather than obtaining it from a real door call. Reading the full body of clara.retrieve_knowledge (0230_knowledge_retrieval.sql:265-413) confirms its only successful return path builds jsonb_build_object('status','ok', 'client_id', ..., 'records', v_records) with no core_readable key anywhere, and the function has no partial-failure path (core, requested and remainder are computed by one CTE chain in one statement, so a failure fails the whole call, which the exception handler in knowledge-retrieval.mjs already routes to unavailable(\"refused\")/unavailable(\"read_failed\") before the core_readable check is ever reached).",
+      "fix": "Either remove the core_readable/core_unreadable branch as dead code and note in the module header that D16's core-tier terminal fires on ANY unavailable result (the atomic door cannot fail partially, so 'core unreadable' and 'the whole read failed' are the same event today), or, if a future door revision is meant to signal a core-only failure independently, say so explicitly so the v5-cut integrator does not assume core_unreadable is already reachable. Behaviourally this is benign -- every real failure still stops the Work via the same fail-closed paths -- so it does not block acceptance."
+    }
+  ],
+  "verdict": "accept",
+  "measured_evidence": {
+    "pnpm_typecheck": "green (exit 0) from the worktree root, both apps/web and packages/runtime",
+    "pnpm_lint": "green (exit 0) from the worktree root, including apps/web's check-token-contrast, check-test-manifest (416 files, alphabetical, complete), check-message-keys (3735 keys all resolve) and check-ui-add-guard selftests",
+    "check_frozen_workflows": "OK -- 296 frozen files verified against frozen-workflows.json, 53 \"use workflow\" modules all frozen+registered, 3 retired entries recorded; knowledge-retrieval.mjs/capability-registry-v2.mjs/work-trace-bounds.mjs confirmed OUTSIDE the closure (zero hits)",
+    "check_parts_parity": "OK -- reader superset of emittable at this commit; no new part kind registered, matching the brief's instruction to register none",
+    "eight_pins_independently_remeasured": "re-ran sha256(prosrc) for all eight non-regression bodies (get_knowledge_pack, list_client_knowledge, _knowledge_legacy_rows, _knowledge_capture_core, _knowledge_floor, capture_knowledge, get_context_pack, answer_work_question) directly against clara_658 via a fresh node/pg script -- every hash matches the migration's prestate/tail pins byte-for-byte; pins are measured, not fabricated",
+    "grants_and_rls_independently_remeasured": "queried has_function_privilege for all 7 new doors across 9 roles and has_table_privilege for work_knowledge_reads across the same roles, directly against the live rig -- exactly matches the migration's claimed grant matrix (5 clara_runtime-only, 2 clara_authenticated-only, the relation privilege-free for every application role) and relrowsecurity+relforcerowsecurity both true",
+    "knowledge_retrieval_db_battery": "re-ran tests/knowledge-retrieval.test.mjs directly: 23/23 pass, 0 fail -- matches the final report exactly",
+    "runtime_unit_batteries": "re-ran tests/knowledge-retrieval.test.mjs + tests/work-trace-bounds.test.mjs in packages/runtime: 27/27 pass (18+9) -- matches the final report exactly",
+    "operation_census_and_rig_isolation": "re-ran both without reset flags: 31 tests, 30 pass, 1 skip (the destructive T19 cell, correctly gated on unset CLARA_RIG_ALLOW_RESET), 0 fail -- matches the final report exactly; T10b re-checked green both before and after the World leg",
+    "world_leg": "re-ran packages/runtime/tests/work-knowledge-e2e.mjs directly against the rig: exit 0, one read-set row survived a SIGKILL and replayed onto its own id, work_knowledge_drift_for observed from the READ rather than a trace -- matches the final report; confirmed rig-isolation T10b stays green afterward (no stray Workflow World left registered)",
+    "shared_file_touches": "spot-checked rig-meta.mjs, packages/db/package.json, .github/actions/db-live-gates/action.yml, apps/web/e2e/serve-built.mjs, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/messages/en.json, apps/web/test/manifest.txt and CONTEXT.md diffs -- every touch is a minimal, correctly-positioned registration (migration-order gate chain, semantic dispatch order per the #657/DECISIONS section 6.1 ruling, one new i18n namespace, term/_Avoid_ shape, declared shared RPC verbs) with no unrelated edits",
+    "readCachedJson": "confirmed apps/web/e2e/work-knowledge-mock.mjs reads every POST body through the shared readCachedJson helper (10 call sites), never a raw stream read",
+    "clr40_remedy_text": "verified the rider-#882(a) stanza's quoted remedy (reverse the acquisition entry and re-book it at the corrected cost) is byte-verbatim against packages/db/migrations/0041's live _tf_fa_movement_belt body",
+    "commit_hygiene": "all 11 commits on the branch carry a Co-Authored-By trailer; the last commit (33b99b83) is a legitimate, well-explained lint fix (a ticket number in a string literal tripped the raw-hex-colour rule) plus a restoration of a shared file's pre-existing wrapping to avoid unrelated diff noise in a nine-lane file",
+    "no_sonner": "grep for sonner/toast( across the new and touched work/registers components returns nothing; StateBanner + Skeleton + Badge composition used throughout, consistent with the house rule"
+  }
+}

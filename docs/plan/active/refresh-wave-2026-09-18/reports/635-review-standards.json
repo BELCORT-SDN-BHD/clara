@@ -1,0 +1,33 @@
+{
+  "ticket": 635,
+  "lens": "standards",
+  "lens_model": "claude-sonnet-5",
+  "head": "34b9a32f",
+  "verdict": "accept",
+  "measured_runs": [
+    { "cmd": "pnpm typecheck (worktree root)", "result": "green — packages/runtime typecheck: Done; apps/web typecheck: Done" },
+    { "cmd": "pnpm lint (worktree root)", "result": "green — eslint + token-contrast + message-keys + ui-add-guard + frozen/parity/leak/dead-citation/dynamic-sql checks + reporting-render lint all PASS; only pre-existing SKIP is the Windows symlink case (#756, EPERM, unrelated)" },
+    { "cmd": "node scripts/check-frozen-workflows.mjs", "result": "OK — 296 frozen file(s) verified, 53 \"use workflow\" modules all frozen+registered, 3 retired entries (matches worker report exactly)" },
+    { "cmd": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK — reader ⊇ emittable" },
+    { "cmd": "packages/db: node --test --test-concurrency=1 tests/firm-commercial-settings.test.mjs (run twice)", "result": "24 pass / 0 fail / 0 skip both times" },
+    { "cmd": "packages/db: node --test --test-concurrency=1 tests/operation-census.test.mjs tests/rig-isolation.test.mjs tests/f-a9-usage-reshape.test.mjs tests/f-a9-pr-1b.test.mjs tests/checkout-gate-c3.test.mjs", "result": "137 pass / 0 fail / 1 skip (rig-isolation T19, the CLARA_RIG_ALLOW_RESET-gated destructive cell this rig must never enable — correctly skipped)" },
+    { "cmd": "rig query: select count(*) from clara.schema_migrations", "result": "220 — matches worker's \"1 new migration applied · 220 total\"" },
+    { "cmd": "rig query: sha256(prosrc) for the recut + three non-regression pins", "result": "get_llm_usage_summary live sha = 88cddfc4… (differs from pinned pre-image 51621dea…, i.e. recut applied); get_current_legal_documents/accept_legal_document/_accounting_work_egress_live all match their pinned pre-image shas exactly — independently reproduces the migration's own §0/§C claims" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test <11 #635 unit files>", "result": "78 pass / 0 fail (legal-standing-card, accept-legal-dialog, commercial-state-card, ai-usage-card, firm-settings-panel, firm-settings-a11y, firm-admin-pages-a11y, commercial-reads, usage-csv, usage-period, capabilities)" },
+    { "cmd": "apps/web: node scripts/run-tests.mjs (whole manifest)", "result": "4199 tests, 4196 pass, 1 fail, 2 skip. The 1 failure is lib/clara/use-clara-thread-stop.test.ts:1857 (\"630 a stop the door says had ALREADY FINISHED...\"), a file #635 never touches (git diff --stat shows zero change; last touched by #798/#630); reproduces the class of pre-existing whole-suite-load flake the brief's risk section names for a sibling file. Not a #635 regression." },
+    { "cmd": "apps/web e2e (triple 3300/3301/3302): pnpm e2e firm-commercial-walk", "result": "8 passed (28.7s), all ten legs — matches worker report exactly" },
+    { "cmd": "apps/web e2e: pnpm e2e firm-navigation-walk shell-migration-walk", "result": "41 passed (1.3m), including axe-zero at /settings/firm for owner and bookkeeper and the shell-migration <h1> pin — no regression from #635's five new cards" },
+    { "cmd": "git diff origin/main...HEAD --stat / forbidden-path checks", "result": "confirms: only one new migration file (packages/db/migrations/0233_*.sql, no other migration touched — append-only honored); components/firm-admin/settings-panel.tsx untouched (legacy cards rendered, not re-typed); lib/navigation/tree.ts, lib/firm/needs-you.ts, e2e/e2e-fixture-ownership.test.ts, components/admin/* all untouched; .github/actions/db-live-gates/action.yml untouched (no World leg, as declared)" }
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "note",
+      "category": "copy-correctness",
+      "where": "apps/web/components/firm-admin/legal-standing-card.tsx:174-181 (ownerHint)",
+      "what": "ownerHint() picks the first document in the array carrying a non-null acceptedByName and renders \"{name} accepted the previous ones\" for every non-owner viewing a not-live standing, regardless of which of the two legal kinds is actually the one blocking standing_live. In the legal_standing_new_version scenario the unaffected kind's still-current acceptor would be named as having accepted \"the previous ones\", which is not quite what happened (their acceptance of the OTHER kind is still current).",
+      "evidence": "packages/db/tests/firm-commercial-settings.test.mjs's p635.db.legal_standing_new_version cell and the migration's own limb-(a) logic (0233:243-256) show standing can go false while one kind's acceptance is still fully valid; legal-standing-card.tsx:178 does `documents.find(d => d.acceptedByName !== null)` with no per-kind targeting. The unit test at legal-standing-card.test.tsx:105-119 only asserts a substring (\"An owner of this firm must accept the current versions\") that matches both the named and unnamed hint variants, so it would not catch a wrong name being picked.",
+      "fix": "Out of standards-lens scope (this is a product-copy/spec nuance, not a house-rule violation) — no fix required for this review's verdict; flagged for the spec lens or a follow-up if the owner cares about the exact wording in the split-acceptance case."
+    }
+  ]
+}

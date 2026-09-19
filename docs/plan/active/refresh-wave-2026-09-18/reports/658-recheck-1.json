@@ -1,0 +1,115 @@
+{
+  "ticket": 658,
+  "role": "recheck",
+  "recheck_of_report": "docs/plan/active/refresh-wave-2026-09-18/reports/658-fixround-1.md",
+  "recheck_of_head": "141103cb6dde9f9f06709d43830e3e9261b08b07",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\658-recheck-1.json",
+  "rig": "PG 127.0.0.1:55708 clara_658, Playwright triple 3370/3371/3372, worktree C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "verdict": "accept",
+  "applied_findings": [
+    {
+      "id": "A1+F1+S1",
+      "severity": "major",
+      "claim": "the `core_readable`/`core_unreadable`/`core_ok` dead contract is removed from the runtime relay, replaced by a header/comment statement that D16's terminal fires on ANY unavailable answer because the door is atomic; a new db cell pins the door's envelope key set and the absence of an exception arm",
+      "commits": ["bd09e79b", "a6553036"],
+      "verified": true,
+      "evidence": "Read packages/runtime/lib/knowledge-retrieval.mjs diff (33b99b83..141103cb): the `coreOk`/`unavailable(\"core_unreadable\",...)` branch, the `core_ok` fields on both the ok-result and `unavailable()`, and `faceStatusOf`'s `core_ok === false -> unknown` arm are all deleted; the header now states the door is atomic and a caller must not be written as though a core-only failure had its own signal. Read 0230_knowledge_retrieval.sql diff: the same statement added to \u00a7A's header, in the durable place. Read the re-cut kr.07 test and the NEW cell p658.retrieve.envelope_is_atomic in packages/db/tests/knowledge-retrieval.test.mjs: it asserts the envelope's exact key set (no `core_readable`) and reads back `pg_proc.prosrc` to assert no `exception when` arm and no `core_readable` string in the catalogued body -- a real assertion against the live door, not a stub. Ran the full db battery (28 gate flags + module's own gate, 41 total): 28/28 pass including this new cell. Ran the runtime battery: knowledge-retrieval.test.mjs 19/19 (kr.07 re-cut, matches report). Not vacuous: the cell fails if a future migration reintroduces `core_readable` or an exception arm without updating the assertion, which is the intended trip-wire."
+    },
+    {
+      "id": "A2",
+      "severity": "major",
+      "claim": "`clara._work_knowledge_drift_core`'s moved-key scan now applies the same per-applicability `not exists` shadow the read and the seventh door apply, so a firm default shadowed for this client no longer reports `relevant:true`; the watermark and a `state='live'` filter are deliberately NOT added",
+      "commits": ["a6553036"],
+      "verified": true,
+      "evidence": "Read migrations/0230_knowledge_retrieval.sql diff at the `v_moved` select (\u00a7E): the scan now reads `... and (r.client_id = w.client_id or (r.scope_kind='firm' and not exists (select 1 from clara.knowledge_records o where o.firm_id=w.firm_id and o.scope_kind='client' and o.client_id=w.client_id and o.state='live' and o.knowledge_key=r.knowledge_key and o.applies_when_digest=r.applies_when_digest)))` -- textually the same shadow `retrieve_knowledge` (:361) and the seventh door (:861/:881) use. Ran the new cell `p658.drift.shadow` as part of the 28/28 db battery pass: it captures a firm default + a client exception on the same key, records the read (which returns only the client's row), corrects the SHADOWED firm record, and asserts `moved_keys` does NOT include the key and `relevant:false` -- then asserts the mirror direction (a client with no exception DOES see the firm default's movement as relevant:true). Both directions pass, so the fix cannot over-correct. No `state`/`superseded_at` filter was added, confirmed absent from the diff."
+    },
+    {
+      "id": "A3",
+      "severity": "major",
+      "claim": "`record_work_knowledge_read` now rejects a `tiers` value outside `{core,requested,remainder}` of non-negative integers (CLR10 `tiers_shape`), and the column CHECK enforces the same shape independently of the writer",
+      "commits": ["a6553036"],
+      "verified": true,
+      "evidence": "Read the column DDL diff: `tiers` gained a CHECK restricting keys to `{core,requested,remainder}` and each present value to a `^[0-9]{1,9}$` numeric string via `jsonb_typeof(...) = 'number'`. Read the writer diff: two new validation blocks raise CLR10 `constraint:\"tiers_shape\"` for an unknown key or a non-integer/negative value. Ran the new cell `p658.reads.tiers_shape` (part of the 28/28 pass): four good shapes admitted, six bad shapes refused (including a prompt-injection string, a 2048-char blob, nesting, -1, 1.5, null), the constraint text read back from `pg_constraint` and confirmed to name all three keys, and a direct `insert` as `clara_fn_owner` (below the writer) refused with `23514` (check_violation) -- proving the wall is the relation's own, not only the writer's diagnosis."
+    },
+    {
+      "id": "A4",
+      "severity": "minor",
+      "claim": "the seventh door's two `rec.knowledge_key = any (k.keys)` predicates are rewritten as `k.keys @> array[rec.knowledge_key]` so the GIN index on `keys` is actually reachable",
+      "commits": ["a6553036"],
+      "verified": true,
+      "evidence": "Read the diff: both occurrences (count query and page query) in `list_work_knowledge_reads_for_record` changed to the containment form. Ran the extended cell `p658.record_reads.bounded` (part of the 28/28 pass): it reads back `pg_proc.prosrc` and asserts the scalar-ANY form is absent and the containment form appears exactly twice; it runs `explain (format json)` with `enable_seqscan` off inside a rolled-forward `begin...commit` and asserts the plan text contains `ix_work_knowledge_reads_keys`; and it asserts the containment form and the scalar-ANY form return the IDENTICAL row count on the door's own data (row-for-row equivalence), not just a plan-shape claim."
+    },
+    {
+      "id": "A5",
+      "severity": "minor",
+      "claim": "a replay on the same `(work_id, run_id, seq)` now returns `replayed`/`payload_digest`/`stored_digest`/`payload_match` instead of a silent `{status:'ok'}` when the payload genuinely differs",
+      "commits": ["a6553036", "bd09e79b"],
+      "verified": true,
+      "evidence": "Read the migration diff: a new `payload_digest` column (`sha256` over the normalised facts), a digest computed once per call, and the receipt now carries the four new fields; `on conflict do nothing` is unchanged (still append-only) but the re-select now also reads back the stored digest for comparison. Read the runtime diff: `recordWorkKnowledgeRead` now returns `replayed`/`payload_match` lifted out of the raw receipt. Ran the new db cell `p658.reads.replay_is_named` (part of the 28/28 pass): first call `replayed:false`; identical replay `replayed:true, payload_match:true, same digest`; a replay with DIFFERENT keys/version/status returns the SAME `read_id` (append-only, unchanged), `replayed:true`, `payload_match:false`, and the row itself is confirmed unchanged in the table -- proving the receipt, not the row, carries the divergence. Ran `work-knowledge-e2e.mjs` directly: exit 0, the SIGKILL replay still lands on its own id with the same `knowledge_version`, so replay-idempotence for the identical-payload case is intact."
+    },
+    {
+      "id": "A6",
+      "severity": "minor",
+      "claim": "instead of lifting the read to `work-detail.tsx` (the reviewer's literal suggestion, which the fix-round report argues cannot work because two OTHER mount sites have no Sources-tab owner to drill from), `apps/web/lib/work/knowledge.ts` gains an in-flight request coalescer keyed by (work id, resolved session accessor), fixing all three mount sites at once",
+      "commits": ["141103cb"],
+      "verified": true,
+      "evidence": "Read the diff to lib/work/knowledge.ts: `readWorkKnowledgeDrift` now checks an `inFlight` Map keyed by workId before calling the door, sharing the in-flight promise only when the RESOLVED accessor matches (falls back to the same `sessionTokenAccessor` singleton `lib/doors.ts:120` uses), and deletes its own entry on settle via a `token` symbol (a coalescer, not a cache) -- callers with a caller-owned `AbortSignal` bypass the coalescer entirely. Confirmed by direct grep that BOTH `work-knowledge-block.tsx:111` and `work-question-form.tsx:192` call this shared `readWorkKnowledgeDrift`, and traced that `work-knowledge-block.tsx`'s `session` prop defaults (via `work-detail.tsx:169`) to the SAME `sessionTokenAccessor` singleton `work-question-form.tsx` falls back to when no session is passed -- so in production the two consumers on one Work-detail page DO share one accessor identity and therefore one in-flight request, and the two OTHER mount sites the reviewer's literal fix could not reach (`WorkCards.tsx` via `WorkQuestionPanel`, `work-question-affordance.tsx` via `WorkQuestionPanel`) also resolve to the same singleton, so they are fixed too. Ran the new test file `apps/web/lib/work/knowledge.test.ts` as part of the whole-suite run: all 7 cells pass (wk.01 three coalesced consumers = one door call and an identical answer object; wk.02 settle then re-read = a real second call, proving it is not a cache; wk.03/wk.04/wk.05 the three must-NOT-coalesce cases; wk.06 a coalesced failure is still a typed face for every sharer; wk.07 a malformed id never enters the coalescer)."
+    },
+    {
+      "id": "A7",
+      "severity": "note",
+      "claim": "`p_as_of` now refuses a non-finite date (CLR10) on both `retrieve_knowledge` and `record_work_knowledge_read`; a decade-bound wall is deliberately NOT added",
+      "commits": ["a6553036"],
+      "verified": true,
+      "evidence": "Read the diff: both functions gained `if p_as_of is not null and not isfinite(p_as_of) then raise ... CLR10` blocks before the date is used/stamped. Ran the new cell `p658.retrieve.as_of_is_a_date` (part of the 28/28 pass): a real old date (`1900-01-01`) is still accepted and correctly marked `in_effect:false`; `infinity`/`-infinity` are refused on the read door; the sole writer is separately probed with `asOf:'infinity'` and also refused. No decade bound exists in the diff, consistent with the claim."
+    },
+    {
+      "id": "A8",
+      "severity": "note",
+      "claim": "no code change owed; the writer's key grammar vs. the catalog's weaker CHECK is documented in 0230's header and in packages/db/README.md",
+      "commits": ["a6553036"],
+      "verified": true,
+      "evidence": "Read the diff at the writer's per-element grammar check: a new comment block states the catalog's CHECK is weaker, that a future key-minting migration could create an unrecordable-but-retrievable key, that all 13 live knowledge_keys and 5 client_fact_keys conform today, and that widening the writer's grammar is a decision, not a bug fix -- placed exactly where the next key-minting migration would look. Confirmed no functional code changed for this item (grep of the diff shows only comment additions near this site)."
+    }
+  ],
+  "deliberately_left_findings_judged": [
+    {
+      "id": "A2 (partial) — no `state`/`superseded_at` filter added to the shadow fix",
+      "severity": "n/a (half of a major finding's prescription)",
+      "judgment": "reason holds",
+      "reasoning": "The reviewer's fix text bundled two changes (the shadow guard AND `and r.state='live'`); the worker took only the shadow guard. Verified against DECISIONS.md's D16 row (\"the layered required read\": \"'your basis changed' lives on the face plus a runtime recheck at resume\") and against the adversarial review's OWN `held` list item 4 (re-measured by this recheck's evidence, not merely cited): a withdrawn client exception leaves `superseded_at` null (a withdrawal is a revision at a HIGHER version, not a deletion), and `work_knowledge_drift_for` must keep reporting `{drifted:true, relevant:true}` for it — the exact case the brief's D16 language protects. A `state='live'` filter on the moved-key scan would silence precisely that case, contradicting D16 and the review's own held requirement. This is not a rationalization to skip work: the migration comment names the withdrawal scenario explicitly and by name, and the two published cells (`p658.drift.shadow`, both directions; the pre-existing `p658.drift.relevant`/held D16 material) between them cover the shadow case AND the withdrawal case as distinct, non-overlapping requirements. Adding the filter would have fixed A2 while silently reopening the D16 defect the ticket exists to close."
+    },
+    {
+      "id": "A7 (partial) — no decade-bound wall added, only finiteness",
+      "severity": "n/a (half of a note finding's prescription)",
+      "judgment": "reason holds",
+      "reasoning": "The reviewer's own fix text offered finiteness OR a decade wall as alternatives (\"add a cheap sanity wall (e.g. refuse non-finite dates and anything outside a decade of now())\"), filed at `note` severity with language conceding it is \"not a leak and not urgent.\" Neither brief-658.md nor DECISIONS.md's D16/D17 rows impose any period-recency requirement on `p_as_of`, and WORK-ORDER.md rule 6 (\"do not widen or narrow the brief silently\" — the same rule the fix-round's own A1 reasoning cites) argues against inventing a business rule (a maximum lookback period) the brief never asked for. A firm legitimately re-working a pre-beta or historical period is a real accounting scenario this codebase does not otherwise forbid. The chosen fix (finiteness only) closes the actually-measured defect (`infinity` stamped permanently on an undeletable relation) without inventing new product scope."
+    }
+  ],
+  "ratification": {
+    "requested": "A1's option (a): should `clara.retrieve_knowledge` be taught to signal a core-only failure independently (its own `begin...exception` arm assembling the core tier, returning a new `core_readable boolean` envelope field), giving D16's layering a real per-tier mechanism instead of relying on the door's current all-or-nothing atomicity?",
+    "brief_text_confirmed": "brief-658.md's \u00a73 object 1 describes `retrieve_knowledge` as deciding all three tiers in a single door body with no per-tier exception handling specified, and D16 (DECISIONS \u00a70) only requires that a core-tier failure stop the run — it does not require the failure to be independently distinguishable from any other door failure. Confirmed: no clause in brief-658.md or DECISIONS.md \u00a70/\u00a76.1 asks for a per-tier readability flag; the three-lens review itself (A1/F1/S1) only asked that the CONTRACT be made honest, offering (a) and (b) as equally valid remedies.",
+    "recommendation": "no action this wave; the deferral is correctly scoped and should be judged by the owner/orchestrator as a product-shape question, not treated as an open defect",
+    "reasoning": "Option (b) (taken) is the conservative reading under WORK-ORDER rule 6, D16 is satisfied today by construction (verified: every internal failure raises, every raise is caught and mapped to `unavailable`, and the new cell `p658.retrieve.envelope_is_atomic` pins that the door catches nothing internally), and the cost of NOT adopting option (a) is stated honestly as zero today. Option (a) is a real, well-scoped enhancement (a new envelope field, a new `begin...exception` arm, a genuine three-way `partial` case) that the worker neither hid nor quietly declined — it named the exact door body it needs, the two cells it would touch, and the trade-off (a `when others` in a read door is a posture decision the brief does not make). This is exactly the shape of question `p658.retrieve.envelope_is_atomic` was designed to surface for a LATER revision, not this one; ratifying it now would be scope creep on this ticket rather than a defect fix. Recalled precedent, not evidence: this is the same posture as an HTTP handler that returns one aggregate error for a multi-step operation versus one that reports per-step status — both are legitimate API shapes, and picking the richer one is a design upgrade a maintainer chooses deliberately, not a fix a reviewer can demand; I know this pattern generally but cannot point to a specific Clara precedent for it, so it is offered as an argument, not a fact about this codebase."
+  },
+  "new_defects_introduced_by_fixes": [],
+  "observations": [
+    "The fixround report's claimed Playwright flake (`knowledge-firm-walk.spec.ts:198`, 'Target crashed' under host contention) did not reproduce on this recheck's run: re-running the full `knowledge` Playwright suite (41 specs across `knowledge-walk.spec.ts`, `knowledge-firm-walk.spec.ts`, and the new `work-knowledge-walk.spec.ts`) produced 41/41 passed with zero retries, consistent with the report's own characterization that the earlier failure was host contention, not an assertion the fix round destabilised.",
+    "The report's 'db siblings, one run' claim (knowledge-retrieval + knowledge-records + knowledge-firm-defaults + knowledge-legacy-readers-converge + operation-census + rig-isolation = 115 tests, 114 pass, 1 skip, 0 fail) was independently re-run in this recheck as one combined `node --test` invocation with the full 41-flag gate chain and reproduced the exact same counts (115/114/1/0), which is stronger evidence than a re-read because it is a fresh execution against the live rig, not a citation of the fix round's own numbers."
+  ],
+  "measured_evidence": {
+    "pnpm_typecheck": "green, exit 0 (apps/web tsc --noEmit Done; packages/runtime tsc --noEmit Done)",
+    "pnpm_lint": "green — full chain completed (frozen-workflows + selftest + registration selftest, frozen-evaluators + selftest, check-leaks, dead-citations + selftest, wiki-dynamic-sql + selftest, dsn-pipe selftests x3, dispatch-model-guard selftest, eslint scripts, then pnpm -r lint across apps/web/packages/runtime/packages/db, then packages/reporting-render lint) with no error/fail lines anywhere in the log; token-contrast (56/56 pairs), test-manifest (417 files), message-keys (3735 keys), ui-add-guard selftests all reported PASS inline",
+    "knowledge_retrieval_db_battery_41_gate_flags": "28/28 pass, 0 fail, 0 skip (re-run directly against clara_658 with all 41 --import gate flags plus the module's own gate)",
+    "db_siblings_one_run": "knowledge-retrieval + knowledge-records + knowledge-firm-defaults + knowledge-legacy-readers-converge + operation-census + rig-isolation, no reset flags: 115 tests, 114 pass, 1 skip (T19 destructive cell correctly gated off), 0 fail — matches fixround claim exactly",
+    "runtime_unit_batteries": "knowledge-retrieval.test.mjs + work-trace-bounds.test.mjs + knowledge-lib.test.mjs + clara-work-v4.test.mjs: 69/69 pass — matches fixround claim exactly (19+9+16+25)",
+    "world_leg": "node tests/work-knowledge-e2e.mjs directly against clara_658: exit 0, 'one read-set row survived a SIGKILL and REPLAYED onto its own id', seq 2 confirmed a second read, non-accounting_work task refused CLR11, drift observed from the READ not a trace",
+    "check_frozen_workflows": "OK — 296 frozen files verified, 53 \"use workflow\" modules all frozen+registered, 3 retired entries",
+    "check_parts_parity": "OK — reader superset of emittable at this commit; no new part kind (emittable set unchanged: freeform_result, work_accepted, work_status, work_result, work_question, knowledge_receipt)",
+    "check_wiki_dynamic_sql_selftest": "OK",
+    "migration_ledger": "node packages/db/scripts/migrate.mjs -> '0 new migration(s) applied · 220 total', prestate clean",
+    "apps_web_whole_unit_suite": "4171 tests, 4169 pass, 0 fail, 2 skipped, 135 suites — matches fixround claim exactly (including the new lib/work/knowledge.test.ts's 7 cells)",
+    "playwright_knowledge_triple": "41 passed (1.0m), 0 failed — CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3370, NEXT_PORT=3371, RUNTIME_PORT=3372; the fixround's reported single host-contention flake did not reproduce",
+    "worktree_hygiene": "git status --porcelain clean at both start and end of this recheck; HEAD unchanged at 141103cb6dde9f9f06709d43830e3e9261b08b07 throughout; no tracked file was modified by this recheck"
+  }
+}

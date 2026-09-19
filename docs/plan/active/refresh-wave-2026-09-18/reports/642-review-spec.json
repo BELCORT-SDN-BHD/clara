@@ -1,0 +1,27 @@
+{
+  "ticket": 642,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "docs/plan/active/refresh-wave-2026-09-18/reports/642-review-spec.json",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "major",
+      "category": "correctness",
+      "where": "apps/web/lib/clara/useTranscriptScroll.ts:221-249 (jumpToLatest's landing-correction setTimeout); triggered assertion at apps/web/e2e/chat-parity-walk.spec.ts:768 (test p642.e2e.long_history_scroll)",
+      "what": "AC5's 'and it LANDS' guarantee (the commit b6eb4d07 / useTranscriptScroll.ts's own header say a smooth jump-to-latest is corrected to the true bottom within PROGRAMMATIC_WINDOW_MS=1000ms) is not reliable. There is a race between the native smooth-scroll's own trailing 'scroll' events and the fixed 1000ms window: if a scroll event fires at/after programmaticUntilRef's deadline while the transcript is still short of the bottom, the onScroll handler's fallback branch (line ~201, the bare `measure()` outside the `if` guard) runs `followingRef.current = bottom` with `bottom=false` (distance > BOTTOM_EPSILON_PX). If that happens at/just-before the landing-correction setTimeout fires, the setTimeout's own `if (!followingRef.current) return;` guard (line ~245) bails out and the scheduled correction never runs, permanently stranding the transcript short of the target with nothing left to trigger another attempt.",
+      "evidence": "Measured directly on the assigned rig via `pnpm --filter @clara/web e2e chat-parity` (CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3320, NEXT_PORT=3321, RUNTIME_PORT=3322): 10 passed, 1 failed, 36.5s total. The failure: `p642.e2e.long_history_scroll` at chat-parity-walk.spec.ts:768 — `expect(...).toBeLessThanOrEqual(2)` reported `Expected: <= 2, Received: 36` after the full 5000ms poll timeout, i.e. the transcript sat exactly 36px short of the bottom for the whole window with no further movement (consistent with the correction never firing, not with 'still catching up'). Notably the residual gap (36px) is the exact figure the branch's own code comment (useTranscriptScroll.ts:253) cites as the defect the correction was written to fix. An isolated re-run of the same test via `pnpm exec playwright test chat-parity -g long_history_scroll` (same pre-built app) then PASSED (9.8s). So the branch's report of a clean `11/11 (37.0s)` chat-parity walk is one run of a test that is measurably flaky on exactly the AC5 assertion it is supposed to prove, and the flakiness traces to a real, nameable race in the source rather than pure test-infra noise.",
+      "fix": "Make the landing correction robust to a late/ambiguous scroll event rather than trusting a single `followingRef.current` read at the 1000ms mark: e.g. have the setTimeout re-measure `el`'s actual distance-to-bottom itself (not just trust the ref), or have `onScroll` skip publishing `followingRef.current = false` for the small residual distances a smooth-scroll tail can produce while a landing correction is still pending (track a `correctionPendingRef` the onScroll handler checks), or simply retry the correction (bounded) until the measured distance is within epsilon instead of firing exactly once. Re-run `p642.e2e.long_history_scroll` several times (or under artificial CPU throttling) to confirm the race is closed before calling AC5 fully green."
+    },
+    {
+      "id": "F2",
+      "severity": "minor",
+      "category": "documentation",
+      "where": "apps/web/lib/clara/toolLabel.ts:16",
+      "what": "The module header claims '`clara-tool-labels.test.ts` is the gate that keeps this list and `messages/en.json` from drifting apart.' No file of that name exists anywhere in the repository — a repo-wide grep for the string matches only this one comment. The actual gate that performs this job is `apps/web/lib/clara/toolLabel.test.ts` (verified: it does assert every CHAT_TOOL_TOKENS entry has a label, every label has a token, and pins the count at 37), so the functional claim is true but the citation naming the evidence is wrong — exactly the class of defect the brief's own Verifier findings (F2) flagged elsewhere in this same ticket's brief.",
+      "evidence": "`grep -rn \"clara-tool-labels\" .` over the worktree returns only apps/web/lib/clara/toolLabel.ts:16 itself; `find . -iname 'clara-tool-labels*'` returns nothing. `apps/web/lib/clara/toolLabel.test.ts` exists and its four tests were run directly on this rig (all green) and do perform the described drift/fallback/jargon checks.",
+      "fix": "Correct the comment in toolLabel.ts:16 to name `toolLabel.test.ts` (its actual gate) rather than a file that was never created."
+    }
+  ],
+  "verdict": "fix_then_accept"
+}

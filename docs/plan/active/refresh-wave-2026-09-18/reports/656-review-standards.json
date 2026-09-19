@@ -1,0 +1,18 @@
+{
+  "ticket": 656,
+  "lens": "standards",
+  "lens_model": "claude-sonnet-5",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\656-review-standards.json",
+  "findings": [
+    {
+      "id": "S1",
+      "severity": "note",
+      "category": "ownership-scope",
+      "where": "apps/web/lib/journals/types.ts (new optional field `is_opening_balance?: boolean | null` on `JournalEntryRow`, commit 1e2022ec)",
+      "what": "DECISIONS.md §3's shared-surface table and the brief's ownership section name only `apps/web/lib/journals/api.ts` (\"ONE hunk... plus one badge\") as the #655-owned file #656 may touch; `lib/journals/types.ts` is not separately listed. The commit adds one optional field there to type the new `ENTRY_SELECT` column.",
+      "evidence": "docs/plan/active/refresh-wave-2026-09-18/DECISIONS.md §3 row `components/accounting/accounting-hub.tsx, lib/journals/api.ts | #655 | #656 adds is_opening_balance to ENTRY_SELECT + one badge in ITS OWN hunk`; diff shows lib/journals/types.ts +7 lines alongside the api.ts +5 line hunk (git diff origin/main...HEAD -- apps/web/lib/journals/types.ts).",
+      "fix": "No action needed on the merits — the field is optional (non-breaking to #655/#636/#658's own fixtures, as the inline comment measures), additive-only, and is the type companion of the one authorized `ENTRY_SELECT` hunk, so it carries no real collision risk. Recorded only so the ownership table's text matches practice for the next brief that cites it verbatim."
+    }
+  ],
+  "verdict": "accept"
+}

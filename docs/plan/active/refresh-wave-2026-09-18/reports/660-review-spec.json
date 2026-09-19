@@ -1,0 +1,27 @@
+{
+  "ticket": 660,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5 xhigh",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\660-review-spec.json",
+  "verdict": "accept",
+  "findings": [
+    {
+      "id": "SP1",
+      "severity": "minor",
+      "category": "decisions-ruling-not-honoured",
+      "where": "apps/web/e2e/e2e-fixture-ownership.test.ts:361 (LANE_DECLARATIONS[\"home-board-mock.mjs\"])",
+      "what": "DECISIONS.md §3 (\"e2e/home-board-walk.spec.ts + home-board-mock.mjs\" row) and brief-660.md state four separate times, verbatim, that #660 must register its three new RPC verbs in e2e-fixture-ownership.test.ts while leaving \"#902's debt declaration ... at :361 ... untouched\" / \"exactly as it is.\" The actual diff modifies that exact line: the pre-branch single-line entry `\"home-board-mock.mjs\": { unscopeable: [], debt: [\"/rest/v1/rpc/get_client_work_pack\"] },` (verified verbatim in `git show origin/main:apps/web/e2e/e2e-fixture-ownership.test.ts` at line 361) becomes a multi-line object whose `debt` array now also carries the three new #660 verbs. `LANE_DECLARATIONS` is typed `Record<string, {unscopeable, debt}>` (same file, line 216), so a second object literal keyed \"home-board-mock.mjs\" is not legal JS/TS -- the instruction to add a lane declaration for the same mock file while leaving its existing entry byte-identical is internally impossible to satisfy literally, not just difficult.",
+      "evidence": "`git -C C:\\Users\\zhant\\Desktop\\clara-wt\\660 diff origin/main...HEAD -- apps/web/e2e/e2e-fixture-ownership.test.ts` shows the hunk at old line 361 changing from a one-line entry to a 19-line block; `git show origin/main:apps/web/e2e/e2e-fixture-ownership.test.ts | sed -n '355,365p'` confirms line 361 in the merge-base (abcc5030) is exactly the single-line #902 entry the brief names. The worker discloses this exact tension in the final report's Assumptions #6 (\"did not touch #902's debt entry beyond extending the same lane's array in place\"), and the resulting behaviour is unchanged: `get_client_work_pack` is still declared `debt` for the same lane, and the independently re-run `home-board-walk` e2e suite (20/20 passed on this rig, including the 9 pre-existing legs) shows no regression from the change.",
+      "fix": "No code change needed on this branch; the brief's \"leave :361 untouched\" instruction is unsatisfiable given LANE_DECLARATIONS' Record-keyed-by-filename shape whenever a second lane adds verbs to the same mock file. The orchestrator should correct the brief/DECISIONS wording (or the census's shape) for future tickets that share a mock file, and note in reconciliation that this branch's resolution -- extending the existing array in place, disclosed -- is the only literal way to satisfy the surrounding intent (three new verbs declared, #902's own verb and its debt status unchanged)."
+    },
+    {
+      "id": "SP2",
+      "severity": "note",
+      "category": "task-instruction-drift",
+      "where": "This review's own computed task text (\"pnpm --filter @clara/web ui:add chart --dry-run resolves ... the guard must refuse the overwrite\") vs DECISIONS.md:216-219 and brief-660.md's D19.c",
+      "what": "The task text handed to this review claims the ui-add guard \"must refuse\" the card.tsx overwrite. That is not what the branch's own governing documents say, and not what the live code does: `apps/web/scripts/protected-components.json` on this branch (and on origin/main) allowlists exactly `components/ui/button.tsx` and `components/ui/pagination.tsx` -- not `card.tsx` -- so `ui-add.mjs`'s guard (read at lines 180-249) does not block the overwrite. DECISIONS.md §6 states this as an explicit, twice-measured correction of an earlier draft (\"the guard's allowlist ... will NOT stop the card.tsx overwrite ... the protection is therefore yours\"), and the worker's report follows that correction: it protected card.tsx procedurally (real CLI's own overwrite prompt refused, sha256 before/after identical, git status clean) rather than relying on the guard.",
+      "evidence": "Read `apps/web/scripts/protected-components.json` and `apps/web/scripts/ui-add.mjs:180-249` on the worktree; both match DECISIONS.md's measured correction, not the task text's paraphrase. `git diff origin/main...HEAD` confirms `components/ui/card.tsx` has zero changes.",
+      "fix": "Not a branch defect -- flagging so the orchestrator can correct whatever generated this review's task text, so a future automated check does not score the branch against a guard behaviour the branch's own binding decisions record disproved."
+    }
+  ]
+}

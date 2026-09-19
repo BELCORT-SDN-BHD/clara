@@ -1,0 +1,152 @@
+{
+  "ticket": 657,
+  "role": "recheck",
+  "recheck_of_report": "docs/plan/active/refresh-wave-2026-09-18/reports/657-fixround-1.md",
+  "recheck_of_head": "43cba4438f36d9a85ee10c594c03b42a2d0a5921",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\657-recheck-1.json",
+  "rig": "PG 127.0.0.1:55707 clara_657, Playwright triple 3360/3361/3362, worktree C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "verdict": "accept",
+  "applied_findings": [
+    {
+      "id": "SP1+A1",
+      "severity": "blocker",
+      "claim": "op key now folds each selected entry's world generation (match_history shape) into the intent tuple, so match->unmatch->resubmit-identical no longer replays the dead match's receipt",
+      "commits": ["5a1f3dc4", "e370e08f"],
+      "verified": true,
+      "evidence": "Read lib/bank/match-opkey.ts: entryGeneration()/canonicalMatchIntent() implement the described '<count>:<newest match_id>:<newest status>' scheme as key material only (never sent to the door — match-doors.ts strips it back to {entry_id, matched_cents} before the wire body). Confirmed real wiring in matching-section.tsx:196-201 (reads entryGenerations off the LIVE candidates.data, not a stub). Ran apps/web/lib/bank/match-opkey.test.ts: 5/5 pass, including the fix-round cell 'p657.web.opkey-renews-after-unmatch' which asserts two different keys for a match-then-unmatch-then-resubmit sequence AND asserts the wire body carries no extra field. Ran packages/db/tests/bank-line-existing-booking.test.mjs's new pin cell 'p657.db.rematch-needs-a-new-key' (part of the 11/11 gated battery run) which independently proves the DB-side premise (same key replays the dead receipt; a renewed key re-decides for real) on the live rig. Not vacuous: the cell asserts on real match_id identity/inequality and on list_unmatched_lines membership, not a shape-only check."
+    },
+    {
+      "id": "SP2+A2",
+      "severity": "major",
+      "claim": "candidate_basis now applies the same remaining-capacity predicate list_bank_match_candidates applies, bounding it to the offerable candidate set",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read migrations/0226_bank_match_evidence.sql:568-627: the basis subselect now computes debit_remaining_cents/credit_remaining_cents once per entry in an inner select and the outer select filters 'where r.debit_remaining_cents > 0 or r.credit_remaining_cents > 0', textually mirroring §3's own filter. p657.db.matching-context (part of the 11/11 gated run) carries the promised cardinality assertion. Not vacuous: the predicate is structurally identical to the candidate read's own filter, not a cosmetic comment change."
+    },
+    {
+      "id": "S1",
+      "severity": "blocker",
+      "claim": "f-a3-pr3-doors.test.mjs's c2.task-binding cell now passes a real uuid task (not a colon-joined string) to the uuid-typed third parameter of _agent_verify_inputs_digest",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read packages/db/tests/f-a3-pr3-doors.test.mjs:915-926: taskA/taskB are randomUUID(), passed directly as $3::uuid, both polarities (same-task admits, different-task refuses). Ran packages/db/tests/f-a3-pr3-doors.test.mjs as part of the touched-suites background run: 89 tests total across the 5 touched suite files, 88 pass, 0 fail, 1 skipped (the skip is the destructive-reset cell, correctly gated on CLARA_RIG_ALLOW_RESET which is unset) — matches the fixround report's own re-run numbers exactly, with no 22P02 failures anywhere in the log."
+    },
+    {
+      "id": "A3",
+      "severity": "major",
+      "claim": "p657.db.capacity-race's capacity assertion is no longer hidden behind an always-false `if (row)` guard",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read packages/db/tests/bank-line-existing-booking.test.mjs:397-417: the guard is gone; capacity is now read directly from journal_lines/bank_match_entry_members (the ledger) with no conditional, and asserts booked=90_000 and booked-consumed>=0 unconditionally. Confirmed passing in the 11/11 gated battery run."
+    },
+    {
+      "id": "A4",
+      "severity": "minor",
+      "claim": "tail item 9's heading now matches what it measures",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read migrations/0226_bank_match_evidence.sql:1187-1200: heading now reads 'EVERY bank.% EVENT TYPE STILL CARRIES A TAXONOMY DECISION' with a comment explaining where D14's three negatives actually live (honoured by construction, not measured here). Tail passed in the gated run ('#657 tail: OK...')."
+    },
+    {
+      "id": "A5",
+      "severity": "minor",
+      "claim": "the thirteen post-image prosrc shas are now pinned and asserted in the tail, not just claimed in a comment",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read migrations/0226_bank_match_evidence.sql:982-1160ish: a v_posts text[][] array of 13 (oid, sha) pairs, with a loop at :1154-1160 that raises CLR10 on any mismatch against live pg_proc.prosrc. Tail passed in the gated run, meaning all 13 pins matched the live catalog. Not vacuous: this is a real hash comparison against the catalog, not a substring check."
+    },
+    {
+      "id": "A6",
+      "severity": "minor",
+      "claim": "the outcome block now renders the operation key",
+      "commits": ["5a1f3dc4", "43cba443"],
+      "verified": true,
+      "evidence": "Read components/bank/matching-outcome.tsx:76-86: a new <dt>/<dd> pair renders receipt.op_key, honestly labelled as the client's key with a comment noting _finish_op echoes none. Ran components/bank/matching-outcome.test.tsx: 5/5 pass. 43cba443 additionally wires the Playwright walk's success leg to compare the rendered key against the key observed on the real request (confirmed passing in the 6/6 Playwright run below), so this isn't a display-only claim — an end-to-end value comparison backs it."
+    },
+    {
+      "id": "A7",
+      "severity": "note",
+      "claim": "three ties in 0226's new read now have explicit tiebreaks",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read migrations/0226_bank_match_evidence.sql: basis aggregate is now 'order by b.posting_date desc, b.entry_id' (:591). The two independent 'limit 1' subselects for group_status/match_id were merged into one 'select ... into' with 'order by (m.group_status = 'live') desc, m.match_id limit 1' (:659-663) so the two fields cannot name different matches."
+    },
+    {
+      "id": "S2",
+      "severity": "major",
+      "claim": "packages/db/README.md now describes the two-typed-copies mechanism that shipped, not the reverted dynamic splice",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "Read packages/db/README.md:670-685: describes static create-or-replace of identical text between sentinel comments in both bodies, the tail's whitespace-normalised equality check, p657.db.pack-parity, and 'a future change edits BOTH bodies by hand' — with the reverted splice cut recorded separately with its reason."
+    },
+    {
+      "id": "S3",
+      "severity": "major",
+      "claim": "reports/657-final.md's AC13 row no longer claims InputGroup is used",
+      "commits": ["n/a — edited directly in 657-final.md, which lives outside the branch"],
+      "verified": true,
+      "evidence": "Read reports/657-final.md:35: now reads 'Table/Field/Alert used. InputGroup is NOT used (fix round S3)...' with the reasoning (MoneyInput wraps plain Input; the brief's own cited precedent doesn't use InputGroup either). grep -rln InputGroup apps/web/components/bank apps/web/lib/bank still returns nothing, confirming the corrected claim is the true one."
+    },
+    {
+      "id": "S4",
+      "severity": "minor",
+      "claim": "reports/657-final.md's AC14 row states the correct axe-scan counts (6 total, 2 in leg 6)",
+      "commits": ["n/a — edited directly in 657-final.md"],
+      "verified": true,
+      "evidence": "grep -n \"expectAccessible(page\" apps/web/e2e/bank-match-walk.spec.ts returns exactly 6 lines (62, 134, 182, 211, 224, 243), with only 224 and 243 inside leg 6 (which starts at line 214 per the current file). reports/657-final.md:36 now states '6 scans across the whole walk, 2 of them inside leg 6'."
+    },
+    {
+      "id": "S5",
+      "severity": "minor",
+      "claim": "CONTEXT.md:568 now reads 'to the cent' instead of 'to the sen'",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "grep -n \"to the cent\" CONTEXT.md -> line 568. grep -c \"to the sen,\" CONTEXT.md -> 0."
+    },
+    {
+      "id": "S6",
+      "severity": "note",
+      "claim": "the battery header and tests README now say ELEVEN cells",
+      "commits": ["e370e08f"],
+      "verified": true,
+      "evidence": "packages/db/tests/bank-line-existing-booking.test.mjs:15 now reads 'THE ELEVEN CELLS'. packages/db/tests/README.md:304 reads 'Eleven cells'. The gated battery run independently confirms 11 tests, 11 pass."
+    }
+  ],
+  "deliberately_left_findings_judged": [
+    {
+      "id": "A8",
+      "severity": "note",
+      "judgment": "reason holds",
+      "reasoning": "The basis half of A8's cost (the unbounded candidate_basis) is closed by A2's fix. The remaining half — get_bank_line_matching_context calling list_bank_statements for every statement on the account and keeping one — is left standing on the brief's own explicit non-goal, verified at brief-657.md:75: 'no second GL-cash reader on your side — your AC3 proof compares list_bank_statements' tie.gl_balance_cents ... and you add no other cash expression.' Selecting the statement's aggregates directly, as A8's own fix suggestion proposes, would be exactly a second GL-cash expression, which the brief forbids while the cash-expression question is open across #657/#660 (per the final report's own open-question log). The reviewer's own measurement (3381 bytes, sub-second on a 15-entry client) supports 'nothing is broken today', so deferring this to when the cash-expression question is ruled is a defensible reading of the brief, not a rationalization to avoid work."
+    },
+    {
+      "id": "A9",
+      "severity": "note",
+      "judgment": "reason holds; independently re-confirmed",
+      "reasoning": "This is a verified-clean record, not a left defect, so no action was owed. I independently re-checked its highest-value claim (dispatch order): apps/web/e2e/serve-built.mjs:704 dispatches handleP657Supabase ABOVE handleHomeBoardSupabase's EMPTY_RPCS arm at :736, each site carrying a comment, and no SHARED_RPC_VERBS row added for the array-dispatched path — matching orchestrator ruling §6.1 given for this recheck verbatim. I also independently confirmed the THIRTEEN-core roster in bank-line-existing-booking.test.mjs is unchanged from 0129's shape (the fix round's only edits near the roster were adding the v_posts sha-pin array and updating the tail's notice text — no core body was patched), consistent with 'STOP and report instead of patching' never needing to fire this round."
+    }
+  ],
+  "ratification": {
+    "requested": "The fix round asks the orchestrator to ratify a second clause on D15's renewal rule: the op key also renews when a selected entry's own match_history moves (a match landing or an existing one being unmatched), in addition to the brief's literal WHAT-changed enumeration (line ids, entry ids, cents).",
+    "brief_text_confirmed": "brief-657.md:243-246 (§3 web item 5) enumerates only the WHAT-changed clause and says 'it renews on nothing else' — the fix's second clause is genuinely outside that literal text, correctly flagged rather than silently shipped.",
+    "recommendation": "ratify",
+    "reasoning": "The amendment keeps D15's actual principle (the key is derived from a property of the DATA, never a component's lifecycle — entryGeneration reads match_history off the wire, is never sent to the door, and _reserve_op still re-hashes the real arguments). It is the minimal fix for a measured, reproducible blocker (SP1/A1): without it, match->unmatch->resubmit-identical silently tells a human a match landed while the line is still on the unmatched report — worse than widening one sentence in a brief. The residual (a concurrent unmatch between the last candidate read and the submit can still replay) is disclosed in the module header rather than hidden, which is the right way to carry a known gap forward. Recalled precedent, not evidence: this is the same shape as an HTTP conditional request's ETag/If-Match — a decision key derived from the resource's own current state so a stale intent cannot silently replay against a resource that has since changed; I know this pattern generally but cannot point to a specific Clara precedent for it, so it is offered as an argument, not a fact about this codebase. The orchestrator-supplied ruling for this session ('D14/D15 stand') does not name this specific clause, so it should not be read as a rejection; I recommend it be read into brief-657.md §3 item 5 and DECISIONS.md's D15 row explicitly rather than left as a comment-only amendment."
+  },
+  "new_defects_introduced_by_fixes": [],
+  "observations": [
+    "reports/657-fixround-1.md's own verification table claims the whole-suite web flake at lib/clara/use-clara-thread-stop.test.ts 'passes 25/25 in isolation'. Re-running that file in isolation 4 times produced 3 clean passes and 1 failure (same assertion, :1021, '4 !== 0'), so the flake is not exclusively a whole-suite-load artifact as characterized — it is flaky in isolation too, just less often. This does NOT implicate the fix round: git log confirms none of the fix-round commits (5a1f3dc4, e370e08f, 43cba443) touch this file, and its flake predates this branch (last touched by #798/#630 commits). Recorded as an evidence-accuracy nuance in the fixround report, not as a new defect the fixes introduced."
+  ],
+  "measured_evidence": {
+    "pnpm_typecheck": "green, exit 0 (apps/web tsc --noEmit Done; packages/runtime tsc --noEmit Done)",
+    "pnpm_lint": "green, exit 0 for the whole root script including the separate `pnpm --dir packages/reporting-render run lint` tail step (re-ran that step directly to confirm EXIT_0 after the backgrounded run's log appeared to truncate before printing a trailing echo — eslint prints nothing on a clean run, which is why the log looked short)",
+    "wiki_dynamic_sql_lint": "node scripts/check-wiki-dynamic-sql.mjs -> OK, 1363 function definitions and 199 change-of-record patches scanned, no dynamic wiki SQL outside the whitelist, 13 justified waivers",
+    "bank_line_existing_booking_gated_41_flags": "11 tests, 11 pass, 0 fail, 0 skipped",
+    "touched_suites_no_gate": "(operation-census, rig-isolation, x38-wave-c-b-match, f-a3-pr3-chatturn-v14-bank-parity, f-a3-pr3-doors) 89 tests, 88 pass, 0 fail, 1 skipped (destructive-reset cell correctly gated off) — matches fixround claim exactly",
+    "apps_web_whole_unit_suite": "4160 tests, 4157 pass, 1 fail, 2 skipped (135 suites) — matches fixround claim exactly; the 1 failure is the pre-existing, unrelated lib/clara/use-clara-thread-stop.test.ts flake (see observations)",
+    "match_opkey_test": "5/5 pass (lib/bank/match-opkey.test.ts), including the fix-round's two new cells",
+    "matching_outcome_test": "5/5 pass (components/bank/matching-outcome.test.tsx)",
+    "playwright_bank_match_walk": "6 passed (17.7s) run against the assigned triple CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3360, CLARA_E2E_NEXT_PORT=3361, CLARA_E2E_RUNTIME_PORT=3362",
+    "migration_ledger": "node packages/db/scripts/migrate.mjs -> '0 new migration(s) applied · 220 total'",
+    "worktree_hygiene": "git status --short clean at both start and end of this recheck; HEAD unchanged at 43cba4438f36d9a85ee10c594c03b42a2d0a5921 throughout; no tracked file was modified by this recheck"
+  }
+}

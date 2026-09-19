@@ -1,0 +1,188 @@
+{
+  "ticket": 636,
+  "role": "recheck",
+  "head_checked": "88b5fb441eef307e1ec1f23c82219ff483e157bf",
+  "fixround_report": "docs/plan/active/refresh-wave-2026-09-18/reports/636-fixround-1.md",
+  "source_reviews": [
+    "docs/plan/active/refresh-wave-2026-09-18/reports/636-review-adversarial.json",
+    "docs/plan/active/refresh-wave-2026-09-18/reports/636-review-spec.json",
+    "docs/plan/active/refresh-wave-2026-09-18/reports/636-review-standards.json"
+  ],
+  "verdict": "accept",
+  "summary": "All 13 findings across the three lenses are accounted for. Every finding marked applied is a real, non-vacuous fix: I read each commit's diff, confirmed the SQL/TS logic actually changes the behaviour the review measured, and independently re-ran every cited cell plus the full regression surface (DB batteries, runtime unit tests, whole apps/web suite, typecheck, lint, frozen-workflow/parts-parity checks) on the rig -- all green, all counts matching the fixround report exactly, including the one pre-existing unrelated DB failure (T10b / #866). The four deliberately-left sub-recommendations all hold up against the brief and DECISIONS text I located and read directly. One new, minor, documentation-only defect was introduced by the fix round itself (apps/web/README.md now contradicts the very commit that removed the `readOnly` prop) -- flagged below as a fast-follow, not a blocker.",
+  "applied_findings": [
+    {
+      "id": "ADV-636-01",
+      "lens": "adversarial",
+      "severity": "blocker",
+      "outcome": "confirmed_fixed",
+      "evidence": "packages/db/migrations/0229_intake_batches.sql: new clara._intake_batch_pending_members(p_batch) (lines ~586-618 of the fix diff) correctly OR's 'intake still arriving' (status in uploading/received/verifying/verified) with 'document still processing' (task status in queued/held_egress/running), scoped to work_id is null. cancel_intake_batch and sweep_intake_batch_cancellations both now gate the terminal flip on 'v_n = 0 and v_pending = 0'. Ran packages/db/tests/intake-batch.test.mjs on clara_636 (rig 127.0.0.1:55702): 31/31 pass including the new p636.batch.cancel_before_admission, which exercises exactly the scenario the review measured (two custody members, no Work; decision reports pending_members=2, state='cancelling'; a Work admitted afterwards is handed to a later sweep with the STORED actor/key). Not vacuous -- the test's assertions (pending_members count, state, sweep worklist membership, late-admission fan-out) are all concrete and would fail against the pre-fix predicate."
+    },
+    {
+      "id": "V636R-1",
+      "lens": "spec",
+      "severity": "blocker",
+      "outcome": "confirmed_fixed",
+      "note": "Same underlying defect and fix as ADV-636-02 (the fixround report treats them as one repair); see ADV-636-02 for the verification detail."
+    },
+    {
+      "id": "ADV-636-02",
+      "lens": "adversarial",
+      "severity": "major",
+      "outcome": "confirmed_fixed",
+      "evidence": "0229's failed-facet count and rows now (a) exclude any member with a committed clara.operation_receipts row via NOT EXISTS, and (b) read only the current attempt per lane via `distinct on (tv.lane) order by tv.lane, tv.version_n desc, tv.updated_at desc`. Ran the new p636.batch.failed_excludes_settled cell directly: a member with a failed extraction attempt followed by a successful post is settled=1/failed=0 and absent from the failed preview; a sibling that failed and has NOT posted is still correctly failed=1 with the right error code. 31/31 in the full DB battery. Matches the World-leg regression the review measured (31 of 35 'failed' members had actually posted)."
+    },
+    {
+      "id": "ADV-636-03",
+      "lens": "adversarial",
+      "severity": "major",
+      "outcome": "confirmed_fixed",
+      "evidence": "get_intake_batch derives cancel_blocked='canceller_not_active' from a live firm_memberships check on the stored cancel_requested_by (no new column, three-state set unchanged, as the brief's D5/§3 narrowing requires). reconciler-batches.mjs counts an all-CLR04 fan-out as batchCancelBlocked (separate from batchCancelFailed) and logs it by name. Card renders a warning banner naming the reason and the per-Work fallback. Verified by running: packages/db/tests/intake-batch.test.mjs's p636.batch.cancel_blocked_after_revocation (revokes BOB's membership mid-cancel, confirms cancel_blocked flips to 'canceller_not_active' and the parent stays on the sweep worklist); packages/runtime/tests/intake-batch-unit.test.mjs's p636.runtime.belt_names_a_blocked_parent (13/13 pass, confirms batchCancelBlocked=1 counted once per parent not per child, and is logged with 'BLOCKED ... B1'); apps/web card unit test 'a STOPPING batch whose canceller lost authority NAMES why it cannot finish' (20/20 pass in that file)."
+    },
+    {
+      "id": "V636R-2",
+      "lens": "spec",
+      "severity": "major",
+      "outcome": "confirmed_fixed",
+      "evidence": "work-detail.tsx: the batch-origin row was moved out of PostedEntrySection (which only renders once entry!==null) to render unconditionally beside WorkFacts, guarded only by batchOrigin===null. Ran components/work/work-detail.test.tsx (full file, 49/49 pass) including both new p636.work_detail.batch_row cells: a refused (never-posted) Work with a non-null batchOrigin shows the row and its label; a Work whose batchOrigin read throws shows no row (the page never claims a Work is NOT in a batch). Not vacuous -- the first cell fails against the pre-fix code (entry===null gate) and the diff plainly removes that gate."
+    },
+    {
+      "id": "chinese-string-in-en-json",
+      "lens": "STANDARDS",
+      "severity": "should",
+      "outcome": "confirmed_fixed",
+      "evidence": "apps/web/messages/en.json IntakeBatch.stopping.title changed from '正在停止 · Stopping this batch' to 'Stopping this batch'. intake-batch-card.test.tsx's cell now asserts /Stopping this batch/ AND that the whole rendered card contains no CJK codepoint at all (a stricter, not just a swapped, assertion). apps/web/e2e/intake-batch-walk.spec.ts's cancel leg updated the same way. Ran intake-batch-card.test.tsx: 20/20 pass."
+    },
+    {
+      "id": "firm-leaf-cancel-unreachable",
+      "lens": "STANDARDS",
+      "severity": "should",
+      "outcome": "confirmed_fixed",
+      "evidence": "The `readOnly` prop was deleted from IntakeBatchCard (was the sole gate on the Cancel trigger and nothing else) and from its one call site in unassigned-sources.tsx (verified via grep: zero remaining readOnly references in components/documents, components/firm/documents or e2e). Ran: intake-batch-card.test.tsx (20/20, including new 'the FIRM-LEAF mount keeps Cancel' and 'a TERMINAL batch offers no Stop even on the firm-leaf mount' cells); intake-batch-keyboard.test.tsx (the previously-inverted 'READ-ONLY mount offers no Stop' cell was corrected in commit 225c400e to assert the opposite, i.e. the contract -- confirmed by reading that commit's diff, which changes both the test body and its name); components/firm/documents/unassigned-sources.test.tsx (6/6 pass, unaffected by the prop removal). A genuine, previously-inverted test caught only by the whole-suite run, correctly fixed. See new_findings for one documentation regression this same change left behind."
+    },
+    {
+      "id": "ADV-636-04",
+      "lens": "adversarial",
+      "severity": "minor",
+      "outcome": "confirmed_fixed",
+      "evidence": "packages/db/tests/intake-batch.test.mjs:685 (post-fix) replaces `assert.equal(out.already_stopping ?? out.status, out.already_stopping ?? out.status)` (compared an expression with itself) with three concrete assertions naming 0199's already-stopping arm: out.reason==='already_stopping', out.cancelled===false, out.replayed===false. This is p636.batch.cancel_while_settling, included in the 31/31 passing DB battery run."
+    },
+    {
+      "id": "ADV-636-05",
+      "lens": "adversarial",
+      "severity": "minor",
+      "outcome": "confirmed_fixed",
+      "evidence": "packages/runtime/tests/intake-batch-e2e.mjs gained an upper bound (failed.count <= MEASURED_N - persistent.length) and a disjointness assertion (no work_id appears in both settled.rows and failed.rows), replacing two lower-only bounds that could not distinguish 35 from 4. Verified by reading the diff and confirming the math: with persistent.length=95 (a clean run) the bound is 5, which the historical 35-failed regression would have violated. Not independently re-run against the real Postgres World in this recheck (that leg needs a live app+runtime server on ports 3310-3312 and takes several minutes; the DB/runtime/web regression surface I did run is unaffected by this file). Syntax-checked with `node --check` -- clean.",
+      "caveat": "The accompanying code comment ('the route's own catch arm fails its intake, so it lands in failed honestly') is only true for the FINALIZE-stage host flake (packages/runtime/lib/intake.mjs's finalizeDocumentIntake catch arm does call clara.fail_document_intake with the mapped code for any error). The PUT-stage flake's catch arm (uploadDocumentBytes) only calls fail_document_intake for the too_large case; a generic PUT failure leaves the intake in a non-terminal status, which would fall under pending_members, not failed. This does not make the assertion wrong or vacuous -- MEASURED_N - persistent.length remains a valid (if slightly looser) upper bound either way, and it still fails against the historical 35-vs-5 regression -- but the comment's blanket claim overstates what the PUT-flake path actually does. Minor, non-blocking; worth a one-line comment correction in a follow-up."
+    },
+    {
+      "id": "ADV-636-06",
+      "lens": "adversarial",
+      "severity": "note",
+      "outcome": "confirmed_fixed",
+      "evidence": "apps/web/lib/documents/batch-url-state.ts's comment above BATCH_FACETS was rewritten to say 'admitted' is deliberately not a filter value, matching the constant (four facets + 'all'). Read the corrected comment directly; it no longer contradicts BATCH_FACETS' five-minus-one shape."
+    },
+    {
+      "id": "ADV-636-07",
+      "lens": "adversarial",
+      "severity": "note",
+      "outcome": "confirmed_fixed",
+      "evidence": "Comment-only change on clara.intake_batch_member_events, written directly above the existing unique(member_id, event, recorded_at) constraint, naming the transaction-granularity property and what a future in-transaction caller must do instead. Read directly in the migration diff; no functional change was warranted (every current caller in packages/runtime/lib/intake-batches.mjs is its own transaction, which I spot-checked is still true after the fix round)."
+    },
+    {
+      "id": "ADV-636-08",
+      "lens": "adversarial",
+      "severity": "note",
+      "outcome": "confirmed_fixed",
+      "evidence": "sweep_intake_batch_cancellations's worklist select gained `for update skip locked`. Read directly in the diff. The full DB battery (31/31, including every cancel/sweep-touching cell) still passes clean, so the added row lock introduced no regression."
+    },
+    {
+      "id": "ADV-636-09",
+      "lens": "adversarial",
+      "severity": "note",
+      "outcome": "confirmed_fixed",
+      "evidence": "The settled-preview subquery's `limit v_preview` was moved from inside the `distinct on (m.work_id)` subquery to an outer select ordered by `committed_at desc, work_id desc`. Ran the new p636.batch.settled_preview_is_newest cell, which posts members until the lowest-work_id member and the newest-receipt member diverge (guarding against the 1-in-N coincidence that made an earlier version of this same cell pass against the bug) and then asserts the preview's one row is the newest, not the lowest uuid. Passed in the 31/31 DB battery run."
+    }
+  ],
+  "deliberately_left": [
+    {
+      "id": "ADV-636-06 (second half: drop the orphan message key IntakeBatch.facet.admitted)",
+      "reason_given": "The key is not orphaned -- the card renders all five facet labels in its count tiles via INTAKE_BATCH_FACET_KINDS.map(t(`facet.${kind}`)); only the toggle group maps the narrower BATCH_FACETS.",
+      "holds": true,
+      "verification": "Read apps/web/components/documents/intake-batch-card.tsx directly: line 238's INTAKE_BATCH_FACET_KINDS.map (which includes 'admitted', defined in lib/documents/intake-batch.ts:40) renders `t(`facet.${kind}`)` for every facet tile, independent of BATCH_FACETS (used only by the ToggleGroup at line 304). The message key is genuinely reachable. The original review's claim was based on reading only the toggle-group's mapping."
+    },
+    {
+      "id": "ADV-636-01 (alternative fix (b): guard _tf_intake_batch_member_work_stamp against a cancelling/cancelled parent)",
+      "reason_given": "The stamp is lane-agnostic by ruling and blocking it would hide a Work that genuinely exists; keeping the parent in cancelling so the sweep stops the child is what closes the journey, not bookkeeping alone.",
+      "holds": true,
+      "verification": "Read brief-636.md section 3 item 8 directly: 'Lane-agnostic is the whole point -- #655's trade-invoice lane, the autodraft lane and any future producer stamp without knowing this table exists, which is what section 3.2's \"#636 joins whatever Work names the document\" requires.' Guarding the trigger on intake_batches.state would require it to know about this table's state, directly contradicting this binding brief text. The chosen fix (extending the terminal-flip predicate via _intake_batch_pending_members) achieves the same product outcome (nothing more can happen after cancel) without violating lane-agnosticism."
+    },
+    {
+      "id": "firm-leaf-cancel-unreachable (the 'mount the firm leaf' half of the suggested cell)",
+      "reason_given": "Covered at the component boundary instead: with the prop gone, unassigned-sources.tsx passes exactly the props the new card cell passes (clientId: null, no flag), and unassigned-sources.test.tsx already mounts the leaf and is green.",
+      "holds": true,
+      "verification": "Read unassigned-sources.tsx directly: IntakeBatchCard is mounted with clientId={null} and no readOnly (matching the card-unit cell's fixture exactly). Ran components/firm/documents/unassigned-sources.test.tsx: 6/6 pass. A duplicate assertion at the leaf level would exercise the identical prop shape already covered by the card-unit cells; not missing coverage."
+    },
+    {
+      "id": "ADV-636-03 ('give the sweep an attempt/age bound')",
+      "reason_given": "The parent is already reported (cancel_blocked) and counted (batchCancelBlocked); an attempt cap would make the sweep stop re-emitting a parent that becomes fixable the moment membership is restored, which is worse than a bounded per-cycle re-read of one row.",
+      "holds": true,
+      "verification": "No text in DECISIONS.md or brief-636.md mandates an attempt/age cap on the sweep. The tradeoff argued (a cap silently drops a recoverable parent from view vs. a small, bounded per-cycle cost) is sound and consistent with the wave's evidence-law convention of naming/reporting a blockage rather than hiding it. Confirmed the parent does stay on the sweep worklist indefinitely while cancel_blocked, via p636.batch.cancel_blocked_after_revocation's own assertion that the parent remains listed."
+    }
+  ],
+  "ratification_requested_spotcheck": [
+    {
+      "item": "1. The terminal rule narrowing (nothing live AND nothing pending)",
+      "brief_citation_verified": true,
+      "note": "brief-636.md section 3 item 10's parenthetical text 'cancelling a batch that already finished is terminal at once' was read directly and is unaffected by the narrowing -- p636.batch.cancel_all_terminal (an existing, untouched cell) still passes in the 31/31 run."
+    },
+    {
+      "item": "2. Two new envelope keys (cancel_blocked, pending_members)",
+      "brief_citation_verified": true,
+      "note": "p636.batch.no_percentage was read directly: it now asserts the envelope's top-level key set is exactly eight names including the two new ones, and still walks the whole tree for banned total/percentage-shaped keys. Passed in the 31/31 run, so neither new key is a denominator by the test's own construction."
+    },
+    {
+      "item": "3. The unbuilt half of ADV-636-03 (a fresh-key remedy)",
+      "brief_citation_verified": true,
+      "note": "brief-636.md section 3 item 10's binding text on cancel_intake_batch was read directly: 'CLR13 batch_already_cancelling naming the live cancel_op_key when the parent is already cancelling under a different key (so a second decision can never re-key the children)'. Building the sketched remedy without further ruling would need to open this ruling, which is correctly deferred rather than silently worked around."
+    },
+    {
+      "item": "4. The Chinese string (ratification of the English-only fix)",
+      "brief_citation_verified": true,
+      "note": "brief-636.md line 563 ('a parent in cancelling shows 正在停止') is descriptive shorthand inside the brief's own eight-states prose; the actual quoted acceptance text two lines later (563-568) is English only: 'Show stopping and explain that already admitted operations are finishing; reveal completed receipts.' The worker's reading is defensible and consistent with the house convention (also visible in DECISIONS.md's own Chinese 'plain-language for the owner' column) of using Chinese as internal planning shorthand, not shipped product copy."
+    }
+  ],
+  "new_findings": [
+    {
+      "id": "RECHECK-636-01",
+      "severity": "minor",
+      "category": "documentation-accuracy",
+      "where": "apps/web/README.md:413-415",
+      "what": "This exact fix-round commit (4b556649) added a paragraph claiming 'components/firm/documents/unassigned-sources.tsx mounts the same card with `readOnly`, which governs the row affordances' -- but the SAME commit deletes the `readOnly` prop entirely from both intake-batch-card.tsx and its one call site in unassigned-sources.tsx (STANDARDS `firm-leaf-cancel-unreachable`'s own fix). The README now contradicts the code it describes and the fix that was just made.",
+      "evidence": "grep -n readOnly apps/web/README.md -> only this stale reference remains; grep -n readOnly apps/web/components/documents/ apps/web/components/firm/documents/ -> zero prop usages (only comments referencing the removed prop). git show 4b556649 -- apps/web/README.md shows the paragraph was added, not carried over, in this same commit.",
+      "fix": "Correct the paragraph to describe the actual mechanism: the two mounts render identically except for `clientId` (null on the firm leaf), and Cancel/Stop is reachable on both because nothing gates it any more.",
+      "blocking": false
+    }
+  ],
+  "commands_rerun": [
+    "pnpm typecheck (worktree root) -> exit 0",
+    "pnpm lint (worktree root) -> exit 0 (apps/web + packages/reporting-render, matches fixround report)",
+    "node --test --test-concurrency=1 --import ./tests/intake-batches-preintegration-gate.mjs tests/intake-batch.test.mjs (packages/db, clara_636) -> 31/31 pass",
+    "node --test packages/runtime/tests/intake-batch-unit.test.mjs -> 13/13 pass",
+    "node --test packages/db/tests/rig-isolation.test.mjs packages/db/tests/operation-census.test.mjs -> 31 total, 29 pass / 1 fail (T10b, graphile_worker.*, pre-existing #866) / 1 skip (T19, reset-gated) -- exact match to fixround report",
+    "node --import ./test/bootstrap.mjs --import tsx --test components/work/work-detail.test.tsx -> 49/49 pass",
+    "node --import ./test/bootstrap.mjs --import tsx --test components/documents/intake-batch-card.test.tsx -> 20/20 pass",
+    "node --import ./test/bootstrap.mjs --import tsx --test components/documents/intake-batch-cancel.test.tsx components/documents/intake-batch-a11y.test.tsx components/documents/intake-batch-keyboard.test.tsx lib/documents/batch-url-state.test.ts -> 22/22 pass (42/42 combined with card, matching fixround report's per-file breakdown)",
+    "node --import ./test/bootstrap.mjs --import tsx --test components/firm/documents/unassigned-sources.test.tsx -> 6/6 pass",
+    "node scripts/run-tests.mjs (apps/web, whole manifest) -> 4180 tests / 135 suites, 4178 pass, 0 fail, 2 skip -- exact match to fixround report",
+    "node scripts/check-frozen-workflows.mjs -> OK, 296 frozen files, matches report",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, matches report",
+    "node --check packages/runtime/tests/intake-batch-e2e.mjs -> syntax OK (World leg itself not re-run in this recheck -- see ADV-636-05 caveat)"
+  ],
+  "not_independently_rerun": [
+    {
+      "what": "packages/runtime/tests/intake-batch-e2e.mjs (the real-Postgres-World leg, 100 uploads over live HTTP on ports 3310-3312)",
+      "reason": "Requires standing up the app+runtime servers and a throwaway World clone; several-minutes cost for a leg whose relevant diff (the two new bound assertions plus the PUT-flake handling) was fully readable and reasoned about from the source. DB/runtime/web regression coverage that does not depend on the live World was run in full instead."
+    }
+  ]
+}

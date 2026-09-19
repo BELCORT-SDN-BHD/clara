@@ -1,0 +1,159 @@
+{
+  "ticket": 656,
+  "recheck_of": "reports/656-fixround-1.md",
+  "head": "0a86d5ab12dfa980f4bc4b96fef7c87b643937ee",
+  "reviews_read": [
+    "reports/656-review-spec.json",
+    "reports/656-review-standards.json",
+    "reports/656-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "summary": "All eleven APPLIED findings are real, non-vacuous and match the fix round's own description: each fix was opened at its citing commit and the exact cell the report names was independently re-run on the rig (not just re-read). A1's refusal-envelope plumbing (egress.mjs -> opening-tb-produce.mjs -> opening-parse.mjs -> opening-source.ts's isKeyedFallback) is wired end to end -- a REFUSED trial balance now renders the reader's verbatim reason through the warning branch and never the keyed-fallback banner, proven both by synthetic cells and by two genuine OCR passes through the real writer. A2's rebuilt fixture actually reaches the obe_not_nil arm (delta arm passes on a matched pair, residue lands on OBE, exact token asserted). A3/spec-S1's six un-fixme'd legs are genuinely live: independently re-ran the whole walk and got 7 passed with zero fixme/skipped, matching the report exactly; the four app/fixture defects it names (seed-scoped mock guard, DataState-swallows-loading, the missing document name, and the opacity-70 contrast failure) are each a real, traceable diff, not a spec-only patch. A5's re-read cell is rebuilt on realOcrPass (real normalizeAzureLayout + real persist_document_extraction) and MEASURES CLR10 source_reread_since_parse rather than assuming it. A6's emission guard and its DB-backed cell genuinely persist a contradicting region through the real writer and measure 0 rows in document_extractions afterwards. A7's two disjunctions are now exact-token assertions, measured on the rig to be extraction_not_accepted. A8's mirror is documented and pinned against the real producer's shape (opening-tb-produce.test.mjs's last cell) with the World leg closing the loop. A10's coverage footer no longer renders a structurally-impossible zero as a measurement, and its two states (document-sourced vs keyed) are each independently exercised. The one small inaccuracy found is cosmetic: A3's own section header says 'APPLIED (three defects found)' while the commit message and the file's own header block correctly count four app defects plus one spec defect -- the fuller, correct count is disclosed in full in the report's 'walk, measured' table, so nothing is hidden, only the summary line undercounts. Both remaining items -- A4/spec-S2's prior_gl business_operation ratification request and A9's deliberately-left migration-tail note -- are correctly disposed: A4 is a genuine, brief-vs-invariant conflict properly escalated (not a worker fix) and DECISIONS.md has not been amended on this point since the brief was written, so it remains open for the orchestrator exactly as the report says; A9's reasoning is independently confirmed against the DB (0228's checksum is recorded in clara.schema_migrations on this rig) and against scripts/migrate.mjs's own checksum-drift check (lines 335-336), which would abort the next migrate() on this rig if the file were edited. A11, spec-S3 and standards-S1 correctly require no action. No new defect was introduced by the fix round: pnpm typecheck and pnpm lint are both green (matching exactly), the 41-gate DB battery for opening+registry is 31/31, the runtime opening/egress batteries are 84/84 (17+17+50), the World leg passes end to end on real Postgres, the Playwright walk is 7/7 with no skips, e2e-fixture-ownership is 18/18, check-frozen-workflows and check-parts-parity are both clean, the wider opening component surface (62 cells across 13 files, beyond just the five the report names) shows zero regressions from the workbench/dryrun-strip changes, the five named web batteries are exactly 32/32, and the whole apps/web unit suite is 4168 tests / 4166 pass / 0 fail / 2 skipped on an independent run -- one better than the report's own 1-fail number, because the failure is a documented pre-existing whole-suite-load flake in a file this ticket never touches (use-clara-thread-stop.test.ts), which simply did not fire on this run.",
+  "applied_findings": [
+    {
+      "id": "A1",
+      "source": "adversarial",
+      "severity": "blocker",
+      "citing_commit": "c65aea74e7925201f69b716a6c0a2a96c55d2e5a",
+      "claim": "the producer's {status, reason, refusals} now rides the extraction envelope under opening_tb_refusal (egress.mjs), readOpeningRefusal (opening-parse.mjs) reads it back off the newest done extraction only when zero lines came home, and a refused read answers 422 with the reason verbatim instead of the keyed-fallback signal",
+      "verification": "Read the diff at packages/runtime/lib/egress.mjs (opening = produceOpeningTbRegions(regions); openingRefusalEnvelopeEntry(opening) written onto envelope only when status==='refused', via a plain assignment not a conditional spread -- matches the parts-parity note), opening-tb-produce.mjs (OPENING_TB_REFUSAL_ENVELOPE_KEY='opening_tb_refusal', openingRefusalEnvelopeEntry only carries status='refused', explicitly not producer_error), and opening-parse.mjs (readOpeningRefusal SELECTs de.envelope->'opening_tb_refusal' off the newest done extraction, ordered by extracted_at/version_n/id desc, and parseOpeningTargets now branches on it before falling back to the bare no_opening_tb_lines token). Confirmed the face side needs no separate change: apps/web/lib/registers/opening-source.ts's isKeyedFallback checks reason==='no_opening_tb_lines' literally, so a verbatim refusal reason now naturally routes through opening-parse-action.tsx's warning branch, not the info banner -- verified by reading both files and by the new component cell (opening-parse-action.test.tsx:161-185) which mounts the component against a mocked {source_refusal:true, reason:REFUSAL} response and asserts the reason text renders, the 'Not read' warning heading appears, and neither 'key the balances' nor 'type the balances' appears. Independently ran node --test tests/opening-tb-produce.test.mjs (17/17), node --test tests/wave-b-opening-parse.test.mjs (17/17, including both A1-named cells: 'a REFUSED trial balance, an UNREADABLE row and a document that is not a trial balance are THREE different answers' and 'the refusal survives the REAL writer'), and node --import ./test/bootstrap.mjs --import tsx --test components/registers/opening-parse-action.test.tsx components/registers/opening-target-document-panel.test.tsx (20/20, matching the report's 10+10). Not vacuous: the cells assert the actual rendered text and the actual envelope key, not just an outcome label.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A2",
+      "source": "adversarial",
+      "severity": "major",
+      "citing_commit": "666d77fb6a790d867f504d65e487ee6550532242",
+      "claim": "p656.tie.obe_not_nil is rebuilt so the DELTA arm actually passes (a matched target pair whose printed figures do not sum) and the OBE arm fires with its own token, asserted exactly and cent-for-cent",
+      "verification": "Read the diff: the fixture now drafts items for BOTH targets in a pair that does not sum (cash + share capital, retained earnings omitted), asserts every dryrun delta is zero, asserts obe_net_cents === BEE.shareCr - BEE.cashDr exactly, and asserts claraReason(err) === 'obe_not_nil' (no disjunction). Independently ran node --test <41 gate imports> tests/opening-ledger-source.test.mjs tests/document-capability-registry.test.mjs on the rig: 31/31 pass, including this cell by name. Not vacuous: the cell now exercises the distinct code path its name claims (verified by reading _opening_seed_deltas' OBE exclusion argument in the fix's own comment and confirming the assertion is an equality, not a disjunction or a tautology).",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A3 / spec-S1",
+      "source": "adversarial + spec",
+      "severity": "major",
+      "citing_commit": "0a86d5ab12dfa980f4bc4b96fef7c87b643937ee",
+      "claim": "all six test.fixme legs are un-fixme'd and pass for real; the causes found were a client_id-only mock guard that starved a seed-scoped read (fixture), DataState swallowing a reload and unmounting the persistent refusal banner (app), a document mounted with documentName=null causing a doubled sha (app), an opacity-70 contrast failure axe caught on three legs (app), and the spec's own inverted /Ready to approve/i match; lane state is reset per cell via reset_opening_ledger_source_fixture",
+      "verification": "Read the full diff: opening-ledger-source-mock.mjs adds mineSeed() (seed_id/bound_scope_id guard) and the client-scoped reset_opening_ledger_source_fixture verb; opening-seed-workbench.tsx adds hasData and gates DataState's loading on !hasData && loading, and adds a separate tieDocumentRead feeding documentName instead of null; opening-dryrun-strip.tsx drops opacity-70 from the gate-reason span; opening-ledger-source-walk.spec.ts un-fixmes all six legs, adds a beforeEach reset call, and rewrites the assertion to toContainText(/Not ready to approve/) plus a negative match on the full satisfied-state sentence. Independently ran the walk myself: CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3350 CLARA_E2E_NEXT_PORT=3351 CLARA_E2E_RUNTIME_PORT=3352 pnpm --filter @clara/web e2e opening-ledger-source --reporter=line --workers=1 -> '7 passed (31.5s)', zero occurrences of 'skip' or 'fixme' or 'fail' in the run log. Also ran e2e/e2e-fixture-ownership.test.ts independently: 18/18. Not vacuous: each of the four app-side fixes is a real behavioural change (a loading-state gate, a separate data read, a Tailwind opacity utility removed) traceable to a specific line, not a spec-only patch. One accuracy nit: the report's own A3 section header reads 'APPLIED (three defects found)' but the same commit's message and the walk file's own header block correctly say FOUR app/fixture defects were found (plus the one spec defect) -- the fuller and correct count is given in full elsewhere in the same report (the 'walk, measured' table); this is a summary-line undercount, not a suppressed defect, and every defect is independently confirmed present and fixed.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A5",
+      "source": "adversarial",
+      "severity": "major",
+      "citing_commit": "c65aea74e7925201f69b716a6c0a2a96c55d2e5a",
+      "claim": "the re-read cell is rebuilt on realOcrPass (real normalizeAzureLayout through real clara.persist_document_extraction) instead of raw INSERTs, and MEASURES that a genuine re-OCR refuses CLR10 source_reread_since_parse, not a CLR31 staleness wall",
+      "verification": "Read wave-b-opening-parse.test.mjs:177-202 (realOcrPass: real task row, real reservation, real normalizeAzureLayout, real clara.persist_document_extraction call) and the RE-READ test at :347-394, which calls realOcrPass twice and asserts the second parse answers exactly {status:'conflict', reason:'source_reread_since_parse'} (no disjunction). Grepped the file for 'insert into clara.document_regions' / 'insert into clara.document_extractions' in this test and confirmed the RE-READ cell contains neither -- both raw inserts that remain in the file are in a different, older helper (buildOpeningFixture's initial seeding, not the re-read arm). Independently ran node --test tests/wave-b-opening-parse.test.mjs on the rig: 17/17, including this cell by name ('#656 RE-READ: a second REAL OCR pass supersedes the cited run...'). Not vacuous: the assertion is an exact deepEqual on the response body, not a disjunction or a status-code-only check.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A6",
+      "source": "adversarial",
+      "severity": "minor",
+      "citing_commit": "c65aea74e7925201f69b716a6c0a2a96c55d2e5a",
+      "claim": "the module header is corrected to say a bad region costs the document its WHOLE extraction (not a few extra rows), disagreeingOpeningRegion re-checks the DB's own monetary invariant before emission and drops the whole set on disagreement, and a DB-backed cell measures the loss directly",
+      "verification": "Read the header rewrite in opening-tb-produce.mjs (the new '### WHAT A BAD REGION COSTS, PRICED HONESTLY' section) and disagreeingOpeningRegion's implementation (re-derives via parseOpeningTbLine and compares monetary_cents/amountCents>0). Read the new DB-backed cell at wave-b-opening-parse.test.mjs:481-535: it hand-builds an innocent region plus a contradicting opening_tb.line region, calls the REAL clara.persist_document_extraction, asserts the call rejects with CLR31, then asserts `select count(*) from clara.document_extractions where document_id=... and engine_id=...` returns 0 -- the WHOLE extraction lost, innocent line included -- and separately asserts disagreeingOpeningRegion([contradicting]) actually flags it, so the producer's own guard is proven to make the same drift unreachable from the real path. Independently ran this cell (ok 17 in the 17/17 wave-b-opening-parse run) and confirmed the 0-row assertion is a real COUNT query against the rig, not a stub. Not vacuous.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A7",
+      "source": "adversarial",
+      "severity": "minor",
+      "citing_commit": "666d77fb6a790d867f504d65e487ee6550532242",
+      "claim": "p656.tie.stale_extraction and p656.tie.approve_rebinds now assert extraction_not_accepted exactly (the disjunction over two tokens is removed), with the other wall's condition named in a comment",
+      "verification": "Read the diff at opening-ledger-source.test.mjs:391-460 -- both assert.ok([...]) disjunctions replaced with assert.equal(claraReason(err), 'extraction_not_accepted', ...) and a comment explaining which wall fires first and why. Independently ran the 41-gate DB battery: 31/31, both cells passing on the exact-token assertion. Not vacuous: an exact equality is strictly stronger than the disjunction it replaces and the battery still passes, so the claim (this IS the wall that fires) is measured, not assumed.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A8",
+      "source": "adversarial",
+      "severity": "minor",
+      "citing_commit": "666d77fb6a790d867f504d65e487ee6550532242",
+      "claim": "produceTbRegions's hand-built element is documented as a MIRROR (packages/db has no dependency on packages/runtime), pointing at opening-tb-produce.test.mjs's own pin of the exact shape as the place a toRegion drift would be caught",
+      "verification": "This is the finding's own stated fallback (cross-package import was explicitly rejected as a new precedent), taken as written. Read the doc comment added above produceTbRegions in opening-ledger-source.test.mjs and the corresponding README.md addition; confirmed opening-tb-produce.test.mjs's last cell ('the emitted element shape is EXACTLY what the db battery's mirror writes') exists and passed in the 17/17 independent run. Confirmed the World leg (packages/runtime/tests/opening-ledger-source-e2e.mjs) independently PASSED end to end on the rig, which is the one place the real producer's bytes meet the real writer. This documents an accepted, disclosed residual rather than closing the underlying gap -- correctly scoped as a minor note, not oversold as a fix.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A10",
+      "source": "adversarial",
+      "severity": "note",
+      "citing_commit": "4d40fb589601281b53bd2c86d281e542f0f55297",
+      "claim": "isDocumentSourcedBasis(targets) gates the coverage footer: a wholly document-sourced basis states the structural fact ('cannot carry an unmapped line') instead of rendering a zero that could never have been anything else; a basis with a keyed row keeps the numeric count",
+      "verification": "Read the diff: opening-source.ts adds isDocumentSourcedBasis (targets.length>0 && every provenance_kind==='document'); opening-target-document-panel.tsx branches the Unmapped row on it, rendering coverageUnmappedImpossible in the structural case and the existing numeric row otherwise. Independently ran node --import ./test/bootstrap.mjs --import tsx --test components/registers/opening-target-document-panel.test.tsx: 10/10, including 'on a wholly document-sourced basis the footer STATES that an unmapped line is impossible, instead of printing a zero (fix-round A10)' and 'a basis carrying a KEYED row keeps the numeric unmapped count'. Not vacuous: both branches are independently exercised with different fixtures.",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "deliberately_left": [
+    {
+      "id": "A9",
+      "source": "adversarial",
+      "severity": "note",
+      "claim": "0228's tail section 5 heading ('NO OTHER KIND MOVED') is wider than its two checks (neither asserts byte-identity of the 227 untouched rows' basis/limits/level columns)",
+      "fix_round_reasoning": "0228 is already applied on this rig and its checksum is recorded in clara.schema_migrations; editing the file (even the one-line heading softening the finding itself offers) would desynchronise the ledger from disk, and migrate() re-verifies every applied version's checksum on every run and aborts on a mismatch. The opening_balance_doc basis was REWRITTEN not patched, so its pre-image is not recoverable from the file to redo a rollback/re-apply safely. Out of proportion to a note whose own suggested fix is a comment edit; a pre-merge recommendation (a pre-image digest, or softening the heading) is written for whoever applies this migration somewhere real, before it is applied anywhere real.",
+      "judgment": "HOLDS, and independently confirmed technically. Queried clara.schema_migrations on rig clara_656 directly: version='0228_opening_ledger_source', checksum recorded, applied_at=2026-09-18T20:31:37Z. Read packages/db/scripts/migrate.mjs:326-336 directly: it loads every applied (version,checksum) pair and computes migrationChecksum(readFileSync(...)) for each on-disk file, pushing a 'checksum drift... Migrations are immutable' failure into `drift` when they differ -- so editing 0228 on this rig would genuinely break the next migrate() run, exactly as claimed. The registry battery (19 of the 31/31 measured above) is independently confirmed green after 0228, so the note's own stated partial cover is real. No DECISIONS.md text requires byte-identity assertions on the untouched 227 rows; this is correctly a pre-merge recommendation for whoever lands the migration for real, not a defect in this worktree's evidence.",
+      "verdict": "HOLDS"
+    },
+    {
+      "id": "A11",
+      "source": "adversarial",
+      "severity": "note",
+      "claim": "seven failed-refutation attempts, recorded as negative evidence",
+      "fix_round_reasoning": "the finding states its own disposition (no action required); nothing to apply",
+      "judgment": "HOLDS. The finding is itself a set of documented FAILED attacks (silent no-op republication, vacuous re-based cells, from-scratch-chain pin mismatch, dead text-match discriminator, unsafe tie picker, broken OCR path, catch-all FK arm) with measured evidence for each; there is nothing here that names a defect to fix.",
+      "verdict": "HOLDS"
+    },
+    {
+      "id": "spec-S3",
+      "source": "spec",
+      "severity": "note",
+      "claim": "every quantitative claim in 656-final.md was independently reproduced by the spec reviewer",
+      "fix_round_reasoning": "positive evidence-quality note; no action needed",
+      "judgment": "HOLDS. This recheck's own independent re-runs (DB battery 31/31, runtime batteries 84/84, World leg PASS, walk 7/7, e2e-fixture-ownership 18/18, typecheck/lint green, five named web batteries 32/32) corroborate the same pattern of exact reproducibility across all three review rounds.",
+      "verdict": "HOLDS"
+    },
+    {
+      "id": "standards-S1",
+      "source": "standards",
+      "severity": "note",
+      "claim": "apps/web/lib/journals/types.ts (the is_opening_balance type companion) is not separately named in DECISIONS.md's ownership table, though it rides beside the one authorized ENTRY_SELECT hunk",
+      "fix_round_reasoning": "the finding states its own disposition ('no action needed on the merits'): the field is optional, additive, and the type companion of the one authorized hunk",
+      "judgment": "HOLDS. Confirmed the field (is_opening_balance?: boolean | null) predates the fix round (commit 1e2022ec) and was not touched by any fix-round commit (git diff d94e6580..HEAD does not list lib/journals/types.ts). Optional and additive as described; no collision risk. Recorded correctly as a documentation reconciliation for the next brief, not a code defect.",
+      "verdict": "HOLDS"
+    }
+  ],
+  "ratification_requested": [
+    {
+      "id": "A4 / spec-S2",
+      "claim": "D13.3 rules prior_gl's business_operation to 'supported'; 0228 holds it at 'stored_only' because document-capability-registry.test.mjs:278-284 asserts, registry-wide, that no row claims business_operation='supported' where typed_facts is not 'supported', and nothing produces a prior_gl.line -- so applying D13.3 literally needs either a false typed_facts claim or relaxing a 240-row honesty law",
+      "status": "STILL OPEN -- no code change was made this round (correctly: this is an orchestrator call, not a worker fix) and DECISIONS.md has not been amended on this point since the brief was written",
+      "verification": "Confirmed the migration is unchanged by this round (0228 is not in the fix round's file list; git diff d94e6580..HEAD touches no packages/db/migrations file). Grepped DECISIONS.md for every #656 row: the only post-brief ruling is the 6.1 whole-registry-version-2 approval (already satisfied before this round, and independently reconfirmed here -- 0228's checksum is applied on the rig and the registry battery is 31/31 green with all 240 rows at version 2, single distinct version). No DECISIONS text answers the business_operation-level question the brief's own D13.3 literal text raises. Both the spec reviewer and this recheck agree the worker's conservative-hold-and-escalate reading is the correct application of WORK-ORDER rule 6 pending that ruling.",
+      "recommendation": "Carry forward exactly as filed: the orchestrator must rule on prior_gl's business_operation (accept the hold and amend D13.3, or accept option 3 -- the four-level vocabulary needs a fifth case, filed as follow-up F6) before this migration is applied anywhere real, because a v2 registry republication that reopens for a business_operation change would need a v3."
+    }
+  ],
+  "new_defects": [],
+  "measured_runs": [
+    { "cmd": "pnpm typecheck (worktree root)", "result": "green -- packages/runtime Done, apps/web Done, exit 0" },
+    { "cmd": "pnpm lint (worktree root)", "result": "green -- eslint, check-token-contrast, check-test-manifest(+selftest), check-message-keys(+selftest), check-ui-add-guard.selftest, db+runtime eslint, 43-case guard suite -- exit 0" },
+    { "cmd": "packages/db: node --test --test-concurrency=1 <41 gate imports> tests/opening-ledger-source.test.mjs tests/document-capability-registry.test.mjs", "result": "31 tests, 31 pass, 0 fail -- matches report exactly" },
+    { "cmd": "packages/runtime: node --test tests/opening-tb-produce.test.mjs", "result": "17 tests, 17 pass, 0 fail" },
+    { "cmd": "packages/runtime: node --test tests/wave-b-opening-parse.test.mjs", "result": "17 tests, 17 pass, 0 fail (incl. both A1-named cells, the RE-READ cell, and the A6 abort cell)" },
+    { "cmd": "packages/runtime: node --test tests/f4-egress-release-hold.test.mjs tests/intake-egress.test.mjs tests/kdoc-*.test.mjs", "result": "50 tests, 50 pass, 0 fail -- combined with the two files above, 84/84 total, matching the report's runtime-battery count exactly" },
+    { "cmd": "packages/runtime: node tests/opening-ledger-source-e2e.mjs (World leg)", "result": "PASS -- producer -> persist -> cite -> approve, end to end, on real Postgres under real roles, 5 regions / 5 targets / 5 approvals" },
+    { "cmd": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3350 CLARA_E2E_NEXT_PORT=3351 CLARA_E2E_RUNTIME_PORT=3352 pnpm --filter @clara/web e2e opening-ledger-source --reporter=line --workers=1", "result": "7 passed (31.5s), zero fixme/skip/fail in the log -- matches the report's shape exactly (timing differs, an expected rig-load variance)" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test e2e/e2e-fixture-ownership.test.ts", "result": "18 tests, 18 pass, 0 fail" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/registers/opening-target-document-panel.test.tsx components/registers/opening-parse-action.test.tsx", "result": "20 tests, 20 pass, 0 fail (10+10, matching the report)" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/registers/opening-a11y.test.tsx opening-approve-guarantees.test.tsx opening-create-tie-picker.test.tsx opening-dryrun-unchanged.test.tsx opening-i18n-keys.test.tsx opening-judgement.test.tsx opening-keyboard.test.tsx opening-parse-action.test.tsx opening-refusal-and-staleness.test.tsx opening-register-fix-round.test.tsx opening-register.test.tsx opening-target-document-panel.test.tsx opening-tie-gates.test.tsx", "result": "62 tests, 62 pass, 0 fail -- the wider opening component surface beyond the report's own named files, confirming no regression from opening-seed-workbench.tsx's hasData change or opening-dryrun-strip.tsx's contrast fix" },
+    { "cmd": "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/registers/opening-create-tie-picker.test.tsx opening-target-document-panel.test.tsx opening-parse-action.test.tsx opening-dryrun-unchanged.test.tsx lib/journals/opening-badge.test.ts", "result": "32 tests, 32 pass, 0 fail -- exactly the five web batteries the report names for its 32/32 claim" },
+    { "cmd": "apps/web: node scripts/run-tests.mjs (whole manifest)", "result": "4168 tests, 4166 pass, 0 fail, 2 skipped -- one BETTER than the report's own 4165/1/2, because the known whole-suite-load flake in lib/clara/use-clara-thread-stop.test.ts (a file this ticket does not touch) did not fire on this run" },
+    { "cmd": "node scripts/check-frozen-workflows.mjs (worktree root)", "result": "OK -- 296 frozen files verified, 53 'use workflow' modules frozen+registered, 3 retired entries" },
+    { "cmd": "packages/runtime: node scripts/check-parts-parity.mjs", "result": "OK -- reader superset of emittable, matching allowlist" },
+    { "cmd": "clara_656 rig query: select version, checksum, applied_at from clara.schema_migrations where version like '%0228%'", "result": "0228_opening_ledger_source, checksum present, applied_at=2026-09-18T20:31:37Z -- confirms A9's premise" },
+    { "cmd": "git diff --stat d94e6580..HEAD (the fix round's own full diff)", "result": "18 files changed, matches the fixround report's commit list exactly -- no migration file touched, no forbidden path touched" },
+    { "cmd": "git status --porcelain (worktree, after all runs)", "result": "clean -- no tracked file was modified by this recheck" }
+  ],
+  "notes": [
+    "HEAD 0a86d5ab matches the task brief's stated HEAD exactly.",
+    "The p656.m1 STOP-and-report gate and the §6.1 whole-registry-version-2 ruling both belong to the ORIGINAL implementation (migration 0228, commit 60cb6004), not to this fix round -- the fix round's four commits touch no migration file, so that gate's evidence (registry battery 19/19 within the 31/31 measured above, checksum applied on the rig) was not at risk this round and remains intact.",
+    "A3's section-header undercount ('three defects found' vs the four app/fixture defects the same document's commit message and header block correctly enumerate) is the only inaccuracy found in the report; it does not hide anything and does not change the verdict."
+  ]
+}

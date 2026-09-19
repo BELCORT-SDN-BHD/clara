@@ -1,0 +1,39 @@
+{
+  "ticket": 659,
+  "lens": "spec",
+  "lens_model": "claude-sonnet-5",
+  "branch": "impl/659-firm-home",
+  "head": "e14a8b9c",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\659-review-spec.json",
+  "method": "Read DECISIONS.md, brief-659.md (full, both pages), gh issue 659 (via gh api, comments empty), reports/659-final.md; read git diff origin/main...HEAD --stat and every changed file in the worktree; independently re-ran packages/db/tests/firm-portfolio-pack.test.mjs (41-flag gate chain: 15/15 pass) and compliance-watch-disposition.test.mjs (6/6 pass) against clara_659; ran both batteries FOCUSED with no gate flags on the current (fully-migrated) rig to sanity-check gate wiring (both still pass, as expected once 0231 is applied -- the brief's 'FAILS loudly below the migration' claim is a pre-0231 development-time measurement I could not replay without a from-scratch chain, which is out of bounds); ran packages/db/tests/operation-census.test.mjs + rig-isolation.test.mjs without reset flags (30 pass, 1 skip, matches report); ran pnpm typecheck and pnpm lint from the worktree root (both exit 0); ran pnpm --filter @clara/web e2e home-board on the assigned Playwright triple after clearing a stray port-holder from my own first attempt (15/15 passed, 50.9s, matches report). Read the full migration 0231_firm_portfolio_pack.sql body (cursor decode/last-pipe-split, coverage-token precedence, tail postcheck with prosrc negatives/positives, ACL and pin re-assertions), the two DB test files' cell bodies (not just names) for p659.portfolio.cross_firm, .no_money, .cursor_stability, the disposition door; the web diff for add-client-control.tsx extraction + mount points, use-firm-portfolio.ts, portfolio-pack.ts (drilldown href builder), needs-you-links.ts repoints, firm-recent-activity.tsx (list_activity swap + #861 naming), compliance-watch-affordance.tsx (receipt addition, acts untouched), CONTEXT.md, rig-meta.mjs (three registration sites), packages/db/package.json gate chain, e2e-fixture-ownership.test.ts declarations, home-board-mock.mjs / serve-built.mjs dispatch order (confirmed EMPTY_RPCS arm and dispatch position untouched, per the binding orchestrator ruling in DECISIONS Sec 6.1); spot-checked the blueprint-drift citations against the live docs/PRD.md and docs/ARCHITECTURE.md text.",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "minor",
+      "category": "undisclosed-brief-deviation",
+      "where": "apps/web/e2e/e2e-fixture-ownership.test.ts:370-371",
+      "what": "brief-659.md Sec 4.5 literally instructs: 'add it to home-board-mock.mjs as an honest-empty envelope handler and append it to that lane's debt array after #902's /rest/v1/rpc/get_client_work_pack string'. The branch instead classifies get_firm_portfolio_pack under unscopeable, not debt, leaving the debt array exactly as it was (only #902's string). Per the file's own documented distinction (unscopeable = a handler that structurally CANNOT be scoped; debt = a handler that COULD be scoped and simply is not), unscopeable is the factually correct category here -- the pack's signature genuinely carries no client argument at all (confirmed in 0231's tail: pg_get_function_arguments = 'p_limit integer DEFAULT 50, p_cursor text DEFAULT NULL::text, p_preview integer DEFAULT 3') -- so this reads as a considered correction rather than an error. It is not, however, listed in 659-final.md's 'Measurements that corrected the brief' section, so a reader diffing the brief against the branch would flag it as an unexplained departure.",
+      "evidence": "git diff origin/main...HEAD -- apps/web/e2e/e2e-fixture-ownership.test.ts shows 'unscopeable: [\"/rest/v1/rpc/get_firm_portfolio_pack\"], debt: [\"/rest/v1/rpc/get_client_work_pack\"]' (lines 370-371); brief-659.md's Sec 4.5 mock-verbs paragraph names the debt array; reports/659-final.md's 'Measurements that corrected the brief' section (lines ~42-59) does not mention this reclassification.",
+      "fix": "Add one line to the final report's corrections list naming this reclassification and its reason (no client parameter exists at all, unlike get_client_work_pack's unused p_client), so the deviation from the brief's literal instruction is traceable rather than silent. No code change needed -- the categorization itself is correct."
+    },
+    {
+      "id": "F2",
+      "severity": "note",
+      "category": "undisclosed-brief-deviation",
+      "where": "apps/web/messages/en.json:180 (recentDatedBy) vs brief-659.md D18.e",
+      "what": "DECISIONS/brief D18.e quotes a specific sentence as the divergence disclosure to carry forward: \"the surface states 'dated by when each Work started, not when it posted' before any click (apps/web/e2e/home-board-walk.spec.ts:424 pins that sentence today)\". The shipped firm-altitude sentence has the OPPOSITE polarity: \"Recent success is dated by when each Work posted, between {from} and {to} -- not by when it started.\" This appears substantively justified once you trace the mechanism: 0231's recent_success count is genuinely keyed on a COMMITTED operation_receipts row (posted), and the drilldown link reuses list_accounting_work's since/until, which filters on created_at (started) -- the OPPOSITE divergence direction from #650's client-altitude list-vs-count case, where the aggregate count is posted-based but an itemised preview list under it is sorted by started date. The chosen sentence is factually accurate for what this door actually does. But it directly contradicts the literal text DECISIONS quotes, and 659-final.md does not call out the reversal as a considered correction anywhere in its 'Measurements that corrected the brief' section.",
+      "evidence": "apps/web/messages/en.json:180 vs apps/web/messages/en.json:801 (the original client-altitude sentence, unchanged); packages/db/migrations/0231_firm_portfolio_pack.sql's recent-success CTE keys on \"o.outcome = 'committed'\"; packages/db/migrations/0203_list_accounting_work_intent_key.sql:340-341 filters p_since/p_until against w.created_at; apps/web/lib/firm/portfolio-pack.ts:296-326 builds the recent_success href from the pack's own window dates through that same since/until axis.",
+      "fix": "Add one sentence to the final report's corrections list explaining the polarity reversal and why it is correct for this altitude (count-vs-drilldown divergence, not list-vs-count), so a reader comparing the brief's quoted text to the shipped copy does not read it as an unexplained contradiction of a binding ruling."
+    },
+    {
+      "id": "F3",
+      "severity": "note",
+      "category": "citation-precision",
+      "where": "docs/PRD.md:27 (cited as :31 in both brief-659.md and reports/659-final.md)",
+      "what": "The blueprint-drift row (both the brief's Docs section and the final report) cites 'docs/PRD.md:31' for the \"Firm workspace ... 跨获准客户查询或发起一批工作\" sentence that reads as delivered before 0231. The sentence is actually at PRD.md:27 in the checked-out tree (docs/PRD.md was not touched by this branch, so this is a pre-existing off-by-four in the brief that the final report inherited rather than re-measured).",
+      "evidence": "grep -n \"跨获准客户查询或发起一批工作\" docs/PRD.md -> \"27:购买和使用产品的是...Firm workspace 是事务所的客户组合视角，可以跨获准客户查询或发起一批工作...\"; brief-659.md's Docs section and reports/659-final.md's Blueprint drift line both say \":31\".",
+      "fix": "Correct the citation to docs/PRD.md:27 the next time #683's blueprint sync touches this row, so the drift pointer survives a line-count diff."
+    }
+  ],
+  "verdict": "accept"
+}

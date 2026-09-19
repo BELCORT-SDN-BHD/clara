@@ -1,0 +1,99 @@
+{
+  "ticket": 642,
+  "lens": "adversarial (refute-first). CODEX CROSS-MODEL LANE ATTEMPTED AND FAILED: `codex exec --sandbox read-only -m gpt-5.6-sol -c model_reasoning_effort=xhigh --skip-git-repo-check -C <the 642 worktree>` exited 0 with EMPTY stdout and stderr \"ERROR: You have hit your usage limit ... try again at 5:41 PM\" - exactly the exhaustion DECISIONS.md:268-271 predicted (reset 2026-09-19 17:41). Per that ruling the adversarial lens ran on claude-opus-5 xhigh instead, on the same targets (concurrency, replay/idempotency, revocation and role loss mid-flight, cross-firm/cross-client leakage, vacuous tests, from-scratch pins, overloads, deferred-trigger races), with three refutations proved by throwaway red cells written under the worktree, run on the rig, and deleted.",
+  "lens_model": "claude-opus-5",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\642-review-adversarial.json",
+  "findings": [
+    {
+      "id": "ADV-642-1",
+      "severity": "blocker",
+      "category": "silent-message-loss",
+      "where": "apps/web/lib/clara/intentKey.ts:64-68 (canonicalIntentAddress) + apps/web/lib/clara/useClaraThread.ts:418 (the derive call) + packages/db/migrations/0006_runtime_core.sql:954-960 (the unbounded replay lookup)",
+      "what": "The turn key is addressed by (threadId, altitude, trimmed draft, sorted attachment ids) and NOTHING that advances with the conversation. Every REPEATED utterance in a session therefore derives the key of the FIRST one and lands on begin_chat_turn's replay branch, which returns the original task without ever reading p_user_parts. The second message is silently dropped: no bubble, no task, no run, no Work, no error — the composer clears and a status line says 'Clara already had that message'. In an agent chat the repeated utterance IS the common case ('yes', 'ok', 'continue', 'post it', re-asking 'show me the trial balance'). The lookup has no time or state bound (0006:955-960, `limit 1`, no ordering, no window; chat_messages is append-only), so the collapse is PERMANENT for the life of the session — the person can never send that sentence again and must reword to be heard. This is a regression the branch introduces: before it, useClaraThread.ts minted crypto.randomUUID() per press and every genuine repeat was admitted.",
+      "evidence": "MEASURED with a throwaway red cell in the branch's own harness (apps/web/components/clara/thread-intent-key.test.tsx copied verbatim; file written, run, deleted; worktree left clean). PROBE1 drove the REAL send path twice with 'yes', the first send accepted and SETTLED (event: done) and the composer cleared, then 'yes' retyped: the wire carried `[\"intent-7cd79e5c858fe0c3f74622eac6a9deeb\",\"intent-7cd79e5c858fe0c3f74622eac6a9deeb\"]` — byte-identical keys — and the product's entire response to the second message was the single status line `Clara already had that message — this is the same request, not a second one.` CORROBORATED BY THE BRANCH'S OWN DB EVIDENCE: packages/runtime/tests/chat-turn-replay-db.test.mjs:130-160 (`p642.runtime.turn_replay_after_terminal`) asserts that after the first turn SETTLES a same-key POST answers 202 with the original terminal task, `tasks.rows[0].n === 1` (no second task), `rows.length === 1` (no second user row) and `clara.accounting_work gained no second row` — i.e. the worker measured the swallow and shipped it as the acceptance criterion. packages/db/tests/rig-runtime-lifecycle.test.mjs:527-530 measures the same at the door: the surviving row carries the FIRST payload. apps/web/e2e/chat-parity-walk.spec.ts:667-675 enshrines it in the browser walk.",
+      "fix": "Add the conversation's POSITION to the address — one more length-prefixed field in canonicalIntentAddress (apps/web/lib/clara/intentKey.ts:66), e.g. the count or last id of the persisted messages the composer has seen (`state.messages.length` / the last MessageRow id, both already in the store). Retry semantics are preserved exactly: a refused or lost send adds nothing to the transcript, so the retry derives the SAME key (including after a reload, since the transcript is re-read to the same length); a re-typed identical message AFTER a settled turn sees a longer transcript and derives a NEW key. Everything the branch's cells assert (p642.web.intent_key_survives_a_refusal, intent_key_and_changed_attachments, e2e.duplicate_send with the ack dropped mid-turn) stays green, because in every one of those the transcript has not advanced."
+    },
+    {
+      "id": "ADV-642-2",
+      "severity": "major",
+      "category": "a11y-live-region",
+      "where": "apps/web/components/clara/ClaraThreadView.tsx:565-567 (`alreadyAccepted`) and :571-573 (`checkingBeforeSend`) against :574-576 (`streamStatusLabel`), :582-584 (`stopped`), :596-613 (`stopFailedCause`) and :621-623 (`runLostSight`)",
+      "what": "The two NEW role=\"status\" lines are gated only on `!revoked`; they are NOT part of the file's mutually exclusive status ladder. The replayed line and the stream-status line therefore announce SIMULTANEOUSLY for one press, which is exactly the defect class this file's own comments say was fixed twice (:577-581 'two role=\"status\" siblings would announce twice', :592-595 'without that gate \"Clara is responding…\" and this line were two live regions announcing one press', :618-620 'it is exclusive with the other two above for the same reason they are exclusive with each other'). `checkingBeforeSend` can likewise coexist with `runLostSight` (:621), since neither gates on the other. The nested-live-region gate (thread-live-tool-states.test.tsx:171) does not catch this — it counts NESTING, not simultaneity — and thread-revoked.test.tsx:117's `lines.length === 1` is only asserted on the revoked arm, where everything else IS gated.",
+      "evidence": "MEASURED (same throwaway harness, PROBE2): beginSend → markAccepted(thread, task, replayed=true) → one `text-delta` chunk, then every role=\"status\" node in the rendered tree collected: `[\"Clara already had that message — this is the same request, not a second one.\",\"Clara is responding…\"]` — 2 lines, assertion `2 !== 1`. This is the ordinary replay path: a replayed task that is still running streams chunks immediately, so both lines are on screen for the whole turn.",
+      "fix": "Fold both new lines into the existing exclusive ladder — add `&& !stopped && stopFailedCause === null && !runLostSight && !streamStatusLabel(state, t)` to :565 and :571, or (better) render `alreadyAccepted` as plain non-live text: it is a fact about the SEND, not a live transition, and it does not need to be announced twice beside 'Clara is responding…'. Pin it with a cell that counts role=\"status\" nodes on the replayed+streaming state, the shape thread-revoked.test.tsx:117 already uses."
+    },
+    {
+      "id": "ADV-642-3",
+      "severity": "minor",
+      "category": "stale-state",
+      "where": "apps/web/lib/clara/threadStore.ts:300 (the only writer of `lastSendReplayed: true`) and :266 (the only clear, inside `beginSend`); rendered at apps/web/components/clara/ClaraThreadView.tsx:565",
+      "what": "`lastSendReplayed` is cleared by NOTHING except the next `beginSend`. `applyStreamEvent` (threadStore.ts:368-381), `markSendFailed` (:350-360), `markSent` (:347), `hydrateRun` and `hydrateMessages` all leave it set, and `useClaraThread`'s `[threadId]` effect (useClaraThread.ts:274-280) clears `lastIntentKeyRef` but not this store flag. The store is module-level and survives unmount, so after a replayed send the line 'Clara already had that message — this is the same request, not a second one.' stays on screen through the whole turn, after it settles, and across a rail close/reopen — a sentence about a press nobody is looking at any more, sitting over a quiet transcript. The field's own doc comment (:57-62) says 'the surface says it ONCE', which is not what the lifetime delivers.",
+      "evidence": "Code, exhaustively: `grep -n lastSendReplayed apps/web/lib/clara/threadStore.ts apps/web/components/clara/ClaraThreadView.tsx` returns exactly five sites — the interface (:62), the empty state (:93), the clear in beginSend (:266), the set in markAccepted (:300) and the render (ClaraThreadView.tsx:565). No mount/unmount/settle/thread-change path touches it. Module-level persistence is the same property thread-rehydrate.test.tsx relies on.",
+      "fix": "Clear it on the terminal the same way `settled`/`revoked` retire the clock in threadStore.ts:368-381, or give it the `markSent` transition — one line beside the existing `pendingUserParts` write."
+    },
+    {
+      "id": "ADV-642-4",
+      "severity": "minor",
+      "category": "incomplete-guard",
+      "where": "apps/web/lib/clara/useClaraThread.ts:257 (`lastIntentKeyRef` is a per-MOUNT useRef), :278 (reset to null) and :433 (`priorKey !== null` in the pre-read condition)",
+      "what": "The DISTINCT-resubmit pre-read — appendix C §3's left column, the thing cell p642.web.distinct_resubmit_reads_state_first exists to deliver — is keyed on a ref that lives only as long as the mount, while the `sendStatus === \"error\"` it pairs with lives in the module-level store. After a rail close/reopen, a scope switch back, or any remount following a failed send, `priorKey` is null, the `priorKey !== null` conjunct is false, and a genuinely DIFFERENT intent posts with no state re-read at all — the exact case the brief says nothing else protects (a different key cannot reach the door's replay branch).",
+      "evidence": "MEASURED (same throwaway harness, PROBE3): send 'book the invoice from Rome' → 500 → `claraThreadStore.getThread(THREAD).sendStatus === \"error\"`; unmount; remount; send the DIFFERENT sentence 'actually, book the Milan one'. Transcript reads before/after the distinct resubmit: **2 → 2** (no pre-read), with the new mount still observing `sendStatus: \"error\"`. The branch's own cell (apps/web/components/clara/thread-intent-key.test.tsx:207-240) only exercises the single-mount path, so it stays green.",
+      "fix": "Put the last posted key on the thread's store state beside `lastSendReplayed` (threadStore.ts) instead of in a mount-scoped ref, or treat `outcomeUnknown && priorKey === null` as 'unknown and unattributable' and take the pre-read."
+    },
+    {
+      "id": "ADV-642-5",
+      "severity": "minor",
+      "category": "incomplete-fix",
+      "where": "packages/runtime/src/streamRoute.ts:31-44 (attach-time AuthError answers an HTTP status, never an SSE `revoked`) vs :152-157 (the mid-stream arm the branch consumes); apps/web/lib/clara/stream.ts:329",
+      "what": "AC5's `revoked` hole is only half closed. A revocation discovered at ATTACH time — the reattach after a `detached`, a rail reopen, a scope switch back, any remount while the membership is already gone — comes back as HTTP 403/404, which `openTaskStream` turns into `throw new Error('stream attach failed (403)')` (stream.ts:329). That takes the ordinary reconnect path: backoff 1s→2s→4s→…, up to `maxAttempts: 8` (~3 minutes of 'Reconnecting… (attempt N)'), then a generic give-up. The person who has lost access is still told the connection is flaky, never that their access was removed — the same sentence the ticket set out to retire, on a path the new `case \"revoked\"` never sees.",
+      "evidence": "Code, both ends: streamRoute.ts:37-41 returns `res.status(err.status).json(...)` for an AuthError before any SSE header is written (`res.status(200).set({Content-Type: text/event-stream})` is at :48-53, after it), so no `revoked` frame can exist on that path; stream.ts:329 throws a plain Error on `!res.ok`, and `runClaraTaskStream`'s new arm (stream.ts:459-467) only inspects `evt.event`, which requires a frame. DEFAULT_RECONNECT_POLICY at stream.ts:353-358.",
+      "fix": "In `openTaskStream`/`runClaraTaskStream`'s attach-failure arm, treat 401/403/404 as the terminal revocation rather than a reconnectable transport failure — deliver the same `{event:'revoked', data:{taskId, reason}}` the mid-stream arm delivers, so one fact has one face. One cell, the shape of stream-revoked.test.ts:65."
+    },
+    {
+      "id": "ADV-642-6",
+      "severity": "minor",
+      "category": "a11y",
+      "where": "apps/web/components/clara/ClaraThreadView.tsx:779 (`aria-describedby=\"clara-composer-hint\"`) and :783 (`aria-invalid`), against the import at :23",
+      "what": "The composer is marked `aria-invalid` when a send fails, but nothing accessible says WHY: `aria-describedby` names only the static Enter/Shift+Enter hint, and the send error renders as a `StateBanner` elsewhere in the tree that the field never references. `FieldError` is not imported (:23 imports `Field, FieldDescription, FieldGroup, FieldLabel` only), although the brief's slice item 6 and cell 15 both name it. A screen-reader user hears 'invalid' with no reason and no route to one.",
+      "evidence": "ClaraThreadView.tsx:23 (`import { Field, FieldDescription, FieldGroup, FieldLabel } from \"@/components/ui/field\"` — no FieldError), :779, :783; the branch's own cell apps/web/components/clara/composer-field-wiring.test.tsx:146 asserts only that the attribute appears and the draft survives, never that the invalid state is described.",
+      "fix": "Render the send error as a `FieldError` inside the `Field` and append its id to `aria-describedby` while invalid — the `work-question-form.tsx:70` shape the brief points at already does this."
+    },
+    {
+      "id": "ADV-642-7",
+      "severity": "note",
+      "category": "correctness",
+      "where": "apps/web/components/clara/ClaraThreadView.tsx:287-292 (`transcriptRevision`)",
+      "what": "The scroll hook's `revision` is a SUM of five independent lengths, so two opposite changes landing in one commit cancel and the append effect (useTranscriptScroll.ts:208-219) does not run: the reader at the bottom is not followed and the reader scrolled up is not re-offered the jump control. The narrow but real case is the provisional bubble retiring (−1) in the same commit as one arriving chunk (+1), which is precisely what `markSent`/the first chunk do together.",
+      "evidence": "ClaraThreadView.tsx:287-292 (`state.messages.length + state.stream.provisionalChunks.length + (state.pendingUserParts ? 1 : 0) + clarifyParts.length + liveToolSteps.length`); useTranscriptScroll.ts:219 (`[revision, viewport, publishAtBottom, publishHasMoreBelow]`). Not measured — the collision is a single-commit coincidence I did not force.",
+      "fix": "Make the revision a monotonic counter bumped on any content change, or a cheap composite string, rather than a sum that can be stationary across a real change."
+    },
+    {
+      "id": "ADV-642-8",
+      "severity": "note",
+      "category": "fold-monotonicity",
+      "where": "apps/web/lib/clara/liveTools.ts:66 (`RANK`) and :116 (`if (RANK[state] > RANK[existing.state]) existing.state = state`)",
+      "what": "`done`, `failed` and `refused` all rank 2 and the comparison is strict, so once a call id reaches any of them no later chunk can change it. A `tool-error` arriving after a `tool-result` for the same `toolCallId` would leave the chip reading *done* for a step that threw. Whether the AI SDK can emit both for one call is documented-not-measured (the header at :14-29 measured the FIELD NAMES, not the ordering), so this is a note rather than a defect.",
+      "evidence": "liveTools.ts:66, :116. The branch's cells (apps/web/lib/clara/liveTools.test.ts:54-67, :118-127) drive result-then-nothing and a replay from index 0, never error-after-result.",
+      "fix": "If the ordering is possible, give `failed` a rank above `done`/`refused` (a thrown tool is the stronger statement), or key the terminal arm on last-writer-wins for the three rank-2 states only."
+    },
+    {
+      "id": "ADV-642-9",
+      "severity": "note",
+      "category": "dom-ids",
+      "where": "apps/web/components/clara/ClaraThreadView.tsx:758 (`htmlFor=\"clara-composer\"`), :763 (`id=\"clara-composer\"`), :808 (`id=\"clara-composer-hint\"`)",
+      "what": "Two document-global literal ids on a component that is mounted from two different places (the rail via rail-mount.tsx and the escalated `(full)` routes). Today only one instance is ever mounted at a time, so nothing breaks; the moment a second one is (a split view, a preview, a test that renders both variants), the label/description association silently binds to the first and the second composer loses its accessible name.",
+      "evidence": "ClaraThreadView.tsx:758, :763, :779, :808 — literal ids, not `useId()`.",
+      "fix": "`useId()` and interpolate, which is what `@/components/ui/field`'s own primitives expect."
+    },
+    {
+      "id": "ADV-642-10",
+      "severity": "note",
+      "category": "scope-verified",
+      "where": "git diff origin/main...HEAD --name-only (38 files)",
+      "what": "The four things most worth breaking a 'no migration, no cut' claim on all hold, re-measured rather than taken from the report: NO `.sql` file, NO frozen workflow body, NO `registry.ts` edit, NO `packages/db/package.json` gate row, NO `rig-meta` cohort and NO `action.yml` row; the single `packages/db/` file touched is a test. Cross-firm leakage through the new scope band is closed at both mounts — the `(full)` client page verifies `sessionBelongsToClient` BEFORE reading the name (page.tsx:29-31) and reads through the caller's own already-resolved token, never a SECURITY DEFINER widening; `(full)/layout.tsx` really does run `requireFirmScope()` (entrance 2 of the spine), so the escalated route is not the hole the 'bare passthrough' comments could be read to imply; and inside `(firm)` the band preserves `useClientIdentity()`'s null-not-a-guess rule verbatim (ClaraThreadView.tsx:270-272). The `ui:add` guard change is a Windows spawn repair only — the DECISION path (protected-file refusal, `CLARA_UI_ADD_OVERWRITE` unset) is untouched (apps/web/scripts/ui-add.mjs:73-89, :213-221).",
+      "evidence": "`git diff origin/main...HEAD --name-only | grep -E '\\.sql$|frozen|registry\\.ts|workflows/'` → no match. apps/web/app/(full)/layout.tsx:39 `await requireFirmScope()`. apps/web/app/(full)/clients/[clientId]/clara/[threadId]/page.tsx:29-31, :40-49. Re-ran the ticket's own web cells on this rig: `node --import ./test/bootstrap.mjs --import tsx --test components/clara/thread-live-regions.test.tsx components/clara/thread-intent-key.test.tsx components/clara/thread-revoked.test.tsx components/clara/thread-live-tool-states.test.tsx lib/clara/useTranscriptScroll.test.ts` → **25 tests, 25 pass, 0 fail**, so every finding above is an ADDITION to a green suite, not an existing red.",
+      "fix": "None needed — recorded so the next reader does not re-litigate it."
+    }
+  ],
+  "verdict": "fix_then_accept"
+}

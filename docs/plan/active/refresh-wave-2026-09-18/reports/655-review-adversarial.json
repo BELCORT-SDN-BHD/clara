@@ -1,0 +1,81 @@
+{
+  "ticket": 655,
+  "lens": "adversarial",
+  "lens_model": "claude-opus-5 (Codex cross-model lane FAILED: `codex exec --sandbox read-only -m gpt-5.6-sol -c model_reasoning_effort=xhigh` exited with \"ERROR: You've hit your usage limit ... try again at 5:41 PM\" -- the exhaustion DECISIONS.md:268-271 predicted. The adversarial review was run in-session instead, on the same target list, with red cells measured on rig 127.0.0.1:55705/clara_655.)",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\655-review-adversarial.json",
+  "verdict": "fix_then_accept",
+  "findings": [
+    {
+      "id": "ADV-655-1",
+      "severity": "blocker",
+      "category": "concurrency-silent-wrong-answer",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:1170-1196 (the post-rung write path of clara.admit_trade_invoice_work); the pre-rung probe it bypasses is at :1076-1098",
+      "what": "Two concurrent admissions under ONE intent key with DIFFERENT typed particulars both leave as SUCCESS. The loser's trade invoice is silently discarded by `on conflict (work_id) do nothing` (:1170) and the door then returns the WINNER's `invoice_id` folded together with the LOSER's own `kind` / `counterparty_id` / `due_date` / `due_date_source` (:1188-1191) -- an answer that describes an object the database does not hold. The door's only particulars comparison (`v_prior_canon is distinct from v_canon`, :1091) lives on the pre-lock read path at step 4, which a concurrent pair BOTH pass before either commits; after the rung the door delegates conflict detection to `clara._admit_accounting_work_core`, which compares basis digest / purpose / source_refs / adjustment (0194:1171-1190) and can see NOTHING of counterparty, reference, document_date, due_date, total_cents or tax_facts. Any payload that differs only in the typed half -- i.e. everything this ticket exists to record -- passes.",
+      "evidence": "MEASURED on clara_655 with a throwaway cell driven through the battery's own `withClientRungHeld` / `awaitRungWaiters` barrier (written under packages/db/tests/, run, deleted). Two admissions, same key, same journal basis, different party and reference. Both answered ok; the second carried `replayed:true`. Stored rows: exactly ONE, `{reference: ADV-A-0001, counterparty_id: 75c45229-3bb3-4592-8c27-a44815bffe82}`. Caller B was answered `counterparty_id: 3cf36f93-7963-4c42-b122-9edbf78dd22f` (Adv Beta Trading) against `invoice_id: 09d5e86f-d272-4fac-a2b8-160466ce2dbf`, whose stored party is Adv Alpha Supplies and whose stored reference is ADV-A-0001. The Work then posts Alpha's bill while caller B is told it recorded Beta's. End-to-end reach: packages/runtime/src/workRoutes.ts:1343-1356 forwards the door's answer verbatim in a 202 and suppresses the enqueue on `replayed:true`; apps/web/components/accounting/trade-invoice-form.tsx:182, :193-195, :208 mint the intentKey ONCE per draft and persist it in storage keyed on {user, firm, client} only -- so two tabs on one client restore the SAME key, and applyResult (:304-311) clears the draft and reports accepted. The sequential case IS caught (:1091, p655.replay.one_receipt); only the raced case is not.",
+      "fix": "After `select ti.id into v_invoice` (0225:1171), re-read `ti.particulars` and raise `intent_payload_conflict` when it is distinct from `v_canon` -- the exact idiom `_admit_accounting_work_core` already uses for its own concurrent-race re-read (0194:1239-1256). Then widen p655.replay.race (packages/db/tests/trade-invoice.test.mjs:573-601) to drive DIVERGENT particulars and assert that the loser leaves as CLR10 intent_payload_conflict and that every answered caller's returned counterparty_id / reference match the row its invoice_id names."
+    },
+    {
+      "id": "ADV-655-2",
+      "severity": "major",
+      "category": "accounting-correctness",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:956-968 (clara._trade_invoice_due, the `counterparty_terms` arm at :961-964)",
+      "what": "When the due date is not stated, it is derived as `posting_date + payment_terms_days`, not `document_date + payment_terms_days`. On the coding lane the two coincide because that lane posts the document's own date; on THIS lane they do not -- the ticket added `document_date` precisely because the Work lane's posting date is chosen separately, and the battery's own fixture spells the gap (TI_DATE = {document: 2026-03-04, posting: 2026-03-31}, packages/db/tests/trade-invoice-fixtures.mjs:122). Payment terms run from the document, so a bill's due date now moves with when the firm got round to posting it. The wrong date is written durably into `clara.trade_invoices.due_date` (append-only, ZERO admitted updates -- 0225:382-419, so it can never be corrected in place) and copied into `clara.open_items.due_date` (0225:2258-2264), which is the overdue marker `ap_aging` / `ar_aging` render.",
+      "evidence": "MEASURED on clara_655 (throwaway cell, run and deleted): supplier bill document_date 2026-03-04, posting_date 2026-03-31, counterparty payment_terms_days 30 -> stored `due_date = 2026-04-30`, `due_date_source = counterparty_terms`, and `open_items.due_date = 2026-04-30`. document_date + 30 is 2026-04-03: a 27-day error in the AP aging for one ordinary month-end posting. NOTE FOR THE ORCHESTRATOR: the implementer followed the brief -- brief-655.md:147 prescribes `posting_date + 30` verbatim and brief-655.md:17 (D12c) leaves the anchor unstated while pointing at the legacy producer 0040:6010-6015. This is a brief/spec defect the implementation faithfully reproduced, not an implementer slip; it needs a ruling, not just a patch.",
+      "fix": "Rule the anchor. If the document is the anchor (which both the existence of `document_date` and the constraint `ck_trade_invoices_due_after_document` imply), change 0225:961-964 to `(p_particulars->>'document_date')::date + p_terms_days` and re-point p655.due.terms_fallback (trade-invoice.test.mjs:359-373) at 2026-04-03. Leave 0040's coding-lane splice untouched (D12c) and state the divergence, since the two lanes then genuinely disagree whenever document_date <> posting_date -- which is also what p655.parity must then assert rather than hide (see ADV-655-3)."
+    },
+    {
+      "id": "ADV-655-3",
+      "severity": "major",
+      "category": "vacuous-test",
+      "where": "packages/db/tests/trade-invoice.test.mjs:573-601 (p655.replay.race) and :830-886 (p655.parity.source_vs_direct)",
+      "what": "The two cells that would have caught ADV-655-1 and ADV-655-2 are each constructed so the defect cannot appear. p655.replay.race races two admissions built from the SAME `p` and `b` (:578-579, :583-586), so the only divergence the door cannot detect is never exercised; its assertions then reduce to 'one row survives', 'not a raw 23505', 'at least one caller is answered' and 'answered callers name the same invoice' (:589-601) -- every one of which the defective door satisfies while lying to the second caller. p655.parity.source_vs_direct builds the coding-lane comparand with `postingDate: TI_DATE.posting` and no document date at all (:855), so both lanes derive from the same posting date, and the cell's `assert.equal(dItem.due_date, cItem.due_date, \"...both lanes derive posting_date + payment_terms_days\")` (:874-875) proves the two implementations agree on an arithmetic, never that the arithmetic is the right one for a lane that carries a separate document date.",
+      "evidence": "Read at the cited lines. Both defects were reproduced on the rig (ADV-655-1, ADV-655-2 above) against a branch on which both these cells are green -- reports/655-final.md records `node --test $GATES tests/trade-invoice.test.mjs` at 26 pass / 0 fail / 0 skip. A cell that is green while the defect it is named for is live is what DECISIONS.md section 4's evidence law exists to exclude.",
+      "fix": "p655.replay.race: race DIVERGENT particulars (different counterparty and reference, identical basis) and assert both the loser's typed refusal AND that each answered caller's returned counterparty_id / due_date match the row its invoice_id names. p655.parity.source_vs_direct: give the Work-lane comparand a document_date that differs from the posting date and assert the due date against the RULE, not against the other lane's output; keep the coding-lane equality as a separate, explicitly scoped claim."
+    },
+    {
+      "id": "ADV-655-4",
+      "severity": "minor",
+      "category": "evidence-gap",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:1131-1137 and :1150-1157 (the two `source_already_posted` raises) versus packages/db/tests/trade-invoice.test.mjs (whole file)",
+      "what": "`source_already_posted` is one of the FOURTEEN tokens DECISIONS.md:50 and brief-655.md:87 / :108 fix as the door's binding contract; the door raises it twice (cheap check, then again under the rung) and packages/db/tests/trade-invoice-fixtures.mjs:90 declares the constant. No cell in the battery, in the runtime World legs or in the Playwright walk ever exercises it, and reports/655-final.md does not name it as a residual. `client_inactive` is in the same position: declared at fixtures:92, raised at 0225:1059-1062, no cell.",
+      "evidence": "`grep -o \"TI_REASON\\.[a-zA-Z]*\" packages/db/tests/trade-invoice.test.mjs | sort | uniq -c` returns fourteen distinct tokens and neither `sourceAlreadyPosted` nor `clientInactive`; `grep -rn source_already_posted packages/db/tests packages/runtime/tests apps/web` returns hits only in OTHER lanes' batteries (coding-lane-evidence-link, journal-work-evidence). I measured that `client_inactive` IS in fact raised -- throwaway cell, client status flipped to `archived`, door answered CLR10 {\"reason\":\"client_inactive\"} -- so that gap is evidence, not behaviour. `source_already_posted` I did not drive.",
+      "fix": "Add two assertions to the existing p655.authority.floors cell: an archived client (already measured to work) and a cited document that already backs a posted entry, each through `refusesTi` so the 'wrote nothing' half is proved too. Or name both as residuals in the report -- DECISIONS.md section 4 admits a NAMED residual, not silence."
+    },
+    {
+      "id": "ADV-655-5",
+      "severity": "minor",
+      "category": "dead-code",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:736-747 (step 6 of clara._assert_trade_invoice_basis, the debit/credit re-sum)",
+      "what": "Step 6's own balance check is unreachable. Step 2 (:643-659) already calls `clara._assert_journal_basis`, which raises for ANY imbalance (0178:780-783, `detail.constraint='balanced'`), and the door's re-badge arm (:648-655) converts exactly that into `unbalanced_basis`. Nothing can reach :742 with v_dr <> v_cr. The comment at :733-735 argues it asks 'the same law of the BASIS, at admission' -- but that is what step 2 already did.",
+      "evidence": "MEASURED: an unbalanced basis (100000 Dr / 106000 Cr) through the door returned CLR10 detail `{\"field\": \"lines\", \"reason\": \"unbalanced_basis\", \"constraint\": \"balanced\", \"debit_cents\": 100000, \"credit_cents\": 106000}`. The `field` / `constraint` keys are `_assert_journal_basis`'s own (0178:781-783), proving the re-badge arm fired and step 6 did not -- step 6's raise builds a detail with neither key (:743-746), so the two are distinguishable and the one that fires is step 2's.",
+      "fix": "Delete step 6, or state in its comment that it is a belt behind a door that already closed, so a later reader does not take its presence as the reason an unbalanced basis is refused."
+    },
+    {
+      "id": "ADV-655-6",
+      "severity": "note",
+      "category": "duplicate-detection",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:304-356 (clara.trade_invoices -- uniques are (work_id) and (logical_op_id) only; `reference` at :319 carries no uniqueness and no cross-check)",
+      "what": "The same supplier bill number can be recorded twice for the same counterparty under two intent keys, producing two trade invoices, two AP open items and double the payable. Nothing in the door, the birth trigger or the belts looks at `(client_id, counterparty_id, reference)`. The ticket's AC4 and AC9 both say 'duplicate'; this branch reads 'duplicate' exclusively as 'the same intent replayed' and reports AC9 as done. reports/655-final.md does not name a same-document-number residual.",
+      "evidence": "MEASURED on clara_655 (throwaway cell, run and deleted): two full admit-then-post cycles with reference `ALPHA-2026-0042` and the same vendor. Result: `trade_invoices` grouped by reference = [{reference: ALPHA-2026-0042, n: 2}]; `open_items` for the client = {count: 2, sum: 212000} sen for one 1,060.00 bill.",
+      "fix": "Either name it as a residual with an owner (a warn-not-refuse duplicate probe is the usual shape -- the person is told 'this number is already recorded, here is the Work' and chooses), or add a non-unique advisory check at admission. A hard unique on `(client_id, counterparty_id, reference)` would be wrong: two suppliers legitimately reuse numbers and `reference` is nullable."
+    },
+    {
+      "id": "ADV-655-7",
+      "severity": "note",
+      "category": "latent-ordering",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:1988-1998 (LADDER 3T inside clara._subledger_classify_entry)",
+      "what": "The comment at :1972-1976 says LADDER 3T sits 'ABOVE LADDER 5's coding_kind is null => adjustment default, which is the only branch it can take away from'. Structurally it sits above ALL the coding_kind ladders: the if/elsif chain tests `v_ti_kind` before `e.coding_kind` is read at all. That is harmless TODAY only because no entry carries both a coding_kind and a trade invoice (p655.rig.coding_kind_untouched pins this lane to NULL). #665's cutover -- which DECISIONS.md D11 schedules and reports/655-final.md names as the merge owner -- produces exactly the entry that carries both, and at that moment the resolver, not the column, decides the kind.",
+      "evidence": "Read at 0225:1988-1998; the guard the comment claims (that 3T can only displace LADDER 5) is not expressed in the code, and the tail census at :2621-2634 asserts congruence between the classifier and the birth trigger, not the claimed rank. No measured failure today -- this is a latent claim/code divergence, filed as a note.",
+      "fix": "Either restate the comment to say what the code does, or gate LADDER 3T on `e.coding_kind is null` so the code matches the claim and #665's cutover has to make an explicit decision rather than inherit one."
+    },
+    {
+      "id": "ADV-655-8",
+      "severity": "note",
+      "category": "dead-input",
+      "where": "packages/db/migrations/0225_trade_invoices.sql:890-945 (clara._trade_invoice_resolve_party) and packages/runtime/lib/trade-invoice-basis.ts:96-103 (the `tin` field)",
+      "what": "`tin` is accepted by the chat tool schema, translated by the runtime route (workRoutes.ts, the registrationNo/tin loop) and named in the door's `party_unresolved` detail (:911-914), but is never used as a lookup key: the resolver matches on registration_normalized (:919-928), then on name_normalized / alias_normalized (:902-909). A payload carrying only a TIN -- the ordinary shape of a Malaysian e-invoice -- leaves as `party_unresolved` even when `clara.counterparties.tin` holds it. The schema's own description ('The tax identification number the document states, if it states one') reads as support.",
+      "evidence": "Read at the cited lines: the count query at 0225:902-909 guards on `v_name_n <> ''` and never references v_tin; v_tin is assigned at :898 and used only in the error message at :911. `clara.counterparties.tin` exists (0037:1867) and 0215:1157-1164 joins on it -- for a cross-client identifier WATCH, not for resolution, so no granted resolver anywhere in the estate resolves by TIN. Not driven on the rig.",
+      "fix": "Either add the TIN arm beside the registration arm (same shape; the precedence question needs settling), or drop `tin` from the wire schema and from the door's detail so the contract stops advertising a key that cannot resolve anything."
+    }
+  ]
+}

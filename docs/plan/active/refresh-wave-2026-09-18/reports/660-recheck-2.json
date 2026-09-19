@@ -1,0 +1,76 @@
+{
+  "ticket": 660,
+  "role": "recheck",
+  "recheck_round": 2,
+  "recheck_model": "claude-sonnet-5 (recheck reviewer, workflow harness)",
+  "head_checked": "c14bd953e8ba2de8a64e601ad951db4e720b224c",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\660",
+  "rig": "127.0.0.1:55710 / clara_660",
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\660-recheck-2.json",
+  "inputs_read": [
+    "reports/660-fixround-1.md (the \"Fix round 2\" section, commits 35c691c3 / c14bd953)",
+    "reports/660-recheck-1.json (source of NF-1 / NF-2, the two items fix round 2 was scoped to close)",
+    "DECISIONS.md \u00a76.2.1 (#660 row: cash_set_published_after_books_start etc. ratified as shipped) and \u00a76.2.2 (fix-round-2 work order: NF-1, NF-2)"
+  ],
+  "verdict": "accept",
+  "summary": "Both DECISIONS \u00a76.2.2 #660 items are done and hold up under independent re-verification at c14bd953. NF-1 (35c691c3): the race's loser is now refused CLR11 cash_set_version_raced instead of the misleading CLR10 first_version_after_books_start. Verified by (a) re-running the exact two-real-session cell p660.set.publish_race_loser_code (1/1 pass), (b) reading the diff, which matches the report's description exactly (a separate re-read statement after the FOR UPDATE select returns null, settling on any existing version row rather than treating null as proof of absence), (c) independently re-measuring on clara_660 that all five read-only dependency bodies the migration pins (trial_balance_as_of, _metric_selector_account_ids, create_account_set_v1, finalize_close, reopen_fiscal_year) are still byte-identical to the report's claimed sha256 values -- so \"this file recuts nothing\" still holds after the re-open, (d) independently re-measuring the fixed publish_client_cash_account_set body's sha256 (b84c152869c4148339e67b0d26907ccec62564c182008ac3e25adf6feaf8e750) matches exactly, (e) independently confirming the route-2 precondition (18 clara% roles on clara_660, which would fail 0154's cluster-wide census on a second from-scratch chain), and (f) confirming the migration ledger row's checksum equals sha256 of the CURRENT file on disk exactly (b0d0c56e60497de4b06d2dcf90dcca24be91032b58ddf6c804d01667abab15e8), so the applied migration is the one in the working tree, not a stale copy. NF-2 (softened 'fully green' claim): the corrected prose in the report is substantively accurate -- git diff origin/main...HEAD is empty for both use-clara-thread-stop.test.ts and its underlying hook module (useClaraThread.ts); the report's exact filename 'use-clara-thread-stop.ts' does not exist as a standalone source file (the hook lives in useClaraThread.ts and is only exercised by the *.test.ts file), a cosmetic imprecision that does not change the substance of the claim. All independently re-run commands the fix-round-2 report cites match exactly: pnpm typecheck (exit 0), pnpm lint (exit 0), the 0232 battery with the 41 packages/db gate imports restricted to client-financial-pack.test.mjs + operation-census.test.mjs + rig-isolation.test.mjs (66 tests \u00b7 65 pass \u00b7 0 fail \u00b7 1 skipped, the skip being rig-isolation T19 which correctly requires CLARA_RIG_ALLOW_RESET), and apps/web's firm-scope-db-pins.test.ts after the 0232 re-pin (22/22). One task-text discrepancy is recorded below (not a #660 defect): the runtime instructions handed to this recheck session ask to also re-run 'the parity + anchor cells for #655', but those cells (p655.parity.source_vs_direct, p655.due.anchor_document_date) belong entirely to ticket #655's own fix-round-2 work (per reports/655-fixround-1.md), live in a different worktree/branch, and do not exist anywhere in the #660 worktree or on the clara_660 rig -- confirmed by grep across the whole #660 tree for trade_invoice / _trade_invoice_due / any *655* source file (none found). This looks like cross-ticket contamination in the computed task text rather than a real #660 obligation, so it was not run and is flagged rather than silently skipped or fabricated.",
+  "applied_findings": [
+    {
+      "id": "NF-1",
+      "claim": "the loser of a concurrent cash-set publish is now told it lost (CLR11 cash_set_version_raced), never that its date predates the books (CLR10 first_version_after_books_start); a null from the locked SELECT is re-checked against a fresh, separate-statement read of the client's whole version set before falling into the first-version branch",
+      "commit": "35c691c3",
+      "verification": "Read the diff at packages/db/migrations/0232_client_financial_pack.sql:563-606: a new v_seen count(*) query runs in a SEPARATE statement after the `for update` select returns v_cur_id = null, and if v_seen > 0 the function raises CLR11 with detail.reason = cash_set_version_raced BEFORE reaching the first-version branch; the stale comment claiming the re-read 'sees what the first did with it' is replaced with an accurate explanation of the EvalPlanQual mechanics. Independently re-ran the exact cited cell: `node --test --test-name-pattern=\"publish_race_loser_code\" --test-concurrency=1 tests/client-financial-pack.test.mjs` on clara_660 -> 1 test, 1 pass, 0 fail (352ms). The test itself uses two genuinely separate pg.Client sessions (twoSessions/asHumanSession), opens session A's transaction and holds it uncommitted while minting revision 2, proves session B's publish call actually BLOCKS via pg_stat_activity's wait_event (not slept through), commits A, and asserts B's error is CLR11/cash_set_version_raced -- explicitly NOT CLR10/first_version_after_books_start and NOT a raw 23505 -- and that the resulting version table has exactly two rows (revision 1 superseded to the winner's date, revision 2 published from the winner's date). Independently re-measured the live installed body's sha256(prosrc) on clara_660: b84c152869c4148339e67b0d26907ccec62564c182008ac3e25adf6feaf8e750, matching the report's claimed 'byte-identical to what the migration installed' value exactly.",
+      "result": "CONFIRMED real, not vacuous, and independently reproduced"
+    },
+    {
+      "id": "NF-1 (route/prestate integrity)",
+      "claim": "0232 recuts nothing; the five read-only dependency bodies it pins by sha256(prosrc) are unchanged after the drop-and-remigrate re-open, and route (2) rather than route (1) was the correct choice because clara_660 already carries 18 clara% roles",
+      "commit": "35c691c3 / c14bd953 (the re-open procedure described in the report's own \"route taken\" section)",
+      "verification": "Independently queried clara_660 directly (node + pg, not psql, since psql is not installed in this shell): `select count(*) from pg_roles where rolname like 'clara%'` -> 18, matching the report's stated route-(1)-disqualifying measurement exactly. Independently re-measured sha256(prosrc) for all five named bodies (trial_balance_as_of, _metric_selector_account_ids, create_account_set_v1, finalize_close, reopen_fiscal_year) on the live database: all five MATCH the report's claimed pins exactly, byte for byte.",
+      "result": "CONFIRMED"
+    },
+    {
+      "id": "ledger-vs-file checksum",
+      "claim": "the applied migration checksum on clara.schema_migrations for version 0232_client_financial_pack equals sha256 of the CURRENT file on disk",
+      "commit": "n/a (verification of migration-runner integrity, per the task's explicit instruction)",
+      "verification": "select version, checksum from clara.schema_migrations where version like '%0232%' on clara_660 -> checksum b0d0c56e60497de4b06d2dcf90dcca24be91032b58ddf6c804d01667abab15e8. Independently computed sha256 of packages/db/migrations/0232_client_financial_pack.sql at HEAD c14bd953 -> b0d0c56e60497de4b06d2dcf90dcca24be91032b58ddf6c804d01667abab15e8. Identical.",
+      "result": "CONFIRMED match"
+    },
+    {
+      "id": "NF-2",
+      "claim": "the fix-round-1 re-runs table's 'fully green' sentence about the whole apps/web suite is corrected to name the pre-existing, non-deterministic use-clara-thread-stop.test.ts flake, and states #660 neither owns nor introduced it",
+      "commit": "documentation-only correction inside reports/660-fixround-1.md itself, no code commit",
+      "verification": "git diff origin/main...HEAD -- apps/web/lib/clara/use-clara-thread-stop.test.ts is empty (no changes on this branch). The report also names 'use-clara-thread-stop.ts' as a second untouched file; no such standalone source file exists in the tree (only the .test.ts file was found) -- the hook itself lives in apps/web/lib/clara/useClaraThread.ts, whose diff against origin/main is likewise empty. This is a cosmetic imprecision in the report's file naming, not a substantive error: the underlying claim (this branch does not touch the code or test behind the flake) holds either way.",
+      "result": "CONFIRMED substance; noted a harmless naming imprecision, not a defect"
+    }
+  ],
+  "regression_checks": [
+    { "check": "pnpm typecheck (worktree root, c14bd953)", "result": "PASS", "detail": "exit 0; apps/web and packages/runtime tsc --noEmit both Done" },
+    { "check": "pnpm lint (worktree root, c14bd953)", "result": "PASS", "detail": "exit 0; all 4 workspace projects incl. dispatch-model-guard 43/43, check-ui-add-guard.selftest, check-test-manifest, check-message-keys" },
+    { "check": "node --test --test-name-pattern=publish_race_loser_code --test-concurrency=1 tests/client-financial-pack.test.mjs", "result": "PASS", "detail": "1 test, 1 pass, 0 fail, 352ms -- the two-real-session race cell" },
+    { "check": "packages/db 0232 battery, 41 gate --import flags, restricted to client-financial-pack.test.mjs + operation-census.test.mjs + rig-isolation.test.mjs", "result": "PASS", "detail": "66 tests \u00b7 65 pass \u00b7 0 fail \u00b7 1 skipped -- exact match to the fix-round-2 report's table. Skip is rig-isolation T19 (destructive, correctly gated on CLARA_RIG_ALLOW_RESET, which was not set)" },
+    { "check": "apps/web tests/firm-scope-db-pins.test.ts", "result": "PASS", "detail": "22/22 -- confirms the 0232 sha re-pin (b0d0c56e...) in firm-scope-db-pins.corpus.ts is correct" },
+    { "check": "live count(*) from pg_roles where rolname like 'clara%' on clara_660", "result": "PASS", "detail": "18 -- matches the report's stated route-2 precondition" },
+    { "check": "live sha256(prosrc) of the 5 pinned read-only dependency bodies", "result": "PASS", "detail": "trial_balance_as_of, _metric_selector_account_ids, create_account_set_v1, finalize_close, reopen_fiscal_year -- all byte-identical to the report's claimed pins" },
+    { "check": "live sha256(prosrc) of clara.publish_client_cash_account_set", "result": "PASS", "detail": "b84c152869c4148339e67b0d26907ccec62564c182008ac3e25adf6feaf8e750 -- matches the report's claimed final/green pin exactly" },
+    { "check": "select version, checksum from clara.schema_migrations where version like '%0232%'", "result": "PASS", "detail": "b0d0c56e60497de4b06d2dcf90dcca24be91032b58ddf6c804d01667abab15e8, equal to sha256 of the current file on disk" },
+    { "check": "git show --stat on 35c691c3 and c14bd953", "result": "PASS", "detail": "both commits exist with the exact messages and file sets the report describes; the SQL diff at 35c691c3 matches the report's described mechanism line for line" },
+    { "check": "git diff origin/main...HEAD -- apps/web/lib/clara/use-clara-thread-stop.test.ts / useClaraThread.ts", "result": "PASS (empty diff)", "detail": "confirms #660 does not touch the flaky test or its hook" }
+  ],
+  "not_run_this_round": [
+    "the whole apps/web unit suite (node scripts/run-tests.mjs) -- the fix-round-2 report itself states this was NOT re-run in round 2 and labels 'unchanged therefore green' an inference, not a measurement; this recheck did not re-run it either since no code in the runtime/web layers changed in round 2 (only the db migration + its own tests + one corpus pin)",
+    "the e2e home-board-walk triple",
+    "check-frozen-workflows.mjs / check-parts-parity.mjs (no runtime module touched this round, per the report; not independently re-run)",
+    "the parity + anchor cells named in the task text as belonging to '#655' -- see task_text_discrepancy below; these do not exist in the #660 worktree/rig and were not run"
+  ],
+  "task_text_discrepancy": {
+    "item": "the computed task text instructs re-running \"the parity + anchor cells for #655\" as part of this #660 recheck",
+    "finding": "no #655 content exists anywhere in the #660 worktree (C:\\Users\\zhant\\Desktop\\clara-wt\\660) or on the clara_660 rig. Searched for trade_invoice / _trade_invoice_due / any file matching *655* across the whole tree (excluding node_modules): none found. Cross-referenced reports/655-fixround-1.md in the main repo: the cells 'p655.parity.source_vs_direct' and 'p655.due.anchor_document_date' are named there, as part of #655's OWN fix-round-2 work (R-A, the counterparty-terms due-date anchor ruling) on a separate branch/worktree entirely. DECISIONS.md \u00a76.2.2's fix-round-2 table also does not assign any #655 item to #660's recheck; #655 is not listed as a row in that table for round 2 at all (the ratified R-A item is #655's own, closed in #655's own fix-round-2 section).",
+    "conclusion": "this is very likely cross-ticket contamination in the computed task text (possibly templated from a batch that also covers #655), not a genuine #660 obligation. Not run, in order to avoid fabricating a result for cells that do not exist on this rig; flagged here rather than silently dropped.",
+    "recommendation": "the orchestrator should check whether a #655 recheck-2 was separately dispatched with the correct worktree/rig, since this clause appears to have been meant for that ticket, not #660"
+  },
+  "ratification_items_from_66.2.1_spot_checked": [
+    "cash_set_published_after_books_start token, comparison.available/reason, unmarked_closing_entries_series/series_coverage_reason, the one-package lockfile move -- all previously ratified in DECISIONS \u00a76.2.1 and unaffected by round 2's narrow SQL change; not re-verified in this round since round 2 touches none of them (spot-checked only that the diff at 35c691c3/c14bd953 does not touch any of the four surfaces, which holds: the diff is confined to the FOR UPDATE branch, its tests/fixtures, and the db-pins corpus sha)"
+  ],
+  "new_findings": []
+}
