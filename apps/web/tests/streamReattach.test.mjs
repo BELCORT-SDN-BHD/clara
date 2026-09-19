@@ -125,17 +125,47 @@ test("a clean single-attach done never reattaches", async () => {
 });
 
 test("a non-ok response throws with the status in the message", async () => {
+  // #642 (fix round 1, ADV-642-5) RE-ENCODED THIS FIXTURE, and only the fixture: it used
+  // to answer 404. A 403 or 404 on the stream route is `assertTaskStreamAccess`'s
+  // masked-view refusal — "you may not see this task" — and the browser now delivers that
+  // as the same `revoked` event a mid-stream revocation delivers, because reading it as a
+  // transport failure produced eight rounds of "Reconnecting…" at a person whose access
+  // had been removed. The refusal arm has its own cells in
+  // `lib/clara/stream-revoked.test.ts`; THIS cell is about the transport failure it must
+  // never be confused with, and 500 is the status that means that.
   await assert.rejects(
     () =>
       runClaraTaskStream({
         token: "tok",
         taskId: "t1",
         signal: new AbortController().signal,
-        fetchImpl: async () => new Response(null, { status: 404 }),
+        fetchImpl: async () => new Response(null, { status: 500 }),
         onEvent: () => {},
       }),
-    /stream attach failed \(404\)/,
+    /stream attach failed \(500\)/,
   );
+});
+
+test("a REFUSED attach (403/404) is announced as a revocation instead of thrown", async () => {
+  // The other half of the cell above, so this file cannot be read as saying every non-ok
+  // attach rejects. One fact, one face: the same event, the same terminal, no reattach.
+  const events = [];
+  let fetchCalls = 0;
+  await runClaraTaskStream({
+    token: "tok",
+    taskId: "t1",
+    signal: new AbortController().signal,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return new Response(JSON.stringify({ error: "not_found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    },
+    onEvent: (evt) => events.push(evt.event),
+  });
+  assert.equal(fetchCalls, 1, "a refusal is never retried — the next attach is refused identically");
+  assert.deepEqual(events, ["revoked"]);
 });
 
 test("an opaque-redirect attach is classified, never reported as status 0", async () => {
