@@ -371,7 +371,21 @@ async function main() {
   assert.equal(pack.waiting_basis.by_dependency.awaiting_fact, 1);
   assert.equal(pack.waiting_basis.by_dependency.awaiting_capacity, 1);
   assert.ok(pack.facets.failed.count >= 1, "the extraction failure is FAILED, never waiting");
+  // FIX ROUND 1, ADV-636-05: the failed/waiting arms used to be LOWER bounds only, so this leg
+  // passed on the run that reported 35 failed children of which 31 had already posted (ADV-636-02).
+  // A lower bound cannot tell 35 from 4. These two are the disjointness the product promises.
+  assert.ok(pack.facets.failed.count <= landed - persistent.length,
+    `a member that POSTED is never also failed, so failed (${pack.facets.failed.count}) cannot `
+    + `exceed the children that did not post (${landed - persistent.length})`);
+  const settledIds = new Set(pack.facets.settled.rows.map((r) => r.work_id));
+  const alsoFailed = pack.facets.failed.rows.filter((r) => r.work_id && settledIds.has(r.work_id));
+  assert.deepEqual(alsoFailed, [],
+    "no previewed child appears under BOTH settled and failed — 'business-complete' and "
+    + "'extraction failed' are not compatible states the way 'admitted' and 'waiting' are");
   assert.ok(pack.facets.unassigned.count >= 2, "the unfiled sources are UNASSIGNED");
+  assert.equal(typeof pack.pending_members, "number",
+    "the door reports how many members are still in flight — the count the stop dialog needs");
+  assert.equal(pack.cancel_blocked, null, "nothing about this batch's stop is blocked");
   assert.equal(pack.capacity.resets_at_local, "08:00");
   assert.ok(!("total" in pack) && !("total" in pack.facets.admitted),
     "no denominator anywhere — AC3 forbids a fabricated percentage");

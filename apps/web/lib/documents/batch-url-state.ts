@@ -58,9 +58,14 @@ export function applyBatchParam(
 }
 
 // ---------------------------------------------------------------------------------------------
-// The facet filter. FIVE values, and they are the door's own five facets plus "all" — the card
-// never invents a sixth grouping, and a facet that is empty while others have rows is a
-// NO-RESULTS state (the filter is preserved and "Show all" is offered), never an Empty.
+// The facet filter. FIVE values: "all" plus the FOUR facets a person filters a batch BY. The door
+// answers five facets and the card shows all five as labelled counts; `admitted` is deliberately
+// not a filter, because "admitted" is every child that reached a Work and filtering to it is the
+// same view as "all" minus the members that never got one. The card never invents a grouping the
+// door does not answer, and a facet that is empty while others have rows is a NO-RESULTS state
+// (the filter is preserved and "Show all" is offered), never an Empty.
+// FIX ROUND 1, ADV-636-06: this comment used to say "the door's own five facets plus all", which
+// the constant below contradicts.
 
 export const BATCH_FACETS = ["all", "waiting", "failed", "unassigned", "settled"] as const;
 export type BatchFacet = (typeof BATCH_FACETS)[number];

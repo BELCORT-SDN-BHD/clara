@@ -6291,8 +6291,12 @@
       "body": "Some sources are still moving, but this page has stopped checking. Press Refresh to read again."
     },
     "stopping": {
-      "title": "正在停止 · Stopping this batch",
+      "title": "Stopping this batch",
       "body": "Operations already admitted are finishing. {settled} have already been committed and their receipts are kept."
+    },
+    "cancelBlocked": {
+      "title": "This batch cannot finish stopping",
+      "body": "The person who stopped it is no longer an active member of this firm, so the remaining operations cannot be asked to stop under that decision. An owner or admin needs to restore their membership, or stop each remaining work item from its own page."
     },
     "cancelled": {
       "title": "This batch was stopped",
@@ -6353,6 +6357,7 @@
       "trigger": "Stop this batch",
       "title": "Stop the batch “{label}”?",
       "body": "{n} operations are still running. Each will be asked to stop, one at a time.",
+      "stillArriving": "{n} more files are still being taken in or read. They are not running yet, so they will be asked to stop as they arrive — this batch keeps stopping until they are all accounted for.",
       "receiptsKept": "Anything already committed keeps its receipt. Nothing that has posted is undone.",
       "confirm": "Stop the batch",
       "pending": "Stopping…",

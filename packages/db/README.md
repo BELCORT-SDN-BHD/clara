@@ -701,6 +701,31 @@ invoice lane and the autodraft lane stamp it without knowing this table exists. 
 cheap negative; the Work-side one reads `ix_intake_batch_members_open`, which is empty on a firm
 with no open batch.
 
+**What "cancelled" means, exactly.** A batch reaches `cancelled` only when nothing is live AND
+nothing can still become live: `_intake_batch_live_children` is the fan-out's worklist (members
+holding a Work that is neither terminal nor already carrying a committed receipt) and
+`_intake_batch_pending_members` is the other half — members with no Work yet whose intake is still
+arriving or whose document still has a queued/running processing task. Both the door and the sweep
+require both to be empty. Without the second, a batch stopped during ingest — which is exactly when
+a hundred-file batch gets stopped — flipped terminal at once, the sweep never looked at it again,
+and every one of its files went on to be admitted and posted. A member merely sitting in custody
+with nothing running is NOT pending: a Work another lane admits for it afterwards is that lane's
+own new decision, taken after the stop.
+
+**A stop that can never finish is NAMED.** The fan-out must re-issue with the stored
+`cancel_requested_by`; if that person's membership goes away, every child refuses CLR04 on every
+sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'` from the live
+membership rather than storing a fourth state, the card renders the remedy, and the reconciler belt
+counts that parent as `batchCancelBlocked` rather than as one more transient failure.
+
+**`settled` and `failed` are NOT compatible facets.** The five facets overlap by construction and
+are never summed, but a member holding a committed receipt is business-complete and is excluded
+from `failed` outright; the task-error arm looks only at the CURRENT attempt per lane
+(`distinct on (lane)` by descending `version_n`), because a retry is a new row
+(`unique (document_id, engine_id, version_n)`) and a terminally-failed row is immutable. Measured
+on the World leg's own data before the fix: 31 of 35 members reported "failed" held a committed
+receipt.
+
 **The capacity wall is a WAITING state, not a raised limit.** #636 changes no default and touches
 none of the three reservation bodies. Measured on a migrated rig: 100 ≤1MB PDFs are admitted and
 the 101st is refused CLR18 on the DOCS guard with both ceilings flush (docs 100 / pages 1000); 100

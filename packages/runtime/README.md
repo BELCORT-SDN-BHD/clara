@@ -948,3 +948,10 @@ needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap
 MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
 rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
 reads and `writeIntakeMeta`'s `rename` (the #693 family).
+
+**THE BELT'S COUNTERS DISTINGUISH A REFUSAL FROM A DEAD END.** `reconciler-batches.mjs` returns
+`batchCancelFailed` for refusals and `batchCancelBlocked` for a parent whose EVERY child refused
+CLR04 — which means its stored canceller has lost authority and no future sweep will change that,
+because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
+The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
+human as `cancel_blocked`.

@@ -61,6 +61,10 @@ function mixedBody() {
   return {
     computed_at: "2026-04-05T02:00:00.000Z",
     preview_limit: 10,
+    // FIX ROUND 1: the door answers these two, so the mock does too — a fixture that omits a key
+    // the real read returns is how a surface comes to depend on a shape production never sends.
+    cancel_blocked: null,
+    pending_members: 0,
     batch: {
       id: INTAKE_BATCH.batchId, label: "April sources", origin: "documents_tab",
       state: batchState, opened_by: "11111111-1111-1111-1111-111111111111",
@@ -120,6 +124,8 @@ function emptyBody() {
   return {
     computed_at: "2026-04-05T02:00:00.000Z",
     preview_limit: 10,
+    cancel_blocked: null,
+    pending_members: 0,
     batch: {
       id: INTAKE_BATCH.emptyBatchId, label: "May sources", origin: "documents_tab", state: "open",
       opened_by: "11111111-1111-1111-1111-111111111111", opened_at: "2026-05-01T01:00:00.000Z",
@@ -189,6 +195,7 @@ export async function handleIntakeBatchRuntime(request, response, url) {
       batch_id: batch, state: "cancelling", cancel_op_key: "walk-decision",
       cancel_requested_by: "11111111-1111-1111-1111-111111111111",
       children: [{ member_id: "m6360001", work_id: INTAKE_BATCH.workId }],
+      pending_members: 0,
       fanned_out: 1, deferred: 0, refused: 0,
     }));
     return true;

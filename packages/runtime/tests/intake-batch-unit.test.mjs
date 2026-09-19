@@ -310,4 +310,33 @@ test("p636.runtime.belt_isolates — a whole-belt failure says so; one poisoned 
   assert.equal(isolated.batchCancelOk, true, "one refusing parent never claims the whole sweep is unknown");
   assert.equal(isolated.batchCancelFailed, 1);
   assert.equal(isolated.batchCancelChildren, 1, "…and the healthy parent's child was still cancelled");
+  assert.equal(isolated.batchCancelBlocked, 0,
+    "a CLR11 is a refusal about one child, not a parent that can never progress");
+});
+
+test("p636.runtime.belt_names_a_blocked_parent — an all-CLR04 fan-out is counted apart (ADV-636-03)", async () => {
+  // MEASURED on the rig: with the stored canceller's membership removed, EVERY child refuses
+  // CLR04 `actor_not_active`, on this sweep and on every future one, because the fan-out must
+  // re-issue with the STORED actor (clara._work_door_ctx hashes {work, author}). Counting that in
+  // `batchCancelFailed` beside a transient refusal is how a permanently stuck batch stayed
+  // invisible while the belt reported itself healthy.
+  const client = {
+    query: async (sql) => (String(sql).includes("to_regprocedure")
+      ? { rows: [{ ok: true }] }
+      : { rows: [{ result: { batches: [
+        { batch_id: "B1", cancel_requested_by: "gone", cancel_op_key: "k",
+          live: [{ work_id: "w1" }, { work_id: "w2" }] },
+      ], settled: [] } }] }),
+  };
+  const lines = [];
+  const withRuntime = (fn) => fn({
+    query: async () => { throw pgError("CLR04", "the author is not an active member of this firm",
+      { reason: "actor_not_active" }); },
+  });
+  const out = await reconcileIntakeBatchCancellations(client, { withRuntime, log: (m) => lines.push(m) });
+  assert.equal(out.batchCancelOk, true, "the sweep itself worked — it is the parent that cannot move");
+  assert.equal(out.batchCancelBlocked, 1, "the parent is counted as BLOCKED, once, not twice for two children");
+  assert.equal(out.batchCancelChildren, 0);
+  assert.ok(lines.some((l) => l.includes("BLOCKED") && l.includes("B1")),
+    "…and it is logged by name, with what a reader can act on");
 });

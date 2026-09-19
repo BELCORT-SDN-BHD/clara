@@ -500,8 +500,12 @@ test("p636.batch.no_percentage — the envelope carries no denominator at any de
   };
   walk(pack, "pack");
   assert.deepEqual(Object.keys(pack).sort(),
-    ["batch", "capacity", "computed_at", "facets", "preview_limit", "waiting_basis"],
-    "the envelope's top-level key set is exactly these six");
+    ["batch", "cancel_blocked", "capacity", "computed_at", "facets", "pending_members",
+      "preview_limit", "waiting_basis"],
+    "the envelope's top-level key set is exactly these eight — cancel_blocked (a NAMED reason or "
+    + "null, never a number) and pending_members (a population count nothing divides by) joined "
+    + "in fix round 1, ADV-636-03 and ADV-636-01");
+  assert.equal(pack.cancel_blocked, null, "an open batch has nothing to name");
   assert.deepEqual(Object.keys(pack.facets).sort(),
     ["admitted", "failed", "settled", "unassigned", "waiting"]);
   assert.deepEqual(pack.capacity,
@@ -649,7 +653,13 @@ test("p636.batch.cancel_while_settling — a child already stopping answers alre
   assert.equal(decision.children.length, 1, "the stopping child is still LIVE — it holds no committed receipt");
   const out = await cancelWork(m.work_id, decision.cancel_requested_by,
     `${decision.cancel_op_key}:${m.work_id}`);
-  assert.equal(out.already_stopping ?? out.status, out.already_stopping ?? out.status);
+  // ADV-636-04: this line used to compare an expression with itself, so the converge-a-stopping-run
+  // arm (0199:295-304) was asserted NOWHERE. It returns `reason='already_stopping'` with
+  // `cancelled=false` and the WORK's own status — measured, then asserted by name.
+  assert.equal(out.reason, "already_stopping",
+    "the fan-out's call lands on 0199's already-stopping arm, by name");
+  assert.equal(out.cancelled, false, "…so it changes nothing and does not re-notify the world");
+  assert.equal(out.replayed, false, "…and it is that arm, not a stored replay of the solo press");
   assert.ok(["cancel_requested", "stopping", "cancelled"].includes(out.status),
     "the fan-out's call converges on the stopping arm rather than raising");
   assert.equal((await batchRow(batch.batch_id)).state, "cancelling",
@@ -916,4 +926,161 @@ test("p636.batch.attach_refuses_a_closed_batch — nothing joins a stopping pare
     "attaching to a cancelling batch");
   assert.equal(detailOf(err).reason, "batch_not_open",
     "no new operation is admitted after cancellation — appendix C's own state-owner rule");
+});
+
+// ===========================================================================================
+// FIX ROUND 1 — the cells the three reviews were owed. Each one RED against the shipped 0229
+// before the repair, and each one names the finding it closes.
+// ===========================================================================================
+
+/** LABELLED FIXTURE DML through the estate's OWN doors: a document's extraction attempt driven
+ *  queued -> running -> failed. A task cannot be hand-failed (`illegal document processing
+ *  transition queued -> failed`, measured), so the claim door runs first and the persist door
+ *  carries the error code, exactly as the engine's own lane does. */
+async function failExtraction(document, { errorCode = "engine_error" } = {}) {
+  const task = (await rootQuery(
+    `select id, lane from clara.document_processing_tasks
+      where document_id=$1 order by version_n desc, created_at desc limit 1`, [document])).rows[0];
+  assert.ok(task, "finalize_document_intake queues a processing task for every document in custody");
+  await roleQuery(ROLES.runtime,
+    "select clara.claim_document_processing_task($1::uuid,$2::text,true) as result",
+    [task.id, opk("p636-claim")]);
+  // Each lane has its OWN failure door and refuses the other's (`classify tasks are settled by
+  // classify_document`, CLR16 — measured). The batch read does not care which lane failed, but
+  // the fixture must go through the right one or it proves nothing.
+  if (task.lane === "classify") {
+    await roleQuery(ROLES.runtime,
+      "select clara.fail_classify($1::uuid,$2::text,$3::text) as result",
+      [task.id, errorCode, opk("p636-failclassify")]);
+  } else {
+    await roleQuery(ROLES.runtime,
+      `select clara.persist_document_extraction($1::uuid,'failed',null::int,null::jsonb,null::jsonb,
+          $2::text,null::text,$3::text) as result`,
+      [task.id, errorCode, opk("p636-persist")]);
+  }
+  return task.id;
+}
+
+test("p636.batch.failed_excludes_settled — a child that POSTED is never also reported failed", async (t) => {
+  if (await gate(t)) return;
+  // V636R-1 / ADV-636-02. MEASURED on this rig before the repair: batch 0ac00d27 answered
+  // {admitted 95, settled 95, failed 35} with 31 members holding BOTH a committed receipt and a
+  // failed ocr attempt — the World leg the final report cited as AC2's evidence.
+  const batch = await openBatch(ALICE(), { label: "p636 failed-vs-settled" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { memo: "p636 recovered" });
+  await failExtraction(m.document);
+  await postWork({ client: world.clients.A1, work: m.work_id, task: m.task_id });
+
+  const pack = await getBatch(ALICE(), batch.batch_id, { preview: 25 });
+  assert.equal(pack.facets.settled.count, 1, "the child holds a committed receipt, so it is SETTLED");
+  assert.equal(pack.facets.failed.count, 0,
+    "…and a business-complete child is NEVER also 'Extraction failed' — 'settled' and 'failed' are "
+    + "not compatible overlapping states the way 'admitted' and 'waiting' are");
+  assert.deepEqual(pack.facets.failed.rows, [], "and it is absent from the preview too");
+
+  // THE OTHER HALF: a member that failed extraction and has NOT posted is still honestly failed.
+  const open = await workMember(batch.batch_id, world.clients.A1, { memo: "p636 still failed" });
+  await failExtraction(open.document);
+  const after = await getBatch(ALICE(), batch.batch_id, { preview: 25 });
+  assert.equal(after.facets.failed.count, 1, "a live child whose CURRENT attempt failed is failed");
+  assert.equal(after.facets.failed.rows[0].member_id, open.member_id);
+  assert.equal(after.facets.failed.rows[0].task_error_code, "engine_error",
+    "and the row names the engine's own code");
+});
+
+test("p636.batch.cancel_before_admission — a batch stopped BEFORE its files became Work is not terminal", async (t) => {
+  if (await gate(t)) return;
+  // ADV-636-01 (blocker). MEASURED on this rig before the repair: two custody members with no Work
+  // answered {"state":"cancelled","children":[]}, the sweep never saw the parent again, and a Work
+  // admitted AFTERWARDS was stamped onto the cancelled batch and posted.
+  const batch = await openBatch(ALICE(), { label: "p636 stop during ingest" });
+  const a = await custodyMember(batch.batch_id, { filename: "p636-pre-a.pdf" });
+  const b = await custodyMember(batch.batch_id, { filename: "p636-pre-b.pdf" });
+
+  const key = opk("p636-pre-cancel");
+  const decision = await cancelBatch(ALICE(), batch.batch_id, key);
+  assert.deepEqual(decision.children, [], "no child holds a Work yet, so the fan-out has no target");
+  assert.equal(decision.pending_members, 2,
+    "…but TWO members are still in flight toward one, and the decision says so");
+  assert.equal(decision.state, "cancelling",
+    "a terminal flip here would mean 'nothing more can happen' while two files are still in ingest");
+  assert.equal((await batchRow(batch.batch_id)).state, "cancelling");
+
+  const onList = (await sweep(50)).batches.find((x) => x.batch_id === batch.batch_id);
+  assert.ok(onList, "the parent stays on the sweep's worklist rather than disappearing");
+
+  // A Work admitted afterwards IS stamped (the stamp is lane-agnostic by ruling) — and because the
+  // parent is still `cancelling`, the sweep now hands it back as a live child to stop.
+  await fileDocument(ALICE(), { document: a.document, client: world.clients.A1 });
+  const late = await admitJournalWork({
+    client: world.clients.A1, author: ALICE(), basis: basis({ memo: "p636 late admission" }),
+    sourceRefs: [{ kind: "document", document_id: a.document }],
+  });
+  const second = (await sweep(50)).batches.find((x) => x.batch_id === batch.batch_id);
+  assert.ok(second, "the parent is still on the worklist");
+  assert.deepEqual(second.live.map((c) => c.work_id), [late.work_id],
+    "the late child is handed to the fan-out — AC4's 'cancel remaining children', on the real journey");
+  assert.equal(second.cancel_requested_by, ALICE(), "…with the STORED actor");
+  assert.equal(second.cancel_op_key, key, "…and the STORED key");
+  void b;
+});
+
+test("p636.batch.cancel_blocked_after_revocation — a stuck fan-out is NAMED, never silently green", async (t) => {
+  if (await gate(t)) return;
+  // ADV-636-03. MEASURED before the repair: with the stored canceller's membership removed, every
+  // resumed child refused CLR04 forever, the parent never left `cancelling`, and nothing on the
+  // board or in the belt said so.
+  const batch = await openBatch(BOB(), { label: "p636 blocked" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p636 blocked" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p636-blocked-run") });
+  const decision = await cancelBatch(BOB(), batch.batch_id, opk("p636-blocked-cancel"));
+  assert.equal(decision.state, "cancelling");
+
+  const live = await getBatch(ALICE(), batch.batch_id);
+  assert.equal(live.cancel_blocked, null, "while the canceller is active there is nothing to name");
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const err = await assertRaises(CLR04,
+      () => cancelWork(m.work_id, decision.cancel_requested_by,
+        `${decision.cancel_op_key}:${m.work_id}`),
+      "the resumed fan-out re-issues with the STORED actor, who no longer holds authority");
+    assert.equal(detailOf(err).reason, "actor_not_active");
+
+    const stuck = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(stuck.batch.state, "cancelling", "the parent cannot settle — its children are untouched");
+    assert.equal(stuck.cancel_blocked, "canceller_not_active",
+      "…and the board NAMES why, instead of showing 'stopping' forever with no explanation");
+    assert.ok((await sweep(50)).batches.some((x) => x.batch_id === batch.batch_id),
+      "the worklist still carries it — the blockage is reported, not hidden by dropping the parent");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+test("p636.batch.settled_preview_is_newest — the settled preview is the NEWEST receipts, not the lowest uuids", async (t) => {
+  if (await gate(t)) return;
+  // ADV-636-09: the `limit` sat inside the `distinct on (work_id)` subquery, so the preview was the
+  // v_preview lowest work_id UUIDs while the envelope's own order claims `committed_at desc`.
+  const batch = await openBatch(ALICE(), { label: "p636 settled preview" });
+  const order = [];
+  // The ids are random uuids, so "newest receipt" and "lowest uuid" coincide by chance once in N.
+  // Post until they DIVERGE, or this cell is green against the bug it exists to catch — which is
+  // exactly what happened on its first run.
+  for (let i = 0; i < 8; i++) {
+    const m = await workMember(batch.batch_id, world.clients.A1, { memo: `p636 preview ${i}` });
+    await postWork({ client: world.clients.A1, work: m.work_id, task: m.task_id });
+    order.push(m.work_id);
+    if (order.length >= 3 && [...order].sort()[0] !== order[order.length - 1]) break;
+  }
+  const newest = order[order.length - 1];
+  assert.notEqual([...order].sort()[0], newest,
+    "the cell only discriminates when the LOWEST work_id is not the newest receipt");
+  const pack = await getBatch(ALICE(), batch.batch_id, { preview: 1 });
+  assert.equal(pack.facets.settled.count, order.length, "every one of them holds a committed receipt");
+  assert.equal(pack.facets.settled.rows.length, 1, "…and the preview shows one");
+  assert.equal(pack.facets.settled.rows[0].work_id, newest,
+    "the one it shows is the MOST RECENTLY committed, which is what the envelope's order says");
 });

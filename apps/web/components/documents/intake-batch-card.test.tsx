@@ -185,12 +185,17 @@ test("intake batch card: NO RESULTS preserves the facet and offers Show all righ
   await h2.unmount();
 });
 
-test("intake batch card: CANCELLING shows 正在停止 and REVEALS the completed receipts; terminal is never shown early", async () => {
+test("intake batch card: CANCELLING says STOPPING and REVEALS the completed receipts; terminal is never shown early", async () => {
   const h = await render(ready({
     batch: { ...(body().batch as Record<string, unknown>), state: "cancelling", cancel_requested_at: "2026-04-05T02:00:00Z" },
   }));
   const text = textOf(h.container as never);
-  assert.match(text, /正在停止/);
+  // FIX ROUND 1 (STANDARDS `chinese-string-in-en-json`): the shipped string used to be
+  // "正在停止 · Stopping this batch" and this cell asserted the Chinese half, locking a phrase
+  // from the planning documents into the single `en` locale. `git show origin/main:…/en.json`
+  // carries zero CJK, so it was the file's first and only instance, not its convention.
+  assert.match(text, /Stopping this batch/);
+  assert.ok(!/[一-鿿]/.test(text), "the en locale renders English");
   assert.match(text, /already been committed and their receipts are kept/);
   assert.ok(!text.includes("This batch was stopped"), "terminal cancellation is NOT shown while children are still finishing");
   assertNoDenominator(h, "cancelling");
@@ -264,5 +269,61 @@ test("intake batch card: waiting_basis states BOTH sources, so two numbers over 
   assert.match(text, /1 awaiting a fact/);
   assert.match(text, /1 awaiting the daily quota/);
   assert.match(text, /1 not yet filed to a client/);
+  await h.unmount();
+});
+
+test("intake batch card: a STOPPING batch whose canceller lost authority NAMES why it cannot finish (ADV-636-03)", async () => {
+  const h = await render(ready({
+    batch: { ...(body().batch as Record<string, unknown>), state: "cancelling", cancel_requested_at: "2026-04-05T02:00:00Z" },
+    cancel_blocked: "canceller_not_active",
+  }));
+  const text = textOf(h.container as never);
+  assert.match(text, /This batch cannot finish stopping/,
+    "a parent that can never settle says so, instead of showing 'stopping' for ever");
+  assert.match(text, /no longer an active member/);
+  assert.match(text, /stop each remaining work item from its own page/,
+    "…and names what a person can actually do about it");
+  assertNoDenominator(h, "cancel blocked");
+  await h.unmount();
+});
+
+test("intake batch card: an OPEN batch names no blockage", async () => {
+  const h = await render(ready());
+  assert.ok(!textOf(h.container as never).includes("cannot finish stopping"));
+  await h.unmount();
+});
+
+test("intake batch card: the FIRM-LEAF mount keeps Cancel — 'read-only apart from Cancel' (STANDARDS)", async () => {
+  const h = await render(ready(), { clientId: null as never });
+  assert.match(textOf(h.container as never), /Stop this batch/,
+    "the firm leaf mounts this read-only APART FROM CANCEL; the old `readOnly` prop gated that one "
+    + "button and nothing else, so it hid the only act the mount was supposed to keep and made "
+    + "unassigned-sources.tsx's onCancelled handler dead code");
+  await h.unmount();
+});
+
+test("intake batch card: a TERMINAL batch offers no Stop even on the firm-leaf mount", async () => {
+  const h = await render(ready({ batch: { ...(body().batch as Record<string, unknown>), state: "cancelled" } }),
+    { clientId: null as never });
+  assert.ok(!textOf(h.container as never).includes("Stop this batch"),
+    "an affordance that could only refuse is still never offered");
+  await h.unmount();
+});
+
+test("intake batch card: a child that POSTED is rendered as committed, never as a failure (V636R-1)", async () => {
+  // The door is what stops a settled member appearing under `failed` (0229's facet predicate, and
+  // p636.batch.failed_excludes_settled). This cell pins the OTHER half: the card must not invent
+  // the state either — a settled row renders its receipt, and the failed facet renders only what
+  // the door put there.
+  const h = await render(ready({
+    facets: {
+      ...(body().facets as Record<string, unknown>),
+      failed: { status: "ok", count: 0, coverage: "ok", coverage_reason: null, rows: [] },
+    },
+  }));
+  const text = textOf(h.container as never);
+  assert.ok(!text.includes("Extraction failed"),
+    "no row claims an extraction failure the door did not report");
+  assert.match(text, /Committed/, "the settled child keeps its own outcome word");
   await h.unmount();
 });

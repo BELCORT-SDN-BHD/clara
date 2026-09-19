@@ -371,6 +371,15 @@ create table clara.intake_batch_member_events (
     references clara.intake_batches(id, firm_id),
   -- `now()` is the TRANSACTION timestamp, so this unique makes a same-transaction replay of one
   -- stamp idempotent by construction; every writer below pairs it with `on conflict do nothing`.
+  --
+  -- THE LEDGER IS THEREFORE TRANSACTION-GRANULAR, AND THAT IS A PROPERTY TO KNOW BEFORE WRITING
+  -- A NEW CALLER (fix round 1, ADV-636-07). Two events of the SAME kind for one member inside ONE
+  -- transaction collapse to the first: a member driven awaiting_fact -> cleared -> awaiting_capacity
+  -- in a single transaction would record one `dependency_set` saying awaiting_fact while the member
+  -- row says awaiting_capacity. Unreachable today -- every door call in
+  -- packages/runtime/lib/intake-batches.mjs is its own transaction -- so it is written down rather
+  -- than designed around. A caller that needs per-step history inside one transaction must key
+  -- this table on its op key or a sequence instead, which is a migration, not a call-site choice.
   unique (member_id, event, recorded_at)
 );
 comment on table clara.intake_batch_member_events is
@@ -575,6 +584,40 @@ create function clara._intake_batch_live_children(p_batch uuid)
    order by m.created_at, m.id;
 $$;
 revoke all on function clara._intake_batch_live_children(uuid) from public;
+
+-- THE PENDING MEMBERS of a parent: members that hold NO Work yet and can still acquire one,
+-- because their intake has not finished arriving or their document's extraction is still running.
+-- FIX ROUND 1, ADV-636-01 (blocker), MEASURED: `cancel_intake_batch` used to flip straight to
+-- `cancelled` whenever no member held a LIVE Work. On the journey the ticket is named after --
+-- a hundred files pressed Stop during OCR -- that is every one of them: the parent went terminal,
+-- the sweep never looked at it again, and all hundred went on to be admitted, stamped onto the
+-- cancelled batch and posted. So the terminal flip now means what it says: nothing live AND
+-- nothing that can still become live.
+--
+-- WHY THIS IS BOUNDED AND NOT AN OPEN WAIT. Both arms terminate by construction: an intake leaves
+-- ('uploading','received','verifying','verified') for a terminal status (0007:109-111) or expires,
+-- and a processing task leaves ('queued','held_egress','running') for done/failed (0007:156-157,
+-- with clara.release_held_document_tasks draining the held rung). A member merely sitting in
+-- custody with nothing running is NOT pending: a Work some lane admits for it later is that lane's
+-- own new decision, taken after the stop, and the batch has no standing to cancel it.
+create function clara._intake_batch_pending_members(p_batch uuid)
+  returns table (member_id uuid, intake_id uuid, reason text)
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select m.id, m.intake_id,
+         case when di.status in ('uploading','received','verifying','verified')
+              then 'intake_in_flight' else 'extraction_in_flight' end
+    from clara.intake_batch_members m
+    join clara.document_intakes di on di.id = m.intake_id
+   where m.batch_id = p_batch
+     and m.work_id is null
+     and ( di.status in ('uploading','received','verifying','verified')
+        or (m.document_id is not null
+            and exists (select 1 from clara.document_processing_tasks t
+                         where t.document_id = m.document_id
+                           and t.status in ('queued','held_egress','running'))) )
+   order by m.created_at, m.id;
+$$;
+revoke all on function clara._intake_batch_pending_members(uuid) from public;
 
 -- =====================================================================================
 -- §F  THE FIVE RUNTIME DOORS. All `clara_runtime` ONLY, actor-explicit, SECURITY DEFINER,
@@ -805,7 +848,7 @@ create function clara.cancel_intake_batch(
 ) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_ctx jsonb; v_firm uuid; b record; v_dedupe jsonb; v_children jsonb := '[]'::jsonb;
-        v_state text; v_n int; r record;
+        v_state text; v_n int; v_pending int; r record;
 begin
   if p_op_key is null or p_op_key ~ '^\s*$' then
     raise exception 'a cancellation requires its idempotency key' using errcode='CLR10',
@@ -861,7 +904,14 @@ begin
   -- CANCELLING A BATCH THAT ALREADY FINISHED IS TERMINAL AT ONCE. `appendix-C-journeys.md:82`'s
   -- "do not show terminal cancellation early" still holds, because terminal is written ONLY when
   -- nothing is live. Everything else waits for the sweep.
-  if v_n = 0 then
+  --
+  -- FIX ROUND 1, ADV-636-01: "nothing is live" now also means "nothing can still BECOME live".
+  -- A member still arriving or still in extraction is counted as PENDING and reported, so a batch
+  -- stopped during ingest stays `cancelling` and the sweep keeps fanning out as its children
+  -- appear, instead of going terminal while a hundred files go on to post.
+  select count(*)::int into v_pending from clara._intake_batch_pending_members(p_batch);
+
+  if v_n = 0 and v_pending = 0 then
     update clara.intake_batches
        set state = 'cancelled', cancelled_at = now(), updated_at = now()
      where id = p_batch and state in ('open','cancelling');
@@ -871,7 +921,8 @@ begin
   end if;
 
   perform clara._audit(v_firm, p_actor, null, null, 'cancel_intake_batch', null,
-    jsonb_build_object('batch', p_batch, 'live_children', v_n, 'op_key', p_op_key));
+    jsonb_build_object('batch', p_batch, 'live_children', v_n, 'pending_members', v_pending,
+                       'op_key', p_op_key));
 
   -- IT IS NOT ONE TRANSACTION AND MUST NOT BE. The caller invokes `clara.cancel_accounting_work`
   -- once per child, one call per transaction, so a child that already posted answers
@@ -880,7 +931,13 @@ begin
   -- shape 0017:4604-4617 already uses.
   return clara._finish_op(v_firm, 'cancel_intake_batch', p_op_key,
     jsonb_build_object('batch_id', p_batch, 'state', v_state, 'cancel_op_key', p_op_key,
-                       'cancel_requested_by', p_actor, 'children', v_children))
+                       'cancel_requested_by', p_actor, 'children', v_children,
+                       -- NOT `pending`: clara._reserve_op returns {"pending":true} for a
+                       -- reserved-but-unfinished key and the door tests `v_dedupe ? 'pending'`,
+                       -- which is KEY EXISTENCE. A stored result carrying a key of that name
+                       -- makes every replay raise CLR13 operation_in_flight. Measured, red-first,
+                       -- in p636.batch.cancel_keeps_receipts.
+                       'pending_members', v_pending))
          || jsonb_build_object('replayed', false);
 end $$;
 revoke all on function clara.cancel_intake_batch(uuid,uuid,text) from public;
@@ -906,22 +963,32 @@ create function clara.sweep_intake_batch_cancellations(p_limit int default 20)
   returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_batches jsonb := '[]'::jsonb; v_settled jsonb := '[]'::jsonb; b record; v_live jsonb;
+        v_pending int;
 begin
   if p_limit is null or p_limit < 1 or p_limit > 100 then
     raise exception 'a sweep limit is 1..100' using errcode='CLR10',
       detail='{"reason":"invalid_limit","field":"p_limit"}';
   end if;
+  -- FIX ROUND 1, ADV-636-08: the worklist takes its rows FOR UPDATE SKIP LOCKED, so two sweeps
+  -- racing take disjoint work rather than the same parents. The derived child key
+  -- (`<cancel_op_key>:<work_id>`) already made a double fan-out harmless -- the second caller
+  -- replays through _reserve_op or gets CLR13 operation_in_flight -- but "harmless because the
+  -- key is derived" is a property to state, not one to lean on.
   for b in select ib.id, ib.firm_id, ib.cancel_requested_by, ib.cancel_op_key
              from clara.intake_batches ib
             where ib.state = 'cancelling'
             order by ib.cancel_requested_at, ib.id
             limit p_limit
+              for update skip locked
   loop
     select coalesce(jsonb_agg(jsonb_build_object('member_id', c.member_id, 'work_id', c.work_id)),
                     '[]'::jsonb)
       into v_live
       from clara._intake_batch_live_children(b.id) c;
-    if jsonb_array_length(v_live) = 0 then
+    -- FIX ROUND 1, ADV-636-01: the same terminal rule as the door -- a parent whose members are
+    -- still arriving or still in extraction is NOT settled, because a child is still coming.
+    select count(*)::int into v_pending from clara._intake_batch_pending_members(b.id);
+    if jsonb_array_length(v_live) = 0 and v_pending = 0 then
       -- IDEMPOTENT AND CONVERGENT: the guard is the state, so two sweeps racing settle once.
       update clara.intake_batches
          set state = 'cancelled', cancelled_at = now(), updated_at = now()
@@ -931,7 +998,7 @@ begin
       v_batches := v_batches || jsonb_build_array(jsonb_build_object(
         'batch_id', b.id, 'firm_id', b.firm_id,
         'cancel_requested_by', b.cancel_requested_by, 'cancel_op_key', b.cancel_op_key,
-        'live', v_live));
+        'live', v_live, 'pending_members', v_pending));
     end if;
   end loop;
   return jsonb_build_object('batches', v_batches, 'settled', v_settled);
@@ -975,7 +1042,7 @@ declare
   v_failed_count int;  v_failed_rows jsonb := '[]'::jsonb;
   v_unassigned_count int; v_unassigned_rows jsonb := '[]'::jsonb;
   v_by_question int; v_by_fact int; v_by_attr int; v_by_cap int;
-  v_by_unfiled int; v_by_cap_failure int;
+  v_by_unfiled int; v_by_cap_failure int; v_cancel_blocked text; v_pending_members int;
 begin
   -- THE INLINE FLOOR, restating 0189:344-347's three predicates verbatim, for 0214:262-274's
   -- structural reason: an INVOKER body cannot call clara._human_ctx.
@@ -998,12 +1065,33 @@ begin
 
   -- RLS does the firm filtering; a batch of another firm reads as zero rows, exactly as an
   -- invented uuid does. NO ORACLE.
-  select ib.id, ib.label, ib.origin, ib.state, ib.opened_by, ib.created_at, ib.cancel_requested_at
+  select ib.id, ib.label, ib.origin, ib.state, ib.opened_by, ib.created_at, ib.cancel_requested_at,
+         ib.cancel_requested_by
     into b
     from clara.intake_batches ib where ib.id = p_batch;
   if not found then
     raise exception 'intake batch not found in your firm' using errcode='CLR11',
       detail='{"reason":"batch_not_found"}';
+  end if;
+
+  -- WHY A STOPPING BATCH MAY NEVER FINISH STOPPING, DERIVED RATHER THAN STORED.
+  -- FIX ROUND 1, ADV-636-03, MEASURED: the resumed fan-out MUST re-issue with the STORED actor,
+  -- because clara._work_door_ctx hashes {work, author} (0184:262-264) and any other identity is
+  -- CLR10 op_key_conflict. So when that person's membership goes away, every child refuses CLR04
+  -- `actor_not_active` on every sweep, forever, and the parent sits in `cancelling` while the belt
+  -- reports itself healthy. This key NAMES that, so the surface can say it instead of showing
+  -- "stopping" for ever with no explanation. It adds NO state and NO column: the three-state set
+  -- is the orchestrator's narrowing and stays three. Re-issuing under a fresh key is NOT offered
+  -- here -- `cancel_intake_batch` refuses CLR13 `batch_already_cancelling` by ruling, so a
+  -- remedy would be a second decision this file has no mandate to invent.
+  v_cancel_blocked := null;
+  if b.state = 'cancelling' and b.cancel_requested_by is not null then
+    if not exists (select 1 from clara.firm_memberships fm
+                    where fm.user_id = b.cancel_requested_by
+                      and fm.status = 'active'
+                      and clara.role_rank(fm.role) >= clara.role_rank('bookkeeper')) then
+      v_cancel_blocked := 'canceller_not_active';
+    end if;
   end if;
 
   -- ------------------------------------------------------------------------------------------
@@ -1075,15 +1163,21 @@ begin
   select coalesce(jsonb_agg(to_jsonb(x) order by x.committed_at desc, x.work_id desc), '[]'::jsonb)
     into v_settled_rows
     from (
-      select distinct on (m.work_id)
-             m.id as member_id, m.work_id as work_id, m.client_id as client_id,
-             o.id as receipt_id, nullif(o.effects->>'entry_id','') as entry_id,
-             o.created_at as committed_at
-        from clara.intake_batch_members m
-        join clara.operation_receipts o
-          on o.work_id = m.work_id and o.outcome = 'committed'
-       where m.batch_id = p_batch
-       order by m.work_id, o.created_at desc
+      -- FIX ROUND 1, ADV-636-09: the `limit` must NOT sit on the `distinct on (work_id)` subquery.
+      -- It did, so the preview was the v_preview LOWEST work_id uuids while the envelope's own
+      -- order claims the newest receipts. The distinct-on picks one receipt per Work; the OUTER
+      -- select is what orders and clamps.
+      select * from (
+        select distinct on (m.work_id)
+               m.id as member_id, m.work_id as work_id, m.client_id as client_id,
+               o.id as receipt_id, nullif(o.effects->>'entry_id','') as entry_id,
+               o.created_at as committed_at
+          from clara.intake_batch_members m
+          join clara.operation_receipts o
+            on o.work_id = m.work_id and o.outcome = 'committed'
+         where m.batch_id = p_batch
+         order by m.work_id, o.created_at desc) d
+       order by d.committed_at desc, d.work_id desc
        limit v_preview
     ) x;
   if v_uncounted > 0 then
@@ -1163,33 +1257,87 @@ begin
   -- ------------------------------------------------------------------------------------------
   -- FACET failed -- EXCLUDING `limit`. A quota block is WAITING, not dead (D4). A processing task
   -- that carries an error_code counts too: the bytes are in custody and the extraction refused.
+  --
+  -- FIX ROUND 1, V636R-1 / ADV-636-02 (both reviews, independently). TWO corrections, both
+  -- measured on this rig against the World leg's own data (batch 0ac00d27: members 100,
+  -- settled 95, failed 35, and 31 of those 35 held a COMMITTED receipt):
+  --   (i) A MEMBER THAT POSTED IS NEVER FAILED. `settled` and `failed` are not compatible
+  --       overlapping states the way `admitted` and `waiting` are -- a Work cannot honestly be
+  --       both business-complete and "Extraction failed" on the same card. The receipt is the
+  --       estate's definition of completion (0214:40-51), so it wins.
+  --   (ii) ONLY THE CURRENT ATTEMPT COUNTS. A retry is a NEW row (`unique (document_id, engine_id,
+  --       version_n)`, 0007:169) and a terminally-failed row is immutable (0051's header), so an
+  --       attempt that failed once and was re-run would otherwise read as failed forever.
+  --       `distinct on (lane)` by descending version_n is the document's current attempt per
+  --       lane; only that row's error_code is a live failure. LANE, not engine_id, because the
+  --       read goes through clara.document_processing_tasks_visible, whose columns are the
+  --       human-facing ones (0007:2238) -- engine_id is not among them, and the read never touches
+  --       the base table.
   -- ------------------------------------------------------------------------------------------
   select count(*)::int into v_failed_count
     from clara.intake_batch_members m
     left join clara.document_intakes_visible dv on dv.id = m.intake_id
    where m.batch_id = p_batch
+     and not exists (select 1 from clara.operation_receipts o
+                      where o.work_id = m.work_id and o.outcome = 'committed')
      and ( (dv.failure_code is not null and dv.failure_code <> 'limit')
-        or exists (select 1 from clara.document_processing_tasks_visible tv
-                    where tv.document_id = m.document_id and tv.error_code is not null) );
+        or exists (select 1 from (
+                     select distinct on (tv.lane) tv.lane, tv.error_code
+                       from clara.document_processing_tasks_visible tv
+                      where tv.document_id = m.document_id
+                      order by tv.lane, tv.version_n desc, tv.updated_at desc) cur
+                    where cur.error_code is not null) );
   select coalesce(jsonb_agg(to_jsonb(x) order by x.created_at desc, x.member_id desc), '[]'::jsonb)
     into v_failed_rows
     from (
       select m.id as member_id, m.intake_id as intake_id, m.document_id as document_id,
              m.work_id as work_id, dv.original_filename as filename,
              dv.status as intake_status, dv.failure_code as intake_failure_code,
-             (select tv.error_code from clara.document_processing_tasks_visible tv
-               where tv.document_id = m.document_id and tv.error_code is not null
-               order by tv.updated_at desc limit 1) as task_error_code,
+             (select cur.error_code from (
+                select distinct on (tv.lane) tv.lane, tv.error_code
+                  from clara.document_processing_tasks_visible tv
+                 where tv.document_id = m.document_id
+                 order by tv.lane, tv.version_n desc, tv.updated_at desc) cur
+               where cur.error_code is not null limit 1) as task_error_code,
              m.created_at as created_at
         from clara.intake_batch_members m
         left join clara.document_intakes_visible dv on dv.id = m.intake_id
        where m.batch_id = p_batch
+         and not exists (select 1 from clara.operation_receipts o
+                          where o.work_id = m.work_id and o.outcome = 'committed')
          and ( (dv.failure_code is not null and dv.failure_code <> 'limit')
-            or exists (select 1 from clara.document_processing_tasks_visible tv
-                        where tv.document_id = m.document_id and tv.error_code is not null) )
+            or exists (select 1 from (
+                         select distinct on (tv.lane) tv.lane, tv.error_code
+                           from clara.document_processing_tasks_visible tv
+                          where tv.document_id = m.document_id
+                          order by tv.lane, tv.version_n desc, tv.updated_at desc) cur
+                        where cur.error_code is not null) )
        order by m.created_at desc, m.id desc
        limit v_preview
     ) x;
+
+  -- ------------------------------------------------------------------------------------------
+  -- PENDING MEMBERS -- not a facet: the members that hold no Work YET and can still acquire one,
+  -- because the intake is still arriving or the document's extraction is still running.
+  -- FIX ROUND 1, ADV-636-01. The cancel dialog used to say "{admitted - settled} operations are
+  -- still running", which on the journey this ticket is named after -- a hundred files pressed
+  -- Stop during OCR -- reads "0 operations are still running" while a hundred are. The predicate
+  -- is the same one `clara._intake_batch_pending_members` uses for the terminal flip, written out
+  -- again here because this body is SECURITY INVOKER and that helper is granted to nobody: it
+  -- reads the two `_visible` views instead, which is what an invoker may read.
+  -- It is a COUNT of a population, never a denominator: nothing divides by it and the tail's
+  -- prosrc probe still finds no total.
+  -- ------------------------------------------------------------------------------------------
+  select count(*)::int into v_pending_members
+    from clara.intake_batch_members m
+    join clara.document_intakes_visible dv on dv.id = m.intake_id
+   where m.batch_id = p_batch
+     and m.work_id is null
+     and ( dv.status in ('uploading','received','verifying','verified')
+        or (m.document_id is not null
+            and exists (select 1 from clara.document_processing_tasks_visible tv
+                         where tv.document_id = m.document_id
+                           and tv.status in ('queued','held_egress','running'))) );
 
   -- ------------------------------------------------------------------------------------------
   -- FACET unassigned -- in custody, no LIVE filing (0007:63, live filing = retired_at is null).
@@ -1222,6 +1370,8 @@ begin
   return jsonb_build_object(
     'computed_at',   v_now,
     'preview_limit', v_preview,
+    'cancel_blocked', v_cancel_blocked,
+    'pending_members', v_pending_members,
     'batch', jsonb_build_object(
       'id', b.id, 'label', b.label, 'origin', b.origin, 'state', b.state,
       'opened_by', b.opened_by, 'opened_at', b.created_at,
@@ -1345,9 +1495,12 @@ begin
       end if;
     end if;
   end loop;
-  -- The four internals are granted to nobody.
+  -- The FIVE internals are granted to nobody (_intake_batch_pending_members joined them in fix
+  -- round 1, ADV-636-01: it decides the terminal flip and must be no more reachable than the
+  -- live-children helper it sits beside).
   foreach v_def in array array['clara._intake_batch_actor_ctx(uuid,uuid)',
                                'clara._intake_batch_live_children(uuid)',
+                               'clara._intake_batch_pending_members(uuid)',
                                'clara._tf_intake_batch_member_intake_stamp()',
                                'clara._tf_intake_batch_member_work_stamp()'] loop
     if has_function_privilege('clara_authenticated', v_def, 'EXECUTE')
@@ -1522,7 +1675,7 @@ begin
   end if;
 
   raise notice '#636 tail OK (1/6): the six installed names each have exactly one pg_proc row';
-  raise notice '#636 tail OK (2/6): five doors are clara_runtime-only SECURITY DEFINER, get_intake_batch is clara_authenticated-only SECURITY INVOKER, and all four internals are ungranted';
+  raise notice '#636 tail OK (2/6): five doors are clara_runtime-only SECURITY DEFINER, get_intake_batch is clara_authenticated-only SECURITY INVOKER, and all five internals are ungranted';
   raise notice '#636 tail OK (3/6): the three relations are RLS-forced with zero application-role DML, clara_runtime SELECT reaches the two CHILDREN only, and every member citation is tenant-carrying';
   raise notice '#636 tail OK (4/6): the member-event ledger carries its append-only/no-truncate pair';
   raise notice '#636 tail OK (5/6): the twelve non-regression bodies are byte-identical -- 0229 recuts nothing';

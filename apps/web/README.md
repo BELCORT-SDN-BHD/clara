@@ -410,6 +410,22 @@ open so Back closes, `router.replace` when the page was loaded directly at it, e
 parameter preserved, and a malformed id answered as not-found rather than folded into "nothing is
 open".
 
+**THE FIRM LEAF IS READ-ONLY APART FROM CANCEL.** `components/firm/documents/unassigned-sources.tsx`
+mounts the same card with `readOnly`, which governs the row affordances; Stop stays reachable there,
+because a person looking at a firm-wide board is exactly the person who needs to stop a batch.
+A TERMINAL batch offers no Stop on either mount — an affordance that could only refuse.
+
+**THE STOP DIALOG COUNTS WHAT IS STILL ARRIVING, NOT ONLY WHAT IS RUNNING.** `get_intake_batch`
+returns `pending_members` (members with no Work yet whose intake is still arriving or whose document
+is still being read), and the dialog says so. Without it, a batch stopped during ingest — the moment
+a hundred-file batch is most likely to be stopped — read "0 operations are still running" while a
+hundred were.
+
+**A STOP THAT CANNOT FINISH SAYS SO.** When the door answers `cancel_blocked`, the card renders a
+banner naming the reason and the remedy instead of showing "stopping" for ever. Today the one value
+is `canceller_not_active`: the fan-out must re-issue with the stored actor, so if that person leaves
+the firm, the remaining children cannot be stopped under that decision.
+
 **ONE CONFIRM, ONE GOVERNED CALL.** `intake-batch-cancel-dialog.tsx` performs exactly one
 `POST /api/runtime/intake/batches/:id/cancel`; the fan-out — one `clara.cancel_accounting_work` per
 live child — is the server's. One op key per open decision, minted with `work-cancel-dialog.tsx`'s

@@ -28,7 +28,9 @@
 // ERROR ISOLATION PER PARENT. A poisoned parent's fan-out is counted and the belt moves to the
 // next one; `batchCancelOk` goes false ONLY for a whole-belt failure (the worklist call itself),
 // because pinning it false for one permanently-refusing parent would say "we do not know" about
-// a sweep that in fact settled everything else.
+// a sweep that in fact settled everything else. A parent that can NEVER progress is counted
+// separately as `batchCancelBlocked` and logged by name, so "one child refused once" and "this
+// batch will never finish stopping" are not the same number (fix round 1, ADV-636-03).
 
 import { resumeCancel } from "./intake-batches.mjs";
 
@@ -57,7 +59,7 @@ export async function reconcileIntakeBatchCancellations(client, { log = NOOP_LOG
   }
 
   const settled = Array.isArray(worklist.settled) ? worklist.settled.length : 0;
-  let children = 0; let failed = 0;
+  let children = 0; let failed = 0; let blocked = 0;
 
   // The fan-out needs its OWN transaction per child, so it cannot ride the leader's connection:
   // one call per transaction is what lets a child that already posted answer `already_completed`
@@ -78,6 +80,19 @@ export async function reconcileIntakeBatchCancellations(client, { log = NOOP_LOG
       const out = await resumeCancel(runInTxn, parent, { log });
       children += (out.cancelled?.length ?? 0);
       if ((out.refused?.length ?? 0) > 0) failed += out.refused.length;
+      // FIX ROUND 1, ADV-636-03. A parent whose EVERY child refused CLR04 cannot make progress on
+      // any future sweep either: the fan-out must re-issue with the STORED actor (clara._work_door_ctx
+      // hashes {work, author}, so any other identity is CLR10 op_key_conflict), and that actor has
+      // lost authority. It is not a transient refusal and must not read as one — `batchCancelFailed`
+      // alone left the belt looking like it was retrying something. `clara.get_intake_batch` names
+      // the same condition to the human as `cancel_blocked`.
+      const refusals = out.refused ?? [];
+      if (refusals.length > 0 && refusals.every((r) => r.code === "CLR04")) {
+        blocked += 1;
+        log(`[reconcile] intake batch cancellations: parent ${parent?.batch_id} is BLOCKED — `
+          + `its stored canceller no longer holds authority, so ${refusals.length} child(ren) `
+          + "cannot be stopped under that decision and no future sweep will change that");
+      }
     } catch (err) {
       failed += 1;
       log(`[reconcile] intake batch cancellations: parent ${parent?.batch_id} fan-out failed — ${err?.message ?? err}`);
@@ -89,5 +104,6 @@ export async function reconcileIntakeBatchCancellations(client, { log = NOOP_LOG
     batchCancelSettled: settled,
     batchCancelChildren: children,
     batchCancelFailed: failed,
+    batchCancelBlocked: blocked,
   };
 }

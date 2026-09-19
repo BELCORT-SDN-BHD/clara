@@ -2330,9 +2330,11 @@ const INTAKE_BATCHES_0229_RUNTIME_FNS = [
 //   argument); the pool gets its worklist from the sweep verb instead, so granting the board to
 //   clara_runtime would be a second, unfloored way to read a firm's attention surface.
 const INTAKE_BATCHES_0229_HUMAN_FNS = ["get_intake_batch"];
-//   …and the ungranted closure: the two shared helpers and the two stamp triggers.
+//   …and the ungranted closure: the three shared helpers and the two stamp triggers.
+//   _intake_batch_pending_members joined in fix round 1 (ADV-636-01): it is what makes the
+//   terminal flip mean "nothing live AND nothing that can still become live".
 const INTAKE_BATCHES_0229_UNGRANTED_FNS = [
-  "_intake_batch_actor_ctx", "_intake_batch_live_children",
+  "_intake_batch_actor_ctx", "_intake_batch_live_children", "_intake_batch_pending_members",
   "_tf_intake_batch_member_intake_stamp", "_tf_intake_batch_member_work_stamp",
 ];
 export const INTAKE_BATCHES_0229_COHORT = [

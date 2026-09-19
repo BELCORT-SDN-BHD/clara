@@ -106,7 +106,6 @@ export function IntakeBatchCard({
   onFacetChange,
   onRefresh,
   pollExhausted = false,
-  readOnly = false,
   onCancelled,
 }: {
   state: IntakeBatchCardState;
@@ -117,8 +116,6 @@ export function IntakeBatchCard({
   onRefresh: () => void;
   /** The bounded poll gave up with rows still unsettled — an honest end, and a manual Refresh. */
   pollExhausted?: boolean;
-  /** The firm leaf mounts this read-only apart from Cancel. */
-  readOnly?: boolean;
   onCancelled?: () => void;
 }) {
   const t = useTranslations("IntakeBatch");
@@ -225,6 +222,16 @@ export function IntakeBatchCard({
       {terminal ? (
         <StateBanner tone="info" title={t("cancelled.title")}>{t("cancelled.body")}</StateBanner>
       ) : null}
+      {/* FIX ROUND 1, ADV-636-03 (MEASURED): the resumed fan-out MUST re-issue with the STORED
+          actor, because clara._work_door_ctx hashes {work, author} and any other identity is
+          CLR10 op_key_conflict. When that person's membership goes away, every child refuses
+          CLR04 on every sweep, for ever, and the parent sits in `cancelling`. The door NAMES that
+          (`cancel_blocked`) and the card says it, instead of showing "stopping" with no end and no
+          explanation. An unknown word from a newer database renders the same generic sentence
+          rather than nothing. */}
+      {ready.cancelBlocked !== null ? (
+        <StateBanner tone="warning" title={t("cancelBlocked.title")}>{t("cancelBlocked.body")}</StateBanner>
+      ) : null}
 
       {/* THE FACET COUNTS. Labelled, with their coverage word, and never summed. */}
       <ul className="grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="intake-batch-facets">
@@ -301,7 +308,16 @@ export function IntakeBatchCard({
           ))}
         </ToggleGroup>
         <Button type="button" size="sm" variant="outline" onClick={onRefresh}>{t("refresh")}</Button>
-        {!readOnly && !terminal ? (
+        {/* FIX ROUND 1 (STANDARDS `firm-leaf-cancel-unreachable`): there used to be a `readOnly`
+            prop, and the ONLY thing in the whole component it gated was this button — so the firm
+            leaf, documented as "read-only apart from Cancel", was the one surface where Cancel
+            could not be reached and `unassigned-sources.tsx`'s `onCancelled` handler was dead
+            code. The prop is gone rather than re-pointed: the rows carry navigation, not acts, so
+            there was nothing else for it to withhold. The two mounts differ by `clientId` alone —
+            the firm leaf passes null, so a row with no Work of its own says "No address yet"
+            instead of linking into a client's workspace. A TERMINAL batch still offers no Stop,
+            on either mount: an affordance that could only refuse. */}
+        {!terminal ? (
           <Button
             type="button"
             size="sm"
@@ -399,7 +415,8 @@ export function IntakeBatchCard({
         <IntakeBatchCancelDialog
           batchId={ready.batch.id}
           label={ready.batch.label ?? t("untitled")}
-          liveChildren={(ready.facets.admitted.count ?? 0) - (ready.facets.settled.count ?? 0)}
+          liveChildren={Math.max((ready.facets.admitted.count ?? 0) - (ready.facets.settled.count ?? 0), 0)}
+          pendingMembers={ready.pendingMembers ?? 0}
           onOpenChange={setCancelOpen}
           returnFocusTo={cancelTriggerRef}
           onCancelled={() => { onCancelled?.(); onRefresh(); }}

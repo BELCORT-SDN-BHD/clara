@@ -54,6 +54,7 @@ export function IntakeBatchCancelDialog({
   batchId,
   label,
   liveChildren,
+  pendingMembers,
   onOpenChange,
   onCancelled,
   returnFocusTo,
@@ -64,6 +65,10 @@ export function IntakeBatchCancelDialog({
   label: string;
   /** How many children the read believes are still running. A number, never a percentage. */
   liveChildren: number;
+  /** Members that hold no Work yet and are still arriving or still being extracted. FIX ROUND 1,
+   *  ADV-636-01: without it this dialog said "0 operations are still running" for a batch stopped
+   *  during ingest, which is the exact moment a hundred-file batch is most likely to be stopped. */
+  pendingMembers: number;
   onOpenChange: (open: boolean) => void;
   /** Re-read the batch after ANY completed attempt, refusal included — hydrate-never-trust. */
   onCancelled: () => void;
@@ -106,6 +111,11 @@ export function IntakeBatchCancelDialog({
           <DialogTitle>{t("cancel.title", { label })}</DialogTitle>
           <DialogDescription>{t("cancel.body", { n: liveChildren })}</DialogDescription>
         </DialogHeader>
+        {pendingMembers > 0 ? (
+          <p className="text-muted-foreground text-sm" data-testid="intake-batch-cancel-pending">
+            {t("cancel.stillArriving", { n: pendingMembers })}
+          </p>
+        ) : null}
         <p className="text-muted-foreground text-sm">{t("cancel.receiptsKept")}</p>
         {refusal ? (
           <StateBanner tone="error" title={t("cancel.refusedTitle")}>

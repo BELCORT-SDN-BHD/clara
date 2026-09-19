@@ -91,6 +91,15 @@ export type IntakeBatchWaitingBasis = {
 export type IntakeBatchPack = {
   computedAt: string | null;
   previewLimit: number | null;
+  /** The door's NAMED reason a stopping batch cannot finish stopping, or null. Derived, never
+   *  stored: today the one value is `canceller_not_active` (the person who pressed Stop is no
+   *  longer an active member, so the resumed fan-out refuses CLR04 on every child forever). An
+   *  unknown word from a newer database is carried through verbatim rather than swallowed. */
+  cancelBlocked: string | null;
+  /** Members that hold no Work YET and can still acquire one — still arriving, or still being
+   *  extracted. NOT a facet and NOT a denominator: it is what lets the stop dialog say how many
+   *  files are still in flight instead of "0 operations are still running" while a hundred are. */
+  pendingMembers: number | null;
   batch: {
     id: string;
     label: string | null;
@@ -164,6 +173,8 @@ export function toIntakeBatchPack(batchId: string, body: unknown): IntakeBatchPa
   return {
     computedAt: asString(root.computed_at),
     previewLimit: asCount(root.preview_limit),
+    cancelBlocked: asString(root.cancel_blocked),
+    pendingMembers: asCount(root.pending_members),
     batch: {
       id: asString(batch.id) ?? batchId,
       label: asString(batch.label),

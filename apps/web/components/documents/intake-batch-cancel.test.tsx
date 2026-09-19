@@ -42,11 +42,14 @@ function App(children: ReturnType<typeof createElement>) {
 
 type Call = { batchId: string; opKey: string };
 
-async function mount(cancel: (b: string, k: string) => Promise<unknown>, onCancelled = () => {}) {
+async function mount(cancel: (b: string, k: string) => Promise<unknown>, onCancelled = () => {},
+  over: Record<string, unknown> = {}) {
   const h = await renderComponent(App(createElement(IntakeBatchCancelDialog, {
     batchId: BATCH,
     label: "April sources",
     liveChildren: 40,
+    pendingMembers: 0,
+    ...over,
     onOpenChange: () => {},
     onCancelled,
     cancel: cancel as never,
@@ -120,5 +123,23 @@ test("the dialog states that committed receipts are kept — the load-bearing pr
   assert.match(text, /Nothing that has posted is undone/);
   assert.match(text, /40 operations are still running/, "a COUNT, never a percentage");
   assert.ok(!/\d+\s*%/.test(text), "no percentage-shaped string anywhere in the dialog");
+  await h.unmount();
+});
+
+test("intake batch cancel: a batch stopped DURING INGEST says how many files are still arriving (ADV-636-01)", async () => {
+  // MEASURED before the repair: a hundred files pressed Stop during OCR gave admitted=0 and
+  // settled=0, so this dialog said "0 operations are still running" while a hundred were, and the
+  // parent then went terminal. The door now reports `pending_members` and the dialog says it.
+  const h = await mount(async () => ({ status: "ok" }), () => {}, { liveChildren: 0, pendingMembers: 100 });
+  const text = bodyText();
+  assert.match(text, /100 more files are still being taken in or read/);
+  assert.match(text, /this batch keeps stopping until they are all accounted for/,
+    "…and the copy no longer implies the stop is finished the moment it is pressed");
+  await h.unmount();
+});
+
+test("intake batch cancel: with nothing in flight the arriving line is absent", async () => {
+  const h = await mount(async () => ({ status: "ok" }), () => {}, { liveChildren: 3, pendingMembers: 0 });
+  assert.ok(!bodyText().includes("still being taken in"));
   await h.unmount();
 });

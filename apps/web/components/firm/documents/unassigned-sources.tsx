@@ -113,7 +113,6 @@ export function UnassignedSources() {
             onFacetChange={batch.setFacet}
             onRefresh={batch.refresh}
             pollExhausted={batch.pollExhausted}
-            readOnly
             onCancelled={() => { void sources.reload(); }}
           />
         </section>

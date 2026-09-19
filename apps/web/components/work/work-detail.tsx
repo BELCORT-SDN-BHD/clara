@@ -443,7 +443,6 @@ export function WorkDetailView({
         committed={committed}
         reloadLinks={reloadLinks}
         claimOrigin={claimOrigin}
-        batchOrigin={batchOrigin}
         reloadWork={() => state.reload()}
         session={session}
       />
@@ -452,6 +451,25 @@ export function WorkDetailView({
   return (
     <div className="flex flex-col gap-6">
       <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} clientId={clientId} />
+
+      {/* #636 — ONE row, "part of batch X", and it renders WHATEVER the Work's state is.
+          FIX ROUND 1, V636R-2: it used to live inside PostedEntrySection, which renders only once
+          a journal entry exists (`entry === null ? null : …`), so the reverse address was absent
+          for exactly the children AC5's recovery language is about — queued, running, waiting on
+          a dependency, refused, cancelled. A read that FAILED is still indistinguishable from
+          "not in a batch": both leave the row absent, and the page never says a Work is NOT in a
+          batch. The started-vs-posted divergence is STATED rather than fixed: the batch card's
+          `admitted` facet counts Work that has been ADMITTED, its `settled` facet counts Work
+          that holds a COMMITTED receipt, and #905 (not this ticket) owns the Work-list
+          projection that would otherwise have to agree with them. */}
+      {batchOrigin === null ? null : (
+        <p className="text-muted-foreground text-sm" data-testid="work-batch-origin">
+          {t("batchOrigin.label")}{" "}
+          <Link href={`${clientBase(clientId)}/documents?batch=${batchOrigin.batchId}`} className="underline">
+            {t("batchOrigin.value", { label: batchOrigin.label ?? batchOrigin.batchId })}
+          </Link>
+        </p>
+      )}
 
       {/* DELAYED IS ABOUT THE READ, not about the Work. It says the page has not
           managed a successful read since a named time, which is a fact about the
@@ -682,7 +700,6 @@ function PostedEntrySection({
   committed,
   reloadLinks,
   claimOrigin,
-  batchOrigin,
   reloadWork,
   session,
 }: {
@@ -695,7 +712,6 @@ function PostedEntrySection({
   committed: OperationReceiptRow | null;
   reloadLinks: () => Promise<unknown>;
   claimOrigin: WorkClaimOrigin | null;
-  batchOrigin: WorkBatchOrigin | null;
   reloadWork: () => Promise<unknown>;
   session: SessionTokenAccessor;
 }) {
@@ -760,21 +776,6 @@ function PostedEntrySection({
                     claimant: claimOrigin.claimant_label,
                     settlement: tsec(`settlement.options.${claimOrigin.settlement}`),
                   })}
-                </dd>
-              </>
-            )}
-            {/* #636 — ONE row, and the started-vs-posted divergence is STATED rather than fixed.
-                The batch card's `admitted` facet counts Work that has been ADMITTED; its `settled`
-                facet counts Work that holds a COMMITTED receipt. Those are different numbers on
-                purpose, and #905 (not this ticket) owns the Work-list projection that would
-                otherwise have to agree with them. */}
-            {batchOrigin === null ? null : (
-              <>
-                <dt className="text-muted-foreground">{t("batchOrigin.label")}</dt>
-                <dd className="text-foreground" data-testid="work-batch-origin">
-                  <Link href={`${clientBase(clientId)}/documents?batch=${batchOrigin.batchId}`} className="underline">
-                    {t("batchOrigin.value", { label: batchOrigin.label ?? batchOrigin.batchId })}
-                  </Link>
                 </dd>
               </>
             )}
