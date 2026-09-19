@@ -15,6 +15,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   RETRIEVE_KNOWLEDGE_FN, WORK_KNOWLEDGE_READ_PURPOSE, faceStatusOf, readKnowledgeDrift,
@@ -120,24 +121,50 @@ test("kr.05 the door is called with NAMED args, in its own order, and the envelo
   assert.deepEqual(params, [CLIENT, "accounting_work", "2026-09-19", ["accounting_basis"], 40, FIRM]);
 });
 
-test("kr.06 a truncated answer is `partial`, and the CORE tier decides whether the run may act", async () => {
+test("kr.06 a truncated answer is `partial`, and the remainder's cap never stops the run", async () => {
   const truncated = { ...ANSWER, truncated: true, hidden_count: 17 };
   const sql = fakeSql(() => ({ rows: [{ answer: truncated }] }));
   const out = await retrieveKnowledge(sql, { clientId: CLIENT, firmId: FIRM, purpose: "accounting_work" });
   assert.equal(out.status, "ok", "the RUNTIME envelope keeps its frozen two words");
   assert.equal(out.truncated, true);
   assert.equal(faceStatusOf(out), "partial", "...and the FACE word says the view is partial");
-  assert.equal(out.core_ok, true, "a truncated REMAINDER leaves the core intact, so the run may act");
+  assert.equal(out.tiers.core, ANSWER.tiers.core, "a capped REMAINDER leaves the core intact, so the run may act");
 });
 
-test("kr.07 a core-read failure is unavailable even when the remainder succeeded", async () => {
-  const coreless = { ...ANSWER, tiers: { core: 0, requested: 0, remainder: 3 }, core_readable: false };
-  const sql = fakeSql(() => ({ rows: [{ answer: coreless }] }));
-  const out = await retrieveKnowledge(sql, { clientId: CLIENT, firmId: FIRM, purpose: "accounting_work" });
-  assert.equal(out.status, "unavailable");
-  assert.equal(out.reason, "core_unreadable");
-  assert.equal(out.core_ok, false);
-  assert.equal(faceStatusOf(out), "unknown");
+test("kr.07 the door is ATOMIC: a failure to read ANY tier is one unavailable answer, and D16's terminal fires on it", async () => {
+  // THE FIX-ROUND CELL (review findings A1/F1/S1). This module used to branch on a
+  // `core_readable` key and mint a sixth reason, `core_unreadable` — and clara.retrieve_knowledge
+  // has never emitted that key: it assembles all three tiers in ONE statement, so it either
+  // answers whole or RAISES. The old cell hand-built `{...ANSWER, core_readable:false}` against a
+  // stub, which proved the JS `if` and nothing about the door. What is true, and what a v5 caller
+  // may rely on, is asserted here instead: EVERY door failure is an unavailable answer that maps
+  // to a non-`ok` face word, which is what D16's terminal actually keys on.
+  const refused = await retrieveKnowledge(
+    fakeSql(() => { throw clrError("CLR10", "knowledge_purpose_required", "a stated purpose"); }),
+    { clientId: CLIENT, firmId: FIRM, purpose: "accounting_work" });
+  assert.equal(refused.status, "unavailable");
+  assert.equal(refused.reason, "refused");
+  assert.equal(faceStatusOf(refused), "denied");
+
+  const broke = await retrieveKnowledge(fakeSql(() => { throw new Error("connection terminated"); }),
+    { clientId: CLIENT, firmId: FIRM, purpose: "accounting_work" });
+  assert.equal(broke.status, "unavailable");
+  assert.equal(broke.reason, "read_failed");
+  assert.equal(faceStatusOf(broke), "unknown");
+
+  // ...and a half-shaped envelope is `malformed`, never a client with nothing recorded.
+  const partialEnvelope = await retrieveKnowledge(
+    fakeSql(() => ({ rows: [{ answer: { status: "ok", tiers: { core: 0 } } }] })),
+    { clientId: CLIENT, firmId: FIRM, purpose: "accounting_work" });
+  assert.equal(partialEnvelope.reason, "malformed");
+  assert.equal(faceStatusOf(partialEnvelope), "unknown");
+
+  // NO SIXTH REASON, AND NO TIER-READABILITY CONTRACT ANYWHERE IN THIS MODULE. If a later door
+  // revision wants to distinguish a core-only failure it adds the field in migration 0230 (the
+  // durable place) and changes p658.retrieve.envelope_is_atomic to say so.
+  const src = await readFile(new URL("../lib/knowledge-retrieval.mjs", import.meta.url), "utf8");
+  assert.ok(!/core_readable|core_unreadable|core_ok/.test(src),
+    "a branch no door can reach is a contract the v5 integrator would have designed against");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -146,10 +173,10 @@ test("kr.07 a core-read failure is unavailable even when the remainder succeeded
 
 test("kr.08 faceStatusOf maps each of the five frozen reasons onto exactly one of the four face words", async () => {
   const FOUR = new Set(["ok", "partial", "unknown", "denied"]);
-  assert.equal(faceStatusOf({ status: "ok", records: [], truncated: false, core_ok: true }), "ok");
-  assert.equal(faceStatusOf({ status: "ok", records: [], truncated: true, core_ok: true }), "partial");
+  assert.equal(faceStatusOf({ status: "ok", records: [], truncated: false }), "ok");
+  assert.equal(faceStatusOf({ status: "ok", records: [], truncated: true }), "partial");
   assert.equal(faceStatusOf({ status: "unavailable", reason: "refused" }), "denied");
-  for (const reason of ["read_failed", "malformed", "no_client", "no_purpose", "core_unreadable"]) {
+  for (const reason of ["read_failed", "malformed", "no_client", "no_purpose"]) {
     const word = faceStatusOf({ status: "unavailable", reason });
     assert.equal(word, "unknown", `reason ${reason}`);
     assert.ok(FOUR.has(word));
@@ -181,8 +208,8 @@ test("kr.09 the rendered block says WHICH tiers were read, at which version and 
 });
 
 test("kr.10 `partial` reads as NEITHER neighbour — not as a clean read and not as a failure", async () => {
-  const okBlock = renderRetrievedKnowledge({ ...ANSWER, core_ok: true });
-  const partialBlock = renderRetrievedKnowledge({ ...ANSWER, truncated: true, hidden_count: 17, core_ok: true });
+  const okBlock = renderRetrievedKnowledge({ ...ANSWER });
+  const partialBlock = renderRetrievedKnowledge({ ...ANSWER, truncated: true, hidden_count: 17 });
   const failedBlock = renderRetrievedKnowledge({ status: "unavailable", reason: "read_failed", records: [] });
   assert.notEqual(partialBlock, okBlock);
   assert.notEqual(partialBlock, failedBlock);
@@ -212,7 +239,7 @@ test("kr.11 an unavailable block never reads as absence, and never as `unavailab
 
 test("kr.12 the read-set writer sends the FACE word and the keys the answer actually returned", async () => {
   const sql = fakeSql(() => ({ rows: [{ receipt: { status: "ok", read_id: "r1" } }] }));
-  const answer = { ...ANSWER, truncated: true, hidden_count: 5, core_ok: true };
+  const answer = { ...ANSWER, truncated: true, hidden_count: 5 };
   const out = await recordWorkKnowledgeRead(sql, {
     taskId: "33333333-3333-4333-8333-333333333333", runId: "wrun_01M20WGD9ETKK6RWCBA8CWG1GE",
     seq: 1, answer,
@@ -246,6 +273,36 @@ test("kr.13 the writer never throws: a refusal and a transport failure are diffe
   });
   assert.equal(b.ok, false);
   assert.equal(b.kind, "unavailable");
+});
+
+test("kr.13b a replay is relayed, and a replay that carried DIFFERENT facts is relayed as that", async () => {
+  // THE FIX-ROUND CELL (review finding A5). 0230's receipt now names a replay and whether the
+  // stored row recorded the same facts; this module lifts both out so the v5 call site reads a
+  // fact instead of digging into a receipt, and so a `payload_match:false` cannot be mistaken for
+  // the ordinary idempotent re-execution the WDK does on every resume.
+  const fresh = fakeSql(() => ({ rows: [{ receipt: {
+    status: "ok", read_id: "r1", replayed: false, payload_match: true, payload_digest: "a".repeat(64),
+  } }] }));
+  const first = await recordWorkKnowledgeRead(fresh, {
+    taskId: "33333333-3333-4333-8333-333333333333", runId: "wrun_01M20WGD9ETKK6RWCBA8CWG1GE",
+    seq: 1, answer: ANSWER,
+  });
+  assert.equal(first.ok, true);
+  assert.equal(first.replayed, false);
+  assert.equal(first.payload_match, true);
+
+  const diverged = fakeSql(() => ({ rows: [{ receipt: {
+    status: "ok", read_id: "r1", replayed: true, payload_match: false,
+    payload_digest: "b".repeat(64), stored_digest: "a".repeat(64),
+  } }] }));
+  const again = await recordWorkKnowledgeRead(diverged, {
+    taskId: "33333333-3333-4333-8333-333333333333", runId: "wrun_01M20WGD9ETKK6RWCBA8CWG1GE",
+    seq: 1, answer: { ...ANSWER, status: "unavailable", reason: "refused" },
+  });
+  assert.equal(again.ok, true, "a diagnostic write must never fail a run");
+  assert.equal(again.replayed, true);
+  assert.equal(again.payload_match, false);
+  assert.equal(again.receipt.stored_digest, "a".repeat(64), "what is actually on file rides through");
 });
 
 test("kr.14 readKnowledgeDrift never invents relevance: a null stays null through the reader", async () => {

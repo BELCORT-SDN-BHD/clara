@@ -892,9 +892,26 @@ four. No face and no column ever says `unavailable` — 0230's CHECK refuses it 
 | `{status:'ok'}` | `ok` |
 | `{status:'ok', truncated:true}` | `partial` |
 | `{status:'unavailable', reason:'refused'}` | `denied` |
-| `{status:'unavailable', reason:'read_failed' \| 'malformed' \| 'no_client' \| 'no_purpose' \| 'core_unreadable'}` | `unknown` |
+| `{status:'unavailable', reason:'read_failed' \| 'malformed' \| 'no_client' \| 'no_purpose'}` | `unknown` |
 
-Batteries: `tests/knowledge-retrieval.test.mjs` (18 cells) and `tests/work-trace-bounds.test.mjs`
+**Five reasons, not six — and D16's required read needs no sixth.** `clara.retrieve_knowledge`
+decides all three tiers in ONE statement and catches nothing, so it either answers with every tier
+or raises: "the core could not be read" is the same event as "the read failed", and both arrive as
+an `unavailable` answer whose face word is `unknown` or `denied`. D16's terminal at the v5 cut
+therefore fires on ANY unavailable answer; there is no per-tier readability signal to key on, and a
+caller must not be written as though there were. Asserted on both sides:
+`p658.retrieve.envelope_is_atomic` reads the catalogued door body, and `kr.07` reads this module's
+source. A later door revision that wants to distinguish a core-only failure adds the field in
+migration 0230, where durable rules live, and changes those two cells to say so.
+
+**A replay is named.** `recordWorkKnowledgeRead` returns `replayed` and `payload_match` beside the
+raw receipt. The relation is append-only and keyed by `(work_id, run_id, seq)`, so a re-execution
+whose outcome genuinely differed (first attempt `ok`, second `denied` because a record was
+withdrawn mid-flight) cannot overwrite the row — it is reported instead of being answered with a
+silent `ok`. The writer still never fails a run: a diagnostic write that could settle a Work would
+be worse than the divergence it reports.
+
+Batteries: `tests/knowledge-retrieval.test.mjs` (19 cells) and `tests/work-trace-bounds.test.mjs`
 (9 cells). Standalone leg: `tests/work-knowledge-e2e.mjs` — it SIGKILLs a child between the
 read-set write and its acknowledgement and proves the replay lands on the SAME
 `(work_id, run_id, seq)` row. It bootstraps NO Workflow World, so it leaves

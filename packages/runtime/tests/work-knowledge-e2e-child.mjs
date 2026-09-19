@@ -24,7 +24,6 @@ const ANSWER = {
   keys: ["accounting_basis", "sst_regime"],
   truncated: false,
   hidden_count: 0,
-  core_ok: true,
   records: [{}, {}, {}, {}, {}, {}, {}],
 };
 

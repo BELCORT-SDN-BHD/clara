@@ -21,8 +21,19 @@
 // (`no_client`, `no_purpose`, `refused`, `malformed`, `read_failed`). `knowledge-conflicts.mjs`
 // took that decision by DELEGATION rather than by copy, and wrote down why (:19-24): "a second
 // copy of that body is how two lanes come to disagree about what an unreadable pack means, which
-// is the exact defect #603 closed." This module makes the same choice. Its own reasons are that
-// same five plus ONE the new door introduces — `core_unreadable`, D16's required-read arm.
+// is the exact defect #603 closed." This module makes the same choice, and its reasons are THAT
+// SAME FIVE and no sixth: `no_client`, `no_purpose`, `refused`, `malformed`, `read_failed`.
+//
+// AND D16's REQUIRED READ NEEDS NO SIXTH REASON, WHICH IS WORTH SAYING PLAINLY BECAUSE AN EARLIER
+// DRAFT OF THIS MODULE THOUGHT IT DID. `clara.retrieve_knowledge` decides all three tiers in ONE
+// CTE chain in ONE statement and catches nothing (0230 §A's header states this, and
+// p658.retrieve.envelope_is_atomic asserts it against the catalogued body): the door either
+// answers with every tier or raises. So "the core could not be read" is not a distinguishable
+// outcome — it is the same event as "the read failed", and both arrive here as an `unavailable`
+// answer whose face word is `unknown` or `denied`. D16's terminal therefore fires on ANY
+// unavailable answer, and a caller must not be written as though a core-only failure had its own
+// signal. If a later revision wants one, it adds the field in migration 0230, where durable rules
+// live, and p658.retrieve.envelope_is_atomic is the cell it has to change to do it.
 //
 // =============================================================================================
 // THE TWO VOCABULARIES, AND THE ONE PLACE THEY MEET.
@@ -113,7 +124,6 @@ function unavailable(reason, extra = {}) {
     keys: [],
     truncated: false,
     hidden_count: 0,
-    core_ok: false,
     records: [],
   }, extra);
 }
@@ -172,21 +182,11 @@ export async function retrieveKnowledge(sql, {
   }
 
   const tiers = answer.tiers && typeof answer.tiers === "object" ? answer.tiers : {};
-  // D16's REQUIRED READ. The core tier is the one a run may not proceed without: policies,
-  // authority-bearing keys and the five legacy-carried facts. `core_readable:false` is the door
-  // saying it could not assemble that tier; a core of zero records on a client that HAS none is a
-  // different thing and is NOT a failure, so the flag is what decides, never the count.
-  const coreOk = answer.core_readable !== false;
-  if (!coreOk) {
-    return unavailable("core_unreadable", {
-      client_id: answer.client_id ?? client,
-      firm_id: answer.firm_id ?? null,
-      purpose: answer.purpose ?? p,
-      as_of: answer.as_of ?? null,
-      message: "the required (core) knowledge tier could not be read",
-    });
-  }
-
+  // D16's REQUIRED READ IS ALREADY SETTLED BY THE TIME EXECUTION REACHES HERE — see this module's
+  // header. Every way the core tier can fail to be read is a raise from the atomic door, and every
+  // raise was turned into an `unavailable` answer above. A core of ZERO records on a client that
+  // genuinely has none is a different thing entirely and is NOT a failure: the run may act, and
+  // `tiers.core` is a count, never a verdict.
   return {
     status: "ok",
     client_id: answer.client_id ?? client,
@@ -204,7 +204,6 @@ export async function retrieveKnowledge(sql, {
     keys: Array.isArray(answer.keys) ? answer.keys : [],
     truncated: answer.truncated === true,
     hidden_count: Number(answer.hidden_count ?? 0),
-    core_ok: true,
     records: answer.records,
   };
 }
@@ -222,10 +221,7 @@ export async function retrieveKnowledge(sql, {
  */
 export function faceStatusOf(answer) {
   const a = answer ?? {};
-  if (a.status === "ok") {
-    if (a.core_ok === false) return "unknown";
-    return a.truncated === true ? "partial" : "ok";
-  }
+  if (a.status === "ok") return a.truncated === true ? "partial" : "ok";
   if (a.status === "unavailable" && a.reason === "refused") return "denied";
   return "unknown";
 }
@@ -356,7 +352,21 @@ export async function recordWorkKnowledgeRead(sql, {
   ];
   try {
     const r = await sql.query(RECORD_SQL, params);
-    return { ok: true, receipt: r?.rows?.[0]?.receipt ?? null };
+    const receipt = r?.rows?.[0]?.receipt ?? null;
+    // A REPLAY IS RELAYED, NOT SWALLOWED. 0230 keeps the FIRST row for a (work, run, seq) —
+    // the relation is append-only, so it cannot do otherwise — and answers whether a row was
+    // already there (`replayed`) and whether it recorded the SAME facts (`payload_match`). A
+    // `replayed: true, payload_match: false` is a re-execution whose outcome genuinely differed
+    // (first attempt ok, second denied because a record was withdrawn mid-flight): the stored row
+    // is the one the drift envelope will report, so a caller that cares must record its own next
+    // `seq` rather than assume the estate holds what it just sent. Lifted out of the raw receipt
+    // so the v5 call site reads it as a fact rather than by digging.
+    return {
+      ok: true,
+      receipt,
+      replayed: receipt?.replayed === true,
+      payload_match: receipt?.payload_match !== false,
+    };
   } catch (err) {
     if (isGovernedRefusal(err)) {
       return {
