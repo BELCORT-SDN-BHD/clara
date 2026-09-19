@@ -129,12 +129,13 @@ test("the LOADING skeleton is structurally accessible and announces itself", asy
 test("the REFUSED state is structurally accessible, and its code is beside its sentence", async () => {
   const h = await renderComponent(Page({
     submit: async () => ({
+      // The wire shape `submitTradeInvoiceWork` really returns — the route unfolds the door's
+      // typed `detail.candidates` onto a first-class field, so the candidate LIST is part of what
+      // this scan has to find structurally accessible.
       kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
-      detail: {
-        candidates: [
-          { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },
-        ],
-      },
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },
+      ],
     }) as unknown as SubmitTradeInvoiceWorkResult,
   }));
   const form = h.find((n) => n.tagName === "FORM");
