@@ -931,6 +931,24 @@ is that destination, and it imports `lib/registration/legal-reads.ts` and `legal
 UNCHANGED rather than forking them, so the op-key, verbatim-digest and stale-re-read properties are
 the same ones the signup journey already proves.
 
+**THE COPY IS CHOSEN BY THE PLATFORM'S LEGAL ENFORCEMENT MODE (#1008, migration 0234).** The
+standing read now carries `enforcement_mode` — `prompt` (the beta, and 0234's landing value) or
+`enforce` (0195's rule). `standing_live` is UNCHANGED and still false whenever an agreement is
+outstanding, in both modes, because that is the fact the card needs in order to ASK; what changes is
+the sentence underneath it. Under `enforce` it is today's consequence sentence, byte for byte
+(`FirmSettings.legalNotLiveBody`). Under `prompt` it is `FirmSettings.legalNotLivePromptBody` —
+"Please accept the current versions of both agreements. During the beta this does not stop Clara
+working on your clients' books" — because under `prompt` the derived basis IS live on any real
+acceptance the firm's active owner holds, and saying otherwise would be the estate telling a firm
+its work is switched off when it is not (the owner's ruling of 2026-09-20). The accept control is
+offered identically in both modes. `decodeLegalEnforcementMode` in
+[lib/firm/commercial-reads.ts](lib/firm/commercial-reads.ts) reads an ABSENT or unreadable mode as
+`enforce`: a build deployed ahead of the migration then renders exactly what its database is
+actually enforcing. It is a default and never a requirement, so an unknown mode cannot drop a read
+the three required scalars would otherwise have carried. There is NO control here for flipping the
+mode — that is the operator firm owner's door (`clara.set_legal_enforcement_mode`) and it has no
+web surface yet.
+
 **What this page deliberately does not have**, each because the estate cannot honestly offer it:
 no price while `billing_plans.amounts_ruled` is false (the flag is the render condition, so an
 owner ruling shows a figure with no code change); no "Manage billing" control at any rank (nothing

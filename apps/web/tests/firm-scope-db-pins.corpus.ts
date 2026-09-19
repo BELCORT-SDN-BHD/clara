@@ -187,4 +187,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "4240e93328d0e9a3174fae476ed99a9fa41da6b2379cafc9d66d2ac2b3a667dd",
     },
   ],
+  // #1008 [0234] — the platform legal enforcement mode, appended at the sorted position. Same
+  // splice family as 0177/0191/0201/0226: pg_get_functiondef recuts of a CLOSED literal roster of
+  // named FUNCTIONS, each read at its exact signature.
+  [
+    "0234_legal_enforcement_mode.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly THREE named functions, each read at its own literal regprocedure spelled in this file — clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text,text) (three counted anchors: the mint arm's consent VALUES list, its clara._audit payload and its egress.purpose_consent_derived payload), clara.restore_client_egress_purpose(uuid,text,text) (three counted anchors of the same shape) and clara.get_firm_legal_standing() (one counted anchor on its RETURN object). Two return jsonb and the third returns jsonb as well, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. Each block asserts the split at the AS $function$ boundary, counts every anchor and refuses unless it occurs EXACTLY once, and then goes further than the family usually does: after installing, it re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned pre-image byte for byte — so a smuggled change anywhere else in the spliced body reds the migration rather than the census. Every other object this migration creates (one relation with its RLS, policy, two triggers and seed row, three function bodies at literal signatures including the whole-body recut of clara._accounting_work_egress_live, and the grant/revoke/comment matrix) is STATIC DDL the lexer inspects directly. The file's prestate pins the pre-image prosrc sha256 of all four recut bodies plus two non-regression pins (clara.consume_egress_dispatch and clara.set_admission_capacity), and its tail re-reads owner, SECURITY DEFINER, pinned search_path, ACL and a single-pg_proc-row census over every name it installs.",
+      sha256: "ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25",
+    },
+  ],
 ]);
