@@ -85,7 +85,7 @@ test("#876 — loadIntakeReceipts no longer issues a CLIENT-WIDE filings request
       await loadIntakeReceipts(CLIENT, { session: session() });
     },
   );
-  assert.ok(counts.document_filings >= 1, "control: the tasks poll must still read document_filings at all");
+  assert.ok((counts.document_filings ?? 0) >= 1, "control: loadIntakeReceipts must still read document_filings at all");
   assert.doesNotMatch(urls.document_filings!, /client_id=eq\./,
     `the mount-time filings read must never filter by the whole client — saw ${urls.document_filings}`);
   assert.match(urls.document_filings!, /document_id=in\.\(doc-1\)/,
