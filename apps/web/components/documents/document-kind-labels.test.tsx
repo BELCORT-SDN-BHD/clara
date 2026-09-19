@@ -23,6 +23,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf } from "../../test/hookHarness";
@@ -158,8 +161,10 @@ test("[633] fix round: the list/receipt classify control never offers a kind the
   // `classifyConsentEvidenceDocument` (`lib/documents/doors.ts:189`), owner-floored.
   //
   // The DETAIL surface's own classify Select (`document-kind-dialog.tsx` since #646 moved it
-  // out of `DocumentAdmin`) still offers the full roster; that surface is not this ticket's to
-  // change and is recorded as an observation, not edited here.
+  // out of `DocumentAdmin`) offered the full roster at the time this cell was written; #633
+  // recorded that on purpose as an observation it would not change. #878 re-opened it — see
+  // the next test — and the dialog now imports this SAME constant rather than the full
+  // `DOCUMENT_KINDS`, so there is exactly one roster, not two.
   const { CLASSIFIABLE_DOCUMENT_KINDS } = await import("./document-kind-control");
   assert.equal(CLASSIFIABLE_DOCUMENT_KINDS.includes("consent_evidence" as never), false,
     "a kind the door always refuses must not be offered");
@@ -171,3 +176,39 @@ test("[633] fix round: the list/receipt classify control never offers a kind the
   );
   assert.equal(CLASSIFIABLE_DOCUMENT_KINDS.length, DOCUMENT_KINDS.length - 1);
 });
+
+test("[878] the DETAIL surface's classify Select also stops offering a kind the door always refuses", async () => {
+  // The DOM idiom above cannot enumerate a live option list — `@base-ui`'s popup mounts
+  // lazily and no test in this repo drives it open (see the non-vacuity comment on the first
+  // test in this file). The house proof for "which roster backs this Select", established by
+  // the [633] fix-round cell above, is the SOURCE the component actually imports: one shared
+  // constant, never a second copy of the filter.
+  const dialogSource = textOfFile("document-kind-dialog.tsx");
+  assert.match(
+    dialogSource,
+    /import\s*\{\s*CLASSIFIABLE_DOCUMENT_KINDS\s*\}\s*from\s*"\.\/document-kind-control"/,
+    "the dialog must import the SAME filtered roster the sibling list/receipt control exports, not re-derive it",
+  );
+  assert.match(
+    dialogSource,
+    /CLASSIFIABLE_DOCUMENT_KINDS\.map\(/,
+    "the dialog's Select must map the filtered roster",
+  );
+  assert.doesNotMatch(
+    dialogSource,
+    /\bDOCUMENT_KINDS\.map\(/,
+    "the dialog must not fall back to mapping the full, unfiltered roster",
+  );
+  // The comment #878's brief asks corrected: the old text asserted the full roster was a
+  // deliberate, permanent choice for this surface. That claim must not survive verbatim.
+  assert.doesNotMatch(
+    dialogSource,
+    /observation it would not change/,
+    "the dialog's own comment must no longer claim the full roster is permanent here",
+  );
+});
+
+function textOfFile(rel: string): string {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  return readFileSync(join(dir, rel), "utf8");
+}
