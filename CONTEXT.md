@@ -405,8 +405,16 @@ A missing-evidence readiness requirement that an authorised person explicitly ac
 _Avoid_: A passed evidence check; permission to waive an accounting identity; a standing waiver for future periods.
 
 **Open item**:
-A specific receivable or payable whose outstanding amount is tracked against its settlements and corrections.
-_Avoid_: The entire balance of an account as a substitute for identifying what remains due.
+A specific receivable or payable whose outstanding amount is tracked against its settlements and corrections. It is born with the entry that creates the claim, carries the due date its basis produced, and is never written by hand.
+_Avoid_: The entire balance of an account as a substitute for identifying what remains due; an open item created independently of the journal entry it belongs to.
+
+**Trade invoice**:
+A client's own accounting document that creates a receivable or a payable: a sales invoice the client issued, or a supplier bill the client received. It names one counterparty, the date the document itself carries, an exact total, and the journal it posts — and it is recorded once, as one accounting act, with the receivable or payable it creates. Its LINES are the journal it posts — a bookkeeper's coding judgement — and never the line items printed on the document.
+_Avoid_: A firm's own billing document for its accounting fees (that would be a subscription invoice, and Clara has none); a credit note, which corrects an invoice rather than being one; a quotation, a proforma or a statement; the document's own printed line items, which Clara does not yet read.
+
+**Due-date basis**:
+How an open item's due date was decided: STATED on the document, derived from the COUNTERPARTY'S agreed payment terms, or honestly ABSENT because neither states one. It is recorded beside the date so a reader can tell a date the document gave from one the terms produced.
+_Avoid_: Today's date, or any date invented when neither the document nor the terms supply one; a due date presented without saying where it came from.
 
 **Settlement allocation**:
 The relationship applying a recorded receipt, payment or credit to a specific open item. It identifies what was settled and by how much.
@@ -417,8 +425,8 @@ A debit that has already occurred in a bank account and is supplied as an accoun
 _Avoid_: An instruction to initiate a payment; authority for a future bank mandate or recurring accounting plan.
 
 **Control account**:
-A general-ledger account whose balance must reconcile with its identified detailed accounting records.
-_Avoid_: An unrestricted shortcut for changing the total without its supporting detail.
+A general-ledger account whose balance must reconcile with its identified detailed accounting records. Which side a trade invoice moves is decided by what the document is, not by which account somebody typed: a sales invoice moves receivables, a supplier bill moves payables.
+_Avoid_: An unrestricted shortcut for changing the total without its supporting detail; a control leg whose party contradicts the direction the document states.
 
 **Operator support case**:
 One thing on the estate's admission surface that needs BELCORT's operator firm: an undecided firm registration with no payment against it, a registration payment that has not opened a firm, or a payment-provider event the estate could not act on. Each case names its affected entity and its current state.

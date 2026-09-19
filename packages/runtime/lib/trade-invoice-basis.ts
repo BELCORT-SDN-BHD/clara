@@ -160,7 +160,7 @@ export const startTradeInvoiceWorkInputSchema = z
       .positive()
       .describe("The document's stated total in whole sen. It must equal the control leg's signed amount."),
     tax_facts: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .nullable()
       .describe("The tax figures the document states, carried verbatim. Nothing recomputes them."),
     posting_date: isoDate.describe("The date the books record it. Often, but not always, the document date."),

@@ -191,6 +191,65 @@ shape for three different facts (unknown token, real token / wrong signed-in add
 no verified address), because distinguishing them would rebuild the existence oracle
 [0141_p4_tranche1_invite_rbac.sql](migrations/0141_p4_tranche1_invite_rbac.sql) §B closed.
 
+[0225_trade_invoices.sql](migrations/0225_trade_invoices.sql) adds the trade-invoice lane (#655):
+`clara.trade_invoices` (the typed business object — one counterparty, the document's own date, the
+due date **and the basis it was decided on**, an exact positive total in sen, opaque tax facts) and
+its append-only status ledger `clara.trade_invoice_status`. Both are FORCE-RLS with **zero**
+application-role DML and tenant-carrying composite FKs throughout. The object admits **no** update
+at all — the entry, the receipt and the open item are DERIVABLE BY JOIN and are never stored on it,
+which is what lets it stay append-only.
+
+**Three doors and their floors.** `clara.admit_trade_invoice_work(p_client, p_author, p_intent_key,
+p_kind, p_particulars, p_basis, p_basis_origin, p_source_refs, p_model)` is granted to
+**`clara_runtime` and nothing else** — there is no `clara_authenticated` twin and no `_for`
+sibling, for the reason 0221:1202-1206 states: Work admission on this lane is a runtime act OBO a
+named human, and admission also ENQUEUES a run, which PostgREST cannot produce. §F asserts both
+halves of that negative. `clara.get_trade_invoice(p_work)` is viewer-floored and reachable by
+`clara_authenticated` and `clara_runtime`. `clara._assert_trade_invoice_basis` and the seven
+other internals are ungranted to every application role. The door carries **no `p_attestation`**
+and `is_high_stakes` is unreachable from it.
+
+**One measured correction to #638's eight-step body order.** The authority preamble runs BEFORE the
+payload half here, not after. Measured on clara_655 with the payload half first: an UNKNOWN client
+left as CLR10 `control_leg_missing` (the chart lookup inside `_assert_trade_invoice_basis` is
+client-scoped) while a REAL client of another firm left as CLR11 `client_not_found` — and the
+difference between those two answers tells an unauthorised caller whether the client exists, which
+is exactly what 0194's no-existence-oracle rule forbids.
+
+**THE OPEN ITEM IS BORN BY A DEFERRED CONSTRAINT TRIGGER, and its ordering premise is MEASURED, not
+argued.** `t_je_open_item_birth` on `clara.journal_entries` is 0216's lane-agnostic instrument,
+declared identically and for 0216's stated reason. Enumerated from `pg_trigger` on clara_655
+(PG 17.11): twenty-three triggers, of which exactly ONE deferred constraint trigger reads
+`clara.open_items` at commit — `t_je_subledger_belt`. Deferred events for one row are queued in
+trigger-NAME order and fire at commit in queue order, so the birth is named to sort before it
+('o' < 's'), and `p655.rig.trigger_order` re-derives the whole ordering from the catalog rather
+than trusting this paragraph. The trigger resolves its subject through
+`clara.trade_invoice_status` (state='posted', entry_id), falls back to the committed operation
+receipt through the TEXT-compared `effects->>'entry_id'`, and returns immediately for every entry
+no trade invoice names — one indexed lookup, which is the whole cost it adds to every other lane.
+
+**THREE BODIES ARE RECUT, and the second and third were forced by a measurement.** The sixth full
+copy of `clara._record_journal_entry_core` was budgeted (D11: the control-leg refusal stands
+unless the Work carries a `clara.trade_invoices` row). The other two were not. Measured on
+clara_655 BEFORE the file was written: a `coding_kind IS NULL` entry with a payable control leg
+classifies as `'adjustment'` (LADDER 5), so `clara._tf_subledger_entry_belt` ARM 1 — which
+compares the entry's items against `clara._subledger_classify_entry` — raises CLR10
+`subledger_entry_untied` for a `'bill'` item (v_bad = 1, measured; 0 for today's
+`'adjustment'`), and `clara._tf_subledger_item_belt` hard-codes `item_kind='bill'` ⟺
+`coding_kind='supplier_bill'` without consulting the classifier at all. So the classifier gains
+LADDER 3T and the item belt's two arms learn the second lawful source, each firing ONLY when
+`clara.trade_invoices` names the entry. Setting `journal_entries.coding_kind` instead would have
+avoided both recuts and was rejected on measurement: it arms
+`clara._assert_supplier_bill_shape_at_projected`, whose `sst_purchase_cost` arm requires a
+DOCUMENT-STATED tax total, which a chat- or UI-stated bill has not got.
+
+**Three catalog censuses move, and each is re-derived rather than transcribed** (this closes #868's
+copies in this file): the `clara.open_items` WRITER set is now **TWO** (`_subledger_on_approve`
++ `_tf_je_open_item_birth`), superseding 0037:3830-3833's ONE; the subledger-hook CALLER set is
+**unchanged** at the measured SIX (0216:938-947), because the birth trigger births directly and
+names neither the hook nor the classifier; and the approve-path census is re-asserted to include
+`_record_journal_entry_core`, superseding 0037:3774-3782's stale four.
+
 **Named residual — the preview reproduces two of `accept_invite`'s three walls.** The acceptance
 door also re-checks the ISSUER's *current* rank (`clara.role_rank(inv.role) > coalesce(v_issuer_rank,
 -1)` → `CLR04 'invite exceeds the issuer''s rank -- re-issue by an owner'`), a fact that lives in

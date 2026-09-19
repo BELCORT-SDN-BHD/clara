@@ -892,3 +892,41 @@ shape; the WRITER does not, and the door is the wall. **`claraWork_v4` was cut i
 the existing `observed` object (`claraWork.v4.impl.ts`). Both rows above therefore carry
 forward to the next frozen `claraWork` version, unchanged.
 <!-- #811 -->
+
+## #655 — the trade-invoice lane, and the `chatTurn_v21` contract it hands over
+
+`POST /api/work/trade-invoice` (`src/workRoutes.ts`) is the **FOURTH** sibling of
+`/api/work/journal`, `/api/work/periodic-adjustment` and `/api/work/staff-expense-claim`, never a
+widened version of any of them. It takes **two** payloads where #638's claim door takes one
+(`invoice` and `basis`), because a trade invoice's journal is not derivable from its particulars:
+which expense account a bill debits is a coding judgement, not an arithmetic one. Both the human
+form and, later, the v21 chat tool post through it, which is what makes ONE `clara_runtime` door
+the whole lane's admission. Its 202 carries `invoice_id`, the RESOLVED `counterparty_id` and the
+**derived** `due_date` / `due_date_source` — four facts the browser could not have computed.
+
+`lib/trade-invoice-basis.ts` is a **NEW non-frozen module**, and it is non-frozen only until
+`chatTurn_v21` imports it: `scripts/check-frozen-workflows.mjs` freezes the transitive relative-
+import closure of every frozen workflow, so at the cut every byte of it is hash-locked — exactly
+what happened to `lib/periodic-adjustment-basis.ts` at v19 and `lib/staff-expense-claim-basis.ts`
+at v20. **Which is why every durable rule lives in migration 0225 and none lives here.** The module
+carries the `.strict()` schema, the two builders, the local refusal mapper (the door's own fifteen
+tokens, as messages) and a DISPLAY helper that names the domain and the item kind without naming a
+chart account — it has no chart. It carries **no object spread anywhere**, because
+`scripts/check-parts-parity.mjs` refuses one ("unclassifiable object spread") in any module it
+walks, and this module enters that walk at the cut; measured — the guard refused an earlier draft.
+
+**The successor contract this lane hands over** is written in full at the foot of that module: the
+tool name, the `.strict()` input schema, the door call with its argument order FIXED, the
+deterministic op key, the fifteen-token refusal map, the existing `work_accepted` part with **no**
+`WORK_ACCEPTED_PURPOSES` widening (a trade invoice is a `journal_entry`-purpose Work, exactly as
+#638's claim is), and the prompt stanza's "I've queued it" posture. Nothing is added to
+`claraWork_v4`: an ambiguous counterparty is refused AT ADMISSION precisely so no new mid-run
+question shape is needed, and a fact discovered mid-run goes through that body's existing
+`ASK_QUESTION_TOOL`.
+
+`tests/trade-invoice-e2e.mjs` is the World leg, and it is the ONLY place the thing this ticket is
+really about can be shown: the signed AR/AP open item is minted by a DEFERRED constraint trigger AT
+COMMIT, so the entry, the receipt, the `trade_invoices` row and the item are one transaction — and
+all four survive an `exit_after_commit` crash and a respawn as ONE of each. It also proves the
+due-date basis end to end: the browser sent `absent`, the door answered `counterparty_terms` and
+stamped `posting_date + payment_terms_days` on the item. It SKIPS CLEANLY when 0225 is absent.
