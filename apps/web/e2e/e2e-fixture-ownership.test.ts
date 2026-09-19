@@ -80,6 +80,7 @@ const LANE_MOCKS = [
   "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
   "trade-invoice-mock.mjs",
+  "work-knowledge-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
 
@@ -226,6 +227,13 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // ONE runtime route (`POST /api/opening/parse-targets`) is likewise scoped to its own seed id.
   // It declares NEITHER list, which is the shape a new lane mock should aim for.
   "opening-ledger-source-mock.mjs": { unscopeable: [], debt: [] },
+  // #658's own lane (the B3 Work-knowledge walk). `work_knowledge_drift` is a brand-new RPC no
+  // other lane calls, and every branch — relation and verb alike — is scoped to this lane's own
+  // client id or to one of the two work/task ids it minted, with its own `return false;`
+  // fall-through otherwise. Its control endpoint takes its discriminant from the QUERY STRING, so
+  // the fall-through happens before the body is drained. It declares NEITHER list, which is the
+  // shape a new lane mock should aim for.
+  "work-knowledge-mock.mjs": { unscopeable: [], debt: [] },
   // #632's own lane. `list_activity`/`get_activity_event` are brand-new RPCs no other lane ever
   // calls, and each still carries its own `return false;` fall-through on an unmatched
   // `p_client`/`p_source`+`p_id` — the journals lane's shape, declaring neither list.
@@ -1152,7 +1160,22 @@ function rpcVerbCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, strin
  * above already establishes is not a property to lean on beyond what N5 already buys.
  */
 const SHARED_RPC_VERBS: Record<string, string[]> = {
-  list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs"],
+  list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs", "work-knowledge-mock.mjs"],
+  // #658 x #631 — the Work-knowledge lane renders the SAME Diagnostics section the journal-work
+  // lane does, because B3's Work detail mounts it for every Work. Each lane answers only for the
+  // work ids IT minted and falls through otherwise (journal-work-mock.mjs:1401-1405's
+  // `state.works.get(workId) === undefined` guard; work-knowledge-mock.mjs's two explicit ids),
+  // so the share is a declared one rather than a collision.
+  get_work_execution_trace: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
+  // #658 x #629 — B3's Work detail mounts `WorkQuestionPanel` for every parked Work, so the three
+  // question doors are read by any lane whose fixture Work is `awaiting_input`. The journal-work
+  // lane answers for its own question id and this lane for its own single one
+  // (work-knowledge-mock.mjs's `WK.questionId`), and both fall through otherwise. The WRITE is a
+  // declared share for the same reason and with the same scoping: `answer_work_question` is
+  // refused by each lane for a question it did not mint, so neither can accept the other's answer.
+  get_work_pending_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
+  get_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
+  answer_work_question: ["journal-work-mock.mjs", "work-knowledge-mock.mjs"],
   list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
   // #624 AC4 — `clara.get_document_state` is read from TWO surfaces by design: the Documents
   // detail panel and the Work detail's Sources tab mount the SAME component over it, because the
@@ -1219,7 +1242,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // answering and falls through otherwise, so it can answer for neither of the other two.
   list_spoken_for_documents: [
     "accrual-mock.mjs", "documents-intake-mock.mjs", "journal-work-mock.mjs",
-    "periodic-adjustment-mock.mjs",
+    "periodic-adjustment-mock.mjs", "work-knowledge-mock.mjs",
   ],
   // #633 x the chat-parity train — THE ATTRIBUTION PAIR, answered by two lanes because two
   // surfaces perform the same act: the chat composer files what it just attached, and the
@@ -1253,7 +1276,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `journal-work-mock.mjs` answers NULL for its own two Works (`seededWorkId`,
   // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
   // work ids and falls through otherwise, so this is a declared share, not a collision.
-  get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
+  get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs", "work-knowledge-mock.mjs"],
   // #649 x P6-5 — `clara.begin_client_onboarding` is the ONE door that creates a client, so any
   // lane whose walk creates one answers it. The two answer for DIFFERENT names and the door
   // carries no id, so the name is the request's own subject here rather than a label for one:
@@ -1272,7 +1295,7 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // register rows, while `journal-work-mock.mjs` and `plans-mock.mjs` answer the door's own SQL
   // NULL for Works that are not claims. Neither can answer for another lane's walk.
   get_work_claim_origin: [
-    "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs",
+    "journal-work-mock.mjs", "plans-mock.mjs", "staff-expense-claim-mock.mjs", "work-knowledge-mock.mjs",
   ],
   // #653 x #640 — the FOUR plan lifecycle doors. A prepayment schedule CONFIGURES an
   // `amortisation_schedule` accounting plan, so pause / resume / end / catch-up on it are

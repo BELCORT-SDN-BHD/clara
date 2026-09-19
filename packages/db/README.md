@@ -701,6 +701,99 @@ the human-review affordance instead.
 Battery: [tests/knowledge-firm-defaults.test.mjs](tests/knowledge-firm-defaults.test.mjs), gated by
 `knowledge-firm-defaults-preintegration-gate.mjs`.
 
+### Bounded knowledge retrieval, the recorded read-set and drift (#658, 0230)
+
+`0230_knowledge_retrieval.sql` adds **seven granted functions, one ungranted core and one
+relation**, and **recuts nothing** — eight bodies (`get_knowledge_pack`, `list_client_knowledge`,
+`_knowledge_legacy_rows`, `_knowledge_capture_core`, `_knowledge_floor`, `capture_knowledge`,
+`get_context_pack`, `answer_work_question`) are pinned by pre-image `sha256(prosrc)` **measured on
+a migrated rig**, never transcribed from file text, and re-read from the catalog in the tail.
+
+The doors, their floors and their grants:
+
+| Door | Lane | Floor / binding |
+|---|---|---|
+| `retrieve_knowledge(p_client, p_purpose, p_as_of, p_keys, p_limit, p_firm)` | `clara_runtime` ONLY | the pack's own lane picker (0192:1474-1500); `p_firm` required on the machine arm |
+| `read_knowledge_record_for(p_firm, p_client, p_record)` | `clara_runtime` ONLY | actor-explicit; CLR11 with no existence oracle |
+| `read_knowledge_history_for(p_firm, p_client, p_record)` | `clara_runtime` ONLY | actor-explicit; CLR11 with no existence oracle |
+| `record_work_knowledge_read(p_task, …)` | `clara_runtime` ONLY | work/firm/client DERIVED from the positive `agent_tasks → accounting_work` join |
+| `work_knowledge_drift_for(p_firm, p_work)` | `clara_runtime` ONLY | firm explicit |
+| `work_knowledge_drift(p_work)` | `clara_authenticated` ONLY | `_human_ctx(role_rank('viewer'))`, firm from the session |
+| `list_work_knowledge_reads_for_record(p_record)` | `clara_authenticated` ONLY | viewer floor; scope taken from the RECORD, firm-bounded |
+
+**`retrieve_knowledge` is pack-shaped, so #783 binds it.** The ruling lives at
+`.out-of-scope/human-read-of-knowledge-pack.md` — "the register is the human surface; the pack is
+the model's" — and the tail asserts the ABSENCE **positively**: no human role, no agent read role
+and no wake lane holds EXECUTE on any of the three pack-shaped reads, with #783 named in the
+failure message. "One register, one pack, one answer" is proven BEHAVIOURALLY instead, by
+`p658.retrieve.shadow_parity` across two personas.
+
+**The seventh door does not breach that, and its own header says why.**
+`list_work_knowledge_reads_for_record` IS granted to `clara_authenticated` because it returns READ
+METADATA — which Work, at which `knowledge_version` and `as_of`, under which `purpose`, with which
+face word, over which key NAMES — and never a record's value, its `applies_when`, source bytes or
+any assembled pack content. `DECISIONS.md:83` mandates exactly this door for exactly this reason:
+`clara.work_knowledge_reads` is FORCE-RLS with **no app-role SELECT**, so a SECURITY DEFINER door is
+the only human path to it and a `grant select` is not an alternative. The tail asserts that grant
+positively too — `clara_authenticated` and NOBODY else — and re-proves that the relation itself
+gains no privilege of any kind after it.
+
+**`clara.work_knowledge_reads` carries NO foreign key to `clara.accounting_work`, deliberately.**
+The reason is quoted from 0195's own measurement (`0195:254-268`) so a later "hardening" pass
+cannot add it back for want of a written reason: an FK takes `FOR KEY SHARE` on the Work row, the
+posting core holds `FOR UPDATE` on exactly that row, and a measured trace insert **blocked 4001 ms
+behind a posting lock and was then silently cancelled**. The binding is enforced by the sole writer
+instead. The status CHECK admits exactly `ok` / `partial` / `unknown` / `denied` and **refuses the
+runtime's own `unavailable`**, so that word can never reach a register through a column; the
+mapping between the two vocabularies is exported once, as `faceStatusOf` in
+`packages/runtime/lib/knowledge-retrieval.mjs`.
+
+`work_knowledge_drift` / `_for` answer over ONE ungranted core, which prefers the recorded
+read-set and falls back to `work_execution_traces.observed_revisions->>'knowledge_version'`. On
+that fallback arm `relevant` is **null, never false**: no read-set was recorded, so "nothing
+relevant moved" would be a claim about keys nobody wrote down. The envelope also carries `read` —
+the last attempt's face word, reason, tier counts and key NAMES — so B3's Work detail needs no
+eighth door for one panel.
+
+**The moved-key scan applies the same per-applicability shadow the READ applied** (`0192:1355-1363`,
+copied into `retrieve_knowledge` and into the seventh door). A firm default that is shadowed for
+this client is a record the run provably did not read, so intersecting it with the read-set on the
+key name would report `relevant` for a basis that did not move — and the Work detail would tell a
+person "a record this Work read has changed" about a record it never read. Two deliberate
+non-symmetries around it, both asserted: the scan applies **no `state`/`superseded_at` filter**,
+because a withdrawn record is a revision at a higher version and "the exception you were relying on
+was withdrawn" is the most relevant thing that can happen to a basis; and the **watermark stays
+unshadowed**, because it is the shipped `0192:1333-1335` expression the read itself records, so
+`drifted` keeps meaning "something in your scope moved" while `relevant` means "and it was yours".
+
+**What a read-set row may contain is walled by the column, not only by the writer.** `keys` has a
+grammar (`^[a-z][a-z0-9_]{0,62}$` — stricter than the catalog's own `btrim(...) <> ''`, which the
+file's header records for the next key-minting migration) and a 400-key cap; `tiers` is a closed
+vocabulary `{core, requested, remainder}` of non-negative integers; `as_of` must be a **finite**
+date (`infinity` is a real date value, and this relation can never delete a row); and
+`payload_digest` records the facts the row carries. The reason is the file's own: the read-set must
+not become a payload slot by the back door, on an APPEND-ONLY relation that both drift doors hand
+back verbatim to the human lane and the runtime lane alike.
+
+**A replay is named.** `record_work_knowledge_read` stays replay-idempotent on `(work_id, run_id,
+seq)` — a WDK re-execution lands on the original row — but the receipt now carries `replayed`,
+`payload_digest`, `stored_digest` and `payload_match`, so a re-execution that carried **different**
+facts (first attempt `ok`, second `denied` because a record was withdrawn mid-flight) is reported
+rather than answered with a silent `ok`. It does not refuse the way `clara._reserve_op` does on the
+same mismatch: an op-key governs a WRITE, this governs a record OF A READ, and a diagnostic write
+that could settle a Work would be worse than the divergence it reports.
+
+**Non-goals, stated here as well as in the file**: #658 captures nothing, corrects nothing,
+promotes nothing, accrues no experience and writes no wiki/OKF page (#663's engine); it registers
+no domain event; it mints no knowledge key and no per-key side table; it widens no
+`accounting_work.purpose`; and `p_purpose` is RECORDED and ECHOED and filters NOTHING —
+`p658.retrieve.purpose_is_recorded_not_filtered` asserts that so a later ticket has a red cell to
+flip.
+
+Battery: [tests/knowledge-retrieval.test.mjs](tests/knowledge-retrieval.test.mjs), gated by
+`knowledge-retrieval-preintegration-gate.mjs`.
+
+
 ### The prepayment-amortisation lane (#653, 0223)
 
 `clara.create_prepayment_schedule` is the one write of that lane and it is unusual in two ways a

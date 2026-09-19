@@ -36,6 +36,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataState } from "@/components/firm/data-state";
@@ -43,6 +44,7 @@ import { EmptyState, StateBanner } from "@/components/common/state";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { knowledgeRecordHref } from "@/lib/navigation/tree";
+import { businessToday } from "@/lib/business-date";
 import { loadClientKnowledge, type KnowledgeRecordRow } from "@/lib/registers/knowledge";
 import {
   KnowledgeApplicability,
@@ -69,8 +71,23 @@ function groupByKey(rows: KnowledgeRecordRow[]): [string, KnowledgeRecordRow[]][
   return [...groups.entries()];
 }
 
+/** Is this record in effect on `asOf`? The two window ends come from fields
+ *  `clara.list_client_knowledge` ALREADY returns (`_knowledge_row_json`, 0192:1013-1036), so the
+ *  mark needs no new door, no recut and no human grant on any pack (#783). An open end means
+ *  "no bound that way", never "unknown". */
+export function isInEffectOn(
+  record: { effective_from: string | null; effective_to: string | null },
+  asOf: string,
+): boolean {
+  if (record.effective_from !== null && record.effective_from > asOf) return false;
+  if (record.effective_to !== null && record.effective_to < asOf) return false;
+  return true;
+}
+
 export function KnowledgePanel({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientKnowledge");
+  const tk = useTranslations("WorkKnowledge");
+  const asOf = businessToday();
   const [kind, setKind] = useState<string>(ALL);
   const knowledge = useAsyncRead(() => loadClientKnowledge(clientId, { session: sessionTokenAccessor }));
 
@@ -99,6 +116,14 @@ export function KnowledgePanel({ clientId }: { clientId: string }) {
         {knowledge.data ? (
           <p className="text-xs text-muted-foreground">
             {t("versionLabel", { version: String(knowledge.data.knowledge_version ?? 0) })}
+            {" · "}
+            {/* #658 — A VERSION WITH NO AS-OF IS HALF AN ANSWER. `knowledge_version` says which
+                revision of this client's knowledge you are looking at; `as_of` says which CALENDAR
+                DAY the in-effect marks below were computed for. Both are needed to read a row that
+                says "not in effect": not in effect WHEN? The date is Kuala Lumpur's, through the
+                one business-date law (lib/business-date.ts), never the browser's raw clock — the
+                same rule clara.get_knowledge_applicability follows server-side (0220:816). */}
+            <span data-testid="knowledge-as-of">{tk("asOfLabel", { date: asOf })}</span>
           </p>
         ) : null}
       </div>
@@ -119,7 +144,7 @@ export function KnowledgePanel({ clientId }: { clientId: string }) {
         ) : (
           <ul className="flex flex-col gap-3">
             {groups.map(([key, rows]) => (
-              <KnowledgeGroup key={key} clientId={clientId} knowledgeKey={key} rows={rows} />
+              <KnowledgeGroup key={key} clientId={clientId} knowledgeKey={key} rows={rows} asOf={asOf} />
             ))}
           </ul>
         )}
@@ -128,10 +153,11 @@ export function KnowledgePanel({ clientId }: { clientId: string }) {
   );
 }
 
-function KnowledgeGroup({ clientId, knowledgeKey, rows }: {
+function KnowledgeGroup({ clientId, knowledgeKey, rows, asOf }: {
   clientId: string;
   knowledgeKey: string;
   rows: KnowledgeRecordRow[];
+  asOf: string;
 }) {
   const t = useTranslations("ClientKnowledge");
   const live = rows.filter((r) => r.state === "live");
@@ -174,20 +200,36 @@ function KnowledgeGroup({ clientId, knowledgeKey, rows }: {
       ) : null}
       <ul className="flex flex-col gap-3">
         {rows.map((row) => (
-          <KnowledgeRow key={row.revision_id} clientId={clientId} row={row} />
+          <KnowledgeRow key={row.revision_id} clientId={clientId} row={row} asOf={asOf} />
         ))}
       </ul>
     </li>
   );
 }
 
-function KnowledgeRow({ clientId, row }: { clientId: string; row: KnowledgeRecordRow }) {
+function KnowledgeRow({ clientId, row, asOf }: {
+  clientId: string;
+  row: KnowledgeRecordRow;
+  asOf: string;
+}) {
   const t = useTranslations("ClientKnowledge");
+  const tk = useTranslations("WorkKnowledge");
+  const inEffect = isInEffectOn(row, asOf);
   return (
     <li className="flex flex-col gap-2 border-t border-border pt-2 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-card-foreground">{knowledgeValueText(row.value)}</span>
         <KnowledgeBadges record={row} />
+        {/* #658 — NOT IN EFFECT IS NOT WITHDRAWN, and the two must not read alike. A withdrawn
+            record was RETIRED by a person and carries a reason; this one is live, governs its own
+            period, and simply does not cover the day this view is for. It carries a WORD — never a
+            colour alone (appendix D #7) — and a title that says what the word means, so a reader
+            who cannot see the tone still reads "not in effect on <date>". */}
+        {!inEffect && row.state !== "withdrawn" ? (
+          <Badge variant="secondary" title={tk("notInEffectHint")} data-testid="knowledge-not-in-effect">
+            {tk("notInEffect", { date: asOf })}
+          </Badge>
+        ) : null}
         {row.state === "withdrawn" ? (
           <span className="text-xs text-muted-foreground">{t("withdrawnNotice")}</span>
         ) : null}

@@ -412,6 +412,21 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/opening-ledger-source-e2e.mjs
+        # #658 — THE KNOWLEDGE READ-SET RESUME PROPERTY, after the last standalone leg above.
+        # It SPAWNS a child that writes one `clara.work_knowledge_reads` row as `clara_runtime` and
+        # SIGKILLs it between the write and its acknowledgement, then respawns: the replayed step
+        # must land on the SAME (work_id, run_id, seq) row rather than a second one. It also proves
+        # that work/firm/client are DERIVED from the positive agent_tasks -> accounting_work join
+        # (a task of another kind is CLR11) and that the drift door observes from the recorded READ
+        # rather than from the execution-trace fallback. It bootstraps NO Workflow World — #658 cuts
+        # no frozen successor, so nothing on this branch calls the writer inside a durable step; the
+        # one-entry/one-receipt half closes with claraWork_v5. It SKIPS CLEANLY (exit 0, printed
+        # reason) when migration 0230 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/work-knowledge-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate

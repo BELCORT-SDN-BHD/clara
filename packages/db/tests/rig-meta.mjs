@@ -2448,6 +2448,36 @@ export const INTAKE_BATCHES_0229_COHORT = [
   ...INTAKE_BATCHES_0229_UNGRANTED_FNS,
 ];
 // #636 END
+// #658 [0230, bounded core-first knowledge retrieval + the recorded read-set + drift] — its own
+// cohort above 0192's and 0220's for the same "wholly present or wholly absent" reason: it recuts
+// nothing and adds a whole lane, so half of it is a read with no way to record what it read.
+//
+//   the TWO HUMAN doors — clara_authenticated ONLY. `work_knowledge_drift` floors at VIEWER (the
+//   same floor clara.list_client_knowledge takes, 0192:1316) and takes its firm from the session;
+//   whether the basis under a Work has moved is something anybody who may see the Work may ask.
+//   `list_work_knowledge_reads_for_record` is DECISIONS.md:83's SEVENTH door and is the ONLY human
+//   path into clara.work_knowledge_reads, which is FORCE-RLS with no app-role SELECT — a
+//   `grant select` is not an alternative to it, and 0230's tail refuses one. clara_runtime holds
+//   NEITHER: the run already knows what it read, and a drift twin that names its firm exists for it.
+const KNOWLEDGE_RETRIEVAL_0230_HUMAN_FNS = [
+  "work_knowledge_drift", "list_work_knowledge_reads_for_record",
+];
+//   the FIVE RUNTIME names — clara_runtime ONLY. Three of them are PACK-SHAPED reads, so #783
+//   binds them (.out-of-scope/human-read-of-knowledge-pack.md — "the register is the human
+//   surface; the pack is the model's"): a human grant on any of the three is the ruling being
+//   re-litigated inside a grant matrix, and this roster is where that fails loudly.
+const KNOWLEDGE_RETRIEVAL_0230_RUNTIME_FNS = [
+  "retrieve_knowledge", "read_knowledge_record_for", "read_knowledge_history_for",
+  "record_work_knowledge_read", "work_knowledge_drift_for",
+];
+//   …and the ONE ungranted core both drift doors delegate to, listed so `cohortFailures` reports
+//   a half-applied 0230 rather than a silently narrower boundary.
+const KNOWLEDGE_RETRIEVAL_0230_UNGRANTED_FNS = ["_work_knowledge_drift_core"];
+export const KNOWLEDGE_RETRIEVAL_0230_COHORT = [
+  ...KNOWLEDGE_RETRIEVAL_0230_HUMAN_FNS, ...KNOWLEDGE_RETRIEVAL_0230_RUNTIME_FNS,
+  ...KNOWLEDGE_RETRIEVAL_0230_UNGRANTED_FNS,
+];
+// #658 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2674,6 +2704,10 @@ export const ALLOWED = {
     // nowhere (its worklist is clara.sweep_intake_batch_cancellations), and both agent read roles
     // and all four wake lanes gain ZERO.
     ...INTAKE_BATCHES_0229_HUMAN_FNS,
+    // #658 [0230] the drift read (viewer floor) and DECISIONS.md:83's seventh door — the ONLY
+    // human path into the FORCE-RLS read-set relation. clara_authenticated ONLY; clara_runtime,
+    // both agent read roles and all four wake lanes gain ZERO.
+    ...KNOWLEDGE_RETRIEVAL_0230_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2862,6 +2896,10 @@ export const ALLOWED = {
     // clara.operation_receipts.
     ...INTAKE_BATCHES_0229_RUNTIME_FNS,
     ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
+    // [#658, 0230] the bounded core-first retrieval, the two inspection twins, the read-set
+    // writer and the drift twin — clara_runtime ONLY. The first three are PACK-SHAPED, so #783
+    // binds them: a human grant here is that ruling being re-litigated inside a grant matrix.
+    ...KNOWLEDGE_RETRIEVAL_0230_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -3161,6 +3199,13 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#657 0226 bank match evidence lane", BANK_MATCH_EVIDENCE_0226_COHORT, liveNames));
   // #657 END
   failures.push(...cohortFailures("#636 0229 intake-batch lane", INTAKE_BATCHES_0229_COHORT, liveNames));
+  // #658 [0230] — bimodal like #652's: wholly present once 0230 applies, wholly absent before it,
+  // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
+  const retrievalLive = KNOWLEDGE_RETRIEVAL_0230_COHORT.filter((n) => liveNames.has(n));
+  if (retrievalLive.length !== 0) {
+    failures.push(...cohortFailures("#658 0230 knowledge-retrieval lane", KNOWLEDGE_RETRIEVAL_0230_COHORT, liveNames));
+  }
+  // #658 END
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

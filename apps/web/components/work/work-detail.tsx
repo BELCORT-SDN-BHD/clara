@@ -34,6 +34,7 @@ import { useTranslations } from "next-intl";
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
 import { DocumentStatePanel } from "@/components/documents/document-state-panel";
 import { WorkDiagnostics } from "@/components/work/work-diagnostics";
+import { WorkKnowledgeBlock } from "@/components/work/work-knowledge-block";
 import {
   CancelOutcome,
   CancelWorkDialog,
@@ -695,6 +696,14 @@ export function WorkDetailView({
               })}
             </ul>
           )}
+          {/* #658 — WHAT THIS WORK READ before it acted, and whether that basis has MOVED since.
+              Mounted in ONE line for the reason WorkDiagnostics states below: this file is
+              1332 lines and three lanes are editing it; everything lives in
+              components/work/work-knowledge-block.tsx. It belongs in SOURCES because the client's
+              governed knowledge is the OTHER thing a run stands on besides its documents — and
+              until 0230 nothing recorded it, so "documents" was the honest answer only by
+              omission. The tab is `keepMounted`, so this read fires once per Work detail visit. */}
+          <WorkKnowledgeBlock workId={work.id} session={session} />
         </TabsContent>
 
         <TabsContent value="activity" className="flex flex-col gap-6">

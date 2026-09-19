@@ -937,6 +937,62 @@ between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
 spawned-engine shape `interview-kill-resume-e2e.mjs` uses.
 <!-- #811 -->
+### #658 — three NEW non-frozen modules the `claraWork_v5` cut will import
+
+All three sit OUTSIDE every frozen closure today (`node scripts/check-frozen-workflows.mjs
+--print-closure` shows the union at 296 modules, with nine `lib/` members, and none of these
+three among them). **Each one freezes the moment `claraWork_v5` imports it**, exactly as
+`lib/knowledge.mjs` froze when `chatTurn_v19` imported it and `lib/knowledge-conflicts.mjs` when
+`claraWork_v4` did — so DURABLE RULES LIVE IN MIGRATION 0230, never in these files. None of the
+three carries a module-level `node:` import, which is `lib/knowledge.mjs:44-64`'s measured
+constraint: the Workflow DevKit compiles a frozen closure into a VM script where `require` is
+undefined, and the failure is a RUN-TIME one no build gate sees.
+
+- **`lib/knowledge-retrieval.mjs`** — `retrieveKnowledge` (never null, never throws),
+  `renderRetrievedKnowledge` (three statuses, and `partial` reads as neither neighbour),
+  `recordWorkKnowledgeRead` and `readKnowledgeDrift`. It DELEGATES the envelope discipline to
+  `lib/knowledge.mjs` rather than restating it, for `knowledge-conflicts.mjs:19-24`'s reason: a
+  second copy is how two lanes come to disagree about what an unreadable pack means.
+- **`lib/capability-registry-v2.mjs`** at `clara-capability-registry/v2` — v1's five entries
+  carried by REFERENCE plus `accounting_work.retrieve_knowledge` and
+  `accounting_work.inspect_knowledge_source`, both `modelBound: true`. A SIBLING, never an edit
+  to the hash-locked v1 (`capability-registry.mjs:29-34`'s own rule; `layout-sandbox.mjs` is the
+  estate's precedent for a sibling).
+- **`lib/work-trace-bounds.mjs`** — #847's owed writer half; see the section below.
+
+**The status mapping, exported ONCE as `faceStatusOf`.** The runtime keeps its own frozen two
+words; every human face and the `clara.work_knowledge_reads.status` column use the estate's
+four. No face and no column ever says `unavailable` — 0230's CHECK refuses it by name.
+
+| runtime envelope | face word |
+|---|---|
+| `{status:'ok'}` | `ok` |
+| `{status:'ok', truncated:true}` | `partial` |
+| `{status:'unavailable', reason:'refused'}` | `denied` |
+| `{status:'unavailable', reason:'read_failed' \| 'malformed' \| 'no_client' \| 'no_purpose'}` | `unknown` |
+
+**Five reasons, not six — and D16's required read needs no sixth.** `clara.retrieve_knowledge`
+decides all three tiers in ONE statement and catches nothing, so it either answers with every tier
+or raises: "the core could not be read" is the same event as "the read failed", and both arrive as
+an `unavailable` answer whose face word is `unknown` or `denied`. D16's terminal at the v5 cut
+therefore fires on ANY unavailable answer; there is no per-tier readability signal to key on, and a
+caller must not be written as though there were. Asserted on both sides:
+`p658.retrieve.envelope_is_atomic` reads the catalogued door body, and `kr.07` reads this module's
+source. A later door revision that wants to distinguish a core-only failure adds the field in
+migration 0230, where durable rules live, and changes those two cells to say so.
+
+**A replay is named.** `recordWorkKnowledgeRead` returns `replayed` and `payload_match` beside the
+raw receipt. The relation is append-only and keyed by `(work_id, run_id, seq)`, so a re-execution
+whose outcome genuinely differed (first attempt `ok`, second `denied` because a record was
+withdrawn mid-flight) cannot overwrite the row — it is reported instead of being answered with a
+silent `ok`. The writer still never fails a run: a diagnostic write that could settle a Work would
+be worse than the divergence it reports.
+
+Batteries: `tests/knowledge-retrieval.test.mjs` (19 cells) and `tests/work-trace-bounds.test.mjs`
+(9 cells). Standalone leg: `tests/work-knowledge-e2e.mjs` — it SIGKILLs a child between the
+read-set write and its acknowledgement and proves the replay lands on the SAME
+`(work_id, run_id, seq)` row. It bootstraps NO Workflow World, so it leaves
+`packages/db/tests/rig-isolation.test.mjs` T10b green (#866).
 ## Requirements carried by the next frozen `claraWork` version (was `claraWork_v4`; it took neither)
 
 `packages/runtime/lib/work-trace.mjs` is inside `claraWork_v3`'s frozen closure and hash-locked in
@@ -966,8 +1022,23 @@ until that version is cut.
 Until a version takes them, the honest sentence about both fields is: the DOOR bounds them in
 shape; the WRITER does not, and the door is the wall. **`claraWork_v4` was cut in the wave
 2026-09-15 integration and took NEITHER requirement** — it only feeds `knowledge_version` into
-the existing `observed` object (`claraWork.v4.impl.ts`). Both rows above therefore carry
-forward to the next frozen `claraWork` version, unchanged.
+the existing `observed` object (`claraWork.v4.impl.ts`).
+
+**BOTH ROWS ARE NOW OWED ON `claraWork_v5`, AND THEIR CODE EXISTS (#658, filed as #847).**
+`packages/runtime/lib/work-trace-bounds.mjs` is a NEW, non-frozen SIBLING module that mirrors
+0210's two door-side clauses on the writer side — `boundedRevisionNumber` (`abs(v) < 1e12` and
+at most six decimal places) and `boundedRunId` (the `wrun_` + 26-character Crockford ULID arm,
+or no 13-digit run). `lib/work-trace.mjs` is NOT opened: #658 cuts no frozen body, so the module
+sits outside every closure until the v5 cut imports it, and the stanza that tells the integrator
+exactly where to call it is written in `reports/658-final.md`. Its own battery
+(`tests/work-trace-bounds.test.mjs`) asserts the admitted side BY VALUE against the shapes
+0210's tail exercised, because the writer's clause must stay **no tighter than the door's** — a
+writer stricter than the door loses rows the database would have accepted, and `traceSafely`
+swallows the loss. From v5 the honest sentence becomes: *the door bounds these two fields in
+shape, and from v5 so does the writer.*
+
+**#791 likewise carries forward to v5 rather than v4**, unchanged in substance: it is a
+requirement on the next frozen `claraWork` body, and v4 did not take it either.
 <!-- #811 -->
 
 ## #655 — the trade-invoice lane, and the `chatTurn_v21` contract it hands over

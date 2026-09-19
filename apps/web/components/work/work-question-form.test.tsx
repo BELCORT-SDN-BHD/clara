@@ -32,6 +32,24 @@ configureSessionTokenSource(async () => "test-token");
 // `fetch` either. doors.test.ts sets the same one for the same reason.
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
 
+// #658 — A MOUNTED **PENDING** QUESTION NOW ASKS `clara.work_knowledge_drift` ONCE, so that the
+// person answering is told when a record this Work read has changed under them. Every cell below
+// predates that read and several stub no door at all, so this default answers exactly that one
+// RPC with `null` — which `readWorkKnowledgeDrift` reports as `unreadable`, i.e. no banner and no
+// change to any cell's subject — and REFUSES everything else, so a cell that forgot its own stub
+// still fails loudly instead of reaching the network. `stubDoors` captures and restores whatever
+// `globalThis.fetch` is at call time, so it restores to this.
+globalThis.fetch = (async (input: unknown) => {
+  const url = String(input);
+  if (url.includes("/rpc/work_knowledge_drift")) {
+    return {
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: async () => null, text: async () => "null",
+    } as unknown as Response;
+  }
+  throw new Error(`work-question-form.test: un-stubbed fetch ${url}`);
+}) as typeof globalThis.fetch;
+
 type Stub = Record<string, unknown>;
 
 const QUESTION = "11111111-1111-4111-8111-111111111111";
@@ -194,7 +212,8 @@ test("a bounded set walks LOCALLY — one field per step, then a review, then ON
     await h.fireEvent(inputFor(h, "amount_cents")!, "change", (n) => setFieldValue(n, "1200.00"));
     await press(h, byTestId(h, "work-question-next")!);
     assert.ok(byTestId(h, "work-question-review"), "the last step is a REVIEW, not a submit surprise");
-    assert.equal(doors.calls.length, 0, "nothing was sent while walking — local navigation is local");
+    assert.equal(doors.calls.filter((c) => c.fn !== "work_knowledge_drift").length, 0,
+      "nothing was sent while walking — local navigation is local. The knowledge-drift READ (ticket 658) is excluded by name: it is a read the form makes once on mount, and the invariant here is that walking writes nothing. The ticket number is spelled out because a hash followed by three hex digits is a banned raw colour literal.");
   } finally {
     await h.unmount();
     doors.restore();
@@ -228,7 +247,8 @@ test("an invalid value is refused LOCALLY, names its constraint, and FOCUSES the
     assert.ok(byTestId(h, "work-question-error-amount_cents"), "the error sits by its control");
     assert.match(h.text(), /at most two decimal places/);
     assert.equal(activeElement(), inputFor(h, "amount_cents"), "the first invalid control took focus");
-    assert.equal(doors.calls.length, 0, "and nothing was sent");
+    assert.equal(doors.calls.filter((c) => c.fn !== "work_knowledge_drift").length, 0,
+      "and nothing was sent (the ticket-658 drift read is excluded by name — see the walking cell above)");
   } finally {
     await h.unmount();
     doors.restore();

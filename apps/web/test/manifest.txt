@@ -236,7 +236,9 @@ components/registers/fixed-assets-keyboard.test.tsx
 components/registers/knowledge-detail.test.tsx
 components/registers/knowledge-exception.test.tsx
 components/registers/knowledge-firm-panel.test.tsx
+components/registers/knowledge-panel-freshness.test.tsx
 components/registers/knowledge-promote-dialog.test.tsx
+components/registers/knowledge-record-reads.test.tsx
 components/registers/opening-a11y.test.tsx
 components/registers/opening-approve-guarantees.test.tsx
 components/registers/opening-create-tie-picker.test.tsx
@@ -272,7 +274,10 @@ components/work/work-activity-view.test.tsx
 # #770
 components/work/work-cancel-dialog.test.tsx
 components/work/work-detail.test.tsx
+components/work/work-diagnostics-observed.test.tsx
 components/work/work-diagnostics.test.tsx
+components/work/work-knowledge-block.test.tsx
+components/work/work-question-drift-banner.test.tsx
 components/work/work-question-form.test.tsx
 components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
@@ -426,6 +431,7 @@ lib/work/diagnostics.test.ts
 lib/work/evidence.test.ts
 lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
+lib/work/knowledge.test.ts
 lib/work/periodic-adjustment-draft.test.ts
 lib/work/periodic-adjustment.test.ts
 lib/work/question-fields.test.ts

@@ -15,6 +15,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   planEvent,
+  hasResolverSurfaceDefault,
+  hasStaleWriterDefault,
+  hasSynthesisAuthorizationSurfaceDefault,
   consumeEgressDispatchDefault,
   contentSha256,
   wikiStorageKey,
@@ -887,4 +890,95 @@ test("[defect] a NON-terminal re-drive failure still aborts the whole event (the
     await assert.rejects(() => plan.mutate(stubClient()), (e) => e === err,
       `${label} must PROPAGATE so the whole transaction rolls back and the event re-drives — it is not a convergence`);
   }
+});
+
+// =============================================================================================
+// C34.3 (#658) — THE THREE `to_regprocedure` SURFACE PROBES.
+//
+// The census: three probes, none bare, each pinning an EXACT SIGNATURE, each evaluated PER EVENT
+// (wiki-projection.mjs:341-346, :348-353, :612-615; :328-331 says in the module's own voice why
+// `to_regproc` would be wrong — "that cannot distinguish signatures, and an overload of a granted
+// name is a different function"). The FIRST clause of C34.3 — that a missing function yields the
+// NAMED SKIP RECEIPT rather than a throw — was already design; the SECOND — that an ADDED OVERLOAD
+// of the same name is still not matched — was unproven until these cells.
+// =============================================================================================
+
+/** A client that answers `to_regprocedure` from a fake catalog of EXACT signatures — the same
+ *  semantics the real catalog has: a signature is matched or it is not, and a different arity is a
+ *  different function. The probes issue `select A is not null [and B is not null] as <alias>`, so
+ *  the answer is the conjunction over every signature the SQL names. */
+function regprocedureStub(catalog) {
+  const present = new Set(catalog);
+  return {
+    async query(sql) {
+      const named = [...sql.matchAll(/to_regprocedure\('([^']+)'\)/g)].map((m) => m[1]);
+      assert.ok(named.length > 0, "a surface probe must name at least one EXACT signature");
+      for (const sig of named) {
+        assert.ok(sig.includes("(") && sig.endsWith(")"),
+          `${sig} must pin a SIGNATURE, never a bare name -- to_regproc cannot distinguish overloads`);
+      }
+      const surface = named.every((sig) => present.has(sig));
+      return { rows: [{ surface, r: surface }] };
+    },
+  };
+}
+
+const SYNTHESIS_SIGS = [
+  "clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)",
+  "clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)",
+];
+const RESOLVER_SIGS = [
+  "clara.resolve_document_client(uuid,uuid)",
+  "clara.resolve_and_ingest_wiki_source(uuid,uuid)",
+];
+const STALE_SIG = "clara.mark_wiki_citations_stale(uuid,uuid,text,text)";
+
+test("C34.3 probe 1/3 — the synthesis-authorization surface: present, MISSING, and an added overload", async () => {
+  assert.equal(await hasSynthesisAuthorizationSurfaceDefault(regprocedureStub(SYNTHESIS_SIGS)), true);
+  // MISSING: either half absent takes the whole surface down, and the probe RETURNS false rather
+  // than throwing -- which is what makes the ceremony window a lane-local skip.
+  for (const half of SYNTHESIS_SIGS) {
+    const without = SYNTHESIS_SIGS.filter((s) => s !== half);
+    assert.equal(await hasSynthesisAuthorizationSurfaceDefault(regprocedureStub(without)), false, `without ${half}`);
+  }
+  // AN ADDED OVERLOAD OF THE SAME NAME IS STILL NOT MATCHED. A later migration that adds
+  // `prepare_egress_dispatch(uuid,uuid,text,bigint,text,text)` beside the pinned five-argument
+  // form does not make this surface "present": a different signature is a different function.
+  assert.equal(await hasSynthesisAuthorizationSurfaceDefault(regprocedureStub([
+    "clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text,text)",
+    "clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text,text)",
+  ])), false, "an overload of a granted name is a DIFFERENT function (wiki-projection.mjs:328-331)");
+});
+
+test("C34.3 probe 2/3 — the resolver surface, and a MISSING one is a NAMED skip receipt, never a throw", async () => {
+  assert.equal(await hasResolverSurfaceDefault(regprocedureStub(RESOLVER_SIGS)), true);
+  assert.equal(await hasResolverSurfaceDefault(regprocedureStub([RESOLVER_SIGS[0]])), false);
+  assert.equal(await hasResolverSurfaceDefault(regprocedureStub([
+    "clara.resolve_document_client(uuid,uuid,text)",
+    "clara.resolve_and_ingest_wiki_source(uuid,uuid,text)",
+  ])), false, "an added overload of the same name is still not matched");
+  // ...and the CALLER turns a false into a named terminal receipt rather than a dead-letter.
+  const ev = {
+    seq: 41, type: "document.classified", client_id: CLIENT, document_id: DOC,
+    payload: { document_id: DOC, client_id: CLIENT },
+  };
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev, deps: { hasResolverSurface: async () => false },
+  });
+  assert.match(String(plan.status), /^skipped_/, "a missing surface is a NAMED skip, never a throw");
+  assert.ok(!plan.mutate, "a skip has no effect to run");
+});
+
+test("C34.3 probe 3/3 — the stale writer, and the skip it produces is `skipped_no_surface`", async () => {
+  assert.equal(await hasStaleWriterDefault(regprocedureStub([STALE_SIG])), true);
+  assert.equal(await hasStaleWriterDefault(regprocedureStub([])), false);
+  assert.equal(await hasStaleWriterDefault(regprocedureStub([
+    "clara.mark_wiki_citations_stale(uuid,uuid,text)",
+    "clara.mark_wiki_citations_stale(uuid,uuid,text,text,text)",
+  ])), false, "two overloads of the same name, and the pinned FOUR-argument form is neither of them");
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: retiredEv(), deps: { hasStaleWriter: async () => false },
+  });
+  assert.equal(plan.status, "skipped_no_surface",
+    "the receipt names WHY -- a checkpoint-only skip the ceremony window is supposed to produce");
 });
