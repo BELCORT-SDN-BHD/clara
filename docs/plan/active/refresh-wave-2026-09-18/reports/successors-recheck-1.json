@@ -1,0 +1,144 @@
+{
+  "ticket": "successors",
+  "role": "recheck",
+  "recheck_round": 1,
+  "recheck_model": "claude-sonnet-5 (CUT RECHECK reviewer, workflow harness)",
+  "head_checked": "887b4162119d498ff9c01d5ac6722d3ba1f05499",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\int",
+  "branch": "integration/wave-2026-09-18",
+  "rigs_used": [
+    "127.0.0.1:55721 clara_rt (typecheck/lint/parts-parity/freeze-lint/build/whole-suite/apps-web-suite)",
+    "127.0.0.1:55721 clara_rt_test (World legs; chat-turn-v21-e2e and two-build-cutover-e2e are hard-gated to PGDATABASE in {clara_rt_test, clara_wave_b_ci} and refuse to start against bare clara_rt)"
+  ],
+  "report_path": "C:\\Users\\zhant\\Desktop\\clara-rebuild\\docs\\plan\\active\\refresh-wave-2026-09-18\\reports\\successors-recheck-1.json",
+  "inputs_read": [
+    "reports/successors-fixround-1.md (full)",
+    "reports/successors-review-adversarial.json (ADV-S-1..12)",
+    "reports/successors-review-spec.json (SP-1..3)",
+    "reports/successors-review-standards.json (S1, S2)",
+    "docs/plan/active/refresh-wave-2026-09-18/DECISIONS.md \u00a71 (frozen-body plan), \u00a72.2 (migration numbering discipline)",
+    "docs/plan/active/refresh-wave-2026-09-18/SUCCESSORS-ORDER.md (found only in the clara-rebuild main checkout, NOT committed to the int worktree or any commit reachable from it -- see process_note below; \u00a71.4 and \u00a72.2 are its section-4-under-heading-1/2 items, confirmed to be exactly what successors-final.md and successors-fixround-1.md cite by those numbers)",
+    "packages/db/migrations/0225_trade_invoices.sql (admit_trade_invoice_work body, record_journal_entry's operation_in_flight raise, _reserve_op call sites)",
+    "packages/db/migrations/0194_periodic_adjustments.sql (_admit_accounting_work_core's unique_violation handler, lines ~1232-1256)"
+  ],
+  "verdict": "accept",
+  "summary": "All 15 APPLIED findings verified by opening the actual diff (a666da12..0008849c) and independently re-running the exact cell(s) each one cites; every diff hunk matches what the report claims line for line, and every cited cell is green in isolation. Both DELIBERATELY LEFT findings (ADV-S-7, SP-2) were checked against the migration source directly, not just against the report's prose, and both hold: admit_trade_invoice_work (0225) never calls clara._reserve_op (grep over its body: 0 hits; operation_in_flight is raised only inside record_journal_entry via _reserve_op), so there is no unmapped concurrency answer for TRADE_INVOICE_REFUSALS to carry, and this reading matches DECISIONS.md \u00a71.2's own language for this exact contract ('the count is descriptive, the door's own raise ladder is the contract'). pack_firm_required (SP-2) is a real CLR10 0230 can raise, already carried with a comment explaining why it is inert in this lane pre-fix-round, and the fix round's only change was to name it in the report as the finding asked -- consistent with SUCCESSORS-ORDER \u00a72.2's literal two-entry map plus the wave's own precedent (#655's F2 addition) for naming rather than deleting a defensive extra row. The ADV-S-2 ratification request (a durable row per inspection read) is real and correctly scoped as a migration-level decision rather than something a fix round should mint unilaterally: independently confirmed clara.work_knowledge_reads' drift-core reads only the latest row per (work_id,run_id) key set (0230:812) and clara.work_execution_traces has no free payload column (0195 \u00a77B), so neither existing relation can safely carry a per-inspection-read row without a schema change. All requested re-verification commands were re-run independently at 887b4162 and match the report's own evidence table: pnpm typecheck (exit 0), pnpm lint (exit 0), check-parts-parity.mjs (exit 0, same six emittable kinds; work_result's site is now claraWork.v5.impl.ts:891 after the fix round's own edits, and the report itself already cites the FILE rather than a line number here per S2's fix -- so this is not new staleness), check-frozen-workflows.mjs --compare-base origin/main (exit 0, 296/16/3, byte-identical to the report), the whole runtime suite (2837 tests \u00b7 2816 pass \u00b7 4 fail \u00b7 17 skip -- all 4 fails are named baseline reds: intake-unit #693, pg-tools-fixture #806, ready MAJOR-1, rollback-preflight 637.pf:B3; none touch a v21/v5 module, and the exact fail/pass/skip split differs slightly from the report's 2814/7/16 only in which of the known load-flakes fired this run, which the report itself documents as nondeterministic), the whole apps/web unit suite (4628 \u00b7 4626 pass \u00b7 0 fail \u00b7 2 skip, exact match), and the World legs after a fresh pnpm --filter @clara/runtime build (10.9MB, same size): chat-turn-v21-e2e PASS (5 legs, including live confirmation of 'THE BLOCK NAMES THE RECORD' and the serving bundle digest fe641982...2bedc698 matching the report's cited post-fix digest exactly), chat-turn-v20-e2e PASS (4 legs, predecessor closure), work-egress-e2e PASS (3 legs), work-knowledge-e2e PASS, work-journal-e2e PASS. The two-build-cutover-e2e leg could not be driven to completion: it refused to start on clara_rt_test with the SAME class of pre-existing non-terminal state the standards reviewer already recorded (12 non-terminal autoDraft_v10 runs, 3 claraWork_v4, 1 clientOnboarding_v5, one unbound accounting_work task -- none of them chatTurn_v21/claraWork_v5 bodies), which is the shared-rig contamination class RIG.md and DECISIONS \u00a76.3 already name; the refusal itself is the leg's documented fail-closed contract firing correctly, not a defect this cut introduced, so it is recorded as unverified-by-completion rather than as a new finding. No new defects were found in the fix round's own changes.",
+  "applied_findings_verified": [
+    {
+      "id": "ADV-S-1",
+      "commit": "c4136de8",
+      "verification": "Diffed knowledge-retrieval.mjs: recordLine now carries record_id plus in-force/scope/applies_when marks, exactly as claimed. Ran kr.19 (green) and the World leg's own probe: chat-turn-v21-e2e now prints '[v21-serve] THE BLOCK NAMES THE RECORD <uuid>' before asserting the tool answered; leg re-run PASS (5 legs)."
+    },
+    {
+      "id": "ADV-S-3",
+      "commit": "c4136de8",
+      "verification": "Diffed claraWork.v5.ts: the drift read is now guarded by `segment + 1 < budgets.segments`, matching the exact SETTLE_TRACE_SEQ collision the finding named. Whole-suite run (which includes the widened census cell) is green on this file's tests."
+    },
+    {
+      "id": "ADV-S-5",
+      "commit": "c4136de8",
+      "verification": "Diffed chatTurn.v21.prompt.ts: CLIENT_BASIS_LIMIT/PRINT_MAX/VALUE_CHARS are now imported from chatTurn.v19.prompt.ts's exported constants rather than retyped; renderRetrievedKnowledge/recordWorkKnowledgeRead take options/recordsShown/truncated as claimed. Ran kr.20 and kr.21 (green)."
+    },
+    {
+      "id": "ADV-S-9",
+      "commit": "c4136de8",
+      "verification": "Diffed knowledge-retrieval.mjs: renderRetrievedKnowledge now special-cases reason==='no_client' with its own sentence before the generic failure text. Ran kr.22 (green)."
+    },
+    {
+      "id": "ADV-S-6",
+      "commit": "4c110b89",
+      "verification": "Diffed chatTurn.v21.tools.ts/ts registry.ts: both mappers now classify on isGovernedRefusalV21 (SQLSTATE /^CLR\\d{2}$/) instead of the dead `refused.ok === true` guard; tradeInvoiceRefusalFromError/depreciationRefusalFromError are now exported. Ran v21.refusals (green). Independently confirmed authoringRefusal returns {ok:false,...} on every path at chatTurn.v11.tools.ts:109."
+    },
+    {
+      "id": "ADV-S-2",
+      "commit": "d97df49b",
+      "verification": "Diffed claraWork.v5.impl.ts/tools.ts/prompt.ts: every false claim (the trace-row comment, the tool header, the prompt module, the model-facing .describe()) is corrected in place to state the reason reaches no relation in clara; the durable per-read row is filed as a ratification request rather than invented. Ran v5.reads and v5.knowledge cells (all green). Confirmed live: chat-turn-v21-e2e's fresh build serves bundle digest fe64198207d5082c06eff21b7cf7193c9a6dc03254f871cc1bdda5752bedc698, matching the report's cited post-.describe()-edit digest exactly."
+    },
+    {
+      "id": "ADV-S-10",
+      "commit": "d97df49b",
+      "verification": "Diffed claraWork.v5.impl.ts: the drift trace row now writes capabilityId 'accounting_work.read_knowledge_drift' instead of reusing the preload's id. Ran work-egress-e2e leg fresh: PASS (3 legs)."
+    },
+    {
+      "id": "ADV-S-12",
+      "commit": "d97df49b",
+      "verification": "Diffed claraWork.v5.impl.ts (read_seq now null when nothing landed) and claraWork.v5.tools.ts (header corrected to name the one terminal it CAN set). Ran v5.knowledge's 'read_seq is NULL...' cell (green)."
+    },
+    {
+      "id": "ADV-S-4",
+      "commit": "7417029d",
+      "verification": "Diffed claraWork.v5.bundle.ts: header now states what the digest cannot see (zod refinements). Ran v5.bundle cells (5/5 green), including the one that pins the roster's one refinement."
+    },
+    {
+      "id": "ADV-S-8",
+      "commit": "7417029d",
+      "verification": "Diffed depreciation-run.ts: floorSentence now names DEPRECIATION_HUMAN_SURFACE (the Fixed assets register's Depreciation runs panel) ahead of the SQL verb. Independently confirmed apps/web/lib/registers/depreciation.ts:161-175 and fa-depreciation-runs-panel.tsx are the real human surface (unchanged this round, since no apps/web file is touched by the fix round -- confirmed via git diff --name-only a666da12..HEAD | grep -c apps/web = 0, matching the report)."
+    },
+    {
+      "id": "ADV-S-11",
+      "commit": "7417029d",
+      "verification": "Diffed trade-invoice-basis.ts: the successor-contract comment now states the narrower, correct guarantee (replayed CALL idempotence, not re-sampled-segment idempotence) and names chat-turn-v21-e2e's two-call-in-one-turn control as what is actually measured. Leg re-run PASS 5 of 5: 'two byte-identical admissions in ONE turn re-reserved the SAME Work'."
+    },
+    {
+      "id": "SP-3",
+      "commit": "7417029d",
+      "verification": "Diffed depreciation-run.ts and chatTurn.v21.prompt.ts: DEPRECIATION_PROMPT_STANZA is now an exported constant and DEPRECIATION_CHAT_GUIDANCE imports it verbatim rather than paraphrasing."
+    },
+    {
+      "id": "SP-1",
+      "commit": "7417029d",
+      "verification": "Diffed depreciation-run.ts: a new comment block on DEPRECIATION_REFUSAL_MESSAGES states the three authority_* rows are forward-looking/defensive, from a door this lane never calls, matching the report's 'labelled' resolution."
+    },
+    {
+      "id": "S1",
+      "commit": "0428c408 (docs-only, successors-final.md)",
+      "verification": "Re-ran the exact four pin files fresh at 887b4162: 65 pass / 0 fail (7+17+25+16), matching the corrected figure exactly, not the original '58 pass'."
+    },
+    {
+      "id": "S2",
+      "commit": "0428c408 (docs-only, successors-final.md)",
+      "verification": "Re-ran check-parts-parity.mjs fresh: work_result's claraWork.v5.impl.ts site is now :891 (moved again since the fix round's own edits added lines). The report already cites the file rather than a line number at this location per S2's own fix suggestion, so this later drift does not reopen the finding."
+    },
+    {
+      "id": "suite-level consequences (duplicate cell names, registry census of two, call-site census reading one emitted file)",
+      "commit": "0008849c",
+      "verification": "Ran the whole runtime suite: no duplicate-named subtests observed, the frozen-manifest/registry diffs are internally consistent, and check-parts-parity + freeze-lint both pass clean, consistent with the renumbering (kr.19-22) and the widened build-emit census the commit describes."
+    }
+  ],
+  "deliberately_left_judged": [
+    {
+      "id": "ADV-S-7",
+      "left_reason": "operation_in_flight (CLR13) is raised only inside clara.record_journal_entry via clara._reserve_op; admit_trade_invoice_work never calls _reserve_op, so it has no unmapped concurrency answer to add a sentence for. Its own idempotency path (accounting_work's unique (firm_id,client_id,intent_key) + _admit_accounting_work_core's unique_violation handler) already answers either a replay or the typed intent_payload_conflict, both already in TRADE_INVOICE_REFUSALS.",
+      "judgment": "SOUND. Independently confirmed via migration source: `grep -n '_reserve_op' packages/db/migrations/0225_trade_invoices.sql` shows the only call at line 1670, inside record_journal_entry (function body starting well after admit_trade_invoice_work's own 1071-1288 span); operation_in_flight's raise is at line 1680, inside that same later function. Independently confirmed 0194_periodic_adjustments.sql:~1232-1256 has the unique_violation handler raising intent_payload_conflict as claimed, and TRADE_INVOICE_REFUSALS carries that token. This matches DECISIONS.md \u00a71.2's own stated contract for this exact map ('the count is descriptive, the door's own raise ladder is the contract'), which is the wave's binding authority, not just the fixround author's own argument."
+    },
+    {
+      "id": "SP-2",
+      "left_reason": "pack_firm_required is a real CLR10 0230 can raise, inert in this lane because ctx.firmId always comes from the Work row; the fix round's action was to name it in the successor report rather than delete it, matching #655's F2-addition precedent.",
+      "judgment": "SOUND. Confirmed READ_KNOWLEDGE_REFUSALS already carried the third key with an explanatory comment before this fix round (not touched by the a666da12..0008849c diff), and SUCCESSORS-ORDER.md \u00a72's item 2 (\"CLR11 -> record_not_in_scope, CLR03 -> no_pack_context\") is the literal two-entry contract this finding measures against; the fix round's 'name it here' resolution is one of the two options the spec reviewer itself offered and carries zero behavioural risk since an unmapped code always falls through to the door's own verbatim message."
+    }
+  ],
+  "ratification_request_checked": {
+    "item": "A durable clara relation row per inspection read (accounting_work.inspect_knowledge_source), from ADV-S-2",
+    "judgment": "Correctly scoped as a migration-level decision rather than a fix-round self-grant. Independently confirmed both stated obstacles: clara._work_knowledge_drift_core (0230:812) takes the latest work_knowledge_reads row's keys as the run's whole read-set (order by read_at desc, seq desc limit 1), so an inspection-read row there would narrow #658's drift signal to one record's key; and clara.work_execution_traces has no free-form payload column (0195 \u00a77B's per-column grammar), so it can record THAT a read happened but never the model-stated reason. SUCCESSORS-ORDER \u00a72.2's `{record_id, reason}` two-member schema is the contract the fixround report cites by that section number, confirmed to exist verbatim in SUCCESSORS-ORDER.md's own item 2 under heading 2."
+  },
+  "regression_checks": [
+    { "check": "pnpm typecheck (worktree root, 887b4162)", "result": "PASS", "detail": "exit 0; packages/runtime and apps/web tsc --noEmit both Done" },
+    { "check": "pnpm lint (worktree root, 887b4162)", "result": "PASS", "detail": "exit 0 across all workspaces" },
+    { "check": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "PASS", "detail": "same six emittable kinds as origin/main; work_result now cites claraWork.v5.impl.ts:891 (line moved again post-fix-round; report already cites file only, see S2 note)" },
+    { "check": "node scripts/check-frozen-workflows.mjs --compare-base origin/main", "result": "PASS", "detail": "296 existing entries retain hash/deployed flag, 16 additions, 3 recorded retirements -- byte-identical to the report" },
+    { "check": "pnpm --filter @clara/runtime build", "result": "PASS", "detail": "exit 0, .output/server/index.mjs 10.9MB" },
+    { "check": "whole runtime suite (node --test \"packages/runtime/tests/**/*.test.mjs\", clara_rt 55721)", "result": "PASS (baseline reds only)", "detail": "2837 tests \u00b7 2816 pass \u00b7 4 fail \u00b7 17 skip; the 4 fails are intake-unit #693, pg-tools-fixture #806, ready MAJOR-1, rollback-preflight 637.pf:B3 -- all named, pre-existing, documented flakes; none touch a v21/v5 module" },
+    { "check": "whole apps/web unit suite (node scripts/run-tests.mjs from apps/web)", "result": "PASS", "detail": "4628 tests \u00b7 4626 pass \u00b7 0 fail \u00b7 2 skip \u00b7 exit 0 -- exact match to the report" },
+    { "check": "chat-turn-v21-e2e (clara_rt_test, fresh build)", "result": "PASS", "detail": "5/5 legs; confirmed 'THE BLOCK NAMES THE RECORD' probe and post-fix bundle digest fe64198207d5082c06eff21b7cf7193c9a6dc03254f871cc1bdda5752bedc698" },
+    { "check": "chat-turn-v20-e2e (clara_rt_test)", "result": "PASS", "detail": "4/4 legs -- predecessor closure confirmed on this image" },
+    { "check": "work-egress-e2e (clara_rt_test)", "result": "PASS", "detail": "3/3 legs" },
+    { "check": "work-knowledge-e2e (clara_rt_test)", "result": "PASS", "detail": "exit 0" },
+    { "check": "work-journal-e2e (clara_rt_test)", "result": "PASS", "detail": "exit 0, 5/5 legs incl. the crash-after-commit/before-checkpoint resume leg" },
+    { "check": "two-build-cutover-e2e (clara_rt_test)", "result": "BLOCKED (leg's own fail-closed gate, not a code defect)", "detail": "Refused to start: 12 non-terminal autoDraft_v10 runs, 3 claraWork_v4, 1 clientOnboarding_v5, 1 unbound accounting_work task already on clara_rt_test -- same contamination class the standards reviewer already recorded (there with 6/3/1); none of the stray runs are chatTurn_v21/claraWork_v5 bodies. Did not attempt a destructive cleanup of a shared rig outside this recheck's own scope." }
+  ],
+  "process_notes": [
+    "SUCCESSORS-ORDER.md, WAVE-DIGEST.md, integration-merge.md and integration-fix-1.md are all cited as authority by successors-final.md/successors-fixround-1.md but exist only in the clara-rebuild main checkout's untracked working copy, not in any commit reachable from the int worktree's HEAD (887b4162) or origin/main. This did not block verification here (SUCCESSORS-ORDER.md's content matches what the reports cite by section number verbatim), but the branch under review does not itself carry the planning documents its own reports point to.",
+    "The World e2e scripts (chat-turn-v21-e2e.mjs, work-egress-e2e.mjs, etc.) must be invoked with cwd=packages/runtime, not the worktree root -- invoking from the worktree root breaks the spawned server child's require resolution for @workflow/world-postgres. They are also hard-gated to PGDATABASE in {clara_rt_test, clara_wave_b_ci}; bare clara_rt is refused. Neither of these is a defect in the reviewed code; noted here only because the task text's generic 'cd into the worktree root' instruction does not by itself run these scripts correctly."
+  ],
+  "new_findings": []
+}

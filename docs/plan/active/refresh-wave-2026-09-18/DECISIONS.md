@@ -292,6 +292,28 @@ Ruled after the three-lens review, the fix rounds and the rechecks (`reports/<n>
 | #657 | fix-round report: the isolation-stability claim softened (flaky, 1 in 4 isolated runs) |
 | #636, #651 | whatever recheck-1 returns, on the same rules |
 
+## 6.3 · Integration rulings (2026-09-19 17:00, on `reports/integration-merge.md` §5)
+
+| Red | Ruling |
+|---|---|
+| §5.1 #655 — `t_je_open_item_birth` has no tier in `f-a2-tier-d.test.mjs` §D.1 | **Tier = ABORT.** A trade invoice whose open item cannot be born never posts — ARCHITECTURE §5.A's transaction boundary ("确认一张发票需要相应总账与 open item"). Register the trigger in §D.1's table as an aborting deferred constraint trigger and add a cell proving a forced birth failure leaves no entry, no receipt and no `trade_invoices` status row (`p655.birth.abort_is_atomic`). |
+| §5.2 #636 — the "intake batch cancellations" belt leaks its probe error to `beltErrors` | **Contain it** like the FA and ADJ belts: the belt reports `batchOk:false` with the probe reason and the sweep behind it completes; the cell's law stands (22/22 again). |
+| §5.3 #651 — the new "Policy & effective revisions" tab breaks #639's ArrowRight cell | **#651's five-tab order stands** (particulars → policy revisions → schedule → history is the reading order). Re-point `fixed-asset-acquisition-walk.spec.ts`'s keyboard cell to the new order (ArrowRight → Policy & effective revisions → ArrowRight → Schedule → End → History) — the cell asserts that keyboard navigation works, not a business order; say so in its comment. |
+| §5.4 — four S5.25 clock/duplication rosters need 7 (B) and 13 (D) names | **Measurement pass, additions only, by rule**: run each arm's own detector over the live catalog; for every new name, if the object derives a MONEY date (as-of, posting, due, period) from the session clock by its own expression, re-point it to the house derivation the roster names and register it as a consumer; if the clock read is `computed_at` / watermark / sampling only, register it with that class. Escalate to the orchestrator ONLY a name whose money-vs-display reading is genuinely ambiguous; never remove a name. Record the per-name table in `reports/integration-fix-1.md`. |
+
+Named-and-ignored at integration (not defects of this wave): #693 EICAR, no `pg_dump` on PATH (four runtime files),
+and the five whole-suite flakes each green alone (ready MAJOR-1, relay-runner, wake-engine, wave-b-lint-belt,
+documents-viewer polygon) — all pre-existing Windows-host reds RIG.md and WORK-ORDER rule 9 name.
+
+## 6.4 · Rulings after the successor cut (2026-09-19 20:50)
+
+| Item | Ruling |
+|---|---|
+| `integration-fix-1.md` §4.3 — `get_client_financial_pack` and `propose_client_cash_accounts` derive a MONEY as-of (`v_today`) from the session clock by their own expression (0232) | **Re-point both to the house book-day derivation** (`clara._book_today()` or the exact function the S5.25 roster names as the consumer target) — `computed_at = now()` stays a sampling read. This IS a 0232 edit: apply it on a FRESH cluster (recreate `rigint` with `mkrig.sh` — a new cluster, so 0154's role census is honest), re-run the from-scratch chain 0001→0233, the #660 battery, the four census cells (both names move from CLASS 2 / escalated to CONSUMER), `operation-census` and `rig-isolation`. Add cell `p660.pack.as_of_is_book_day`: under `set local timezone = 'UTC'` at a fixture instant where UTC and Asia/Kuala_Lumpur dates differ, the pack's default as-of and the proposal's `as_of` equal the MYT book day, never the UTC date. Counter-argument noted (`_book_today()` samples per statement); a money date must be the book day regardless. |
+| Cut fix ratification — a durable row per inspection read (`read_knowledge_source` / `read_knowledge_history`), carrying the model's `reason` | **Not this wave** — it needs a `read_kind` on `work_knowledge_reads` (or a sibling relation) so `_work_knowledge_drift_core`'s `limit 1` does not narrow the drift signal to one record; file as a follow-up (ready-for-agent) with the fix round's analysis. The capability id `accounting_work.inspect_knowledge_source` stays registered and is recorded on zero rows until then — the report says so. |
+| Cut fix deliberately-left ADV-S-7 (no in-flight arm on `start_trade_invoice_work`) and SP-2 (`pack_firm_required` row kept) | ratified as measured |
+| Cut recheck NOT-verified — the two-build cutover leg refused to start on a contaminated shared rig | re-run it on the fresh cluster above; it passed on `rigint3` before the cut and must pass after |
+
 ## 7 · Effort, lanes and sequence
 
 | Ticket | Effort | Implementer lane | Notes |
