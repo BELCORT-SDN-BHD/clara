@@ -599,6 +599,68 @@ test("p655.replay.race a concurrent pair under ONE key leaves one invoice and a 
   assert.ok(ok.length >= 1, "p655.replay.race: at least one caller is answered");
   const ids = new Set(ok.map((o) => o.r.invoice_id));
   assert.equal(ids.size, 1, "p655.replay.race: every answered caller names the SAME invoice");
+
+  // ---- THE DIVERGENT RACE (the fix-round arm) -------------------------------------------
+  // THE ARM ABOVE RACES ONE PAYLOAD WITH ITSELF, so the only divergence the door cannot see from
+  // its pre-rung probe -- two DIFFERENT typed particulars under ONE key -- was never exercised.
+  // The sequential case is caught at step 4 (p655.replay.one_receipt), but step 4 runs BEFORE the
+  // rung: a concurrent pair both pass it, and after the rung the door delegates conflict detection
+  // to clara._admit_accounting_work_core, which compares basis digest / purpose / source_refs /
+  // adjustment (0194:1171-1190) and can see NOTHING of the counterparty, the reference, the dates
+  // or the total. So the loser's typed half must be re-read against the row that actually survived
+  // -- the same idiom the core uses for its own concurrent-race re-read (0194:1239-1256).
+  //
+  // WHAT AN UNGUARDED DOOR DOES, measured before the fix: BOTH callers leave as SUCCESS, the
+  // loser's trade invoice is silently discarded by `on conflict (work_id) do nothing`, and the
+  // loser is answered the WINNER's invoice_id folded together with its OWN kind / counterparty_id
+  // / due_date -- an answer describing an object the database does not hold.
+  const dclient = await tiClient("racediverge");
+  const alpha = await vendor(ALICE(), { client: dclient, name: `Race Alpha ${randomUUID().slice(0, 8)}` });
+  const beta = await vendor(ALICE(), { client: dclient, name: `Race Beta ${randomUUID().slice(0, 8)}` });
+  const dkey = `ti-race-diverge-${randomUUID()}`;
+  const pA = billParticulars({ counterparty: alpha, reference: "RACE-A-0001" });
+  const pB = billParticulars({ counterparty: beta, reference: "RACE-B-0002" });
+  const db_ = billBasis();   // THE SAME journal basis, so the core's own digest comparison agrees
+                             // and the ONLY divergence is the typed half this ticket exists for.
+
+  const raced = await withClientRungHeld(dclient, async (release) => {
+    const a = admitTradeInvoiceWork({ client: dclient, author: ALICE(), intentKey: dkey, particulars: pA, basis: db_ })
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, code: e.code, detail: e.detail }));
+    const c = admitTradeInvoiceWork({ client: dclient, author: ALICE(), intentKey: dkey, particulars: pB, basis: db_ })
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, code: e.code, detail: e.detail }));
+    await awaitRungWaiters(2);
+    await release();
+    return Promise.all([a, c]);
+  });
+
+  assert.equal(await invoiceCount(dclient), 1,
+    "p655.replay.race: a DIVERGENT pair still leaves exactly ONE trade invoice");
+  const dok = raced.filter((o) => o.ok);
+  const dno = raced.filter((o) => !o.ok);
+  assert.equal(dok.length, 1,
+    "p655.replay.race: exactly ONE of a divergent pair is answered -- the other sent different particulars under the same key");
+  assert.equal(dno.length, 1, "p655.replay.race: …and the other leaves as a refusal");
+  assert.equal(dno[0].code, "CLR10",
+    "p655.replay.race: the loser's refusal is the door's own typed class, never a raw 23505");
+  const dDetail = typeof dno[0].detail === "string" ? JSON.parse(dno[0].detail) : dno[0].detail;
+  assert.equal(dDetail.reason, TI_REASON.intentConflict,
+    "p655.replay.race: …and it is intent_payload_conflict, the same name the sequential case carries");
+  assert.equal(dDetail.field, "particulars",
+    "p655.replay.race: …naming the offending half");
+
+  // EVERY ANSWERED CALLER'S ANSWER DESCRIBES THE ROW ITS OWN invoice_id NAMES. This is the
+  // assertion the vacuous cell could not make: the defect answered SUCCESS with a foreign party.
+  const survivor = await invoiceRow(dok[0].r.invoice_id);
+  assert.ok(survivor, "p655.replay.race: the answered invoice_id names a real row");
+  assert.equal(dok[0].r.counterparty_id, survivor.counterparty_id,
+    "p655.replay.race: the answered counterparty is the one the surviving row holds");
+  assert.equal(dok[0].r.kind, survivor.kind,
+    "p655.replay.race: …and so is the kind");
+  assert.equal(dok[0].r.due_date_source, survivor.due_date_source,
+    "p655.replay.race: …and the due-date basis");
+  assert.equal(survivor.reference,
+    survivor.counterparty_id === alpha ? "RACE-A-0001" : "RACE-B-0002",
+    "p655.replay.race: the stored reference belongs to the SAME submission as the stored party -- never a blend of the two");
 });
 
 test("p655.atomic.no_partial a failure anywhere in the admission leaves no Work, no invoice, no entry, no item and no receipt", async (t) => {

@@ -1168,7 +1168,31 @@ begin
            else p_particulars->'tax_facts' end,
       v_canon, v_doc, p_author, p_author)
     on conflict (work_id) do nothing;
-  select ti.id into v_invoice from clara.trade_invoices ti where ti.work_id = v_work;
+
+  -- 8b · THE CONCURRENT-RACE RE-READ, and it is the door's only honest answer to a pair that
+  -- raced. `on conflict (work_id) do nothing` converges the CORE's replay branch onto one row --
+  -- but "converges" and "agrees" are different claims. Step 4's particulars comparison runs on the
+  -- UNLOCKED path, so two admissions under one key are BOTH past it before either commits; after
+  -- the rung this door delegates conflict detection to `clara._admit_accounting_work_core`, which
+  -- compares basis digest / purpose / source_refs / adjustment (0194:1171-1190) and can see
+  -- NOTHING of the counterparty, the reference, the two dates, the total or the tax facts -- i.e.
+  -- nothing of the typed half this lane exists to record. So the row that SURVIVED is read back
+  -- and compared against what THIS caller sent, exactly as the core re-reads its own race
+  -- (0194:1239-1256).
+  --
+  -- MEASURED on clara_655 before this arm existed (p655.replay.race's divergent arm): two
+  -- admissions under one key with different parties BOTH left as success, the loser's invoice was
+  -- silently discarded by the `do nothing`, and the loser was answered the WINNER's invoice_id
+  -- folded together with its OWN kind / counterparty_id / due_date -- an answer describing an
+  -- object the database does not hold, and the Work then posts the winner's bill.
+  select ti.id, ti.particulars into v_invoice, v_prior_canon
+    from clara.trade_invoices ti where ti.work_id = v_work;
+  if v_prior_canon is distinct from v_canon then
+    raise exception 'this intent key already carries a different trade invoice'
+      using errcode='CLR10',
+      detail=jsonb_build_object('reason','intent_payload_conflict','work_id',v_work,
+        'invoice_id',v_invoice,'field','particulars')::text;
+  end if;
 
   insert into clara.trade_invoice_status(firm_id, client_id, invoice_id, state, detail)
     values (v_firm, p_client, v_invoice, 'admitted',
