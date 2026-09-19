@@ -157,4 +157,14 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "b0e7bb8b94ff7b2cc85da610a87d25105287a61ed1cfcb060ff0fa206830e93c",
     },
   ],
+  // #651 (0227) — the depreciation-history lane, the same 0201 splice family and the largest of
+  // them: SIX splices in one file rather than one or two.
+  [
+    "0227_depreciation_history.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut exactly EIGHT named functions, each read at its own LITERAL regprocedure signature spelled in this file — clara._tf_fa_authority_transition(), clara._fa_validate_particulars(jsonb), clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text), clara._fa_complete_particulars_core(uuid,uuid,uuid,uuid,jsonb,text,text), clara.revise_fixed_asset_particulars(uuid,uuid,jsonb,date,text), clara._fa_run_period_core(uuid,date,date,text,uuid,uuid,text), clara._fa_oldest_unmet_period(uuid) and clara._fa_asset_json(uuid,date). Seven return jsonb/boolean/record and the eighth returns trigger, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. Every splice counts its anchor and refuses unless it occurs EXACTLY once; the two 0042-era bodies additionally re-run 0042 S5.15c/S5.15d's own marker censuses as their prestate AND their postcheck, including S5.15c's ordering law. The file's prestate pins the pre-image body sha256 of every recut target measured off pg_proc.prosrc, and its tail re-proves owner, ACL, SECURITY DEFINER and pinned search_path for each one. Every other object this migration creates (five columns, three CHECK constraints, one backfill UPDATE and four function bodies at literal signatures) is static DDL the lexer inspects directly.",
+      sha256: "5ac4180c7855fd68ed9f466f85323e043641202c86bc22f5a04a919670718321",
+    },
+  ],
 ]);

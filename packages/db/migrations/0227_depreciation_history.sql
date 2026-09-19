@@ -496,27 +496,31 @@ end $p651_validator$;
 -- NOT route through 0216's shared core — so the wall belongs in both, and putting it in
 -- `_fa_complete_particulars_core` is what gives 0216's runtime door
 -- `complete_fixed_asset_particulars_for` the identical refusal.
-do $p651_completion$
-declare r record; v_def text; v_frm text; v_rep text; v_cnt int;
+-- ONE BLOCK PER BODY, EACH NAMING ITS TARGET AS A LITERAL — 0042 §S5.15c/§S5.15d's own shape,
+-- and not a stylistic choice. An earlier cut looped over a two-row VALUES list and spliced
+-- `r.sig::regprocedure`, which is a dynamic `execute` no static reader can attribute to a
+-- function: `apps/web/test/sqlFunctionCensus.ts` threw
+-- `sql_function_census_unresolved_execute:0227_depreciation_history.sql:v_def` and took FOUR live
+-- web census suites down with it (do-action-floors, firm capabilities, members-doors,
+-- firm-scope-db-pins). A migration whose recuts an estate-wide instrument cannot read is a
+-- migration nothing downstream can police, so the loop is unrolled. The two bodies' anchors
+-- differ (only the human door takes `_human_ctx` first), which is why they were never one splice.
+
+do $p651_completion_human$
+declare
+  v_sig text := 'clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)';
+  v_def text; v_frm text; v_cnt int;
 begin
-  for r in select * from (values
-      ('clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)',
-       $f$  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_frm := $f$  c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required' using errcode = 'CLR10';
-  end if;$f$),
-      ('clara._fa_complete_particulars_core(uuid,uuid,uuid,uuid,jsonb,text,text)',
-       $f$  if p_op_key is null or btrim(p_op_key) = '' then
-    raise exception 'op_key is required' using errcode = 'CLR10',
-      detail = '{"reason":"invalid_op_key"}';
-  end if;$f$)) as t(sig, anchor) loop
-    select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = r.sig::regprocedure;
-    v_frm := r.anchor;
-    v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
-    if v_cnt <> 1 then
-      raise exception '#651 §C: the op-key anchor in % appears % time(s)', r.sig, v_cnt using errcode='CLR10';
-    end if;
-    v_rep := v_frm || $t$
+  end if;$f$;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '#651 §Ca: the op-key anchor in % appears % time(s)', v_sig, v_cnt using errcode='CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, v_frm || $t$
   -- 0227 (#651): A FIRST COMPLETION IS NOT A CHANGE. The change classification describes what
   -- kind of REVISION superseded a generation; a row whose particulars were never filled in has
   -- nothing to reclassify, and admitting the keys here would let a caller stamp a class on a root
@@ -527,17 +531,50 @@ begin
       using errcode = 'CLR37',
         detail = jsonb_build_object('reason', 'fa_change_class_on_completion',
           'asset_id', p_asset, 'remedy', 'revise_fixed_asset_particulars')::text;
-  end if;$t$;
-    v_def := replace(v_def, v_frm, v_rep);
-    execute v_def;
-    select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = r.sig::regprocedure;
-    if position('fa_change_class_on_completion' in v_def) = 0
-       or position('fa_particulars_already_complete' in v_def) = 0
-       or position('clara._fa_validate_particulars(p_particulars)' in v_def) = 0 then
-      raise exception '#651 §C postcheck: the completion wall splice damaged %', r.sig using errcode='CLR10';
-    end if;
-  end loop;
-end $p651_completion$;
+  end if;$t$);
+  execute v_def;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('fa_change_class_on_completion' in v_def) = 0
+     or position('fa_particulars_already_complete' in v_def) = 0
+     or position('clara._fa_validate_particulars(p_particulars)' in v_def) = 0 then
+    raise exception '#651 §Ca postcheck: the completion wall splice damaged %', v_sig using errcode='CLR10';
+  end if;
+end $p651_completion_human$;
+
+do $p651_completion_core$
+declare
+  v_sig text := 'clara._fa_complete_particulars_core(uuid,uuid,uuid,uuid,jsonb,text,text)';
+  v_def text; v_frm text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_frm := $f$  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10',
+      detail = '{"reason":"invalid_op_key"}';
+  end if;$f$;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '#651 §Cb: the op-key anchor in % appears % time(s)', v_sig, v_cnt using errcode='CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, v_frm || $t$
+  -- 0227 (#651): A FIRST COMPLETION IS NOT A CHANGE. The change classification describes what
+  -- kind of REVISION superseded a generation; a row whose particulars were never filled in has
+  -- nothing to reclassify, and admitting the keys here would let a caller stamp a class on a root
+  -- row that `ck_fixed_assets_change_class` would then refuse with a constraint name instead of a
+  -- sentence. Refused BEFORE the op key is reserved, so a retry is clean.
+  if p_particulars ? 'change_class' or p_particulars ? 'change_reason' then
+    raise exception 'depreciation particulars are being completed for the first time; a change class describes a REVISION (clara.revise_fixed_asset_particulars), not a completion'
+      using errcode = 'CLR37',
+        detail = jsonb_build_object('reason', 'fa_change_class_on_completion',
+          'asset_id', p_asset, 'remedy', 'revise_fixed_asset_particulars')::text;
+  end if;$t$);
+  execute v_def;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('fa_change_class_on_completion' in v_def) = 0
+     or position('fa_particulars_already_complete' in v_def) = 0
+     or position('clara._fa_validate_particulars(p_particulars)' in v_def) = 0 then
+    raise exception '#651 §Cb postcheck: the completion wall splice damaged %', v_sig using errcode='CLR10';
+  end if;
+end $p651_completion_core$;
 
 -- =====================================================================================
 -- §D  THE REVISION DOOR REQUIRES A CLASS AND STAMPS IT FORWARD (AC1, D10).
