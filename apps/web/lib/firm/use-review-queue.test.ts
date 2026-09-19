@@ -86,19 +86,22 @@ async function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Pr
   }
 }
 
-// #903 (item 2) — `ReviewQueueEnvelope.watermark` was typed but never read by this hook (nor by
-// `listReviewQueue`, nor rendered anywhere): a repo-wide search found zero consumers of either
-// the type or a `.watermark` property access against a review-queue envelope. Deletion is the
-// evidence-backed default the ticket's own triage settled on, over threading it through to a
-// renderer that has never existed. This is a SOURCE pin, not a DOM one: there is nothing to
-// mount that would prove an absent field is absent.
-test("903 — watermark is fully ABSENT from ReviewQueueEnvelope, not half-wired: no type field, no reader", () => {
+// #903 (item 2, FIX ROUND L07-A03) — `ReviewQueueEnvelope.watermark` was deleted on grounds that
+// did not hold: `clara.list_review_queue` DOES emit it (0011_daily_loop.sql:3861, recut at
+// 0016_a21_compliance_watch.sql:4691), 0036_wave_c0_deferred_belts.sql:1737-1744 pins it as a
+// must-not-be-lost output of that function, and CONTEXT.md (both "Attention source freshness" and
+// "Source watermark") names it as a real, estate-wide concept — not "unrelated to the dead
+// front-end field" the deleting commit's comment claimed. Restored with the SAME posture this file
+// already gives `compliance`/`lint` just above it: present on the wire, typed loosely, a NAMED gap
+// rather than a silent, undocumented drop — this build still renders nothing from it. This is a
+// SOURCE pin, not a DOM one: there is nothing to mount that would prove an unread field is unread.
+test("903 — watermark is a NAMED, present-but-unread field on ReviewQueueEnvelope: typed, not (re-)read by the hook", () => {
   const dir = dirname(fileURLToPath(import.meta.url));
   const needsYouSource = readFileSync(join(dir, "needs-you.ts"), "utf8");
-  assert.doesNotMatch(needsYouSource, /watermark/i,
-    "the review-queue envelope type must not declare a field this build never reads");
+  assert.match(needsYouSource, /watermark\?:/,
+    "the type must name the field the DB actually emits, matching compliance/lint's own posture");
   const hookSource = readFileSync(join(dir, "use-review-queue.ts"), "utf8");
-  assert.doesNotMatch(hookSource, /watermark/i, "the hook must not (re-)introduce a read of a field the type no longer carries");
+  assert.doesNotMatch(hookSource, /\.watermark\b/, "the hook must not read a field this build renders nowhere");
 });
 
 test("initial load: populates rows/counts from page 1, hasMore reflects a FULL page", async () => {

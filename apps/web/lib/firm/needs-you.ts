@@ -242,6 +242,16 @@ export type ReviewQueueCursor = { tuple: string[] };
 export type ReviewQueueEnvelope = {
   counts: ReviewQueueCounts;
   sweep: ReviewQueueSweep;
+  /** FIX ROUND (L07-A03) — `clara.list_review_queue`'s own mutation watermark
+   *  (0011_daily_loop.sql:3861, recut at 0016_a21_compliance_watch.sql:4691;
+   *  0036_wave_c0_deferred_belts.sql:1737-1744 pins it as a must-not-be-lost output
+   *  of that function). CONTEXT.md names this — "Attention source freshness" and
+   *  "Source watermark" — as a real, estate-wide concept: THE DATABASE SNAPSHOT A
+   *  READ ACTUALLY SAW, so a stale re-read can be dated separately from a fresh
+   *  one. Present on the wire; NOT rendered by this build (`components/firm`'s
+   *  Needs-you inbox has no per-source staleness label today) — a NAMED gap, same
+   *  posture as `compliance`/`lint` below, never a silent, undocumented drop. */
+  watermark?: unknown;
   /** 0016+: per-client SST-registration figures + a staleness flag. Present on
    *  the wire; NOT rendered by this build (named gap, not a silent drop —
    *  components/firm's Needs-you inbox surfaces only `counts.compliance_watches`
