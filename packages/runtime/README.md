@@ -817,6 +817,29 @@ exit path — and the leg has its own skip probe over `clara.open_interruption` 
 `clara.answer_interruption`. Local evidence 2026-09-15: both legs green in one run; hosted evidence
 pending.
 <!-- /#794 -->
+<!-- #850 -->
+**Since #850 the two legs' scratch builds OVERLAP instead of running back to back.** The
+`clara.open_interruption` / `clara.answer_interruption` probe that decides whether the chatTurn leg
+runs at all is now read at the TOP of the file, once, so the file knows before doing anything else
+whether it will need a second scratch image. The chatTurn scratch build is then started (not
+awaited) the moment the claraWork scratch build finishes — a DIFFERENT scratch directory
+(`previous-chat`), a DIFFERENT class rewrite (`chatTurn`, never `claraWork`) — so its `nitro build`
+child process runs in the BACKGROUND while the claraWork leg does its own work: spawn, admit, stop,
+spawn again, resume, preflight, all HTTP/DB round trips rather than CPU work. The chatTurn leg later
+`await`s that already-in-flight promise instead of starting a fresh build, so on any run where the
+claraWork leg's own exercise takes longer than one scratch build, the file pays close to ONE scratch
+build's wall clock for two, rather than two in sequence. Neither leg's proof moved: each image is
+still staged, rewritten and built exactly as `buildPreviousVersionImage` always did it, and each is
+still independently scanned against build B's roster for the "differs by exactly one body"
+invariant before anything is spawned — verified by deliberately colliding the two builds' scratch
+directory names (the plausible mistake this change invites) and watching the file fail loudly
+(`ENOENT` on the claraWork build's own artifact, ripped out from under it mid-flight) before
+reverting to the distinct names. Local evidence 2026-09-20 (Windows host, both legs green, same
+assertions): sequential 36.6s–42.5s whole-file wall clock across two runs before this change,
+32.3s–34.8s across two runs after, each scratch build 5–6s on this rig. The CI wall-clock figure
+(this rig has no CI runner) is in `.github/actions/db-live-gates/action.yml`'s own comment beside
+the step, marked unverified until the next CI run measures it.
+<!-- /#850 -->
 
 ### #623 — the accounting-Work lane (`claraWork_v1`, `chatTurn_v18`)
 

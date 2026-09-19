@@ -351,17 +351,53 @@ runs:
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/chat-turn-v21-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
-        # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
-        # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor
-        # body file, and runs `nitro build` there — then spawns that image, admits Work to it, stops
-        # it, spawns THIS tree's build, admits Work to the successor, and resumes the first Work on
-        # its original body inside the second image. That is the one thing the single-process
-        # version-cutover-e2e above cannot show.
+        # BUILDS A SECOND IMAGE (as of #794, TWO second images — see #850 below). It copies the
+        # runtime package to <repo>/.scratch/two-build/previous, rewrites that copy's registry to
+        # pin the PREDECESSOR claraWork body, deletes the successor body file, and runs `nitro
+        # build` there — then spawns that image, admits Work to it, stops it, spawns THIS tree's
+        # build, admits Work to the successor, and resumes the first Work on its original body
+        # inside the second image. That is the one thing the single-process version-cutover-e2e
+        # above cannot show.
         #
-        # MEASURED COST before wiring it (the orchestrator's condition): 78.0s for the scratch build
-        # and 124s for the whole file — Windows-host measurements, re-measured at the #637 fix-round
-        # closure review (superseding this comment's earlier 82.6s / 3m25s), against a ~6 minute
-        # budget. The copy MUST live outside packages/runtime — measured during the spike, a copy at
+        # #850 — THE 78.0s / 124s FIGURES BELOW PREDATE #794's SECOND LEG, so they understate the
+        # step's cost as it stands today: #794 added a chatTurn leg that stages and builds a SECOND
+        # scratch image (<repo>/.scratch/two-build/previous-chat) the same way, to prove the same
+        # cutover law on the lane that has no Work row to resume through. Verified at `65fde7f3`
+        # (#850's own triage) that each scratch build differs from this tree's own build by only a
+        # registry.ts rewrite and one deleted body file, so a second leg means a second full
+        # stage-and-build, paid in full, IN ADDITION to the figures below.
+        #
+        # #850's FIX: the chatTurn scratch build is now started in the BACKGROUND the moment the
+        # claraWork scratch build finishes (tests/two-build-cutover-e2e.mjs, `chatBuildPromise`),
+        # overlapped with the claraWork leg's own exercise — spawn, admit, stop, spawn again,
+        # resume, preflight — which is HTTP/DB-bound, not CPU-bound, for its own wall clock. The
+        # chatTurn leg then AWAITS that already-in-flight build instead of starting it fresh, so the
+        # step pays for two scratch builds' COMPUTE but, on any run where the claraWork leg's own
+        # exercise takes longer than one scratch build, close to only ONE scratch build's WALL
+        # CLOCK. Neither leg's proof moved: each scratch image is still staged, rewritten and built
+        # exactly as before, and each is still independently scanned against build B's roster for
+        # the "differs by exactly one body" invariant (tests/two-build-cutover-e2e.mjs `bodiesA` /
+        # `bodiesA2`) before anything is spawned.
+        #
+        # MEASURED LOCALLY (Windows host, packages/runtime/tests/two-build-cutover-e2e.mjs run
+        # standalone against a bootstrapped clara_rt_test, RELAY_TEST_MODE=1 — this lane's own rig
+        # has no CI runner access, so this is NOT the CI figure the two paragraphs above call for):
+        # sequential (pre-#850) 36.6s–42.5s whole-file wall clock across two runs, each scratch
+        # build 5.0s–6.2s; overlapped (post-#850) 32.3s–34.8s across two runs, same two scratch
+        # builds, same assertions, all passing. The ~5s freed per run is this rig's own single
+        # scratch-build cost, hidden behind the claraWork leg's own exercise rather than paid again
+        # after it — the qualitative effect AC3 asks for. THE CI NUMBER IS UNVERIFIED HERE: this
+        # rig's scratch build (5-6s) is over an order of magnitude faster than the 78.0s CI
+        # measurement below, so the ABSOLUTE seconds saved on a GitHub-hosted runner do not transfer
+        # from this measurement — only the mechanism does. The next CI run of this step is what
+        # proves the CI wall clock (both legs) that AC1 asks for; update this comment's 78.0s/124s
+        # pair with that run's numbers once it exists, the way the #637 fix-round review superseded
+        # its own 82.6s/3m25s.
+        #
+        # 78.0s for the scratch build and 124s for the whole file — Windows-host measurements,
+        # re-measured at the #637 fix-round closure review (superseding this comment's earlier
+        # 82.6s / 3m25s), against a ~6 minute budget, BEFORE #794's second leg (above). The copy
+        # MUST live outside packages/runtime — measured during the spike, a copy at
         # packages/runtime/.scratch made the MAIN nitro build compile 98 workflows instead of 49.
         # Its DATABASE costs the template copy above — a file-level clone, seconds — and not the
         # ~2m20s a from-scratch migrate+seed+bootstrap measures on this runner.

@@ -410,6 +410,19 @@ async function main() {
     process.exit(0);
   }
 
+  // #850 — READ EARLY, NOT WHERE IT USED TO BE. Whether the chatTurn leg runs at all is a fact
+  // about the DATABASE (does it carry 0006's clarification pair?), not about how far the claraWork
+  // leg has gotten, so there is no reason this cheap probe has to wait until the file reaches the
+  // chatTurn section. Reading it here is what lets the chatTurn SCRATCH BUILD start in the
+  // background the moment claraWork's own build finishes, instead of only after the whole claraWork
+  // leg (spawn, admit, stop, spawn again, resume, preflight) has run its course.
+  const chatProbe = await rig.rootQuery(`
+    select to_regprocedure('clara.open_interruption(uuid,text,jsonb,uuid)') is not null as open_fn,
+           to_regprocedure('clara.answer_interruption(uuid,jsonb,text)') is not null as answer_fn
+  `);
+  const cp = chatProbe.rows[0] ?? {};
+  const chatSupported = Boolean(cp.open_fn) && Boolean(cp.answer_fn);
+
   const query = (sql, params) => rig.rootQuery(sql, params);
 
   // ==========================================================================
@@ -533,6 +546,35 @@ async function main() {
   // =========================================================================
   const built = await buildPreviousVersionImage({ log: (m) => console.log(m) });
   const pair = built.pair;
+  // #850 — START THE SECOND SCRATCH BUILD HERE, NOT WHERE IT USED TO LIVE. claraWork's own build
+  // (above) is the only thing in this leg that is CPU-bound; everything from here to the chatTurn
+  // section is HTTP polling and database round trips against images that are themselves mostly
+  // idle. Kicking off the chatTurn image's build NOW — a DIFFERENT scratch directory
+  // (`previous-chat`), a DIFFERENT class rewrite (`chatTurn`, not `claraWork`) — lets its `nitro
+  // build` child process run to completion IN THE BACKGROUND, overlapped with the claraWork leg's
+  // own wall clock, rather than paid again in full AFTER that leg finishes. The AWAIT that used to
+  // sit at the top of the chatTurn section (below) becomes a wait on a build that, on any run where
+  // the claraWork leg takes longer than a scratch build, is ALREADY DONE.
+  //
+  // NEITHER LEG'S PROOF MOVES. `buildPreviousVersionImage` is unchanged: this build still stages
+  // its own copy, still rewrites only its own class's pin, still deletes only its own class's
+  // successor body file, and its bundle is still independently scanned below (`bodiesA2`) against
+  // build B's roster — the same "differ by exactly one body" assertion as before, on the same
+  // artifact, just built earlier in wall-clock terms. `chatBuildPromise` is `null` when this
+  // database cannot run the chatTurn leg at all (`chatSupported` false), so a database without
+  // 0006's clarification pair pays no idle background build for a leg it is about to skip.
+  //
+  // `.catch(() => {})` ON A SEPARATE BRANCH, NEVER ON `chatBuildPromise` ITSELF: attaching a
+  // rejection handler to a promise (which is what `.catch` does) marks it HANDLED for Node's
+  // unhandled-rejection tracking even though the ORIGINAL promise is still the one `await
+  // chatBuildPromise` reads from, later, inside this function's own try/catch — so a build that
+  // fails in the background still fails the drill, through the same error-dump-and-rethrow path
+  // every other failure in this file takes, and Node never prints a spurious "unhandled rejection"
+  // for a rejection this file always intended to read.
+  const chatBuildPromise = chatSupported
+    ? buildPreviousVersionImage({ name: "previous-chat", className: "chatTurn", log: (m) => console.log(m) })
+    : null;
+  if (chatBuildPromise) chatBuildPromise.catch(() => {});
   // THE BUNDLE IDS ARE DERIVED TOO (wave-3, the first real re-run of this drill). The pair above
   // was always derived, but three `"clara-work/v1"` / two `"clara-work/v2"` LITERALS survived in
   // the assertions below, and the file's own header claimed the whole drill needed no edit at a
@@ -980,18 +1022,21 @@ async function main() {
     // pair, so a later v19 -> v20 repoint needs no edit here — the wave-3 lesson this file's header
     // records, applied the first time rather than after a red run.
     {
-      const chatProbe = await rig.rootQuery(`
-        select to_regprocedure('clara.open_interruption(uuid,text,jsonb,uuid)') is not null as open_fn,
-               to_regprocedure('clara.answer_interruption(uuid,jsonb,text)') is not null as answer_fn
-      `);
-      const cp = chatProbe.rows[0] ?? {};
-      if (!cp.open_fn || !cp.answer_fn) {
+      if (!chatSupported) {
         // The leg's OWN door, not the file's: the Work probe at the top of main() answers about
         // 0180, and a database carrying that but not the 0006 clarification pair would skip this
-        // leg while every claraWork assertion above still stands.
+        // leg while every claraWork assertion above still stands. Read once, at the top of main()
+        // (#850), so the decision to build the chatTurn scratch image in the background is made at
+        // the same place as the decision to skip it here — one query, one answer, used twice.
         console.log("[tb-e2e] chatTurn leg SKIPPED — clara.open_interruption / clara.answer_interruption are not on this database");
       } else {
-        const builtChat = await buildPreviousVersionImage({ name: "previous-chat", className: "chatTurn", log: (m) => console.log(m) });
+        // #850 — AWAITING, NOT BUILDING: the build was kicked off right after claraWork's own build
+        // finished (see the comment there), so on any run where the claraWork leg's own exercise
+        // (spawn, admit, stop, spawn again, resume, preflight — all HTTP/DB-bound, not CPU-bound)
+        // took longer than this scratch build, this await resolves immediately against an
+        // already-finished image, and the SECOND `nitro build` is paid concurrently with the
+        // claraWork leg's wall clock instead of after it.
+        const builtChat = await chatBuildPromise;
         const pairC = builtChat.pair;
         console.log(
           `[tb-e2e] chatTurn pair derived from registry.ts: ${pairC.previous} (build A2) -> ${pairC.pinned} (build B)`
