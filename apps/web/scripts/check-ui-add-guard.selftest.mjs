@@ -24,10 +24,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   checkGuard,
+  classifyDependencies,
   loadAllowlist,
   main,
   resolveTargetPaths,
   resolveTargetPathsFromDryRun,
+  LOCAL_DEPENDENCY_NAMES,
   OVERRIDE_ENV_VAR,
 } from "./ui-add.mjs";
 
@@ -131,14 +133,21 @@ await testCase("recovers project-relative paths from a dry-run transcript", () =
 // ---------------------------------------------------------------------------
 console.log("main():");
 
-function fakeDeps(payload, spawnCalls) {
+/** #969 — `resolveDependencies`/`stripLocalDependencies` default to no-ops here (no
+ *  dependency, nothing ever to strip) so every EXISTING `fakeDeps` call site — none of which
+ *  concern themselves with dependencies — keeps working unchanged and network-free; a case
+ *  that DOES care overrides them via `extra`. */
+function fakeDeps(payload, spawnCalls, extra = {}) {
   return {
     resolveFiles: async () => payload,
+    resolveDependencies: async () => ({ dependencies: [], devDependencies: [] }),
     spawnAdd: (args) => {
       spawnCalls.push(args);
       return 0;
     },
+    stripLocalDependencies: () => 0,
     log: () => {},
+    ...extra,
   };
 }
 
@@ -221,6 +230,121 @@ await testCase("`button.tsx` is byte-identical ACROSS a refused run whose writer
   assert(/REFUSING/.test(said), `the refusal must say so in as many words; it said:\n${said}`);
   assert(new RegExp(OVERRIDE_ENV_VAR).test(said),
     "…and must name the override, or a blocked human has no lawful way forward");
+});
+
+// ---------------------------------------------------------------------------
+// (4b) #969 — the `cn` dependency stand-in: classification, reporting, and the
+//      automated strip. AVATAR_PAYLOAD/AVATAR_DEPS below are the real, live-measured
+//      shape (see the file header): `resolveRegistryItems(["avatar"])` on the pinned
+//      4.19.0 today returns exactly `{dependencies: ["cn"], files: [...]}`.
+// ---------------------------------------------------------------------------
+console.log("the `cn` dependency stand-in (#969):");
+
+const AVATAR_PAYLOAD = [{ path: "registry/base-nova/ui/avatar.tsx", type: "registry:ui" }];
+const AVATAR_DEPS = { dependencies: ["cn"], devDependencies: [] };
+const EXTERNAL_DEPS = { dependencies: ["date-fns"], devDependencies: [] };
+
+await testCase("classifyDependencies splits the one known local stand-in from everything else, de-duplicated", () => {
+  assert(LOCAL_DEPENDENCY_NAMES.includes("cn"), "cn must be the named local stand-in");
+  const { local, external } = classifyDependencies(["date-fns", "cn", "cn", "zod"]);
+  assert(JSON.stringify(local) === JSON.stringify(["cn"]), `got local=${JSON.stringify(local)}`);
+  assert(JSON.stringify(external) === JSON.stringify(["date-fns", "zod"]), `got external=${JSON.stringify(external)}`);
+});
+await testCase("classifyDependencies on an empty or dependency-free list returns both empty", () => {
+  const { local, external } = classifyDependencies([]);
+  assert(local.length === 0 && external.length === 0, `got ${JSON.stringify({ local, external })}`);
+});
+
+await testCase("[AC1] an item resolving `cn`, no override, real run: the CLI is invoked, THEN the guard strips cn — no manual revert needed", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const lines = [];
+  const code = await main(["avatar"], {}, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0, "a successful install + successful strip must exit 0");
+  assert(spawnCalls.length === 1 && spawnCalls[0].includes("avatar"), "the real CLI must still be invoked");
+  assert(stripCalls.length === 1 && JSON.stringify(stripCalls[0]) === JSON.stringify(["cn"]),
+    `expected exactly one strip call for ["cn"], got ${JSON.stringify(stripCalls)}`);
+  const said = lines.join("\n");
+  // [AC2] the guard reports what it did about cn.
+  assert(/dropped/i.test(said) && /\bcn\b/.test(said), `expected the log to report dropping cn; it said:\n${said}`);
+});
+
+await testCase("[AC3] a --dry-run names the dependencies the item would add, including the one classified as local — and never strips (nothing was written)", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const lines = [];
+  const code = await main(["avatar", "--dry-run"], {}, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0);
+  assert(stripCalls.length === 0, "a dry run writes nothing — there must be nothing to strip");
+  const said = lines.join("\n");
+  assert(/\bcn\b/.test(said) && /local/i.test(said), `expected the dry-run report to name cn as local; it said:\n${said}`);
+});
+
+await testCase("the override lets a genuine external `cn` survive: no strip call, and the log says so", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const lines = [];
+  const code = await main(["avatar"], { [OVERRIDE_ENV_VAR]: "1" }, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0);
+  assert(stripCalls.length === 0, "the override must skip the strip entirely — the caller wants cn kept");
+  const said = lines.join("\n");
+  assert(new RegExp(OVERRIDE_ENV_VAR).test(said) && /\bcn\b/.test(said),
+    `expected the override's effect on cn to be named; it said:\n${said}`);
+});
+
+await testCase("[AC4] an item whose dependencies do NOT touch cn behaves exactly as before — no strip call, no cn claim in the log", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const lines = [];
+  const code = await main(["alert"], {}, fakeDeps(NON_PROTECTED_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => EXTERNAL_DEPS,
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 0);
+  assert(stripCalls.length === 0, "no local dependency was resolved — nothing to strip");
+  const said = lines.join("\n");
+  assert(!/\bcn\b/.test(said), `expected no mention of cn for an item that never resolved it; it said:\n${said}`);
+  assert(/date-fns/.test(said), "a genuine external dependency should still be named in the report");
+});
+
+await testCase("[AC4] a PROTECTED payload that also resolves cn is still refused on the protected file FIRST — dependencies are never even resolved, nothing is stripped", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  let dependenciesResolved = false;
+  const code = await main(["pagination"], {}, fakeDeps(BUTTON_CONTAINING_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => { dependenciesResolved = true; return AVATAR_DEPS; },
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+  }));
+  assert(code !== 0, "the protected-file refusal must be unaffected by #969");
+  assert(spawnCalls.length === 0, "the CLI must never be invoked");
+  assert(dependenciesResolved === false, "dependency resolution is wasted work on a refusal that never installs anything");
+  assert(stripCalls.length === 0);
+});
+
+await testCase("a FAILED strip is surfaced loudly, not swallowed: non-zero exit, a WARNING naming cn", async () => {
+  const spawnCalls = [];
+  const lines = [];
+  const code = await main(["avatar"], {}, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    stripLocalDependencies: () => 17,
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 17, `a failed cleanup must propagate its own exit code, got ${code}`);
+  const said = lines.join("\n");
+  assert(/WARNING/.test(said) && /\bcn\b/.test(said), `expected a loud warning naming cn; it said:\n${said}`);
 });
 
 // ---------------------------------------------------------------------------

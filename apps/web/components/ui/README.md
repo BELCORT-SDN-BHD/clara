@@ -47,11 +47,31 @@ what would be overwritten (`pnpm ui:add <component> --dry-run` first, or `--diff
 change) and confirmed the protected file's owner-ruled fix is being deliberately superseded or
 re-applied afterward — never as a way to get past the abort without reading it.
 
+### The `cn` dependency stand-in (#969)
+
+Several registry items (the message/bubble/marker/avatar family, and others) import a `cn()`
+helper from a bare specifier `"cn"` — a registry-authoring placeholder, never a real published
+package this repo has used (`lib/utils.ts` exports its own). The pinned CLI's file-WRITE step
+correctly rewrites that import to this project's own `@/lib/utils` alias; its dependency-INSTALL
+step does not know that and installs a real `cn` npm package regardless, which then needs a hand
+revert of `package.json` and the lockfile (#642's own `ui:add --dry-run` finding).
+
+`pnpm ui:add` now handles this itself: it reports every dependency the item would add — on a
+`--dry-run` too, since a dry run writes nothing for the next step to act on — and, after a real
+install, automatically removes anything classified as a local stand-in (`cn`, and nothing else
+today) from `package.json` and the lockfile via `pnpm remove`, no manual revert needed. The same
+`CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn` package survive deliberately,
+instead of a second refusal vocabulary for this one name.
+
 ### Proof
 
 `scripts/check-ui-add-guard.selftest.mjs` (wired into `pnpm lint`) is this guard's own positive
 control: it drives the guard's decision logic against fixture payloads with no network, proving the
-abort, the override, and the no-false-positive case together. The live rehearsal against the real,
-pinned registry — `pnpm ui:add pagination` refusing because the payload still contains `button.tsx`,
-hash-identical before and after — is recorded in the delivering change's own report rather than run
-on every CI build, since a gate every PR runs must not depend on the network.
+abort, the override, the no-false-positive case, and the `cn` classification/report/strip flow
+together. The live rehearsal against the real, pinned registry — `pnpm ui:add pagination` refusing
+because the payload still contains `button.tsx`, hash-identical before and after; separately,
+`pnpm ui:add avatar` installing `cn` as a real dependency and this guard then removing it from both
+`package.json` and `pnpm-lock.yaml` with no trace left, `avatar.tsx` itself reverted afterward since
+adding a real component is outside this fix's own scope — is recorded in the delivering change's
+own report rather than run on every CI build, since a gate every PR runs must not depend on the
+network.

@@ -60,6 +60,28 @@
  * resolver), so it needs no network, and it is wired into `pnpm lint`, which
  * CI's shared lint-suite action already runs on every PR with no pipeline
  * edit.
+ *
+ * #969 — THE `cn` DEPENDENCY STAND-IN. The guard above answers "would this
+ * OVERWRITE a protected FILE"; it never asked "would this add a bogus
+ * DEPENDENCY", because it only ever read `resolved.files`. The pinned CLI's
+ * registry items for the message/bubble/marker/avatar family (and others)
+ * import a `cn()` helper from a bare specifier `"cn"` — a registry-authoring
+ * placeholder, not a real published package this repo has ever needed
+ * (`lib/utils.ts` exports its own). The CLI's file-WRITE step correctly
+ * rewrites that import to this project's own `@/lib/utils` alias; its
+ * dependency-INSTALL step does not know that and installs a REAL `cn` npm
+ * package instead (#642's `ui:add --dry-run` finding — a hand-revert of
+ * `package.json` and the lockfile every time, until now).
+ * `classifyDependencies` reads `resolved.dependencies`/`devDependencies`
+ * (previously ignored) and splits `cn` out; `main` reports every dependency
+ * an item would add on EVERY run, dry or real (a dry run writes nothing, so
+ * this report is the only place that information surfaces), and after a
+ * REAL install, automates the exact hand-revert #642 describes —
+ * `stripLocalDependencies` runs `pnpm remove` on anything classified local,
+ * offline, needing no registry fetch. The SAME `CLARA_UI_ADD_OVERWRITE=1`
+ * knob the protected-file refusal above already defines lets a caller keep
+ * a genuine external `cn` package deliberately, rather than a second
+ * refusal vocabulary being invented for this one name.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -91,8 +113,39 @@ const SHADCN_BIN = process.platform === "win32" && existsSync(`${SHADCN_BIN_BASE
 
 /** THE ONE ENV VAR THAT LETS A DELIBERATE, REVIEWED OVERWRITE PROCEED — distinct
  *  from the underlying CLI's own `-o/--overwrite`, which this guard never lets
- *  reach the CLI on a protected file in the first place. */
+ *  reach the CLI on a protected file in the first place. Reused, not
+ *  reinvented, for #969's `cn` dependency stand-in below — one refusal
+ *  vocabulary, not two. */
 export const OVERRIDE_ENV_VAR = "CLARA_UI_ADD_OVERWRITE";
+
+/**
+ * #969 — package names this repo already provides ITSELF, so the pinned CLI must never
+ * install one as a real npm dependency. `cn` is the one measured case: the registry's own
+ * item source imports `cn` from a bare specifier `"cn"` (a registry-authoring convention, not
+ * a real published import this repo uses), the CLI's file-WRITE step correctly rewrites that
+ * to this project's own `aliases.utils` (`@/lib/utils`, verified live against the pinned
+ * 4.19.0 — a freshly-resolved `avatar.tsx` lands on disk importing `cn` from `@/lib/utils`,
+ * not from `"cn"`), but the CLI's dependency-INSTALL step is naive: it takes the registry
+ * item's declared `dependencies` at face value and installs a REAL `cn` package from npm,
+ * which this workspace has never needed and never wants (#642's own `ui:add --dry-run`
+ * finding). Only `cn` is named — any other resolved-dependency problem in the pinned CLI is
+ * out of scope (#969's own ruling).
+ */
+export const LOCAL_DEPENDENCY_NAMES = Object.freeze(["cn"]);
+
+/**
+ * Split a registry item's resolved dependency list into names this repo already provides
+ * locally (never installed as a real npm package here) and everything else. Order-stable and
+ * de-duplicated so the guard's own report reads the same way every run.
+ * @param {readonly string[]} dependencies
+ * @returns {{ local: string[], external: string[] }}
+ */
+export function classifyDependencies(dependencies) {
+  const seen = new Set(dependencies ?? []);
+  const local = LOCAL_DEPENDENCY_NAMES.filter((name) => seen.has(name));
+  const external = [...seen].filter((name) => !LOCAL_DEPENDENCY_NAMES.includes(name)).sort();
+  return { local, external };
+}
 
 /** registry item `type` → the `components.json` alias key the pinned CLI
  *  joins it under. Only the types this workspace's own installs have ever
@@ -205,6 +258,33 @@ async function defaultResolveFiles(componentNames, config) {
   return resolved.files ?? [];
 }
 
+/** #969 — the SAME registry resolution `defaultResolveFiles` calls, read for its
+ *  `dependencies`/`devDependencies` instead of `files`. A separate call (never plumbed
+ *  through `resolveFiles`) so every existing `resolveFiles` fixture/injection in the selftest
+ *  keeps working unchanged — this is purely additive. Never called by the selftest, which
+ *  injects a fixture instead (same house rule as `defaultResolveFiles`). */
+async function defaultResolveDependencies(componentNames, config) {
+  const { resolveRegistryItems } = await import("shadcn/registry");
+  const resolved = await resolveRegistryItems(componentNames, { config });
+  return { dependencies: resolved.dependencies ?? [], devDependencies: resolved.devDependencies ?? [] };
+}
+
+/** #969 — the automated form of #642's own hand-revert: after a REAL install has already run,
+ *  remove every LOCAL-classified dependency (`cn`, and nothing else today) the pinned CLI just
+ *  wrote, from both package.json and the lockfile, in one local, offline operation — removing
+ *  an already-resolved entry needs no registry fetch. Never called by the selftest (same house
+ *  rule as `defaultSpawnAdd`); never called at all for a `--dry-run` (nothing was written) or
+ *  when the override was given (the caller wants the real package kept). */
+function defaultStripLocalDependencies(names) {
+  if (names.length === 0) return 0;
+  const useShell = process.platform === "win32";
+  const result = spawnSync(useShell ? "pnpm.cmd" : "pnpm", ["remove", ...names], { cwd: WEB_ROOT, stdio: "inherit", shell: useShell });
+  if (result.status === null) {
+    console.error(`[ui-add] could not run "pnpm remove ${names.join(" ")}" to drop the bogus local dependency stand-in(s): ${result.error?.message ?? "unknown spawn failure"}`);
+  }
+  return result.status ?? 1;
+}
+
 /** The default, REAL-CLI-INVOKING installer — spawns the pinned local binary
  *  (never a floating `npx`-resolved one) with `add` plus every argument this
  *  script did not itself consume, inheriting stdio so the CLI's own prompts
@@ -223,21 +303,25 @@ function defaultSpawnAdd(args) {
 }
 
 /**
- * THE WHOLE GUARDED FLOW, with its two effectful edges injectable — the shape
+ * THE WHOLE GUARDED FLOW, with its effectful edges injectable — the shape
  * check-ui-add-guard.selftest.mjs needs to prove the decision logic with no
  * network and no real install.
  * @param {string[]} argv everything after the script name — component names and CLI flags alike
  * @param {NodeJS.ProcessEnv} env
  * @param {{
  *   resolveFiles?: (names: string[], config: unknown) => Promise<ReadonlyArray<{path: string, type?: string, target?: string}>>,
+ *   resolveDependencies?: (names: string[], config: unknown) => Promise<{dependencies?: string[], devDependencies?: string[]}>,
  *   spawnAdd?: (args: string[]) => number,
+ *   stripLocalDependencies?: (names: string[]) => number,
  *   log?: (line: string) => void,
  * }} deps
  * @returns {Promise<number>} the process exit code
  */
 export async function main(argv, env, deps = {}) {
   const resolveFiles = deps.resolveFiles ?? defaultResolveFiles;
+  const resolveDependencies = deps.resolveDependencies ?? defaultResolveDependencies;
   const spawnAdd = deps.spawnAdd ?? defaultSpawnAdd;
+  const stripLocalDependencies = deps.stripLocalDependencies ?? defaultStripLocalDependencies;
   const log = deps.log ?? ((line) => console.log(line));
 
   // EVERY ARGUMENT THIS SCRIPT DOES NOT ITSELF CONSUME IS FORWARDED VERBATIM
@@ -276,7 +360,38 @@ export async function main(argv, env, deps = {}) {
     log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): proceeding despite ${blocked.length} protected file(s) in the payload: ${blocked.join(", ")}.`);
   }
 
-  return spawnAdd(argv);
+  // #969 — resolved and reported EVERY run (dry or real): a caller must never be silently
+  // deprived of visibility into what an item would add, and a dry run in particular writes
+  // nothing for the strip step below to act on, so this report is the ONLY place that
+  // information surfaces for one.
+  const resolvedDeps = await resolveDependencies(componentNames, componentsConfig);
+  const allDependencyNames = [...new Set([...(resolvedDeps.dependencies ?? []), ...(resolvedDeps.devDependencies ?? [])])];
+  const { local, external } = classifyDependencies(allDependencyNames);
+  if (allDependencyNames.length > 0) {
+    const described = [
+      ...external,
+      ...local.map((name) => `${name} (local — this repo's own, see lib/utils.ts; never installed as a real npm package)`),
+    ];
+    log(`[ui-add] dependencies ${componentNames.join(", ")} would add: ${described.join(", ")}.`);
+  }
+  if (local.length > 0 && override) {
+    log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): keeping ${local.join(", ")} as a REAL npm dependency this run, instead of the usual local stand-in.`);
+  }
+
+  const code = spawnAdd(argv);
+  if (code !== 0) return code;
+
+  const isDryRun = argv.includes("--dry-run");
+  if (local.length > 0 && !override && !isDryRun) {
+    const stripCode = stripLocalDependencies(local);
+    if (stripCode !== 0) {
+      log(`[ui-add] WARNING: the pinned CLI added ${local.join(", ")} as a real dependency and this guard's own cleanup FAILED (exit ${stripCode}) — remove ${local.length === 1 ? "it" : "them"} from package.json and the lockfile by hand before committing.`);
+      return stripCode;
+    }
+    log(`[ui-add] dropped ${local.length} bogus local dependency stand-in(s) the pinned CLI added: ${local.join(", ")} — this repo already provides ${local.length === 1 ? "it" : "them"} locally (lib/utils.ts), never as a package. No manual revert needed. Set ${OVERRIDE_ENV_VAR}=1 to take the real npm package instead.`);
+  }
+
+  return code;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
