@@ -1420,3 +1420,59 @@ direction: the landing mode is strictly more permissive than the rule it replace
 NEW key and defaults a missing one to `enforce`, and no runtime lane calls any of the three new
 names. ROLLBACK is a new append-only migration — or, with no migration at all, the operator firm's
 owner setting the mode back to `enforce` through the door this file ships.
+
+**WHAT A `prompt`-ERA CONSENT KEEPS AFTER THE FLIP, AND WHY IT IS AN EVIDENCE FACT AND NOT A HOLE.**
+A consent is minted ONCE per (firm, client, `accounting_work`) and is never re-derived:
+`prepare_egress_dispatch`'s guard is `not exists` over EVERY row of the purpose, live or revoked
+(0195's own, carried through 0234's splice unchanged). So a row minted during the beta SURVIVES the
+flip to `enforce` exactly as it was written — with its `derived under the beta legal enforcement
+mode (prompt) …` scope note and, for a Terms-only owner, a `legal_acceptance_id` that points at a
+TERMS acceptance. Nothing is granted by that row on its own: the live gate is
+`clara._accounting_work_egress_live`, which `prepare_egress_dispatch` re-derives on EVERY
+`accounting_work` call, so the flip withdraws authority on the next dispatch
+(`clara.consume_egress_dispatch` re-checks the authorization's binding and its 120s TTL, not the
+basis — that is the only residual window, and it is 0195's shape). What DOES persist is the
+estate's durable record of the lawful basis. Two consequences for whoever builds the evidence
+surface: join each consent to a FRESH `clara._accounting_work_egress_live` answer rather than
+trusting its stored `scope_note`, and read `enforcement_mode` BEFORE rendering `terms_version` /
+`dpa_version`, which carry the ACCEPTED versions under `prompt` and the PUBLISHED ones under
+`enforce`. Whether the launch flip should re-derive or annotate the beta-era rows is a decision a
+later ticket owes; 0234 deliberately does neither.
+
+**THE ROLLBACK, LITERALLY.** There is no web control for the flip (that is the operator-console
+follow-up), so both directions are a `psql` act by a person who is an ACTIVE OWNER of the firm
+carrying `is_operator`. Measure the precondition FIRST — `clara.firms.is_operator` is set only by a
+raw ops act (0133's tail: "ZERO firms are marked operator by this migration"), so an estate can
+have none:
+
+```sql
+-- read-only. ZERO rows means NOBODY can reach the door, and the last resort below is the only way.
+select f.id as operator_firm_id, f.name as operator_firm_name,
+       m.user_id as owner_user_id, u.email as owner_email
+  from clara.firms f
+  join clara.firm_memberships m
+    on m.firm_id = f.id and m.status = 'active' and m.role = 'owner'
+  join clara.users u on u.id = m.user_id
+ where f.is_operator
+ order by m.created_at;
+```
+
+Then flip, as that owner, through the door — which is what leaves the `clara._audit` receipt naming
+the actor, the new mode and the previous one:
+
+```sql
+begin;
+  set local role clara_authenticated;                    -- the door is granted to this role only
+  select set_config('request.jwt.claims',
+    json_build_object('sub', '<owner_user_id from the query above>',
+                      'role', 'authenticated')::text, true);
+  select clara.set_legal_enforcement_mode(
+    'enforce', 'rollback: <why>', 'rollback-<yyyy-mm-dd>-<unique>');  -- op_key is idempotency
+commit;
+```
+
+LAST RESORT ONLY, if no operator firm with an active owner exists: `update clara.legal_enforcement
+set mode = 'enforce' where id;` as the superuser satisfies the relation's CHECK and the wall reads
+it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no receipt — the change
+becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
+using it.
