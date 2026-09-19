@@ -19,7 +19,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   RETRIEVE_KNOWLEDGE_FN, WORK_KNOWLEDGE_READ_PURPOSE, faceStatusOf, readKnowledgeDrift,
-  recordWorkKnowledgeRead, renderRetrievedKnowledge, retrieveKnowledge,
+  recordWorkKnowledgeRead, renderRetrievedKnowledge, renderedView, retrieveKnowledge,
 } from "../lib/knowledge-retrieval.mjs";
 
 function fakeSql(handler) {
@@ -231,6 +231,89 @@ test("kr.11 an unavailable block never reads as absence, and never as `unavailab
   const empty = renderRetrievedKnowledge({ ...ANSWER, records: [], tiers: { core: 0, requested: 0, remainder: 0 } });
   assert.ok(empty.includes("found nothing"), "an empty OK says the read SUCCEEDED and found nothing");
   assert.ok(!empty.includes("did not succeed"));
+});
+
+// ---------------------------------------------------------------------------------------------
+// FIX ROUND 1 — the block a model can ACT on (review findings ADV-S-1, ADV-S-5, ADV-S-9)
+// ---------------------------------------------------------------------------------------------
+
+/** The block's line separator, spelled once: a test that splits on a literal newline is a test
+ *  whose own source can be mangled by an editor. */
+const NL = String.fromCharCode(10);
+
+/** A pack with every mark the three id-taking tools need, and more records than any lane prints. */
+function bigPack(n, over = {}) {
+  const records = [];
+  for (let i = 0; i < n; i += 1) {
+    records.push({
+      record_id: `11111111-1111-4111-8111-${String(i).padStart(12, "0")}`,
+      knowledge_key: `k_${String(i).padStart(3, "0")}`,
+      value: "x".repeat(400),
+      tier: i < n - 5 ? "core" : "remainder",
+      trust: "asserted",
+      source_kind: i % 3 === 0 ? "legacy_client_fact" : "knowledge_record",
+      authoritative: i % 5 === 0,
+      scope_kind: i % 7 === 0 ? "firm" : "client",
+      applies_when: { branch: "KL" },
+      in_effect: i % 11 !== 0,
+    });
+  }
+  return Object.assign({
+    status: "ok", client_id: CLIENT, firm_id: FIRM, purpose: "accounting_work",
+    as_of: "2026-09-19", knowledge_version: "42",
+    tiers: { core: n - 5, requested: 0, remainder: 5 },
+    keys: records.map((r) => r.knowledge_key), truncated: false, hidden_count: 0, records,
+  }, over);
+}
+
+test("kr.14 every printed line NAMES its record — the id the three id-taking tools take is in the block", () => {
+  const block = renderRetrievedKnowledge(bigPack(6));
+  const lines = block.split(NL).filter((l) => l.startsWith("- "));
+  assert.equal(lines.length, 6);
+  for (const line of lines) {
+    assert.match(line, /record_id=[0-9a-f-]{36}/,
+      "read_knowledge_source, read_knowledge_history and ask_knowledge_conflict each require a "
+      + "record_id the model can only have learned from this block");
+  }
+  assert.match(block, /in force/, "which row GOVERNS, not left to the model to rank");
+  assert.match(block, /firm rule/, "a firm default is marked as one");
+  assert.match(block, /applies_when=/, "the condition a row says it holds under");
+  assert.match(block, /source=/, "where the fact came from");
+});
+
+test("kr.15 the print caps are the LANE's ask, not one number for two lanes", () => {
+  const pack = bigPack(55);
+  const work = renderRetrievedKnowledge(pack).split(NL).filter((l) => l.startsWith("- "));
+  const chat = renderRetrievedKnowledge(pack, { maxRecords: 60, maxValueChars: 300 })
+    .split(NL).filter((l) => l.startsWith("- "));
+  assert.equal(work.length, 40, "the Work lane's own cap");
+  assert.equal(chat.length, 55, "a lane that ASKED for 60 records prints the 55 it was given");
+  assert.ok(chat[0].length > work[0].length, "and clips a value at ITS char bound, not the Work lane's");
+});
+
+test("kr.16 a print-clipped view reports what it SHOWED, and reads as partial", () => {
+  const pack = bigPack(55);
+  const view = renderedView(pack);
+  assert.equal(view.records_shown, 40, "records_shown answers 'what did Clara see', not 'what did the door return'");
+  assert.equal(view.truncated, true, "a block that printed 40 of 55 is a partial view");
+  assert.equal(faceStatusOf(pack, view.truncated), "partial",
+    "the ONE mapping takes the view's truncation, so the face word describes the block");
+  const block = renderRetrievedKnowledge(pack);
+  assert.match(block, /15 more record\(s\) not printed/);
+  assert.match(block, /10 of them CORE/,
+    "0230 caps only the remainder, so a print cap can drop CORE rows — the block says how many");
+  const whole = renderedView(bigPack(6));
+  assert.deepEqual(whole, { records_shown: 6, truncated: false });
+});
+
+test("kr.17 a turn with no client is told there is no client — not that a read failed", () => {
+  const block = renderRetrievedKnowledge({ status: "unavailable", reason: "no_client", records: [] });
+  assert.ok(!/did not succeed/.test(block),
+    "no read was attempted, so reporting a failed read makes a Home turn hedge about a client that does not exist");
+  assert.match(block, /not about a client/i);
+  assert.ok(!/Do NOT tell anybody/.test(block));
+  const failed = renderRetrievedKnowledge({ status: "unavailable", reason: "read_failed", records: [] });
+  assert.match(failed, /did not succeed/, "every OTHER unavailable reason keeps #603's sentence");
 });
 
 // ---------------------------------------------------------------------------------------------

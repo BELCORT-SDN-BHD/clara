@@ -442,6 +442,141 @@ test("v5.errors: every v1..v4 mapping is preserved BY CONSTRUCTION — the route
 });
 
 // ---------------------------------------------------------------------------
+// 5b · FIX ROUND 1 — the block the run can ACT on, and what the digest cannot see
+// ---------------------------------------------------------------------------
+
+test("v5.knowledge: the block NAMES each record, so the three id-taking tools are reachable", () => {
+  // REVIEW ADV-S-1. `read_knowledge_source`, `read_knowledge_history` and v4's still-rostered
+  // `ask_knowledge_conflict` all take a `record_id` — and `ask_knowledge_conflict` takes
+  // `scope_kind` and `applies_when` PER ROW. The model can only have learnt any of them from this
+  // block, and the first cut of `recordLine` printed key, value and trust alone.
+  const records = [
+    {
+      record_id: "11111111-1111-4111-8111-000000000001",
+      knowledge_key: "sst_regime", value: "sales_tax", tier: "core", trust: "asserted",
+      source_kind: "legacy_client_fact", scope_kind: "client", applies_when: { branch: "KL" },
+      in_effect: true,
+    },
+    {
+      record_id: "11111111-1111-4111-8111-000000000002",
+      knowledge_key: "sst_regime", value: "service_tax", tier: "core", trust: "derived",
+      source_kind: "knowledge_record", scope_kind: "firm", applies_when: {}, in_effect: true,
+    },
+  ];
+  const block = retrieval.renderRetrievedKnowledge({
+    status: "ok", knowledge_version: "7", as_of: "2026-09-30",
+    tiers: { core: 2, requested: 0, remainder: 0 }, keys: ["sst_regime"], truncated: false,
+    hidden_count: 0, records,
+  });
+  for (const r of records) assert.ok(block.includes(`record_id=${r.record_id}`), `${r.record_id} is named`);
+  assert.match(block, /in force/, "which of the two rows GOVERNS — the conflict tool's whole subject");
+  assert.match(block, /firm rule/);
+  assert.match(block, /applies_when=/);
+  // the schema the block has to feed, pinned against the block rather than described
+  const row = v5Tools.knowledgeConflictRowSchema.parse({
+    record_id: records[0].record_id,
+    scope_kind: "client",
+    applies_when: JSON.stringify(records[0].applies_when),
+    value: String(records[0].value),
+  });
+  assert.equal(row.record_id, records[0].record_id);
+});
+
+test("v5.knowledge: the Work lane prints its OWN bound, and the row says what the block showed", () => {
+  // REVIEW ADV-S-5. 0230 caps only the REMAINDER at `p_limit`; core and requested are unbounded,
+  // so the print cap is the one place a CORE row can be dropped — and `records_shown`/`truncated`
+  // must describe the BLOCK, not the door's answer, or the Work's durable result says "55 shown,
+  // not truncated" about a block that printed 40.
+  assert.equal(retrieval.RETRIEVED_MAX_RECORDS, 40, "knowledge-conflicts.mjs:44's number, the Work lane's own");
+  assert.equal(retrieval.RETRIEVED_MAX_VALUE_CHARS, 200);
+  const records = [];
+  for (let i = 0; i < 55; i += 1) {
+    records.push({
+      record_id: `11111111-1111-4111-8111-${String(i).padStart(12, "0")}`,
+      knowledge_key: `k_${i}`, value: "v", tier: "core", trust: "asserted", in_effect: true,
+    });
+  }
+  const answer = {
+    status: "ok", knowledge_version: "7", as_of: "2026-09-30",
+    tiers: { core: 55, requested: 0, remainder: 0 }, keys: [], truncated: false,
+    hidden_count: 0, records,
+  };
+  const view = retrieval.renderedView(answer, retrieval.RETRIEVED_MAX_RECORDS);
+  assert.deepEqual(view, { records_shown: 40, truncated: true });
+  assert.equal(retrieval.faceStatusOf(answer, view.truncated), "partial",
+    "a clipped block is a PARTIAL view and the estate's face word says so");
+  assert.match(retrieval.renderRetrievedKnowledge(answer), /15 of them CORE/,
+    "and the block tells the run which tier it lost");
+  // the step hands both to the recorder rather than letting it count the door's records
+  const impl = codeOf(new URL("../workflows/claraWork.v5.impl.ts", import.meta.url));
+  assert.match(impl, /recordsShown: view\.records_shown, truncated: view\.truncated/);
+  assert.match(impl, /records_shown: view\.records_shown/);
+});
+
+test("v5.knowledge: read_seq is NULL when this attempt's facts landed on no row", () => {
+  // REVIEW ADV-S-12(a). `read_seq` is documented as "the seq this attempt's facts actually landed
+  // on". Four divergent replays exhaust the bound and a failed first write lands nothing at all;
+  // answering the last seq TRIED in either case is a claim about the estate the estate does not
+  // carry.
+  const impl = codeOf(new URL("../workflows/claraWork.v5.impl.ts", import.meta.url));
+  assert.match(impl, /const landedSeq = recorded && !divergent \? seq : null;/);
+  assert.ok(!/Math\.min\(seq, KNOWLEDGE_READ_MAX_SEQ\)/.test(impl),
+    "the bound is not a seq this attempt landed on");
+});
+
+test("v5.bundle: the digest CANNOT see a zod refinement, and the roster's one refinement is pinned", () => {
+  // REVIEW ADV-S-4. `z.toJSONSchema` erases `.superRefine`/`.refine` entirely, so the header's
+  // "a tool that … now MOVES THE DIGEST" is true of every item it lists and false as a general
+  // claim. This cell records the limit as a MEASUREMENT rather than a memory, and pins both the
+  // census of schemas carrying such a check and the behaviour of the only one that does.
+  const plain = z.object({ kind: z.enum(["text", "choice"]), options: z.array(z.string()).optional() }).strict();
+  const refined = plain.superRefine((v, ctx) => {
+    if (v.kind === "choice" && v.options === undefined) ctx.addIssue({ code: "custom", message: "options required" });
+  });
+  const toJson = (schema) => JSON.stringify(z.toJSONSchema(schema, { target: "draft-07", io: "input" }));
+  assert.equal(toJson(plain), toJson(refined),
+    "MEASURED: the hashed text is identical with and without the rule, so the digest is blind to it");
+  assert.equal(plain.safeParse({ kind: "choice" }).success, true);
+  assert.equal(refined.safeParse({ kind: "choice" }).success, false,
+    "...while the two schemas accept DIFFERENT inputs — which is what a contract is");
+
+  // THE CENSUS: which roster schemas carry a check the digest cannot see. A new one must be
+  // declared here, which is the gate the digest itself cannot be.
+  const customChecks = (schema, path, out) => {
+    const def = schema?._zod?.def;
+    if (!def) return out;
+    for (const c of Array.isArray(def.checks) ? def.checks : []) {
+      if (c?._zod?.def?.check === "custom") out.push(path);
+    }
+    if (def.type === "object" && def.shape) {
+      for (const [k, v] of Object.entries(def.shape)) customChecks(v, `${path}.${k}`, out);
+    }
+    if (def.type === "array" && def.element) customChecks(def.element, `${path}[]`, out);
+    if ((def.type === "optional" || def.type === "nullable") && def.innerType) customChecks(def.innerType, path, out);
+    if (Array.isArray(def.options)) def.options.forEach((o, i) => customChecks(o, `${path}|${i}`, out));
+    return out;
+  };
+  const census = [];
+  for (const name of v5Prompt.CLARA_WORK_TOOL_NAMES_V5) {
+    census.push(...customChecks(v5Prompt.CLARA_WORK_TOOL_SCHEMAS_V5[name], name, []));
+  }
+  assert.deepEqual(census, ["ask_question.fields[]"],
+    "exactly one roster schema carries a rule the bundle digest cannot see — #791's own example");
+
+  // AND THAT ONE RULE IS PINNED BY BEHAVIOUR, so relaxing it reds here even though the digest
+  // would not move.
+  const askQuestion = v5Prompt.CLARA_WORK_TOOL_SCHEMAS_V5[v1Prompt.ASK_QUESTION_TOOL];
+  const field = (over) => Object.assign({ key: "k", label: "L", kind: "text" }, over);
+  const ask = (fields) => askQuestion.safeParse({
+    question: "Which basis?", reason: "the basis is ambiguous", fields,
+  });
+  assert.equal(ask([field({ kind: "choice", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] })]).success, true);
+  assert.equal(ask([field({ kind: "choice" })]).success, false, "`choice` without options is refused");
+  assert.equal(ask([field({ options: [{ value: "a", label: "A" }] })]).success, false,
+    "...and options on a non-choice field is refused");
+});
+
+// ---------------------------------------------------------------------------
 // 6 · the capability registry, the trace scheme and the registry pin
 // ---------------------------------------------------------------------------
 
@@ -473,6 +608,30 @@ test("v5.trace: the seq scheme gives every act its own number and nothing collid
   // the DRIFT row of segment n+1 is what the body writes on a resume, so it must be inside the
   // scheme rather than past it
   assert.ok(v5Impl.segmentTraceBase(B.segments - 1) + 3 < v5Impl.SETTLE_TRACE_SEQ);
+});
+
+test("v5.trace: the drift row a RESUME can write is inside the scheme — the settle's seq is nobody else's", () => {
+  // THE CELL THE FIRST CUT SHOULD HAVE WRITTEN (review ADV-S-3). The loop above stops at
+  // `B.segments - 1`, so it never reached the row the body can actually write on the LAST
+  // segment's resume: `readKnowledgeDriftStepV5(..., segmentTraceBase(segment + 1))` with
+  // `segment = B.segments - 1` is `segmentTraceBase(B.segments)` — which IS `SETTLE_TRACE_SEQ`.
+  // `clara.record_work_execution_trace` ends `on conflict (work_id, run_id, seq) do nothing` and
+  // both writers swallow the answer, so the settle row — outcome, refusal, receipt — was simply
+  // dropped, silently, on that path.
+  for (let i = 0; i <= B.segments; i += 1) {
+    const base = v5Impl.segmentTraceBase(i);
+    if (i === B.segments) {
+      assert.equal(base, v5Impl.SETTLE_TRACE_SEQ,
+        "segmentTraceBase(B.segments) IS the settle's seq — the body may never ask for a row there");
+      break;
+    }
+    assert.ok(base + 3 < v5Impl.SETTLE_TRACE_SEQ, `segment ${i} keeps its four rows below the settle`);
+  }
+  // and the BODY holds the wall, not this arithmetic: the drift is taken only when a segment that
+  // can consume its news still exists.
+  const body = codeOf(new URL("../workflows/claraWork.v5.ts", import.meta.url));
+  assert.match(body, /segment \+ 1 < budgets\.segments/,
+    "a resume with no next segment settles rather than spending a read whose row would land on the settle's seq");
 });
 
 test("v5.registry: claraWork is pinned at v5, and v1..v4 stay exported and rostered (policy (c))", () => {

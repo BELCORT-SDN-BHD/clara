@@ -146,6 +146,9 @@ import {
   readKnowledgeDrift,
   recordWorkKnowledgeRead,
   renderRetrievedKnowledge,
+  renderedView,
+  RETRIEVED_MAX_RECORDS,
+  RETRIEVED_MAX_VALUE_CHARS,
   retrieveKnowledge,
   WORK_KNOWLEDGE_DEFAULT_LIMIT,
   WORK_KNOWLEDGE_READ_PURPOSE,
@@ -179,11 +182,20 @@ type RecordReadArgs = {
   answer: unknown;
   purpose?: string;
   reason?: string | null;
+  /** What the BLOCK showed — the carrier keeps the door's own counts when neither is passed. */
+  recordsShown?: number;
+  truncated?: boolean;
 };
 const recordWorkKnowledgeReadTyped = recordWorkKnowledgeRead as unknown as (
   sql: PgExec,
   args: RecordReadArgs,
 ) => Promise<{ ok: boolean; receipt?: unknown; replayed?: boolean; payload_match?: boolean }>;
+
+/** The carrier's "what did the block actually show" pair, through the same typed view. */
+const renderedViewTyped = renderedView as unknown as (
+  answer: unknown,
+  maxRecords?: number,
+) => { records_shown: number; truncated: boolean };
 
 const readKnowledgeDriftTyped = readKnowledgeDrift as unknown as (
   sql: PgExec,
@@ -417,8 +429,9 @@ export type WorkKnowledgeV5 = {
   records_shown: number;
   truncated: boolean;
   text: string;
-  /** The `work_knowledge_reads` seq this attempt's facts actually landed on — see below. */
-  read_seq: number;
+  /** The `work_knowledge_reads` seq this attempt's facts actually landed on, or NULL when every
+   *  seq the bound allows was already held by a row recording something else — see below. */
+  read_seq: number | null;
   /** FALSE when the read-set row could not be written. Never fails the run (see below). */
   recorded: boolean;
 };
@@ -510,20 +523,35 @@ export async function loadWorkKnowledgeStepV5(
       limit: WORK_KNOWLEDGE_DEFAULT_LIMIT,
     })) as RetrievedAnswer;
 
+    // WHAT THE BLOCK WILL SHOW, DERIVED BEFORE THE ROW IS WRITTEN. `records_shown` and `truncated`
+    // are the estate's durable answer to "what did Clara see", and the door's own counts are the
+    // answer to a different question: 0230 caps only the remainder, so a door that returned 55
+    // records against this lane's print cap of 40 would otherwise have left a row reading "55
+    // shown, not truncated" about a block that printed 40 (review ADV-S-5(c)).
+    const view = renderedViewTyped(answer, RETRIEVED_MAX_RECORDS);
+
     let seq = 1;
     let recorded = false;
+    let divergent = false;
     for (; seq <= KNOWLEDGE_READ_MAX_SEQ; seq += 1) {
       const written = await recordWorkKnowledgeReadTyped(c, {
         taskId, runId, seq, answer, purpose: readPurpose,
+        recordsShown: view.records_shown, truncated: view.truncated,
       });
       if (written.ok !== true) break;
       recorded = true;
-      if (!(written.replayed === true && written.payload_match === false)) break;
+      divergent = written.replayed === true && written.payload_match === false;
+      if (!divergent) break;
     }
-    const landedSeq = Math.min(seq, KNOWLEDGE_READ_MAX_SEQ);
+    // NULL WHEN NOTHING LANDED, and that is fix round 1's correction (review ADV-S-12(a)).
+    // `read_seq` is documented as "the seq this attempt's facts actually landed on"; two paths
+    // reach the end of this loop with no row holding them — a write that never succeeded, and a
+    // fourth seq that STILL diverged (every seq the bound allows is then held by a row recording
+    // something else). Answering the last seq TRIED in either case is a claim about the estate
+    // that the estate does not carry.
+    const landedSeq = recorded && !divergent ? seq : null;
 
-    const records = Array.isArray(answer.records) ? answer.records : [];
-    const face = faceStatusOf(answer) as WorkKnowledgeV5["face_status"];
+    const face = faceStatusOf(answer, view.truncated) as WorkKnowledgeV5["face_status"];
     await traceSafely(c, traceRow(null, {
       taskId, runId, seq: KNOWLEDGE_TRACE_SEQ, phase: "tool_call",
       capabilityId: "accounting_work.retrieve_knowledge",
@@ -548,9 +576,12 @@ export async function loadWorkKnowledgeStepV5(
           : String(answer.knowledge_version),
       as_of: answer.as_of === null || answer.as_of === undefined ? null : String(answer.as_of),
       keys: Array.isArray(answer.keys) ? (answer.keys as string[]) : [],
-      records_shown: records.length,
-      truncated: answer.truncated === true,
-      text: renderRetrievedKnowledge(answer),
+      records_shown: view.records_shown,
+      truncated: view.truncated,
+      text: renderRetrievedKnowledge(answer, {
+        maxRecords: RETRIEVED_MAX_RECORDS,
+        maxValueChars: RETRIEVED_MAX_VALUE_CHARS,
+      }),
       read_seq: landedSeq,
       recorded,
     };

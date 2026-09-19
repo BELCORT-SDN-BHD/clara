@@ -55,7 +55,9 @@ import {
   toTypedParts_v21,
   hasCodingIntent_v21,
   CLIENT_BASIS_LIMIT,
+  CLIENT_BASIS_PRINT_MAX,
   CLIENT_BASIS_PURPOSE,
+  CLIENT_BASIS_VALUE_CHARS,
   type ClaraPartV21,
 } from "./chatTurn.v21.prompt.js";
 import { pools, resolveModel, type PgExec } from "./chatTurn.v15.infra.js";
@@ -63,7 +65,9 @@ import { consumeChatTurnModelResult } from "./chatTurn.v10.impl.js";
 import { buildToolsV21 } from "./chatTurn.v21.tools.js";
 import { POST_TOOL } from "./chatTurn.v13.post.js";
 import { recordChatUsage, chatEngineId } from "./chatTurn.v21.usage.js";
-import { faceStatusOf, renderRetrievedKnowledge, retrieveKnowledge } from "../lib/knowledge-retrieval.mjs";
+import {
+  faceStatusOf, renderRetrievedKnowledge, renderedView, retrieveKnowledge,
+} from "../lib/knowledge-retrieval.mjs";
 
 // THE CARRIER IS JAVASCRIPT, SO THIS CLOSURE CALLS IT THROUGH A TYPED VIEW — the estate's pattern
 // for a `.mjs` dependency (`claraWork.v4.impl.ts:270` casts `readWorkKnowledge` the same way), and
@@ -85,6 +89,11 @@ const retrieveKnowledgeTyped = retrieveKnowledge as unknown as (
   sql: PgExec,
   args: RetrieveKnowledgeArgs,
 ) => Promise<Record<string, unknown>>;
+/** The carrier's "what did the block actually show" pair, through the same typed view. */
+const renderedViewTyped = renderedView as unknown as (
+  answer: unknown,
+  maxRecords?: number,
+) => { records_shown: number; truncated: boolean };
 
 export {
   claimRunStep,
@@ -221,11 +230,15 @@ export async function loadClientBasisStepV21(
         }),
       )) as RetrievedAnswer)
     : { status: "unavailable", reason: "no_client", records: [] };
-  const records = Array.isArray(answer.records) ? answer.records : [];
+  // WHAT THE BLOCK SHOWED, not what the door returned — the three facts below are one answer and
+  // they must agree with each other (review ADV-S-5(c)). `renderedView` derives the pair from the
+  // same print cap the render uses, so a turn shown 40 of 55 records says `partial` and 40 rather
+  // than `ok` and 55.
+  const view = renderedViewTyped(answer, CLIENT_BASIS_PRINT_MAX);
   return {
     status: answer.status === "ok" ? "ok" : "unavailable",
     reason: typeof answer.reason === "string" ? answer.reason : null,
-    face_status: faceStatusOf(answer) as ClientBasisV21["face_status"],
+    face_status: faceStatusOf(answer, view.truncated) as ClientBasisV21["face_status"],
     // VERBATIM, AS TEXT. The watermark is a bigint the driver hands over as text; coercing it
     // through Number() would quietly lose precision past 2^53 and would make a later "is this the
     // version I read?" comparison compare two different things.
@@ -234,9 +247,12 @@ export async function loadClientBasisStepV21(
         ? null
         : String(answer.knowledge_version),
     as_of: answer.as_of === null || answer.as_of === undefined ? null : String(answer.as_of),
-    records_shown: records.length,
-    truncated: answer.truncated === true,
-    text: renderRetrievedKnowledge(answer),
+    records_shown: view.records_shown,
+    truncated: view.truncated,
+    text: renderRetrievedKnowledge(answer, {
+      maxRecords: CLIENT_BASIS_PRINT_MAX,
+      maxValueChars: CLIENT_BASIS_VALUE_CHARS,
+    }),
   };
 }
 

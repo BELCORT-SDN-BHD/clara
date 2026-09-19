@@ -65,6 +65,13 @@ import {
   type ClaraPartV20,
 } from "./chatTurn.v20.prompt.js";
 import type { WorkAcceptedPartV19 } from "./chatTurn.v19.parts.js";
+// IMPORTED, NOT RETYPED — see `CLIENT_BASIS_PRINT_MAX` below. The same two constants are also
+// re-exported further down, which is a different act: this brings them into scope so THIS lane's
+// numbers can be DERIVED from v19's rather than agree with them by hand.
+import {
+  KNOWLEDGE_CONTEXT_MAX_RECORDS,
+  KNOWLEDGE_CONTEXT_MAX_VALUE_CHARS,
+} from "./chatTurn.v19.prompt.js";
 import { START_TRADE_INVOICE_WORK_TOOL, RUN_DEPRECIATION_PERIOD_TOOL } from "./chatTurn.v21.tools.js";
 import { DEPRECIATION_HUMAN_DOOR, floorSentence } from "../lib/depreciation-run.js";
 
@@ -118,7 +125,18 @@ export const CLIENT_BASIS_PURPOSE = "chat_turn";
  *  `knowledge_limit_out_of_range` outside it; sixty is v19's own record cap
  *  (`KNOWLEDGE_CONTEXT_MAX_RECORDS`) carried forward, so the block a turn sees does not shrink at
  *  the repoint. It is the number this lane asks for, never the rule. */
-export const CLIENT_BASIS_LIMIT = 60;
+export const CLIENT_BASIS_LIMIT = KNOWLEDGE_CONTEXT_MAX_RECORDS;
+
+/** WHAT THE BLOCK PRINTS, and it is v19's number BY IMPORT rather than by retyping.
+ *
+ *  Fix round 1's correction (review ADV-S-5(a)): asking the door for sixty records and then
+ *  rendering through a carrier whose own default printed forty made "the block does not shrink at
+ *  the repoint" false by twenty records and by a hundred characters of every value — a claim this
+ *  lane made in its own comment and the cut's report repeated. Deriving both from v19's exported
+ *  constants means a later reader cannot be told one number and shown another: if the caps ever
+ *  diverge it is because someone changed v19's, which is a different and much louder act. */
+export const CLIENT_BASIS_PRINT_MAX = KNOWLEDGE_CONTEXT_MAX_RECORDS;
+export const CLIENT_BASIS_VALUE_CHARS = KNOWLEDGE_CONTEXT_MAX_VALUE_CHARS;
 
 // --- the guidance -------------------------------------------------------------------------
 

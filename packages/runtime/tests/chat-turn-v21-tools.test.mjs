@@ -35,6 +35,7 @@ const v20Tools = await import("../workflows/chatTurn.v20.tools.ts");
 const v20Prompt = await import("../workflows/chatTurn.v20.prompt.ts");
 const v21Tools = await import("../workflows/chatTurn.v21.tools.ts");
 const v21Prompt = await import("../workflows/chatTurn.v21.prompt.ts");
+const v19Prompt = await import("../workflows/chatTurn.v19.prompt.ts");
 const v21Usage = await import("../workflows/chatTurn.v21.usage.ts");
 const tradeLib = await import("../lib/trade-invoice-basis.ts");
 const depLib = await import("../lib/depreciation-run.ts");
@@ -411,7 +412,10 @@ test("v21.coding-intent: the trade invoice IS acting on the books; the depreciat
 });
 
 test("v21.basis: an UNAVAILABLE read says the read did not succeed — never 'this client has nothing recorded'", () => {
-  for (const reason of ["refused", "read_failed", "malformed", "no_client", "no_purpose"]) {
+  // FOUR REASONS, NOT FIVE. `no_client` left this list in fix round 1 (review ADV-S-9): it is the
+  // one unavailable reason that names a fact about the CONVERSATION rather than about the estate,
+  // and the cell below is where it is pinned instead.
+  for (const reason of ["refused", "read_failed", "malformed", "no_purpose"]) {
     const block = retrieval.renderRetrievedKnowledge({ status: "unavailable", reason });
     assert.match(block, /the read did not succeed/);
     assert.match(block, /Do NOT tell anybody/);
@@ -425,15 +429,42 @@ test("v21.basis: an UNAVAILABLE read says the read did not succeed — never 'th
   assert.match(empty, /The read succeeded and found nothing/);
 });
 
+test("v21.basis: a HOME turn is told there is no client, not that a read failed", () => {
+  // A conversation with no client pin never reaches the door — the step short-circuits to
+  // `no_client` — so "the read did not succeed ... do NOT tell anybody that this client has no
+  // recorded knowledge" made the model hedge about a client that does not exist. The step's own
+  // header promised the block would say WHICH; until this fix it did not.
+  const block = retrieval.renderRetrievedKnowledge({ status: "unavailable", reason: "no_client", records: [] });
+  assert.ok(!/the read did not succeed/.test(block));
+  assert.ok(!/Do NOT tell anybody/.test(block));
+  assert.match(block, /not about a client/i);
+  assert.ok(!/nothing recorded yet|found nothing/.test(block),
+    "and it is still not 'this client has nothing recorded' — there is no client");
+  // the face word is unchanged: the runtime cannot say what it did not read
+  assert.equal(retrieval.faceStatusOf({ status: "unavailable", reason: "no_client" }), "unknown");
+});
+
 test("v21.basis: the chat lane asks for `chat_turn` at v19's record cap, and the step never collapses to null", () => {
   assert.equal(v21Prompt.CLIENT_BASIS_PURPOSE, "chat_turn");
   assert.equal(v21Prompt.CLIENT_BASIS_LIMIT, 60, "v19's own record cap, so the block does not shrink at the repoint");
   assert.ok(v21Prompt.CLIENT_BASIS_LIMIT >= 1 && v21Prompt.CLIENT_BASIS_LIMIT <= 200,
     "0230 bounds p_limit to 1..200 and refuses CLR10 knowledge_limit_out_of_range outside it");
+  // AND WHAT IT ASKS FOR IS WHAT IT PRINTS — the half fix round 1 added (review ADV-S-5(a)).
+  // Asking the door for sixty and rendering through a carrier that printed forty shrank the block
+  // by twenty records and every value by a hundred characters, which is the exact claim
+  // CLIENT_BASIS_LIMIT's comment makes. Both are v19's constants BY IMPORT, so they cannot drift.
+  assert.equal(v21Prompt.CLIENT_BASIS_PRINT_MAX, v19Prompt.KNOWLEDGE_CONTEXT_MAX_RECORDS);
+  assert.equal(v21Prompt.CLIENT_BASIS_VALUE_CHARS, v19Prompt.KNOWLEDGE_CONTEXT_MAX_VALUE_CHARS);
+  assert.equal(v21Prompt.CLIENT_BASIS_PRINT_MAX, v21Prompt.CLIENT_BASIS_LIMIT,
+    "a lane that asks for more records than it prints is a lane that clips silently");
   const impl = codeOf(new URL("../workflows/chatTurn.v21.impl.ts", import.meta.url));
   assert.ok(!/catch\s*\{\s*contextPack = null/.test(impl),
     "`chatTurn.v10.impl.ts:136`'s shape is the defect this step exists to close");
-  assert.match(impl, /face_status: faceStatusOf\(answer\)/, "the ONE mapping between the two vocabularies");
+  assert.match(impl, /face_status: faceStatusOf\(answer, view\.truncated\)/,
+    "the ONE mapping between the two vocabularies, taking the VIEW's truncation so the face word "
+    + "describes the block the turn was shown rather than the answer the door returned");
+  assert.match(impl, /records_shown: view\.records_shown/,
+    "and the count answers what Clara SAW");
   // and `clara.get_context_pack` is not recut and not repointed — not one byte
   assert.match(impl, /loadContextStepV10/, "v10's history/context read is still called");
   assert.ok(!/get_context_pack/.test(impl), "this closure names no context-pack door in its own code");

@@ -69,8 +69,16 @@ export const WORK_KNOWLEDGE_READ_PURPOSE = "accounting_work";
  *  `knowledge_limit_out_of_range` outside it; this is the number the lane asks for, not the rule. */
 export const WORK_KNOWLEDGE_DEFAULT_LIMIT = 40;
 
-/** How many records the rendered block prints, and how long one value may be — the Work lane's own
- *  numbers, carried from `knowledge-conflicts.mjs:44-45` so the two blocks stay legible together. */
+/** How many records the rendered block prints, and how long one value may be — the WORK lane's own
+ *  numbers, carried from `knowledge-conflicts.mjs:44-45` so the two blocks stay legible together.
+ *
+ *  THEY ARE A DEFAULT, NOT THE RULE, and that is fix round 1's correction (review ADV-S-5). Two
+ *  lanes render through this one function and they do not ask for the same view: the chat lane
+ *  asks the door for 60 records and printed 60 of them under `chatTurn_v19`
+ *  (`KNOWLEDGE_CONTEXT_MAX_RECORDS` / `_VALUE_CHARS` = 60 / 300), so a module-level 40/200 silently
+ *  SHRANK the block at the repoint — the one thing `CLIENT_BASIS_LIMIT`'s own comment promised it
+ *  would not do. Every caller passes its own bound; these two are what a caller that states none
+ *  gets. */
 export const RETRIEVED_MAX_RECORDS = 40;
 export const RETRIEVED_MAX_VALUE_CHARS = 200;
 
@@ -219,11 +227,34 @@ export async function retrieveKnowledge(sql, {
  * NEVER a fifth word, and never `unavailable`: that word is the runtime's own and migration 0230's
  * status CHECK refuses it, so it cannot reach a register through a column either.
  */
-export function faceStatusOf(answer) {
+export function faceStatusOf(answer, truncated) {
   const a = answer ?? {};
-  if (a.status === "ok") return a.truncated === true ? "partial" : "ok";
+  // THE SECOND ARGUMENT IS THE VIEW'S OWN TRUNCATION, and it exists so this stays the ONE mapping.
+  // The DOOR's `truncated` means the database withheld remainder rows; a block that printed fewer
+  // records than it was handed is ALSO a partial view, and the row a face reads must describe what
+  // the run was SHOWN rather than what the door returned (review ADV-S-5(c)). A caller that omits
+  // it keeps the door's own answer — which is every caller that renders nothing.
+  const t = truncated === undefined ? a.truncated === true : truncated === true;
+  if (a.status === "ok") return t ? "partial" : "ok";
   if (a.status === "unavailable" && a.reason === "refused") return "denied";
   return "unknown";
+}
+
+/**
+ * WHAT THE MODEL WAS ACTUALLY SHOWN — the two facts a read-set row, a face and a Work's result
+ * must answer with.
+ *
+ * `records_shown` is how many records the BLOCK printed, never how many the door returned, and
+ * `truncated` is true when EITHER the database withheld rows or the print cap dropped some. The
+ * pair is derived here, once, because the alternative this fix round measured was a durable
+ * `clara.work_knowledge_reads` row saying "55 shown, not truncated" about a block that printed 40.
+ */
+export function renderedView(answer, maxRecords = RETRIEVED_MAX_RECORDS) {
+  const a = answer ?? {};
+  const records = Array.isArray(a.records) ? a.records : [];
+  const cap = typeof maxRecords === "number" && maxRecords >= 0 ? maxRecords : RETRIEVED_MAX_RECORDS;
+  const shown = Math.min(records.length, cap);
+  return { records_shown: shown, truncated: a.truncated === true || shown < records.length };
 }
 
 const BLOCK_HEADER = [
@@ -237,23 +268,52 @@ function clip(s, max) {
   return s.length <= max ? s : `${s.slice(0, max)}…`;
 }
 
-function valueText(value) {
+function valueText(value, maxChars = RETRIEVED_MAX_VALUE_CHARS) {
   try {
-    return clip(JSON.stringify(value ?? null), RETRIEVED_MAX_VALUE_CHARS);
+    return clip(JSON.stringify(value ?? null), maxChars);
   } catch {
     return "(unrenderable)";
   }
 }
 
-function recordLine(r) {
+/**
+ * ONE record, ONE line — and the line NAMES the record.
+ *
+ * THE ID IS THE POINT, and fix round 1 is where this module learnt it (review ADV-S-1). Three of
+ * the Work roster's tools take a `record_id` and nothing else identifies a row:
+ * `read_knowledge_source` and `read_knowledge_history` (#658's two reads) and
+ * `ask_knowledge_conflict`, which shipped WORKING under `claraWork_v4` because
+ * `knowledge-conflicts.mjs:66-84` printed the id — "a run that could see a conflict but not
+ * address it could only describe the problem". The first cut of this line printed key, value and
+ * trust only, so all three were documented, rostered, hashed into the bundle digest and
+ * UNREACHABLE from the model's own context, while three sentences the model reads told it to give
+ * "the `record_id` exactly as the block printed it".
+ *
+ * The other marks are v19's and v4's, carried for their own stated reasons: `in force` says which
+ * row GOVERNS when two rows share a key (0192's `_knowledge_legacy_rows` flags every unioned
+ * `clara.client_facts` row authoritative), the scope mark says a firm rule is not this client's
+ * own record, and `applies_when` is the condition the row itself states — which is the field
+ * `ask_knowledge_conflict` requires PER ROW and could otherwise only be invented.
+ */
+function recordLine(r, maxValueChars = RETRIEVED_MAX_VALUE_CHARS) {
   const key = typeof r?.knowledge_key === "string" ? r.knowledge_key : "(unnamed)";
   const tier = typeof r?.tier === "string" ? r.tier : "remainder";
   const trust = typeof r?.trust === "string" ? r.trust : "unknown";
+  const source = typeof r?.source_kind === "string" && r.source_kind ? r.source_kind : null;
+  const marks = [`trust=${trust}`];
+  if (source !== null) marks.push(`source=${source}`);
+  if (source === "legacy_client_fact" || r?.authoritative === true) marks.push("in force");
+  if (r?.scope_kind === "firm") marks.push("firm rule");
+  const applies = r?.applies_when;
+  if (applies && typeof applies === "object" && Object.keys(applies).length > 0) {
+    marks.push(`applies_when=${clip(JSON.stringify(applies), 120)}`);
+  }
+  if (typeof r?.record_id === "string" && r.record_id) marks.push(`record_id=${r.record_id}`);
   // AN OUT-OF-EFFECT ROW IS MARKED IN THE PROMPT, never dropped. A run that silently lost a rule
   // reasons without a fact that applies; a run shown an expired rule unmarked applies one that
   // does not. Migration 0230 returns both and flags the difference; this is where the run reads it.
   const effect = r?.in_effect === false ? " [not in effect for this period]" : "";
-  return `- [${tier}] ${key} = ${valueText(r?.value)} (trust: ${trust})${effect}`;
+  return `- [${tier}] ${key} = ${valueText(r?.value, maxValueChars)} [${marks.join(", ")}]${effect}`;
 }
 
 /**
@@ -265,10 +325,28 @@ function recordLine(r) {
  * :93-98 recorded the reasoning for the general case ("a Work's authority is its ADMITTED BASIS"),
  * and it still holds for every tier below core.
  */
-export function renderRetrievedKnowledge(answer) {
+export function renderRetrievedKnowledge(answer, options = {}) {
   const a = answer ?? {};
+  const maxRecords = typeof options.maxRecords === "number" && options.maxRecords >= 0
+    ? options.maxRecords : RETRIEVED_MAX_RECORDS;
+  const maxValueChars = typeof options.maxValueChars === "number" && options.maxValueChars > 0
+    ? options.maxValueChars : RETRIEVED_MAX_VALUE_CHARS;
   if (a.status !== "ok" || !Array.isArray(a.records)) {
     const reason = typeof a.reason === "string" && a.reason ? a.reason : "unknown";
+    // NO CLIENT IS NOT A FAILED READ, and it is the one unavailable reason that names a fact about
+    // the CONVERSATION rather than about the estate (review ADV-S-9). A Home turn has no client to
+    // read, so no read was attempted — and telling the model "the read did not succeed ... do NOT
+    // tell anybody that this client has no recorded knowledge" made it hedge about a client that
+    // does not exist. The step's own header already promised the block would say which.
+    if (reason === "no_client") {
+      return [
+        BLOCK_HEADER,
+        "",
+        "Client knowledge: this conversation is not about a client, so there is no client knowledge",
+        "to read. Nothing was attempted and nothing failed. If the person names a client, this block",
+        "will carry that client's recorded facts.",
+      ].join("\n");
+    }
     const code = typeof a.code === "string" && a.code ? a.code : null;
     const detailReason = typeof a.detail_reason === "string" && a.detail_reason ? a.detail_reason : null;
     const parts = [reason];
@@ -297,7 +375,7 @@ export function renderRetrievedKnowledge(answer) {
   }
 
   const tiers = a.tiers ?? {};
-  const shown = records.slice(0, RETRIEVED_MAX_RECORDS);
+  const shown = records.slice(0, maxRecords);
   const printHidden = records.length - shown.length;
   const lines = [
     BLOCK_HEADER,
@@ -305,7 +383,7 @@ export function renderRetrievedKnowledge(answer) {
     `Client knowledge (knowledge_version ${version}, as of ${asOf}), ${records.length} record(s)`
     + ` — core ${Number(tiers.core ?? 0)}, requested ${Number(tiers.requested ?? 0)},`
     + ` remainder ${Number(tiers.remainder ?? 0)}:`,
-    ...shown.map(recordLine),
+    ...shown.map((r) => recordLine(r, maxValueChars)),
   ];
   // TWO DIFFERENT TRUNCATIONS, AND THEY ARE NOT THE SAME FACT. The DOOR's `truncated` means the
   // database withheld remainder rows; the print cap means this block is showing fewer than it was
@@ -316,7 +394,14 @@ export function renderRetrievedKnowledge(answer) {
       + " record(s) from the remainder tier. The CORE tier is complete. Say so if it matters.");
   }
   if (printHidden > 0) {
-    lines.push(`(${printHidden} more record(s) not printed here.)`);
+    // AND IT SAYS HOW MANY OF THEM WERE CORE. 0230 caps only the REMAINDER at `p_limit` ("core
+    // unbounded, requested unbounded, remainder capped"), so a print cap is the one place a CORE
+    // row can be dropped — the tier the Work lane's whole terminal exists to protect. A block that
+    // dropped core rows and said only "more record(s) not printed" would hide exactly the loss
+    // that matters (review ADV-S-5(b)).
+    const coreHidden = records.slice(shown.length).filter((r) => r?.tier === "core").length;
+    lines.push(`(${printHidden} more record(s) not printed here`
+      + `${coreHidden > 0 ? `, ${coreHidden} of them CORE — ask for the key by name if you need it` : ""}.)`);
   }
   return lines.join("\n");
 }
@@ -333,9 +418,17 @@ export function renderRetrievedKnowledge(answer) {
  */
 export async function recordWorkKnowledgeRead(sql, {
   taskId, runId, seq, answer, purpose = WORK_KNOWLEDGE_READ_PURPOSE, reason = null,
+  recordsShown = null, truncated = null,
 } = {}) {
   const a = answer ?? {};
-  const face = faceStatusOf(a);
+  // THE VIEW'S COUNTS WIN WHEN THE CALLER STATES THEM. `records_shown` and `truncated` are the
+  // durable answer to "what did Clara SEE", and the caller is the only one that knows what its
+  // block printed; passing neither keeps the door's own numbers, which is right for a caller that
+  // renders nothing. Review ADV-S-5(c).
+  const shown = typeof recordsShown === "number"
+    ? recordsShown : (Array.isArray(a.records) ? a.records.length : 0);
+  const wasTruncated = typeof truncated === "boolean" ? truncated : a.truncated === true;
+  const face = faceStatusOf(a, wasTruncated);
   const params = [
     text(taskId) || null,
     text(runId) || null,
@@ -345,8 +438,8 @@ export async function recordWorkKnowledgeRead(sql, {
     a.knowledge_version === null || a.knowledge_version === undefined ? "0" : String(a.knowledge_version),
     Array.isArray(a.keys) ? a.keys : [],
     JSON.stringify(a.tiers ?? {}),
-    Array.isArray(a.records) ? a.records.length : 0,
-    a.truncated === true,
+    shown,
+    wasTruncated,
     face,
     text(reason) || (face === "ok" ? null : (typeof a.reason === "string" ? a.reason : null)),
   ];

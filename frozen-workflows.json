@@ -65,7 +65,7 @@
       "deployed": true
     },
     "packages/runtime/lib/knowledge-retrieval.mjs": {
-      "sha256": "d1334275619e08f83cdeaf16f73e750e444d66713386769b38897ca84a351abf",
+      "sha256": "af0fd96759e949d5c78fae4b8331938caf876c6c8858df0bbc1475e0face5233",
       "note": ""
     },
     "packages/runtime/lib/knowledge.mjs": {
@@ -822,11 +822,11 @@
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v21.impl.ts": {
-      "sha256": "f5bfd4e4d46170ce48d090604a6d6cc8165c9086d6e3cc48e805098a8e39754e",
+      "sha256": "e477aa3bb00232a96551b98070e6ebd9d2364368c525542a0e46278bfaeeaca8",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.prompt.ts": {
-      "sha256": "64d898f59cd08ea053ca86089c054f2dcc9f83de08c91e461f88ee8ec058be4c",
+      "sha256": "2fbdc84748113238ee9ce57b2c8d615c371541221f158d8928fa3d19fc9892e5",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v21.tools.ts": {
@@ -1195,7 +1195,7 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.impl.ts": {
-      "sha256": "0eee3aa47bfcdf695375cec2defc44104dbe79388bdc5e36d51d3eb3a15df936",
+      "sha256": "2ed81bc77839bd573e22b60c82abb19d7ca6312cf1b5f6ff9cb622159118d217",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.prompt.ts": {
@@ -1207,7 +1207,7 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v5.ts": {
-      "sha256": "7d8b6b0152f8e77983e221e599d81eed9e0378fa516eb74dc0be01d2c54e931a",
+      "sha256": "44c819aa51c75ee12f85c99adaa628194ce52420ffc6b428d64f4580531d1009",
       "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {

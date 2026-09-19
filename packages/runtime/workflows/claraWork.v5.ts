@@ -387,10 +387,22 @@ export async function claraWork_v5(input: { taskId: string }): Promise<{ taskId:
           // recorded, revised or withdrawn a fact in between. Asked ONCE per resume, AFTER the
           // authority recheck (an unauthorised run should not spend a read) and BEFORE the next
           // segment — its trace row is the first of that segment's four.
-          const drift = await readKnowledgeDriftStepV5(
-            work.firmId, work.workId, taskId, runId, segmentTraceBase(segment + 1),
-          );
-          const note = driftNoteV5(drift);
+          //
+          // AND ONLY WHEN THERE IS A NEXT SEGMENT (fix round 1, review ADV-S-3). The drift row is
+          // `segmentTraceBase(segment + 1)`, and on the LAST segment's resume that number is
+          // `segmentTraceBase(budgets.segments)` = `SETTLE_TRACE_SEQ`: the run leaves the loop
+          // immediately after this branch, settles, and `clara.record_work_execution_trace`'s
+          // `on conflict (work_id, run_id, seq) do nothing` then DROPS the settle's own row —
+          // outcome, refusal and receipt — onto a drift row, with no error anywhere, because both
+          // writers swallow the answer. The guard is also the honest reading of the act: a resume
+          // that cannot re-enter a segment has nothing to re-plan with, so a read whose news
+          // nobody can act on is not worth a row, a round trip, or a replan charged against it.
+          const drift = segment + 1 < budgets.segments
+            ? await readKnowledgeDriftStepV5(
+              work.firmId, work.workId, taskId, runId, segmentTraceBase(segment + 1),
+            )
+            : null;
+          const note = drift === null ? null : driftNoteV5(drift);
           if (note !== null) {
             // A RELEVANT DRIFT SPENDS ONE EXISTING `budget.replans`, AND ONLY A RELEVANT ONE.
             // `relevant:true` is the estate saying a key THIS run recorded reading has moved: the
@@ -398,7 +410,7 @@ export async function claraWork_v5(input: { taskId: string }): Promise<{ taskId:
             // the replan allowance is for. `relevant:null` and an unreadable drift are SURFACED
             // and spend nothing — charging a budget for news the estate could not confirm would
             // let an unreadable diagnostic exhaust a run.
-            if (driftSpendsReplanV5(drift)) {
+            if (drift !== null && driftSpendsReplanV5(drift)) {
               if (replans >= budgets.replans) {
                 // The allowance is gone and the basis has moved under this run. Carrying on would
                 // re-plan without the budget that bounds re-planning; settling is RECOVERABLE and
