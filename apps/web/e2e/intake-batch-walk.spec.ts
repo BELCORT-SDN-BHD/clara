@@ -147,7 +147,11 @@ test.describe("#636 the durable intake batch", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText(/keeps its receipt/i);
     await dialog.getByRole("button", { name: /^Stop the batch$/ }).click();
-    await expect(card(page)).toContainText(/正在停止/);
+    // FIX ROUND 1 (STANDARDS `chinese-string-in-en-json`): this leg used to assert the Chinese
+    // half of a shipped `en` string. The banner says it in English now, and the walk checks the
+    // whole rendered card carries no CJK at all.
+    await expect(card(page)).toContainText(/Stopping this batch/);
+    await expect(card(page)).not.toContainText(/[\u4e00-\u9fff]/);
     await expect(card(page)).toContainText(/already been committed and their receipts are kept/i);
     // NOT terminal: the door writes `cancelled` only when nothing is live.
     await expect(card(page)).not.toContainText(/This batch was stopped/);
