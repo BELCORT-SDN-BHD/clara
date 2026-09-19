@@ -90,6 +90,17 @@ test("the line's source facts sit beside the candidates, with the filename, the 
 });
 
 test("matching a unique sufficient candidate states 'no new cash entry was created', sourced from the door's own field", async ({ page }) => {
+  // The key the app SENDS is observed off the request, so the op key the outcome block shows can
+  // be compared with the real one rather than with a string this file made up (review A6).
+  const sent: string[] = [];
+  page.on("request", (req) => {
+    if (!req.url().includes("/rest/v1/rpc/match_bank_line")) return;
+    try {
+      const body = req.postDataJSON() as { p_op_key?: string } | null;
+      if (body?.p_op_key) sent.push(body.p_op_key);
+    } catch { /* a body this leg cannot parse is not a key it can assert on */ }
+  });
+
   await signInTo(page, MATCHING);
   await openLine(page, P657.cleanLine);
 
@@ -111,6 +122,10 @@ test("matching a unique sufficient candidate states 'no new cash entry was creat
   await expect(outcome).toContainText(P657.exactEntry);
   await expect(outcome).toContainText("maybank-514420657001-2026-04.pdf");
   await expect(outcome).toContainText("Malayan Banking Berhad");
+
+  // …and the OPERATION KEY this act was submitted under, so a human can quote it (AC10).
+  expect(sent.length, "the door was called once").toBeGreaterThanOrEqual(1);
+  await expect(page.getByTestId("matching-outcome-op-key")).toHaveText(sent[sent.length - 1]!);
 
   // PERSISTENT, not a toast: it is still there after a beat, and it is a status region.
   await page.waitForTimeout(1200);

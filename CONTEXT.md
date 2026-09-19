@@ -565,7 +565,7 @@ _Avoid_: A confidence score; a percentage; a ranking; a model's opinion presente
 
 **Bank match**:
 A group that allocates one or more bank statement lines against one or more ALREADY-APPROVED
-journal entries on the same bank account, to the sen, with the sum of the lines equal to the sum
+journal entries on the same bank account, to the cent, with the sum of the lines equal to the sum
 of the entries. It records that an existing movement has been seen on the statement; it books
 nothing.
 _Avoid_: A posting; a cash entry; a way to create the entry it matches (that is a booking act);

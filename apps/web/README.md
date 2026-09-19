@@ -394,10 +394,23 @@ place. **A multi-selection stays OUT of the URL**: a selection set is a draft, n
 
 **ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
 key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
-flag}` — the same tuple `clara._reserve_op` hashes server-side — so "same intent ⇒ same key" is a
-property of the DATA rather than of a component's lifecycle, and there is no state to reset. The
-renewal rule is written out in full in that module's header; the short form is: the key renews
-only on an intentional human act that changes WHAT is being submitted, and on nothing else.
+flag}` — the same tuple `clara._reserve_op` hashes server-side — plus each selected entry's
+WORLD GENERATION, so "same intent ⇒ same key" is a property of the DATA rather than of a
+component's lifecycle, and there is no state to reset. The renewal rule is written out in full in
+that module's header; the short form is: the key renews on an intentional human act that changes
+WHAT is being submitted, or on a change to the WORLD it is deciding about, and on nothing else.
+
+The generation is `<count>:<newest match_id>:<newest status>` off the candidate row's own
+`match_history` (which migration 0226 put on the wire). Without it, `match → unmatch → resubmit
+the identical selection` — an ordinary re-decision — hashed to the FIRST key, and `_reserve_op`,
+which knows nothing about whether the match its stored result describes is still live, replayed
+the dead match's receipt: a persistent "no new cash entry was created" block naming a match the
+database had recorded as `unmatched`, beside a line that never left the unmatched report. An
+unmatch flips that newest history row, so the re-decision hashes differently; a lost response, a
+reload and a re-render write nothing and leave it byte-identical. It is KEY MATERIAL ONLY and
+never reaches the wire body. Its residual: the generation is only as fresh as the read it came
+from, so a concurrent unmatch between the last candidate read and the submit can still reach the
+replay; the surface re-reads after every act, which is a mitigation, not a proof.
 
 This deliberately DIFFERS from the house posture, which is left alone: `lib/members/doors.ts`
 mints a fresh uuid per call on purpose, and `work-cancel-dialog.tsx`'s `useDecisionKey` mints one

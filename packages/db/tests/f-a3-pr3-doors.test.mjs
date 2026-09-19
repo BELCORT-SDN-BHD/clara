@@ -906,15 +906,27 @@ test("f-a3pr3.c2.task-binding a same-task pack-read grounds an act; a different-
   await grantBankMatching({ client, firm, actor: w.users.alice });
   const cred = await mintCred("bank_agent", firm, client);
 
-  const taskA = `c2ta-${randomUUID().slice(0, 8)}`;
-  const taskB = `c2tb-${randomUUID().slice(0, 8)}`;
+  // #657 (migration 0226) MOVED THIS CONTRACT, and this cell is its only direct caller outside
+  // the thirteen re-patched cores. `clara._agent_verify_inputs_digest`'s third parameter was
+  // `text` -- the RAW op_key, parsed inside with `split_part(p_op_key, ':', 2)`. It is now
+  // `uuid`: a PRE-EXTRACTED task, so the comparison site carries no parser. Two consequences
+  // this cell must respect, both of them the point of the change:
+  //   * the argument is the task itself, not the key it was hiding in. A colon-joined string
+  //     is now rejected by Postgres at the bind layer (22P02), before any logic runs.
+  //   * a task id must be a REAL uuid. `clara._bank_op_key_task` is uuid-regex guarded and
+  //     TOTAL, so a `c2ta-1a2b3c4d`-shaped field 2 resolves to NULL and the receipt would bind
+  //     through the null-task fallback -- which is the arm this cell exists to bypass.
+  // The op_key SHAPE under test is unchanged: lane-chatturn-v14's real
+  // `bank-{verb}:{taskId}:{segment}:{payload}`, both polarities.
+  const taskA = randomUUID();
+  const taskB = randomUUID();
   // The pack-read's own op_key names taskA in the real chat shape -- never opk()'s
   // underscore-joined form, which is exactly why the bound branch goes unexercised elsewhere.
   const digest = await realDigest(cred.secret, client, bankAccountId, `bank-get_bank_pack:${taskA}:0:{}`);
 
   // Same task as the pack-read: admits (returns void, no exception).
-  await rootQuery(`select clara._agent_verify_inputs_digest($1,$2,$3)`,
-    [client, digest, `bank-add_bank_account:${taskA}:0:{}`]);
+  await rootQuery(`select clara._agent_verify_inputs_digest($1,$2,$3::uuid)`,
+    [client, digest, taskA]);
 
   // A DIFFERENT task: the digest is real and the client matches, but the task field diverges --
   // must refuse, not silently fall back to the client+digest-only match (that fallback is
@@ -922,8 +934,8 @@ test("f-a3pr3.c2.task-binding a same-task pack-read grounds an act; a different-
   // task).
   let err = null;
   try {
-    await rootQuery(`select clara._agent_verify_inputs_digest($1,$2,$3)`,
-      [client, digest, `bank-add_bank_account:${taskB}:0:{}`]);
+    await rootQuery(`select clara._agent_verify_inputs_digest($1,$2,$3::uuid)`,
+      [client, digest, taskB]);
   } catch (e) { err = e; }
   assert.ok(err, "c2.task-binding: a different-task op_key refuses, not silently grounds on a stale task's pack-read");
   assert.equal(err?.code, "CLR10", `c2.task-binding: expected CLR10, got ${err?.code}: ${err?.message}`);

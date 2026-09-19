@@ -61,6 +61,13 @@
 -- rostered name — a NEW VERB by DECISIONS §2.2, not a widened read. So `candidate_basis[]`
 -- rides on `clara.get_bank_line_matching_context(p_line)`, which has both sides.
 --
+-- ITS POPULATION IS THE CANDIDATE SET, NOT THE BOOK. One row per entry
+-- `clara.list_bank_match_candidates` would OFFER for this line's bank account — the same
+-- remaining-capacity predicate, so the two arrays describe the same entries. A basis row for an
+-- entry the surface can never present is not evidence; it is weight on every line click, and it
+-- grows with the client's whole booking history rather than with the offerable set.
+-- `p657.db.matching-context` asserts the two entry-id sets are EQUAL.
+--
 -- Q3 / SYNTHESIS J2 (binding): a DETERMINISTIC basis, never a score. There is no 0–1 number
 -- anywhere in this file, `clara.list_bank_line_suggestions` (dropped whole at 0129:395) is not
 -- revived, and #665's classifier-retirement AC3 is not fought. The four facts are:
@@ -528,6 +535,7 @@ create function clara.get_bank_line_matching_context(p_line uuid)
 declare
   c record; l record; s record; ba record;
   v_stmts jsonb; v_stmt_j jsonb; v_exc jsonb; v_block jsonb; v_basis jsonb;
+  v_line_status text; v_line_match uuid;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_line is null then return null; end if;
@@ -565,38 +573,31 @@ begin
   -- (0044:2459-2460); NULL is the honest answer when nothing blocks.
   v_block := clara._wdb_line_booking_block(l.id);
 
-  -- THE DETERMINISTIC BASIS, one row per candidate entry of this line's bank account.
+  -- THE DETERMINISTIC BASIS, one row per CANDIDATE entry of this line's bank account.
   -- Never a score (Q3 / SYNTHESIS J2). See the file header §B for each field's definition.
-  select coalesce(jsonb_agg(b.row_b order by b.posting_date desc), '[]'::jsonb) into v_basis
+  --
+  -- "CANDIDATE" MEANS THE SAME POPULATION §3's READ OFFERS, and the remaining-capacity
+  -- predicate is how that sentence is made true rather than merely written. A FIRST CUT
+  -- filtered only on firm / client / approved / not-reversed / touches-the-COA and therefore
+  -- described EVERY approved bank-touching entry the client had ever booked, fully-spent ones
+  -- included. Nothing failed: matching-candidates.tsx builds its map from this array but looks
+  -- rows up BY the candidate read's own entry ids, so the surplus was computed, hashed into the
+  -- pack, sent over the wire and silently dropped — cost with no reader. The capacity is now
+  -- computed ONCE per entry in the inner select (it was typed twice, once per arm of the
+  -- amount_exact CASE) and the outer select filters on it exactly as §3's `) t where ...` does.
+  -- p657.db.matching-context asserts the two entry-id sets are equal, so the claim is executable.
+  --
+  -- THE AGGREGATE CARRIES A TIEBREAK. Two entries posted on the same date have no natural
+  -- order, and an arbitrary one is a flake waiting for the first test that pins it; entry_id
+  -- breaks it, the way the candidate read's own match_history projection breaks its tie on
+  -- bm.id.
+  select coalesce(jsonb_agg(b.row_b order by b.posting_date desc, b.entry_id), '[]'::jsonb) into v_basis
     from (
-      select je.posting_date, jsonb_build_object(
-        'entry_id', je.id,
-        'amount_exact', (
-          case when l.amount_cents > 0
-            then greatest(0,
-                   (select coalesce(sum(jl.debit_cents), 0) from clara.journal_lines jl
-                     where jl.entry_id = je.id and jl.account_code = ba.coa_account_code)
-                   - (select coalesce(sum(em.matched_cents), 0)
-                      from clara.bank_match_entry_members em
-                      join clara.bank_matches bm on bm.id = em.match_id
-                      join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
-                      where em.entry_id = je.id and em.matched_cents > 0
-                        and bm.status in ('pending','live')
-                        and ba2.coa_account_code = ba.coa_account_code
-                        and ba2.client_id = l.client_id))
-            else greatest(0,
-                   (select coalesce(sum(jl.credit_cents), 0) from clara.journal_lines jl
-                     where jl.entry_id = je.id and jl.account_code = ba.coa_account_code)
-                   - (select coalesce(sum(-em.matched_cents), 0)
-                      from clara.bank_match_entry_members em
-                      join clara.bank_matches bm on bm.id = em.match_id
-                      join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
-                      where em.entry_id = je.id and em.matched_cents < 0
-                        and bm.status in ('pending','live')
-                        and ba2.coa_account_code = ba.coa_account_code
-                        and ba2.client_id = l.client_id))
-          end) = abs(l.amount_cents),
-        'date_delta_days', (l.entry_date - je.posting_date),
+      select r.entry_id, r.posting_date, jsonb_build_object(
+        'entry_id', r.entry_id,
+        'amount_exact', (case when l.amount_cents > 0 then r.debit_remaining_cents
+                              else r.credit_remaining_cents end) = abs(l.amount_cents),
+        'date_delta_days', (l.entry_date - r.posting_date),
         'counterparty_match', (
           select case
             when cp.id is null then 'none'
@@ -615,16 +616,52 @@ begin
             on cp.client_id = l.client_id
            and cp.id = clara._canonical_counterparty(l.client_id,
                  (select min(jl4.counterparty_id::text)::uuid from clara.journal_lines jl4
-                    where jl4.entry_id = je.id and jl4.counterparty_id is not null))),
+                    where jl4.entry_id = r.entry_id and jl4.counterparty_id is not null))),
         'class_hint', clara._bank_line_class_hint(l.description)) as row_b
-      from clara.journal_entries je
-      where je.firm_id = c.firm and je.client_id = l.client_id
-        and je.status = 'approved' and je.reversed_by is null and je.reversal_of is null
-        and ba.coa_account_code is not null
-        and exists (select 1 from clara.journal_lines jl
-          where jl.entry_id = je.id and jl.account_code = ba.coa_account_code
-            and (jl.debit_cents <> 0 or jl.credit_cents <> 0))
+      from (
+        select je.id as entry_id, je.posting_date,
+          greatest(0,
+            (select coalesce(sum(jl.debit_cents), 0) from clara.journal_lines jl
+              where jl.entry_id = je.id and jl.account_code = ba.coa_account_code)
+            - (select coalesce(sum(em.matched_cents), 0)
+               from clara.bank_match_entry_members em
+               join clara.bank_matches bm on bm.id = em.match_id
+               join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+               where em.entry_id = je.id and em.matched_cents > 0
+                 and bm.status in ('pending','live')
+                 and ba2.coa_account_code = ba.coa_account_code
+                 and ba2.client_id = l.client_id)) as debit_remaining_cents,
+          greatest(0,
+            (select coalesce(sum(jl.credit_cents), 0) from clara.journal_lines jl
+              where jl.entry_id = je.id and jl.account_code = ba.coa_account_code)
+            - (select coalesce(sum(-em.matched_cents), 0)
+               from clara.bank_match_entry_members em
+               join clara.bank_matches bm on bm.id = em.match_id
+               join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+               where em.entry_id = je.id and em.matched_cents < 0
+                 and bm.status in ('pending','live')
+                 and ba2.coa_account_code = ba.coa_account_code
+                 and ba2.client_id = l.client_id)) as credit_remaining_cents
+        from clara.journal_entries je
+        where je.firm_id = c.firm and je.client_id = l.client_id
+          and je.status = 'approved' and je.reversed_by is null and je.reversal_of is null
+          and ba.coa_account_code is not null
+          and exists (select 1 from clara.journal_lines jl
+            where jl.entry_id = je.id and jl.account_code = ba.coa_account_code
+              and (jl.debit_cents <> 0 or jl.credit_cents <> 0))
+      ) r
+      where r.debit_remaining_cents > 0 or r.credit_remaining_cents > 0
     ) b;
+
+  -- THE LINE'S LIVE MEMBERSHIP, read ONCE. Two independent `limit 1` subselects with no order
+  -- could, if a second pending/live member row ever existed, name DIFFERENT matches in the two
+  -- fields — a self-contradicting payload. The line-exclusivity index makes that unlikely
+  -- rather than impossible, so this reads the row, not the fields, and orders explicitly.
+  select m.group_status, m.match_id into v_line_status, v_line_match
+    from clara.bank_match_line_members m
+   where m.line_id = l.id and m.group_status in ('pending','live')
+   order by (m.group_status = 'live') desc, m.match_id
+   limit 1;
 
   return jsonb_build_object(
     'schema', 'clara.bank-line-matching-context/v1',
@@ -638,10 +675,8 @@ begin
       'description', l.description, 'amount_cents', l.amount_cents,
       'running_balance_cents', l.running_balance_cents,
       'class_hint', clara._bank_line_class_hint(l.description),
-      'group_status', (select m.group_status from clara.bank_match_line_members m
-                        where m.line_id = l.id and m.group_status in ('pending','live') limit 1),
-      'match_id', (select m.match_id from clara.bank_match_line_members m
-                    where m.line_id = l.id and m.group_status in ('pending','live') limit 1)),
+      'group_status', v_line_status,
+      'match_id', v_line_match),
     'statement', jsonb_build_object(
       'id', s.id, 'status', s.status, 'superseded_by', s.superseded_by,
       'voided_by', s.voided_by, 'voided_at', s.voided_at, 'voided_reason', s.voided_reason,
@@ -664,7 +699,7 @@ begin
 end $get_bank_line_matching_context$;
 
 comment on function clara.get_bank_line_matching_context(uuid) is
-  '#657: everything one bank statement line can say about itself before a match is decided -- its own facts, its statement header/lineage and filename, the period coverage (tie lifted from list_bank_statements, never re-derived), the governing bank_line_exceptions row, _wdb_line_booking_block''s payload verbatim, and one DETERMINISTIC basis row per candidate entry. Never a score.';
+  '#657: everything one bank statement line can say about itself before a match is decided -- its own facts, its statement header/lineage and filename, the period coverage (tie lifted from list_bank_statements, never re-derived), the governing bank_line_exceptions row, _wdb_line_booking_block''s payload verbatim, and one DETERMINISTIC basis row per entry list_bank_match_candidates would OFFER for this line''s bank account (the same remaining-capacity predicate, so the two arrays describe the same entries). Never a score.';
 
 -- GRANT MATRIX. A function is PUBLIC-executable until revoked (0005:38-42), so the revoke is
 -- not optional. ONE grantee: clara_authenticated. clara_runtime gains nothing (this is a human
@@ -934,6 +969,40 @@ declare
     'clara._wdb_line_booking_block(uuid,uuid,uuid)',
     'clara._bank_op_key_task(text)',
     'clara._agent_verify_inputs_digest(uuid,text,uuid)'];
+  -- THE THIRTEEN POST-IMAGE SHAS (0195:390-409's prestate idiom, run on the POST side). Each
+  -- was MEASURED off pg_proc.prosrc on clara_657 after §7(b)'s loop applied, never transcribed
+  -- from file text — the caller loop reads each body out of the live catalog with
+  -- pg_get_functiondef and replaces one counted anchor, so the post-image is a function of
+  -- 0129/0134's live text and nothing else. Pinning them here is what makes Risk 6's sentence
+  -- ("every one of the thirteen gets a NEW prosrc sha; future bank-family pins measure against
+  -- #657's post-image, never 0129's") an executable fact instead of a note in a report.
+  v_posts text[][] := array[
+    ['clara._agent_add_bank_account_core(uuid,text,uuid,text,text,text,text,jsonb,text,text)',
+     '74275dcf369c0b478ffe64b35766375c775c59865ff2cbb5bc39d7a088d1ef44'],
+    ['clara._agent_book_staff_advance_application_core(uuid,date,text,jsonb,jsonb,text,text,text,jsonb,text,text)',
+     'b24efc35555b36990234f41d0e5d4c428e4f38b3d9b6b7d08984eed919fd62c3'],
+    ['clara._agent_complete_bank_reconciliation_core(uuid,uuid[],text,jsonb,text,text)',
+     'a3c6959715e84d9de001fd247f62a2ca814d0c23d46b3887ef1af2a33699196b'],
+    ['clara._agent_match_bank_line_core(uuid,jsonb,jsonb,jsonb,boolean,text,jsonb,text,text)',
+     'd735c1d7d2e7e660f83130fa3a7d1b0e9c0ae1411523a8c5f1f5a2ec8ac73f42'],
+    ['clara._agent_propose_bank_identifier_promotion_core(uuid,uuid,text,text,int,text,jsonb,text,text)',
+     'cc9fcafcd0fe4e398d18161e364963f433b74694e201e6f397f8cfe38f6405da'],
+    ['clara._agent_propose_line_exception_core(uuid,text,text,uuid,text,jsonb,text,text)',
+     '6f83c76aab7a647724a31e06a1468eca591ea320189fa42201372da13610ea14'],
+    ['clara._agent_resolve_and_book_core(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,jsonb,text,text,boolean)',
+     '3bbf947f03e709f375d78e52b72f0973ecd95b2b477e790d32b31dbded2bdb9b'],
+    ['clara._agent_resolve_bank_line_exception_core(uuid,text,text,uuid,text,jsonb,text,text)',
+     'bad39b0a26d8b79b3d2b0ffa02ee0598c3e1def36d8cd4df5c50ae616ecaeeef'],
+    ['clara._agent_settle_from_bank_line_core(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,jsonb,text,text)',
+     '504a6ba1133e24551a739ec6989a89e7f35801cef0060bdedf4085e9fa9d90fa'],
+    ['clara._agent_unmatch_bank_match_core(uuid,uuid,text,text,jsonb,text,text)',
+     '35a3494d639a550b6676ce221e2775aa5a8b1dc9a2b9025ed3f18759b1ff4a66'],
+    ['clara._agent_upsert_account_core(uuid,text,text,text,text,text,text,jsonb,text,text)',
+     '59f6bad298acebd8f14ccc383527e986825035685171a07ef90f978de37c1f82'],
+    ['clara._agent_void_bank_reconciliation_core(uuid,text,text,jsonb,text,text)',
+     '6b7e8ce99b24a896dfa12828b485616df5b0a75a171d21073ad20a4cb6828c7a'],
+    ['clara._agent_void_bank_statement_core(uuid,uuid,text,text,jsonb,text,text)',
+     '87c359a67a56ad8ab08089732637516b75f08c8ab35d1cc1574ee29f0ae7f6fa']];
   v_name text; v_owner text; v_secdef boolean; v_cfg text[];
 begin
   -- 1 · ONE pg_proc ROW PER NAME. A defaulted parameter would create an overload and an
@@ -1069,10 +1138,21 @@ begin
     raise exception '#657 tail: clara._agent_verify_inputs_digest does not carry the typed task comparison' using errcode='CLR10';
   end if;
 
-  -- 7 · ALL THIRTEEN CORES carry the #657 post-image call exactly once, and the receipt stores
-  --     the binding. (Post-image SHAs are asserted by the companion battery cell
-  --     p657.db.digest-census, which measures them against the LIVE catalog rather than a
-  --     transcription -- see packages/db/tests/bank-line-existing-booking.test.mjs.)
+  -- 7 · ALL THIRTEEN CORES carry the #657 post-image call exactly once, EVERY ONE AT ITS PINNED
+  --     POST-IMAGE SHA, and the receipt stores the binding.
+  --
+  --     The sha loop is the brief's "assert every post-image sha in the tail". A previous cut of
+  --     this comment said the shas were asserted by the companion battery cell
+  --     p657.db.digest-census; that cell asserts the substring anchor and no sha at all, so the
+  --     file pointed at evidence that did not exist. Both now hold: the anchor is counted below,
+  --     and the sha is compared against v_posts.
+  for v_i in 1 .. array_length(v_posts, 1) loop
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_a from pg_proc p
+      where p.oid = v_posts[v_i][1]::regprocedure;
+    if v_a is distinct from v_posts[v_i][2] then
+      raise exception '#657 tail: % is at prosrc sha % -- expected #657 post-image %. A core diverged from 0129''s shape, or this file was applied against a chain that had already moved it', v_posts[v_i][1], v_a, v_posts[v_i][2] using errcode='CLR10';
+    end if;
+  end loop;
   select count(*)::int into v_n from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
      and p.proname like '\_agent\_%\_core'
@@ -1099,13 +1179,22 @@ begin
     raise exception '#657 tail: clara.get_bank_line_matching_context names one of 0044''s three creation-key literals -- a READ must never claim it BUILT an entry' using errcode='CLR10';
   end if;
 
-  -- 9 · NO NEW TABLE, NO NEW EVENT TYPE, NO NEW accounting_work purpose (D14).
+  -- 9 · EVERY bank.% EVENT TYPE STILL CARRIES A TAXONOMY DECISION.
+  --
+  --     THE TITLE SAYS WHAT THE BLOCK MEASURES. It used to read "NO NEW TABLE, NO NEW EVENT
+  --     TYPE, NO NEW accounting_work purpose (D14)" and assert none of those three things: it
+  --     counts orphaned bank event types, a fact about the ESTATE that this file can move in
+  --     one direction only (by registering an event and forgetting its taxonomy row). D14's
+  --     three negatives are real and they are honoured -- this file creates no table, registers
+  --     no event type and never names `accounting_work` -- but they are honoured BY CONSTRUCTION
+  --     and read by a human, not compiled here. Claiming otherwise in a tail heading is the
+  --     class of unbacked claim AGENTS.md forbids, so the heading now matches the measurement.
   select count(*)::int into v_n from clara.event_types where name like 'bank.%'
     and name not in (select event_type from clara.trigger_taxonomy);
   if v_n <> 0 then
     raise exception '#657 tail: % bank event type(s) carry no taxonomy decision -- this file registers no new event and must not have orphaned one', v_n using errcode='CLR10';
   end if;
 
-  raise notice '#657 tail: OK -- clara.get_bank_line_matching_context(uuid) and clara._bank_op_key_task(text) each exist exactly once; the read is clara_authenticated-only and the helper plus _wdb_line_booking_block plus the recreated _agent_verify_inputs_digest hold ZERO non-owner grants; every installed and recut name resolves to exactly ONE pg_proc row; the public candidate read and the pack core''s inlined copy are field-identical (counterparty_name + truthful high_stakes + bounded match_history, in both); _match_bank_line_core keeps its three lock-order literals in order and now states new_journal_entries/settlement_objects while match_bank_line/6 itself is byte-unmoved; _agent_verify_inputs_digest carries no split_part and compares a typed task; all 13 rostered cores carry the #657 post-image call; _agent_bank_receipt stores wake_task_id and keeps its append-only ON CONFLICT arm; and the new read names none of 0044''s three creation-key literals.';
+  raise notice '#657 tail: OK -- clara.get_bank_line_matching_context(uuid) and clara._bank_op_key_task(text) each exist exactly once; the read is clara_authenticated-only and the helper plus _wdb_line_booking_block plus the recreated _agent_verify_inputs_digest hold ZERO non-owner grants; every installed and recut name resolves to exactly ONE pg_proc row; the public candidate read and the pack core''s inlined copy are field-identical (counterparty_name + truthful high_stakes + bounded match_history, in both); _match_bank_line_core keeps its three lock-order literals in order and now states new_journal_entries/settlement_objects while match_bank_line/6 itself is byte-unmoved; _agent_verify_inputs_digest carries no split_part and compares a typed task; all 13 rostered cores carry the #657 post-image call AND each is at its pinned post-image prosrc sha; _agent_bank_receipt stores wake_task_id and keeps its append-only ON CONFLICT arm; and the new read names none of 0044''s three creation-key literals.';
 end
 $p657_tail$;

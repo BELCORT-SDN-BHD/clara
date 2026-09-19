@@ -12,12 +12,16 @@
 // x38 fixture wrappers). `rootQuery` appears only for LABELLED fixture arrangement and for
 // catalog facts a granted door deliberately never returns (pg_proc, ACLs, raw row counts).
 //
-// THE NINE CELLS:
+// THE ELEVEN CELLS:
 //   p657.db.no-new-cash            the centre: five figures unchanged, one receipt, and the
 //                                  door's OWN receipt states new_journal_entries = 0.
 //   p657.db.one-receipt-under-retry a replayed op key returns the byte-identical receipt and
 //                                  writes no second match (extends x38.x:1373 against the
 //                                  ENRICHED _finish_op payload).
+//   p657.db.rematch-needs-a-new-key the OTHER half of that fact, and the premise the web key's
+//                                  renewal clause rests on (review SP1/A1): after an unmatch,
+//                                  the SAME key replays the dead match's receipt and writes
+//                                  nothing, and only a RENEWED key re-decides.
 //   p657.db.capacity-race          two sessions, two lines, ONE entry with capacity for only
 //                                  one of them: one wins, one refuses by name, capacity never
 //                                  goes negative. Blocking is PROVEN, in x38.g:387-460's shape.
@@ -58,7 +62,7 @@ import {
 import {
   BANKCOA1, BANKCOA2, AR1, AP1, EXPN, REVN, CLR10,
   hasBankMatching, caught, manualRes,
-  addBankAccount, enterStatement, matchBankLine, assertGroupTies,
+  addBankAccount, enterStatement, matchBankLine, unmatchBankMatch, assertGroupTies,
   birthCounterparty, plainEntry,
 } from "./x38-match-fixtures.mjs";
 import { snapshotNoNewCash, assertNoNewCash, assertReceiptStatesNoNewCash } from "./bank-no-new-cash.mjs";
@@ -253,6 +257,81 @@ test("p657.db.one-receipt-under-retry · a replayed op key returns the byte-iden
 });
 
 // ===========================================================================
+// p657.db.rematch-needs-a-new-key — the PREMISE the web-side renewal clause rests on
+// (review SP1 / A1). This cell asserts CURRENT database behaviour, deliberately: it is not a
+// red-first fix but a pin, so that if `_reserve_op`'s replay semantics ever gain a lifecycle
+// check the face's generation clause is re-examined rather than silently kept.
+// ===========================================================================
+test("p657.db.rematch-needs-a-new-key · a replayed key after an unmatch returns the DEAD match's receipt; only a renewed key re-decides", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const bank = bankAcct.A1.primary;
+  const entry = await plainEntry(sub, { client, debit: BANKCOA1, credit: REVN, cents: 55_000, memo: "p657 rematch booking" });
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: bank, periodStart: "2026-12-01", periodEnd: "2026-12-31", opening: 0,
+    specs: [{ amountCents: 55_000, entryDate: "2026-12-04", description: "p657 rematch inbound" }],
+  });
+  const line = stmt.lines[0];
+  const intent = { client, lines: [line.id], entries: [{ entry_id: entry, matched_cents: 55_000 }] };
+
+  // 1 · the first decision, under the key the intent tuple hashes to. The entry's history is
+  //     snapshotted where the FACE reads it — off the candidate row, before the submit.
+  const genBefore = ((await candidatesOf(sub, client, bank)).find((c) => c.entry_id === entry)?.match_history) ?? [];
+  const keyOne = opk("p657-rematch-1");
+  const first = await matchBankLine(sub, { ...intent, opKey: keyOne });
+  assert.ok(first.match_id, "the first decision landed");
+
+  // 2 · the human undoes it. The line is back on the report — genuinely undecided.
+  await unmatchBankMatch(sub, { client, match: first.match_id, reason: "p657 rematch undo", opKey: opk("p657-rematch-u") });
+  const status = await rootQuery("select status from clara.bank_matches where id = $1", [first.match_id]);
+  assert.equal(status.rows[0].status, "unmatched", "the match is dead");
+  const backOnReport = (await humanQuery(sub, "select clara.list_unmatched_lines(p_client => $1::uuid) as result", [client])).rows[0].result ?? [];
+  assert.equal(backOnReport.some((l) => l.line_id === line.id), true, "the line is undecided again");
+  const genAfterUnmatch = ((await candidatesOf(sub, client, bank)).find((c) => c.entry_id === entry)?.match_history) ?? [];
+
+  // 3 · THE HAZARD, pinned. Re-deciding the SAME selection under the SAME key is not refused and
+  //     is not re-run: _reserve_op (0004:46-60) returns the STORED result, which describes a
+  //     match that no longer exists. A face that renders this payload tells the human a match
+  //     landed while the line sits in front of them, still unmatched.
+  const replay = await matchBankLine(sub, { ...intent, opKey: keyOne });
+  assert.deepEqual(replay, first, "the replay is byte-identical to the receipt of the DEAD match");
+  const liveAfterReplay = await rootQuery(
+    "select count(*)::int n from clara.bank_matches where client_id = $1 and status in ('pending','live') and id = $2",
+    [client, first.match_id]);
+  assert.equal(liveAfterReplay.rows[0].n, 0, "…and nothing live came back: the replay wrote NOTHING");
+  const stillOnReport = (await humanQuery(sub, "select clara.list_unmatched_lines(p_client => $1::uuid) as result", [client])).rows[0].result ?? [];
+  assert.equal(stillOnReport.some((l) => l.line_id === line.id), true,
+    "the line is STILL on the unmatched report after the 'successful' replay — this is the lie the web key's generation clause exists to prevent");
+
+  // 4 · THE FIX'S PREMISE. A RENEWED key — which is what the face now mints, because the
+  //     entry's match_history moved when the unmatch landed — re-decides for real.
+  const keyTwo = opk("p657-rematch-2");
+  const second = await matchBankLine(sub, { ...intent, opKey: keyTwo });
+  assert.ok(second.match_id, "the renewed key re-decided");
+  assert.notEqual(second.match_id, first.match_id, "…and it created a NEW match, not a replay");
+  assertReceiptStatesNoNewCash(second, "p657.db.rematch-needs-a-new-key");
+  const finalReport = (await humanQuery(sub, "select clara.list_unmatched_lines(p_client => $1::uuid) as result", [client])).rows[0].result ?? [];
+  assert.equal(finalReport.some((l) => l.line_id === line.id), false, "the line left the report, this time for real");
+
+  // 5 · AND THE DATUM THE FACE HASHES IS WHAT MOVED. The web key folds in each selected entry's
+  //     WORLD GENERATION — `<count>:<newest match_id>:<newest status>` off the candidate row's
+  //     own bounded match_history (lib/bank/match-opkey.ts `entryGeneration`). The three
+  //     snapshots taken above are the three decisions, and they are three different strings.
+  //     (They are read where the FACE reads them: while the entry still has capacity, so the
+  //     recut read still offers it. After step 4 it is fully spent and correctly absent —
+  //     which is the same exclusion review A3 caught hiding an assertion in this file.)
+  assert.deepEqual(genBefore, [], "before any decision the entry has no history, so it has no generation");
+  assert.equal(genAfterUnmatch.length, 1, `after the unmatch the entry carries exactly the undone group (got ${JSON.stringify(genAfterUnmatch)})`);
+  assert.equal(genAfterUnmatch[0].match_id, first.match_id, "…named");
+  assert.equal(genAfterUnmatch[0].status, "unmatched",
+    "…and marked unmatched — the read does not hide a decision that was reversed, and THIS is the flip the key hashes");
+  const spentNow = await candidatesOf(sub, client, bank);
+  assert.equal(spentNow.some((c) => c.entry_id === entry), false,
+    "after the re-decision the entry is fully spent and no longer offerable");
+});
+
+// ===========================================================================
 // p657.db.capacity-race — two sessions, two lines, ONE entry. Blocking PROVEN.
 // ===========================================================================
 test("p657.db.capacity-race · two concurrent matches against one entry's remaining capacity: one wins, one refuses by name, capacity never goes negative", async (t) => {
@@ -315,13 +394,33 @@ test("p657.db.capacity-race · two concurrent matches against one entry's remain
   assert.equal(detail.side, "debit", `the refusal names the SIDE (got ${JSON.stringify(detail)})`);
   assert.equal(detail.entry_id, entry, "the refusal names the entry whose capacity ran out");
 
-  // Capacity is never negative afterwards.
+  // CAPACITY IS NEVER NEGATIVE AFTERWARDS — read from the SOURCE OF TRUTH (review A3).
+  //
+  // This assertion used to hang off `const row = cands.find(c => c.entry_id === entry); if (row)`
+  // and NEVER RAN: the recut read excludes a candidate with zero remaining capacity on both
+  // sides (0226's `where debit_remaining_cents > 0 or credit_remaining_cents > 0`, asserted as
+  // an exclusion by p657.db.candidate-enrichment), and this entry is fully spent by the end of
+  // the race — so `row` was always undefined and the cell's third stated claim was carried by
+  // nothing. The capacity is measured against the ledger instead, with no guard to hide behind.
+  const cap = await rootQuery(
+    `select (select coalesce(sum(jl.debit_cents), 0) from clara.journal_lines jl
+              where jl.entry_id = $1
+                and jl.account_code = (select ba.coa_account_code from clara.bank_accounts ba where ba.id = $2))::bigint as booked,
+            (select coalesce(sum(em.matched_cents), 0) from clara.bank_match_entry_members em
+               join clara.bank_matches bm on bm.id = em.match_id
+              where em.entry_id = $1 and em.matched_cents > 0 and bm.status in ('pending','live'))::bigint as consumed`,
+    [entry, bank]);
+  const booked = Number(cap.rows[0].booked);
+  const consumed = Number(cap.rows[0].consumed);
+  assert.equal(booked, 90_000, "the entry booked 90_000 of debit capacity on the bank COA");
+  assert.ok(booked - consumed >= 0,
+    `remaining debit capacity never goes negative (booked ${booked} - consumed ${consumed})`);
+  assert.equal(booked - consumed, 0, "the winner took it all and the loser took nothing — no oversubscription");
+  // …and the read agrees the entry is no longer offerable, which is WHY it could not carry this
+  // assertion itself.
   const cands = await candidatesOf(sub, client, bank);
-  const row = cands.find((c) => c.entry_id === entry);
-  if (row) {
-    assert.ok(Number(row.debit_remaining_cents) >= 0, "debit_remaining_cents never goes negative");
-    assert.ok(Number(row.credit_remaining_cents) >= 0, "credit_remaining_cents never goes negative");
-  }
+  assert.equal(cands.some((c) => c.entry_id === entry), false,
+    "a fully-spent entry is absent from list_bank_match_candidates — the exclusion, asserted beside the capacity it hides");
   const spent = await rootQuery(
     "select coalesce(sum(em.matched_cents),0)::bigint s from clara.bank_match_entry_members em join clara.bank_matches bm on bm.id = em.match_id where em.entry_id = $1 and bm.status in ('pending','live')",
     [entry]);
@@ -444,6 +543,27 @@ test("p657.db.matching-context · the line read carries its own facts, the state
     "coverage.tie is LIFTED from list_bank_statements' own tie object — #657 adds no second cash expression");
   assert.equal(ctx.exception, null, "no exception on a clean line");
   assert.equal(ctx.booking_block, null, "nothing blocks a clean line");
+
+  // THE BASIS IS ONE ROW PER *CANDIDATE*, NOT PER APPROVED ENTRY (review A2 / SP2). The read's
+  // own comment, the function comment and the brief all say "one deterministic row per candidate
+  // entry"; the first cut filtered only on firm/client/approved/touches-the-COA and shipped a
+  // basis row for every entry the client had ever booked on this bank COA, including fully-spent
+  // ones the surface can never offer. Nothing failed — matching-candidates.tsx looks the basis up
+  // BY the candidate list's own entry ids, so the surplus was computed, sent and silently dropped.
+  // Cardinality is therefore asserted here, where the claim is made.
+  const spender = await plainEntry(sub, { client, debit: BANKCOA1, credit: REVN, cents: 31_000, memo: "p657 context spent entry" });
+  const spendStmt = await enterStatement(sub, {
+    client, bankAccount: bank, periodStart: "2026-10-01", periodEnd: "2026-10-31", opening: 0,
+    specs: [{ amountCents: 31_000, entryDate: "2026-10-07", description: "p657 context spender" }],
+  });
+  await matchBankLine(sub, { client, lines: [spendStmt.lines[0].id], entries: [{ entry_id: spender, matched_cents: 31_000 }] });
+  const ctx2 = await contextOf(sub, line.id);
+  const offered = (await candidatesOf(sub, client, bank)).map((c) => c.entry_id).sort();
+  const described = ctx2.candidate_basis.map((b) => b.entry_id).sort();
+  assert.deepEqual(described, offered,
+    "candidate_basis describes EXACTLY the candidates list_bank_match_candidates offers — no surplus row for an entry the surface can never present");
+  assert.equal(described.includes(spender), false,
+    "a fully-spent entry has no basis row, because it is not a candidate");
 
   const basis = ctx.candidate_basis.find((b) => b.entry_id === entry);
   assert.ok(basis, "the basis carries one row per candidate entry of this line's bank account");

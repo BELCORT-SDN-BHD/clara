@@ -670,13 +670,20 @@ block's grant state is asserted both in 0226's prestate (before the wrap) and in
 **THE TWO-COPY CANDIDATE DISCIPLINE.** `clara.list_bank_match_candidates(uuid,uuid)` and the copy
 inlined in `clara._agent_get_bank_pack_core` are the same projection written twice — the agent
 lane cannot call the public read because that read calls `clara._human_ctx`. Nothing fails at
-runtime if only one moves. So 0226 writes the projection ONCE, between the sentinel comments
-`/* P657-CAND-BEGIN */` and `/* P657-CAND-END */` inside the public read, and then EXTRACTS that
-exact text out of the freshly recut catalog body and SPLICES it into the pack core in place of
-its own positionally-located old copy. The pack's copy is the public read's copy by construction
-rather than by care, and the tail re-reads both marked regions and asserts they are identical
-modulo whitespace. **A future change to the candidate projection edits the public read only**;
-re-running a splice of the same shape is how the pack follows.
+runtime if only one moves. So 0226 types the projection IDENTICALLY IN BOTH BODIES, between the
+sentinel comments `/* P657-CAND-BEGIN */` and `/* P657-CAND-END */`, as two static
+`create or replace` statements — and the TAIL is what keeps them honest: it reads both marked
+regions out of the live catalog, whitespace-normalises them and refuses if they differ, and
+`p657.db.pack-parity` proves the same thing behaviourally, field for field, against real data.
+**A future change to the candidate projection edits BOTH bodies by hand**, and the tail plus
+that cell are what catch a hand that edits only one.
+
+A first cut did splice instead — write the projection once in the public read, then extract that
+exact text out of the freshly recut catalog body and re-install the pack core around it — and it
+had to be REVERTED: `apps/web/test/sqlFunctionCensus.ts` refuses a dynamic statement it cannot
+resolve to exactly one function definition (`sql_function_census_unresolved_execute`). The
+splice-by-construction guarantee is therefore not available here; two typed copies plus an
+executable equality assertion is what this estate's census leaves standing.
 
 The three additions: `counterparty_name` (the name of
 `clara._canonical_counterparty(p_client, …)`, so a merged payer reads as its SURVIVOR),

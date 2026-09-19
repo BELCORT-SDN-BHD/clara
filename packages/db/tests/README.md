@@ -301,7 +301,7 @@ not preload it and fails loudly on a database without the lane, because a skip i
 
 ## `bank-line-existing-booking.test.mjs` — #657 (migration 0226)
 
-Ten cells, all through `humanQuery` least-privileged personas except where a catalog fact or a
+Eleven cells, all through `humanQuery` least-privileged personas except where a catalog fact or a
 labelled fixture needs root. The centre is `p657.db.no-new-cash`: matching an already-approved
 booking must leave `journal_entries`, `journal_lines`, `open_items`, `open_item_allocations` and
 `list_bank_statements`' own `tie.gl_balance_cents` all unchanged, and write exactly one
@@ -314,8 +314,10 @@ review.
 next, prove the same negative the same way rather than each writing a slightly different "nothing
 was created".
 
-The other nine: `one-receipt-under-retry` (a replayed key returns the BYTE-IDENTICAL enriched
-receipt), `capacity-race` (two sessions, two lines, ONE entry — blocking PROVEN behind a gate, in
+The other ten: `one-receipt-under-retry` (a replayed key returns the BYTE-IDENTICAL enriched
+receipt), `rematch-needs-a-new-key` (the other half of that fact, and the premise the FACE's key
+renewal clause rests on: after an `unmatch_bank_match`, replaying the SAME key returns the DEAD
+match's receipt and writes nothing, so only a RENEWED key re-decides), `capacity-race` (two sessions, two lines, ONE entry — blocking PROVEN behind a gate, in
 `x38.g`'s shape, then a refusal naming `already_matched` with its `side`), `candidate-enrichment`,
 `pack-parity` (the two marked candidate projections are identical), `matching-context`,
 `exception-context`, `opkey-parse-free`, `digest-census` (exactly thirteen cores, all at #657's
