@@ -62,6 +62,20 @@ export function FigureComparisonLine({ figure }: { figure: FigureGroup }) {
   const tc = useTranslations("Common");
   const c = figure.comparison;
   if (c === null || figure.status === "unknown" || figure.status === "denied") return null;
+
+  // AN UNAVAILABLE COMPARISON IS SAID, NOT SKIPPED. The door withholds the amounts for a period
+  // before this client's books begin; rendering nothing at all would leave a reader to assume the
+  // figure simply has no history, and rendering "against RM 0.00" would be a fabricated zero.
+  if (!c.available) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="client-money-comparison">
+        {c.reason === "pre_coverage"
+          ? t("comparison.beforeBooks", {
+              start: formatDay(c.period?.start ?? null), end: formatDay(c.period?.end ?? null) })
+          : t("comparison.unavailable")}
+      </p>
+    );
+  }
   if (c.deltaCents === null && c.valueCents === null) return null;
 
   const delta = c.deltaCents === null ? CENTS_UNAVAILABLE : fmtCents(c.deltaCents, tc("centsUnsafe"));

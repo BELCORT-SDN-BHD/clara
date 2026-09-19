@@ -577,6 +577,8 @@ function moneyGroup(overrides: Record<string, unknown> = {}): Record<string, unk
     coverage_reason: null,
     comparison: null,
     composition: [],
+    composition_total: 0,
+    composition_truncated: false,
     ...overrides,
   };
 }
@@ -594,6 +596,7 @@ function financialPack(overrides: Record<string, unknown> = {}): Record<string, 
     cash: moneyGroup({
       comparison: {
         value_cents: 1_700_000, delta_cents: 16_534_055, delta_pct: 972.59, sign_change: false,
+        available: true, reason: null,
         period: { start: "2026-08-31", end: "2026-08-31" },
       },
       set: {
@@ -627,6 +630,8 @@ function financialPack(overrides: Record<string, unknown> = {}): Record<string, 
         }],
         entries_total: 1, entries_truncated: false,
       }],
+      composition_total: 1,
+      composition_truncated: false,
     }),
     income: moneyGroup({ value_cents: 500_000 }),
     expense: moneyGroup({ value_cents: 623_456 }),
@@ -638,8 +643,9 @@ function financialPack(overrides: Record<string, unknown> = {}): Record<string, 
       { month: "2026-08-01", income_cents: 180_000, expense_cents: 80_000, profit_cents: 100_000, partial: false, as_of: "2026-08-31" },
       { month: "2026-09-01", income_cents: 500_000, expense_cents: 623_456, profit_cents: -123_456, partial: true, as_of: "2026-09-18" },
     ],
-    profit_composition: [],
     unmarked_closing_entries: 0,
+    unmarked_closing_entries_series: 0,
+    series_coverage_reason: null,
     excluded_by_design: ["receivable", "payable", "statement_balance"],
     ...overrides,
   };
@@ -906,4 +912,39 @@ test("p660.money.axe — WCAG 2.1 AA over the money band, populated and denied",
   await settled(page);
   const unpublished = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(unpublished.violations).toEqual([]);
+});
+
+test("p660.money.disclosures — the ACCOUNT cap and the SIX-MONTH history are said on the face, not only on the wire", async ({ page }) => {
+  await seed(page);
+  // A chart of accounts bigger than the door's 50-row cap, and an unmarked pre-0120 close in a
+  // month the chart DRAWS but the selected period does not contain. Both are facts the reader can
+  // only learn from the face: the table would otherwise sum to less than the headline above it,
+  // and a bar would be drawn as clean while carrying a roll that should have been excluded.
+  await seedMoney(page, financialPack({
+    profit: moneyGroup({
+      value_cents: -123_456,
+      composition: [{
+        account_id: "aaaa0000-0000-4000-8000-000000000050", account_code: "5000",
+        name: "Office Rent", account_type: "expense",
+        opening_cents: 0, movement_cents: 623_456, closing_cents: 623_456,
+        entries: [], entries_total: 0, entries_truncated: false,
+      }],
+      composition_total: 61,
+      composition_truncated: true,
+    }),
+    unmarked_closing_entries: 0,
+    unmarked_closing_entries_series: 2,
+    series_coverage_reason: "closing_transfer_unmarked_history",
+  }));
+  await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
+  await settled(page);
+
+  const board = workbench(page);
+  await expect(board.getByTestId("client-money-accounts-truncated"))
+    .toHaveText("Showing 1 of 61 accounts, largest first.");
+  await expect(board.getByTestId("client-money-series-unmarked"))
+    .toContainText("2 year-end closing entries in these six months");
+  // The SELECTED period is clean, so the profit tile says nothing — the two disclosures are about
+  // different populations and the face keeps them apart.
+  await expect(board.getByTestId("client-money-profit-partial")).toHaveCount(0);
 });

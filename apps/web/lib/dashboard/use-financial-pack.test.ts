@@ -34,7 +34,7 @@ function packWith(cashCents: number, month: string | null): ClientFinancialPack 
     period, computedAt: "2026-09-18T02:00:00.000Z",
     definitionVersion: "clara.client-financial-pack/v1",
     sourceWatermark: "1:1:", coverage: "ok" as const, coverageReason: null,
-    comparison: null, composition: [],
+    comparison: null, composition: [], compositionTotal: 0, compositionTruncated: false,
   };
   return {
     ...EMPTY_FINANCIAL_PACK,
@@ -267,6 +267,47 @@ test("A PERIOD CHANGE CLEARS BEFORE RE-READING — last month's cash never stand
       await settle(h);
       assert.equal(h.current.pack.cash.valueCents, 4_000_000);
       assert.deepEqual(seen, [null, "2026-03-01"], "the period reached the loader, not just the key");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("A SUPERSEDED READ DOES NOT CLEAR THE NEW READ'S SKELETON — the answered face never stands over an empty envelope", async () => {
+  await withTimers(async () => {
+    // The period changes while the first read is still in flight. The epoch guard already keeps
+    // the stale DATA out; the busy flags must follow it, or the stale response ends the new
+    // read's `loading` over a pack that was just reset to EMPTY — and the band renders the
+    // ANSWERED face (every figure `unknown`, every value null) under a period that is still
+    // loading, for the whole remaining latency of the outstanding read.
+    const resolvers: ((p: ClientFinancialPack) => void)[] = [];
+    let month: string | null = null;
+    const h = await renderHook(() => useFinancialPack({
+      clientId: CLIENT,
+      month,
+      load: async () => new Promise<ClientFinancialPack>((resolve) => { resolvers.push(resolve); }),
+      now: () => 1_000,
+    }));
+    try {
+      await settle(h);
+      assert.equal(resolvers.length, 1, "the first read is in flight");
+
+      month = "2026-08-01";
+      await h.rerender();
+      await h.settle();
+      assert.equal(resolvers.length, 2, "the period change started a second read");
+      assert.equal(h.current.loading, true);
+
+      // The FIRST read answers, late. It is superseded: its data is dropped (the epoch guard),
+      // and its busy flags belong to it, not to the read that replaced it.
+      resolvers[0]?.(packWith(18_234_055, null));
+      await settle(h);
+      assert.equal(h.current.loading, true,
+        "a superseded read cleared the skeleton over an EMPTY envelope");
+      assert.equal(h.current.pack.cash.valueCents, null, "and the stale data stayed out");
+
+      resolvers[1]?.(packWith(4_000_000, "2026-08-01"));
+      await settle(h);
+      assert.equal(h.current.loading, false);
+      assert.equal(h.current.pack.cash.valueCents, 4_000_000);
     } finally { await h.unmount(); }
   });
 });

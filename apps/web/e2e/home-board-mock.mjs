@@ -141,25 +141,30 @@ const EMPTY_FINANCIAL_PACK = {
     value_cents: null, status: "unknown", coverage: "unknown",
     coverage_reason: "cash_set_unpublished",
     comparison: null, set: null, points: [], composition: [],
+    composition_total: 0, composition_truncated: false,
   },
   profit: {
     ...MONEY_ENVELOPE,
     value_cents: 0, status: "ok", coverage: "ok", coverage_reason: "no_posted_entries",
-    comparison: null, composition: [],
+    // THE COMPOSITION LIVES IN THE GROUP, because that is where the door puts it and where the
+    // parser reads it. A mock that invents a second spelling is a mock that can keep a dead
+    // drilldown green (0232's `profit.composition`, not a top-level `profit_composition`).
+    comparison: null, composition: [], composition_total: 0, composition_truncated: false,
   },
   income: {
     ...MONEY_ENVELOPE,
     value_cents: 0, status: "ok", coverage: "ok", coverage_reason: "no_posted_entries",
-    comparison: null, composition: [],
+    comparison: null, composition: [], composition_total: 0, composition_truncated: false,
   },
   expense: {
     ...MONEY_ENVELOPE,
     value_cents: 0, status: "ok", coverage: "ok", coverage_reason: "no_posted_entries",
-    comparison: null, composition: [],
+    comparison: null, composition: [], composition_total: 0, composition_truncated: false,
   },
   series: [],
-  profit_composition: [],
   unmarked_closing_entries: 0,
+  unmarked_closing_entries_series: 0,
+  series_coverage_reason: null,
   excluded_by_design: ["receivable", "payable", "statement_balance"],
 };
 

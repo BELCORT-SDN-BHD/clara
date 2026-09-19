@@ -81,15 +81,21 @@ export function shiftMonth(month: string, delta: number): string {
 }
 
 /**
- * THE ELAPSED-INTERVAL CAP, as a pure date rule — the SAME rule the door applies to the numbers.
- * It is restated here only so a face can LABEL the comparison it is showing; nothing on this side
- * computes the amounts.
+ * THE COMPARISON INTERVAL, as a pure date rule — the SAME rule the door applies to the numbers
+ * (0232's `v_prev_stop`). It is restated here only so a face can LABEL the comparison it is
+ * showing; nothing on this side computes the amounts. It is TWO rules, not one:
  *
- * A month-to-date run to the 31st compares against the prior month's LAST DAY when that month is
- * shorter: 2026-03-31 compares 2026-02-01..2026-02-28, never a date that does not exist.
+ *   · A COMPLETE month — a historic month read to its own last day — compares against the prior
+ *     month IN FULL. Capping a COMPLETE February at 28 elapsed days would truncate January to the
+ *     28th and silently drop three days of it from the baseline; the same response's series row
+ *     for January would then disagree with the caption written here for the same month.
+ *   · AN IN-PROGRESS month-to-date compares against the same ELAPSED stretch of the prior month,
+ *     capped at that month's LAST DAY when it is shorter: 2026-03-31 compares
+ *     2026-02-01..2026-02-28, never a date that does not exist.
  */
 export function priorInterval(periodMonth: string, asOf: string): { start: string; end: string } {
   const prior = shiftMonth(periodMonth, -1);
+  if (asOf >= monthEnd(periodMonth)) return { start: monthStart(prior), end: monthEnd(prior) };
   const elapsedDay = Number(asOf.slice(8, 10));
   const capped = Math.min(elapsedDay, daysInMonth(prior));
   return { start: monthStart(prior), end: `${prior}-${String(capped).padStart(2, "0")}` };

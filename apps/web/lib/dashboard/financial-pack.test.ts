@@ -154,6 +154,43 @@ test("a composition entry with NO id is dropped — a drilldown row whose whole 
   assert.equal(f.composition[0]?.entries[0]?.amountCents, -50_000, "a negative movement is kept signed");
 });
 
+test("THE ACCOUNT LEVEL CARRIES ITS OWN CAP — a list cut at 50 accounts says so, and an uncut one says that too", () => {
+  // The entry level already reported `entries_truncated` + `entries_total`; the account level
+  // emits the same pair, because a table listing 50 accounts that sums to less than the headline
+  // above it, with nothing saying it was cut, is the same class of silent wrongness as a
+  // fabricated zero.
+  const cut = hydrateFigure(figure({ composition: [], composition_total: 61, composition_truncated: true }));
+  assert.equal(cut.compositionTotal, 61);
+  assert.equal(cut.compositionTruncated, true);
+  const whole = hydrateFigure(figure({ composition: [], composition_total: 3, composition_truncated: false }));
+  assert.equal(whole.compositionTotal, 3);
+  assert.equal(whole.compositionTruncated, false);
+  // A body that says nothing about the cap is not a body that says the list is complete.
+  const silent = hydrateFigure(figure());
+  assert.equal(silent.compositionTotal, null);
+  assert.equal(silent.compositionTruncated, false);
+});
+
+test("AN UNAVAILABLE COMPARISON IS NOT A ZERO — the door's own availability survives hydration", () => {
+  // A month-end before this client's coverage floor: `points[]` calls it unknown, and the
+  // comparison beside the headline must not answer RM 0.00 for the same date.
+  const f = hydrateFigure(figure({
+    comparison: {
+      value_cents: null, delta_cents: null, delta_pct: null, sign_change: false,
+      available: false, reason: "pre_coverage",
+      period: { start: "2026-08-31", end: "2026-08-31", as_of: "2026-08-31", timezone: "Asia/Kuala_Lumpur" },
+    },
+  }));
+  assert.equal(f.comparison?.valueCents, null);
+  assert.equal(f.comparison?.deltaCents, null);
+  assert.equal(f.comparison?.available, false);
+  assert.equal(f.comparison?.reason, "pre_coverage");
+  // An older door that says nothing about availability is treated as available — it answered.
+  const legacy = hydrateFigure(figure());
+  assert.equal(legacy.comparison?.available, true);
+  assert.equal(legacy.comparison?.reason, null);
+});
+
 test("the pack hydrates its six cash points, its cash set and its six-month series", () => {
   const pack = hydrateClientFinancialPack({
     computed_at: "2026-09-18T02:00:00.000Z",
@@ -173,6 +210,8 @@ test("the pack hydrates its six cash points, its cash set and its six-month seri
       { month: "2026-09-01", income_cents: 0, expense_cents: 30_000, profit_cents: -30_000, partial: true, as_of: "2026-09-18" },
     ],
     unmarked_closing_entries: 2,
+    unmarked_closing_entries_series: 3,
+    series_coverage_reason: "closing_transfer_unmarked_history",
   });
   assert.equal(pack.period?.isMtd, true);
   assert.equal(pack.coverageFloor, "2026-01-07");
@@ -186,6 +225,10 @@ test("the pack hydrates its six cash points, its cash set and its six-month seri
   assert.equal(pack.series[0]?.partial, true);
   assert.equal(pack.series[0]?.profitCents, -30_000, "a loss is carried as a loss");
   assert.equal(pack.unmarkedClosingEntries, 2);
+  // THE SIX MONTHS THE CHART DRAWS carry their own disclosure: an unmarked close three months
+  // back is counted into that bar, and the selected period's own count cannot see it.
+  assert.equal(pack.unmarkedClosingEntriesSeries, 3);
+  assert.equal(pack.seriesCoverageReason, "closing_transfer_unmarked_history");
   // A point whose availability the body did not state is NOT drawable — absent means unavailable.
   const guessy = hydrateClientFinancialPack({ cash: figure({ points: [{ as_of: "2026-09-18", value_cents: 5 }] }) });
   assert.equal(guessy.cashPoints[0]?.available, false);

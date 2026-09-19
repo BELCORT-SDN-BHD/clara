@@ -788,7 +788,9 @@
       "comparison": {
         "line": "{delta} ({pct}) against {prior}",
         "signChange": "{delta} — from a loss of {prior} to a profit",
-        "against": "compared with {start} to {end}"
+        "against": "compared with {start} to {end}",
+        "beforeBooks": "No comparison for {start} to {end}: that period is before this client’s books begin.",
+        "unavailable": "No comparable figure for the previous period."
       },
       "cashTrend": {
         "heading": "Cash over six months",
@@ -802,7 +804,8 @@
         "partialMonth": "{month} is a part month — figures run to {asOf}.",
         "tableLabel": "Income and expense by calendar month",
         "colMonth": "Month",
-        "toAsOf": "to {asOf}"
+        "toAsOf": "to {asOf}",
+        "unmarkedHistory": "{n} year-end closing entries in these six months are not marked as such, so the months they fall in may include a roll that should be excluded."
       },
       "drilldown": {
         "heading": "What is behind this period",
@@ -810,7 +813,8 @@
         "colAccount": "Account",
         "colMovement": "Movement",
         "colEntries": "Entries",
-        "truncated": "Showing {shown} of {total} entries."
+        "truncated": "Showing {shown} of {total} entries.",
+        "accountsTruncated": "Showing {shown} of {total} accounts, largest first."
       },
       "cashSet": {
         "missingTitle": "Nobody has said which accounts count as cash",
@@ -859,6 +863,7 @@
       "reason": {
         "cashSetUnpublished": "Nobody has said which accounts count as cash for this client.",
         "cashSetVersionChanged": "The cash accounts changed during these six months, so earlier points use the membership in force at the as-of rather than their own.",
+        "cashSetPublishedAfterBooks": "The cash accounts were chosen after some of these months were booked, so earlier points use today’s membership.",
         "preCoverage": "Some of these months are before this client’s books begin.",
         "preCoveragePoint": "Before the books begin",
         "openingCarryDownDeferred": "This client’s opening position has not been captured, so figures start from the first posted entry.",

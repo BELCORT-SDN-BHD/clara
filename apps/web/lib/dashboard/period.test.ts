@@ -53,6 +53,20 @@ test("the elapsed interval is CAPPED at the prior month's last day — 31 March 
   assert.deepEqual(priorInterval("2026-05", "2026-05-31"), { start: "2026-04-01", end: "2026-04-30" });
 });
 
+test("a COMPLETE month compares against the WHOLE prior month — the cap is the month-to-date rule, not the history rule", () => {
+  // AC4 is two rules, and this is the one the elapsed-day cap gets wrong on its own: a COMPLETE
+  // month shorter than its predecessor (February after January; April, June, September and
+  // November after their 31-day neighbours) must compare against the prior month IN FULL. Capping
+  // at 28 elapsed days would silently drop 29-31 January from the baseline, and the door's own
+  // series row for January would then disagree with the caption this module writes for it.
+  assert.deepEqual(priorInterval("2026-02", "2026-02-28"), { start: "2026-01-01", end: "2026-01-31" });
+  assert.deepEqual(priorInterval("2026-04", "2026-04-30"), { start: "2026-03-01", end: "2026-03-31" });
+  assert.deepEqual(priorInterval("2026-11", "2026-11-30"), { start: "2026-10-01", end: "2026-10-31" });
+  assert.deepEqual(priorInterval("2024-02", "2024-02-29"), { start: "2024-01-01", end: "2024-01-31" });
+  // A month-to-date read INSIDE February still compares against the same elapsed stretch.
+  assert.deepEqual(priorInterval("2026-02", "2026-02-14"), { start: "2026-01-01", end: "2026-01-14" });
+});
+
 test("the option list is month-to-date plus thirteen WHOLE months, and never offers the current month twice", () => {
   const options = periodOptions("2026-09-18");
   assert.equal(options.length, CLIENT_PERIOD_HISTORY_MONTHS + 1);

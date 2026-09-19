@@ -33,6 +33,7 @@ export const FIGURE_TONE: Record<FigureStatus, "neutral" | "info" | "warning" | 
 export const COVERAGE_REASON_KEYS = {
   cash_set_unpublished: "reason.cashSetUnpublished",
   cash_set_version_changed_in_series: "reason.cashSetVersionChanged",
+  cash_set_published_after_books_start: "reason.cashSetPublishedAfterBooks",
   pre_coverage: "reason.preCoverage",
   opening_carry_down_deferred: "reason.openingCarryDownDeferred",
   closing_transfer_unmarked_history: "reason.closingTransferUnmarked",

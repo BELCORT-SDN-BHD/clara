@@ -23,6 +23,7 @@ import messages from "../../../messages/en.json";
 import { ClientFinancialSummary } from "./client-financial-summary";
 import {
   EMPTY_FINANCIAL_PACK,
+  hydrateClientFinancialPack,
   type CashProposal,
   type ClientFinancialPack,
   type FigureGroup,
@@ -53,6 +54,8 @@ function group(overrides: Partial<FigureGroup> = {}): FigureGroup {
     coverageReason: null,
     comparison: null,
     composition: [],
+    compositionTotal: 0,
+    compositionTruncated: false,
     ...overrides,
   };
 }
@@ -157,6 +160,68 @@ function hrefs(h: { container: unknown }): string[] {
 }
 
 // ===========================================================================================
+
+test("THE DRILLDOWN RENDERS FROM A REAL DOOR PAYLOAD - the wire shape, hydrated, not a hand-built pack", async () => {
+  // EVERY OTHER CELL IN THIS FILE HANDS THE COMPONENT A TYPED PACK, and that is exactly how a
+  // whole feature can be green while being dead in production: the door emitted the profit
+  // composition at TOP LEVEL, the parser read it from INSIDE the profit group, and nothing
+  // reconciled the two - so `pack.profit.composition` was permanently `[]` against the real door
+  // while the mock and the prop-injected cells stayed green. This cell therefore starts from the
+  // JSON `clara.get_client_financial_pack` actually returns (snake_case, group-nested), runs it
+  // through the SAME hydration the browser runs, and asserts the drilldown reaches the screen.
+  const envelope = {
+    value_cents: -123_456,
+    status: "ok",
+    unit: "minor_units",
+    currency: "MYR",
+    period: { start: "2026-09-01", end: "2026-09-30", as_of: "2026-09-18", timezone: "Asia/Kuala_Lumpur" },
+    computed_at: "2026-09-18T02:00:00.000Z",
+    definition_version: "clara.client-financial-pack/v1",
+    source_watermark: "1234:1240:",
+    coverage: "ok",
+    coverage_reason: null,
+    comparison: null,
+  };
+  const raw = {
+    computed_at: "2026-09-18T02:00:00.000Z",
+    period: { ...envelope.period, month: "2026-09-01", is_mtd: true },
+    coverage_floor: "2026-01-07",
+    cash: { ...envelope, value_cents: 18_234_055, points: [], set: null, composition: [],
+            composition_total: 0, composition_truncated: false },
+    profit: {
+      ...envelope,
+      composition: [{
+        account_id: ACCOUNT, account_code: "5000", name: "Office Rent", account_type: "expense",
+        opening_cents: 0, movement_cents: 623_456, closing_cents: 623_456,
+        entries: [{ entry_id: ENTRY, posting_date: "2026-09-03", memo: "September rent",
+                    amount_cents: 623_456 }],
+        entries_total: 1, entries_truncated: false,
+      }],
+      composition_total: 51,
+      composition_truncated: true,
+    },
+    income: { ...envelope, value_cents: 500_000 },
+    expense: { ...envelope, value_cents: 623_456 },
+    series: [{ month: "2026-09-01", income_cents: 500_000, expense_cents: 623_456,
+               profit_cents: -123_456, partial: true, as_of: "2026-09-18" }],
+    unmarked_closing_entries: 0,
+    unmarked_closing_entries_series: 2,
+    series_coverage_reason: "closing_transfer_unmarked_history",
+  };
+  const h = await mount({ load: async () => hydrateClientFinancialPack(raw) });
+  try {
+    const body = text(h);
+    assert.match(body, /Office Rent/, "the drilldown row never reached the screen from the door's own shape");
+    assert.match(body, /September rent/);
+    assert.ok(hrefs(h).some((u) => u.includes(`entry=${ENTRY}`)),
+      "the drilldown row carries no address to the journals page");
+    // The ACCOUNT-level cap discloses itself, exactly as the entry level does.
+    assert.match(body, /Showing 1 of 51 accounts/,
+      "a table cut at 50 accounts said nothing about the accounts it left out");
+    // And the disclosure covers all six drawn months, not only the selected one.
+    assert.match(body, /2 year-end closing entries in these six months/);
+  } finally { await h.unmount(); }
+});
 
 test("EXACT money strings, with the currency and the period beside them", async () => {
   const h = await mount();

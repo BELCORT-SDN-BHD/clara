@@ -151,10 +151,16 @@ export function useFinancialPack(args: UseFinancialPackArgs): FinancialPackState
         setStaleError(error);
       }
     } finally {
-      // UNCONDITIONAL: this call's busy flags always clear when IT settles; only the DATA is
-      // epoch-gated.
-      setLoading(false);
-      setRefreshing(false);
+      // THE BUSY FLAGS FOLLOW THE EPOCH, exactly as the data does. A superseded read clearing
+      // `loading` would end the CURRENT read's skeleton over a pack that was just reset to
+      // EMPTY_FINANCIAL_PACK — so the band would render the ANSWERED face (every figure
+      // `unknown`, every value null, "this client's money could not be read") under a period that
+      // is still loading, for the whole remaining latency of the outstanding read. That is the
+      // same defect this file's header is about, one state-word over.
+      if (epoch === epochRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [clientId, month]);
 

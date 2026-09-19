@@ -219,6 +219,9 @@ export function ClientFinancialSummary({
             clientId={clientId}
             series={pack.series}
             composition={pack.profit.composition}
+            compositionTotal={pack.profit.compositionTotal}
+            compositionTruncated={pack.profit.compositionTruncated}
+            unmarkedSeriesEntries={pack.unmarkedClosingEntriesSeries}
             loading={loading}
           />
         </>

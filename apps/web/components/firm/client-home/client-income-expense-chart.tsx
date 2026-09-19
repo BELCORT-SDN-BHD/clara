@@ -52,12 +52,22 @@ export function ClientIncomeExpenseChart({
   clientId,
   series,
   composition,
+  compositionTotal,
+  compositionTruncated,
+  unmarkedSeriesEntries,
   loading,
 }: {
   clientId: string;
   series: SeriesMonth[];
   /** The per-account movement behind the CURRENT period's profit — the drilldown's population. */
   composition: CompositionRow[];
+  /** How many accounts there are BEFORE the door's 50-row cap, and whether it bit. A table that
+   *  sums to less than the headline above it has to say why. */
+  compositionTotal: number | null;
+  compositionTruncated: boolean;
+  /** How many approved entries across the SIX DRAWN MONTHS carry a close receipt but no
+   *  `closing_transfer` marker. The bar they sit in includes them; the reader is told. */
+  unmarkedSeriesEntries: number | null;
   loading: boolean;
 }) {
   const t = useTranslations("ClientFinancial");
@@ -85,6 +95,14 @@ export function ClientIncomeExpenseChart({
             month: monthLabel(partial.month),
             asOf: formatDay(partial.asOf),
           })}
+        </p>
+      ) : null}
+      {/* THE DISCLOSURE COVERS ALL SIX BARS, not only the selected month. An unmarked pre-0120
+          close three months back is invisible to the exclusion predicate and is counted into that
+          month's bar; the tile above can only speak for the selected period. */}
+      {unmarkedSeriesEntries !== null && unmarkedSeriesEntries > 0 ? (
+        <p className="text-xs text-warning" data-testid="client-money-series-unmarked">
+          {t("series.unmarkedHistory", { n: unmarkedSeriesEntries })}
         </p>
       ) : null}
 
@@ -199,6 +217,13 @@ export function ClientIncomeExpenseChart({
               ))}
             </TableBody>
           </DataTableCard>
+          {compositionTruncated ? (
+            <p className="text-xs text-muted-foreground" data-testid="client-money-accounts-truncated">
+              {t("drilldown.accountsTruncated", {
+                shown: composition.length, total: compositionTotal ?? composition.length,
+              })}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>

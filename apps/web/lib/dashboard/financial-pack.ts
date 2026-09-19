@@ -76,6 +76,14 @@ export type FigureComparison = {
   deltaCents: number | null;
   /** Percent, already computed and rounded in the door. NEVER recomputed here. */
   deltaPct: number | null;
+  /** False when the comparison PERIOD is one this client's books cannot answer for — a month-end
+   *  before the coverage floor. The amounts are then null rather than 0: `points[]` already calls
+   *  that date unknown, and a line beside the headline saying "against RM 0.00" would make one
+   *  read say two different things about one date. An older body that says nothing is treated as
+   *  available, because it answered. */
+  available: boolean;
+  /** The door's machine token for why the comparison is unavailable (`pre_coverage`), or null. */
+  reason: string | null;
   /** True when the two amounts differ in sign and both are non-zero — a profit/loss transition,
    *  which a percentage alone cannot convey. */
   signChange: boolean;
@@ -126,6 +134,12 @@ export type FigureGroup = {
   coverageReason: string | null;
   comparison: FigureComparison | null;
   composition: CompositionRow[];
+  /** How many accounts the composition WOULD have carried before the 50-row cap, or null when
+   *  the body did not say. The account level owes its own `truncated` + `rows_total`, exactly as
+   *  the entry level does: a table that lists 50 accounts and sums to less than the headline
+   *  above it, with nothing saying it was cut, is a number a reader cannot reconcile. */
+  compositionTotal: number | null;
+  compositionTruncated: boolean;
 };
 
 /** One cash point of the six-point trend. `available:false` is a real answer — the point is
@@ -172,6 +186,11 @@ export type ClientFinancialPack = {
   /** How many approved entries in the period carry a close receipt but no `closing_transfer`
    *  marker — the pre-0120 history this read DISCLOSES and repairs nothing of. */
   unmarkedClosingEntries: number | null;
+  /** The same count over the SIX MONTHS THE CHART DRAWS. The period-scoped count above cannot see
+   *  an unmarked close three months back, and that close is counted into its own bar. */
+  unmarkedClosingEntriesSeries: number | null;
+  /** The door's machine token for what the SERIES cannot cover, or null. */
+  seriesCoverageReason: string | null;
 };
 
 /** The one honest answer for a figure nothing could be read from. Frozen so a caller cannot
@@ -189,6 +208,8 @@ export const UNKNOWN_FIGURE: FigureGroup = Object.freeze({
   coverageReason: null,
   comparison: null,
   composition: [],
+  compositionTotal: null,
+  compositionTruncated: false,
 }) as FigureGroup;
 
 /** The figure a caller may not read. Same shape, a different sentence. */
@@ -209,6 +230,8 @@ export const EMPTY_FINANCIAL_PACK: ClientFinancialPack = Object.freeze({
   cashSet: null,
   series: [],
   unmarkedClosingEntries: null,
+  unmarkedClosingEntriesSeries: null,
+  seriesCoverageReason: null,
 }) as ClientFinancialPack;
 
 export const DENIED_FINANCIAL_PACK: ClientFinancialPack = Object.freeze({
@@ -261,6 +284,11 @@ function comparison(raw: unknown): FigureComparison | null {
         ? Number(raw.delta_pct)
         : null,
     signChange: raw.sign_change === true,
+    // ABSENT MEANS AVAILABLE here, and that is the opposite of `points[]`'s rule on purpose: a
+    // body that carried amounts and said nothing about availability ANSWERED the comparison. Only
+    // an explicit `false` withholds it.
+    available: raw.available !== false,
+    reason: str(raw.reason),
     period: period(raw.period),
   };
 }
@@ -326,6 +354,8 @@ export function hydrateFigure(raw: unknown): FigureGroup {
     : null;
   const value = cents(raw.value_cents);
   const composition = compositionRows(raw.composition);
+  const compositionTotal = int(raw.composition_total);
+  const compositionTruncated = raw.composition_truncated === true;
 
   // THE ENVELOPE IS ALL OR NOTHING for a figure that claims to be answered. A `status:'ok'` body
   // with no period, no unit or no definition version is a number this build cannot describe, and
@@ -334,7 +364,7 @@ export function hydrateFigure(raw: unknown): FigureGroup {
     && definitionVersion !== null && sourceWatermark !== null && computedAt !== null
     && coverage !== null;
   if (!complete) {
-    return { ...UNKNOWN_FIGURE, composition };
+    return { ...UNKNOWN_FIGURE, composition, compositionTotal, compositionTruncated };
   }
   return {
     valueCents: status === "unknown" ? null : value,
@@ -349,6 +379,8 @@ export function hydrateFigure(raw: unknown): FigureGroup {
     coverageReason: str(raw.coverage_reason),
     comparison: comparison(raw.comparison),
     composition,
+    compositionTotal,
+    compositionTruncated,
   };
 }
 
@@ -421,6 +453,8 @@ export function hydrateClientFinancialPack(raw: unknown): ClientFinancialPack {
     cashSet: cashSet(isRecord(raw.cash) ? raw.cash.set : null),
     series: seriesMonths(raw.series),
     unmarkedClosingEntries: int(raw.unmarked_closing_entries),
+    unmarkedClosingEntriesSeries: int(raw.unmarked_closing_entries_series),
+    seriesCoverageReason: str(raw.series_coverage_reason),
   };
 }
 

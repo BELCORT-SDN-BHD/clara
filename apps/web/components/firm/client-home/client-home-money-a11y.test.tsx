@@ -38,6 +38,7 @@ function group(overrides: Partial<FigureGroup> = {}): FigureGroup {
     period: PERIOD, computedAt: "2026-09-18T02:00:00.000Z",
     definitionVersion: "clara.client-financial-pack/v1", sourceWatermark: "1:1:",
     coverage: "ok", coverageReason: null, comparison: null, composition: [],
+    compositionTotal: 0, compositionTruncated: false,
     ...overrides,
   };
 }
