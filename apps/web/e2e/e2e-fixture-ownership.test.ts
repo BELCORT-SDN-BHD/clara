@@ -1239,19 +1239,31 @@ test("concurrency counter-example · two identities racing the SAME shared mutab
 // not "safe when accidental": a NEW lane that happens to pick a verb name another lane already
 // answers is silently protected by the SAME discipline today, with nothing recording that the
 // name is now shared. This census reads every lane mock's own RPC dispatch — `fn === "…"`,
-// `verb === "…"`, or a literal `path === "/rest/v1/rpc/…"` (the three shapes this suite's lanes
-// actually use, confirmed against real source below) — and fails when a verb has two or more
-// claimants that are not a NAMED, declared share.
+// `verb === "…"`, a literal `path === "/rest/v1/rpc/…"`, its guard-and-return mirror
+// `path !== "/rest/v1/rpc/…"` (measured: `intake-batch-mock.mjs`'s single-verb early return was
+// invisible to the three-shape opener until #863 widened it, closing a REAL, not hypothetical,
+// blind spot), and the historical `rpc === "…"` spelling #646's fix round found in
+// `document-correction-mock.mjs` and closed by RENAMING the file rather than widening this
+// opener (so the opener itself stayed blind to that shape) — and fails when a verb has two or
+// more claimants that are not a NAMED, declared share.
 
-const RPC_VERB_OPENER = /(?:verb === "([a-z0-9_]+)"|fn === "([a-z0-9_]+)"|path === "\/rest\/v1\/rpc\/([a-z0-9_]+)")/g;
+const RPC_VERB_OPENER =
+  /(?:verb === "([a-z0-9_]+)"|fn === "([a-z0-9_]+)"|rpc === "([a-z0-9_]+)"|path (?:===|!==) "\/rest\/v1\/rpc\/([a-z0-9_]+)")/g;
+
+/** Every RPC verb `source` (a lane mock's text, real or synthetic) declares an opener for, in the
+ *  order matched. Pure and synchronous so the real census and its synthetic positive controls
+ *  below share one implementation — the same split `verbCollisions` and `bodyReaderViolation`
+ *  (above) use. */
+function verbsInSource(source: string): string[] {
+  return [...source.matchAll(RPC_VERB_OPENER)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]!);
+}
 
 /** verb -> every lane mock (sorted) whose own dispatch recognises it. */
 function rpcVerbCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, string[]> {
   const owners = new Map<string, Set<string>>();
   for (const mock of mocks) {
     const source = readFileSync(join(E2E_DIR, mock), "utf8");
-    for (const m of source.matchAll(RPC_VERB_OPENER)) {
-      const verb = m[1] ?? m[2] ?? m[3]!;
+    for (const verb of verbsInSource(source)) {
       const set = owners.get(verb) ?? new Set<string>();
       set.add(mock);
       owners.set(verb, set);
@@ -1489,6 +1501,51 @@ test("verb-ownership census POSITIVE CONTROL · two undeclared claimants of list
   assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
   assert.match(problems[0]!, /list_entry_links/);
   assert.match(problems[0]!, /fake-lane-a-mock\.mjs/);
+});
+
+// --- RPC-OPENER SPELLING CENSUS (#863) -----------------------------------------
+//
+// The three shapes above (`verb ===`, `fn ===`, literal `path === "/rest/v1/rpc/…"`) are not
+// the only ones a lane mock's dispatch has actually used. `document-correction-mock.mjs` once
+// spelled it `rpc === "…"` (found and fixed by RENAMING the variable, #646's fix round — the
+// opener itself stayed blind to that spelling); `intake-batch-mock.mjs` spells its ONE verb as a
+// guard-and-return, `path !== "/rest/v1/rpc/get_intake_batch"`, which is the mirror image of the
+// literal shape and was — before this ticket — genuinely invisible to `RPC_VERB_OPENER`, a REAL
+// blind spot measured on today's tree, not a hypothetical one. These cells prove both spellings
+// are now recognised, and that the real, previously-invisible verb is now counted.
+
+test("RPC-opener census · the historical `rpc === \"…\"` spelling is recognised", () => {
+  // SYNTHETIC source — the exact spelling #646's fix round found and closed by renaming the
+  // variable rather than widening the opener, so the opener itself never had to prove it could
+  // see this shape until now.
+  const synthetic = 'if (request.method === "POST" && rpc === "duplicate_verb") { return true; }';
+  assert.deepEqual(verbsInSource(synthetic), ["duplicate_verb"]);
+});
+
+test("RPC-opener census · the guard-and-return `path !== \"/rest/v1/rpc/…\"` spelling is recognised", () => {
+  // SYNTHETIC source, modelled on intake-batch-mock.mjs's real one-liner (measured below against
+  // the real file too, not only here).
+  const synthetic = 'if (request.method !== "POST" || path !== "/rest/v1/rpc/get_intake_batch") return false;';
+  assert.deepEqual(verbsInSource(synthetic), ["get_intake_batch"]);
+});
+
+test("RPC-opener census · a mock mixing every recognised spelling in one file loses none of them", () => {
+  const synthetic = [
+    'if (verb === "a_verb") {}',
+    'if (fn === "b_verb") {}',
+    'if (path === "/rest/v1/rpc/c_verb") {}',
+    'if (path !== "/rest/v1/rpc/d_verb") return false;',
+    'if (rpc === "e_verb") {}',
+  ].join("\n");
+  assert.deepEqual(verbsInSource(synthetic), ["a_verb", "b_verb", "c_verb", "d_verb", "e_verb"]);
+});
+
+test("RPC-opener census · intake-batch-mock.mjs's real get_intake_batch verb is no longer invisible", () => {
+  // NOT synthetic: the real file, the real blind spot #863 closes. Before the widening this verb
+  // was absent from rpcVerbCensus() entirely (zero openers matched anywhere in the file) — a
+  // second, undeclared claimant using a RECOGNISED spelling would have censused as sole owner.
+  const census = rpcVerbCensus();
+  assert.deepEqual(census.get("get_intake_batch"), ["intake-batch-mock.mjs"]);
 });
 
 // --- THE CORE HANDOVER CENSUS (#625) ------------------------------------------
