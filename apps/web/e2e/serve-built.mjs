@@ -77,6 +77,11 @@ import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, 
 // is scoped too (it takes `client` and falls through otherwise — the sibling lane's shape, adopted
 // after a standards review found the declaration ahead of the code). See periodic-adjustment-mock.mjs.
 import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } from "./periodic-adjustment-mock.mjs";
+// #879's own lane — the staff-advances REGISTER (`?tab=staffAdvances`): its enrolment read, its
+// four doors and its summary/tie/statement reads. Every branch names this lane's own client id
+// and falls through otherwise. No runtime hook — every write is a plain PostgREST RPC. See
+// staff-advances-register-mock.mjs.
+import { handleStaffAdvancesRegisterSupabase } from "./staff-advances-register-mock.mjs";
 // #638's own lane — the staff-expense-claim form, its enrolment read, its refusals and its
 // register. Scoped to its own client id in every branch (the control endpoint included) and
 // file-disjoint from every other lane. See staff-expense-claim-mock.mjs.
@@ -706,6 +711,12 @@ async function handleSupabase(request, response, url) {
   // hold nothing but their placeholder. Every branch here is scoped to this lane's own client and
   // falls through otherwise, so the honest empties still answer every other walk.
   if (await handlePeriodicAdjustmentSupabase(request, response, path, url, sendJson, cors)) return;
+  // #879 — ahead of the home board for the same reason its neighbour below states:
+  // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]`
+  // for every subject, so this register's account pickers (the enrol dialog, the lines editor)
+  // would hold nothing but their placeholder with this hook after it. Every branch is scoped to
+  // this lane's own client and falls through otherwise.
+  if (await handleStaffAdvancesRegisterSupabase(request, response, path, url, sendJson, cors)) return;
   // #638, beside its closest sibling and ahead of the home board for the identical reason:
   // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]`
   // for every subject, so with this hook after it the claim form's account pickers would hold

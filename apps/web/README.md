@@ -362,6 +362,24 @@ a fifth effective status on both, which is a ticket of its own. See `packages/db
 note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
 (`p625.preview.issuer_rank`).
 
+## #879 — the staffAdvances register tab gets its first browser coverage
+
+`?tab=staffAdvances` (`components/registers/staff-advances-register.tsx`) shipped with a full
+write surface — enrol, book application, complete particulars, retire — and zero Playwright
+coverage: `staffAdvancesHref` had a URL builder, the tab rendered from a unit mount, and no file
+under `e2e/` mentioned it. `e2e/staff-advances-register-mock.mjs` (a file-disjoint lane, the
+`staff-expense-claim-mock.mjs` shape) and `e2e/staff-advances-register-walk.spec.ts` close that:
+one enrolled account with one outstanding advance, one not-yet-enrolled candidate account. Three
+cells, in file order (`playwright.config.ts`'s `fullyParallel: false` / `workers: 1`, so the mock's
+in-memory state persists across them the way every stateful lane in this suite relies on): the tab
+renders with a real read; enrol → retire (the freshly-enrolled account has zero advances, so this
+never hits CLR10 `advance_outstanding_on_retire`) → book a 300.00 application → complete
+particulars, end to end, with the summary's outstanding figure and missing-particulars count both
+re-reading correctly afterward; the per-account statement panel then shows the booked application's
+row and the reduced closing balance. The lane owns `staff_advance_summary`/`staff_advance_tie`/
+`staff_advance_statement` exclusively for its own client — `staff-expense-claim-mock.mjs`'s own
+header records that it deliberately declines all three, leaving them to whichever lane needs them.
+
 ## Close and bank operating order
 
 Prepare and reconcile the books before beginning a financial-year close. For an ongoing client with brought-forward balances, record an evidenced opening position in this order:

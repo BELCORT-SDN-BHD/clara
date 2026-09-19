@@ -77,6 +77,7 @@ const LANE_MOCKS = [
   "periodic-adjustment-mock.mjs",
   "plans-mock.mjs",
   "prepayments-mock.mjs",
+  "staff-advances-register-mock.mjs",
   "staff-expense-claim-mock.mjs",
   "tax-boundary-mock.mjs",
   "trade-invoice-mock.mjs",
@@ -522,6 +523,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // start here. The lane answers NEITHER `list_accounting_work` NOR `staff_advance_summary`: both
   // are read by surfaces other lanes drive, and a lane that claimed them would replace their
   // fixtures.
+  // #879 — every handler is scoped to this lane's own client id (`SAR.clientId`): the PostgREST
+  // reads (clients, coa_accounts, staff_advance_accounts, staff_advances by `client_id`), the
+  // three read RPCs (staff_advance_summary/tie/statement by `p_client`), and the four write doors
+  // (book/complete/enrol/retire, by `p_client`, with enrol and retire additionally naming the one
+  // account code / enrolment id this module owns). It answers no verb any other lane answers —
+  // `staff-expense-claim-mock.mjs`'s own header records that it deliberately declines
+  // `staff_advance_summary`, leaving it (and its two siblings) to whichever lane owns the
+  // register; this is that lane.
+  "staff-advances-register-mock.mjs": { unscopeable: [], debt: [] },
   "staff-expense-claim-mock.mjs": { unscopeable: [], debt: [] },
   // #655's C1/C3/C6 trade-invoice lane, built to the same shape: every branch names this lane's
   // own client id or the Work id this module minted before it answers, and falls through
