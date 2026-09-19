@@ -21,6 +21,7 @@ import { renderComponent } from "../../../test/hookHarness";
 import { enableDomInspection } from "../../../test/domInspect";
 import messages from "../../../messages/en.json";
 import { ClientFinancialSummary } from "./client-financial-summary";
+import { WORK_STALE_AFTER_MS } from "@/lib/work/use-work-detail";
 import {
   EMPTY_FINANCIAL_PACK,
   hydrateClientFinancialPack,
@@ -105,6 +106,7 @@ async function mount(opts: {
   load?: (clientId: string, month: string | null) => Promise<ClientFinancialPack>;
   period?: string | null;
   malformedPeriod?: boolean;
+  now?: () => number;
 } = {}) {
   const h = await renderComponent(
     createElement(NextIntlClientProvider, {
@@ -127,7 +129,7 @@ async function mount(opts: {
               search: "",
               malformedPeriod: opts.malformedPeriod ?? false,
               load: opts.load ?? (async () => pack()),
-              now: () => Date.parse("2026-09-18T02:00:10.000Z"),
+              now: opts.now ?? (() => Date.parse("2026-09-18T02:00:10.000Z")),
               loadProposal: async () => proposal,
             })),
         ),
@@ -400,4 +402,45 @@ test("a malformed ?period= is SAID on the face, never silently corrected", async
     assert.match(text(h), /That period could not be read/);
     assert.match(text(h), /showing the current month to date instead/);
   } finally { await h.unmount(); }
+});
+
+test("896.L07-A06 — once the connection goes stale, client-money-delayed lands on the rendered StateBanner as a real data-testid", async () => {
+  // #896's fix made StateBanner forward `data-testid` (and other native div attributes) instead of
+  // dropping it — this band's own "delayed" banner (client-financial-summary.tsx) is a SECOND call
+  // site that newly gets a queryable `data-testid="client-money-delayed"` in the rendered DOM,
+  // untested by #896's own cells (which only covered work-question-form.tsx's banner). This cell
+  // reproduces the real staleness path `useFinancialPack` uses in production: a real `setInterval`
+  // re-checks `now() - readAt >= WORK_STALE_AFTER_MS` on its own tick (use-financial-pack.ts) — no
+  // component prop can force `delayed` directly, so the interval callback is captured and fired by
+  // hand, the same idiom use-financial-pack.test.ts's own `withTimers` uses for this exact hook.
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const ticks: (() => void)[] = [];
+  globalThis.setInterval = ((cb: TimerHandler) => { ticks.push(cb as () => void); return 999 as never; }) as typeof setInterval;
+  globalThis.clearInterval = (() => undefined) as typeof clearInterval;
+  let now = Date.parse("2026-09-18T02:00:10.000Z");
+  let fail = false;
+  try {
+    // `load` fails on every call AFTER the first — a successful read always resets `delayed` to
+    // false (use-financial-pack.ts's own `read()`, success branch), which is the "sixty seconds
+    // with no successful read" the ticket's staleness clock actually measures, matching
+    // use-financial-pack.test.ts's own "60 seconds with no successful read is DELAYED" cell.
+    const h = await mount({ now: () => now, load: async () => { if (fail) throw new Error("network"); return pack(); } });
+    try {
+      assert.equal(
+        h.find((n) => (n as unknown as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === "client-money-delayed"),
+        null,
+        "control: freshly read, the delayed banner must not render yet",
+      );
+      now += WORK_STALE_AFTER_MS;
+      fail = true;
+      await h.act(() => { for (const cb of ticks) cb(); });
+      for (let i = 0; i < 10; i += 1) await h.settle();
+      const banner = h.find((n) => (n as unknown as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === "client-money-delayed");
+      assert.ok(banner, "once delayed, the banner must render with its data-testid queryable in the DOM");
+    } finally { await h.unmount(); }
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
 });
