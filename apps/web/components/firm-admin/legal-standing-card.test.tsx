@@ -108,12 +108,17 @@ test("p635.web.legal_not_live_without_accept a non-owner is told WHO must act, a
     data: standing({
       standingLive: false,
       canAcceptForFirm: false,
-      documents: [doc({ version: 3, firmAccepted: false, acceptedAt: null, acceptedBy: null, acceptedByName: "Alice Tan", myAcceptedVersion: null, myAcceptedAt: null }), doc({ kind: "dpa" })],
+      // THE SHAPE THE DOOR CAN ACTUALLY EMIT (spec F1): `firm_accepted` and `accepted_by_name`
+      // come from the SAME lateral per document (0233:267-272), so an unaccepted kind carries
+      // no name. The name in the hint therefore comes from the OTHER kind, which is still
+      // accepted — the ordinary "a new version was published" state.
+      documents: [doc({ version: 3, firmAccepted: false, acceptedAt: null, acceptedBy: null, acceptedByName: null, myAcceptedVersion: null, myAcceptedAt: null }), doc({ kind: "dpa" })],
     }),
   });
   try {
     const text = h.text();
-    assert.match(text, /An owner of this firm must accept the current versions/);
+    assert.match(text, /An owner of this firm must accept the current versions\. The most recent acceptance on record was made by Alice Tan\./,
+      "the whole sentence, named — not the leading clause both variants share");
     assert.equal(acceptTrigger(h) !== null, false,
       "裁-187: a control this caller's rank cannot use is NOT RENDERED — not disabled, not at all");
   } finally { await h.unmount(); }
@@ -190,5 +195,104 @@ test("p635.web.legal_denied renders the DATABASE's own sentence, verbatim, with 
     assert.match(text, /actor has no active membership/, "0004:299-309's own words, not a paraphrase");
     assert.match(text, /CLR04/);
     assert.doesNotMatch(text, /Accepted for this firm/, "nothing of the payload survives a refusal");
+  } finally { await h.unmount(); }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// FIX ROUND 1 — the SPLIT-ACCEPTANCE state (adversarial A1) and the NAMED hint
+// (spec F1 / standards F1). Both were reachable and neither was covered.
+// ───────────────────────────────────────────────────────────────────────────
+
+function triggerCount(h: { text: () => string }): number {
+  return (h.text().match(/Accept for this firm/g) ?? []).length;
+}
+
+test("p635.web.legal_split_acceptance an owner still gets the control that makes standing live", async () => {
+  // TWO OWNERS HOLD THE TWO HALVES. `standing_live` (0195:896-906) needs ONE active owner
+  // holding BOTH current acceptances, so a firm where owner B accepted terms v2 and owner A
+  // accepted dpa v1 reads `firm_accepted: true` on BOTH kinds and `standing_live: false`.
+  // The database battery asserts exactly this state (p635.db.legal_standing_two_people).
+  // Gating the control on `!firmAccepted` left the firm with NO in-app remedy in the one
+  // state the remedy exists for.
+  const h = await mount({
+    status: "ready",
+    data: standing({
+      standingLive: false,
+      canAcceptForFirm: true,
+      documents: [
+        // terms v2 — accepted for the firm by the OTHER owner; this caller has not accepted it.
+        doc({ version: 2, firmAccepted: true, acceptedByName: "Bob Lim", acceptedAt: "2026-09-19T02:00:00.000Z", myAcceptedVersion: 1, myAcceptedAt: "2026-09-01T00:00:00.000Z" }),
+        // dpa v2 — this caller's own acceptance, still current.
+        doc({ kind: "dpa", version: 2, firmAccepted: true, myAcceptedVersion: 2 }),
+      ],
+    }),
+  });
+  try {
+    assert.match(h.text(), /Clara cannot use a model on any client's books/, "the warning is right");
+    assert.equal(triggerCount(h), 1,
+      "exactly one control: for the kind THIS owner has not accepted at its current version");
+  } finally { await h.unmount(); }
+});
+
+test("p635.web.legal_live_offers_nothing_even_to_an_owner_who_never_accepted", async () => {
+  // The other direction of the same gate: standing is LIVE (some owner holds both), so there is
+  // nothing outstanding — a second owner who has accepted neither is offered no control.
+  const h = await mount({
+    status: "ready",
+    data: standing({
+      standingLive: true,
+      canAcceptForFirm: true,
+      documents: [
+        doc({ myAcceptedVersion: null, myAcceptedAt: null }),
+        doc({ kind: "dpa", myAcceptedVersion: null, myAcceptedAt: null }),
+      ],
+    }),
+  });
+  try {
+    assert.equal(triggerCount(h), 0, "a live standing needs no repair");
+    assert.match(h.text(), /You have not accepted this version/, "…and the reader's own state is still stated");
+  } finally { await h.unmount(); }
+});
+
+test("p635.web.legal_named_hint names the MOST RECENT acceptance, not the first row carrying a name", async () => {
+  // The hint used to take `documents.find(d => d.acceptedByName !== null)` — array order, which
+  // is kind order — and say that person "accepted the previous ones". In a split state that
+  // names whichever kind sorts first, and asserts something that did not happen. It now names
+  // the most recent acceptance on record, which is true in every reachable state.
+  const h = await mount({
+    status: "ready",
+    data: standing({
+      standingLive: false,
+      canAcceptForFirm: false,
+      masked: false,
+      documents: [
+        doc({ version: 2, firmAccepted: true, acceptedByName: "Alice Tan", acceptedAt: "2026-09-01T00:00:00.000Z" }),
+        doc({ kind: "dpa", version: 2, firmAccepted: true, acceptedByName: "Bob Lim", acceptedAt: "2026-09-19T02:00:00.000Z" }),
+      ],
+    }),
+  });
+  try {
+    const text = h.text();
+    assert.match(text, /An owner of this firm must accept the current versions\. The most recent acceptance on record was made by Bob Lim\./,
+      "the exact sentence, so a cell cannot pass on the shared leading clause alone");
+    assert.doesNotMatch(text, /made by Alice Tan/, "the earlier acceptance is not the one named");
+  } finally { await h.unmount(); }
+});
+
+test("p635.web.legal_named_hint_masked falls back to the unnamed sentence", async () => {
+  const h = await mount({
+    status: "ready",
+    data: standing({
+      standingLive: false,
+      canAcceptForFirm: false,
+      masked: true,
+      documents: [doc({ acceptedAt: null, acceptedBy: null, acceptedByName: null })],
+    }),
+  });
+  try {
+    const text = h.text();
+    assert.match(text, /An owner of this firm must accept the current versions\./);
+    assert.doesNotMatch(text, /most recent acceptance on record/,
+      "a masked payload carries no name, so the named variant must not render at all");
   } finally { await h.unmount(); }
 });

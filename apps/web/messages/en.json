@@ -6278,7 +6278,7 @@
     "legalNotLiveHeading": "This firm's legal standing is not current",
     "legalNotLiveBody": "Clara cannot use a model on any client's books until an owner of this firm accepts the current versions of both agreements.",
     "legalNotLiveOwnerHint": "An owner of this firm must accept the current versions.",
-    "legalNotLiveOwnerNamed": "An owner of this firm must accept the current versions. {name} accepted the previous ones.",
+    "legalNotLiveOwnerNamed": "An owner of this firm must accept the current versions. The most recent acceptance on record was made by {name}.",
     "legalLive": "An owner of this firm has accepted the current versions of both agreements.",
     "legalMaskedNote": "Who accepted an agreement, and when, is shown to bookkeepers and above.",
     "legalAcceptTrigger": "Accept for this firm",

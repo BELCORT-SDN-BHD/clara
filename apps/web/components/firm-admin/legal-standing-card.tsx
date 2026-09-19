@@ -124,7 +124,8 @@ export function LegalStandingCard({ view, onRetry, onAccepted, dialogProps }: Le
                   {doc.status === "draft" ? (
                     <p className="text-xs text-muted-foreground">{t("legalDraftNote")}</p>
                   ) : null}
-                  {standing.canAcceptForFirm && doc.status === "published" && !doc.firmAccepted ? (
+                  {standing.canAcceptForFirm && !standing.standingLive
+                   && doc.status === "published" && doc.myAcceptedVersion !== doc.version ? (
                     <div className="pt-1">
                       <Button type="button" size="sm" onClick={() => setAcceptingKind(doc.kind)}>
                         {t("legalAcceptTrigger")}
@@ -170,12 +171,36 @@ function firmLine(
 }
 
 /** For everyone who may NOT accept: who must. The owner's NAME is used only where this reader's
- *  rank is already allowed to see it — a masked payload carries no name to use. */
+ *  rank is already allowed to see it — a masked payload carries no name to use.
+ *
+ *  IT NAMES THE MOST RECENT ACCEPTANCE ON RECORD, and says exactly that. The first version of
+ *  this helper took the first document carrying a name (array order, which is kind order) and
+ *  said that person "accepted the previous ones". Standing can be false while one kind's
+ *  acceptance is still perfectly current (p635.db.legal_standing_new_version), and two different
+ *  owners can hold the two halves (p635.db.legal_standing_two_people) — in both states the old
+ *  sentence asserted something that did not happen. "The most recent acceptance on record was
+ *  made by X" is true in every state the door can emit, and it still answers the question the
+ *  reader actually has: who here has been handling this. */
 function ownerHint(
   standing: FirmLegalStanding,
   t: (key: string, values?: Record<string, string | number>) => string,
 ): string {
-  const named = standing.documents.find((d) => d.acceptedByName !== null)?.acceptedByName ?? null;
+  const named = latestAcceptor(standing.documents);
   if (standing.masked || named === null) return t("legalNotLiveOwnerHint");
   return t("legalNotLiveOwnerNamed", { name: named });
+}
+
+/** The name behind the latest `accepted_at` the payload carries. Compared as instants, never as
+ *  strings: the door returns `timestamptz`, and PostgREST is free to render two rows with
+ *  different offsets. A row missing either half of the pair is not an acceptance this can name. */
+function latestAcceptor(documents: readonly LegalStandingDocument[]): string | null {
+  let bestName: string | null = null;
+  let bestAt = Number.NEGATIVE_INFINITY;
+  for (const d of documents) {
+    if (d.acceptedByName === null || d.acceptedAt === null) continue;
+    const at = Date.parse(d.acceptedAt);
+    if (Number.isNaN(at)) continue;
+    if (at > bestAt) { bestAt = at; bestName = d.acceptedByName; }
+  }
+  return bestName;
 }
