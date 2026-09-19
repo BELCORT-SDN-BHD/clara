@@ -143,6 +143,17 @@ export async function loadFirmLegalStanding(opts: CallDoorOptions = {}): Promise
 // COMMERCIAL STATE
 // ───────────────────────────────────────────────────────────────────────────
 
+export type FirmPlanState = {
+  readonly localKey: string;
+  readonly name: string;
+  readonly currency: string;
+  readonly amountCents: number;
+  /** THE RENDER CONDITION, not a hint. `false` means the database has not been told what this
+   *  plan costs, so no figure may appear anywhere on the card (C-01 / C-56). A later owner
+   *  ruling that sets an amount shows it with no code change. */
+  readonly amountsRuled: boolean;
+};
+
 export type FirmCommercialState = {
   readonly firm: {
     readonly id: string;
@@ -150,16 +161,13 @@ export type FirmCommercialState = {
     readonly createdAt: string | null;
     readonly isOperator: boolean;
   };
-  readonly plan: {
-    readonly localKey: string;
-    readonly name: string;
-    readonly currency: string;
-    readonly amountCents: number;
-    /** THE RENDER CONDITION, not a hint. `false` means the database has not been told what this
-     *  plan costs, so no figure may appear anywhere on the card (C-01 / C-56). A later owner
-     *  ruling that sets an amount shows it with no code change. */
-    readonly amountsRuled: boolean;
-  };
+  /** `null` when NO plan row carries `is_current`. `uq_billing_plans_current` (0163:207) caps
+   *  the current plan at one and permits ZERO, and the door's `select … where b.is_current`
+   *  into a record then yields a plan whose every column is NULL. That is an ABSENCE with a
+   *  shape, and the card says so; dropping the whole payload for it rendered a transport
+   *  failure over a perfectly readable answer, and took the payment, the invoice explanation,
+   *  the capacity numbers and the identity card's "In Clara since" down with it. */
+  readonly plan: FirmPlanState | null;
   readonly payment: {
     readonly recorded: boolean;
     readonly recordedAt: string | null;
@@ -184,6 +192,39 @@ function nullableInt(v: unknown): number | null {
   return typeof v === "number" && Number.isInteger(v) ? v : null;
 }
 
+/** A sentinel, because `null` already MEANS something here: "no plan is current". A payload this
+ *  build cannot read is a different answer from an absence, and the two must not collapse into
+ *  one value. */
+const UNREADABLE = Symbol("unreadable plan");
+
+/** THE WHOLE ROW IS NULL, OR THE WHOLE ROW IS READABLE. A plan carrying a name but no currency
+ *  is not an absence; it is a money row this build cannot read, and half of one is never
+ *  rendered. */
+function decodePlan(plan: Record<string, unknown>): FirmPlanState | null | typeof UNREADABLE {
+  const absent =
+    (plan.local_key ?? null) === null && (plan.name ?? null) === null
+    && (plan.currency ?? null) === null && (plan.amount_cents ?? null) === null;
+  if (absent) return null;
+  if (typeof plan.local_key !== "string" || typeof plan.name !== "string") return UNREADABLE;
+  if (typeof plan.currency !== "string") return UNREADABLE;
+  if (typeof plan.amounts_ruled !== "boolean") return UNREADABLE;
+  // `amount_cents` is a bigint on the wire and PostgREST may send it as a JSON number or as a
+  // string; both are decoded, and anything else drops the whole payload rather than rendering a
+  // NaN into a money position.
+  const amountCents =
+    typeof plan.amount_cents === "number" ? plan.amount_cents
+    : typeof plan.amount_cents === "string" && /^-?\d+$/.test(plan.amount_cents) ? Number(plan.amount_cents)
+    : null;
+  if (amountCents === null || !Number.isSafeInteger(amountCents)) return UNREADABLE;
+  return {
+    localKey: plan.local_key,
+    name: plan.name,
+    currency: plan.currency,
+    amountCents,
+    amountsRuled: plan.amounts_ruled,
+  };
+}
+
 export function decodeFirmCommercialState(raw: unknown): FirmCommercialState | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
@@ -195,19 +236,10 @@ export function decodeFirmCommercialState(raw: unknown): FirmCommercialState | n
   if (!firm || !plan || !payment || !invoices || !capacity) return null;
   if (typeof firm.id !== "string" || firm.id.length === 0) return null;
   if (typeof firm.name !== "string" || firm.name.length === 0) return null;
-  if (typeof plan.local_key !== "string" || typeof plan.name !== "string") return null;
-  if (typeof plan.currency !== "string") return null;
-  if (typeof plan.amounts_ruled !== "boolean") return null;
   if (typeof payment.recorded !== "boolean") return null;
   if (typeof invoices.available !== "boolean") return null;
-  // `amount_cents` is a bigint on the wire and PostgREST may send it as a JSON number or as a
-  // string; both are decoded, and anything else drops the whole payload rather than rendering a
-  // NaN into a money position.
-  const amountCents =
-    typeof plan.amount_cents === "number" ? plan.amount_cents
-    : typeof plan.amount_cents === "string" && /^-?\d+$/.test(plan.amount_cents) ? Number(plan.amount_cents)
-    : null;
-  if (amountCents === null || !Number.isSafeInteger(amountCents)) return null;
+  const decodedPlan = decodePlan(plan);
+  if (decodedPlan === UNREADABLE) return null;
   return {
     firm: {
       id: firm.id,
@@ -215,13 +247,7 @@ export function decodeFirmCommercialState(raw: unknown): FirmCommercialState | n
       createdAt: typeof firm.created_at === "string" ? firm.created_at : null,
       isOperator: firm.is_operator === true,
     },
-    plan: {
-      localKey: plan.local_key,
-      name: plan.name,
-      currency: plan.currency,
-      amountCents,
-      amountsRuled: plan.amounts_ruled,
-    },
+    plan: decodedPlan,
     payment: {
       recorded: payment.recorded,
       recordedAt: typeof payment.recorded_at === "string" ? payment.recorded_at : null,
@@ -309,15 +335,39 @@ export function decodeFirmUsageRow(raw: unknown): FirmUsageRow | null {
   };
 }
 
-export function decodeFirmUsageRows(raw: unknown): FirmUsageRow[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map(decodeFirmUsageRow).filter((r): r is FirmUsageRow => r !== null);
+/** The rows this build could read, and HOW MANY IT COULD NOT. The count is the same kind of
+ *  published tripwire `unpriced_calls` is (0110:702-704): a table missing a row reads as
+ *  complete, which is the silently-zeroed-row defect one step further along. The card says so
+ *  beside the money column and the CSV carries it into the spreadsheet. */
+export type FirmUsageTable = {
+  readonly rows: readonly FirmUsageRow[];
+  readonly dropped: number;
+};
+
+/** `null` when the payload is not a TABLE at all — a refusal body, an object, a string. That is
+ *  a failed read and it must reach the card as one: returning `[]` painted the card's named zero
+ *  ("No model calls in this period.") over a read that never happened, which is exactly the
+ *  generic successful-Empty AC3 forbids. An EMPTY array is a different answer and stays one. */
+export function decodeFirmUsageRows(raw: unknown): FirmUsageTable | null {
+  if (!Array.isArray(raw)) return null;
+  const rows: FirmUsageRow[] = [];
+  let dropped = 0;
+  for (const entry of raw) {
+    const row = decodeFirmUsageRow(entry);
+    if (row === null) dropped += 1;
+    else rows.push(row);
+  }
+  return { rows, dropped };
 }
 
 /** `p_period` is a `date` the door bins to its own month; this module sends the first day of the
  *  requested month and never a "today". The door's window is UTC-derived (0110:711-712 + :750)
  *  and `usage-period.ts` is where that is said in the surface's words. */
-export async function loadFirmAiUsage(period: string, opts: CallDoorOptions = {}): Promise<FirmUsageRow[]> {
+export async function loadFirmAiUsage(period: string, opts: CallDoorOptions = {}): Promise<FirmUsageTable> {
   const raw = await callDoor<unknown>(FIRM_AI_USAGE_DOOR, { p_period: period }, opts);
-  return decodeFirmUsageRows(raw);
+  const table = decodeFirmUsageRows(raw);
+  // THE SAME REFUSAL THE TWO SIBLING READS MAKE (:138, :248). A read that did not produce a
+  // table is a failure with a retry, never an empty period.
+  if (table === null) throw new Error("get_firm_ai_usage returned a payload this build cannot read");
+  return table;
 }

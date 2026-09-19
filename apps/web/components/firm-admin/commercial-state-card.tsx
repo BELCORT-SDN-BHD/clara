@@ -52,7 +52,8 @@ export function CommercialStateCard({
 }) {
   const t = useTranslations("FirmSettings");
   const state = view.status === "ready" ? view.data : null;
-  const planAmount = state === null ? null : formatPlanAmount(state.plan);
+  const plan = state?.plan ?? null;
+  const planAmount = plan === null ? null : formatPlanAmount(plan);
 
   return (
     <Card>
@@ -78,12 +79,17 @@ export function CommercialStateCard({
           <dl className="flex flex-col gap-3 text-sm">
             <div>
               <dt className="text-xs text-muted-foreground">{t("commercialPlanLabel")}</dt>
-              <dd className="font-medium">{state.plan.name}</dd>
-              <dd className="text-muted-foreground">
-                {planAmount === null
-                  ? t("commercialPlanUnruled")
-                  : t("commercialPlanAmount", { amount: planAmount, currency: state.plan.currency })}
-              </dd>
+              {/* NO CURRENT PLAN IS AN ANSWER, NOT A FAILURE. `uq_billing_plans_current`
+                  (0163:207) permits zero current rows, and this firm is then on no plan at all.
+                  Said plainly, with the same support route the invoice line carries. */}
+              <dd className="font-medium">{plan === null ? t("commercialPlanNone") : plan.name}</dd>
+              {plan === null ? null : (
+                <dd className="text-muted-foreground">
+                  {planAmount === null
+                    ? t("commercialPlanUnruled")
+                    : t("commercialPlanAmount", { amount: planAmount, currency: plan.currency })}
+                </dd>
+              )}
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">{t("commercialPaymentLabel")}</dt>

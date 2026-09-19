@@ -103,8 +103,8 @@ const COMMERCIAL = {
 test("p635.reads.commercial_decodes the unruled plan, the absent payment and the null capacity all travel as themselves", () => {
   const decoded = decodeFirmCommercialState(COMMERCIAL);
   assert.ok(decoded);
-  assert.equal(decoded.plan.amountsRuled, false, "the render condition, carried as data");
-  assert.equal(decoded.plan.amountCents, 0);
+  assert.equal(decoded.plan?.amountsRuled, false, "the render condition, carried as data");
+  assert.equal(decoded.plan?.amountCents, 0);
   assert.equal(decoded.payment.recorded, false);
   assert.equal(decoded.invoices.reason, "not_collected");
   assert.equal(decoded.capacity.docsPerDay, null,
@@ -114,7 +114,7 @@ test("p635.reads.commercial_decodes the unruled plan, the absent payment and the
 
 test("p635.reads.commercial_bigint_amount a bigint arriving as a string still decodes, and a nonsense one drops the payload", () => {
   const asString = decodeFirmCommercialState({ ...COMMERCIAL, plan: { ...COMMERCIAL.plan, amount_cents: "19900", amounts_ruled: true } });
-  assert.equal(asString?.plan.amountCents, 19900, "PostgREST may send a bigint as a string");
+  assert.equal(asString?.plan?.amountCents, 19900, "PostgREST may send a bigint as a string");
   assert.equal(decodeFirmCommercialState({ ...COMMERCIAL, plan: { ...COMMERCIAL.plan, amount_cents: "lots" } }), null,
     "a NaN in a money position is never rendered — the whole payload drops instead");
   assert.equal(decodeFirmCommercialState({ ...COMMERCIAL, firm: { ...COMMERCIAL.firm, id: "" } }), null);
@@ -143,10 +143,54 @@ test("p635.reads.usage_decodes bigint counts arrive as strings and decode to saf
     "carried per row, not hoisted to a constant this module believes — a widening of 0110:497's CHECK must arrive as data");
 });
 
-test("p635.reads.usage_drops_unreadable a row whose numbers cannot be read is dropped, never silently zeroed", () => {
-  const rows = decodeFirmUsageRows([USAGE, { ...USAGE, calls: "many" }, { ...USAGE, scope: "elsewhere" }, null]);
-  assert.equal(rows.length, 1,
+test("p635.reads.usage_drops_unreadable a row whose numbers cannot be read is dropped, never silently zeroed, and the DROP IS COUNTED", () => {
+  const table = decodeFirmUsageRows([USAGE, { ...USAGE, calls: "many" }, { ...USAGE, scope: "elsewhere" }, null]);
+  assert.ok(table);
+  assert.equal(table.rows.length, 1,
     "a table with one silently-zeroed row is worse than one missing it: the total would look complete");
-  assert.equal(rows[0]!.scope, "firm");
-  assert.deepEqual(decodeFirmUsageRows("nope"), []);
+  assert.equal(table.rows[0]!.scope, "firm");
+  // FIX ROUND 1 (adversarial A4). A table missing a row reads as COMPLETE, which is the same
+  // defect one step further along. The count comes back so the card can say so beside the money
+  // column and the CSV can carry it, exactly as `unpriced_calls` already is.
+  assert.equal(table.dropped, 3, "three rows this build could not read, counted rather than forgotten");
+});
+
+test("p635.reads.usage_not_a_table a payload that is not a table is a FAILURE, never an empty period", () => {
+  // `[]` for a refusal-shaped or otherwise unreadable payload made the card render its named
+  // zero — "No model calls in this period." — for a read that did not happen. The two sibling
+  // reads throw; so does this one now.
+  assert.equal(decodeFirmUsageRows("nope"), null);
+  assert.equal(decodeFirmUsageRows({ code: "CLR99", message: "boom" }), null);
+  assert.deepEqual(decodeFirmUsageRows([]), { rows: [], dropped: 0 },
+    "an EMPTY table is still a table: a month with no calls is a real, complete answer");
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// FIX ROUND 1 — NO CURRENT PLAN (adversarial A6). `uq_billing_plans_current`
+// (0163:207) caps the current plan at one row and permits ZERO; the door's
+// `select ... where b.is_current` into a record then yields a plan whose every
+// column is NULL. Dropping the whole payload for it turned an ABSENCE into a
+// transport failure and took the payment, the invoice explanation, the four
+// capacity numbers and the identity card's "In Clara since" down with it.
+// ───────────────────────────────────────────────────────────────────────────
+
+test("p635.reads.commercial_no_current_plan is an absence with a shape, not a dropped payload", () => {
+  const decoded = decodeFirmCommercialState({
+    ...COMMERCIAL,
+    plan: { local_key: null, name: null, currency: null, amount_cents: null, amounts_ruled: false },
+  });
+  assert.ok(decoded, "the rest of the answer is perfectly readable and must survive");
+  assert.equal(decoded.plan, null, "no plan is current — said as itself, never as a failure");
+  assert.equal(decoded.payment.recorded, false);
+  assert.equal(decoded.invoices.reason, "not_collected");
+  assert.equal(decoded.firm.name, "Tan & Partners", "the identity card rides this answer too");
+});
+
+test("p635.reads.commercial_half_a_plan still drops the payload", () => {
+  // A plan with a NAME but no currency is not an absence; it is a payload this build cannot
+  // read, and half-rendering a money row is the defect the decoder exists to refuse.
+  assert.equal(
+    decodeFirmCommercialState({ ...COMMERCIAL, plan: { local_key: "x", name: "Clara Beta", currency: null, amount_cents: null, amounts_ruled: false } }),
+    null,
+  );
 });

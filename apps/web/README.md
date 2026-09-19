@@ -416,6 +416,31 @@ instead of the wall. NAMED RESIDUAL: a tab that is never refocused and never nav
 last payload until one of those happens; closing that needs a server-push channel this estate does
 not have.
 
+**The accept control is gated on the CALLER's own acceptance, not on the firm's.**
+`standing_live` needs ONE active owner holding BOTH current acceptances, so two owners holding the
+two halves is a state where every kind reads `firm_accepted: true` and standing is still false
+(`p635.db.legal_standing_two_people` asserts exactly that). A control gated on `!firm_accepted`
+disappeared in precisely that state, leaving the firm with no in-app remedy at all. The gate is
+`can_accept_for_firm && !standing_live && status = 'published' && my_accepted_version <> version`:
+a control for the owner who can actually move the wall, and none while standing is live. The hint
+everyone else reads names the MOST RECENT acceptance on record — not "whoever sorts first accepted
+the previous ones", which is false whenever one kind's acceptance is still current.
+
+**An answer carries the month it is an answer for.** The window label, the CSV's provenance header
+and the download filename follow the period the instant it changes; the rows follow the door, which
+is a round trip later. So `FirmSettingsPanel` stamps the month onto the usage answer and the card
+renders nothing until the two agree — otherwise the provenance header that exists so a spreadsheet
+cannot lose the window would state a window its rows did not come from.
+
+**An unreadable read is never an empty one.** `loadFirmAiUsage` THROWS when the payload is not a
+table (the two sibling reads already did), so a refusal-shaped body reaches the card as a failure
+with a retry rather than as "No model calls in this period." Rows the build cannot decode are still
+dropped — a silently zeroed row is worse — but the COUNT comes back, the card says so beside the
+money column, and the CSV carries it, exactly as `unpriced_calls` is carried. Likewise, a firm with
+NO current billing plan (`uq_billing_plans_current`, 0163:207, permits zero) reads "No plan is
+current for this firm" and keeps its payment line, invoice explanation and capacity numbers, rather
+than dropping the whole answer behind a transport failure.
+
 **The model-usage window is UTC, and the page says so.** `clara.get_llm_usage_summary` filters rows
 by `(created_at at time zone 'utc')::date` (0110:750), so the month the card labels is a UTC month
 and not an `Asia/Kuala_Lumpur` one. `lib/firm/usage-period.ts` derives the bounds the way the door

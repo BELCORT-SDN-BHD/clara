@@ -44,15 +44,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { triggerDownload } from "@/lib/download-mechanism";
 import { formatInteger, formatMoneyCents, formatUsageMonth, formatUtcDay } from "@/lib/firm/commercial-format";
-import type { FirmUsageRow, UsageScope } from "@/lib/firm/commercial-reads";
+import type { FirmUsageTable, UsageScope } from "@/lib/firm/commercial-reads";
 import { buildUsageCsv, usageCsvFilename } from "@/lib/firm/usage-csv";
 import type { UsagePeriod } from "@/lib/firm/usage-period";
 import type { FirmSettingsView } from "./firm-settings-view";
 
 const SCOPE_ORDER: readonly UsageScope[] = ["firm", "platform"];
 
+/** THE ANSWER CARRIES THE MONTH IT IS AN ANSWER FOR. The window label, the CSV's provenance
+ *  header and the filename all follow `period` the instant it changes; the rows follow the door,
+ *  which is a round trip later. Between the two, a card taking rows and a period as INDEPENDENT
+ *  props renders last month's table under this month's window and offers to download it with
+ *  this month's stamp on it — the provenance header stating a window its rows did not come from,
+ *  which is the one thing that header exists to make impossible. Carrying the month INSIDE the
+ *  ready view makes the mismatch representable and therefore checkable, instead of a rule
+ *  somebody has to remember while editing the panel. */
+export type FirmUsageAnswer = FirmUsageTable & { readonly month: string };
+
 export type AiUsageCardProps = {
-  readonly view: FirmSettingsView<readonly FirmUsageRow[]>;
+  readonly view: FirmSettingsView<FirmUsageAnswer>;
   readonly period: UsagePeriod;
   readonly months: readonly string[];
   readonly firmName: string;
@@ -72,7 +82,12 @@ export function AiUsageCard({
   download = triggerDownload,
 }: AiUsageCardProps) {
   const t = useTranslations("FirmSettings");
-  const rows = view.status === "ready" ? view.data : null;
+  // AN ANSWER FOR ANOTHER MONTH IS NOT AN ANSWER. It reverts to the loading face rather than
+  // rendering rows the label above them does not describe.
+  const answer = view.status === "ready" && view.data.month === period.month ? view.data : null;
+  const rows = answer?.rows ?? null;
+  const dropped = answer?.dropped ?? 0;
+  const awaitingPeriod = view.status === "loading" || (view.status === "ready" && answer === null);
   const currency = rows?.find((r) => r.priceCurrency.length > 0)?.priceCurrency ?? "USD";
   const unpriced = (rows ?? []).reduce((sum, r) => sum + r.unpricedCalls, 0);
   const hasRows = rows !== null && rows.length > 0;
@@ -84,6 +99,7 @@ export function AiUsageCard({
       fromDate: period.fromDate,
       toDate: period.toDate,
       currency,
+      dropped,
     });
     download({
       blob: new Blob([csv], { type: "text/csv;charset=utf-8" }),
@@ -127,7 +143,7 @@ export function AiUsageCard({
         </p>
         {period.fellBack ? <StateBanner tone="neutral">{t("usageBadPeriod")}</StateBanner> : null}
 
-        {view.status === "loading" ? <Skeleton className="h-32 w-full" /> : null}
+        {awaitingPeriod ? <Skeleton className="h-32 w-full" /> : null}
 
         {view.status === "denied" ? (
           <StateBanner tone="warning" code="CLR04">{view.message}</StateBanner>
@@ -140,10 +156,15 @@ export function AiUsageCard({
           </StateBanner>
         ) : null}
 
-        {rows !== null && rows.length === 0 ? (
+        {rows !== null && rows.length === 0 && dropped === 0 ? (
           // A NAMED ZERO after a complete read — and the download action is ABSENT, not disabled
-          // over an empty table (appendix D §136).
+          // over an empty table (appendix D §136). It is withheld when rows were DROPPED: an
+          // incomplete read must never be spelled "no model calls in this period".
           <p className="text-sm text-muted-foreground">{t("usageEmpty")}</p>
+        ) : null}
+
+        {dropped > 0 ? (
+          <StateBanner tone="warning">{t("usageDropped", { count: dropped })}</StateBanner>
         ) : null}
 
         {hasRows ? (

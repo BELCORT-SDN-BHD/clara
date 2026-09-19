@@ -21,7 +21,7 @@ import { FirmScopeProvider } from "../firm-scope-provider";
 import { FirmSettingsPanelView, type FirmSettingsLoaders } from "./firm-settings-panel";
 import { recentUsageMonths, resolveUsagePeriod } from "../../lib/firm/usage-period";
 import { RefusalError } from "../../lib/wire";
-import type { FirmCommercialState, FirmLegalStanding, FirmUsageRow } from "../../lib/firm/commercial-reads";
+import type { FirmCommercialState, FirmLegalStanding, FirmUsageRow, FirmUsageTable } from "../../lib/firm/commercial-reads";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -118,7 +118,7 @@ test("p635.web.panel_composition five cards plus the two pinned legacy ones, fro
   const h = await mountPanel({
     legalStanding: async () => { calls += 1; return STANDING; },
     commercialState: async () => { calls += 1; return COMMERCIAL; },
-    aiUsage: async () => { calls += 1; return USAGE; },
+    aiUsage: async () => { calls += 1; return { rows: USAGE, dropped: 0 }; },
   });
   try {
     const text = h.text();
@@ -143,7 +143,7 @@ test("p635.web.revocation_clears a demotion mid-session clears the figures on th
   const h = await mountPanel({
     legalStanding: async () => STANDING,
     commercialState: async () => { if (demoted) throw clr04(); return COMMERCIAL; },
-    aiUsage: async () => { if (demoted) throw clr04(); return USAGE; },
+    aiUsage: async () => { if (demoted) throw clr04(); return { rows: USAGE, dropped: 0 }; },
   });
   try {
     assert.match(h.text(), /MYR 199\.00/, "the figures are on screen");
@@ -191,7 +191,7 @@ test("p635.web.panel_failed_is_not_denied a transport failure offers a retry and
   const h = await mountPanel({
     legalStanding: async () => STANDING,
     commercialState: async () => { throw new Error("fetch failed"); },
-    aiUsage: async () => USAGE,
+    aiUsage: async () => ({ rows: USAGE, dropped: 0 }),
   });
   try {
     const text = h.text();
@@ -199,5 +199,64 @@ test("p635.web.panel_failed_is_not_denied a transport failure offers a retry and
     assert.match(text, /Try again/);
     assert.doesNotMatch(text, /No payment is recorded for this firm/,
       "a failed read is not an absence: 'nobody paid' and 'we could not ask' are different answers");
+  } finally { await h.unmount(); }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// FIX ROUND 1 — the PERIOD CHANGE (adversarial A2). The window label, the CSV
+// provenance header and the filename all follow `period` immediately; the rows
+// follow the door. Between the two there was a stretch where the table showed
+// last month's rows under this month's window and offered to download them
+// with this month's stamp on them.
+// ───────────────────────────────────────────────────────────────────────────
+
+function panelElement(loaders: FirmSettingsLoaders, month: string) {
+  return createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    timeZone: "Asia/Kuala_Lumpur",
+    children: createElement(FirmScopeProvider, {
+      scope: SCOPE,
+      children: createElement(FirmSettingsPanelView, {
+        loaders,
+        now: NOW,
+        period: resolveUsagePeriod(month, NOW),
+        months: recentUsageMonths(NOW),
+        onPeriodChange: () => {},
+      }),
+    }),
+  });
+}
+
+test("p635.web.usage_period_change a new window is never stamped on the previous month's rows", async () => {
+  const SEPTEMBER: FirmUsageRow[] = [{ ...USAGE[0]!, callKind: "september_only_kind" }];
+  const loaders: FirmSettingsLoaders = {
+    legalStanding: async () => STANDING,
+    commercialState: async () => COMMERCIAL,
+    // AUGUST NEVER ANSWERS. That is the whole window this cell is about: the moment between the
+    // period changing and the door coming back.
+    aiUsage: async (period) =>
+      period === "2026-09-01"
+        ? { rows: SEPTEMBER, dropped: 0 }
+        : new Promise<FirmUsageTable>(() => {}),
+  };
+
+  const h = await renderComponent(panelElement(loaders, "2026-09"));
+  try {
+    for (let i = 0; i < 4; i += 1) await h.settle();
+    assert.match(h.text(), /september_only_kind/, "September answered and is on screen");
+
+    await h.rerender(panelElement(loaders, "2026-08"));
+    for (let i = 0; i < 3; i += 1) await h.settle();
+
+    const text = h.text();
+    assert.match(text, /01 Aug 2026 to 31 Aug 2026/, "the window label followed the period, as it must");
+    assert.doesNotMatch(text, /september_only_kind/,
+      "…and the rows did NOT stay behind under it — a table read under the wrong window is a wrong table");
+    assert.equal(
+      h.find((n) => (n as Record<string, unknown>).tagName === "BUTTON" && /Download CSV/.test(String((n as { textContent?: string }).textContent ?? ""))) !== null,
+      false,
+      "there is nothing to download until the new month answers: the CSV's provenance header would otherwise carry a window its rows did not come from",
+    );
   } finally { await h.unmount(); }
 });

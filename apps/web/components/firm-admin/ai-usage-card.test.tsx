@@ -12,7 +12,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
-import { AiUsageCard } from "./ai-usage-card";
+import { AiUsageCard, type FirmUsageAnswer } from "./ai-usage-card";
 import type { FirmUsageRow } from "../../lib/firm/commercial-reads";
 import { resolveUsagePeriod, recentUsageMonths } from "../../lib/firm/usage-period";
 import type { FirmSettingsView } from "./firm-settings-view";
@@ -41,10 +41,24 @@ function row(over: Partial<FirmUsageRow> = {}): FirmUsageRow {
   };
 }
 
-type Handoff = { filename: string; text: string };
+type Handoff = { filename: string; text: string; blob: Blob };
 
+/** Every cell below is about a period whose answer has ARRIVED, so the stamp is the period's
+ *  own month; `mountAnswer` is for the cells that are about the stamp itself. */
 async function mount(
   view: FirmSettingsView<readonly FirmUsageRow[]>,
+  sink: { periods: string[]; downloads: Handoff[] },
+  period = PERIOD,
+) {
+  const stamped: FirmSettingsView<FirmUsageAnswer> =
+    view.status === "ready"
+      ? { status: "ready", data: { month: period.month, rows: view.data, dropped: 0 } }
+      : view;
+  return mountAnswer(stamped, sink, period);
+}
+
+async function mountAnswer(
+  view: FirmSettingsView<FirmUsageAnswer>,
   sink: { periods: string[]; downloads: Handoff[] },
   period = PERIOD,
 ) {
@@ -61,7 +75,10 @@ async function mount(
         onPeriodChange: (month: string) => sink.periods.push(month),
         onRetry: () => {},
         download: ({ blob, filename }) => {
-          sink.downloads.push({ filename, text: (blob as unknown as { __text?: string }).__text ?? "" });
+          // THE BYTES ARE READ FROM THE BLOB ITSELF where a cell needs them (`blob.text()` is
+          // async, so the handler stashes the Blob and the cell awaits it). `__text` was a stub
+          // field nothing ever set; the filename cells never noticed because they never read it.
+          sink.downloads.push({ filename, text: (blob as unknown as { __text?: string }).__text ?? "", blob });
         },
       }),
     }),
@@ -202,5 +219,59 @@ test("p635.web.usage_separation the card says these are not a client's figures a
     assert.match(h.text(), /These are Clara's own model costs\. They are not a client's figures and they never post to a ledger/,
       "C55.21's separation sentence — ticket 660 owns the money on the client dashboards (spelled without the hash: the token lint reads a three-digit ticket number as a hex colour)");
     assert.ok(h.find((n) => (n as Stub).tagName === "A" && textOf(n as Stub).includes("Go to clients")));
+  } finally { await h.unmount(); }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// FIX ROUND 1 — the month STAMP (adversarial A2) and the DROPPED-ROW count
+// (adversarial A4).
+// ───────────────────────────────────────────────────────────────────────────
+
+test("p635.web.usage_answer_for_another_month is not rendered at all", async () => {
+  const sink = { periods: [] as string[], downloads: [] as Handoff[] };
+  const h = await mountAnswer(
+    { status: "ready", data: { month: "2026-08", rows: [row({ callKind: "august_only_kind" })], dropped: 0 } },
+    sink,
+    PERIOD,
+  );
+  try {
+    const text = h.text();
+    assert.doesNotMatch(text, /august_only_kind/,
+      "rows belonging to another month are not this period's table, whatever the label above them says");
+    assert.equal(downloadButton(h) !== null, false,
+      "and they are certainly not downloadable under this period's provenance header");
+    assert.doesNotMatch(text, /No model calls in this period/,
+      "…nor is the absence of them a named zero: nothing has been read for THIS month yet");
+  } finally { await h.unmount(); }
+});
+
+test("p635.web.usage_dropped_rows are counted on screen and the period is never called empty", async () => {
+  const sink = { periods: [] as string[], downloads: [] as Handoff[] };
+  const h = await mountAnswer(
+    { status: "ready", data: { month: PERIOD.month, rows: [], dropped: 2 } },
+    sink,
+  );
+  try {
+    const text = h.text();
+    assert.match(text, /2 rows for this period could not be read/,
+      "the same published tripwire unpriced_calls is: an incomplete table says so");
+    assert.doesNotMatch(text, /No model calls in this period/,
+      "a read that dropped rows is NOT a named zero — that is a generic successful Empty over a failure");
+  } finally { await h.unmount(); }
+});
+
+test("p635.web.usage_dropped_rows_reach_the_csv so a spreadsheet cannot read as complete either", async () => {
+  const sink = { periods: [] as string[], downloads: [] as Handoff[] };
+  const h = await mountAnswer(
+    { status: "ready", data: { month: PERIOD.month, rows: [row()], dropped: 1 } },
+    sink,
+  );
+  try {
+    const button = downloadButton(h);
+    assert.ok(button, "rows were read, so there is something to download");
+    await h.fireEvent(button, "click");
+    assert.equal(sink.downloads.length, 1);
+    assert.match(await sink.downloads[0]!.blob.text(),
+      /1 rows returned for this period could not be read and are NOT in this file/);
   } finally { await h.unmount(); }
 });

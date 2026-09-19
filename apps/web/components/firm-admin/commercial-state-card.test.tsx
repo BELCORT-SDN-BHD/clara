@@ -141,3 +141,22 @@ test("p635.web.commercial_failed offers a retry and paints no commercial state a
     assert.ok(h.find((n) => (n as Stub).tagName === "BUTTON" && textOf(n as Stub).includes("Try again")));
   } finally { await h.unmount(); }
 });
+
+// FIX ROUND 1 (adversarial A6) — NO CURRENT PLAN. `uq_billing_plans_current` (0163:207) caps
+// the current plan at one row and permits ZERO. The door then returns a plan whose every column
+// is NULL, and the decoder used to drop the WHOLE payload for it: the payment, the invoice
+// explanation, the four capacity numbers and the identity card's "In Clara since" all vanished
+// behind "This could not be read." — an absence rendered as a transport failure, which is the
+// one thing AC3 names.
+test("p635.web.commercial_no_current_plan is a named absence, and the rest of the card still reads", async () => {
+  const h = await mount({ status: "ready", data: state({ plan: null }) });
+  try {
+    const text = h.text();
+    assert.match(text, /No plan is current for this firm/);
+    assert.doesNotMatch(text, /This could not be read\./, "an absence is not a failure");
+    assert.doesNotMatch(text, MONEY_RE, "and certainly not an occasion to render a figure");
+    assert.match(text, /No payment is recorded for this firm/, "the payment line is still readable");
+    assert.match(text, /Clara does not collect subscription invoices/, "…and so is the invoice explanation");
+    assert.equal(manageBilling(h), false, "still no billing control at any rank");
+  } finally { await h.unmount(); }
+});

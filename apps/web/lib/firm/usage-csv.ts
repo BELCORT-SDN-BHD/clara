@@ -31,6 +31,10 @@ export type UsageCsvContext = {
   /** The currency the ROWS carry. Passed in rather than read off the first row so an empty
    *  period still says which currency the column would have been in. */
   readonly currency: string;
+  /** Rows the door returned that this build could not read. Carried for the same reason
+   *  `unpriced_calls` is: a file that reads as complete when the screen said it was not is the
+   *  defect the provenance header exists to prevent. */
+  readonly dropped: number;
 };
 
 export const USAGE_CSV_COLUMNS = [
@@ -67,12 +71,12 @@ export function buildUsageCsv(rows: readonly FirmUsageRow[], context: UsageCsvCo
       `Clara model usage — ${context.firmName}`,
       `${context.fromDate} to ${context.toDate} (UTC)`,
     ]),
-    csvLine([
-      `Provider price in ${context.currency}, not your books; nothing here is converted and nothing here posts to a ledger.`,
-      unpriced > 0
-        ? `${unpriced} calls in this period have no price on record and are counted but not priced.`
-        : "Every call in this period has a price on record.",
-    ]),
+    csvLine(
+      context.dropped > 0
+        ? [provenanceCurrency(context), provenanceFreshness(unpriced),
+           `${context.dropped} rows returned for this period could not be read and are NOT in this file.`]
+        : [provenanceCurrency(context), provenanceFreshness(unpriced)],
+    ),
     csvLine(USAGE_CSV_COLUMNS),
     ...rows.map((r) =>
       csvLine([
@@ -89,6 +93,16 @@ export function buildUsageCsv(rows: readonly FirmUsageRow[], context: UsageCsvCo
     ),
   ];
   return `${lines.join("\r\n")}\r\n`;
+}
+
+function provenanceCurrency(context: UsageCsvContext): string {
+  return `Provider price in ${context.currency}, not your books; nothing here is converted and nothing here posts to a ledger.`;
+}
+
+function provenanceFreshness(unpriced: number): string {
+  return unpriced > 0
+    ? `${unpriced} calls in this period have no price on record and are counted but not priced.`
+    : "Every call in this period has a price on record.";
 }
 
 /** A filename a person can find again: the firm is already in the header, so the name carries

@@ -94,7 +94,7 @@ function loadersFor(admin: boolean, masked: boolean): FirmSettingsLoaders {
   return {
     legalStanding: async () => standing(masked),
     commercialState: async () => { if (!admin) throw clr04(); return COMMERCIAL; },
-    aiUsage: async () => { if (!admin) throw clr04(); return USAGE; },
+    aiUsage: async () => { if (!admin) throw clr04(); return { rows: USAGE, dropped: 0 }; },
   };
 }
 

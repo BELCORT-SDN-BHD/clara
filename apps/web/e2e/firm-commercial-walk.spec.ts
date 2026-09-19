@@ -440,8 +440,12 @@ test("320px and 200% zoom carry no horizontal page scroll, and focus returns to 
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  const focusTag = await page.evaluate(() => document.activeElement?.tagName ?? "NONE");
-  expect(focusTag, "focus must not be stranded on <body> after the dialog closes").not.toBe("BODY");
+  // THE TRIGGER ITSELF, not "anything but <body>". `not.toBe("BODY")` passed if focus landed on
+  // another card's button, on the dialog's former container, or on the page shell — none of which
+  // is focus RETURN, which is the property AC5/AC6 name and the reason a keyboard user can carry
+  // on from where they were. Compared against the element handle that opened the dialog.
+  const returned = await trigger.evaluate((el) => el === document.activeElement);
+  expect(returned, "focus must return to the trigger that opened the dialog").toBe(true);
 
   // 320px — the cards stack and the usage table scrolls inside its own region.
   await page.setViewportSize({ width: 320, height: 720 });

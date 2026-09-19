@@ -42,7 +42,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { SettingsPanel } from "@/components/firm-admin/settings-panel";
-import { AiUsageCard } from "@/components/firm-admin/ai-usage-card";
+import { AiUsageCard, type FirmUsageAnswer } from "@/components/firm-admin/ai-usage-card";
 import { CommercialStateCard } from "@/components/firm-admin/commercial-state-card";
 import { FirmIdentityCard } from "@/components/firm-admin/firm-identity-card";
 import { LegalStandingCard } from "@/components/firm-admin/legal-standing-card";
@@ -55,7 +55,7 @@ import {
   loadFirmLegalStanding,
   type FirmCommercialState,
   type FirmLegalStanding,
-  type FirmUsageRow,
+  type FirmUsageTable,
 } from "@/lib/firm/commercial-reads";
 import { recentUsageMonths, resolveUsagePeriod, type UsagePeriod } from "@/lib/firm/usage-period";
 import { denied, failed, LOADING, ready, type FirmSettingsView } from "./firm-settings-view";
@@ -63,7 +63,7 @@ import { denied, failed, LOADING, ready, type FirmSettingsView } from "./firm-se
 export type FirmSettingsLoaders = {
   readonly legalStanding: () => Promise<FirmLegalStanding>;
   readonly commercialState: () => Promise<FirmCommercialState>;
-  readonly aiUsage: (period: string) => Promise<FirmUsageRow[]>;
+  readonly aiUsage: (period: string) => Promise<FirmUsageTable>;
 };
 
 const PRODUCTION_LOADERS: FirmSettingsLoaders = {
@@ -136,7 +136,7 @@ export function FirmSettingsPanelView({
 
   const [standing, setStanding] = useState<FirmSettingsView<FirmLegalStanding>>(LOADING);
   const [commercial, setCommercial] = useState<FirmSettingsView<FirmCommercialState>>(LOADING);
-  const [usage, setUsage] = useState<FirmSettingsView<readonly FirmUsageRow[]>>(LOADING);
+  const [usage, setUsage] = useState<FirmSettingsView<FirmUsageAnswer>>(LOADING);
 
   // N3's latest-wins epoch, and there is ONE PER READ rather than one shared counter. A single
   // counter is not a smaller version of this: the three reads start together, so the third would
@@ -180,10 +180,13 @@ export function FirmSettingsPanelView({
   const readUsage = useCallback(async (month: string) => {
     const mine = ++usageEpoch.current;
     try {
-      const data = await loaderRef.current.aiUsage(`${month}-01`);
-      if (usageEpoch.current === mine) setUsage(ready(data));
+      const table = await loaderRef.current.aiUsage(`${month}-01`);
+      // THE MONTH TRAVELS WITH THE ROWS. The epoch guard below fixes out-of-order RESPONSES; it
+      // says nothing about the stretch BEFORE the first one, where the label has already moved.
+      // Stamping the answer lets the card refuse to render rows under a window they are not from.
+      if (usageEpoch.current === mine) setUsage(ready({ month, ...table }));
     } catch (e) {
-      if (usageEpoch.current === mine) setUsage(classify<readonly FirmUsageRow[]>(e));
+      if (usageEpoch.current === mine) setUsage(classify<FirmUsageAnswer>(e));
     }
   }, []);
 

@@ -695,6 +695,16 @@ body, subtracts 0233's floor block and requires the remainder to hash to the pre
 same way. The grant is NOT re-issued — `create or replace` preserves the ACL, and §C asserts the
 live ACL is byte-identical to the pre-image, which is what makes that claim a measurement.
 
+**A CENSUS THAT READS THE WRONG BODY PROVES NOTHING.** §C's name-resolution guard — the standing
+door must resolve `display_name` inside its own definer body and never through
+`clara.users_visible` (0137:291-298 re-derives `jwt_firm()` and admits agents) — originally tested a
+variable last assigned inside the preceding loop, whose final iteration is `get_firm_ai_usage`. It
+therefore passed whatever the standing door said: measured on the rig by splicing `users_visible`
+into the standing body inside a rolled-back transaction, the whole tail still returned OK. The guard
+now re-derives the comment-stripped source from the standing door's own `prosrc` immediately before
+the test, and the same mutant raises. Comment-stripped and not raw, because this body legitimately
+NAMES `clara.users_visible` in the comment explaining why it does not use it.
+
 **`clara.firm_document_limits` IS UNTOUCHED.** Its viewer-readable SELECT (`0007:810-811`,
 `:2742-2744`) is unmoved in both directions, asserted in the prestate and again in the tail. The
 capacity numbers ride door 2 only so a settings card can render them beside the plan; that is an

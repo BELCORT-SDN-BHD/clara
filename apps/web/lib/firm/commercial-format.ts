@@ -26,9 +26,15 @@ export function formatPlanAmount(plan: PlanAmount): string | null {
 /** Cents in the currency the caller names, formatted for en-MY. Never called on a plan whose
  *  amount is unruled — `formatPlanAmount` is the gate for that. */
 export function formatMoneyCents(cents: number, currency: string): string {
-  const whole = Math.trunc(cents / 100);
+  // ONE SIGN, COMPOSED ONCE, AND THE MAGNITUDE FORMATTED WITHOUT IT. The first cut let
+  // `Intl.NumberFormat` see a negative whole part AND prepended a "-" of its own when that whole
+  // part was `-0`, so `formatMoneyCents(-50, "USD")` read "-USD -0.50" and `-19900` read
+  // "MYR -199.00" — two different shapes for one idea, on a money surface. Neither is reachable
+  // from today's data (spend is a coalesced sum over a non-negative price table; the beta plan is
+  // 0), which is why `p635.format.money_negative_sub_unit` pins it rather than a comment.
+  const sign = cents < 0 ? "-" : "";
+  const whole = Math.abs(Math.trunc(cents / 100));
   const fraction = Math.abs(cents % 100);
-  const sign = cents < 0 && whole === 0 ? "-" : "";
   return `${sign}${currency} ${formatInteger(whole)}.${String(fraction).padStart(2, "0")}`;
 }
 

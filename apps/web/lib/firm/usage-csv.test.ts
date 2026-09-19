@@ -32,6 +32,7 @@ const CONTEXT = {
   fromDate: "2026-09-01",
   toDate: "2026-09-30",
   currency: "USD",
+  dropped: 0,
 };
 
 test("p635.csv.provenance_header the first two lines carry the firm, the exact UTC window and the currency", () => {
@@ -99,4 +100,19 @@ test("p635.csv.empty_period an empty period still states its window and its curr
 
 test("p635.csv.filename names the month in the door's own frame", () => {
   assert.equal(usageCsvFilename("2026-09"), "clara-model-usage-2026-09-utc.csv");
+});
+
+test("p635.csv.dropped_rows the provenance header carries what the file is MISSING, not only what it holds", () => {
+  // FIX ROUND 1 (adversarial A4). A row the build could not decode leaves the table; a file that
+  // says nothing about it reads as a complete period, which is the same defect as a silently
+  // zeroed row one step further along.
+  const complete = buildUsageCsv([row()], CONTEXT);
+  assert.doesNotMatch(complete.split("\r\n")[1]!, /could not be read/,
+    "nothing was dropped, so nothing is claimed");
+
+  const partial = buildUsageCsv([row()], { ...CONTEXT, dropped: 2 });
+  const lines = partial.split("\r\n");
+  assert.match(lines[1]!, /2 rows returned for this period could not be read and are NOT in this file/);
+  assert.equal(lines[2], USAGE_CSV_COLUMNS.join(","), "the column header is still the third line");
+  assert.equal(lines[3]!.startsWith("firm,chat,"), true, "and the rows still start on the fourth");
 });
