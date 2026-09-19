@@ -488,7 +488,7 @@ test("p655.polarity.matrix a negative total, an AR party on an AP kind and a cre
       basis: billBasis(),
     }),
     "p655.polarity.matrix(e2): a stated total that does not tie to the control leg");
-  await refusesTi(client, "CLR10", TI_REASON.unbalanced,
+  const unbal = await refusesTi(client, "CLR10", TI_REASON.unbalanced,
     () => admitTradeInvoiceWork({
       client, author: ALICE(), kind: TI_KIND.bill,
       particulars: billParticulars({ counterparty: vend }),
@@ -498,6 +498,15 @@ test("p655.polarity.matrix a negative total, an AR party on an AP kind and a cre
       ] }),
     }),
     "p655.polarity.matrix(e3): an unbalanced basis");
+  // ADV-655-5 (fix round 1): WHICH arm answers is pinned, because two of them could. Step 2's
+  // re-badge of `clara._assert_journal_basis` (0178:780-783) carries that predicate's OWN
+  // `field`/`constraint` keys; step 6's later re-sum builds a detail with neither. The estate
+  // answers with step 2's — so step 6 is a belt behind a door that already closed, and 0225's
+  // comment now says so instead of implying it is the reason an unbalanced basis is refused.
+  assert.equal(unbal.detail.constraint, "balanced",
+    "p655.polarity.matrix(e3): the refusal is clara._assert_journal_basis's, re-badged at step 2 -- not step 6's own re-sum");
+  assert.equal(unbal.detail.field, "lines",
+    "p655.polarity.matrix(e3): …and it carries that predicate's own `field`, which step 6's raise does not build");
   await refusesTi(client, "CLR10", TI_REASON.invalidDueDate,
     () => admitTradeInvoiceWork({
       client, author: ALICE(), kind: TI_KIND.bill,
@@ -663,6 +672,43 @@ test("p655.replay.race a concurrent pair under ONE key leaves one invoice and a 
     "p655.replay.race: the stored reference belongs to the SAME submission as the stored party -- never a blend of the two");
 });
 
+test("p655.duplicate.same_reference_is_NOT_probed two admissions of ONE supplier bill number under two intent keys both land -- the residual, measured rather than assumed", async (t) => {
+  if (await gateTi(t)) return;
+  // ADV-655-6 (fix round 1), NAMED AND MEASURED, NOT FIXED. This branch reads "duplicate"
+  // exclusively as "the same INTENT replayed" -- which is what AC4 and the brief's cell 13 ask
+  // for, and what p655.replay.* proves. It does NOT read "duplicate" as "this supplier's bill
+  // number is already recorded": nothing in the door, the birth trigger or the belts looks at
+  // (client_id, counterparty_id, reference), and `reference` carries no uniqueness (0225 section
+  // A: it is nullable, and two suppliers legitimately reuse numbers, so a hard unique would be
+  // WRONG). The usual shape is a warn-not-refuse probe -- the person is told "this number is
+  // already recorded, here is the Work" and chooses -- and that is a new refusal/advisory surface
+  // the brief does not grant this ticket.
+  //
+  // So the cell PINS today's behaviour instead of pretending it is not there: one bill number,
+  // two keys, two payables. A later ticket that adds the probe reds this cell, which is exactly
+  // how a named residual should behave.
+  const client = await tiClient("dupref");
+  const cp = await vendor(ALICE(), { client });
+  const ref = `ALPHA-DUP-${randomUUID().slice(0, 8)}`;
+  for (const tag of ["one", "two"]) {
+    const a = await armed({
+      client, particulars: billParticulars({ counterparty: cp, reference: ref }),
+      basis: billBasis(), intentKey: `ti-dup-${tag}-${randomUUID()}`,
+    });
+    await post(a);
+  }
+  const dupes = (await rootQuery(
+    "select count(*)::int n from clara.trade_invoices where client_id=$1 and reference=$2",
+    [client, ref])).rows[0].n;
+  assert.equal(dupes, 2,
+    "p655.duplicate.same_reference_is_NOT_probed: TWO trade invoices carry one bill number -- the residual this cell names");
+  const items = await openItemsForClient(client);
+  assert.equal(items.length, 2, "p655.duplicate.same_reference_is_NOT_probed: …and TWO AP open items");
+  assert.equal(items.reduce((s, i) => s + Number(i.amount_cents), 0), 212000,
+    "p655.duplicate.same_reference_is_NOT_probed: …so the payable is doubled. A firm's own control is the "
+    + "Work list and the open-item list, not this door -- until a duplicate probe is owned and built");
+});
+
 test("p655.atomic.no_partial a failure anywhere in the admission leaves no Work, no invoice, no entry, no item and no receipt", async (t) => {
   if (await gateTi(t)) return;
   const client = await tiClient("atomic");
@@ -761,6 +807,64 @@ test("p655.authority.floors viewer ⇒ insufficient_role; deactivated member ⇒
   await refusesTi(client, "CLR10", TI_REASON.invalidIntentKey,
     () => admitTradeInvoiceWork({ client, author: ALICE(), intentKey: "   ", particulars: p, basis: b }),
     "p655.authority.floors: a whitespace intent key is refused before anything durable");
+});
+
+test("p655.authority.cited_and_inactive the last two tokens of the door's ladder are DRIVEN: a document that already backs a posted entry, and a client that is no longer active", async (t) => {
+  if (await gateTi(t)) return;
+  // ADV-655-4 (fix round 1). `source_already_posted` and `client_inactive` were declared in the
+  // fixtures, raised in the door and named in the contract stanza, but no cell, World leg or walk
+  // ever drove them -- and DECISIONS section 4 admits a NAMED residual, never silence. Both are
+  // driven here, through `refusesTi`, so the "wrote nothing" half is proved too.
+  const rf = await import("./rig-fixtures.mjs");
+
+  // ---- source_already_posted --------------------------------------------------------------
+  // The FIRST trade invoice cites a real verified document and posts; the posting core writes the
+  // clara.entry_evidence_links row (0204:687-700) that clara._document_posting_entry reads. The
+  // SECOND admission cites the same document and must be refused BY NAME, at admission, rather
+  // than reaching uq_entry_evidence_links_document as a raw 23505 minutes later.
+  const cited = await tiClient("cited");
+  const ccp = await vendor(ALICE(), { client: cited });
+  const doc = await rf.ingestDocument(ALICE(), {
+    client: cited,
+    sha256: `${randomUUID().replace(/-/g, "")}${randomUUID().replace(/-/g, "")}`,   // 64 lowercase hex — documents_sha256_check
+    filename: "alpha-bill.pdf", opKey: opk("ti-cited-doc"),
+  });
+  const first = await armed({
+    client: cited, particulars: billParticulars({ counterparty: ccp }), basis: billBasis(),
+    sourceRefs: [{ kind: "document", document_id: doc }],
+  });
+  await post(first);
+  assert.equal(await entryCount(cited), 1, "p655.authority.cited_and_inactive: the cited invoice posted");
+
+  const already = await refusesTi(cited, "CLR13", TI_REASON.sourceAlreadyPosted,
+    () => admitTradeInvoiceWork({
+      client: cited, author: ALICE(),
+      particulars: billParticulars({ counterparty: ccp, reference: "ALPHA-2026-0043" }),
+      basis: billBasis(), sourceRefs: [{ kind: "document", document_id: doc }],
+    }),
+    "p655.authority.cited_and_inactive: a document that already backs a posted entry");
+  assert.equal(already.detail.document_id, doc,
+    "p655.authority.cited_and_inactive: …and the refusal names the document");
+  assert.ok(already.detail.entry_id,
+    "p655.authority.cited_and_inactive: …and the entry that already holds it, so the person can open it");
+
+  // ---- client_inactive ----------------------------------------------------------------------
+  // A LABELLED FIXTURE SHORTCUT: archiving a client is the client lifecycle's own door (#635's
+  // surface), and driving it here would test that lane rather than this one. The status is
+  // written directly, said so, and put back.
+  const dormant = await tiClient("dormant");
+  const dcp2 = await vendor(ALICE(), { client: dormant });
+  await rootQuery("update clara.clients set status='archived' where id=$1", [dormant]);
+  try {
+    await refusesTi(dormant, "CLR10", TI_REASON.clientInactive,
+      () => admitTradeInvoiceWork({
+        client: dormant, author: ALICE(),
+        particulars: billParticulars({ counterparty: dcp2 }), basis: billBasis(),
+      }),
+      "p655.authority.cited_and_inactive: an archived client admits no new accounting work");
+  } finally {
+    await rootQuery("update clara.clients set status='active' where id=$1", [dormant]);
+  }
 });
 
 test("p655.party.resolution an ambiguous party is refused at ADMISSION with the candidate list carried verbatim", async (t) => {
@@ -934,8 +1038,31 @@ test("p655.parity.source_vs_direct a coding-lane supplier bill and a Work-lane t
   assert.equal(String(dItem.amount_cents), String(cItem.amount_cents),
     "p655.parity: the same signed amount, to the sen");
   assert.equal(dItem.item_date, cItem.item_date, "p655.parity: the same item date");
+
+  // THE DUE DATE, ASSERTED AGAINST THE RULE AND NOT AGAINST THE OTHER LANE'S OUTPUT.
+  //
+  // ADV-655-3 (fix round 1): `assert.equal(dItem.due_date, cItem.due_date)` alone proves that two
+  // implementations agree on an arithmetic, never that the arithmetic is the right one for a lane
+  // that carries a SEPARATE document date. THIS Work-lane invoice states document_date 2026-03-04
+  // and posts on 2026-03-31, so the two candidate anchors are 27 days apart and exactly one of
+  // them is what the estate wrote. The cell now NAMES it.
+  //
+  // ADV-655-2, RECORDED HERE RATHER THAN SILENTLY FIXED: payment terms conventionally run from the
+  // DOCUMENT, and the anchor is what the ticket added `document_date` for. But brief-655.md's
+  // section 4 cell 11 prescribes `posting_date + 30` verbatim, and D12c leaves the anchor unstated
+  // while pointing at the legacy producer 0040:6010-6015. Changing it changes what the brief
+  // specifies, so it is RATIFICATION-REQUESTED, not a hunk -- and until it is ruled, the number
+  // the estate actually writes is pinned here in the open. Flipping the anchor reds THIS line
+  // first, which is the point.
+  const TERMS_FROM_POSTING = "2026-04-30";   // TI_DATE.posting  + 30
+  const TERMS_FROM_DOCUMENT = "2026-04-03";  // TI_DATE.document + 30
+  assert.equal(dItem.due_date, TERMS_FROM_POSTING,
+    "p655.parity: the counterparty-terms fallback anchors on the POSTING date (0225's clara._trade_invoice_due, "
+    + "brief section 4 cell 11) -- NOT on the document date, though the document date is 27 days earlier here");
+  assert.notEqual(TERMS_FROM_POSTING, TERMS_FROM_DOCUMENT,
+    "p655.parity: the two anchors genuinely disagree on this fixture, so the assertion above is not vacuous");
   assert.equal(dItem.due_date, cItem.due_date,
-    "p655.parity: the SAME due date -- both lanes derive posting_date + payment_terms_days (0040:6010-6015)");
+    "p655.parity: and the coding lane derives the same date from the same anchor (0040:6010-6015)");
   assert.equal(await controlBalance(direct, "payable"), await controlBalance(coded, "payable"),
     "p655.parity: the same control-account movement");
   // THE HONEST RESIDUAL, asserted rather than glossed: the two lanes' item KINDS agree only

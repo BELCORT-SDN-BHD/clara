@@ -732,9 +732,17 @@ begin
           'total_cents',v_total,'control_net_cents',v_net,'constraint','control_leg_tie')::text;
   end if;
 
-  -- 6 · BALANCED, EXACT CENTS. `clara._assert_balanced` is an entry-level belt and runs at commit;
-  -- this is the same law asked of the BASIS, at admission, so an unbalanced submission never
-  -- becomes a Work at all.
+  -- 6 · BALANCED, EXACT CENTS — A BELT BEHIND A DOOR THAT ALREADY CLOSED, and it is labelled as
+  -- one rather than left to read as the reason an unbalanced basis is refused.
+  --
+  -- MEASURED (ADV-655-5, on clara_655): step 2 above already calls `clara._assert_journal_basis`,
+  -- which raises for ANY imbalance (0178:780-783) and whose refusal the re-badge arm converts into
+  -- this lane's `unbalanced_basis`. An unbalanced submission (100000 Dr / 106000 Cr) leaves
+  -- carrying THAT predicate's own `field`/`constraint` keys, which the raise below does not build
+  -- — so nothing reaches this step with v_dr <> v_cr today, and `p655.polarity.matrix(e3)` pins
+  -- which arm answers. It is kept because it is the only balance law this door owns: if
+  -- `_assert_journal_basis` ever stops asking, the admission must still refuse rather than let an
+  -- unbalanced basis become a Work. A belt that never fires is cheap; a hole is not.
   select coalesce(sum((coalesce(nullif(btrim(coalesce(x.elem->>'debit_cents','')),''),'0'))::numeric),0)::bigint,
          coalesce(sum((coalesce(nullif(btrim(coalesce(x.elem->>'credit_cents','')),''),'0'))::numeric),0)::bigint
     into v_dr, v_cr
@@ -1994,10 +2002,21 @@ begin
   -- the signed control net IS -gross by construction, and nothing in this function has to
   -- know what a discount is.
   -- LADDER 3T (#655) — THE WORK-LANE TRADE INVOICE. It sits BELOW ladders 1 (reversal) and 2
-  -- (opening), so a reversal mirror and an opening entry are untouched by construction, and ABOVE
-  -- LADDER 5's `coding_kind is null => 'adjustment'` default, which is the only branch it can
-  -- take away from. It fires ONLY when clara._trade_invoice_kind_of_entry finds a trade invoice
-  -- for this entry, so EVERY other input in the estate classifies byte-identically.
+  -- (opening), so a reversal mirror and an opening entry are untouched by construction. It fires
+  -- ONLY when clara._trade_invoice_kind_of_entry finds a trade invoice for this entry, so EVERY
+  -- other input in the estate classifies byte-identically.
+  --
+  -- ITS RANK, STATED AS THE CODE ACTUALLY EXPRESSES IT (ADV-655-7). Structurally 3T is tested
+  -- BEFORE `e.coding_kind` is read at all, so it sits above ALL the coding_kind ladders, not only
+  -- above LADDER 5's `coding_kind is null => 'adjustment'` default. TODAY the two readings cannot
+  -- diverge, because no entry in the estate carries BOTH a coding_kind and a trade invoice: this
+  -- lane pins `coding_kind IS NULL` (cell p655.rig.coding_kind_untouched) and the coding lane
+  -- writes no clara.trade_invoices row. #665's cutover is what produces the entry that carries
+  -- both, and at that moment THIS resolver — not the column — decides the kind. That is a
+  -- decision #665 must make explicitly; it is recorded here rather than inherited from a comment,
+  -- and it is deliberately NOT narrowed to `e.coding_kind is null` in this file, because doing so
+  -- would deepen a widening of this shared classifier that is itself still awaiting the
+  -- orchestrator's ratification (report's "scope deviation", review finding F1).
   --
   -- WHY IT HAD TO EXIST AT ALL. MEASURED on clara_655 (PG 17.11) before 0225 was written: a
   -- documentless coding_kind-NULL entry with a payable control leg classifies 'adjustment' here,
