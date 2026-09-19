@@ -30,6 +30,17 @@
 //       not a UI annoyance, and it is designed out here rather than caught downstream:
 //       nothing downstream can catch it.
 //
+//   (c) A REPEATED UTTERANCE IS A NEW INTENT, and this is the half the first cut missed
+//       (fix round 1, review finding ADV-642-1 / STANDARDS F1). Addressed by content
+//       ALONE, every repeat of a sentence in one session derived the FIRST one's key and
+//       landed on the same replay branch — so the second "yes", "ok", "continue" or
+//       "post it" was answered with the turn Clara had already run and dropped with no
+//       bubble, no task and no error. The replay lookup has no time or state bound
+//       (0006:955-960 is `limit 1` over `(session_id, turn_key, role='user')` on an
+//       append-only table), so that collapse was PERMANENT: the person could never send
+//       that sentence again in that conversation. The address therefore carries the
+//       conversation's POSITION as well as its content — see `transcriptPosition` below.
+//
 // IT NEEDS NO NEW STATE. `AttachmentPart` is `{type, document_id, intake_id}`
 // (lib/parts/types.ts) and `ComposerAttachmentControl` emits only READY items carrying a
 // `documentId`, so the address is a pure function of what is already on screen.
@@ -51,6 +62,32 @@ export interface IntentKeyInput {
   altitude: string;
   draft: string;
   attachments: readonly AttachmentPart[];
+  /** WHERE IN THE CONVERSATION this press was made, from `transcriptPosition` below.
+   *
+   *  It is what separates a RETRY from a REPEAT, and nothing else can: both carry the
+   *  same text and the same files. A refused or lost send adds nothing to the persisted
+   *  transcript, so a retry sees the same position and derives the same key — the door's
+   *  replay branch still deduplicates it, which is the whole point of the key. A sentence
+   *  re-typed after a turn has SETTLED sees a longer transcript and derives a new one, so
+   *  it is admitted as the new instruction it is. */
+  transcriptPosition: string;
+}
+
+/** The conversation's position, as the composer has seen it: how many rows are persisted
+ *  and which one is last.
+ *
+ *  BOTH HALVES, deliberately. The count alone would collide across a transcript that was
+ *  re-read into a different window; the last id alone would not move if a row were
+ *  appended and another dropped in the same read. Neither is a hypothetical this surface
+ *  can rule out, and the pair costs one string.
+ *
+ *  IT READS ONLY PERSISTED ROWS — never the provisional bubble, never the live chunk
+ *  buffer. Those are this tab's own optimism about a turn that may not have been
+ *  admitted, and addressing an intent by them would fork the key between a press and its
+ *  own retry. */
+export function transcriptPosition(messages: readonly { id: string }[]): string {
+  const last = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  return last ? `${messages.length}@${last.id}` : "0@";
 }
 
 /** The canonical, unambiguous serialisation the hash is taken over. Exported for the
@@ -63,7 +100,7 @@ export interface IntentKeyInput {
  *  then B and attaching B then A are the same intent. */
 export function canonicalIntentAddress(input: IntentKeyInput): string {
   const documentIds = [...new Set(input.attachments.map((part) => part.document_id).filter((id) => typeof id === "string" && id.length > 0))].sort();
-  const fields = [input.threadId, input.altitude, input.draft.trim(), ...documentIds];
+  const fields = [input.threadId, input.altitude, input.transcriptPosition, input.draft.trim(), ...documentIds];
   return fields.map((field) => `${field.length}:${field}`).join("|");
 }
 

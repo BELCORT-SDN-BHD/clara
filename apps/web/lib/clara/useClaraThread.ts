@@ -18,7 +18,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
 import { readRunByTaskId, readThreadRunSnapshot, THREAD_RUN_LIVE_STATUSES } from "./turnRun";
-import { deriveIntentKey } from "./intentKey";
+import { deriveIntentKey, transcriptPosition } from "./intentKey";
 import { FIRM_ALTITUDE } from "./useActiveThread";
 import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
@@ -248,13 +248,6 @@ export function useClaraThread(
   const sendGenRef = useRef(0);
   /** The send generation a pending stop belongs to, or null when no stop is waiting. */
   const pendingStopRef = useRef<number | null>(null);
-  /** #642 — the intent key this tab last POSTED for this thread, so a resubmit can tell a
-   *  RETRY of the same intent (the door's replay branch protects it) from a DIFFERENT
-   *  intent sent after an unknown outcome (nothing protects that, so this tab reads the
-   *  state first). Memory-only and deliberately not persisted: appendix C §3 rules out
-   *  promising reload recovery from memory-only state, and content addressing makes the
-   *  reload case work anyway — the same sentence with the same files derives the same key. */
-  const lastIntentKeyRef = useRef<string | null>(null);
   /** Set false by the unmount cleanup, so nothing writes state into a closed rail. RE-ARMED on
    *  every mount rather than only initialised: React's StrictMode mounts, unmounts and remounts an
    *  effect in development, and a flag that only ever goes false would leave the machine silent
@@ -274,8 +267,6 @@ export function useClaraThread(
   // conversation it says nothing about.
   useEffect(() => {
     pendingStopRef.current = null;
-    // #642 — and so is the last intent: a key is an address within ONE conversation.
-    lastIntentKeyRef.current = null;
     setStop(STOP_IDLE);
   }, [threadId, setStop]);
 
@@ -414,8 +405,22 @@ export function useClaraThread(
       // text and the sorted attachment ids — see ./intentKey.ts for why a changed
       // attachment set MUST derive a new key (the door returns before it reads
       // `p_user_parts`, so a same-key repost with a different invoice drops it in silence).
+      //
+      // THE ADDRESS CARRIES THE CONVERSATION'S POSITION TOO (fix round 1, ADV-642-1).
+      // Content alone made every REPEAT of a sentence — "yes", "ok", "continue" — collide
+      // with the first one for the life of the session, and the door answered the second
+      // one with the turn it had already run. `before` is read here rather than after the
+      // derive precisely so the position is the one the person was looking at when they
+      // pressed Send.
       const altitude = opts.altitude ?? FIRM_ALTITUDE;
-      const turnKey = deriveIntentKey({ threadId, altitude, draft: trimmed, attachments });
+      const before = claraThreadStore.getThread(threadId);
+      const turnKey = deriveIntentKey({
+        threadId,
+        altitude,
+        draft: trimmed,
+        attachments,
+        transcriptPosition: transcriptPosition(before.messages),
+      });
 
       // THE PRE-READ, AND EXACTLY WHEN IT IS OWED (appendix C §3's left column). It is owed
       // when the previous send's outcome is UNKNOWN (`sendStatus === "error"` — a network
@@ -427,10 +432,17 @@ export function useClaraThread(
       // meant to protect. Read BEFORE `beginSend`, so the error the reader is looking at
       // stays on screen while this tab checks rather than being replaced by a blank
       // "Sending…".
-      const before = claraThreadStore.getThread(threadId);
-      const priorKey = lastIntentKeyRef.current;
+      //
+      // AND THE LAST KEY IS READ FROM THE STORE, not from a mount-scoped ref (fix round 1,
+      // ADV-642-4). The `sendStatus === "error"` it is paired with lives in the
+      // module-level store and survives a rail close/reopen; a ref does not, so after any
+      // remount following a failed send `priorKey` was null, the gate was skipped, and a
+      // genuinely different intent posted with no state re-read at all. A null prior key
+      // with an unknown outcome is now "unknown and unattributable", which is a reason to
+      // look, not a reason to skip looking — `priorKey !== turnKey` is true for it.
+      const priorKey = before.lastIntentKey;
       const outcomeUnknown = before.sendStatus === "error";
-      if (outcomeUnknown && priorKey !== null && priorKey !== turnKey) {
+      if (outcomeUnknown && priorKey !== turnKey) {
         claraThreadStore.beginCheckingBeforeSend(threadId);
         try {
           const [snapshot, messages] = await Promise.all([
@@ -457,8 +469,11 @@ export function useClaraThread(
       sendGenRef.current = generation;
       pendingStopRef.current = null;
       setStop(STOP_IDLE);
-      claraThreadStore.beginSend(threadId);
-      lastIntentKeyRef.current = turnKey;
+      // #642 — THE KEY THIS TAB POSTED IS RECORDED WHERE THE SEND STATE LIVES. It used to
+      // be a per-mount ref beside a module-level `sendStatus`, so a remount after a failed
+      // send lost the one fact that tells a retry from a new intent (ADV-642-4). It is an
+      // address within ONE conversation, so it lives on that conversation's own row.
+      claraThreadStore.beginSend(threadId, turnKey);
 
       const parts: ClaraPart[] = [{ type: "text", text: trimmed }, ...attachments];
       const result = await postTurn(auth, threadId, trimmed, turnKey, attachments);

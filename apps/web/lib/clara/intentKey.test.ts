@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { canonicalIntentAddress, deriveIntentKey } from "./intentKey";
+import { canonicalIntentAddress, deriveIntentKey, transcriptPosition } from "./intentKey";
 import type { AttachmentPart } from "@/lib/parts/types";
 
 const THREAD = "66666666-6666-4666-8666-666666666666";
@@ -25,7 +25,17 @@ const attach = (documentId: string, intakeId = `intake-${documentId}`): Attachme
 });
 
 const key = (over: Partial<Parameters<typeof deriveIntentKey>[0]> = {}) =>
-  deriveIntentKey({ threadId: THREAD, altitude: CLIENT, draft: "book this invoice", attachments: [], ...over });
+  deriveIntentKey({
+    threadId: THREAD,
+    altitude: CLIENT,
+    draft: "book this invoice",
+    attachments: [],
+    // The conversation has not moved: every cell below that does not say otherwise is
+    // about two presses made at the SAME point in the transcript, which is what a retry
+    // is.
+    transcriptPosition: "0@",
+    ...over,
+  });
 
 test("p642.web.intent_key — the SAME intent derives the SAME key, press after press", () => {
   assert.equal(key(), key(), "two presses of one unchanged composer must agree");
@@ -95,11 +105,18 @@ test("p642.web.intent_key — the canonical address is UNAMBIGUOUS, not merely d
   // `("a","bc")` serialise alike. This is asserted on the ADDRESS rather than on the hash
   // because a hash collision would be indistinguishable from a serialisation bug, and
   // only one of those is a defect in this module.
-  const ab_c = canonicalIntentAddress({ threadId: "ab", altitude: "c", draft: "", attachments: [] });
-  const a_bc = canonicalIntentAddress({ threadId: "a", altitude: "bc", draft: "", attachments: [] });
+  const at = { draft: "", attachments: [], transcriptPosition: "0@" } as const;
+  const ab_c = canonicalIntentAddress({ threadId: "ab", altitude: "c", ...at });
+  const a_bc = canonicalIntentAddress({ threadId: "a", altitude: "bc", ...at });
   assert.notEqual(ab_c, a_bc);
-  assert.notEqual(deriveIntentKey({ threadId: "ab", altitude: "c", draft: "", attachments: [] }),
-    deriveIntentKey({ threadId: "a", altitude: "bc", draft: "", attachments: [] }));
+  assert.notEqual(deriveIntentKey({ threadId: "ab", altitude: "c", ...at }),
+    deriveIntentKey({ threadId: "a", altitude: "bc", ...at }));
+  // …and the position is inside the same fence: a two-row transcript ending on `a2` and a
+  // 2-row-shaped id are not allowed to serialise alike either.
+  assert.notEqual(
+    canonicalIntentAddress({ threadId: "t", altitude: "f", draft: "", attachments: [], transcriptPosition: "2@a2" }),
+    canonicalIntentAddress({ threadId: "t", altitude: "f", draft: "", attachments: [], transcriptPosition: "2@a" }),
+  );
 });
 
 test("p642.web.intent_key — the key is a plain, legible token a database column can carry", () => {
@@ -112,4 +129,30 @@ test("p642.web.intent_key — a two-byte character is not the same as its two by
   // different sentences deriving one key inside a session is exactly the collision that
   // would make one of them vanish.
   assert.notEqual(key({ draft: "Ā" }), key({ draft: "\u0001\u0000" }));
+});
+
+test("p642.web.intent_key — a REPEATED utterance at a LATER point in the conversation is a different intent", () => {
+  // Fix round 1, review finding ADV-642-1 / STANDARDS F1 (blocker). Addressed by content
+  // alone, "yes" answered to a second question derived the key of the "yes" answered to
+  // the first, and `begin_chat_turn`'s replay branch answered it with the turn it had
+  // already run — no bubble, no task, no error, and permanently, because the lookup has
+  // no time or state bound over an append-only table.
+  const first = key({ draft: "yes", transcriptPosition: "0@" });
+  const later = key({ draft: "yes", transcriptPosition: "2@a2" });
+  assert.notEqual(later, first, "the same word at a later point in the conversation is a NEW instruction");
+
+  // THE CONTROL, and it is the whole reason the key exists: two presses made at the SAME
+  // point — which is every retry, because a refused or lost send adds nothing to the
+  // transcript — must still agree.
+  assert.equal(key({ draft: "yes", transcriptPosition: "2@a2" }), later, "a retry at the same position reuses the key");
+});
+
+test("p642.web.intent_key — `transcriptPosition` reads persisted rows only, and says both how many and which last", () => {
+  assert.equal(transcriptPosition([]), "0@", "an empty transcript has a position too, and it is not a special case");
+  assert.equal(transcriptPosition([{ id: "u1" }, { id: "a2" }]), "2@a2");
+  // BOTH HALVES MATTER. Two transcripts of the same LENGTH whose last row differs are
+  // different conversations; two that end on the same row with different lengths are the
+  // same row read through different windows. Either one alone would collide.
+  assert.notEqual(transcriptPosition([{ id: "u1" }, { id: "a2" }]), transcriptPosition([{ id: "u1" }, { id: "a9" }]));
+  assert.notEqual(transcriptPosition([{ id: "a2" }]), transcriptPosition([{ id: "u1" }, { id: "a2" }]));
 });

@@ -58,8 +58,23 @@ export interface ClaraThreadUiState {
    *  `replayed: true`: the door recognised the content-addressed `turn_key` and returned
    *  the ORIGINAL task instead of admitting a second one. It is a fact about the SEND,
    *  not about the turn, and the surface says it ONCE instead of drawing a second bubble
-   *  for one intent. Cleared by the next `beginSend`. */
+   *  for one intent. Cleared by the next `beginSend` AND by the turn's own terminal — a
+   *  sentence about a press is finished when the turn it was about is (fix round 1,
+   *  ADV-642-3: nothing but the next send cleared it, so it stood over a quiet transcript
+   *  for the rest of the session and across a rail close/reopen, because this store is
+   *  module-level). */
   lastSendReplayed: boolean;
+  /** #642 AC3 — THE INTENT KEY THIS TAB LAST POSTED for this conversation, so a resubmit
+   *  can tell a RETRY of the same intent (which the door's replay branch deduplicates)
+   *  from a DIFFERENT intent sent after an unknown outcome (which nothing protects, so
+   *  this tab re-reads the state first).
+   *
+   *  IT LIVES HERE, not in the hook, and that is the fix for ADV-642-4: it is paired with
+   *  `sendStatus`, which is module-level and survives a rail close/reopen, and a
+   *  mount-scoped ref beside it meant any remount after a failed send silently skipped
+   *  the pre-read. Memory-only, never persisted — appendix C §3 rules out promising
+   *  reload recovery from memory-only state. */
+  lastIntentKey: string | null;
   /** #642 AC3 — TRUE while a DISTINCT resubmit is re-reading run + messages before it
    *  posts. It exists only for the case appendix C §3's left column names: the previous
    *  send's outcome is UNKNOWN (`sendStatus === "error"`) and the new intent has a
@@ -91,6 +106,7 @@ const emptyThreadState: ClaraThreadUiState = {
   turnLostSight: false,
   renderFault: false,
   lastSendReplayed: false,
+  lastIntentKey: null,
   checkingBeforeSend: false,
   stream: initialClaraStreamState,
 };
@@ -254,12 +270,17 @@ export const claraThreadStore = {
     setThread(threadId, { loadError: null });
   },
 
-  beginSend(threadId: string): void {
+  /** @param intentKey the content address this send is about to POST, recorded so a later
+   *   resubmit can tell a retry from a new intent (see `lastIntentKey`). Optional only so
+   *   that a cell driving the machine by hand need not invent one; the real send path
+   *   always passes it. */
+  beginSend(threadId: string, intentKey?: string): void {
     setThread(threadId, {
       sendStatus: "sending",
       sendError: null,
       pendingUserParts: null,
       renderFault: false,
+      ...(intentKey === undefined ? {} : { lastIntentKey: intentKey }),
       // #642 — both #642 flags belong to ONE send. A "we already had that one" line left
       // standing over the NEXT press would be a statement about a turn nobody is looking
       // at any more, and the checking line is finished by definition once the POST starts.
