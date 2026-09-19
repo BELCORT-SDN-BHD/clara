@@ -2546,6 +2546,10 @@ export const ALLOWED = {
     // #625 [0224] the invited person's pre-password preview — see the block above.
     // clara_authenticated ONLY; runtime, both agent read roles and all four wake lanes gain ZERO.
     ...PREVIEW_INVITE_0224_HUMAN_FNS,
+    // #651 [0227] the depreciation run preview — see the block above. clara_authenticated ONLY;
+    // clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the ungranted
+    // core it wraps (clara._fa_compute_charges) stays in FA_0041_UNGRANTED_FNS with no role at all.
+    ...FA_DEPRECIATION_0227_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2716,6 +2720,11 @@ export const ALLOWED = {
     // clara_runtime ONLY. Declared here so a grant to clara_authenticated (a second human door
     // with no _human_ctx floor) or to either wake role FAILS the matrix.
     ...FA_ACQUISITION_0216_RUNTIME_FNS,
+    // [#651, 0227] the depreciation run door the runtime calls OBO a named human -- clara_runtime
+    // ONLY, and a NEW NAME rather than a widened grant, because `run_depreciation_manual` (in
+    // FA_0041_HUMAN_FNS, expected false for every machine role) must never reach one or the
+    // maker-checker ladder would have a bypass. Declared here so any wider grant FAILS the matrix.
+    ...FA_DEPRECIATION_0227_RUNTIME_FNS,
     // [#638, 0221] the staff-expense-claim admission door — clara_runtime ONLY, the same lane
     // clara.admit_journal_work sits in, acting OBO a named human.
     ...STAFF_EXPENSE_CLAIMS_0221_RUNTIME_FNS,

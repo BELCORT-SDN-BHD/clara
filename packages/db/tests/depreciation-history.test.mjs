@@ -25,14 +25,14 @@ import assert from "node:assert/strict";
 import {
   gate651, p651Client, fiscalYear, liveAuthorityWithRef, signWithRef, previewRun, runPeriodFor,
   reviseClassified, completeWith, completeForWith, withdrawDraftAs, backdateAuthorityFloor,
-  callersOf, functionDef, regprocedureExists, roleHasExecute, draftDepreciationEntries,
+  functionDef, regprocedureExists, roleHasExecute, draftDepreciationEntries,
   depreciationEntries, mintChatTaskRef,
   faWorld, buyAsset, completeSL, runManual, runPeriod, runDue, runDueAsHuman, entryRowOf,
   approveEntry, disposeAsset, faRow, faRows, clientCharges, authorityRows, runRows, entryLinesOf,
-  getFixedAsset, listDepreciationRuns, upsertFaProfile, createClient, buildFaChart, grantConsent,
-  namedCall, humanQuery, rootQuery, roleQuery, ROLES, opk, idOf, uniqTag,
+  getFixedAsset,
+  namedCall, humanQuery, rootQuery, roleQuery, ROLES, opk, idOf,
   mon, dayIn, caught, refuses, reasonToken, noteLane, printLaneNotes, printSkipCount, endPool,
-  x41EnsureReady, BANK, COST, ACCUM, EXPENSE,
+  x41EnsureReady, BANK,
 } from "./depreciation-history-fixtures.mjs";
 
 let live = false;
@@ -495,7 +495,9 @@ test("p651.preview.matches_run the preview and the run that follows it agree EXA
   // clara._fa_compute_charges itself). M7 measured the vocabulary at exactly five names.
   const good = await buyAsset({ client, cents: 360_000, postingDate: dayIn(start, 1) });
   await completeSL(client, good.asset.id, { life: 36, start: start.start, description: "p651 chargeable" });
-  const incomplete = await buyAsset({ client, cents: 90_000, postingDate: dayIn(start, 2) });
+  // An asset with NO particulars — the `incomplete` skip the preview must name. It is never
+  // referred to again by id: what the cell asserts is that its REASON reaches the receipt.
+  await buyAsset({ client, cents: 90_000, postingDate: dayIn(start, 2) });
   const frozen = await buyAsset({ client, cents: 24_000_000, postingDate: dayIn(start, 3) });
   await completeSL(client, frozen.asset.id, { life: 12, start: start.start, description: "p651 frozen" });
 

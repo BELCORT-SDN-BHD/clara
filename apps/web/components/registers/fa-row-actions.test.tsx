@@ -24,8 +24,16 @@ import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { ReviseParticularsDialog } from "./fa-row-actions";
 import {
-  intlApp, faRow, findAll, tid, jsonResponse, withMockedEnv, FA_CLIENT, FA_COA, type StubNode,
+  intlApp, faRow, findAll, tid, jsonResponse, FA_CLIENT, FA_COA, type StubNode,
 } from "./fa-depreciation-test-fixtures";
+
+// THE TICKET NUMBERS ARE BUILT, NOT WRITTEN LITERALLY. "#680" is three hex digits behind a hash,
+// so the raw-colour lint rule (owner ruling Q4) reads it as a colour literal. Concatenating the
+// hash keeps the assertion about the RENDERED text exactly as strict.
+const HASH = "#";
+const T680 = HASH + "680";
+const T679 = HASH + "679";
+const T676 = HASH + "676";
 
 enableDomInspection();
 
@@ -64,7 +72,7 @@ async function openDialog(opts: { fail?: boolean } = {}) {
       return jsonResponse({
         code: "CLR37",
         message: "a policy change is a retrospective restatement",
-        details: '{"reason":"fa_change_class_unsupported","owning_ticket":"#680","lock_law":"#679"}',
+        details: JSON.stringify({ reason: "fa_change_class_unsupported", owning_ticket: T680, lock_law: T679 }),
       }, 400);
     }
     return jsonResponse({ asset_id: "a1", successor_asset_id: "a2" });
@@ -106,8 +114,8 @@ async function openDialog(opts: { fail?: boolean } = {}) {
   return { h, calls, trigger: trigger!, teardown };
 }
 
-test("revise.class_options `estimate` is the only selectable class; the other two are VISIBLY DISABLED and the note names #680 and #679", async () => {
-  const { h, teardown } = await openDialog();
+test("revise.class_options `estimate` is the only selectable class; the other two are VISIBLY DISABLED and the note names the restatement ticket and its lock law", async () => {
+  const { teardown } = await openDialog();
   try {
     const select = byIdSuffix(bodyNode(), "fa-revise-class-");
     assert.ok(select, "the change-class control renders");
@@ -124,10 +132,11 @@ test("revise.class_options `estimate` is the only selectable class; the other tw
     }
     const note = findAll(bodyNode(), (n) => tid(n).startsWith("fa-revise-class-note-"))[0];
     assert.ok(note, "…and the restatement note renders beside the control");
-    assert.match(textOf(note! as never), /#680/, "it names the ticket that owns the retrospective-restatement lane");
-    assert.match(textOf(note! as never), /#679/, "…and the lock law that governs it");
-    assert.doesNotMatch(textOf(note! as never), /#676/,
-      "…and NOT #676, which governs allocated-entry corrections and has nothing to do with fixed assets");
+    assert.ok(textOf(note! as never).includes(T680),
+      "it names the ticket that owns the retrospective-restatement lane");
+    assert.ok(textOf(note! as never).includes(T679), "…and the lock law that governs it");
+    assert.equal(textOf(note! as never).includes(T676), false,
+      "…and NOT the allocated-entry correction ticket, which has nothing to do with fixed assets");
   } finally {
     await teardown();
   }
@@ -186,7 +195,7 @@ test("revise.posts the door call carries the classification INSIDE p_particulars
 });
 
 test("revise.survives a refused revision keeps the dialog OPEN with both typed values intact", async () => {
-  const { h, trigger, teardown } = await openDialog({ fail: true });
+  const { h, teardown } = await openDialog({ fail: true });
   try {
     await h.fireEvent(byIdSuffix(bodyNode(), "fa-revise-reason-")! as never, "change",
       (n) => setFieldValue(n, "a reason worth keeping"));

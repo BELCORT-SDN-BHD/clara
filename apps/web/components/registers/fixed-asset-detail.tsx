@@ -54,8 +54,9 @@ import { applyDocumentParam, documentUrl } from "@/lib/documents/url-state";
 // has never been revised" is not "depreciation particulars are not filled in yet", and a merged
 // section can only show one of them. Appendix D row 58 permits alternate views inside one route ON
 // CONDITION the state is shareable — which is why the id moved out of `useState` and into `?tab=`
-// in the same slice, on `registers?tab=fixedAssets`' own precedent. Back now returns to the tab
-// the reader came from, and a pasted link lands on the reading it was about.
+// in the same slice, on `registers?tab=fixedAssets`' own precedent. A pasted link now lands on the
+// reading it was about, and ONE Back returns to wherever the reader came from — the register, not
+// the tab they last glanced at — because every tab move REPLACES rather than pushes.
 const TABS = ["acquisition", "particulars", "revisions", "schedule", "history"] as const;
 type TabId = (typeof TABS)[number];
 

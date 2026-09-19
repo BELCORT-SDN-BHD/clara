@@ -65,7 +65,7 @@ export async function mintChatTaskRef(client) {
   try {
     const t = await rootQuery(insert, params);
     return { kind: "chat_task", id: t.rows[0].id };
-  } catch (e) {
+  } catch {
     // …EXCEPT for a client that is not yet ACTIVE. Every arm of the insert trigger demands
     // something a carry-down/onboarding fixture does not have: `autodraft` and `close_prep` demand
     // an ACTIVE client, `chat_turn` a chat session, `wake` a wake intent, `accounting_work` a Work

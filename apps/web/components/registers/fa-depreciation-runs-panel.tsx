@@ -65,7 +65,9 @@ export function DepreciationRunsPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      <SectionHeader level={3} action={hasLiveAuthority ? <RunDialog clientId={clientId} busy={busy} act={act} onPosted={onPosted} /> : undefined}>
+      <SectionHeader level={3} action={hasLiveAuthority
+        ? <RunDialog clientId={clientId} busy={busy} act={act} err={err} clr={clr} onPosted={onPosted} />
+        : undefined}>
         {t("heading")}
       </SectionHeader>
       {runs && err ? (
@@ -150,6 +152,8 @@ function RunDialog({
   clientId,
   busy,
   act,
+  err,
+  clr,
   onPosted,
 }: {
   clientId: string;
@@ -157,6 +161,13 @@ function RunDialog({
   /** `useHydratedPart`'s own `act`, INCLUDING its `onOk` parameter — the previous
    *  one-argument prop type erased the channel this fix needs. */
   act: (fn: () => Promise<void>, onOk?: () => void) => Promise<boolean>;
+  /** THE REFUSAL HAS TO TRAVEL IN HERE WITH THE HUMAN. `act()` stores a refused run on the
+   *  hydrated part, and the panel renders it — BEHIND this modal's backdrop, where the person who
+   *  pressed Confirm cannot read it. MEASURED as exactly that: the closed-period walk leg found a
+   *  dialog that correctly stayed open and carried no refusal at all. `FaDoorDialog`'s `refusal`
+   *  prop is CB-AE2E-004's own mechanism for this; the run dialog simply was not using it. */
+  err: string | null;
+  clr: { code: string; reason: string | null } | null;
   onPosted?: () => void;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.runs");
@@ -193,6 +204,7 @@ function RunDialog({
       confirmLabel={t("runConfirm")}
       busy={busy || previewing}
       confirmDisabled={!canConfirm}
+      refusal={err === null ? undefined : { err, clr }}
       onOpen={load}
       onClosed={() => {
         // A CLOSED DIALOG ENDS THE DECISION. The next press is a new one and mints a new key —
