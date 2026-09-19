@@ -12,9 +12,11 @@
 //
 // No dependencies — Node built-ins only.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   readFieldPathGrammar,
   fieldPathViolation,
@@ -114,6 +116,29 @@ testCase("extract: an evidence-CITATION object ({region_idx, quote, field_path})
   const hits = extractFieldPathLiterals('parse([{ region_idx: 1, quote: "q", field_path: "p" }]);');
   assertDeepEqual(hits, [], "region_idx marks this the citation schema, not a document_regions row");
 });
+testCase("extract: a citation object with region_id (no idx) is still excluded via its quote: sibling (real repo case)", () => {
+  // The exact shape wave-e-f9-chatturn-v10.test.mjs:156 constructs on purpose (testing that a
+  // BARE region_id, without idx, is refused by the real schema) — same citation family,
+  // `region_idx` itself absent by design.
+  const hits = extractFieldPathLiterals('assert.equal(parse([{ region_id: REGION_TOTAL, quote: "q", field_path: "p" }]).success, false);');
+  assertDeepEqual(hits, [], "the quote: sibling alone is enough to mark this a citation object, not a document_regions row");
+});
+testCase("extract: L04-S10 — a genuine document_regions field_path is NOT excluded merely because " +
+  "\"region_idx\" appears NEARBY in a DIFFERENT, sibling object literal (structural, not a 200-char window)", () => {
+  // Reproduces the exact false-negative the fix-round review measured: a naive proximity window
+  // reaches into an adjacent object literal's own region_idx and wrongly excludes an unrelated,
+  // genuinely malformed document_regions field_path sitting a few characters away.
+  const src =
+    'const citation = { region_idx: 0, quote: "q", field_path: "invoice.total" };\n'
+    + 'const region = { field_path: "rogue.company_ssm", locator_kind: "row_col" };\n';
+  const hits = extractFieldPathLiterals(src);
+  assertDeepEqual(
+    hits,
+    [{ line: 2, value: "rogue.company_ssm" }],
+    "only the second (genuinely document_regions-shaped) literal is reported — the first is " +
+      "excluded by its OWN region_idx/quote siblings, not by proximity to them",
+  );
+});
 testCase("extract: a template-literal field_path (backtick, possibly interpolated) is not statically checkable", () => {
   const hits = extractFieldPathLiterals("const row = { field_path: `tables.0.cells.${i}`, text_content: t };");
   assertDeepEqual(hits, [], "backtick shape is never matched — cannot prove it is a literal");
@@ -203,6 +228,65 @@ testCase("findFieldPathViolations: a NULL path and a well-formed path together r
 // Integration: the REAL two test trees, today, must be clean — the "77 distinct literal
 // paths conform today" claim (#857's triage), re-verified rather than trusted.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// L04-S09: main()'s own exit-code wiring (AC1's literal wording — "exits
+// non-zero on a seeded malformed path"). Every case above drives the exported
+// PURE functions directly; none calls main() or spawns the script as a
+// program, so nothing pinned that a violation actually reaches
+// `process.exit(main())` at the bottom of the file — the exact refactor
+// hazard named in this ticket's fix-round review (main() logging instead of
+// returning 1, or the `process.exit(main())` line being dropped, would leave
+// every case above green while the real lint chain stayed green over a live
+// violation). This drives the REAL script as a REAL subprocess, in THIS
+// worktree's own git index (an isolated checkout — nothing here touches any
+// other worktree), the same idiom apps/web/scripts/check-ui-add-guard.selftest.mjs
+// uses for its own entry-point wiring case.
+// ---------------------------------------------------------------------------
+
+const SELFTEST_ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+const SCRIPT_PATH = fileURLToPath(new URL("./check-document-region-field-paths.mjs", import.meta.url));
+const DECOY_REL = "packages/db/tests/__check857_selftest_decoy.mjs";
+const DECOY_ABS = join(SELFTEST_ROOT, ...DECOY_REL.split("/"));
+
+testCase("main(): a REAL subprocess run exits non-zero on a seeded malformed path, naming file:line:path on stdout", () => {
+  if (existsSync(DECOY_ABS)) throw new Error(`${DECOY_REL} already exists -- a previous run did not clean up`);
+  try {
+    writeFileSync(
+      DECOY_ABS,
+      "// L04-S09 self-test decoy -- staged and removed within one test case, never committed.\n"
+      + "await rootQuery(\n"
+      + "  `insert into clara.document_regions(firm_id,field_path) values($1,'rogue.company_ssm')`,\n"
+      + "  [firm],\n"
+      + ");\n",
+      "utf8",
+    );
+    // scanTargetFiles() reads `git ls-files`, which lists the INDEX -- a merely-written file is
+    // invisible to it (the real scope gap this same review named separately, L04-S11). `git add`
+    // stages it (index only, no commit) so the real subprocess sees exactly what a developer
+    // would see the moment they stage a new fixture.
+    execFileSync("git", ["add", "--", DECOY_REL], { cwd: SELFTEST_ROOT });
+    const out = spawnSync(process.execPath, [SCRIPT_PATH], { cwd: SELFTEST_ROOT, encoding: "utf8" });
+    assertEqual(out.status, 1, `expected exit 1, got ${out.status} (signal ${out.signal}); stdout:\n${out.stdout}\nstderr:\n${out.stderr}`);
+    const stdout = out.stdout ?? "";
+    if (!stdout.includes(`${DECOY_REL}:3:`)) {
+      throw new Error(`expected stdout to name "${DECOY_REL}:3:", got:\n${stdout}`);
+    }
+    if (!stdout.includes("rogue.company_ssm") || !stdout.includes("field_path_namespace")) {
+      throw new Error(`expected stdout to name the path and reason, got:\n${stdout}`);
+    }
+  } finally {
+    // Unstage (index only -- nothing was ever committed) and delete, so a failed assertion
+    // above still leaves the worktree exactly as it found it.
+    try { execFileSync("git", ["reset", "--quiet", "HEAD", "--", DECOY_REL], { cwd: SELFTEST_ROOT }); } catch { /* never staged */ }
+    if (existsSync(DECOY_ABS)) rmSync(DECOY_ABS, { force: true });
+  }
+});
+
+testCase("main(): a REAL subprocess run against this clean worktree exits 0", () => {
+  const out = spawnSync(process.execPath, [SCRIPT_PATH], { cwd: SELFTEST_ROOT, encoding: "utf8" });
+  assertEqual(out.status, 0, `expected exit 0 on a clean worktree, got ${out.status}; stdout:\n${out.stdout}`);
+});
 
 testCase("findFieldPathViolations: the real packages/db/tests + packages/runtime/tests are clean today", () => {
   const files = scanTargetFiles();

@@ -145,11 +145,64 @@ function splitSqlList(text) {
   return parts;
 }
 
-/** The window (chars, each side) searched around a `field_path:` match for
- *  `region_idx` — see `extractFieldPathLiterals`'s (a) for why. Generous
- *  enough to span a multi-line object literal's other properties, small
- *  enough to never reach a SEPARATE object literal elsewhere in the file. */
-const SIBLING_WINDOW = 200;
+/** Marks every character index that sits inside a JS string or template literal
+ *  (single-, double-quoted or backtick, backslash-escaped) — used so the
+ *  enclosing-object-literal scan below never miscounts a `{`/`}` that happens
+ *  to appear inside a string's own text. Comments are not stripped (a brace
+ *  inside a comment is rare enough in these two scan roots that treating it as
+ *  structural is the safer default — it can only narrow a match, never widen
+ *  one past the real object). */
+function stringMask(text) {
+  const mask = new Array(text.length).fill(false);
+  let quote = null;
+  let i = 0;
+  while (i < text.length) {
+    if (quote) {
+      mask[i] = true;
+      if (text[i] === "\\") { if (i + 1 < text.length) mask[i + 1] = true; i += 2; continue; }
+      if (text[i] === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (text[i] === "'" || text[i] === '"' || text[i] === "`") { quote = text[i]; mask[i] = true; }
+    i += 1;
+  }
+  return mask;
+}
+
+/** The `[start, end)` span of the JS object literal that DIRECTLY encloses
+ *  `index` — scanning back from it to its own unmatched `{`, then forward from
+ *  there to the matching `}` — braces inside a string (per `mask`) never
+ *  count. Replaces a fixed character window (L04-S10: a proximity window either
+ *  reaches a sibling property that belongs to a DIFFERENT, nearby object
+ *  literal — a false exclusion — or, on a densely-packed one-liner, is
+ *  needlessly wide): structure, not distance, is what "the same object" means.
+ *  Returns `null` if `index` is not inside any object literal (an object
+ *  literal is exactly what `field_path\s*:` property syntax requires, so this
+ *  is a shape the caller treats as "prove nothing", never "assume excluded"). */
+function enclosingObjectLiteralSpan(text, index, mask) {
+  let depth = 0;
+  let start = -1;
+  for (let i = index; i >= 0; i -= 1) {
+    if (mask[i]) continue;
+    if (text[i] === "}") depth += 1;
+    else if (text[i] === "{") {
+      if (depth === 0) { start = i; break; }
+      depth -= 1;
+    }
+  }
+  if (start === -1) return null;
+  depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    if (mask[i]) continue;
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return { start, end: i + 1 };
+    }
+  }
+  return null; // unterminated — not this guard's business, the JS syntax check owns that
+}
 
 /** Every literal `field_path` value this file hands `clara.document_regions`,
  *  as `{ line, value }`. Two independent shapes (see the file header); a value
@@ -161,18 +214,30 @@ export function extractFieldPathLiterals(text) {
 
   // (a) `field_path: "…"` / `field_path: '…'` object-literal property — but
   // ONLY when it is not sitting in an evidence-CITATION object
-  // (`{ region_idx, quote, field_path }`, the chat/prompt-tool shape that
-  // reuses the same property name for an already-existing region's label,
-  // never for a NEW clara.document_regions row: `region_idx` is the marker no
-  // document_regions row object ever carries). Measured false positive
-  // without this guard: packages/runtime/tests/f-a1-pr3a-consumers.test.mjs
-  // and wave-e-f9-{autodraft-v7,chatturn-v10}.test.mjs, all evidence-citation
+  // (`{ region_idx, quote, field_path }`, wave-e-f9-testkit.mjs's own `cite()`
+  // shape — the chat/prompt-tool schema that reuses the same property name
+  // for an already-existing region's label, never for a NEW
+  // clara.document_regions row). Excluded when the ENCLOSING object literal
+  // (L04-S10: structural, not a proximity window — see
+  // enclosingObjectLiteralSpan) carries either half of that shape's OTHER two
+  // properties: `region_idx` itself, or a `quote:` property key (no
+  // document_regions row object ever carries either — its own columns are
+  // `text_content`/`locator_kind`/`extraction_id`/…). Both markers are
+  // needed: wave-e-f9-chatturn-v10.test.mjs:156 deliberately constructs
+  // `{ region_id: …, quote: "q", field_path: "p" }` (testing that a BARE
+  // `region_id`, without `idx`, is refused by the real schema) — same
+  // citation family, `region_idx` itself absent by design, caught instead by
+  // its `quote:` sibling. Measured false positive without this guard:
+  // packages/runtime/tests/f-a1-pr3a-consumers.test.mjs and
+  // wave-e-f9-{autodraft-v7,chatturn-v10}.test.mjs, all evidence-citation
   // schema fixtures, none a document_regions insert.
+  const CITATION_MARKER_RE = /\bregion_idx\b|\bquote\s*:/;
   const objectRe = /\bfield_path\s*:\s*(["'])((?:\\.|(?!\1)[^\\])*)\1/g;
+  const mask = stringMask(text);
   for (const m of text.matchAll(objectRe)) {
-    const windowStart = Math.max(0, m.index - SIBLING_WINDOW);
-    const windowEnd = Math.min(text.length, m.index + m[0].length + SIBLING_WINDOW);
-    if (/\bregion_idx\b/.test(text.slice(windowStart, windowEnd))) continue;
+    const span = enclosingObjectLiteralSpan(text, m.index, mask);
+    const scope = span ? text.slice(span.start, span.end) : "";
+    if (CITATION_MARKER_RE.test(scope)) continue;
     hits.push({ line: lineAt(text, m.index), value: m[2] });
   }
 
