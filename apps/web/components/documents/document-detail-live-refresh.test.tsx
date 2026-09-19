@@ -149,7 +149,7 @@ test("904 — the transition to DONE renders with no manual reload, then polling
     assert.match(h.text(), /Extracting…/);
     done = true; // the next tick's read returns the settled row — no click, no reload() call here.
     await settleUntil(h, () => h.text().includes("Extraction complete"),
-      "the DONE status to appear from the poll alone, matching #904's own defect report");
+      "the DONE status to appear from the poll alone, matching the original defect report");
     assert.doesNotMatch(h.text(), /Extracting…/, "the stale status must not linger beside the fresh one");
 
     // The poll's `enabled` flips false on this same render; give it a real window to prove it
