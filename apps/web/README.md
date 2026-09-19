@@ -82,6 +82,16 @@ jump-to-latest is offered only while there is something below, is a real `<Butto
 in the tab order and has a word for a name, not an icon), and jumps instantly under
 `prefers-reduced-motion` — the preference is read at the press, not captured at mount.
 
+Following a live turn costs the hook NO render of its own, and that is a measured contract
+rather than a nicety. The append effect runs once per streamed delta; publishing `atBottom` /
+`hasMoreBelow` on it unconditionally made React schedule a second render pass per token for
+the ordinary case (a reader parked at the bottom), and the transcript census
+`components/clara/thread-live-stream-stability.test.tsx` caught it at 401 commits for 200
+deltas against a budget of 215 — that suite's own words for "a component updating itself".
+Both flags are mirrored in refs and written only on a REAL transition.
+`lib/clara/useTranscriptScroll.test.ts`'s `p642.web.scroll_render_budget` pins it at this
+hook's seam: 25 appends must cost exactly 25 renders, all of them the caller's.
+
 **The intent key is content-addressed, and memory-only on purpose.**
 `lib/clara/intentKey.ts` derives the `turn_key` a send posts from the conversation, the
 altitude, the trimmed text and the SORTED attachment document ids. A retry of the same intent
