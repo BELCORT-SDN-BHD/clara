@@ -802,3 +802,32 @@ CI's job, one file at a time, on an isolated database (see each file's own heade
 `PGDATABASE=... CLARA_RIG_ALLOW_RESET=1` invocation). What this suite proves locally, safely, and
 on a shared rig is the ROUTING: the name check runs before any of those paths could reach a real
 `reset()`.
+
+## `fixed-asset-acquisition.test.mjs` `p639.birth.opening_excluded` / `p639.birth.opening_admitted` — #884
+
+`p639.birth.exclusions`'s own comment used to name the wrong arm and the wrong code for the
+fixed-asset K-family opening-balance exclusion: it said the arm was proven only by a `prosrc`
+string search because "no opening-seed fixture exists anywhere in packages/db/tests", and it
+implied the birth trigger (`clara._tf_fa_acquisition_birth`) itself raised the refusal. Both were
+wrong. A fixture already existed — `kSeededFaClient` (`x41-fa-world.mjs`), a thin wrapper over the
+wave-b opening-seed doors (`wb.onboardingClient`, `wb.createOpeningSeed`, `wb.seedFixedAsset`,
+`wb.draftOpeningItem`, `wb.approveOpeningSeed`) that `x41.b2`'s door-(e) sub-case, K8/K9
+(`wave-b/wb-k-supersede-fa.test.mjs`) and several depreciation batteries already reuse — and the
+refusal for a gl-balance leg on an ENROLLED fixed-asset account is raised by the BELT
+(`clara._tf_fa_movement_belt`, migration 0041's arm (e)), SQLSTATE CLR40, reason
+`fa_k_gl_balance_on_enrolled`, not the birth trigger and not CLR38.
+
+`p639.birth.opening_excluded` builds a fresh onboarding client, explicitly ENROLS COST/ACCUM/EXPENSE
+(`upsert_fa_account_profile` is a deliberate act, never automatic — the belt only sees an account
+as enrolled once this door has run for it), drafts a plain `gl_balance` opening item naming the
+enrolled COST account directly (never itemised as `item_kind='fixed_asset'`) plus a second,
+ordinary item on SHARE so the set's net OBE ties to zero ahead of the belt, and asserts the
+approval refuses CLR40 `fa_k_gl_balance_on_enrolled` naming the account code, with zero
+`clara.fixed_assets` rows and both entries still `draft` — the belt is a DEFERRED constraint
+trigger, so its exception unwinds the WHOLE approval, not just the register write.
+
+`p639.birth.opening_admitted` drives `kSeededFaClient` and asserts EXACTLY ONE `clara.fixed_assets`
+row ties to the opening entry (`acquisition_entry_id`), and it is the SAME id `seed_fixed_asset`'s
+own receipt named — the behavioural proof that `_tf_fa_acquisition_birth`'s
+`if new.is_opening_balance then return null; end if;` guard actually prevented a second birth,
+rather than a `prosrc` string match proving only that the guard's TEXT exists.
