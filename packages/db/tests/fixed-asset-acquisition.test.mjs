@@ -295,8 +295,15 @@ test("p639.birth.opening_excluded a gl_balance opening leg on an ENROLLED fixed-
     entryRevisions: wb.revMapOf([cost884, share884]), opKey: opk("884approve"),
   }), ACQ.kGlBalance, "opening_excluded: an opening gl_balance leg naming an ENROLLED fixed-asset account");
   assert.equal(err.code, "CLR40", `opening_excluded: the belt's own SQLSTATE (got ${err.code})`);
-  const blob = `${err.detail ?? ""} ${err.message ?? ""}`;
-  assert.ok(blob.includes(COST), `opening_excluded: the refusal names the account code ${COST} (got ${blob})`);
+  // The criterion asks for the account code ON THE DETAIL (contract §4 pins DETAIL as the
+  // structured discriminant; the prose message is not a machine-readable contract and could
+  // drop the field while still mentioning it in English). detail is a jsonb_build_object(...)::text
+  // (migration 0041), so parse it and check the field itself rather than substring-searching a
+  // blob of message-or-detail — a later recut that drops account_code from the JSON while leaving
+  // it interpolated into the message would otherwise leave this cell green.
+  const detail = JSON.parse(err.detail);
+  assert.equal(detail.account_code, COST,
+    `opening_excluded: the refusal's DETAIL must name the account code ${COST} on account_code (got ${err.detail})`);
 
   // NO REGISTER ROW, AND A FULL ROLLBACK: the belt is a DEFERRED constraint trigger firing at
   // the approval statement's own commit, so its exception unwinds the whole approve — the entry
