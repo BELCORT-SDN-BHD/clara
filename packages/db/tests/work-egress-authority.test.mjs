@@ -43,6 +43,9 @@ import {
   defaultBundle, bundleForVersion, workRow,
   basis, CLR, assertPair, rootQuery, opk, entryCount, committedReceiptCount,
   acceptLegalNow, publishNewerLegal, publishedLegal,
+  // #1008
+  forceLegalEnforcementMode,
+  // #1008
   prepareEgressDispatch, consumeEgressDispatch, prepareWorkEgressDispatch, workEgressEventSeq,
   authoriseWorkRun, authorizationRow, authorizationsFor, synthesisedConsent,
   revokeWorkEgress, deactivateClient, reactivateClient, expireAuthorization,
@@ -177,23 +180,33 @@ test("w631.prep.foreign a client of ANOTHER firm is UNKNOWN, byte-identically", 
 
 test("w631.prep.superseded a NEWER published legal version withdraws authority until it is accepted", async (t) => {
   if (await gateEgress(t)) return;
-  // Firm B's own owner, so superseding the estate-wide legal text is re-accepted here and the
-  // other cells' firms re-accept in their own `acceptLegalNow` calls.
-  const DAVE = world.users.dave;
-  await acceptLegalNow(DAVE);
-  const client = await freshWorkClient(DAVE, "prepsuper");
-  assert.equal((await prepareEgressDispatch({ firm: FIRM_B(), client, eventSeq: 8n })).verdict, "granted",
-    "prep.superseded: mandatory setup — the current acceptance authorises");
+  // #1008: THIS CELL IS ABOUT THE `enforce` RULE, and 0234 makes the platform's landing mode
+  // `prompt`, under which a publication changes NO already-live firm's basis (the other side is
+  // `p1008.db.prompt_survives_publication`). The mode is therefore SET here rather than the
+  // assertion weakened, and put back in the `finally` so a later cell inherits what it found. On a
+  // chain below 0234 the helper is a no-op and the estate already behaves as `enforce`.
+  const priorMode = await forceLegalEnforcementMode("enforce");
+  try {
+    // Firm B's own owner, so superseding the estate-wide legal text is re-accepted here and the
+    // other cells' firms re-accept in their own `acceptLegalNow` calls.
+    const DAVE = world.users.dave;
+    await acceptLegalNow(DAVE);
+    const client = await freshWorkClient(DAVE, "prepsuper");
+    assert.equal((await prepareEgressDispatch({ firm: FIRM_B(), client, eventSeq: 8n })).verdict, "granted",
+      "prep.superseded: mandatory setup — the current acceptance authorises");
 
-  const newVersion = await publishNewerLegal("dpa");
-  noteLane(`prep.superseded: dpa published at version ${newVersion}`);
-  assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_B(), client, eventSeq: 9n }), UNKNOWN,
-    "prep.superseded: a newer DPA nobody has accepted STOPS model egress — that is what revocation means here");
+    const newVersion = await publishNewerLegal("dpa");
+    noteLane(`prep.superseded: dpa published at version ${newVersion}`);
+    assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_B(), client, eventSeq: 9n }), UNKNOWN,
+      "prep.superseded: a newer DPA nobody has accepted STOPS model egress — that is what revocation means here");
 
-  await acceptLegalNow(DAVE);
-  assert.equal((await prepareEgressDispatch({ firm: FIRM_B(), client, eventSeq: 10n })).verdict, "granted",
-    "prep.superseded: …and accepting the new version restores it");
-  assert.equal((await publishedLegal("dpa")).version, newVersion);
+    await acceptLegalNow(DAVE);
+    assert.equal((await prepareEgressDispatch({ firm: FIRM_B(), client, eventSeq: 10n })).verdict, "granted",
+      "prep.superseded: …and accepting the new version restores it");
+    assert.equal((await publishedLegal("dpa")).version, newVersion);
+  } finally {
+    if (priorMode !== null) await forceLegalEnforcementMode(priorMode);
+  }
 });
 
 test("w631.prep.revoked an explicit owner withdrawal is STICKY — no prepare re-mints over it", async (t) => {

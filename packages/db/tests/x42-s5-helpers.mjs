@@ -1272,6 +1272,22 @@ const CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES = [
 ];
 // WAVE 2026-09-18 END
 
+// RIDER #1008 [0234, the platform's legal enforcement mode] — ONE name, and it is
+// `clara.set_admission_capacity`'s own shape carried forward: `set_legal_enforcement_mode` samples
+// `now()` ONCE into a local and writes that same instant to `legal_enforcement.updated_at` and into
+// its own receipt, exactly as 0186's capacity door does with `admission_capacity.updated_at` and as
+// 0185's `publish_legal_document` does with `published_at`. Sampling once is what makes the stored
+// stamp and the answer the caller is handed the same moment; sampling twice would let a receipt
+// name an instant the row does not carry.
+//
+// 0234's OTHER bodies add nothing, and that is measured rather than assumed. `_legal_enforcement_mode`
+// and `get_legal_enforcement_mode` are projections of the stored row. The four RECUT bodies
+// (`_accounting_work_egress_live`, `prepare_egress_dispatch`, `restore_client_egress_purpose`,
+// `get_firm_legal_standing`) gain no clock token: prepare's `clock_timestamp()` pair is 0038's own
+// dispatch TTL, carried through the splice byte-for-byte and already adjudicated on its own file's
+// roster, and the other three read none at all.
+const LEGAL_ENFORCEMENT_0234_CLOCK_NAMES = ["set_legal_enforcement_mode"];
+
 // #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
 // arm-(D) census over 0001..0194 returns nothing out of either file. 0191's three constraint
 // triggers derive their verdicts from stored terms and stamp `evaluated_at` through a column
@@ -1410,6 +1426,8 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("knowledge_retrieval$")) names.push(...KNOWLEDGE_RETRIEVAL_0230_CLOCK_NAMES);
   if (await appliedStem("firm_portfolio_pack$")) names.push(...FIRM_PORTFOLIO_PACK_0231_CLOCK_NAMES);
   if (await appliedStem("client_financial_pack$")) names.push(...CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES);
+  // RIDER #1008 (0234) - stem-gated, never number-gated, for the reason :207-214 gives.
+  if (await appliedStem("legal_enforcement_mode$")) names.push(...LEGAL_ENFORCEMENT_0234_CLOCK_NAMES);
   return names.sort();
 }
 

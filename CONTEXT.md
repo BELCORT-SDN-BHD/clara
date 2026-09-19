@@ -426,6 +426,18 @@ on any client's books. An owner accepts the current versions in-app to put it ba
 _Avoid_: One person's own acceptance as the firm's; "we signed it once" as a standing state;
 a firm-level switch that can be turned on.
 
+**Legal enforcement mode**:
+The platform's one setting deciding whether a firm's legal standing GOVERNS its work or is merely
+shown and asked for. `enforce` is the strict reading: Clara may use a model on a client's books only
+while an active owner holds acceptances of the currently published version of both agreement kinds.
+`prompt` is the beta reading: any real acceptance that owner has actually made, of either kind at
+any version, is enough, and publishing a newer version withdraws nothing. In both readings the
+standing itself is reported truthfully, an inactive client and an owner's own withdrawal still stop
+the work, and an authority is never founded on an acceptance nobody made. It belongs to the operator,
+not to a firm, and every change is receipted with who and when.
+_Avoid_: A per-firm exemption; a feature flag; "the agreements are off"; a mode that fakes an
+acceptance or hides that one is outstanding.
+
 **Billing plan**:
 The one current commercial arrangement a firm is on, held in the database with its amount, its
 currency and — separately — whether that amount has been RULED. An unruled plan has no price at

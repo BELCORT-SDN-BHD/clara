@@ -52,6 +52,9 @@ function standing(over: Partial<FirmLegalStanding> = {}): FirmLegalStanding {
     standingLive: true,
     canAcceptForFirm: true,
     masked: false,
+    // #1008: `enforce` by default, so every cell written before the mode existed keeps asserting
+    // the copy the estate showed then. The two cells that are ABOUT the mode set it explicitly.
+    enforcementMode: "enforce",
     ...over,
   };
 }
@@ -295,4 +298,67 @@ test("p635.web.legal_named_hint_masked falls back to the unnamed sentence", asyn
     assert.doesNotMatch(text, /most recent acceptance on record/,
       "a masked payload carries no name, so the named variant must not render at all");
   } finally { await h.unmount(); }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// #1008 — THE COPY PER MODE. In `prompt` (the beta) the card asks the owner to accept and must
+// NOT say the model is switched off, because it is not: migration 0234 makes the derived basis
+// live on any real acceptance the firm's active owner holds. `standing_live` still arrives false,
+// deliberately — that is the fact the card needs in order to ASK.
+// ───────────────────────────────────────────────────────────────────────────
+
+test("p1008.web.legal_prompt_copy in prompt mode the card asks for the acceptance and never says the model is off", async () => {
+  const h = await mount({
+    status: "ready",
+    data: standing({
+      enforcementMode: "prompt",
+      standingLive: false,
+      canAcceptForFirm: true,
+      documents: [
+        doc({ version: 3, firmAccepted: false, acceptedAt: null, acceptedBy: null, acceptedByName: null, myAcceptedVersion: null, myAcceptedAt: null }),
+        doc({ kind: "dpa" }),
+      ],
+    }),
+  });
+  try {
+    const text = h.text();
+    assert.doesNotMatch(text, /cannot use a model/,
+      "the beta ruling: the state of a firm's agreements must never be reported as switching a capability off");
+    assert.match(text, /Please accept the current versions/,
+      "…and the card still ASKS, which is the whole point of `prompt`");
+    assert.ok(acceptTrigger(h), "an owner still gets the control that is the remedy");
+  } finally { await h.unmount(); }
+});
+
+test("p1008.web.legal_enforce_copy in enforce mode the consequence sentence is back, unchanged", async () => {
+  const h = await mount({
+    status: "ready",
+    data: standing({
+      enforcementMode: "enforce",
+      standingLive: false,
+      canAcceptForFirm: true,
+      documents: [
+        doc({ version: 3, firmAccepted: false, acceptedAt: null, acceptedBy: null, acceptedByName: null, myAcceptedVersion: null, myAcceptedAt: null }),
+        doc({ kind: "dpa" }),
+      ],
+    }),
+  });
+  try {
+    const text = h.text();
+    assert.match(text, /Clara cannot use a model on any client's books until an owner of this firm accepts the current versions/,
+      "enforce is today's copy, byte for byte");
+    assert.doesNotMatch(text, /Please accept the current versions/);
+  } finally { await h.unmount(); }
+});
+
+test("p1008.web.legal_live_copy a live standing reads the same in both modes", async () => {
+  for (const mode of ["prompt", "enforce"] as const) {
+    const h = await mount({ status: "ready", data: standing({ enforcementMode: mode }) });
+    try {
+      const text = h.text();
+      assert.match(text, /An owner of this firm has accepted the current versions of both agreements/,
+        `${mode}: a live standing is a live standing`);
+      assert.equal(acceptTrigger(h) !== null, false, `${mode}: nothing is outstanding`);
+    } finally { await h.unmount(); }
+  }
 });

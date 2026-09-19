@@ -680,3 +680,57 @@ whatever else ran on the cluster.
 `firm-commercial-settings-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
 does not preload it and fails loudly on a database without 0233, because a skip is not evidence.
 
+
+## `legal-enforcement-mode.test.mjs` — #1008 / migration 0234 (cell prefix `p1008.db.`)
+
+26 cells. The platform's legal enforcement mode, the derived basis under each of its two values,
+the truthfulness of the evidence the mint and the restore write, the operator-firm-owner door that
+flips it, and — added in fix round 1 — whose acceptance may found the basis at all and what two
+concurrent first dispatches mint.
+
+**EVERY BEHAVIOURAL CELL ASSERTS BOTH MODES, and that is the battery's own vacuity control.** A
+body that ignored the mode could not pass `p1008.db.prompt_belcort` (UNKNOWN under `enforce`,
+`granted` under `prompt`, same firm, same client, same cell) or
+`p1008.db.prompt_survives_publication` (a newer published version withdraws under `enforce` and
+does not under `prompt`). The cells that are about something the mode does NOT change —
+`revoke_sticky`, `deactivate_reactivate`, `prompt_inactive_client` — loop over both values and
+assert the same outcome in each.
+
+**THE MODE IS ARRANGED AT ROOT, AND EXERCISED THROUGH THE DOOR.** `clara.legal_enforcement` carries
+FORCE RLS with a single `clara_fn_owner` policy and no application-role privilege, and its only
+human writer is floored on the OPERATOR FIRM's owner — of which the estate admits exactly one at a
+time (`uq_firms_one_operator`). Driving every cell's arrangement through that door would serialise
+the battery behind a global lock other files also take, so `forceMode()` is a LABELLED root UPDATE
+(the same disposition `publishNextVersion` carries for `clara.legal_documents`) and the door itself
+is exercised by the four cells that are ABOUT the door: `mode_door_floor`, `mode_door_vocabulary`,
+`mode_door_receipt` and `mode_doors_posture`. Nothing under test is arranged by root DML.
+
+**`work-egress-authority.test.mjs`'s ONE enforcement cell SETS the mode rather than weakening its
+assertion.** `w631.prep.superseded` is about the `enforce` rule, and 0234's landing value is
+`prompt`; it now wraps its body in `forceLegalEnforcementMode("enforce")` and puts the previous
+value back in a `finally`. That helper is frontier-tolerant: below 0234 the relation does not exist
+and the estate already behaves as `enforce`, so it is a no-op.
+
+**THE PROMPT ARM IS PINNED FROM THE HOSTILE SIDE TOO** (fix round 1, review finding A4).
+`prompt_wrong_person` seeds REAL acceptances of both published kinds on people who are not this
+firm's active owner — a non-owner MEMBER of the firm, and another firm's owner — and requires the
+same indistinguishable `{"live": false}` in both modes. `prompt_owner_leaves` demotes the accepting
+owner through `set_member_role`, puts the role back, then removes the membership through
+`remove_member`, and requires the basis to follow. MEASURED: with `m.status='active' and
+m.role='owner'` deleted from the prompt arm's owner selection on the rig, the 23 cells that
+preceded these two ALL stayed green and only these two red — which is the gap they close.
+
+**AND THE CONCURRENT FIRST DISPATCH IS A FORCED WINDOW, NOT A HOPED-FOR ONE** (finding A3).
+`prompt_first_dispatch_race` goes through `racedFirstDispatch`, which mints on session A inside an
+open transaction, starts session B, OBSERVES B waiting on a lock in `pg_stat_activity` from a third
+session, and only then lets A commit. The observation is asserted (`blocked`), because the obvious
+spelling is worthless: MEASURED on this rig, a bare `Promise.all` of two `prepareEgressDispatch`
+calls does NOT overlap — the first commits before the second reads its guard — and that pair passes
+even against a `prepare_egress_dispatch` whose `on conflict do nothing` has been deleted. The forced
+version reds with `23505` against that same mutation and is green against the shipped body.
+
+**The battery leaves the estate as the MIGRATION leaves it** (`prompt`) in its `after` hook, so a
+later file in the same sweep does not inherit this one's arrangement.
+
+`legal-enforcement-mode-preintegration-gate.mjs` is the package-wide sweep's escape; a FOCUSED run
+does not preload it and fails loudly on a database without 0234, because a skip is not evidence.

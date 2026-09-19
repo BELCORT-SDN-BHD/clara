@@ -882,6 +882,11 @@ async function handleSupabase(request, response, url) {
       standing_live: true,
       can_accept_for_firm: owner,
       masked: false,
+      // #1008 — the platform's legal enforcement mode (0234). `prompt` is what a hosted estate
+      // answers after that migration, and with `standing_live: true` above it renders exactly the
+      // same face as before, so no unrelated spec moves. `firm-commercial-walk.spec.ts` installs
+      // its own `page.route` pair for the scenarios that are ABOUT the mode.
+      enforcement_mode: "prompt",
     }, cors);
     return;
   }

@@ -48,6 +48,8 @@ const STANDING: FirmLegalStanding = {
     },
   ],
   standingLive: true,
+  // #1008: `enforce` keeps this fixture rendering the copy it was written against.
+  enforcementMode: "enforce",
   canAcceptForFirm: true,
   masked: false,
 };

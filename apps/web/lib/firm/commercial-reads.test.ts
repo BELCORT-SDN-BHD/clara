@@ -194,3 +194,36 @@ test("p635.reads.commercial_half_a_plan still drops the payload", () => {
     null,
   );
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// #1008 — THE LEGAL ENFORCEMENT MODE, carried on the standing read (migration 0234).
+// ───────────────────────────────────────────────────────────────────────────
+
+test("p1008.reads.standing_mode the door's enforcement_mode decodes, in both values", () => {
+  for (const mode of ["prompt", "enforce"] as const) {
+    const decoded = decodeFirmLegalStanding({
+      documents: [DOC, DPA], standing_live: false, can_accept_for_firm: true, masked: false,
+      enforcement_mode: mode,
+    });
+    assert.ok(decoded);
+    assert.equal(decoded.enforcementMode, mode);
+    assert.equal(decoded.standingLive, false,
+      "the mode never changes the standing fact — the card must still be able to ASK");
+  }
+});
+
+test("p1008.reads.standing_mode_defaults_to_enforce an absent or unreadable mode is the STRICTER reading", () => {
+  // A web build that has landed ahead of migration 0234 reads a payload with no
+  // `enforcement_mode` at all. Defaulting to `prompt` there would tell a firm that its Work can
+  // use the model when the database has not been taught that yet; defaulting to `enforce` renders
+  // exactly the copy the pre-0234 estate is actually enforcing. Fail closed, as the database's own
+  // clara._legal_enforcement_mode() does on an absent configuration row.
+  const base = { documents: [DOC, DPA], standing_live: false, can_accept_for_firm: true, masked: false };
+  assert.equal(decodeFirmLegalStanding(base)?.enforcementMode, "enforce");
+  assert.equal(decodeFirmLegalStanding({ ...base, enforcement_mode: null })?.enforcementMode, "enforce");
+  assert.equal(decodeFirmLegalStanding({ ...base, enforcement_mode: "off" })?.enforcementMode, "enforce");
+  assert.equal(decodeFirmLegalStanding({ ...base, enforcement_mode: 7 })?.enforcementMode, "enforce");
+  // …and it is a DEFAULT, not a requirement: the payload still decodes, because the three
+  // scalars this module has always required are all present.
+  assert.ok(decodeFirmLegalStanding(base), "an unknown mode never drops the whole read");
+});

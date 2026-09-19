@@ -2566,6 +2566,30 @@ export const FIRM_COMMERCIAL_0233_COHORT = [
   ...FIRM_COMMERCIAL_0233_HUMAN_FNS, ...FIRM_COMMERCIAL_0233_RECUT_FNS,
 ];
 // #635 END
+// #1008 [0234, the platform's legal enforcement mode] — its own cohort, bimodal like 0222's and
+// 0231's: wholly present once 0234 applies, wholly absent before it, because the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers.
+//
+//   TWO NEW HUMAN DOORS, clara_authenticated ONLY, both floored on the OPERATOR FIRM's owner in
+//   their own bodies — `clara.set_admission_capacity`'s predicate, byte-for-byte, re-derived at
+//   call time. `set_legal_enforcement_mode(text,text,text)` is the ONE writer of
+//   `clara.legal_enforcement` (op_receipts-idempotent, with a clara._audit receipt);
+//   `get_legal_enforcement_mode()` is the operator's own read of it. clara_runtime, both agent
+//   read roles and all four wake lanes gain ZERO on both: each is `_human_ctx`-gated, so a lane
+//   carrying no JWT claims could not execute the body even if it held the grant.
+//
+//   0234's ONE internal, `clara._legal_enforcement_mode`, is granted to NOBODY — it is the one
+//   body every wall reads, reached only from DEFINER bodies, and is therefore expected-false for
+//   every role in the live sweep rather than listed here. That is the same disposition 0186's
+//   `clara._admission_capacity_state` and 0188's `clara._operator_support_cases` carry.
+//
+//   THE FOUR BODIES 0234 RECUTS keep their existing cohort memberships: their grants did not move
+//   (`create or replace` preserves the ACL, and 0234's tail asserts each one byte-for-byte).
+const LEGAL_ENFORCEMENT_0234_HUMAN_FNS = [
+  "set_legal_enforcement_mode", "get_legal_enforcement_mode",
+];
+export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FNS];
+// #1008 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -2812,6 +2836,11 @@ export const ALLOWED = {
     // read roles and all four wake lanes gain ZERO. The recut `get_llm_usage_summary` is
     // already on this set through F_A9_PR1A_HUMAN_FNS and its grant did not move.
     ...FIRM_COMMERCIAL_0233_HUMAN_FNS,
+    // #1008 [0234] the platform's legal enforcement mode — the operator-firm owner's write door
+    // and its matching read, see the block above. clara_authenticated ONLY; clara_runtime, both
+    // agent read roles and all four wake lanes gain ZERO, and the ungranted predicate
+    // clara._legal_enforcement_mode holds no role at all.
+    ...LEGAL_ENFORCEMENT_0234_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3274,6 +3303,13 @@ export async function grantMatrixFailures() {
   // would otherwise report this roster PARTIAL forever. See the block beside the constant.
   if (liveNames.has("get_firm_legal_standing")) {
     failures.push(...cohortFailures("#635 0233 firm legal/commercial/usage reads", FIRM_COMMERCIAL_0233_COHORT, liveNames));
+  }
+  // #1008 [0234] — bimodal: wholly present once 0234 applies, wholly absent before it. A PARTIAL
+  // cohort is still a failure, which is the half that matters.
+  const enforcementLive = LEGAL_ENFORCEMENT_0234_COHORT.filter((n) => liveNames.has(n));
+  if (enforcementLive.length !== 0) {
+    failures.push(...cohortFailures("#1008 0234 platform legal enforcement mode",
+      LEGAL_ENFORCEMENT_0234_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
