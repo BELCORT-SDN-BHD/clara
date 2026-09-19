@@ -44,10 +44,19 @@ function specFiles(): string[] {
  *
  * THE BUTTON HALF IS A REFERENCE, NOT A `.click()`, deliberately. A parser that demanded
  * `.click()` on the same expression would miss the shape a real offender takes just as easily —
- * `const button = page.getByRole("button", { name: "Sign in" }); await button.click();` — and the
- * cost of the stricter reading is exactly one honest exception (`entry-faces-walk.spec.ts`, which
- * FOCUSES that button without clicking it because the login face is its subject). A gate that is
- * one named exception stricter is the better trade.
+ * `const button = page.getByRole("button", { name: "Sign in" }); await button.click();`. The
+ * password half reads the same way (a locator bound to a variable and filled through it), because
+ * a census that understood indirection on one half and not the other would stay green against a
+ * local sign-in reshaped in three keystrokes.
+ *
+ * WHAT PAYS FOR THAT LOOSENESS IS PROXIMITY, NOT AN EXCEPTION LIST. Two halves ANDed across a
+ * WHOLE FILE are not evidence of one sign-in: `entry-faces-walk.spec.ts` fills a Password on
+ * `/signup` and, in a different cell 38 lines away, NAMES the login page's "Sign in" button to
+ * assert its focus ring without ever clicking it — two forms, read as one, and a FORM_EXCEPTIONS
+ * entry whose recorded reason was something that file does not do. So the two halves must land
+ * within `SAME_SIGN_IN_LINES` of each other. MEASURED at `dd3f8f1d`: every one of the fourteen
+ * local sign-ins #851 folded put its Password fill exactly ONE line from its "Sign in" submit,
+ * and the only file that matched across two different forms put them 38 apart.
  *
  * THE REGEX SPELLING COUNTS TOO, and finding out why is what this file is for.
  * `intake-batch-walk.spec.ts` drove the same three acts as `getByLabel(/password/i)` and
@@ -62,25 +71,43 @@ function specFiles(): string[] {
 const PASSWORD_LOCATOR = String.raw`getByLabel\(\s*(?:"Password"|'Password'|\/[^/\n]*password[^/\n]*\/[a-z]*)\s*\)`;
 
 /** The field filled straight off its own locator. */
-const PASSWORD_FILL = new RegExp(String.raw`${PASSWORD_LOCATOR}\s*\.fill\(`, "i");
+const PASSWORD_FILL = new RegExp(String.raw`${PASSWORD_LOCATOR}\s*\.fill\(`, "gi");
 /** …and the field BOUND FIRST — `const password = page.getByLabel("Password"); await
- *  password.fill(…)` — whose `.fill(` arrives later, through the variable. Symmetry with the
- *  button half, which has read an indirected locator since this file was written: a census that
- *  understood indirection on one half and not the other would stay GREEN against a local sign-in
- *  reshaped in three keystrokes, which is the one thing this file exists not to do. */
+ *  password.fill(…)` — whose `.fill(` arrives later, through the variable. */
 const PASSWORD_BINDING = new RegExp(
   String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*[^;\n]*${PASSWORD_LOCATOR}`,
   "gi",
 );
-const SIGN_IN_SUBMIT = /getByRole\(\s*(["'])button\1\s*,\s*\{\s*name:\s*(?:(["'])Sign in\2|\/[^/\n]*sign[\s_-]*in[^/\n]*\/[a-z]*)/i;
+const SIGN_IN_SUBMIT = /getByRole\(\s*(["'])button\1\s*,\s*\{\s*name:\s*(?:(["'])Sign in\2|\/[^/\n]*sign[\s_-]*in[^/\n]*\/[a-z]*)/gi;
+
+/** How far apart the two halves may sit and still be ONE sign-in. Ten lines is room for the
+ *  paragraph every retired copy carried about its wait, and still a quarter of the distance the
+ *  one false positive needed. */
+const SAME_SIGN_IN_LINES = 10;
+
+function lineAt(source: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index; i += 1) if (source[i] === "\n") line += 1;
+  return line;
+}
+
+/** Every line on which the PASSWORD FIELD is filled, by either shape. */
+function passwordFillLines(source: string): number[] {
+  const lines: number[] = [];
+  for (const m of source.matchAll(PASSWORD_FILL)) lines.push(lineAt(source, m.index + m[0].length - 1));
+  for (const binding of source.matchAll(PASSWORD_BINDING)) {
+    const through = new RegExp(String.raw`\b${binding[1]!}\s*\.fill\(`, "g");
+    for (const use of source.matchAll(through)) lines.push(lineAt(source, use.index));
+  }
+  return lines;
+}
 
 export function reimplementsLoginForm(source: string): boolean {
-  if (!SIGN_IN_SUBMIT.test(source)) return false;
-  if (PASSWORD_FILL.test(source)) return true;
-  for (const [, bound] of source.matchAll(PASSWORD_BINDING)) {
-    if (new RegExp(String.raw`\b${bound!}\s*\.fill\(`).test(source)) return true;
-  }
-  return false;
+  const fills = passwordFillLines(source);
+  if (fills.length === 0) return false;
+  return [...source.matchAll(SIGN_IN_SUBMIT)].some((submit) =>
+    fills.some((fill) => Math.abs(lineAt(source, submit.index) - fill) <= SAME_SIGN_IN_LINES),
+  );
 }
 
 /**
@@ -116,15 +143,16 @@ export function importsSharedSignIn(source: string): boolean {
 }
 
 /**
- * THE TWO FILES ALLOWED TO DRIVE THE LOGIN FORM, each with the reason recorded beside it rather
- * than in a commit message.
+ * THE ONE FILE ALLOWED TO DRIVE THE LOGIN FORM, with the reason recorded beside it rather than in
+ * a commit message.
+ *
+ * It was two until the detector learned proximity. `entry-faces-walk.spec.ts` never drove the
+ * login form at all — it fills a Password on `/signup` and focuses (never clicks) the login
+ * submit in another cell — so its entry was an exception granted for something the file does not
+ * do, and a real local sign-in added to that file would have gone unseen. The third cell below is
+ * what forced the entry out once the false positive stopped matching.
  */
 const FORM_EXCEPTIONS: Record<string, string> = {
-  // The login and signup FACES are this file's subject, not its setup: it asserts the tab order
-  // Email → Password → Sign in, that the submit carries a visible focus indicator, and the signup
-  // positive control. It cannot delegate the form to a helper because the form is what it measures
-  // — and every cell in it that merely needs a session already calls the shared `signInTo`.
-  "entry-faces-walk.spec.ts": "the login face is the subject under test (tab order, focus ring)",
   // #804's own named out-of-scope file. This walk does not run in this harness at all: it is
   // driven by `e2e/live-stack/run-reports-download-walk.mjs` against real Postgres, real report
   // doors and a real object store, where its `establishSession` signs a REAL user in. Folding it
@@ -245,6 +273,37 @@ test("#851 · THE VACUITY CONTROL: the detector actually detects, and does not o
     "await submit.click();",
   ].join("\n");
   assert.equal(reimplementsLoginForm(indirectPassword), true, "an indirected Password locator is the same form");
+
+  // TWO HALVES OF TWO DIFFERENT FORMS ARE NOT ONE SIGN-IN. `entry-faces-walk.spec.ts`'s real
+  // shape: a Password filled on `/signup` and submitted with "Create account", and — in another
+  // cell, 38 lines away — the login page's "Sign in" button NAMED to assert its focus ring,
+  // never clicked. A file-scoped AND read those two as a local sign-in and demanded an exception
+  // whose recorded reason ("the login face is the subject under test") was something the file
+  // does not do. The halves must belong to the same sign-in.
+  const twoDifferentForms = [
+    'await page.goto("/signup");',
+    'await page.getByLabel("Password").fill("Clara-e2e-password-1!");',
+    'await page.getByRole("button", { name: "Create account" }).click();',
+    ...Array.from({ length: 30 }, (_, i) => `// an unrelated cell, line ${i}`),
+    'const signInButton = page.getByRole("button", { name: "Sign in" });',
+    "await expect(signInButton).toBeFocused();",
+  ].join("\n");
+  assert.equal(
+    reimplementsLoginForm(twoDifferentForms),
+    false,
+    "a signup fill and a focus-only login button 30 lines apart are two forms, not one sign-in",
+  );
+
+  // …and the window is not so tight that a comment between the two acts hides a real one. This is
+  // the fold's own retired shape: every walk it retired carried a paragraph about its wait.
+  const commentedOffender = [
+    'await page.getByLabel("Password").fill("Clara-e2e-password-1!");',
+    "// A GENEROUS TIMEOUT, not the 5 s default: this host runs several rigs at once and the",
+    "// post-sign-in navigation is a full server render. A short wait here reports \"the app did",
+    "// not sign in\" for a page that had simply not finished, which is a false finding.",
+    'await page.getByRole("button", { name: "Sign in" }).click();',
+  ].join("\n");
+  assert.equal(reimplementsLoginForm(commentedOffender), true, "a comment between the two acts does not break the form");
 
   // A compliant file, and the SIGN-UP form — neither is this form.
   assert.equal(

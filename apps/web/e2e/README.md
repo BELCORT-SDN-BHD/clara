@@ -52,14 +52,14 @@ pnpm --filter @clara/web e2e -- --no-build documents-viewer-walk
 
 Every spec takes its sign-in from [`helpers.ts`](helpers.ts) — `signIn(page, email?)` or `signInTo(page, destination, email?)`. #804's fourth acceptance criterion said so in prose and, by 2026-09-17, fourteen spec files written during that wave had each grown a local copy again, several with a hand-picked 30 s or 60 s wait and one (`intake-batch-walk.spec.ts`) with regex locators and the wrong fixture password. Nothing went red.
 
-[`sign-in-census.test.ts`](sign-in-census.test.ts) is that rule with a cell behind it. It reads the login FORM — a Password fill plus the "Sign in" submit, in either the string or the regex spelling — rather than a function name, so a local helper called anything at all is caught and a thin wrapper that delegates is not. Two short lists, each entry carrying its reason in source:
+[`sign-in-census.test.ts`](sign-in-census.test.ts) is that rule with a cell behind it. It reads the login FORM — a Password fill plus the "Sign in" submit, in either the string or the regex spelling, and through a locator bound to a variable as readily as one chained in place — rather than a function name, so a local helper called anything at all is caught and a thin wrapper that delegates is not. The two halves must land **within ten lines of each other**: ANDed across a whole file they read a `/signup` password fill and a focus-only login button in some other cell as one sign-in, which is how `entry-faces-walk.spec.ts` came to hold an exception for something it does not do. Measured at `dd3f8f1d`, every one of the fourteen local sign-ins the fold retired put its two halves one line apart; that false positive put them 38 apart. Two short lists, each entry carrying its reason in source:
 
 | List | Entries | What it permits |
 |---|---|---|
-| `FORM_EXCEPTIONS` | `entry-faces-walk.spec.ts`, `reports-download-walk.spec.ts` | driving the login form itself — one because that face is its subject, one because it is the live-stack lane #804 named out of scope |
+| `FORM_EXCEPTIONS` | `reports-download-walk.spec.ts` | driving the login form itself — the live-stack lane #804 named out of scope, whose `establishSession` signs a REAL user in against real Postgres |
 | `WRAPPERS` | `chat-parity-walk.spec.ts`, `documents-intake-walk.spec.ts`, `members-invite-walk.spec.ts` | declaring a sign-in function, provided it imports the shared helper |
 
-A third cell keeps both lists live: an entry that no longer offends fails, so the lists can shrink but cannot rot. A fourth is the vacuity control — the detector is driven over synthetic offenders (including the variable-then-click and regex spellings) and over compliant and signup sources, so an empty census is evidence rather than an instrument that never fired.
+A third cell keeps both lists live: an entry that no longer offends fails, so the lists can shrink but cannot rot — it is what forced the `entry-faces-walk.spec.ts` entry out once the detector stopped mis-reading that file. A fourth is the vacuity control — the detector is driven over synthetic offenders (the variable-then-click shape, the indirected Password locator, the regex spellings, and a real form whose two acts are separated by a comment block) and over compliant, signup and two-different-forms sources, so an empty census is evidence rather than an instrument that never fired.
 
 ## One worker, one host (#706)
 
