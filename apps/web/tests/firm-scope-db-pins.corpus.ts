@@ -162,8 +162,8 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
     "0232_client_financial_pack.sql",
     {
       reason:
-        "Reviewed: the ONLY dynamic SQL in 0232 is a two-iteration do-block that enables and FORCES row level security and creates an owner policy and a firm-scoped human policy on the file's OWN two new relations (clara.cash_account_set_versions, clara.cash_account_set_members) — the same execute-format loop 0003:505-518 uses for the core tables. It emits ALTER TABLE and CREATE POLICY only and contains no CREATE VIEW of any kind, so neither P4 scope view can be a target; the two relation names it interpolates are string literals in the array beside it.",
-      sha256: "80d5977ccbefdc0d3a0a83cc2b8ffaba702b702e5a30ea4a266cbbf005e41c5f",
+        "Reviewed: the ONLY dynamic SQL in 0232 is a two-iteration do-block that enables and FORCES row level security and creates an owner policy and a firm-scoped human policy on the file's OWN two new relations (clara.cash_account_set_versions, clara.cash_account_set_members) — the same execute-format loop 0003:505-518 uses for the core tables. It emits ALTER TABLE and CREATE POLICY only and contains no CREATE VIEW of any kind, so neither P4 scope view can be a target; the two relation names it interpolates are string literals in the array beside it. Re-read in the fix round: the loop itself is byte-unchanged; the file's sha moved because the pack's comparison, composition, coverage-reason and disclosure arms were corrected, none of which is dynamic SQL.",
+      sha256: "289fc682c1625b4273a82b01cbbb8d36e691f6b93e23ae7ad5cd7e33e3281e64",
     },
   ],
 ]);
