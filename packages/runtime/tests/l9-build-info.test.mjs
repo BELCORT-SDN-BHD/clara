@@ -206,7 +206,24 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // the point rather than the names: an operator reading /api/build-info must see every rollback
   // target this image actually carries, not infer them from the pin.
   assert.match(src, /import \{ claraWorkBundleIdentityV4 \} from "\.\.\/workflows\/claraWork\.v4\.bundle\.js"/, "the route imports the v4 bundle identity");
-  assert.match(src, /bundles: \[claraWorkBundleIdentityV4\(\), claraWorkBundleIdentityV3\(\), claraWorkBundleIdentityV2\(\), claraWorkBundleIdentity\(\)\]/, "...and passes all FOUR into the payload, pinned first, so one read answers which bundles this image serves");
+  // WAVE 2026-09-18 — FIVE identities now, PINNED FIRST. Same reason, one version on: v5 is what
+  // `workflows.claraWork` dispatches and v4…v1 are still carried for runs parked on their hooks.
+  assert.match(src, /import \{ claraWorkBundleIdentityV5 \} from "\.\.\/workflows\/claraWork\.v5\.bundle\.js"/, "the route imports the v5 bundle identity");
+  // THE ARRAY, READ AS AN ORDERED LIST RATHER THAN AS A LITERAL STRING. The previous form pinned
+  // the exact one-line spelling, so it reds on a REFORMAT as loudly as on a missing bundle — and
+  // this cut's addition pushed the line past the width limit, which is how that was found. What
+  // the cell is actually for is the ORDER (newest first, so one read answers which body is pinned)
+  // and the COMPLETENESS (every retained body, so a rollback preflight need not infer its targets);
+  // both survive a line break, and neither is weakened by letting one through.
+  const bundlesAt = src.indexOf("bundles: [");
+  assert.ok(bundlesAt > 0, "the payload carries a bundles array");
+  const bundlesArg = src.slice(bundlesAt, src.indexOf("]", bundlesAt));
+  const identities = [...bundlesArg.matchAll(/claraWorkBundleIdentity(V\d+)?\(\)/g)].map((m) => m[1] ?? "V1");
+  assert.deepEqual(
+    identities,
+    ["V5", "V4", "V3", "V2", "V1"],
+    "...and passes all FIVE into the payload, NEWEST FIRST, so one read answers which bundles this image serves",
+  );
   // #637 — the SAME import-here-pass-in shape for the registry's provenance exports. Without
   // these two the payload could name the bundles but not the BODIES, and a rollback preflight
   // reading a target image's /api/build-info would have nothing to compare a parked run against.
