@@ -46,3 +46,19 @@ Known Windows-only reds you must not "fix" unless your ticket IS that defect: #7
 out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files), the
 `thread-live-clarify.test.tsx` load flake under the whole-suite run (re-run alone, report both), and
 `use-clara-thread-stop.test.ts` (#956: lane 08 owns it this wave).
+
+## Addendum for wave 2 and later (2026-09-20)
+
+- Lane branches are `riders/w<w>-lane<k>`, cut from the integrated head of the wave before (the
+  prompt names the commit). Wave 1 added no migration, so every lane database is still at
+  229 files / `0234_legal_enforcement_mode` before the first wave-2 ticket.
+- `use-clara-thread-stop.test.ts` (#956) was fixed in wave 1 and is no longer a known red.
+- Runtime e2e spawners: four admit a `clara_l<NN>` database name (work-journal, trade-invoice,
+  staff-expense-claim, periodic-adjustment); seven others admit only `clara_rt_test` and
+  `clara_wave_b_ci`. If you must run one of those seven, CLONE your lane database inside your own
+  cluster (`createdb -h 127.0.0.1 -p <port> -U postgres -T <your db> clara_rt_test`, with no open
+  connection to the source), run against the clone, and drop the clone afterwards. Never widen a
+  gate for the rig and never run a second from-scratch chain on your cluster.
+- A second from-scratch chain on a cluster that already ran one needs the #867 recipe
+  (`packages/db/README.md`, "From-scratch reapply on a reused cluster"). Lanes never need it: the
+  integrator runs the from-scratch proof on a disposable cluster.

@@ -70,3 +70,29 @@ orchestrator integrates, reviews and releases; you build and prove. These rules 
     done / partial / already satisfied / stopped, each acceptance criterion with its evidence (test
     name + result, file, command), what was deliberately left; then the gates with counts; docs
     updated; successor contracts; follow-ups worth filing; anything unverified.
+
+## Addendum for wave 2 and later (2026-09-20)
+
+These lines override the rules above where they differ.
+
+- **Base.** Your lane branch is cut from the integrated head of the wave before, not from
+  `origin/main`. Your prompt names that base commit. Everywhere a rule above says
+  `origin/main..HEAD`, read `<base>..HEAD`. Reviews diff against the same base.
+- **One implementer per ticket.** You are given ONE ticket. Tickets before yours in the lane have
+  already landed commits on the branch and applied their migrations to the lane database: read
+  `git log <base>..HEAD` and their reports (`reports/wave<w>-lane<k>-ticket<n>.md`) first.
+- **Migrations (replaces the wave-1 half of rule 5).** A ticket that needs a schema or function
+  change writes EXACTLY ONE new migration file at the number reserved for it in your prompt. House
+  shape: header, prestate with `sha256(prosrc)` pins MEASURED on your lane database now (a ticket
+  before yours may have recut the body: pin what is live), the change, tail assertions, a
+  preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in
+  migration order. Never edit an applied migration or another ticket's new migration. To re-apply
+  your own unmerged migration after an edit, use the supported redo mode that #957 added
+  (`packages/db/README.md`, "Redo (#957)": `CLARA_MIGRATION_REDO=<version>`, highest applied version
+  only, destructive guard required) and record that you did.
+- **Report (replaces the file name in rule 10).** One report per ticket:
+  `reports/wave<w>-lane<k>-ticket<n>.md`, same shape, with the migration name and its prestate pins.
+- **A frozen chat or Work tool** is never edited. Everything such a tool would need is a "successor
+  contract" in your report (name, zod input, door call with argument order, refusal mapping, part
+  kind, prompt stanza). The ONE shared cut `chatTurn_v22` / `claraWork_v6` happens at the end of
+  wave 4.
