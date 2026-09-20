@@ -114,6 +114,9 @@ export const PLAN_REASON = {
   planKindUnsupported: "plan_kind_unsupported",
   timezoneUnsupported: "timezone_unsupported",
   reversalCollides: "reversal_collides_with_next_occurrence",
+  // #908: `_assert_plan_schedule`'s own wall, next to the accrual entrance's
+  // `accrual_schedule_yields_no_occurrence` (accrual-adjustments-fixtures.mjs's ACCRUAL_REASON).
+  scheduleYieldsNoOccurrence: "plan_schedule_yields_no_occurrence",
   reversalBeforePrimary: "reversal_before_primary",
   periodAlreadyAdmitted: "period_already_admitted",
   effectiveFromBeforeAuthority: "effective_from_before_authority",

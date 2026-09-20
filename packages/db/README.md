@@ -2969,3 +2969,81 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0280 — the plan lane's own door gains the accrual entrance's wall (#908)
+
+**Context.** #652 (migration 0222) added `clara._assert_accrual_schedule_yields`, an entrance-level
+refusal for a schedule whose day rule can never reach a due date inside its own effective window,
+but wired it ONLY into `clara.create_accrual_adjustment`/`clara.revise_accrual_adjustment`. The
+underlying `clara._assert_plan_schedule` (0193:1572, recut by 0223) — the ONE validator
+`clara.create_accounting_plan` and `clara.revise_accounting_plan` both call, and the one
+`clara._accrual_plan_core` (0222:961) also reaches directly with `p_kind = 'reversing_journal'` —
+carried no such refusal, so a caller of the shared door directly (bypassing the two accrual doors)
+could still record a `'reversing_journal'`, `'recurring_journal'` or `'amortisation_schedule'` plan
+that is recorded and never performs.
+
+**What 0280 does.** `0280_plan_schedule_yield_wall.sql` recuts `clara._assert_plan_schedule` with
+ONE new arm, added after every arm 0223 wrote, unconditionally on `p_kind`: when
+`p_effective_to is not null` and `clara._accrual_schedule_yields` (0222:796, IMMUTABLE, untouched)
+answers false for the same five arguments the function already carries, it raises CLR10
+`plan_schedule_yields_no_occurrence`, naming `day_of_month` for a day-of-month rule and `day_rule`
+otherwise — the accrual entrance's own field logic, restated. No signature change, no volatility
+change (still IMMUTABLE), no new relation, no new function; `clara.create_accounting_plan` and
+`clara.revise_accounting_plan` keep byte-identical bodies and inherit the arm through the one
+function they already call, exactly as 0223's own amortisation-cadence arm already does for
+`revise_accounting_plan`.
+
+**Why the accrual entrance keeps its own token.** `create_accrual_adjustment` (0222:1134) and
+`revise_accrual_adjustment` both call `_assert_accrual_schedule_yields` — their OWN CLR10 token —
+at 0222:1182/1283, strictly BEFORE either door's nested `_accrual_plan_core` ever reaches
+`_assert_plan_schedule` at 0222:1027. A `raise exception` stops the transaction outright, so 0280's
+new arm is never reached through either accrual door; it only ever fires for a caller that reaches
+`_assert_plan_schedule` without going through `_assert_accrual_schedule_yields` first —
+`clara.create_accounting_plan`, `clara.revise_accounting_plan`, and `_accrual_plan_core`'s own
+direct call, which nothing upstream of it protects on the bypass path the ticket names.
+`tests/plan-schedule-yield-wall.test.mjs`'s `pw908.accrual-entrance-unmoved` cell drives
+`create_accrual_adjustment` with a no-yield shape and measures the accrual token still answers.
+
+**Why an open-ended plan (`effective_to is null`) is not this wall's business.**
+`clara._plan_due_events` returns no rows once its own `p_end` argument is null (0193:851), which
+would make the boolean predicate read "no occurrence" for every open-ended schedule — this lane's
+own DEFAULT shape (`accounting-plans-fixtures.mjs`'s `createAccountingPlan` defaults `effectiveTo`
+to `null`). The new arm is therefore gated on `p_effective_to is not null`, mirroring
+`_assert_accrual_schedule_yields`'s own guard (0222:820). Measured: the whole pre-existing
+`accounting-plans.test.mjs` (20/20), `accrual-adjustments.test.mjs` (21/21),
+`prepayment-schedule.test.mjs` (18/18) and `accounting-plan-occurrences.test.mjs` (16/16) batteries
+are green after this file applies, and `pw908.legitimate-plans` additionally drives an open-ended
+plan and a bounded, genuinely-reaching plan of each of the three kinds — including a
+`'reversing_journal'` plan created DIRECTLY through `create_accounting_plan`, the very bypass the
+issue names — and measures every one accepted.
+
+**Prestate/tail.** Pins (pre-image `sha256(prosrc)`, MEASURED on a 267-migration, `0001->0272`
+rig): `clara._assert_plan_schedule` (`e3640588afe0…67fd7`, the post-0223 body), and as
+non-regression `clara._accrual_schedule_yields` (`c75bf4c036cb…1a42`),
+`clara._plan_due_events` (`66100718e518…3384`), `clara.create_accounting_plan`
+(`84b67058244b…8d6c4`), `clara.revise_accounting_plan` (`87c9f1e9bcf4…431f`) and
+`clara._assert_accrual_schedule_yields` (`fd504b300a89…ec9f`). The prestate is REDO-tolerant by
+construction (#957): it recognises either the measured pre-0280 pre-image or this file's own prior
+output (its new token together with every pre-existing arm's own token), and refuses anything else
+rather than guessing. `create or replace function` on the unchanged signature converges to the same
+text either way, so §A itself carries no branch. The tail re-reads every pin, re-asserts every
+existing arm's token is still present BY NAME (0280 adds, it does not rewrite), and re-confirms
+owner, `SECURITY DEFINER`, `search_path`, `IMMUTABLE` volatility and the owner-only ACL are
+unmoved. Measured redo: applied FIRST (with a cosmetic notice-message bug — a reused loop variable
+printed the wrong sha in the closing `raise notice`, never in an `if` check), then fixed and
+re-applied via `CLARA_MIGRATION_REDO=0280_plan_schedule_yield_wall`, which took the REDO branch
+correctly and converged to the same functional body.
+
+**What 0280 does not do (Agent Brief "Out of scope").** It does not rename
+`accrual_schedule_yields_no_occurrence` or touch `clara._assert_accrual_schedule_yields`. It does
+not touch `clara._plan_due_events` or `clara._accrual_schedule_yields` — both pinned, both
+untouched; 0280 adds no logic of its own, only a call. It does not recut
+`clara.create_accounting_plan` or `clara.revise_accounting_plan`.
+
+**Known gap, not this ticket's scope.** `apps/web/lib/plans/schedule.ts`'s `validatePlanSchedule`
+is the general plan form's own mirror of `_assert_plan_schedule` and carries no yield check (unlike
+`apps/web/lib/work/accrual-draft.ts`, which already mirrors the accrual entrance's own wall) —
+after 0280, a well-shaped but non-yielding schedule submitted through the general plan form now
+gets a correct but LATE refusal from the door rather than an early one beside the field. Filing a
+follow-up to add the mirror is recommended; #908's Agent Brief names only the SQL validator and its
+two doors as in scope.
