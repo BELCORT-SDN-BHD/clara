@@ -210,7 +210,11 @@ export type OperationReceiptRow = {
   via_wake_kind: string;
   bundle_digest: string;
   run_id: string;
-  task_id: string;
+  /** #984 — NULL FOR AN OPENING RECEIPT, and only for one. Migration 0239 drops this column's
+   *  NOT NULL behind `ck_operation_receipts_task_by_purpose`: the three model-served purposes
+   *  still REQUIRE a task, an `opening_balance` receipt REFUSES one, because a human approval
+   *  owns no run. */
+  task_id: string | null;
   outcome: string;
   effects: { entry_id?: string | null; revision_token?: string | null } | null;
   refusal: { code?: string | null; reason?: string | null; message?: string | null } | null;
