@@ -75,6 +75,22 @@ exclusive because one event must be one announcement.
 with a vacuity control proving the tree really does contain live regions — treat
 `nested-live-region` as a gate, not a check.
 
+**A read this tab opened for ITSELF does not speak about the reader's access (#1024).** When the
+door refuses a Stop, `useClaraThread`'s `stopReply` re-opens its own read of the reply so the answer keeps
+arriving. `runClaraTaskStream` delivers a 403/404 at attach as the same `revoked` event a mid-stream
+revocation delivers (#642, "one fact, one face"), which is right for a tab's FIRST attach — its only
+view of the turn — and wrong for this one. That 404 also covers a task the runtime no longer holds (a
+reply that ended, was reaped, a stale id), so it would render an EXISTENCE fact as an ACCESS fact, and
+`applyStreamEvent`'s `revoked` arm writes `turnStatus: null` — for a turn this tab did not post the ONLY
+live arm of `turnLive`, so a statement about access silently withdrew the Stop control from a reply the
+refusal had just called live. `AttachRefusalMeaning` lets the caller say which reading it wants:
+`"revocation"` (the default, unchanged) or `"this-tab-cannot-resume"`, whose refused attach is kept out
+of the shared stream state and recorded by the caller's own machine as `reattach: "lost"` plus
+`markReattachFailed` — the same state a re-attach that failed at the TRANSPORT already reaches. A
+`revoked` that arrives once the read is OPEN is never diverted: the runtime sent it, and it still
+retires the clock and withdraws the parked question. `e2e/work-cancel-walk.spec.ts`'s B7 cell was the
+non-deterministic red this produced on both branches.
+
 **The transcript owns its own scroll, and nothing else's.** `lib/clara/useTranscriptScroll.ts`
 holds the whole policy: a reader scrolled up stays put while content arrives (the "is the
 reader following?" answer is sampled from their own scroll events, never recomputed after an
