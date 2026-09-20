@@ -197,6 +197,8 @@ test("#624 clara.get_document_state publishes the failing check to the surface t
   assert.deepEqual(failing.map((v) => v.check_name), ["invoice.six_term_identity"]);
   assert.ok(state.facts.extractions.some((e) => e.engine_kind === "llm_text_facts" && e.region_count > 0),
     "the facts and their source version travel with the verdict, so the panel can show both");
-  assert.equal(state.capability.limits.invoice_line_items, "planned",
-    "the invoice line-item deferral rides the same read, so 'facts recorded' can never overstate what was read");
+  assert.equal(state.capability.limits.invoice_line_items, "accepted_limitation",
+    "the invoice line-item limitation rides the same read, so 'facts recorded' can never overstate what was read (#782)");
+  assert.equal(state.capability.limits.invoice_line_items_reason, "no_consumer_reads_line_facts",
+    "the limitation carries its own reason, not a bare verdict (#782)");
 });
