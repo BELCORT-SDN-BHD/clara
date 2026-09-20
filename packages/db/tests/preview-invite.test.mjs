@@ -40,7 +40,14 @@ const PREVIEW_MIGRATION = "0224_preview_invite.sql";
 // `ready`/`unready` above) while skipping ONLY the cells this file adds for #872 -- detected off
 // `clara.schema_migrations`, never off a function's existence, because this migration recuts two
 // EXISTING bodies and adds no new catalog object (packages/db/tests/a21-helpers.mjs's own
-// convention: "the clara.schema_migrations row, never the migration file on disk").
+// convention: "the clara.schema_migrations row, never the migration file on disk"). The probe is
+// the STEM `invite_issuer_lapsed_status$`, never the migration NUMBER -- numbers are claimed at
+// merge, and a number-keyed probe turns every #872 cell into a silent green SKIP the moment the
+// integrator renumbers this file (adversarial ADV-L10-04, 2026-09-20; measured on clara_l10 in a
+// rolled-back transaction: renamed to 0277_, `^0269_` matched 0 rows while the stem matched 1).
+// This is the same rule the sibling gate one ticket later states in as many words
+// (tests/firm-document-limits-writer-preintegration-gate.mjs) and the wave-2 work order asks for
+// ("a preintegration gate module with a stable stem").
 const ISSUER_LAPSED_MIGRATION = "0269_invite_issuer_lapsed_status.sql";
 
 /** The SIX bodies 0224 must leave untouched, with the sha256 of their `prosrc` MEASURED on this
@@ -78,13 +85,14 @@ before(async () => {
     return;
   }
 
-  const ledger = await rootQuery("select 1 from clara.schema_migrations where version ~ '^0269_'");
+  const ledger = await rootQuery("select 1 from clara.schema_migrations where version ~ 'invite_issuer_lapsed_status$'");
   ready872 = ledger.rowCount > 0;
   if (!ready872 && process.env.CLARA_ALLOW_MISSING_ISSUER_LAPSED !== "1") {
     throw new Error(
       `#872 premise ${ISSUER_LAPSED_MIGRATION} is not applied (no clara.schema_migrations row matching ` +
-        "'^0269_') and CLARA_ALLOW_MISSING_ISSUER_LAPSED is unset -- this is a FOCUSED run and must fail " +
-        "loudly, not skip. Preload ./tests/invite-issuer-lapsed-preintegration-gate.mjs for an estate " +
+        "the stem 'invite_issuer_lapsed_status$') and CLARA_ALLOW_MISSING_ISSUER_LAPSED is unset -- this is a " +
+        "FOCUSED run and must fail loudly, not skip. Preload " +
+        "./tests/invite-issuer-lapsed-preintegration-gate.mjs for an estate " +
         "sweep against a pre-PR chain.",
     );
   }
@@ -105,7 +113,10 @@ function unready(t) {
 function unready872(t) {
   if (unready(t)) return true;
   if (!ready872) {
-    t.skip(`rig not ready for #872: no clara.schema_migrations row matching '^0269_' (${ISSUER_LAPSED_MIGRATION} not applied)`);
+    t.skip(
+      `rig not ready for #872: no clara.schema_migrations row matching the stem ` +
+        `'invite_issuer_lapsed_status$' (${ISSUER_LAPSED_MIGRATION} not applied)`,
+    );
     return true;
   }
   return false;
