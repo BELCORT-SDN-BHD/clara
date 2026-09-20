@@ -19,8 +19,16 @@
 //
 // THE MINTED REFERENCE IS A LABELLED `rootQuery` FIXTURE INSERT, the established pattern at
 // `f-a4-pr1c-fixtures.mjs:60`, `activity-feed.test.mjs:163` and `binding-proposal-pr-1.test.mjs:206`.
-// It is fixture DML, never the thing under test: the battery that PROVES the resolution ladder is
-// `depreciation-history.test.mjs` (`p651.authority.ref_resolves`), and it drives the real door.
+// It is fixture DML, never the thing under test: the batteries that PROVE the resolution ladder are
+// `depreciation-history.test.mjs` (`p651.authority.ref_resolves`) and
+// `authority-ref-human-instruction.test.mjs` (#977's `p977.*`), and both drive the real doors.
+//
+// #977 [0250] CLOSED THE RESIDUAL THIS MODULE USED TO NAME. The ladder proved the instruction's
+// PROVENANCE, not that a person typed it, so this helper minted the cheapest task kind that
+// existed (`autodraft`). The owner's ruling of 2026-09-20 narrowed the chat-lane arm in both
+// doors: a `chat_task` reference resolves only for a `chat_turn` task carrying an author. The
+// helper now mints exactly that shape, and `mintAgentTaskRef` below mints the refused shapes the
+// #977 cells drive.
 
 import assert from "node:assert/strict";
 import { rootQuery, withActor } from "./rig-helpers.mjs";
@@ -63,49 +71,91 @@ export async function signTakesAuthorityRef() {
   return _four;
 }
 
-/** A `{kind:'chat_task', id}` reference that RESOLVES for this client — a labelled fixture
- *  `clara.agent_tasks` row in the client's own firm.
- *
- *  THE ROW KIND IS `autodraft`, MEASURED RATHER THAN CHOSEN. `clara._tf_agent_task_insert`'s
- *  `chat_turn` arm requires a real `clara.chat_sessions` row (`chat_turn task requires
- *  session_id`) and its `wake` arm requires a `wake_intents` row; `autodraft` is the one arm whose
- *  whole precondition is "a prevalidated firm and an ACTIVE client, born queued, with a model
- *  snapshot" — the `f-a4-pr1c-fixtures.mjs:60` shape. The authority reference's own `kind` word
- *  (`chat_task`) names the RELATION the id lives in, and 0227's ladder resolves it against
- *  `clara.agent_tasks` by id, firm and client without reading `kind` — so this fixture is a real
- *  row of the real relation rather than a shape the ladder would never see in production.
- *
- *  THAT LAST SENTENCE IS ALSO THE NAMED RESIDUAL (adversarial review ADV-651-2): the ladder proves
- *  the instruction's PROVENANCE, not that a person typed it, exactly as 0193:1500-1514 does for
- *  accounting plans. Narrowing it is a cross-lane decision; 0227 §F's header carries the whole
- *  argument and #651's fix-round report files the follow-up. */
-export async function mintChatTaskRef(client) {
-  const c = await rootQuery("select firm_id from clara.clients where id = $1", [client]);
-  const firm = c.rows[0]?.firm_id;
-  assert.ok(firm, `mintChatTaskRef: client ${client} has no firm`);
+/** THE FIRM MEMBER a fixture stamps as an author — the first live active membership of this
+ *  client's own firm. Null only for a firm with no active member at all, which every world
+ *  builder in this package rules out. */
+async function firstActiveMember(firm) {
   const u = await rootQuery(
     "select user_id from clara.firm_memberships where firm_id = $1 and status = 'active' order by created_at limit 1",
     [firm]);
-  const insert = `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot, created_by)
-       values ($1, $2, 'autodraft', 'queued', 'p651-fixture', $3) returning id`;
-  const params = [firm, client, u.rows[0]?.user_id ?? null];
-  try {
-    const t = await rootQuery(insert, params);
+  return u.rows[0]?.user_id ?? null;
+}
+
+/** A labelled fixture `clara.agent_tasks` row of a NAMED kind, in this client's own firm and
+ *  client, returned as the `{kind:'chat_task', id}` reference shape both authority doors take.
+ *
+ *  ONE MINTER, FOUR SHAPES, because #977 makes the row's OWN kind and author the thing under
+ *  test rather than an irrelevance:
+ *
+ *    `chat_turn` + author  — A PERSON'S INSTRUCTION. The only shape #977's doors accept. Needs a
+ *                            real `clara.chat_sessions` row (the insert trigger's chat arm reads
+ *                            the session for the firm and client it stamps on the task), which is
+ *                            also why it works for a client that is NOT yet active: a session
+ *                            only asks that its client be IN the firm.
+ *    `chat_turn` no author — a turn row nobody signed. Refused by #977: authorship is half the
+ *                            predicate, and this is the arm that proves the other half is read.
+ *    `autodraft`           — AN AGENT RUN THAT CARRIES AN AUTHOR. Refused by #977 for its KIND,
+ *                            not for a missing author: a run is not an instruction. Its own
+ *                            trigger arm demands a prevalidated firm and an ACTIVE client.
+ *    `wake`                — the estate enqueuing work for itself; carries no author BY
+ *                            CONSTRUCTION. Its trigger arm demands a real `wake_intents` row
+ *                            resolving through `clara.domain_events`, and a wake task's firm and
+ *                            client are stamped FROM that event — so a fixture that needs the
+ *                            task to land on a NAMED client writes it directly, LABELLED, with
+ *                            the insert trigger off for exactly that statement, inside ONE
+ *                            transaction on ONE connection (see `withTriggerOff` above). The
+ *                            reference under test is the DOOR's business, not the task's birth.
+ *
+ *  This is fixture DML, never the thing under test: the battery that PROVES the resolution ladder
+ *  is `authority-ref-human-instruction.test.mjs` (#977) and `depreciation-history.test.mjs`
+ *  (`p651.authority.ref_resolves`), and both drive the real doors. */
+export async function mintAgentTaskRef(client, { kind = "chat_turn", author = true } = {}) {
+  const c = await rootQuery("select firm_id from clara.clients where id = $1", [client]);
+  const firm = c.rows[0]?.firm_id;
+  assert.ok(firm, `mintAgentTaskRef: client ${client} has no firm`);
+  const member = await firstActiveMember(firm);
+  const createdBy = author ? member : null;
+
+  if (kind === "chat_turn") {
+    assert.ok(member, `mintAgentTaskRef: firm ${firm} has no active member to author a chat session`);
+    const s = await rootQuery(
+      "insert into clara.chat_sessions(firm_id, client_id, created_by) values ($1, $2, $3) returning id",
+      [firm, client, member]);
+    const t = await rootQuery(
+      `insert into clara.agent_tasks(session_id, kind, status, model_snapshot, created_by)
+         values ($1, 'chat_turn', 'queued', 'p651-fixture', $2) returning id`,
+      [s.rows[0].id, createdBy]);
     return { kind: "chat_task", id: t.rows[0].id };
-  } catch {
-    // …EXCEPT for a client that is not yet ACTIVE. Every arm of the insert trigger demands
-    // something a carry-down/onboarding fixture does not have: `autodraft` and `close_prep` demand
-    // an ACTIVE client, `chat_turn` a chat session, `wake` a wake intent, `accounting_work` a Work
-    // row. An instruction naming a client still in onboarding is a real shape (a firm agrees the
-    // depreciation policy while the client is being set up) that no audited verb can reach here, so
-    // the fixture writes it directly, LABELLED, with the trigger off for exactly that statement —
-    // and inside ONE transaction on ONE connection, so the window is transaction-scoped rather
-    // than cluster-wide (see `withTriggerOff` above).
-    return withTriggerOff("clara.agent_tasks", "t_agent_task_insert", async (c) => {
-      const t = await c.query(insert, params);
-      return { kind: "chat_task", id: t.rows[0].id };
-    });
   }
+
+  if (kind === "autodraft") {
+    const t = await rootQuery(
+      `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot, created_by)
+         values ($1, $2, 'autodraft', 'queued', 'p651-fixture', $3) returning id`,
+      [firm, client, createdBy]);
+    return { kind: "chat_task", id: t.rows[0].id };
+  }
+
+  assert.equal(kind, "wake", `mintAgentTaskRef: unsupported fixture kind ${kind}`);
+  return withTriggerOff("clara.agent_tasks", "t_agent_task_insert", async (c2) => {
+    const t = await c2.query(
+      `insert into clara.agent_tasks(firm_id, client_id, kind, status, created_by)
+         values ($1, $2, 'wake', 'held', $3) returning id`,
+      [firm, client, createdBy]);
+    return { kind: "chat_task", id: t.rows[0].id };
+  });
+}
+
+/** A `{kind:'chat_task', id}` reference that RESOLVES for this client — the shape #977's doors
+ *  accept: a `chat_turn` agent task carrying a named author, in the client's own firm and client.
+ *
+ *  IT WAS AN `autodraft` UNTIL #977. 0227's ladder resolved a chat-lane reference by a bare
+ *  existence test, so any task kind satisfied it and `autodraft` was the cheapest arm to mint
+ *  (`chat_turn` needs a chat session, `wake` a wake intent). #977 is the ruling that closed that
+ *  gap — a machine-enqueued row is no longer an instruction — so the fixture now mints the shape
+ *  a person's instruction actually has. Every caller below keeps working unchanged. */
+export async function mintChatTaskRef(client) {
+  return mintAgentTaskRef(client, { kind: "chat_turn", author: true });
 }
 
 /** LABELLED FIXTURE DML, and the ONE shape no audited verb can reach: an authority signed in a

@@ -757,6 +757,20 @@ reference — the Work or chat task the instruction lives in — and renders the
 verbatim with their codes. `depreciation-authority-panel.tsx` shows the resolved reference as a link
 and the authority window's floor, with the honest sentence that anything earlier is reached only by
 an explicit catch-up a person performs.
+
+**A WITHDRAWN authority is a state, not an absence (#979, migration 0251).** Before 0251
+`clara.get_depreciation_authority` selected only `status in ('live','proposed')`, so a client whose
+only authority had been retired read back `authority: null` — the same answer a client that never
+proposed one gets, and `fa-authority-ceremony.tsx` rendered the same "none proposed" sentence for
+both. 0251 falls back to the client's most recent retired authority, so `status` here now admits
+three values. The card renders the retirement's own facts: the reason the admin gave at the door
+(`fa-authority-retired-reason`), the retiring author as the same short-id chip the instruction
+reference uses (`fa-authority-retired-by`), and the window it once governed in the past tense —
+reusing `fa-authority-window`, because it is the same column read at a different moment. The action
+row offers **Propose** in place of a second **Retire**, which `clara.retire_depreciation_authority`
+refuses CLR38 `authority_not_live` anyway. `depreciation-walk.spec.ts` drives all of it in a browser
+against a third fixture client whose authority payload is transcribed from the door's own body —
+including the fact that the retired arm carries no `authority_ref`.
 ## #656 — the opening basis gets a source, and the books say so
 
 Three separate places made the document half of the opening lane unreachable from a browser, and

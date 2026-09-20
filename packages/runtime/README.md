@@ -179,7 +179,15 @@ names below are therefore the contracts' ORIGINAL addressees, kept as written; t
 
 * **`chatTurn_v20` — `start_prepayment_schedule_work`.** Four lines: the tool, the local refusal,
   a `stableOpKey`, one `clara.create_prepayment_schedule` call with `{kind:"chat_task", id:
-  ctx.taskId}` as the authority, and a `prepayment_schedule_configured` part. It mints no
+  ctx.taskId}` as the authority, and a `prepayment_schedule_configured` part. Since **#977
+  (migration 0250)** that authority carries a REQUIREMENT rather than a convention: the door
+  (through `clara.create_accounting_plan`, which it passes the reference to) resolves a `chat_task`
+  reference only when the named `clara.agent_tasks` row is of kind `chat_turn` AND carries an
+  author, and refuses anything else with `authority_ref_not_human_instruction` (CLR10), distinct
+  from `authority_ref_unresolved`. A chat-lane `ctx.taskId` IS such a row — `clara.begin_chat_turn`
+  stamps `created_by` from an author it has already checked is a live active member (`0006:988`) —
+  so the contract stands as written; a successor that called this door from a WAKE or autodraft run
+  would be refused, and that is the ruling, not a defect. It mints no
   `accounting_work.purpose` and no claraWork bundle — an amortisation occurrence is an ordinary
   `journal_entry` Work the existing frozen body runs byte for byte.
 * **`claraWork_v4` — the TERM PARK.** #653's AC5 and historical row C55.13 are NOT CLAIMED by this

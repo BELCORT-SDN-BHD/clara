@@ -14,6 +14,7 @@ import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks
 
 import messages from "../../messages/en.json";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import type { FaDepreciationAuthorityEnvelope } from "../../lib/registers/depreciation";
 
 export const FA_CLIENT = "c1111111-1111-4111-8111-111111111111";
 export const FA_ASSET = "a1111111-1111-4111-8111-111111111111";
@@ -164,7 +165,12 @@ export const faPreview = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-export const faAuthorityEnvelope = (over: Record<string, unknown> = {}) => ({
+// #979: typed `Partial<FaDepreciationAuthorityEnvelope>` rather than `Record<string, unknown>`
+// (this file's other `over` params) — this fixture is passed DIRECTLY as `AuthorityCeremony`'s
+// strictly-typed `data` prop (unlike `faPreview`, whose callers always go through `jsonResponse`,
+// which erases to `unknown`), so a status override needs its literal ("retired") preserved rather
+// than widened to `string`.
+export const faAuthorityEnvelope = (over: Partial<FaDepreciationAuthorityEnvelope> = {}): FaDepreciationAuthorityEnvelope => ({
   client_id: FA_CLIENT,
   authority: {
     id: "au-1", status: "live", cadence: "monthly", proposed_by: "u1", signed_by: "u2",

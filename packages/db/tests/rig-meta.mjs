@@ -2058,6 +2058,57 @@ export const FA_DEPRECIATION_0227_COHORT = [
   ...FA_DEPRECIATION_0227_UNGRANTED_FNS,
 ];
 
+// #973 [0248, fold preview_depreciation_run's duplicated leg-pairing aggregation into
+// clara._fa_run_period_core] — its own cohort for the same "wholly present or wholly absent"
+// reason FA_DEPRECIATION_0227_COHORT carries: folding this ONE name into 0227's own cohort would
+// red every database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by
+// design. `_fa_depreciation_leg_pairing` is UNGRANTED like `_fa_assert_period_open` above: the
+// main sweep fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS.
+const FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS = ["_fa_depreciation_leg_pairing"];
+export const FA_DEPRECIATION_LEG_FOLD_0248_COHORT = [
+  ...FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS,
+];
+
+// #976 [0249, fold the fixed-asset particulars completion wall shared by
+// complete_fixed_asset_particulars and _fa_complete_particulars_core] — its own cohort for the
+// same "wholly present or wholly absent" reason FA_DEPRECIATION_LEG_FOLD_0248_COHORT carries:
+// folding this ONE name into 0216's own cohort would red every database between the two
+// frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+// Both names are UNGRANTED like `_fa_depreciation_leg_pairing` above: the main sweep fails the
+// moment a grant appears on either, this cohort fails if either ever DISAPPEARS. TWO names and
+// not one because the wall has two halves that belong at two different points in a door -- the
+// payload-only change-class guard runs BEFORE `clara._reserve_op` (0227's own anchor), the rest
+// after the row lock -- and 0249 mints both in the same statement pair, so they are wholly
+// present or wholly absent together, which is exactly what `cohortFailures()` wants.
+const FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS = [
+  "_fa_assert_completion_not_a_change", "_fa_assert_particulars_completable",
+];
+export const FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT = [
+  ...FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS,
+];
+
+// #977 [0250, what counts as a person's instruction for an authority_ref] — its own cohort, for
+// the same "wholly present or wholly absent" reason the two above carry. `_authority_ref_refusal`
+// is the ONE definition clara.sign_depreciation_authority and clara.create_accounting_plan both
+// read, and it is UNGRANTED like its siblings: the main sweep fails the moment a grant appears on
+// it, this cohort fails if it ever DISAPPEARS.
+const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS = ["_authority_ref_refusal"];
+export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
+  ...AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS,
+];
+
+// #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
+// was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
+// the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
+// it RECUTS `clara.get_depreciation_authority` to add one fallback select and one conditional
+// field merge, same signature `(uuid)`, same owner, same SECURITY DEFINER, same STABLE
+// volatility, same pinned search_path, same EXECUTE to clara_authenticated and to nobody else
+// (0251's own tail T.5/T.5b/T.5c re-reads exactly that off the catalog). A cohort of its own
+// would be WRONG here rather than merely redundant: cohortFailures() fails a HALF-present cohort,
+// and `get_depreciation_authority` is present on every database from 0041 onward regardless of
+// whether 0251 has been applied.
+// #979 END
+
 // #638 [0221, staff expense claims / employee payables / advance settlement] — its own cohort for
 // the same "wholly present or wholly absent" reason 0178's and 0194's carry.
 //
@@ -3430,6 +3481,21 @@ export async function grantMatrixFailures() {
   const depHistoryLive = FA_DEPRECIATION_0227_COHORT.filter((n) => liveNames.has(n));
   if (depHistoryLive.length !== 0) {
     failures.push(...cohortFailures("#651 0227 depreciation-history lane", FA_DEPRECIATION_0227_COHORT, liveNames));
+  }
+  // #973 [0248] — bimodal like 0227's: wholly present once 0248 applies, wholly absent before it.
+  const legFoldLive = FA_DEPRECIATION_LEG_FOLD_0248_COHORT.filter((n) => liveNames.has(n));
+  if (legFoldLive.length !== 0) {
+    failures.push(...cohortFailures("#973 0248 depreciation leg-pairing fold", FA_DEPRECIATION_LEG_FOLD_0248_COHORT, liveNames));
+  }
+  // #976 [0249] — bimodal like 0248's: wholly present once 0249 applies, wholly absent before it.
+  const particularsFoldLive = FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT.filter((n) => liveNames.has(n));
+  if (particularsFoldLive.length !== 0) {
+    failures.push(...cohortFailures("#976 0249 fixed-asset particulars completion wall fold", FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT, liveNames));
+  }
+  // #977 [0250] — bimodal like 0249's: wholly present once 0250 applies, wholly absent before it.
+  const authorityRefRuleLive = AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT.filter((n) => liveNames.has(n));
+  if (authorityRefRuleLive.length !== 0) {
+    failures.push(...cohortFailures("#977 0250 authority-ref human-instruction rule", AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.

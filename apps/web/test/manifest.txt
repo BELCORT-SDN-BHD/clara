@@ -246,6 +246,7 @@ components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/counterparty-hygiene-kinds.test.tsx
 components/registers/counterparty-identity-correct.test.tsx
 components/registers/counterparty-identity-panel.test.tsx
+components/registers/fa-authority-ceremony.test.tsx
 components/registers/fa-charge-ledger.test.tsx
 components/registers/fa-detail-tab-url.test.tsx
 components/registers/fa-particulars-fields.test.tsx
