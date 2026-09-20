@@ -232,6 +232,17 @@ tie-out compares the books against, never a posting in its own right.
 _Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
 target a journal line.
 
+**Opening Work**:
+The Work record an approved opening batch carries: one per approval — the seed batch, then one per
+correction batch — under the `opening_balance` purpose, so the opening appears on the Work list,
+the Work detail and the firm Activity feed like every other accounting act. It is deterministic and
+human-approved, so it has no model run, no agent task and no journal basis: its entries were
+approved and tied out before it was written, and what it records is which batch of which seed was
+approved, by whom, and how many entries it carried.
+_Avoid_: Calling it the opening basis or the opening receipt — the basis is the versioned set of
+balances and the receipt is the per-entry approval record; treating it as work still to be done (it
+is written only once the batch is already finalized); expecting it to name a single posted entry.
+
 **Provenance (document / keyed)**:
 Whether a target came from stored evidence on the bound document — a named extraction region whose
 text the database re-derives the figure from — or from a named professional's keying. Every target
@@ -384,6 +395,10 @@ _Avoid_: A second question status; proof that the Work advanced.
 **Evidence link**:
 The append-only record that one client document is the source behind one posted journal entry: which Work and operation identity bound it, who bound it, when, and whether it was bound as the entry was recorded or attached afterwards. A document backs at most one live posted entry; a reversal releases the link so the corrected entry may cite the same document. Evidence is optional — an entry recorded without a document is a complete accounting fact.
 _Avoid_: A column rewritten on the posted entry; a claim that the document was independently verified; "unsourced" as a synonym for "wrong".
+
+**Document binding claim**:
+The serialization token behind “one document, one posted entry” when two people act on the same document at the same moment: whoever takes a document’s binding first keeps it, and the other is refused with the wall’s ordinary conflict. It records no accounting fact and answers no question — the evidence wall and the opening wall still decide what is a conflict.
+_Avoid_: Evidence link, tie document or “document lock” as synonyms — an evidence link is the durable record of which document backs which posted entry, a tie document is the one document an opening seed binds its items to, and a claim is neither of those and is never shown to a person.
 
 **Document filing**:
 One live placement of a document into one client's books, with the attribution act that authorised it. A document may be filed to more than one client of the firm at once, and a filing is *retired* rather than deleted — a retired filing stays readable, names its reason and, when a wrong-client correction retired it, the correction that did so.

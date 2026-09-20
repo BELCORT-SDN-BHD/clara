@@ -1328,6 +1328,7 @@
         "purposeJournalEntry": "Journal entry",
         "purposePeriodicStockAdjustment": "Periodic stock adjustment",
         "purposePayrollObligation": "Supplied payroll obligation",
+        "purposeOpeningBalance": "Opening balances",
         "workLabel": "work",
         "operationLabel": "operation identity",
         "note": "Clara accepted this as durable work. It runs in the background; its own page keeps the current state, the basis and the receipt.",
@@ -2068,6 +2069,8 @@
     "basisHeading": "What was asked for",
     "basisNote": "The basis this work was admitted with. It never changes, so a refusal can be read against exactly what was submitted.",
     "basisUnreadable": "The basis of this work could not be read.",
+    "basisNoLines": "This work's basis carries no journal lines.",
+    "basisNoLinesOpening": "This work's basis carries no journal lines. Its entries were approved and posted before the work itself was recorded.",
     "basisTableLabel": "Requested journal entry lines",
     "postingDate": "Posting date",
     "memo": "Memo",
@@ -2246,7 +2249,8 @@
     "purposeLabels": {
       "journal_entry": "Journal entry",
       "periodic_stock_adjustment": "Periodic stock adjustment",
-      "payroll_obligation": "Supplied payroll obligation"
+      "payroll_obligation": "Supplied payroll obligation",
+      "opening_balance": "Opening balances"
     },
     "filterClient": "Client",
     "filterClientAll": "All clients",
@@ -6190,7 +6194,8 @@
     "workPurposes": {
       "journal_entry": "Recorded a journal entry",
       "periodic_stock_adjustment": "Recorded a periodic stock adjustment",
-      "payroll_obligation": "Recorded a supplied payroll obligation"
+      "payroll_obligation": "Recorded a supplied payroll obligation",
+      "opening_balance": "Approved an opening balance batch"
     },
     "columnActor": "Actor",
     "columnClient": "Client",
@@ -6282,6 +6287,7 @@
       "purposeJournalEntry": "Journal entry",
       "purposePeriodicStockAdjustment": "Periodic stock adjustment",
       "purposePayrollObligation": "Supplied payroll obligation",
+      "purposeOpeningBalance": "Opening balances",
       "basisOrigin": "Basis",
       "basisUserDirect": "Typed by a person",
       "basisClaraInterpreted": "Interpreted by Clara",

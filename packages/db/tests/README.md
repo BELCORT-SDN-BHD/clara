@@ -71,6 +71,56 @@ the six non-regression `prosrc` pins that prove 0224 recut nothing. Its gate is
 `preview-invite-preintegration-gate.mjs`; a focused run leaves `CLARA_ALLOW_MISSING_PREVIEW_INVITE`
 unset and must count zero skips.
 
+`subledger-hook-caller-roster.test.mjs` reads `clara._subledger_on_approve`'s catalog comment
+(0236, #868): all six live callers named with the migration each arrived in, the historical
+four-name pin (0037) stated as stale, and the AC3 non-regression pins (`prosrc` sha, owner,
+`SECURITY DEFINER` flag, grant, trigger reachability) that prove 0236 changed nothing but the
+comment. Its gate is `subledger-hook-caller-roster-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_SUBLEDGER_HOOK_ROSTER` unset and must count zero skips.
+
+`journal-basis-zero-total-unreachable.test.mjs` calls `clara._assert_journal_basis` directly
+(0237, #906): its catalog comment names the `nonzero_total` arm unreachable and names both
+guarding arms (`at_least_two`, `exactly_one_side`), the AC2 non-regression pins (`prosrc` sha,
+owner, `SECURITY DEFINER` flag, owner-only ACL) prove 0237 changed nothing but the comment, and two
+direct calls prove an all-zero basis lands on `exactly_one_side` while an all-credit
+(zero-debit-total) basis lands on `balanced` — never on `nonzero_total` either way. Its gate is
+`journal-basis-zero-total-unreachable-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_JOURNAL_BASIS_ZERO_TOTAL_ARM` unset and must count zero skips.
+
+`correction-client-rung-order.test.mjs` drives `clara.approve_wrong_client_correction` under forced
+two- and three-session schedules (0238, #914): an adversary in the rung-first order every sibling
+door uses no longer deadlocks against a concurrent correction (the 40P01 SQLSTATE is the oracle,
+and the door is proven blocked on the rung with `pg_blocking_pids` first, so the schedule really
+interleaved); a catalogue census over every `clara` body proves no door is left that takes a
+`clara.clients` row before the client rung `203005004`; and the source client is still serialised
+against wiki publication in both directions, measured on a SECOND document filed to the same
+client so the only shared object is that client, with the blocked side's own `pg_locks` read to
+say which lock it is queued behind. Its gate is
+`correction-client-rung-order-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_CORRECTION_CLIENT_RUNG_ORDER` unset and must count zero skips — and against a
+pre-0238 chain it fails on the deadlock, which is the evidence.
+
+`opening-balance-work.test.mjs` drives both opening approval doors through the wave-B fixture
+(0239, #984) and asserts what the approval now leaves behind: exactly one `clara.accounting_work`
+row and one `clara.operation_receipts` row of the new `opening_balance` purpose per approved batch,
+with no `clara.agent_tasks` row for the client and none pointing at the Work, `task_id` null on the
+receipt, `effects` naming the seed and NOT an entry, and `clara.opening_seed_approvals` unchanged;
+a correction batch mints a SECOND Work and leaves the seed's byte-for-byte. Its counts are
+client-scoped so an estate sweep cannot move them, and the same predicate is what sees the Work,
+so the scoping is not vacuous. It also carries the catalogue census of the four places the columns
+close the purpose vocabulary, the two admission cores (only the sibling learned the value) and
+`clara._record_journal_entry_core`'s untouched three-value lookup — which is AC5's own wording for
+how the posting core is proven unchanged. Its gate is
+`opening-balance-work-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_OPENING_BALANCE_WORK` unset and must count zero skips, and against a pre-0239
+chain the premise check throws rather than skipping. `obw984.zero_entry` (fix round) pins the one ordering that block depends on: each door's own
+"has no draft entries" arm refuses an empty batch BEFORE the loop that builds the Work's entry
+array, so no `entry_count = 0` Work is reachable and a later recut that hoists the minting above
+that arm is a red cell. The sibling pin lives in
+`staff-expense-claim.test.mjs`'s `p638.core.no_regression`, whose CHECK literal #984 re-derived to
+the four-value text (deliberately, with each prior value re-asserted by name) rather than deleting
+or skipping the cell.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator
@@ -161,7 +211,7 @@ skip — clone a sibling first (`create database <sibling> template <source>`, n
 on the source) and bootstrap the World only on the sibling. `RIG.md` in an active wave plan
 restates this per-lane; this section is the durable copy.
 
-## The opening-balance evidence-link race, and a measured gap (#854)
+## The opening-balance evidence-link race, measured (#854) and repaired (#1014)
 
 `coding-lane-evidence-link.test.mjs`'s `cle.race.*` cells and `opening-balance-evidence-link.test.mjs`'s
 `obw.race.*` cells share ONE two-session driver, `humanHoldThenContend`
@@ -170,51 +220,70 @@ fires and must be PROVEN blocked (`wait_event_type = 'Lock'` and `pg_blocking_pi
 backend — a schedule that never blocked proves nothing about a race) before `a` commits and `b`
 resolves against `a`'s committed state.
 
+`obw.claim.unknown_document` (fix round) sits beside them and is not a race cell: it drives
+`clara._lock_document_binding` directly with an id that names no document, because 0197's
+"locks nothing and RAISES NOTHING" tolerance is a SEAM contract no door can express (both lanes'
+writes are foreign-keyed to `clara.documents`). The claim is gated on the document existing, so
+the helper writes no token on a key no document owns.
+
 `clara.approve_opening_seed` / `clara.approve_opening_correction` refuse `CLR31 not_serializable`
 outside a genuinely SERIALIZABLE transaction, so driving the opening lane through this helper needs
 `side.isolation = "serializable"` — the ONLY level it accepts. A SERIALIZABLE side can also lose at
 **commit** rather than at the statement its `run()` awaited (PostgreSQL defers a `40001`
-serialization failure discovery to `COMMIT` in this shape); `commitOrCapture` folds that outcome
+serialization failure discovery to `COMMIT` in some shapes); `commitOrCapture` folds that outcome
 into the same `out.a`/`out.b` shape a statement-level refusal already uses, so a cell asserts one
 shape regardless of where Postgres actually raised it.
 
-**What `obw.race.evidence_then_opening` measured, twice, reproducibly:** `clara.documents` is
-locked `FOR UPDATE` by both the coding lane and the opening lane purely for serialization
-(`clara._lock_document_binding`) — neither lane's body ever changes a column on that row. When
-`attach_entry_evidence` (plain, holds first) commits a document it only locked, the blocked
-`approve_opening_seed` (SERIALIZABLE, contends) is granted the SAME, byte-identical row, sees no
-reason to abort, and evaluates its own conflict probe against a snapshot taken BEFORE the
-attachment committed — which never saw the live link. **Both sides commit.** The reverse arrival
-order (`obw.race.opening_then_evidence`) does not have this hole: the contender there
-(`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per statement once
-unblocked.
+**What #854 measured, twice, reproducibly — and what 0235 changed.** `clara.documents` was locked
+`FOR UPDATE` by both lanes purely for serialization (`clara._lock_document_binding`) and neither
+lane's body ever wrote a column on that row. A row lock that is only TAKEN AND RELEASED forces
+nothing on a waiter under a snapshot isolation level: when `attach_entry_evidence` (plain READ
+COMMITTED, holds first) committed a document it had only locked, the blocked `approve_opening_seed`
+(SERIALIZABLE since 0171) was granted the SAME byte-identical row, found no reason to abort, and
+evaluated its conflict probe against a snapshot taken BEFORE the attachment committed — which never
+saw the live link. **Both sides committed.** The reverse arrival order
+(`obw.race.opening_then_evidence`) never had this hole: its contender is plain READ COMMITTED,
+which always re-reads fresh per statement once unblocked.
 
-**Mechanism — this lane's own reading, not a cited fact (L04-S07):** a plausible account is that
-PostgreSQL's SERIALIZABLE "second updater" protection fires only when the row a transaction waited
-on was actually **updated or deleted** by the transaction that held the lock, never when it was
-merely locked and released, which would explain why a lock-only commit does not force the waiter
-to re-evaluate. An at-least-equally-plausible alternative this lane did not rule out: SSI aborts a
-transaction only at the PIVOT of a dangerous structure (an incoming AND an outgoing
-rw-antidependency — PostgreSQL docs, "Serializable Isolation Level"), and a single rw-conflict here
-may simply not be the shape SSI polices, which has nothing to do with the second-updater rule.
-Either mechanism is consistent with the measurement; neither is confirmed against the PostgreSQL
-source or a core committer. A successor fix should verify the actual mechanism before assuming
-either account, since the two point at different repairs.
+Migration `0235_opening_binding_claim` (#1014) closes it. `clara._lock_document_binding` keeps its
+`FOR UPDATE` on `clara.documents`, unmoved and still first, and then upserts that document's row in
+`clara.document_binding_claims` — a serialization token, one row per document, written by that
+helper alone and read by nothing. An `ON CONFLICT DO UPDATE` is arbitrated by the index, not by
+anyone's snapshot, so the blocked SERIALIZABLE session now hits a real write conflict where before
+it saw an unchanged row. `ON CONFLICT DO NOTHING` would not do: against a VISIBLE conflicting row
+it takes no lock at all, which would leave the race open from a document's second binding onwards.
+The walls themselves are untouched — they still decide from their own probes.
 
-This is a genuine double-posting gap in migration 0213's opening-lane wall, MEASURED by the two
-`obw.race.*` cells and left UNREPAIRED here — #854's own brief puts "repair either wall, either
-approver or the document lock helper" and "any repair if both sides can commit" explicitly out of
-scope, since fixing it needs either a new migration (a wave-1 lane may not cut one) or a change to
-`clara._lock_document_binding`/`clara.approve_opening_seed`, both named out of scope in the ticket.
-`obw.race.evidence_then_opening` asserts the CURRENT (double-posting) outcome as a regression
-sentinel; a future repair updates that one assertion, deliberately, rather than the test going red
-by surprise. **Filed as GitHub issue #1014** ("Opening-balance evidence wall: a concurrent evidence
-attachment and opening approval can both commit", state OPEN, labels `bug` + `ready-for-agent`):
-recorded as a follow-up in
-`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-final.md` and
-`docs/plan/active/riders-2026-09-20/reports/wave1-lane04-fixround-1.md`; repro is
-`obw.race.evidence_then_opening` verbatim, and the issue body also names the correction door's
-shared exposure (L04B-SPEC-07, below).
+**The mechanism, measured rather than reasoned (this is what #854's own note asked a successor to
+settle).** Three outcomes, re-measured on three throwaway relations on a rig PostgreSQL 17 before
+0235 was written: a holder that only LOCKS a row lets a SERIALIZABLE waiter proceed (the defect); a
+holder that UPDATES a row the waiter can see gives the waiter `40001 could not serialize access due
+to concurrent update`; and a holder that INSERTS a row the waiter's snapshot cannot see gives the
+same `40001` to a waiter upserting that key with `ON CONFLICT DO UPDATE`. The repair rests on those
+three measurements, not on either causal account #854 floated — and note that neither of those
+accounts pointed at a reachable repair: a SERIALIZABLE transaction cannot READ what committed after
+its snapshot at all, so "re-read the evidence links under the lock" was never available. What was
+available is a CONFLICT.
+
+**What the loser is told.** The upsert's `serialization_failure` is caught in the helper and
+re-raised as the walls' own `CLR13` / `source_already_posted` — 0182's shape, naming the document
+and flagging the conflict — so a raw `40001 could not serialize access due to concurrent update`
+never reaches a person. The handler wraps THE UPSERT ALONE: a serialization failure on the
+`clara.documents` row itself would mean the document row changed (the legacy bytes/storage upgrade
+is its only writer), which is a different fact and keeps its own spelling. **`detail.entry_id` is
+null on this arm and that is a documented limit, not a gap:** the winner committed after the losing
+transaction's snapshot, and nothing inside a SERIALIZABLE transaction can read it. The key is
+present-and-null rather than absent, so the detail's KEY SET is unchanged. A caller that wants the
+standing entry's name re-reads the document's links in a fresh transaction.
+
+**The gates.** `obw.race.evidence_then_opening` asserts the repaired outcome (exactly one commit,
+the tie document carrying ONE posted entry, the refused batch still wholly draft, and the loser
+refused `CLR13`), and `obw.race.typed_refusal` pins what the loser sees against the SAME refusal
+reached sequentially — byte-identical message, same detail keys, and the one honest difference
+(`entry_id`) asserted explicitly in both directions. Both are frontier-gated on the
+`opening_binding_claim$` stem (`gateBindingClaim`), so a leg pinned between 0213 and 0235 skips
+cleanly; a FOCUSED run below 0235 fails loudly in the battery's `before` unless
+`opening-binding-claim-preintegration-gate.mjs` is preloaded.
 
 **AC2's "exactly one", reinterpreted (L04B-SPEC-04):** the brief's literal wording is "asserts
 exactly one". Neither race cell pins a bare `1` — `obw.race.opening_then_evidence` asserts

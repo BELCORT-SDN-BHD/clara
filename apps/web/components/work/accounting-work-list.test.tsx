@@ -545,3 +545,41 @@ test("a DENIED list asks the addressed-row door nothing — one banner, not two"
     }
   });
 });
+
+// #984 — THE FOURTH PURPOSE, on the two surfaces this component owns. Migration 0239 widened
+// `clara.accounting_work.purpose` and the opening doors now mint a Work for every approved batch,
+// so this list will carry rows a firm cannot otherwise see at all. Both halves are asserted
+// together because they fail together: the ROW label comes from this component's own known-label
+// set, the FILTER trigger from `work-list-filters.tsx`'s `KNOWN_PURPOSES`, and a value missing
+// from either one degrades to the database's raw token or to "A kind not in this list".
+test("p984.work_list.opening_purpose — an opening-balance Work shows its human label in the list AND is selectable in the purpose filter", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: "purpose=opening_balance",
+      load: async () => ({
+        rows: [row({
+          purpose: "opening_balance",
+          status: "completed",
+          current_run_status: null,
+          intent_key: "opening:seed:11111111-1111-4111-8111-111111111111:1",
+          memo: null,
+          posting_date: null,
+        })],
+        next_cursor: null,
+        truncated: false,
+      }),
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /Opening balances/, "the row and the filter trigger both read the human label");
+      assert.doesNotMatch(text, /opening_balance/,
+        "the database's raw token must never be what a person reads");
+      assert.doesNotMatch(text, /A kind not in this list/,
+        "the purpose is in KNOWN_PURPOSES, so the filter can offer it rather than calling it unresolvable");
+      assert.doesNotMatch(text, /All kinds/, "an applied purpose filter never reads as unfiltered");
+    } finally {
+      await h.unmount();
+    }
+  });
+});

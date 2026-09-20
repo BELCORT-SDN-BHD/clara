@@ -16,10 +16,16 @@
 
 /** The message-key suffix for a purpose, under whichever namespace the caller reads. `null` when
  *  this build has no label for the value — the caller renders the raw string. */
+// #984 — THE FOURTH VALUE, and the first that is not model-served. Migration 0239 widened
+// `clara.accounting_work.purpose` to admit `opening_balance`: approving an opening seed or an
+// opening correction now mints one Work and one operation receipt for the batch, on the owner's
+// ruling of 2026-09-20. It reaches every surface below through this one map, which is exactly why
+// the map exists — the alternative was a fourth place to forget.
 const SUFFIX: Readonly<Record<string, string>> = Object.freeze({
   journal_entry: "JournalEntry",
   periodic_stock_adjustment: "PeriodicStockAdjustment",
   payroll_obligation: "PayrollObligation",
+  opening_balance: "OpeningBalance",
 });
 
 /**

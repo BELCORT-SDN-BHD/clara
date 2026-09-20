@@ -1681,3 +1681,338 @@ set mode = 'enforce' where id;` as the superuser satisfies the relation's CHECK 
 it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no receipt — the change
 becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
 using it.
+
+## 0235 — the document binding claim (#1014)
+
+Two lanes may bind one client document: the **document-coding / evidence** lane
+(`clara.attach_entry_evidence`, `clara.admit_journal_work`) and the **opening** lane
+(`clara.approve_opening_seed`, `clara.approve_opening_correction`). Since
+[0197](migrations/0197_coding_lane_evidence_link.sql) both reach that binding through ONE helper,
+`clara._lock_document_binding`, which takes `clara.documents … for update` before either wall asks
+its question. Since [0171](migrations/0171_opening_approval_isolation_pin.sql) the two opening
+approvers run SERIALIZABLE.
+
+Those two facts together were a double-posting hole, measured twice by #854 and repaired by
+[0235_opening_binding_claim.sql](migrations/0235_opening_binding_claim.sql). **A row lock that is
+only taken and released forces nothing on a waiter under a snapshot isolation level.** Neither lane
+ever wrote a column on the document row it locked, so an opening approval that blocked on a
+concurrent evidence attachment was granted the same byte-identical row when the attachment
+committed, found no reason to abort, and decided against its own pre-block snapshot — which could
+not see the new link. Both sides committed. (The reverse arrival order never had the hole: its
+contender is plain READ COMMITTED and re-reads fresh per statement once unblocked.)
+
+0235 keeps that `for update` unmoved and first, and appends one statement to the same helper: an
+upsert of the document's row in `clara.document_binding_claims`. The claim is a **serialization
+token** — one row per document, `document_id` / `claim_seq` / `claimed_at`, written by that helper
+alone, read by nothing, no grant for any application role, RLS forced with a single owner policy.
+Its conflict is arbitrated by an index rather than by either session's snapshot, so the blocked
+side now meets a real write conflict. `ON CONFLICT DO UPDATE` is load-bearing: `DO NOTHING` takes no
+row lock against a VISIBLE conflicting row and would leave the race open from a document's second
+binding onwards.
+
+The upsert's `serialization_failure` is caught in the helper and re-raised as the walls' own
+`CLR13` / `source_already_posted` naming the document, so no raw `40001 could not serialize access
+due to concurrent update` reaches a person. The handler wraps **the upsert alone**: a serialization
+failure on the `clara.documents` row would mean the document row itself changed (the legacy
+bytes/storage upgrade is its only writer) and keeps its own spelling. `detail.entry_id` is
+present-and-null on this one arm — the winner committed after the loser's snapshot and no read
+inside a SERIALIZABLE transaction can reach it.
+
+**It serializes on the document, not on the conflict, and that over-refuses on purpose.** A
+SERIALIZABLE session that blocked on *any* other transaction binding the same document is refused,
+including one that left no live evidence link. Measured with both sides driving
+`clara._lock_document_binding` directly: the waiter blocks on a `Lock` and is refused `CLR13`; the
+same call unraced succeeds. The one case where this is stricter than the sequential path is a plain
+coded approval carrying the tie document racing an opening approval — 0213's opening arm probes live
+links alone, so sequentially both stand. Narrowing it is not available: the losing session cannot
+read *what* the winner claimed, which is the same snapshot limit the claim exists to work around.
+The outcome is conservative, typed and retryable.
+
+**An id that names no document still claims nothing** (fix round, ADV-L01-02). 0197's contract for
+the helper is that an unknown document "locks nothing and raises nothing"; the claim is gated on the
+`for update` having found the row (`if not found then return`), so the token is never written for a
+key no document owns. Without that gate the helper left an unreachable row behind and — measured
+with two sessions on two such ids — gave them a contention point OUTSIDE `clara.documents`' own
+ordering, where they deadlocked and the loser saw a raw `40P01`. Re-measured after the gate: both
+sessions return `ok` and no claim row exists.
+
+**Retention** (fix round, ADV-L01-03): the life of the document. One row per document, upserted in
+place, written only by this helper and only for a document that exists; nothing prunes it and
+nothing should, because the token's value is that the key is there to conflict on. The row count is
+bounded above by `clara.documents`, and the dead tuples an upsert leaves are ordinary autovacuum
+work.
+
+**Lock order.** The claim is taken after the document row and only ever for the same document, so a
+transaction binding documents A then B takes `A.doc, A.claim, B.doc, B.claim`: the relative order
+of two documents is the one `clara.documents` already imposed, and two transactions that inverted it
+would already have deadlocked on `clara.documents`. It joins neither the member-door order above
+nor the wave ladder `accounting_plans → accounting_work → agent_tasks → agent_interruptions`.
+`deadlock_detected` (40P01) is therefore not caught beside `serialization_failure`: with the claim
+taken only after — and only for — a document row that exists, two sessions contending for one
+document meet on that row first and cannot form a cycle on the claim's primary key. A deadlock on
+`clara.documents` itself predates this file and stays raw, for the same reason a serialization
+failure on that row does.
+
+Deployment notes: it recuts exactly one body (`clara._lock_document_binding`, a `create or
+replace`, so no catalog entry enters or leaves and the grant matrix is unchanged), mints one table,
+edits no applied migration, and re-pins `clara._tf_source_binding_wall`,
+`clara._tf_evidence_link_binding_wall`, `clara._document_posting_entry`,
+`clara._approve_opening_entry` by `sha256(prosrc)` in its prestate and again in its tail. The two
+opening DOOR pins are two-state, because 0239 recuts both to mint the opening Work: on a
+from-scratch chain 0235 runs first and the pinned bodies are the only lawful ones, while on a lane
+rig mid-wave a redo meets 0239's bodies (recognised by their call to `clara._admit_opening_work`,
+not by a ledger row — a redo rewrites the ledger). What the prestate accepted is handed to the tail
+through a session setting, so the tail still proves this file moved neither door. It owes **no** writer-quiescence window: a transaction that began under the old body
+simply does not take the claim, which is the behaviour that shipped before it. Rollback is a
+successor migration restoring 0197's two-line body; the table may stay, since nothing reads it.
+
+## 0236 — the subledger hook's caller roster, stated on the hook itself (#868)
+
+`clara._subledger_on_approve` ([0037](migrations/0037_wave_c_a_subledger.sql)) is the one hook that
+births `clara.open_items` rows and classifies a coding kind when a journal entry is approved. It
+carried no statement of its own reachability: the first thing a reader who greps its name finds is
+0037's own tail, which pins its caller set at **four** — a pin that was already two migrations
+stale by the time [0216](migrations/0216_fixed_asset_acquisition.sql) and
+[0221](migrations/0221_staff_expense_claims.sql) each independently re-derived and re-pinned the
+live set at **six**, because neither had one shared place to read it from.
+
+The live six, and where each one's direct call arrived:
+
+| caller | arrived |
+|---|---|
+| `_approve_entry_core` | [0037](migrations/0037_wave_c_a_subledger.sql) (hook's own creation) |
+| `_approve_opening_entry` | [0037](migrations/0037_wave_c_a_subledger.sql) |
+| `approve_wrong_client_correction` | [0037](migrations/0037_wave_c_a_subledger.sql) |
+| `reverse_entry` | [0037](migrations/0037_wave_c_a_subledger.sql) |
+| `finalize_close` | [0056](migrations/0056_wave_e_close_model.sql) (created already calling it) |
+| `reopen_fiscal_year` | [0085](migrations/0085_b3_reopen_ends_on.sql) / [0086](migrations/0086_b3_reopen_ends_on_part2.sql) |
+
+`reopen_fiscal_year` is the one entry worth a note: through 0056 it unwound a closed year by
+calling `clara.reverse_entry`, so it was not itself a direct caller yet — measured absent from
+0056's own body, and stated in 0085's own header ("0056's reopen routes its unwind through
+`clara.reverse_entry`"). 0085 gave it a dedicated reversal mirror and its own direct call; 0086 (its
+obligatory sibling file) pinned the resulting six-name caller census and the six-count
+approve-writer census, both re-derived from the live catalog. 0216's own comment attributes both
+new callers to "0056" — imprecise on this one point; 0085/0086 is the correct citation, and 0236's
+comment carries the corrected one.
+
+[0236_subledger_hook_caller_roster.sql](migrations/0236_subledger_hook_caller_roster.sql) closes
+the discoverability gap with exactly one statement: a `comment on function` naming all six callers
+and the migration each arrived in, and stating that 0037's four-name census is stale by two. Its
+prestate re-derives the roster from the catalog the same way 0216/0221's own tails do and refuses
+to apply unless it is still that measured six; its tail re-reads the comment's content and
+re-confirms the hook's body (`sha256(prosrc)`), owner, `SECURITY DEFINER` flag and (empty) grant
+are byte-for-byte unmoved, and that the hook is still reachable by no trigger directly. No door, no
+wire shape, no new relation, and no shared roster-census helper (out of scope, Agent Brief): the
+next migration that needs the count still re-derives it in its own tail, exactly as 0216 and 0221
+did — this file only gives the first reader a durable place to learn what that census currently
+reads.
+
+## 0237 — `clara._assert_journal_basis`'s `nonzero_total` arm, stated as unreachable (#906)
+
+`clara._assert_journal_basis` ([0178](migrations/0178_accounting_work_journal_successor.sql))
+validates a journal basis before either of its two live callers
+(`clara.create_accounting_plan` at [0193](migrations/0193_accounting_plans.sql):1521 and the
+prepayment door at [0223](migrations/0223_prepayment_amortisation.sql):1246) records it. Its own
+constraint vocabulary lists `nonzero_total` ("the basis moves no money") beside three reachable
+tokens with no note — a reader might assume it is live defence-in-depth. It is not: found
+independently from both the accrual (#652) and prepayment (#653) sides while each wired refusal
+logic through this shared predicate, and recorded in the accrual gap map as untested because it is
+unreachable.
+
+**Why it is unreachable.** Two earlier arms in the same function foreclose it:
+
+* `at_least_two` (0178:743-745) refuses fewer than two lines, so the per-line loop always runs —
+  the vacuous "zero lines, both totals initialise to zero" shape can never reach the totals check.
+* `exactly_one_side` (0178:769-772) refuses any line whose debit and credit are equally signed,
+  including both zero. Combined with `clara._journal_cents` refusing a negative minor-unit value,
+  every surviving line carries exactly one strictly positive side.
+
+An all-zero basis (every line's debit AND credit are zero) is therefore refused by
+`exactly_one_side` on its first line — control never leaves the per-line loop. A basis whose debit
+total is genuinely zero but whose lines are each one-sided forces every line's credit to be
+strictly positive (by the same arm), so the credit total is positive while the debit total is
+zero; `balanced` (0178:780-783) refuses that mismatch — `v_dr <> v_cr` — before `nonzero_total`'s
+own `if v_dr = 0` line is ever reached. `nonzero_total` is retained as a fold guard only. This was
+already downstream knowledge (0223:1257-1266, the prepayment door's own comment, carries the same
+finding at its call site); the predicate itself carried no statement of its own contract.
+
+[0237_journal_basis_zero_total_unreachable.sql](migrations/0237_journal_basis_zero_total_unreachable.sql)
+closes the gap with exactly one statement: a `comment on function` naming `nonzero_total` as
+unreachable by construction and naming both guarding arms, `at_least_two` and `exactly_one_side`.
+Its prestate pins the predicate's body (`sha256(prosrc)`), owner, `SECURITY DEFINER` flag and
+owner-only ACL, and refuses to apply if the body has drifted or no longer carries all three
+tokens; its tail re-reads the comment and re-confirms the same four facts are byte-for-byte
+unmoved. No door, no wire shape, no new relation, no reordering and no recut of either caller
+(explicitly out of scope, Agent Brief): `at_least_two`, `exactly_one_side`, `balanced` and
+`nonzero_total` all still exist, in the same order, raising the same messages.
+[tests/journal-basis-zero-total-unreachable.test.mjs](tests/journal-basis-zero-total-unreachable.test.mjs)
+calls the predicate directly (the ticket's own named seam) and proves both shapes above land on
+the arm this section says they do, never on `nonzero_total`.
+
+## 0238 — the correction door takes the client rung before any client row (#914)
+
+`clara.approve_wrong_client_correction` was the **only** door in the estate that acquired a
+`clara.clients` row **before** the client advisory rung `203005004`. #649's round-two re-check
+censused every rung-bearing body, found exactly one such door, measured a real deadlock against an
+adversary in the prescribed order, and recorded it in `DECISIONS.md` §3.1 as a pre-existing
+violation — explicitly not #649's to fix.
+
+**The ladder, before and after** (acquisition sequence, not source order):
+
+| step | before (0027 → 0037 → 0038 → 0125) | after (0238) |
+|---|---|---|
+| 1 | firm rung `203005002` | firm rung `203005002` |
+| 2 | `filing_corrections` row `for update` | `filing_corrections` row `for update` |
+| 3 | `clara.documents` row `for update` (0027 task #29) | unchanged |
+| 4 | `clara.document_filings` rows `order by id for update` | unchanged |
+| 5 | **`clara.clients` row on `x.from_client`** | `clara.journal_entries` rows `for update of je` |
+| 6 | `clara.journal_entries` rows `for update of je` | **client rung `203005004` on `x.from_client`, once, unconditionally** |
+| 7 | client rung `203005004` on `o.client_id`, per item, inside the reverse branch | **`clara.clients` row on `x.from_client`** |
+
+**Why the remedy is to move the ROW down, not the rung up.** 0037 §K states the rung ladder as a
+partial order with one named exception: `clara.reverse_entry` and this door lock a *pre-existing*
+`clara.journal_entries` row **first**, because `clara._approve_entry_core` does, and inverting that
+in one verb would itself be the deadlock. 0037 §H.3 installed a body census pinning the rung after
+`for update of je` and before `clara._subledger_allocated_items_present(`
+([tests/x37-wave-c-a-subledger.test.mjs](tests/x37-wave-c-a-subledger.test.mjs) still asserts it
+live). Hoisting the rung to the top of the body — the obvious-looking remedy — would break that
+pin and invert against the core. 0238 therefore moves the client row *down*, below a rung that
+stays exactly where 0037 put it relative to the entry row locks.
+
+**Which client the rung covers, and why once is enough.** The correction's **source** client,
+`x.from_client`. Every captured item is an entry selected by `je.filing_id = <the source client's
+active filing>` (`clara.preview_wrong_client_correction`,
+[0007](migrations/0007_document_pipeline.sql):2460, whose plan `propose_wrong_client_correction`
+stores verbatim); `ck_je_document_filing_pair` makes `document_id` and `filing_id` null together,
+and the `t_je_provenance` constraint trigger refuses any entry with a document whose filing's
+`client_id` differs from the entry's own. So `o.client_id = x.from_client` for every item,
+structurally — and neither column can drift afterwards (neither appears in any allowset of
+`t_je_immutable`, and a filing's identity is immutable as well). Advisory xact locks are
+re-entrant, so the old per-item acquisition was already a no-op after the first item; 0238 takes
+the same key once, earlier, and holds it a little longer. The hoist also drops a **condition**
+(fix round, ADV-L01-07): in 0125 the rung sat inside `if it.action = 'reverse'`, so a correction
+whose items are all `withdraw_draft` or `already_reversed` — one that reverses nothing — took no
+client rung at all, and now takes it like every other correction. That is strictly more locking and
+adds no pair: every `rung → Y` the straight-line acquisition creates already existed on the reverse
+arm, and 0037 §H.3's "rung before `clara._subledger_allocated_items_present(`" order is intact. Its prestate refuses to apply if either
+of those two walls is missing.
+
+**The new pair this creates, stated rather than hoped.** The `journal_entries` row locks now
+precede the `clara.clients` row, so a door taking a client row and *then* a `journal_entries` row
+would invert against 0238. There is none: of the eleven live bodies that acquire a `clara.clients`
+row, this is the only one that also locks a `clara.journal_entries` row.
+
+[0238_correction_client_rung_order.sql](migrations/0238_correction_client_rung_order.sql) is one
+`create or replace function` carrying 0125's body with exactly three edits (the `for update of je`
+statement moves up, one `pg_advisory_xact_lock(203005004, hashtext(x.from_client::text))` is
+inserted, the per-item acquisition becomes a comment). Everything else — every refusal code and
+message, the reversal mirror and its adoption branch, the single `clara._subledger_on_approve` call,
+`clara._book_today()`, the filing retirement and re-filing, the coding task, the notification, the
+audit row, the domain events and the receipt — is 0125's, verbatim. Its prestate pins the 0125 body
+by `sha256(prosrc)` (and accepts its own body, so a #957 redo is safe), the owner, the
+`SECURITY DEFINER` flag and the ACL; its tail re-reads the new ladder off the catalog, re-asserts
+0027's documents-before-`document_filings` order, counts the fifteen refusals and both rungs, proves
+the source filing is still retired under the source client's row lock, and runs a
+catalogue-derived census over **every** `clara` body proving no door is left that takes a
+`clara.clients` row before the rung.
+[tests/correction-client-rung-order.test.mjs](tests/correction-client-rung-order.test.mjs) drives
+the schedule that deadlocked — an adversary holding the rung, then taking the row — with the
+deadlock SQLSTATE as its oracle, races the door against `clara.record_wiki_source_ingest` to prove
+the source client is still serialised against publication, and re-runs the same census from the
+other side.
+
+## 0239 — the opening lane becomes a Work (#984)
+
+**What was wrong.** Approving an opening seed or an opening correction wrote opening's own receipt
+relation (`clara.opening_seed_approvals`, one row per approved entry) and nothing else: no
+`clara.accounting_work` row and no `clara.operation_receipts` row. The one accounting act every
+later figure carries down from got none of the Work list, Work detail, Work audit or firm Activity
+treatment every other accounting act gets, so a firm could not see its own opening at all. #656's
+AC5 asked for the Work-and-receipt pair here and the 2026-09-15 wave recorded it as "descoped
+(authority)"; the owner's ruling of 2026-09-20 on #984 settles that authority question and reverses
+that ticket's own recommended Option B.
+
+**Why it is a governed widening.** The purpose vocabulary is closed independently in six places,
+each of which refuses a fourth value on its own. 0239 widens four of them and deliberately leaves
+two alone:
+
+| where | 0239 |
+|---|---|
+| `accounting_work_purpose_check` | widened to four |
+| `operation_receipts_purpose_check` | widened to four |
+| `ck_accounting_work_adjustment_basis` | widened: `opening_balance` joins `journal_entry` on the no-particulars side |
+| `clara._assert_adjustment_basis` | one new arm, in the journal-entry arm's position and with its spelling |
+| `clara._admit_accounting_work_core` | **not** widened — it inserts an `agent_tasks` row and demands a model name |
+| `clara._record_journal_entry_core` | **not** widened — an opening Work never reaches the posting core |
+
+**No Work is minted out of nothing** (fix round, ADV-L01-08). Both doors build the Work's entry
+array from the seed's DRAFT opening items and hand it to `clara._admit_opening_work`
+unconditionally, so on a reading of that block alone an empty batch would mint a Work with
+`basis.entry_count = 0`. It cannot happen, and the guard is each door's own "opening seed / opening
+correction has no draft entries" arm (0017's, kept verbatim by 0239 at :730 and :889), which runs
+before the loop that builds the array. Measured on the rig: approving a seed with nothing staged
+raises `CLR31` and leaves no `clara.accounting_work` and no `clara.operation_receipts` row
+(`obw984.zero_entry` in
+[tests/opening-balance-work.test.mjs](tests/opening-balance-work.test.mjs) pins the ordering, so a
+later recut that hoists the minting above the guard is a red cell).
+
+**Two shape CHECKs also read the purpose,** and they are why this file is bigger than a CHECK swap.
+`clara.operation_receipts.task_id` was `NOT NULL` with an FK to `clara.agent_tasks`; an opening
+approval owns no run, so the column becomes nullable behind a NEW purpose-keyed CHECK
+(`ck_operation_receipts_task_by_purpose`) that makes the nullability *exact*: the three
+model-served purposes still **require** a task and the opening purpose **refuses** one. The
+invariant is tightened, not loosened. `ck_operation_receipts_outcome_shape` demanded a non-blank
+`effects->>'entry_id'` on every committed receipt; an opening batch commits N entries and owns none
+singly, so its arm names `effects->>'seed_id'` instead and the other three keep the entry arm
+byte-for-byte. Leaving `entry_id` out is load-bearing twice: `clara._tf_assert_agent_post_receipt`
+counts receipts that name an entry and refuses any count but one, and
+`clara.list_activity` / `clara.get_activity_event` join their entry through that same text
+expression with left joins that already tolerate its absence.
+
+**The sibling admission path.** `clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,
+uuid,text)` is a `clara_fn_owner` `SECURITY DEFINER` internal granted to **nobody**, reached only
+from the two opening approvers, which have already taken `clara._human_ctx(role_rank('admin'))`,
+the registry row lock, the client advisory rung and the whole tie assertion before they call it. It
+mints **one Work per approved batch** (not per entry — `clara.opening_seed_approvals` already owns
+the per-entry record) at `status = 'completed'`, `basis_origin = 'user_direct'`,
+`adjustment_basis` null, `current_task_id` null, and its receipt with `task_id` null,
+`acting_actor` = `on_behalf_of` = the approving human and `via_wake_kind = 'opening_approval'`. The
+`run_id` is the door's own operation key, which is the only run identity a human door has. The
+intent key is `opening:<seed|correction>:<seed_id>:<batch_n>`, so a correction batch is a second
+Work rather than a conflict under `uq_accounting_work_intent`. The one authority question it
+re-derives for itself is membership, and it asks it the way the rest of the estate does —
+`and m.status = 'active'` — so the `actor_not_active` refusal it raises names the predicate it
+actually tested and `initiator_role` can only be read off a live membership row. (It first ordered
+active rows first and took the top one, which admitted a **removed** member; unreachable through
+the two doors, whose `clara._human_ctx` already filters on `active`, but the seam's own guard is
+what a third caller would inherit. Fixed in the #984 fix round, ADV-L01-04; the tail re-reads the
+predicate off the live body and `obw984.admit.membership` drives it.)
+
+**The basis is what was approved, not a journal basis.** No lines, no posting date, no memo: the
+entries were approved by `clara._approve_opening_entry` and tied out by `clara._assert_opening_tie`
+*before* the Work row is written. `source_refs` stays the empty array even on a tied seed — a
+source ref is the journal lane's evidence **claim** and stamping one would enrol the tie document
+in `clara._tf_intake_batch_member_work_stamp`'s open-batch hand-off — and the tie document is
+recorded as `basis.tie_document_id`, a fact rather than a claim. `apps/web`'s Work detail gained
+the matching guard: a basis with no `lines` array renders a sentence saying so instead of throwing
+on `basis.lines.map`.
+
+**Known cosmetic consequence, recorded rather than left to be discovered.** The firm Activity row
+renders "*person* on behalf of *the same person*" for an opening receipt, because
+`clara.operation_receipts.on_behalf_of` is `NOT NULL` and the approver acted for themselves. That
+is what the receipt says and it is true; suppressing the phrase when the two are equal is a web
+change 0239 deliberately does not reach for.
+
+[0239_opening_balance_work.sql](migrations/0239_opening_balance_work.sql) is redo-safe by
+construction (`create or replace`, `drop constraint if exists` before `add constraint`, an
+idempotent `drop not null`) and its prestate admits **both** lawful states of every object it
+replaces, naming which one it found. Its tail re-reads all four CHECKs (each must carry the three
+prior values *and* the fourth), the nullable-but-FK-bound `task_id`, the new internal's empty
+EXECUTE audience and the absence of `agent_tasks`/model from its body, both doors' owner,
+`SECURITY DEFINER` flag, pinned `search_path`, 0171 `SERIALIZABLE` proconfig and
+`clara_authenticated`-only audience, the whole-database count of isolation-pinned bodies (2, and
+they are the opening doors), and the two cores it must not have moved, by `sha256(prosrc)` and by
+re-reading the posting core's closed three-value IN-list.
+[tests/opening-balance-work.test.mjs](tests/opening-balance-work.test.mjs) drives both human doors
+for real and asserts what appears, what does not, and that opening's own relations are unchanged.

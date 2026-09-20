@@ -86,6 +86,43 @@ export async function gateOpeningWall(t) {
 }
 // #821
 
+// #1014
+// THE BINDING-CLAIM FRONTIER. #1014 repairs the one arrival order #854 measured open (an evidence
+// attachment holding the document lock, an opening approval blocking on it, and BOTH committing)
+// by giving `clara._lock_document_binding` a CLAIM the serializable side cannot miss. A database
+// carrying 0213 but not that migration still answers the OLD way, so the cells that assert the
+// repair must SKIP there rather than red — exactly as the #821 cells skip below 0213.
+export const BINDING_CLAIM_STEM = "opening_binding_claim$";
+
+let _claimReady = null;
+export async function bindingClaimReady() {
+  if (_claimReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [BINDING_CLAIM_STEM]);
+      _claimReady = r.rows[0].n > 0;
+    } catch {
+      _claimReady = false;
+    }
+  }
+  return _claimReady;
+}
+
+/** `if (await gateBindingClaim(t)) return;` — the per-cell frontier gate, counted skip.
+ *
+ *  A FOCUSED invocation must never skip silently: the battery's own premise check lives in
+ *  `opening-balance-evidence-link.test.mjs`'s `before`, which throws unless
+ *  `CLARA_ALLOW_MISSING_OPENING_BINDING_CLAIM=1` is preloaded by the estate sweep's gate module
+ *  (`opening-binding-claim-preintegration-gate.mjs`). */
+export async function gateBindingClaim(t) {
+  if (await bindingClaimReady()) return false;
+  markSkip();
+  t.skip(`#1014 opening binding claim absent (no ${BINDING_CLAIM_STEM} migration applied)`);
+  return true;
+}
+// #1014
+
 // ===========================================================================================
 // 2 · The DOCUMENT-CODING lane, driven through its own two human doors.
 //
