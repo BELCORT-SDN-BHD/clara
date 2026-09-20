@@ -6693,7 +6693,18 @@
       "issueDayOfMonthRange": "Choose a day between 1 and 28. Use the last day of the month for a month end.",
       "issueDayOfMonthAbsent": "A last-day-of-month schedule carries no day number.",
       "issueReversalCollides": "A monthly accrual on the 1st would have its reversal land on the next accrual's own day. Accrue on the month end, or on a day between 2 and 28.",
-      "issueScheduleYieldsNone": "This schedule never reaches an accrual date inside the authority window, so nothing would ever post. Choose a day that falls inside the service period."
+      "issueScheduleYieldsNone": "This schedule never reaches an accrual date inside the authority window, so nothing would ever post. Choose a day that falls inside the service period.",
+      "correctLink": "Correct this accrual",
+      "correctHeading": "Correct this accrual",
+      "correctBody": "Restate the amount, either account, the service period, the instruction or the memo. The schedule and the authority window do not move — the correction applies from the next due date, and every due date already reached is unchanged.",
+      "correctionFrozenNote": "The purpose, the authority and the schedule do not change here. The service period below must still sit inside the authority window shown above.",
+      "submitCorrect": "Record the correction",
+      "alreadyCorrectedTitle": "This accrual has already been corrected",
+      "alreadyCorrectedBody": "A correction supersedes exactly once. Open the successor to correct it further.",
+      "openSuccessor": "Open the successor",
+      "correctsLabel": "Corrects",
+      "correctedByLabel": "Corrected by",
+      "lineageNote": "A correction supersedes the row it corrects. The superseded row is kept, unchanged apart from this pointer."
     },
     "Prepayments": {
       "heading": "Prepayments",

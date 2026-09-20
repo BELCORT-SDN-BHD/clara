@@ -39,6 +39,7 @@ components/accounting/staff-expense-claim-form.test.tsx
 components/accounting/trade-invoice-form-a11y.test.tsx
 components/accounting/trade-invoice-form-keyboard.test.tsx
 components/accounting/trade-invoice-form.test.tsx
+components/accruals/accrual-correction-form.test.tsx
 components/accruals/accrual-form.test.tsx
 components/accruals/accruals-list.test.tsx
 components/admin/invite-dialog-a11y.test.tsx

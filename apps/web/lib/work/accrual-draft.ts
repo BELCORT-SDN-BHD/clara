@@ -342,10 +342,19 @@ export function accrualFieldElementId(field: AccrualFieldId): string {
   return `accrual-${field}`;
 }
 
+/** The nine particulars fields both the CREATE draft and the #936 CORRECTION draft carry — a
+ *  `Pick`, not the full `AccrualDraft`, so `toAccrualParticulars` below accepts either shape
+ *  structurally and a correction needs no second copy of this mapping. */
+type AccrualParticularsSource = Pick<
+  AccrualDraft,
+  "expenseAccountCode" | "liabilityAccountCode" | "amountCents" | "servicePeriodStart"
+  | "servicePeriodEnd" | "method" | "instruction" | "memo" | "sourceDocumentId"
+>;
+
 /** The draft as the door's `p_accrual` argument, in the DATABASE's own field spelling. Only what
  *  0222 reads: the schedule, the window and the authority are the door's OWN arguments, and a key
  *  the database never reads could carry no refusal. */
-export function toAccrualParticulars(draft: AccrualDraft): {
+export function toAccrualParticulars(draft: AccrualParticularsSource): {
   expense_account_code: string;
   liability_account_code: string;
   amount_cents: number;
@@ -379,4 +388,77 @@ export function toAccrualParticulars(draft: AccrualDraft): {
     memo === "" ? {} : { memo },
     document === "" ? {} : { source_document_id: document },
   );
+}
+
+// ── #936: THE ACCRUAL CORRECTION DRAFT ──────────────────────────────────────
+//
+// A CORRECTION IS NOT A CREATION, and its draft says so by carrying fewer fields: no purpose, no
+// authority, no schedule. `clara.correct_accrual_adjustment` takes none of those as arguments —
+// the plan's purpose is unchanged and the schedule (frequency/day_rule/day_of_month/timezone) and
+// the authority window (effective_from/effective_to) are the LIVE revision's own, carried through
+// server-side (the migration's own header). What a correction restates is the nine particulars
+// `AccrualParticularsSource` above already names, so this draft is exactly that shape plus nothing.
+
+export type AccrualCorrectionDraft = AccrualParticularsSource;
+
+/** The authority window a correction may NOT move — read off the accrual being corrected, never
+ *  typed. `validateAccrualCorrectionDraft` mirrors `clara._assert_accrual_term_window` against it
+ *  so a corrected term that would fall outside it is refused HERE, beside the control that holds
+ *  the mistake, rather than at a round trip. */
+export type AccrualCorrectionWindow = { effectiveFrom: string; effectiveTo: string };
+
+/**
+ * Every refusal a correction can raise BEFORE a round trip, mirroring the relevant subset of
+ * `validateAccrualDraft` — the amount, both legs, the term and the instruction. There is no
+ * purpose, authority or schedule issue to raise: this draft carries none of those controls.
+ */
+export function validateAccrualCorrectionDraft(
+  draft: AccrualCorrectionDraft,
+  window: AccrualCorrectionWindow,
+  knownAccounts: ReadonlySet<string> | null = null,
+): AccrualIssue[] {
+  const issues: AccrualIssue[] = [];
+  const t = (v: string) => v.trim();
+
+  if (t(draft.expenseAccountCode) === "") {
+    issues.push({ field: "expenseAccountCode", code: "expenseAccountRequired" });
+  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.expenseAccountCode))) {
+    issues.push({ field: "expenseAccountCode", code: "accountUnknown" });
+  }
+  if (t(draft.liabilityAccountCode) === "") {
+    issues.push({ field: "liabilityAccountCode", code: "liabilityAccountRequired" });
+  } else if (knownAccounts !== null && !knownAccounts.has(t(draft.liabilityAccountCode))) {
+    issues.push({ field: "liabilityAccountCode", code: "accountUnknown" });
+  }
+  if (t(draft.expenseAccountCode) !== "" && t(draft.expenseAccountCode) === t(draft.liabilityAccountCode)) {
+    issues.push({ field: "liabilityAccountCode", code: "accountsNotDistinct" });
+  }
+
+  if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
+    issues.push({ field: "amountCents", code: "amountRequired" });
+  }
+
+  if (t(draft.servicePeriodStart) === "") issues.push({ field: "servicePeriodStart", code: "silentTerm" });
+  if (t(draft.servicePeriodEnd) === "") issues.push({ field: "servicePeriodEnd", code: "silentTerm" });
+  if (t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
+      && draft.servicePeriodEnd < draft.servicePeriodStart) {
+    issues.push({ field: "servicePeriodEnd", code: "servicePeriodOrder" });
+  }
+
+  if (t(draft.instruction) === "") issues.push({ field: "instruction", code: "instructionRequired" });
+
+  // THE FIXED AUTHORITY WINDOW BRACKETS THE STATED TERM (0222's SIXTH MEASUREMENT, the same wall
+  // `validateAccrualDraft` mirrors for CREATE) — but the MISTAKE, if any, is in the term a
+  // correction is free to restate, never in the window a correction cannot move. So the issue
+  // lands on the service-period control, the one the preparer can actually act on here.
+  const termStands = t(draft.servicePeriodStart) !== "" && t(draft.servicePeriodEnd) !== ""
+    && draft.servicePeriodEnd >= draft.servicePeriodStart;
+  if (termStands && window.effectiveFrom < draft.servicePeriodStart) {
+    issues.push({ field: "servicePeriodStart", code: "windowBeforeTerm" });
+  }
+  if (termStands && window.effectiveTo > draft.servicePeriodEnd) {
+    issues.push({ field: "servicePeriodEnd", code: "windowAfterTerm" });
+  }
+
+  return issues;
 }

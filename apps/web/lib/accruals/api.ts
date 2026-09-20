@@ -300,6 +300,42 @@ export function accrualScheduleYields(
   return false;
 }
 
+// ── correct (#936) ─────────────────────────────────────────────────────────
+
+/** The answer `clara.correct_accrual_adjustment` hands back. It NAMES the row it supersedes
+ *  (`corrects_accrual_id`) — the pointer the detail surface renders as lineage — and the plan
+ *  revision the corrected basis now lives on. Like `AccrualCreated`, this is a REPORT of what the
+ *  database did, never a value the form paints as state: the form navigates to the NEW accrual's
+ *  own address and that destination re-reads. */
+export type AccrualCorrected = {
+  accrual_id: string;
+  corrects_accrual_id: string;
+  plan_id: string;
+  revision_id: string;
+  revision: number;
+  superseded_revision: number;
+  status: string;
+  overlap_warning: AccrualCreated["overlap_warning"];
+};
+
+export type CorrectAccrualInput = {
+  /** The accrual being corrected — the row this call supersedes. */
+  accrualId: string;
+  /** The CORRECTED particulars, in the database's own field spelling — the same shape
+   *  `CreateAccrualInput.accrual` carries. The door reads no schedule, purpose or authority
+   *  argument: those are the live plan revision's own, carried through unchanged. */
+  accrual: AccrualParticulars;
+  opKey: string;
+};
+
+export async function correctAccrual(input: CorrectAccrualInput, o: Opts = {}): Promise<AccrualCorrected> {
+  return callDoor<AccrualCorrected>(
+    "correct_accrual_adjustment",
+    { p_accrual_id: input.accrualId, p_accrual: input.accrual, p_op_key: input.opKey },
+    opts(o),
+  );
+}
+
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It
  *  mirrors `clara._accrual_journal_basis` (0222) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */
