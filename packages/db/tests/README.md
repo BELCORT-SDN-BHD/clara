@@ -292,6 +292,30 @@ doors — that one driven end-to-end through `checkout-convergence-fixtures.mjs`
 `liveCheckout` / `deliver` / `claimPaidFirm`, the same helpers `checkout-convergence.test.mjs`
 drives, so this file adds no second implementation of that world.
 
+## Firm setup polish (#895, `0256_firm_setup_polish.sql`)
+
+`firm-setup-polish.test.mjs` is frontier-gated on its own stable stem (`firm_setup_polish$`), the
+`onboarding_plan_firm_uniqueness$` idiom, and preloads `firm-setup-polish-preintegration-gate.mjs`
+in the package run. Three cells, one per recut defect: `p895.seed.noop` seeds a fully-empty plan
+(bumps, seeded=12), then seeds again under a DIFFERENT op_key once every catalogue row is already
+present (adds nothing) and asserts the plan's `revision_token`/`revision_n`/revision-history count
+are BYTE-UNCHANGED by the no-op call while `clara.audit_log` and `clara.domain_events` still gained
+a row each (seeded=0); `p895.read.honest_no_plan` plants a firm with NO firm-scope plan at all
+(root, by construction — no door ever creates one on its own) and asserts `get_firm_setup()` reads
+`counter={required_answered:0,required_total:0}` rather than the catalogue's constant borrowed as
+if it were progress; `p895.facts.state_filter` answers one firm-defaultable key and withdraws it,
+answers a second and CORRECTS it, and asserts `confirmed_facts` excludes the withdrawn revision and
+the pre-correction (superseded) revision while including only the corrected (live) one — cross-
+checked directly against `clara.knowledge_records` by `id`/`state`/`superseded_at`, independent of
+the door's own answer. `record_id` (the STABLE thread identity `clara._knowledge_row_json` exposes)
+is shared by every revision of one fact; `revision_id` (`clara.knowledge_records.id`) is what a
+capture, a correction and a withdrawal each mint fresh — the cells assert on `revision_id`, never on
+`record_id`, for exactly that reason. All three cells were run against the recut migration's OWN
+pre-image (the pre-#895 `create or replace function` text, applied by hand outside the migration
+ledger) and failed for the reason the header names, then re-run green after restoring the exact
+post-#895 bodies — the vacuity control, since #895's whole deliverable is three SQL-level fixes with
+no new relation or grant to independently anchor a cell to.
+
 ## Firm knowledge defaults (#654, `0220_firm_knowledge_defaults.sql`)
 
 `knowledge-firm-defaults.test.mjs` is the firm-default half of the governed Knowledge lane, above

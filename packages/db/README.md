@@ -727,6 +727,22 @@ today closes a firm plan. `clara.claim_paid_firm` itself is untouched — pinned
 post-image by `sha256(prosrc)` in 0255's own prestate/tail — and 0017's client-scope sibling
 index, `uq_onboarding_plans_one_open` on `(firm_id, client_id)`, is untouched too.
 
+**#895 (0256, three defects `#648`'s own fix round found and left)** recuts `seed_firm_setup_plan`
+and `get_firm_setup` in full (`create or replace function`, both pre-images pinned by
+`sha256(prosrc)`), fixing three gaps each previously masked by a web-side guard or an unreachable
+path: (1) a reconciliation that inserts nothing no longer rotates the plan's CAS token, advances
+`revision_n` or appends a revision snapshot — the audit row and `firm_setup.seeded` event still
+fire, carrying `seeded=0`, so the no-op act stays a receipted fact; (2) `get_firm_setup`'s
+`counter.required_total` is now gated on `p.id is not null`, exactly as `required_answered`
+already was, so a firm with NO firm-scope plan reads `counter={0,0}` rather than the catalogue's
+constant required-row count borrowed as if it were this firm's own progress; (3) the
+`confirmed_facts` projection gained the `r.state = 'live'` filter the per-item join two blocks
+above already carried, so a WITHDRAWN firm default — `clara.withdraw_knowledge` leaves
+`superseded_at` NULL, exactly as a LIVE row does, per `ck_knowledge_records_state` — no longer
+lingers in `confirmed_facts` forever. `required_outstanding` is a stated residual: it lists every
+required catalogue key for a plan-less firm too, and #895's Agent Brief named only the counter and
+the unseeded count, so it is untouched here. Neither door's ACL, floor or signature moved.
+
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
 `clara_authenticated`, and `create_accrual_adjustment_for` on `clara_runtime` alone. They are
