@@ -106,8 +106,24 @@ export const birthBodySource = async () =>
     "select p.prosrc as src from pg_proc p where p.oid = 'clara._tf_fa_acquisition_birth()'::regprocedure",
   )).rows[0]?.src ?? "";
 
-/** The watermark expression 0041 §S2.6's belt phrases and 0247 copied into the birth join. */
-export const WATERMARK_EXPR = "coalesce(new.approved_at, now()) >= fp.enrolled_at";
+/** The watermark predicate 0247 installs in the birth join. It is CLOCK-FREE, and it is the exact
+ *  complement of `clara.fa_register_tie`'s OWN pre-enrolment test (below): the instrument that
+ *  births the register row and the instrument that audits it answer "was this entry approved
+ *  before the account was enrolled?" with the same expression, so they cannot drift apart. */
+export const WATERMARK_EXPR = "coalesce(new.approved_at, new.created_at) >= fp.enrolled_at";
+
+/** `clara.fa_register_tie`'s own pre-enrolment test (0041:4367 and :4376, once per column). The
+ *  birth's watermark is its negation, which is what makes a difference the tie reports either
+ *  explained by its pre-enrolment column or nobody's. */
+export const TIE_PRE_ENROLMENT_EXPR = "coalesce(j.approved_at, j.created_at) < v_enrolled";
+
+/** A complete reversal-linkage UPDATE that ALSO tries to null `approved_at` — the one shape that
+ *  could make the birth's fallback load-bearing. `clara._tf_entry_immutable`'s approved->approved
+ *  arm allows only reversed_by / reversal_reason / updated_at, so this is CLR08, and the
+ *  watermark's first operand can never be NULL on a row this trigger fires for. */
+export const NULL_APPROVED_AT_UPDATE =
+  "update clara.journal_entries set approved_at = null, reversed_by = id, "
+  + "reversal_reason = 'p972 watermark probe' where id = $1";
 
 /** 0216's watermark-FREE join, verbatim. Its absence is what makes the recut non-vacuous. */
 export const WATERMARK_FREE_JOIN = `             and fp.asset_account_code = jl.account_code and fp.active

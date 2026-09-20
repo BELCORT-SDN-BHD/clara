@@ -1016,13 +1016,33 @@ rather than a `prosrc` string match proving only that the guard's TEXT exists.
 ## The fixed-asset birth-watermark battery (#972)
 
 `fa-birth-watermark.test.mjs` is frontier-gated on the `fa_birth_watermark$` stem (migration 0247)
-— never on a number — and shares `fa-birth-watermark-fixtures.mjs`. Three `p972.*` cells:
-`p972.law` reads the recut birth body off the CATALOG (the belt's watermark expression present
-exactly once, 0216's watermark-free join gone, `t_je_fa_acquisition_birth` still the deferred
+— never on a number — and shares `fa-birth-watermark-fixtures.mjs`. Four `p972.*` cells:
+`p972.law` reads the recut birth body off the CATALOG (the watermark expression present exactly
+once, 0216's watermark-free join gone, NO bare clock token — arm (D)'s own detector, imported from
+`x42-s5-helpers.mjs` rather than restated — and `clara.fa_register_tie` still phrasing the
+pre-enrolment test the watermark negates, twice; `t_je_fa_acquisition_birth` still the deferred
 insert-or-update constraint trigger whose re-firing is the mechanism); `p972.retro` drives the
 defect's own shape at the door seam and then through `clara.fa_register_tie` at `x41.s4`'s three
 as-ofs, classified by `x41.s4`'s own `isRed`/`isExplained`; `p972.refire` proves the narrowed join
-did not close the lane 0216 opened.
+did not close the lane 0216 opened; `p972.source` drives the assumption the predicate rests on
+instead of asserting it — an approved entry can never carry a NULL `approved_at`, because
+`clara._tf_entry_immutable` refuses the draft→approved transition without one and its
+approved→approved allow-list is exactly `{reversed_by, reversal_reason, updated_at}`.
+
+**Why the predicate is the TIE's, negated, and not the BELT's.** The belt
+(`clara._tf_fa_movement_belt`, 0041 §S2.6) spells its own watermark
+`coalesce(new.approved_at, now()) >= fp.enrolled_at`, and the first cut of 0247 copied it. That
+session clock is wrong here and the review caught it twice over: the whole finding is that this
+trigger RE-FIRES in a LATER transaction (`clara.reverse_entry`'s `reversed_by` stamp), where
+`now()` is the REVERSING transaction's instant — always at or after enrolment — so the fallback
+would re-admit exactly the entry the file excludes; and the clock read reddened `x42.r7.s5c.5` and
+`x42.s5c.6`, whose arm (D) roster (`FA_ACQUISITION_0216_CLOCK_NAMES`) says in prose that this body
+"takes its dates from the entry it fires for". The shipped predicate is
+`coalesce(new.approved_at, new.created_at) >= fp.enrolled_at` — the exact negation of
+`clara.fa_register_tie`'s own pre-enrolment test (`coalesce(j.approved_at, j.created_at) <
+v_enrolled`, once per column), so the instrument that BIRTHS a register row and the instrument
+`x41.s4` reads to AUDIT it cannot disagree about scope. It spends no clock read, so arm (D)'s
+roster stays true unwidened, and 0247's own tail (T.8) re-proves that off the catalog.
 
 `fa-birth-watermark-preintegration-gate.mjs` is the package-wide sweep's escape
 (`CLARA_ALLOW_MISSING_FA_BIRTH_WATERMARK=1`), registered in `packages/db/package.json`'s `"test"`

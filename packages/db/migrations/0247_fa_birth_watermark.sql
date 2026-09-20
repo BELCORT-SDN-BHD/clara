@@ -38,18 +38,46 @@
 -- chain at 0234 (0227 long applied) births one such row, every time.
 --
 -- =====================================================================================
--- THE FIX: ONE PREDICATE, AND IT IS THE BELT'S OWN.
+-- THE FIX: ONE PREDICATE, AND IT IS THE TIE'S OWN, NEGATED.
 --
--- `clara._tf_fa_movement_belt` (0041 §S2.6) already reads the watermark as
--- `coalesce(new.approved_at, now()) >= fp.enrolled_at`. This file adds THAT EXPRESSION, word for
--- word, to the birth join, so the instrument that REFUSES an unregistered movement and the
--- instrument that BIRTHS the register row can never drift apart about which entries are in scope.
+-- `clara.fa_register_tie` -- the read `x41.s4` drives, and the instrument that REPORTED this
+-- defect -- already decides which GL movement is PRE-ENROLMENT, once per column:
+-- `coalesce(j.approved_at, j.created_at) < v_enrolled` (0041:4367 cost, :4376 accumulated).
+-- This file adds that test's exact NEGATION to the birth join:
+-- `coalesce(new.approved_at, new.created_at) >= fp.enrolled_at`. The instrument that BIRTHS a
+-- register row and the instrument that AUDITS it therefore answer "was this entry approved before
+-- the account was enrolled?" with the same expression, and a difference the tie reports is either
+-- explained by its own pre-enrolment column or is nobody's.
+--
+-- WHY NOT THE BELT'S PHRASING, WHICH AN EARLIER CUT OF THIS FILE COPIED. `clara._tf_fa_movement_belt`
+-- (0041 §S2.6) spells its own watermark with a SESSION-CLOCK fallback, and its comment says why:
+-- it needs a transaction-constant instant to close the interval at `retired_at` against a
+-- same-transaction retire. The birth has no upper bound to close and no such race -- and the
+-- fallback is actively WRONG here. This trigger's whole finding is that it re-fires on a LATER
+-- transaction (`clara.reverse_entry`'s `reversed_by` stamp), and in that transaction the session
+-- clock is the REVERSING transaction's, always at or after enrolment: the fallback would re-admit
+-- exactly the entry this file exists to exclude. `created_at` is the ENTRY's own instant, which is
+-- the thing the birth is asking about. Copying the belt also spent a clock read the estate's own
+-- structural census (`packages/db/tests/x42-s5-helpers.mjs`, S5.25 arm (D),
+-- FA_ACQUISITION_0216_CLOCK_NAMES) states in prose this body does not have -- `x42.r7.s5c.5` and
+-- `x42.s5c.6` both reddened with a one-name diff. The predicate above spends none, so the census
+-- reads true without widening its roster, and this file's tail re-proves it off the catalog (T.8).
+--
+-- AND THE FALLBACK IS BELT-AND-BRACES, NOT LOAD-BEARING. This is a constraint trigger gated
+-- `when (new.status = 'approved')`, and an approved row can never carry a NULL `approved_at`:
+-- `clara._tf_entry_immutable` refuses the draft->approved transition outright when
+-- `new.approved_at is null` ("illegal approval transition"), and its approved->approved arm
+-- allows only `reversed_by` / `reversal_reason` / `updated_at`, so the stamp can never be removed
+-- afterwards either. Both guards are asserted in the prestate below and driven live by
+-- `p972.source`. Should that law ever break, `coalesce(..., new.created_at)` is still the
+-- conservative answer for the case this file is about -- an entry CREATED before enrolment stays
+-- out of the birth's scope -- and `clara.journal_entries.created_at` is itself NOT NULL.
 --
 -- WHY NO UPPER BOUND HERE, AND WHY THAT IS NOT A HALF-FIX. The belt closes the enrolment interval
 -- at both ends (`retired_at`) because it joins every profile generation; the birth join takes only
 -- `fp.active`, and `ck_fap_retired` makes `active` and `retired_at is null` the SAME fact
--- (asserted in the prestate). So on the set this trigger considers, the two predicates are now
--- identical. The birth's blindness to RETIRED generations is 0216's, older than this defect, and
+-- (asserted in the prestate). So on the set this trigger considers, the lower bound is the whole
+-- interval. The birth's blindness to RETIRED generations is 0216's, older than this defect, and
 -- is not touched here.
 --
 -- WHAT THIS FILE DOES NOT DO. It does not clean register rows a long-lived rig already carries:
@@ -75,7 +103,16 @@ declare
   c_birth_pre constant text := '090217b0e74d8b1d8381e8b0e9c63c3822763b4eba9f641786247d2fb1fe687c';
   -- The marker that makes a RE-APPLY of this very file (the #957 redo mode) visible rather than
   -- merged into: the live body already carries the watermark this file installs.
-  c_marker constant text := 'coalesce(new.approved_at, now()) >= fp.enrolled_at';
+  c_marker constant text := 'coalesce(new.approved_at, new.created_at) >= fp.enrolled_at';
+  -- …and the SIGNAL the redo detector keys on, which is deliberately LOOSER than the marker.
+  -- A fix round edits the predicate's own words (this file's first cut spelled the fallback
+  -- `now()`; the review that measured the reddened clock census is why it no longer does), and a
+  -- detector keyed on the exact marker cannot see a rig carrying an EARLIER cut of this same
+  -- file: it would read that rig as 0216-fresh and refuse on the sha pin. `>= fp.enrolled_at` is
+  -- the part every cut of this file has in common and 0216's own body has not.
+  c_redo_signal constant text := '>= fp.enrolled_at';
+  -- clara.fa_register_tie's OWN pre-enrolment test, which the marker above is the negation of.
+  c_tie constant text := 'coalesce(j.approved_at, j.created_at) < v_enrolled';
 begin
   if to_regclass('clara.fixed_assets') is null or to_regclass('clara.fa_account_profiles') is null then
     raise exception '#972 prestate: the fixed-asset register is absent -- 0041 must apply first'
@@ -124,11 +161,13 @@ begin
   -- unmerged migration after an edit.) The recut below is `create or replace`, so it is safe over
   -- its own old effects — but a prestate pinned to the PRE-image would refuse the redo outright.
   -- The redo is admitted LOUDLY, and only on the one signal that means it: the live body already
-  -- carries this file's watermark. Everything else below, and the whole tail, still runs.
+  -- carries A watermark this file installed (c_redo_signal, not the exact marker -- see its own
+  -- comment). Everything else below, and the whole tail, still runs, and the tail's T.1 is what
+  -- proves the redo landed THIS cut's predicate rather than the one it replaced.
   select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_fa_acquisition_birth()'::regprocedure;
-  if position(c_marker in v_src) > 0 then
+  if position(c_redo_signal in v_src) > 0 then
     v_redo := true;
-    raise notice '#972 prestate: the live clara._tf_fa_acquisition_birth ALREADY carries the watermark -- treating this as a #957 REDO of 0247 itself. The recut is create-or-replace and the tail below re-proves the whole post-state from scratch.';
+    raise notice '#972 prestate: the live clara._tf_fa_acquisition_birth ALREADY carries a watermark against fa_account_profiles.enrolled_at (this file''s own earlier effect) -- treating this as a #957 REDO of 0247 itself. The recut is create-or-replace and the tail below re-proves the whole post-state from scratch, including that the predicate is THIS cut''s.';
   end if;
 
   -- (4) PRE-IMAGE sha256(prosrc) PINS, EVERY ONE MEASURED ON THE LANE-04 RIG off pg_proc.prosrc.
@@ -158,17 +197,41 @@ begin
     end if;
   end loop;
 
-  -- (5) THE BELT REALLY DOES CARRY THE EXPRESSION THIS FILE IS ABOUT TO COPY, exactly once. The
-  -- fix's whole claim is "the birth now reads the watermark the belt already reads"; if the belt
-  -- stopped saying it in these words, that claim is false and this file must be re-derived.
-  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_fa_movement_belt()'::regprocedure;
-  v_n := (length(v_src) - length(replace(v_src, c_marker, ''))) / length(c_marker);
-  if v_n <> 1 then
-    raise exception '#972 prestate: clara._tf_fa_movement_belt carries the watermark expression % time(s), expected exactly 1', v_n
+  -- (5) THE TIE REALLY DOES DECIDE PRE-ENROLMENT THE WAY THIS FILE IS ABOUT TO NEGATE, exactly
+  -- twice -- once per column. The fix's whole claim is "the birth now admits exactly what the
+  -- audit read calls POST-enrolment"; if clara.fa_register_tie stopped saying it in these words,
+  -- that claim is false and this file must be re-derived. (Its whole body is also sha-pinned
+  -- above and re-read in §T; this arm says WHICH sentence in it the fix depends on.)
+  select p.prosrc into v_src from pg_proc p where p.oid='clara.fa_register_tie(uuid,date)'::regprocedure;
+  v_n := (length(v_src) - length(replace(v_src, c_tie, ''))) / length(c_tie);
+  if v_n <> 2 then
+    raise exception '#972 prestate: clara.fa_register_tie phrases its pre-enrolment test % time(s), expected exactly 2 (cost and accumulated)', v_n
       using errcode='CLR10';
   end if;
 
-  raise notice '#972 prestate: clean -- the watermark column is NOT NULL, ck_fap_retired still equates `active` with a NULL retired_at, t_je_fa_acquisition_birth is still 0216''s deferred insert-or-update constraint trigger sorting before the belt, the belt still phrases the watermark exactly once, and every pinned pre-image matches.';
+  -- (6) THE WATERMARK'S FIRST OPERAND CAN NEVER BE NULL ON A ROW THIS TRIGGER FIRES FOR, and
+  -- that is what makes the `created_at` arm belt-and-braces rather than load-bearing (header).
+  -- clara._tf_entry_immutable refuses the draft->approved transition when approved_at is absent,
+  -- and its approved->approved arm allows only the reversal-linkage pair plus updated_at, so the
+  -- stamp can never be removed afterwards. Asserted here, and DRIVEN live by p972.source.
+  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_entry_immutable()'::regprocedure;
+  if position('new.approved_at is null' in v_src) = 0
+     or position('illegal approval transition' in v_src) = 0 then
+    raise exception '#972 prestate: clara._tf_entry_immutable no longer refuses an approval that carries no approved_at -- re-derive this file''s NULL argument before applying'
+      using errcode='CLR10';
+  end if;
+  if position($a$v_allowed := array['reversed_by','reversal_reason','updated_at'];$a$ in v_src) = 0 then
+    raise exception '#972 prestate: clara._tf_entry_immutable''s approved->approved allow-list is no longer exactly {reversed_by, reversal_reason, updated_at} -- approved_at may now be nullable after approval, so re-derive this file''s NULL argument'
+      using errcode='CLR10';
+  end if;
+  if not exists (select 1 from information_schema.columns
+                  where table_schema='clara' and table_name='journal_entries'
+                    and column_name='created_at' and is_nullable='NO') then
+    raise exception '#972 prestate: clara.journal_entries.created_at is nullable -- the watermark''s fallback operand is no longer guaranteed'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#972 prestate: clean -- the watermark column is NOT NULL, ck_fap_retired still equates `active` with a NULL retired_at, t_je_fa_acquisition_birth is still 0216''s deferred insert-or-update constraint trigger sorting before the belt, clara.fa_register_tie still phrases its pre-enrolment test exactly twice, clara._tf_entry_immutable still guarantees an approved entry carries approved_at, and every pinned pre-image matches.';
 end
 $p972_pre$;
 
@@ -206,12 +269,15 @@ begin
              -- this line that re-fire birthed a register row from an entry approved BEFORE the
              -- account was enrolled — the retroactive birth §1.2 exists to forbid, which
              -- clara.fa_register_tie's pre-enrolment column cannot explain (it explains a
-             -- register SHORT of the GL; this made it LONG). The expression is
-             -- clara._tf_fa_movement_belt's own, word for word (0041 §S2.6), so the instrument
-             -- that refuses an unregistered movement and the instrument that births the register
-             -- row can never drift apart about which entries are in scope; `coalesce(…, now())`
-             -- is the belt's own reading of a NULL approved_at.
-             and coalesce(new.approved_at, now()) >= fp.enrolled_at
+             -- register SHORT of the GL; this made it LONG). The expression is that column's own
+             -- test NEGATED (0041:4367, :4376), so the instrument that births the register row
+             -- and the instrument that audits it cannot disagree about which entries are
+             -- pre-enrolment. It reads NO session clock, by design: on the re-fire the clock
+             -- belongs to the REVERSING transaction, which is always at or after enrolment and
+             -- would re-admit the very entry this line excludes. The `created_at` arm is
+             -- unreachable while clara._tf_entry_immutable holds (an approved row always carries
+             -- approved_at) and conservative if it ever does not.
+             and coalesce(new.approved_at, new.created_at) >= fp.enrolled_at
            where jl.entry_id = new.id and jl.debit_cents > 0
            order by jl.id loop
     v_asset := null;
@@ -247,9 +313,11 @@ comment on function clara._tf_fa_acquisition_birth() is
   'clara.journal_entries, named to fire before t_je_fa_movement_belt (deferred triggers fire in '
   'alphabetical trigger-name order -- measured on clara_639, PG 17.11). Idempotent against '
   'clara._fa_on_approve arm 4 through the same on conflict (acquisition_line_id) do nothing. '
-  '#972 (0247): the join carries the 0041 §1.2 enrolment watermark in the belt''s own words, so '
-  'a re-fire caused by a later UPDATE that leaves the entry approved -- clara.reverse_entry''s '
-  'reversed_by stamp -- can never birth a row from a PRE-ENROLMENT entry.';
+  '#972 (0247): the join carries the 0041 §1.2 enrolment watermark as the exact negation of '
+  'clara.fa_register_tie''s own pre-enrolment test, so a re-fire caused by a later UPDATE that '
+  'leaves the entry approved -- clara.reverse_entry''s reversed_by stamp -- can never birth a row '
+  'from a PRE-ENROLMENT entry, and the birth cannot disagree with the read that audits it. It '
+  'reads NO session clock: on that re-fire the clock is the REVERSING transaction''s.';
 
 reset role;
 
@@ -259,7 +327,8 @@ reset role;
 do $p972_tail$
 declare
   v_src text; v_n int; v_pin record; v_sha text;
-  c_marker constant text := 'coalesce(new.approved_at, now()) >= fp.enrolled_at';
+  c_marker constant text := 'coalesce(new.approved_at, new.created_at) >= fp.enrolled_at';
+  c_tie constant text := 'coalesce(j.approved_at, j.created_at) < v_enrolled';
   -- The OLD, watermark-free join, verbatim. A vacuous replace would leave this present.
   c_old constant text := '             and fp.asset_account_code = jl.account_code and fp.active
            where jl.entry_id = new.id';
@@ -355,14 +424,25 @@ begin
     end if;
   end loop;
 
-  -- T.8 the two instruments now phrase the watermark IDENTICALLY. Not decoration: it is the whole
-  -- argument that the birth and the belt agree on scope.
-  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_fa_movement_belt()'::regprocedure;
-  if position(c_marker in v_src) = 0 then
-    raise exception '#972 tail T.8: the belt no longer carries the watermark expression the birth now copies'
+  -- T.8 THE RECUT SPENDS NO CLOCK READ. Not decoration: the estate's own structural census
+  -- (x42 S5.25 arm (D)) states in prose that this body carries none, and an earlier cut of this
+  -- file reddened two of its cells by copying the belt's clock-bearing phrasing. The detector is
+  -- arm (D)'s OWN regex, spelled here so the migration proves the property it must not break
+  -- rather than leaving it to a battery that runs later.
+  if v_src ~* '\m(now\(\)|current_timestamp\M|localtimestamp\M|clock_timestamp\(\)|statement_timestamp\(\)|transaction_timestamp\(\))' then
+    raise exception '#972 tail T.8: the recut birth body reads a bare clock token -- x42 arm (D)''s roster says this body has none, and the watermark must be the ENTRY''s own instant'
       using errcode='CLR10';
   end if;
 
-  raise notice '#972 tail OK: clara._tf_fa_acquisition_birth carries the 0041 §1.2 watermark exactly once in the belt''s own words, the watermark-free join is gone, 0216''s four exclusions and its single conflict-targeted insert survive, the function keeps its owner/definer/search_path and grants nobody EXECUTE, t_je_fa_acquisition_birth is unchanged, and the belt, clara._fa_on_approve, clara.fa_register_tie and clara.reverse_entry are byte-for-byte unmoved.';
+  -- T.9 …AND THE TIE STILL PHRASES THE TEST THIS FILE NEGATES, twice, one per column. The whole
+  -- argument that the birth and the audit read agree on scope.
+  select p.prosrc into v_src from pg_proc p where p.oid='clara.fa_register_tie(uuid,date)'::regprocedure;
+  v_n := (length(v_src) - length(replace(v_src, c_tie, ''))) / length(c_tie);
+  if v_n <> 2 then
+    raise exception '#972 tail T.9: clara.fa_register_tie phrases its pre-enrolment test % time(s), expected exactly 2 -- the birth''s watermark is its negation', v_n
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#972 tail OK: clara._tf_fa_acquisition_birth carries the 0041 §1.2 watermark exactly once in clara.fa_register_tie''s own words negated, reads no bare clock token, the watermark-free join is gone, 0216''s four exclusions and its single conflict-targeted insert survive, the function keeps its owner/definer/search_path and grants nobody EXECUTE, t_je_fa_acquisition_birth is unchanged, and the belt, clara._fa_on_approve, clara.fa_register_tie and clara.reverse_entry are byte-for-byte unmoved.';
 end
 $p972_tail$;
