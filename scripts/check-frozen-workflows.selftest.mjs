@@ -727,7 +727,10 @@ testCase("(L05-STD-02 fix round) `--ruling` followed by another flag (not a ruli
   const result = spawnSync(
     process.execPath,
     [join(HERE, "check-frozen-workflows.mjs"), "--retire", "packages/runtime/workflows/does-not-exist-in-manifest.ts", "--ruling", "--child-os"],
-    { cwd: REPO_ROOT, encoding: "utf8" },
+    // CI and GITHUB_ACTIONS are cleared for the child, as the successful-retire cell above does:
+    // under CI the CLI refuses --retire outright BEFORE it reads --ruling, so the refusal this
+    // cell pins (the missing-ruling one) would never be reached on a CI runner.
+    { cwd: REPO_ROOT, encoding: "utf8", env: { ...process.env, CI: "", GITHUB_ACTIONS: "" } },
   );
   const after = readFileSync(manifestPath, "utf8");
   if (after !== before) throw new Error("must not write the manifest when --ruling's value is actually another flag");
