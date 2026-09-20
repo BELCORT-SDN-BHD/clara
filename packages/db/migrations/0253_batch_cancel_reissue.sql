@@ -25,8 +25,9 @@
 --
 -- WHAT THIS FILE CHANGES, IN ONE SENTENCE. `clara.cancel_intake_batch`'s refusal-on-duplicate rule
 -- gains ONE named exception: while the batch is still `cancelling` AND its STORED canceller no
--- longer holds an active bookkeeper+ membership — the EXACT predicate `clara.get_intake_batch`
--- already evaluates for `cancel_blocked` — a call under a DIFFERENT actor and a FRESH op key is
+-- longer holds an active bookkeeper+ membership OF THIS FIRM — the EXACT predicate
+-- `clara.get_intake_batch` already evaluates for `cancel_blocked` — a call under a DIFFERENT
+-- actor and a FRESH op key is
 -- admitted as a genuinely new decision, which re-points `cancel_requested_by` / `cancel_op_key` /
 -- `cancel_requested_at` at the new actor, key and moment. Every other path through the function
 -- (the open→cancelling flip, the terminal-in-one-call flip, the op-key replay, the live/pending
@@ -74,6 +75,20 @@
 --     (`useDecisionKey`), so a different, currently active bookkeeper opening the SAME card and
 --     pressing Stop again already sends exactly the shape this door now admits. Confirmed by
 --     reading both files; no line of either changes in this PR.
+--
+-- WHY THE PREDICATE IS SPELLED FIRM-SCOPED HERE AND NOT IN THE READ (fix round, ADV-W2L05-01 /
+-- L05-SPEC-08). The two bodies evaluate the same words under DIFFERENT privilege: this door is
+-- SECURITY DEFINER (owner `clara_fn_owner`, whose `p_firm_memberships_owner` policy qualifies
+-- `true`), so it sees every firm's `clara.firm_memberships` rows; `clara.get_intake_batch` is
+-- INVOKER, so `p_firm_memberships_human` already confines it to `firm_id = clara.jwt_firm()`.
+-- Copying the read's bytes therefore did NOT copy the read's meaning: a canceller who left this
+-- firm and joined another — the canonical shape the ticket names, and the only one
+-- `uq_membership_active_user` (unique on `user_id` where `status='active'`) permits — was
+-- reported blocked by the board and refused by the door, leaving the batch stuck for ever with no
+-- remedy at all. `and fm.firm_id = v_firm` makes the door evaluate what the read REPORTS. The
+-- door stays strictly no more permissive than before for any identity of this firm, so this
+-- opens no authority: `clara._intake_batch_actor_ctx` still proves the CALLER is an active
+-- bookkeeper+ of the batch's own firm before any of this is reached.
 --
 -- REDO-SAFETY (#957). The one statement below is `create or replace function` — naturally
 -- idempotent DDL. The splice is ALSO idempotent against its OWN prior effect: if the live body
@@ -136,9 +151,17 @@ begin
     -- clara._intake_batch_actor_ctx above already proved p_actor IS an active bookkeeper+, so this
     -- can never be the SAME blocked identity re-keying its own decision. A batch already
     -- `cancelled` (terminal) is untouched -- the exception applies only while still `cancelling`.
+    -- THE `fm.firm_id = v_firm` LEG IS NOT DECORATION (fix round, ADV-W2L05-01). This door is
+    -- SECURITY DEFINER and therefore sees EVERY firm's memberships; clara.get_intake_batch is
+    -- INVOKER and reads the same relation under RLS, where p_firm_memberships_human already
+    -- confines it to `firm_id = clara.jwt_firm()`. Spelling the scope here is what makes the two
+    -- bodies MEAN the same predicate: without it, a canceller who left this firm for another one
+    -- -- the canonical case the ticket exists for, and the only shape uq_membership_active_user
+    -- permits -- is reported blocked by the board and refused by the door for ever.
     if b.state <> 'cancelling' or b.cancel_requested_by is null
        or exists (select 1 from clara.firm_memberships fm
                    where fm.user_id = b.cancel_requested_by
+                     and fm.firm_id = v_firm
                      and fm.status = 'active'
                      and clara.role_rank(fm.role) >= clara.role_rank('bookkeeper')) then
       raise exception 'this intake batch is already stopping under another decision'
@@ -169,7 +192,10 @@ begin
      where id = p_batch and state = 'cancelling';
   end if;$r2$;
 
-  if v_src like ('%' || v_r2 || '%') then
+  -- BOTH replacements are probed, never just one: a half-landed body (an earlier fix-round
+  -- attempt that got the `elsif` branch but not the firm-scoped guard) must fall through to the
+  -- pre-image check below and FAIL LOUDLY, rather than be waved past as "already at target".
+  if v_src like ('%' || v_r1 || '%') and v_src like ('%' || v_r2 || '%') then
     raise notice '#968 cancel: already at the re-issue target (a redo over this function''s own prior effect) -- skipping the splice.';
   else
     if encode(sha256(convert_to(v_src,'UTF8')),'hex') <> v_pre then
@@ -214,7 +240,7 @@ comment on function clara.cancel_intake_batch(uuid,uuid,text) is
   'the live child list -- the caller fans clara.cancel_accounting_work out one call per '
   'transaction. #968: while still `cancelling`, a DIFFERENT, currently active bookkeeper may '
   're-issue the stop under a fresh key once the STORED canceller no longer holds an active '
-  'bookkeeper+ membership -- the same predicate clara.get_intake_batch reports as '
+  'bookkeeper+ membership OF THIS FIRM -- the same predicate clara.get_intake_batch reports as '
   'cancel_blocked=''canceller_not_active''. A batch whose stored canceller is still active, or '
   'one already `cancelled`, keeps refusing a second decision exactly as 0229 shipped it.';
 
@@ -236,6 +262,16 @@ begin
      or v_src not like '%if b.state <> ''cancelling'' or b.cancel_requested_by is null%'
      or v_src not like '%fm.status = ''active''%and clara.role_rank(fm.role) >= clara.role_rank(''bookkeeper'')%' then
     raise exception '#968 tail: clara.cancel_intake_batch does not carry the re-issue exception'
+      using errcode='CLR10';
+  end if;
+
+  -- (T1b) THE MEMBERSHIP TEST IS SCOPED TO THIS FIRM (fix round, ADV-W2L05-01). Asserted
+  -- separately from T1 so the reason is readable on its own: this door is SECURITY DEFINER and
+  -- sees every firm's memberships, while the read it mirrors is INVOKER under RLS and sees only
+  -- the caller's. Without `fm.firm_id = v_firm` the two bodies carry the same bytes and mean
+  -- different things, and a canceller who left for another firm blocks the batch for ever.
+  if v_src not like '%and fm.firm_id = v_firm%' then
+    raise exception '#968 tail: clara.cancel_intake_batch''s re-issue exception is not firm-scoped -- the door would see memberships at OTHER firms that clara.get_intake_batch cannot'
       using errcode='CLR10';
   end if;
 

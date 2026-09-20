@@ -1281,6 +1281,50 @@ test("p968.reissue.blocked_canceller_may_be_replaced — a different active book
   }
 });
 
+// FIX ROUND (ADV-W2L05-01 / L05-SPEC-08). `clara.get_intake_batch` is INVOKER and reads
+// `clara.firm_memberships` under RLS, so its `canceller_not_active` predicate is silently
+// FIRM-SCOPED; `clara.cancel_intake_batch` is SECURITY DEFINER and sees every firm's rows. A
+// byte-identical predicate therefore MEANS two different things in the two bodies. The canonical
+// case the ticket names — the bookkeeper LEAVES this firm — is also the only one
+// `uq_membership_active_user` permits to carry an active membership anywhere else, so it is
+// exactly the case where the board reported the block and the door refused the remedy for ever.
+test("p968.reissue.blocked_canceller_active_at_another_firm_is_still_replaced — the door's membership test is scoped to THIS firm, exactly as the read's is", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 reissue elsewhere" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 elsewhere" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p968-elsewhere-run") });
+  const originalKey = opk("p968-elsewhere-original");
+  const original = await cancelBatch(BOB(), batch.batch_id, originalKey);
+  assert.equal(original.state, "cancelling");
+
+  // BOB leaves firm A and joins firm B as an active bookkeeper — one active membership
+  // estate-wide, which is all `uq_membership_active_user` allows.
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  await rootQuery(
+    "insert into clara.firm_memberships(firm_id,user_id,role,status) values ($1,$2,'bookkeeper','active')",
+    [world.firms.B, BOB()]);
+  try {
+    const blocked = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(blocked.cancel_blocked, "canceller_not_active",
+      "the board still names the block — BOB holds no active membership of THIS firm");
+
+    const newKey = opk("p968-elsewhere-reissue");
+    const reissued = await cancelBatch(ALICE(), batch.batch_id, newKey);
+    assert.equal(reissued.cancel_requested_by, ALICE(),
+      "…and the door admits the remedy the board's own block promises, instead of refusing for ever");
+    assert.equal(reissued.cancel_op_key, newKey);
+    assert.equal((await getBatch(ALICE(), batch.batch_id)).cancel_blocked, null,
+      "the block clears, so the two surfaces agree about the same batch");
+  } finally {
+    await rootQuery("delete from clara.firm_memberships where user_id=$1 and firm_id=$2",
+      [BOB(), world.firms.B]);
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
 test("p968.reissue.active_canceller_still_refuses — the second-decision refusal is unchanged while the canceller is active", async (t) => {
   if (await gate(t)) return;
   if (await gateReissue(t)) return;
