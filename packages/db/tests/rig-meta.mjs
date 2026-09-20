@@ -1364,6 +1364,21 @@ const CHECKOUT_CONVERGENCE_0186_HUMAN_FNS = [
 ];
 export const CHECKOUT_CONVERGENCE_0186_COHORT = [...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS];
 
+// #843 [0263, the operator support acts on the operator firm's own timeline] — NO NEW COHORT, NO
+// NEW NAME, NO GRANT CHANGE, each MEASURED rather than assumed (0263's own §T re-reads owner /
+// SECURITY / settings / ACL after both recuts and refuses on drift).
+// `clara.set_admission_capacity` (this cohort) and `clara.resolve_stripe_event_problem`
+// (CHECKOUT_GATE_C2_HUMAN_FNS, above) are STILL the SAME two doors at their SAME signatures and
+// grant: each gains ONE `clara._append_event` call inside the reservation it already held — no
+// parameter, no new function, no widened or narrowed ACL — so no roster change is owed for
+// either name. The file's other effect is REFERENCE DATA (two `clara.event_types` rows and their
+// `clara.trigger_taxonomy` routing at the active version), which no cohort here enumerates:
+// rig-meta's rosters are about function names and the grants on them, and the estate's own
+// coverage law over the catalog lives in rig-events-structure.test.mjs §7, which this migration's
+// tail re-reads for itself. Same "wholly present or wholly absent" reasoning #840's note (below)
+// states for its own body-only recut of a different pair.
+// #843 END
+
 // #615 (0188 operator support console): the TWO reads the operator's support destination rides,
 // clara_authenticated ONLY -- no agent, wake, runtime or Stripe-webhook sibling, by the design's
 // own shape rather than by omission. Neither is an agent act and neither is reachable from any
@@ -1610,6 +1625,31 @@ const USER_PREFERENCES_0179_HUMAN_FNS = ["get_my_preferences", "save_my_preferen
 // floor. clara_authenticated ONLY: no wake or agent variant exists — this is a human-read
 // audit surface, never something a model lane produces or consumes on its own.
 const ACTIVITY_FEED_0181_HUMAN_FNS = ["list_activity", "get_activity_event"];
+
+// #840 [0262, the successor Work link on a work.cancelled row] — NO NEW COHORT, NO NEW NAME, NO
+// GRANT CHANGE, each MEASURED rather than assumed (0262's own §T re-reads owner/SECURITY/settings/
+// ACL after the recut and refuses on drift). `clara.list_activity`/`clara.get_activity_event` are
+// STILL 0181's SAME two doors at their SAME signatures and grant (ACTIVITY_FEED_0181_HUMAN_FNS
+// above already covers them; 0183's own note above records the first body-only recut of these
+// names, 0262 is another one): it adds ONE additive jsonb key, `successor_work_id`, to each door's
+// return payload via `create or replace` — no parameter, no new function, no widened or narrowed
+// ACL — so no roster change is owed for either name, the same "wholly present or wholly absent"
+// reasoning 0183's own note states for this exact pair, and the same shape 0200's note (below,
+// #721) states for `clara.answer_work_question`/`clara._tf_accounting_work_immutable`.
+// #840 END
+
+// #861 [0264, the kind ladder's five new rungs] — NO NEW COHORT, NO NEW NAME, NO GRANT CHANGE,
+// each MEASURED rather than assumed (0264's own tail re-reads owner/SECURITY/settings/ACL for both
+// names after the recut and refuses on drift). `clara.list_activity`/`clara.get_activity_event`
+// are STILL 0181's SAME two doors at their SAME signatures and grant
+// (ACTIVITY_FEED_0181_HUMAN_FNS above already covers them; 0183, 0202 and 0262 each recut these
+// same bodies before). 0264 adds FIVE rungs to each door's domain-event kind ladder (member.*/
+// invite.* -> people, asset.* -> assets, counterparty.* -> counterparties, client.*/knowledge.* ->
+// clients, firm.* -> firm) and the same five values to list_activity's closed p_kinds roster — a
+// WIDENING of accepted input, no parameter, no new function, no ACL movement — so no roster change
+// is owed for either name, the same "wholly present or wholly absent" reasoning 0183's note states
+// for this exact pair and #840's note above states for the recut before this one.
+// #861 END
 
 // #629 [0180, shared Work questions] — the SHARED-QUESTION lane, one cohort for the same "wholly
 // present or wholly absent" reason 0178's list above carries.

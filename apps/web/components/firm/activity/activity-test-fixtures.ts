@@ -68,6 +68,7 @@ export function activityRow(overrides: Partial<ActivityRow> = {}): ActivityRow {
     object_kind: "document",
     object_id: "d1111111-1111-1111-1111-111111111111",
     work_id: null,
+    successor_work_id: null,
     receipt_id: null,
     document_id: "d1111111-1111-1111-1111-111111111111",
     original_entry_id: null,

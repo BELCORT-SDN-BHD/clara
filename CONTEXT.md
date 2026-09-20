@@ -542,6 +542,10 @@ _Avoid_: Conflating a source read with reading the extracted facts or overlay dr
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.
 
+**Activity kind**:
+The one closed group an Activity event is filed under, computed at read time from the event's own family and used as both the feed's filter vocabulary and its row badge: documents, journal, close, report, agent, work, people, assets, counterparties, clients or firm. A family the ladder does not name rides a stated default rather than inventing a group, and the browser's vocabulary is the door's, never a second list.
+_Avoid_: A per-event label chosen in the browser; a stored column on the event; "documents" as a place to put anything unclassified.
+
 **Kept sweep receipt**:
 A `sweep.run_completed` event whose run drafted or posted at least one item, and so remains in the Activity feed as an attributed agent act. A run that changed nothing is excluded rather than shown as unattributed noise.
 _Avoid_: Every sweep run; a refusal or a skip counted as "effect".
@@ -613,6 +617,10 @@ _Avoid_: An unrestricted shortcut for changing the total without its supporting 
 **Operator support case**:
 One thing on the estate's admission surface that needs BELCORT's operator firm: an undecided firm registration with no payment against it, a registration payment that has not opened a firm, or a payment-provider event the estate could not act on. Each case names its affected entity and its current state.
 _Avoid_: Any view of another firm's books; a support ticket; a paid registration presented as awaiting an operator's approval.
+
+**Operator support act**:
+A decision BELCORT's operator firm takes on the admission surface and nowhere else: rejecting a firm registration, changing the estate's admission capacity, or resolving a payment-provider problem. Each leaves an attributable audit row AND one domain event under the operator firm, so the act is readable on that firm's own Activity and on no other firm's; a repeat under the same operation key replays its receipt and writes neither again. Approving a registration is the same shape, except that it also mints a firm and is recorded under that new firm.
+_Avoid_: Any act on a firm's books; an estate-wide audit read; a support ticket.
 
 **Support receipt**:
 Who decided an operator support case, when, and the reason they gave — the registration's own decision or the provider problem's resolution stamp, read back through the same queue that offered the act.

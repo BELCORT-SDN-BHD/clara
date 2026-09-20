@@ -303,8 +303,14 @@ test("Firm Home (ticket 659, D18.f): recent activity renders the DB's own senten
       assert.match(h.text(), /2026-09-04/, "the day header is the business-timezone calendar day");
       assert.match(h.text(), /Tao/,
         "and the ACTOR is rendered now — list_firm_timeline carried the uuid and this board dropped it");
-      assert.match(h.text(), /wrong kind by the activity door/,
-        "with the door's own kind-ladder defect NAMED on the surface rather than patched in the browser");
+      // #861 — THE RESIDUAL DISCLOSURE IS GONE, and this is the cell that used to require it.
+      // Until migration 0264 the door filed membership, invitation, fixed-asset,
+      // counterparty-identity and client-facet events under `documents`, and this band said so
+      // in words under its list rather than patching a second, disagreeing ladder into the
+      // browser. The door files them under their own kinds now, so the sentence would be a
+      // false statement on the surface — the honest-note discipline cuts both ways.
+      assert.doesNotMatch(h.text(), /wrong kind by the activity door/,
+        "the kind-ladder residual was fixed in the door (ticket 861); its disclosure must not outlive it");
     } finally { await h.unmount(); }
   });
   await withMockedEnv(

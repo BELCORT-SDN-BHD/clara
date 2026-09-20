@@ -154,7 +154,6 @@
     "seeAgentActivity": "See all agent activity",
     "activityHeading": "Recent activity",
     "activityEmpty": "No firm activity recorded yet.",
-    "activityKindResidual": "Some events are still filed under the wrong kind by the activity door (#861). The sentence and the person are right; the category may not be.",
     "portfolio": {
       "heading": "Client portfolio",
       "seeRegister": "Open the client register",
@@ -6222,7 +6221,12 @@
       "close": "Close",
       "report": "Reports",
       "agent": "Agent",
-      "work": "Work"
+      "work": "Work",
+      "people": "People",
+      "assets": "Assets",
+      "counterparties": "Counterparties",
+      "clients": "Clients",
+      "firm": "Firm"
     },
     "statusLabels": {
       "approved": "Approved",
@@ -6244,6 +6248,7 @@
     "noClient": "No client",
     "linksToOriginal": "Links to the original entry it replaced.",
     "linksToReplacement": "Links to the entry that replaced it.",
+    "linksToSuccessor": "Links to the Work that superseded it.",
     "viewWork": "View Work",
     "viewObject": "View in books",
     "loading": "Loading activity…",
@@ -6270,6 +6275,7 @@
     "eventStatus": "Status",
     "eventOriginal": "Original",
     "eventReplacement": "Replacement",
+    "eventSuccessor": "Successor Work",
     "eventReceiptId": "Receipt",
     "eventBasisOrigin": "Basis origin"
   },

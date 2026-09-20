@@ -11,12 +11,13 @@
 // this union; `packages/db/tests/activity-feed.test.mjs` owns that half.
 //
 // TWO CLIENTS:
-//   ACTIVITY.clientId      — the main fixture: a 14-row first page (upload, posting, a
+//   ACTIVITY.clientId      — the main fixture: a first page (upload, posting, a
 //                            correction PAIR, a close event, an agent-receipt, a conversation-
-//                            maintenance event, a report-kind row, and a KEPT sweep-heartbeat row
-//                            — #728 finding 1, plus #742's four MACHINE-written document-pipeline
-//                            rows and the HUMAN-written counterpart of one of them) that is
-//                            `truncated`, and a second page carrying one
+//                            maintenance event, a report-kind row, a KEPT sweep-heartbeat row
+//                            — #728 finding 1, a `work.cancelled` row for a RESTATED Work naming
+//                            its successor (#840), plus #742's four MACHINE-written document-
+//                            pipeline rows and the HUMAN-written counterpart of one of them) that
+//                            is `truncated`, and a second page carrying one
 //                            new row PLUS a DELIBERATE duplicate of the first page's document row
 //                            (the load-more dedupe cell).
 //   ACTIVITY.flipClientId  — a second, otherwise-empty client whose `list_activity` call COUNT
@@ -74,6 +75,13 @@ export const ACTIVITY = {
   /** The HUMAN half of the same event type — `set_document_kind` passes the acting member, which
    *  is exactly what must keep the person's name rather than the system label. */
   classifiedHumanEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20113",
+  // #840 — a `work.cancelled` row whose cancellation was a restatement (#721): the RETIRED Work's
+  // own id (this row's `work_id`) is deliberately never `workId`/`secondWorkId` above — a distinct
+  // id keeps this row from being mistaken for either Work's own operation-receipt row by a test
+  // that locates by id rather than by sentence.
+  cancelledWorkId: "a2a2a2a2-2222-4777-8777-a2a2a2a20117",
+  successorWorkId: "a2a2a2a2-2222-4777-8777-a2a2a2a20118",
+  cancelledEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20119",
 };
 
 const PAGE_2_CURSOR = "activity-mock-page-2";
@@ -103,8 +111,8 @@ function eventRow(over) {
   return {
     source: "event", event_type: null, description: null, client_id: ACTIVITY.clientId,
     actor: SUBJECT, on_behalf_of: null, via_wake_kind: null, object_kind: null, object_id: null,
-    work_id: null, receipt_id: null, document_id: null, original_entry_id: null,
-    replacement_entry_id: null, status: null, kind: "documents",
+    work_id: null, successor_work_id: null, receipt_id: null, document_id: null,
+    original_entry_id: null, replacement_entry_id: null, status: null, kind: "documents",
     ...over,
   };
 }
@@ -165,6 +173,20 @@ const CORRECTION_REPLACEMENT_ROW = eventRow({
   object_kind: "entry", object_id: ACTIVITY.entryReplacementId,
   status: "approved", original_entry_id: ACTIVITY.entryOriginalId,
   kind: "journal",
+});
+
+// #840 — a `work.cancelled` row for a RESTATED Work (#721): the door projects `successor_work_id`
+// additively (0262), and the row itself carries the RETIRED Work's own id as `work_id` (0184's own
+// coalesce, unaffected by this ticket) — the successor is a DIFFERENT Work this row merely points
+// to, never the Work the row is "about".
+const CANCELLED_ROW = eventRow({
+  id: ACTIVITY.cancelledEventId,
+  event_type: "work.cancelled",
+  description: "Accounting work was cancelled.",
+  occurred_at: "2026-09-01T02:45:00.000Z",
+  work_id: ACTIVITY.cancelledWorkId,
+  successor_work_id: ACTIVITY.successorWorkId,
+  kind: "work",
 });
 
 const CLOSE_ROW = eventRow({
@@ -269,8 +291,8 @@ const PIPELINE_HUMAN_ROW = eventRow({
 
 const PAGE_1 = [
   REPORT_ROW, AGENT_RECEIPT_ROW, CONVERSATION_MAINTENANCE_ROW, CLOSE_ROW,
-  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SECOND_WORK_ROW, SWEEP_ROW,
-  DOCUMENT_ROW, ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
+  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SECOND_WORK_ROW, CANCELLED_ROW,
+  SWEEP_ROW, DOCUMENT_ROW, ...PIPELINE_MACHINE_ROWS, PIPELINE_HUMAN_ROW,
 ].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
 const PAGE_2_NEW_ROW = eventRow({

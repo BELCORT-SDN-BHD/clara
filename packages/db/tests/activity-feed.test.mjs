@@ -22,6 +22,11 @@ import {
 } from "./work-journal-fixtures.mjs";
 import { seedVerifiedDocument } from "./rig-docs-fixtures.mjs";
 import { withTxn } from "./rig-txn.mjs";
+// #840 — the two verbs its own successor-link cells need; work-cancel-fixtures.mjs re-exports
+// everything work-journal-fixtures.mjs does, so only the TWO names this file does not already
+// import above are pulled from it (a second import of an already-imported name is a duplicate
+// binding, not a convenience).
+import { restateAccountingWork, cancelAccountingWork } from "./work-cancel-fixtures.mjs";
 
 const CLR04 = "CLR04";
 const CLR10 = "CLR10";
@@ -95,6 +100,92 @@ async function pWorkReady() {
 async function gatePWork(t) {
   if (await pWorkReady()) return false;
   t.skip(`#770 list_activity p_work lane absent (no ${PWORK_STEM} migration applied)`);
+  return true;
+}
+
+// #840 — the successor-Work link on a `work.cancelled` row lives in ITS OWN migration (0262), a
+// FOURTH frontier past 0181's/0183's/0202's above. Unlike 0202, this recut is `create or replace`
+// over an UNCHANGED signature (an additive jsonb key, not a new parameter), so no arity switch is
+// owed here — only the stem check itself.
+const SUCCESSOR_STEM = "activity_successor_link$";
+let _successorReady = null;
+async function successorLinkReady() {
+  if (_successorReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [SUCCESSOR_STEM]);
+      _successorReady = r.rows[0].n > 0;
+    } catch {
+      _successorReady = false;
+    }
+  }
+  return _successorReady;
+}
+
+/** `if (await gateSuccessorLink(t)) return;` — the house per-cell frontier gate, always a quiet
+ *  skip (the db-slice-frontiers matrix's own need). */
+async function gateSuccessorLink(t) {
+  if (await successorLinkReady()) return false;
+  t.skip(`#840 activity-successor-link lane absent (no ${SUCCESSOR_STEM} migration applied)`);
+  return true;
+}
+
+/** The pre-integration discriminator (accrual-adjustments-fixtures.mjs's own idiom, restated here
+ *  because this file's frontier gates are local rather than imported from a shared fixtures
+ *  module): a FOCUSED run against a database without this migration is a real failure, and only
+ *  the package-wide sweep's preloaded gate module (activity-successor-link-preintegration-gate.mjs)
+ *  turns it into a skip. Called ONCE, by the first cell that depends on this frontier; every other
+ *  cell in this lane uses the plain `gateSuccessorLink` above. */
+async function assertSuccessorLinkCohortPresent(t) {
+  if (await successorLinkReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_ACTIVITY_SUCCESSOR_LINK === "1") {
+    t.skip("#840 activity-successor-link lane absent (pre-integration sweep)");
+    return true;
+  }
+  assert.fail(
+    "#840: the activity-successor-link lane is absent. Apply 0262_activity_successor_link.sql, or "
+    + "set CLARA_ALLOW_MISSING_ACTIVITY_SUCCESSOR_LINK=1 for the package-wide pre-integration sweep.");
+  return true;
+}
+
+// #861 — the kind ladder's five new rungs live in THEIR OWN migration (0264), a FIFTH frontier
+// past 0181's/0183's/0202's/0262's above. Another body-only `create or replace` over both doors'
+// unchanged signatures, so again only the stem check is owed.
+const KIND_LADDER_STEM = "activity_kind_ladder$";
+let _kindLadderReady = null;
+async function kindLadderReady() {
+  if (_kindLadderReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [KIND_LADDER_STEM]);
+      _kindLadderReady = r.rows[0].n > 0;
+    } catch {
+      _kindLadderReady = false;
+    }
+  }
+  return _kindLadderReady;
+}
+
+/** `if (await gateKindLadder(t)) return;` — the quiet per-cell frontier gate. */
+async function gateKindLadder(t) {
+  if (await kindLadderReady()) return false;
+  t.skip(`#861 activity-kind-ladder lane absent (no ${KIND_LADDER_STEM} migration applied)`);
+  return true;
+}
+
+/** The pre-integration discriminator for the same frontier — the double-gate idiom above, once
+ *  per lane: a FOCUSED run against a chain without 0264 is a real failure, and only the
+ *  package-wide sweep's preloaded activity-kind-ladder-preintegration-gate.mjs turns it into a
+ *  skip. */
+async function assertKindLadderCohortPresent(t) {
+  if (await kindLadderReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_ACTIVITY_KIND_LADDER === "1") {
+    t.skip("#861 activity-kind-ladder lane absent (pre-integration sweep)");
+    return true;
+  }
+  assert.fail(
+    "#861: the activity-kind-ladder lane is absent. Apply 0264_activity_kind_ladder.sql, or "
+    + "set CLARA_ALLOW_MISSING_ACTIVITY_KIND_LADDER=1 for the package-wide pre-integration sweep.");
   return true;
 }
 
@@ -218,6 +309,31 @@ async function mkSweepEvent({ firm, draftedCount, postedCount = 0, refusedCount 
     `select id::text as id, created_at from clara.domain_events where firm_id = $1 and seq = $2`,
     [firm, seq])).rows[0];
   return { runId: run, eventId: ev.id, occurredAt: ev.created_at.toISOString() };
+}
+
+/** #861 — ONE domain event of a named `clara.event_types` name, appended as root through
+ *  `clara._append_event` (the SAME direct-event idiom `mkSweepEvent` above uses, and the same one
+ *  every other direct-event fixture in this rig uses: root bypasses that helper's ungranted ACL).
+ *
+ *  DIRECT rather than through each family's own product door, deliberately and with its limit
+ *  stated: the ladder under test reads `event_type` and NOTHING else — not the payload, not the
+ *  actor, not the object columns — so the row a real `clara.add_counterparty` would write and the
+ *  row this writes are indistinguishable to it. Where the world ALREADY carries a real row of the
+ *  family (member.added, client.created and firm.created are all written by `buildWorld` through
+ *  clara.add_member / clara.create_client / clara.create_firm), the cells below read THAT row and
+ *  this helper is not used at all.
+ *
+ *  `client` is passed only for a client-scoped type: clara._tf_validate_domain_event refuses a
+ *  firm-level type that carries a client_id at all. Returns the event's own id and time, read back
+ *  by (firm_id, seq) exactly as `mkSweepEvent` does — never assumed. */
+async function mkEvent({ firm, type, client = null, actor = null, payload = {} }) {
+  const seq = (await rootQuery(
+    `select clara._append_event($1, $2, $3, $4, null, null, null, null, null, $5::jsonb) as seq`,
+    [firm, type, client, actor, JSON.stringify(payload)])).rows[0].seq;
+  const ev = (await rootQuery(
+    `select id::text as id, created_at from clara.domain_events where firm_id = $1 and seq = $2`,
+    [firm, seq])).rows[0];
+  return { eventId: ev.id, occurredAt: ev.created_at.toISOString() };
 }
 
 // ===========================================================================================
@@ -1666,4 +1782,352 @@ test("af.30 omitting p_work reproduces the six-argument door exactly — same ro
   assert.deepEqual(plain, withNull,
     "af.30 the DEFAULT for p_work is null and a six-argument call reaches the same page, cursor included");
   assert.equal(typeof plain.next_cursor, "string", "af.30 vacuity control: this page is truncated and carries a cursor");
+});
+
+// ===========================================================================================
+// 8 · #840 — THE SUCCESSOR WORK LINK on a `work.cancelled` row (migration 0262).
+//
+// #721's ruling of 2026-09-12 (point 3): the two Works link both ways on B3 (the Work detail page,
+// which already reads `supersedes`/`superseded_by` off `clara.accounting_work` directly) AND on
+// the Activity feed. `clara.cancel_accounting_work` has carried the successor in its OWN event's
+// payload since #750 (0199, forward-compatibly re-derived by #721's 0200); these two cells prove
+// BOTH doors now surface it, additively, and ONLY on the one row it is about.
+// ===========================================================================================
+
+test("af.31 a work.cancelled row for a RESTATED Work carries the successor id in BOTH doors, and an unrelated posted Work's own row carries a null successor", async (t) => {
+  if (await assertSuccessorLinkCohortPresent(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af840a");
+
+  // An UNRELATED Work, posted — the orx arm's own kind=work row, the additive-only control: this
+  // row's event_type is a Work purpose ('journal_entry'), never work.cancelled.
+  const posted = await postWorkEntry({ client: cli });
+
+  const original = await admitJournalWork({ client: cli, author: BOB(), basis: basis() });
+  const restated = await restateAccountingWork({
+    work: original.work_id, author: BOB(), basis: basis({ memo: "af840 corrected" }),
+  });
+  assert.notEqual(restated.work_id, original.work_id, "af.31 setup: restating minted a NEW Work");
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["work"], limit: 100 }));
+
+  const cancelledRow = page.find((r) => r.event_type === "work.cancelled" && r.work_id === original.work_id);
+  assert.ok(cancelledRow, "af.31 the retired Work's cancellation reaches the feed");
+  assert.equal(cancelledRow.successor_work_id, restated.work_id,
+    "af.31 list_activity projects the successor onto the work.cancelled row");
+
+  const detail = await getActivityEvent(BOB(), "event", cancelledRow.id);
+  assert.equal(detail.successor_work_id, restated.work_id,
+    "af.31 get_activity_event projects the SAME successor for the SAME row");
+
+  const postedRow = page.find((r) => r.source === "operation_receipt" && r.receipt_id === posted.receipt_id);
+  assert.ok(postedRow, "af.31 setup: the unrelated posted Work's own row is on the SAME page");
+  assert.equal(postedRow.successor_work_id, null,
+    "af.31 additive-only: an operation_receipt row (never a work.cancelled event) carries a null successor");
+  const postedDetail = await getActivityEvent(BOB(), "operation_receipt", posted.receipt_id);
+  assert.equal(postedDetail.successor_work_id, null, "af.31 …and the SAME null in ITS OWN detail door");
+});
+
+test("af.32 an ORDINARY cancellation (no successor) carries a null successor_work_id in both doors, never an absent key", async (t) => {
+  if (await gateSuccessorLink(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af840b");
+  const work = await admitJournalWork({ client: cli, author: BOB(), basis: basis() });
+  await cancelAccountingWork({ work: work.work_id, author: BOB() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["work"], limit: 100 }));
+  const cancelledRow = page.find((r) => r.event_type === "work.cancelled" && r.work_id === work.work_id);
+  assert.ok(cancelledRow, "af.32 the plain cancellation reaches the feed");
+  assert.ok(Object.prototype.hasOwnProperty.call(cancelledRow, "successor_work_id"),
+    "af.32 the key is PRESENT (additive projection), not merely absent-and-therefore-undefined");
+  assert.equal(cancelledRow.successor_work_id, null,
+    "af.32 a cancel with no successor carries a null successor");
+
+  const detail = await getActivityEvent(BOB(), "event", cancelledRow.id);
+  assert.ok(Object.prototype.hasOwnProperty.call(detail, "successor_work_id"));
+  assert.equal(detail.successor_work_id, null, "af.32 …and the SAME null in the detail door");
+});
+
+// ===========================================================================================
+// 9 · #861 — THE KIND LADDER'S FIVE NEW RUNGS (migration 0264).
+//
+// The owner's ruling of 2026-09-18 on this ticket fixes the vocabulary: `people` (member.*,
+// invite.*), `assets` (asset.*), `counterparties` (counterparty.*), `clients` (client.*,
+// knowledge.*) and `firm` (firm.*), with every unrecognised prefix still landing on the door's
+// STATED DEFAULT, `documents`. Before 0264 all five families fell through that default, where the
+// filter that names them could never find them.
+//
+// THE EXPECTED VALUES BELOW COME FROM THAT RULING, never from re-reading the SQL: each cell names
+// the prefix and the kind the owner assigned it, and the table in af.39 is a transcription of the
+// ruling's own five lines plus the default the two migrations before it already documented.
+// ===========================================================================================
+
+test("af.33 a membership event and an invitation event land on kind=people in BOTH doors, and the people filter reaches them", async (t) => {
+  if (await assertKindLadderCohortPresent(t)) return;
+
+  // The membership row is REAL: `buildWorld` added bob and carol to firm A through
+  // clara.add_member, so the estate's own product path wrote this event before the cell ran.
+  const invite = await mkEvent({ firm: FIRM_A(), type: "invite.issued", actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { kinds: ["people"], limit: 100 }));
+  assert.ok(page.length > 0, "af.33 the people filter is accepted by the door and returns rows");
+  assert.ok(page.every((r) => r.kind === "people"),
+    "af.33 the people filter returns ONLY people rows — the roster entry narrows, it does not widen");
+
+  const memberRow = page.find((r) => r.event_type === "member.added");
+  assert.ok(memberRow, "af.33 a real member.added row is reachable under kinds=['people']");
+  const inviteRow = page.find((r) => r.id === invite.eventId);
+  assert.ok(inviteRow, "af.33 an invite.issued row is reachable under the SAME kind");
+
+  for (const row of [memberRow, inviteRow]) {
+    assert.equal(row.kind, "people", `af.33 list_activity files ${row.event_type} under people`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "people",
+      `af.33 get_activity_event files ${row.event_type} under the SAME kind`);
+  }
+});
+
+test("af.34 a fixed-asset event lands on kind=assets in BOTH doors, and the assets filter reaches it", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  const acquired = await mkEvent({ firm: FIRM_A(), type: "asset.acquired", client: cli, actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["assets"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "assets"), "af.34 the assets filter returns ONLY assets rows");
+
+  const row = page.find((r) => r.id === acquired.eventId);
+  assert.ok(row, "af.34 the acquisition is reachable under kinds=['assets']");
+  assert.equal(row.kind, "assets", "af.34 list_activity files asset.acquired under assets");
+  const detail = await getActivityEvent(BOB(), "event", row.id);
+  assert.equal(detail.kind, "assets", "af.34 get_activity_event files it under the SAME kind");
+
+  // …and it is no longer on the documents rung it used to fall through to, which is the whole
+  // point: the documents filter is a filter on document acts again.
+  const docs = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["documents"], limit: 100 }));
+  assert.equal(docs.find((r) => r.id === acquired.eventId), undefined,
+    "af.34 the acquisition has LEFT the documents rung");
+});
+
+test("af.35 a counterparty-identity event lands on kind=counterparties in BOTH doors, and that filter reaches it", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  // TWO types of the same family, so the cell proves the arm is a PREFIX match and not one name:
+  // `counterparty.created` is the birth, `counterparty.identifiers_set` is the identity edit the
+  // ticket's own summary names.
+  const created = await mkEvent({ firm: FIRM_A(), type: "counterparty.created", client: cli, actor: ALICE() });
+  const identified = await mkEvent({ firm: FIRM_A(), type: "counterparty.identifiers_set", client: cli, actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["counterparties"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "counterparties"),
+    "af.35 the counterparties filter returns ONLY counterparties rows");
+
+  for (const ev of [created, identified]) {
+    const row = page.find((r) => r.id === ev.eventId);
+    assert.ok(row, `af.35 ${ev.eventId} is reachable under kinds=['counterparties']`);
+    assert.equal(row.kind, "counterparties", `af.35 list_activity files ${row.event_type} under counterparties`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "counterparties", `af.35 get_activity_event agrees for ${row.event_type}`);
+  }
+});
+
+test("af.36 a client-facet event and a knowledge event BOTH land on kind=clients in both doors, and that filter reaches them", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  // The ruling puts TWO prefixes on one rung — client.* and knowledge.* — so this cell needs one
+  // of each to prove the `or` and not merely the first half of it.
+  //
+  // BOTH are appended directly rather than read off the world, and the reason is a finding: the
+  // FIRST cut of this cell looked for a real `client.created` row, because `clara.create_client`
+  // is what `buildWorld` calls — and it failed. `client.created` is a REGISTERED but UNEMITTED
+  // event type on this estate (measured: clara.domain_events carries client.activated,
+  // client.onboarding_started and client.resolved, and not one client.created), so reading one
+  // would have been a test waiting forever for a row no door writes.
+  const activated = await mkEvent({ firm: FIRM_A(), type: "client.activated", client: cli, actor: ALICE() });
+  const captured = await mkEvent({ firm: FIRM_A(), type: "knowledge.captured", client: cli, actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["clients"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "clients"), "af.36 the clients filter returns ONLY clients rows");
+
+  const clientRow = page.find((r) => r.id === activated.eventId);
+  assert.ok(clientRow, "af.36 a client.activated row is reachable under kinds=['clients']");
+  const knowledgeRow = page.find((r) => r.id === captured.eventId);
+  assert.ok(knowledgeRow, "af.36 a knowledge.captured row is reachable under the SAME kind");
+
+  for (const row of [clientRow, knowledgeRow]) {
+    assert.equal(row.kind, "clients", `af.36 list_activity files ${row.event_type} under clients`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "clients", `af.36 get_activity_event agrees for ${row.event_type}`);
+  }
+});
+
+test("af.37 firm.created lands on kind=firm, and the two LOOK-ALIKE families (firm_registration.*, firm_setup.*) stay on the stated default", async (t) => {
+  if (await gateKindLadder(t)) return;
+
+  // The firm row is REAL: `buildWorld` minted firm A through clara.create_firm, which appended
+  // firm.created under the firm it was creating.
+  //
+  // THE NEGATIVE IS THE POINT OF THIS CELL. In SQL LIKE, `_` is a single-character wildcard, so a
+  // ladder arm written `firm_%` would swallow `firm_registration.*` (three types) and
+  // `firm_setup.*` (four) as well — two families the owner's ruling does not name, and one of
+  // which #843's os.20 pins on the door's stated default on this same branch. Both are appended
+  // here under firm A so the assertion is about THIS ladder, not about another firm's rows.
+  const registration = await mkEvent({ firm: FIRM_A(), type: "firm_registration.rejected", actor: ALICE() });
+  const setup = await mkEvent({ firm: FIRM_A(), type: "firm_setup.seeded", actor: ALICE() });
+
+  const page = rowsOf(await listActivity(BOB(), { kinds: ["firm"], limit: 100 }));
+  assert.ok(page.every((r) => r.kind === "firm"), "af.37 the firm filter returns ONLY firm rows");
+  const firmRow = page.find((r) => r.event_type === "firm.created");
+  assert.ok(firmRow, "af.37 a real firm.created row is reachable under kinds=['firm']");
+  assert.equal(firmRow.kind, "firm", "af.37 list_activity files firm.created under firm");
+  assert.equal((await getActivityEvent(BOB(), "event", firmRow.id)).kind, "firm",
+    "af.37 get_activity_event agrees");
+
+  for (const ev of [registration, setup]) {
+    assert.equal(page.find((r) => r.id === ev.eventId), undefined,
+      "af.37 a firm_* look-alike is NOT on the firm rung");
+  }
+  const defaulted = rowsOf(await listActivity(BOB(), { kinds: ["documents"], limit: 100 }));
+  for (const ev of [registration, setup]) {
+    const row = defaulted.find((r) => r.id === ev.eventId);
+    assert.ok(row, "af.37 a firm_* look-alike is still reachable on the stated default");
+    assert.equal(row.kind, "documents", `af.37 ${row.event_type} rides the stated default`);
+    assert.equal((await getActivityEvent(BOB(), "event", row.id)).kind, "documents",
+      `af.37 get_activity_event agrees for ${row.event_type}`);
+  }
+});
+
+test("af.38 an event type whose prefix no rung names lands on the STATED DEFAULT, documents, in both doors", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  // THREE unrelated families the owner's ruling does not name, so the cell is about the `else`
+  // arm and not about one lucky prefix: a bank statement, a typed-egress activation and an open
+  // item. None of them is a document act either — the default is the door's honest "I have no
+  // kind for this", stated in its own comment and in 0264's header, not a claim about documents.
+  const seeded = [];
+  for (const type of ["bank.statement_ingested", "egress.purpose_activated", "open_item.created"]) {
+    seeded.push({ type, ...(await mkEvent({ firm: FIRM_A(), type, client: cli, actor: ALICE() })) });
+  }
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["documents"], limit: 100 }));
+  for (const ev of seeded) {
+    const row = page.find((r) => r.id === ev.eventId);
+    assert.ok(row, `af.38 ${ev.type} is reachable under the default kind`);
+    assert.equal(row.kind, "documents", `af.38 list_activity files ${ev.type} on the stated default`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "documents", `af.38 get_activity_event agrees for ${ev.type}`);
+  }
+});
+
+/** The kind ladder of ONE installed body, as an ordered, comment-free, whitespace-normalised
+ *  sentence: from the sweep arm (the ladder's first rung, #728) to the stated default that closes
+ *  it. Comments are dropped because the two doors document the same rungs at different lengths —
+ *  what must match is the DECISION, not the prose around it. */
+function ladderOf(prosrc) {
+  const FIRST = "when v.event_type = 'sweep.run_completed'";
+  const LAST = "else 'documents'";
+  const start = prosrc.indexOf(FIRST);
+  assert.notEqual(start, -1, "the installed body has no kind ladder at all");
+  const end = prosrc.indexOf(LAST, start);
+  assert.notEqual(end, -1, "the installed kind ladder has no stated default");
+  return prosrc.slice(start, end + LAST.length)
+    .split("\n").map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("--"))
+    .join(" ").replace(/\s+/g, " ");
+}
+
+/** The ladder the ticket asks for, written out ONCE from its sources rather than re-derived from
+ *  the SQL: the sweep arm is #728's (0183), entry/document/close are 0181's, `work.%` is #630's
+ *  (0184), the five that follow are the owner's ruling of 2026-09-18 on #861 in the order it names
+ *  them, and `documents` closes it as the stated default 0181 chose. */
+const EXPECTED_LADDER = [
+  "when v.event_type = 'sweep.run_completed' then 'agent'",
+  "when v.event_type like 'entry.%' then 'journal'",
+  "when v.event_type like 'document.%' then 'documents'",
+  "when v.event_type like 'close.%' then 'close'",
+  "when v.event_type like 'work.%' then 'work'",
+  "when v.event_type like 'member.%' or v.event_type like 'invite.%' then 'people'",
+  "when v.event_type like 'asset.%' then 'assets'",
+  "when v.event_type like 'counterparty.%' then 'counterparties'",
+  "when v.event_type like 'client.%' or v.event_type like 'knowledge.%' then 'clients'",
+  "when v.event_type like 'firm.%' then 'firm'",
+  "else 'documents'",
+].join(" ");
+
+test("af.39a the two installed ladders are the SAME ladder, rung for rung, and they are the ladder the ruling names", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const sig = await listActivitySignature();
+  const list = (await rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [sig])).rows[0].prosrc;
+  const detail = (await rootQuery(
+    "select prosrc from pg_proc where oid = 'clara.get_activity_event(text,text)'::regprocedure")).rows[0].prosrc;
+
+  assert.equal(ladderOf(list), ladderOf(detail),
+    "af.39a list_activity and get_activity_event carry byte-comparable ladders");
+  assert.equal(ladderOf(list), EXPECTED_LADDER,
+    "af.39a …and it is the ladder #728/#630 and the owner's #861 ruling name, in that order");
+});
+
+test("af.39b EVERY registered event type answers the SAME kind in both doors, and the kind its family was assigned", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A2;
+
+  // The independent source of truth for the expected value: the prefix -> kind table, transcribed
+  // from the owner's ruling of 2026-09-18 (the five new rungs) and from the arms 0183/0181/0184
+  // already documented. FIRST MATCH WINS, exactly as a SQL `case` resolves, and anything that
+  // matches nothing rides the stated default.
+  const RULING = [
+    [(n) => n === "sweep.run_completed", "agent"],
+    [(n) => n.startsWith("entry."), "journal"],
+    [(n) => n.startsWith("document."), "documents"],
+    [(n) => n.startsWith("close."), "close"],
+    [(n) => n.startsWith("work."), "work"],
+    [(n) => n.startsWith("member.") || n.startsWith("invite."), "people"],
+    [(n) => n.startsWith("asset."), "assets"],
+    [(n) => n.startsWith("counterparty."), "counterparties"],
+    [(n) => n.startsWith("client.") || n.startsWith("knowledge."), "clients"],
+    [(n) => n.startsWith("firm."), "firm"],
+  ];
+  const expectedKind = (name) => (RULING.find(([p]) => p(name)) ?? [null, "documents"])[1];
+
+  // `sweep.run_completed` is the ONE registered type this census cannot drive this way: #728
+  // EXCLUDES a heartbeat with no measured effect from the feed entirely, so a bare append of one
+  // would never reach a page at all. Its rung is proven by af.15 (a kept heartbeat reads
+  // kind=agent) and by af.39a's structural comparison, which covers it like every other rung.
+  const types = (await rootQuery(
+    "select name, client_scoped from clara.event_types where name <> 'sweep.run_completed' order by name")).rows;
+  assert.ok(types.length >= 100,
+    `af.39b the census is real (got ${types.length} registered event types, expected at least 100)`);
+
+  const seeded = new Map();
+  for (const row of types) {
+    const ev = await mkEvent({
+      firm: FIRM_A(), type: row.name, client: row.client_scoped ? cli : null, actor: ALICE(),
+    });
+    seeded.set(ev.eventId, row.name);
+  }
+
+  // Page the feed until every seeded id has been seen. They are the newest rows in the firm, so
+  // this terminates in ceil(n/100) pages; the guard is there so a cursor defect fails loudly
+  // instead of looping.
+  const seen = new Map();
+  let cursor = null;
+  for (let guard = 0; guard < 20 && seen.size < seeded.size; guard += 1) {
+    const page = await listActivity(BOB(), { cursor, limit: 100 });
+    for (const r of rowsOf(page)) if (seeded.has(r.id)) seen.set(r.id, r.kind);
+    cursor = page.next_cursor;
+    if (!cursor) break;
+  }
+  assert.equal(seen.size, seeded.size,
+    `af.39b every seeded event reached the feed (${seen.size} of ${seeded.size})`);
+
+  for (const [id, name] of seeded) {
+    const want = expectedKind(name);
+    assert.equal(seen.get(id), want, `af.39b list_activity files ${name} under ${want}`);
+    const detail = await getActivityEvent(BOB(), "event", id);
+    assert.equal(detail.kind, want, `af.39b get_activity_event files ${name} under ${want} too`);
+  }
+
+  // …and every kind the ladder just produced is a value the door's own filter admits, which is
+  // what makes each of them reachable rather than merely correctly labelled.
+  for (const kind of new Set(seen.values())) {
+    const page = rowsOf(await listActivity(BOB(), { kinds: [kind], limit: 1 }));
+    assert.ok(Array.isArray(page), `af.39b the closed roster admits ${kind}`);
+  }
 });
