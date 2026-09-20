@@ -32,12 +32,16 @@ let executed = 0;
 
 /** True iff 0218's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a half-applied firm setup lane
- *  must be visible as a defect rather than skipped as an old frontier. */
+ *  must be visible as a defect rather than skipped as an old frontier.
+ *
+ *  #894 (0255_onboarding_plan_firm_uniqueness.sql) RENAMED `uq_onboarding_plans_one_open_firm`
+ *  to `uq_onboarding_plans_one_firm` and widened its predicate to `scope_kind='firm'` alone (no
+ *  `state` term) — the probe below reads the NEW name; the old one is gone by 0255's own tail. */
 async function firmSetupCohortApplied() {
   const r = await rootQuery(
     `select
        to_regclass('clara.firm_setup_keys')                                    is not null as catalogue,
-       to_regclass('clara.uq_onboarding_plans_one_open_firm')                  is not null as one_open_index,
+       to_regclass('clara.uq_onboarding_plans_one_firm')                       is not null as one_firm_index,
        to_regprocedure('clara.seed_firm_setup_plan(text)')                     is not null as seed_door,
        to_regprocedure('clara.answer_firm_setup_item(uuid,uuid,text,jsonb,text)') is not null as answer_door,
        to_regprocedure('clara.defer_firm_setup_item(uuid,uuid,text,text,text)')   is not null as defer_door,
@@ -876,22 +880,26 @@ cell("p648.acl.census every 0218 name is clara_authenticated-only; no runtime, a
   assert.equal(uop.rows[0].acl, "clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner");
 });
 
-cell("p648.plans.one_open the partial unique index refuses a second OPEN firm plan", async () => {
+cell("p648.plans.one_firm the partial unique index refuses a second firm plan (#894 widened it past OPEN-only)", async () => {
   const w = await firmSetupWorld("t14");
+  // #894 (0255_onboarding_plan_firm_uniqueness.sql) RENAMED this index and dropped the `state`
+  // term from its predicate entirely — a full any-state regression (including a CLOSED first
+  // plan) lives in its own dedicated file, tests/onboarding-plan-firm-uniqueness.test.mjs. This
+  // cell keeps proving the ORIGINAL OPEN-vs-OPEN case that motivated 0218, under the new name.
   const def = await rootQuery(
-    "select pg_get_indexdef(i.indexrelid) as d from pg_index i where i.indexrelid = 'clara.uq_onboarding_plans_one_open_firm'::regclass");
+    "select pg_get_indexdef(i.indexrelid) as d from pg_index i where i.indexrelid = 'clara.uq_onboarding_plans_one_firm'::regclass");
   assert.match(def.rows[0].d, /CREATE UNIQUE INDEX/);
   assert.match(def.rows[0].d, /\(firm_id\)/);
-  assert.match(def.rows[0].d, /WHERE \(\(state = 'open'::text\) AND \(scope_kind = 'firm'::text\)\)/);
+  assert.match(def.rows[0].d, /WHERE \(scope_kind = 'firm'::text\)/);
 
   // A second open firm plan — exactly what `clara.claim_paid_firm`'s bare `select ... into`
-  // (0186:1555-1557) would otherwise resolve arbitrarily — is now a loud unique violation.
+  // (0186:1555-1557) would otherwise resolve arbitrarily — is a loud unique violation.
   const err = await rootQuery(
     `insert into clara.onboarding_plans(firm_id, scope_kind, review_maker, reviewed_at, contributors)
      values ($1,'firm',$2, now(), array[$2]::uuid[])`, [w.firm, w.owner]).catch((e) => e);
   assert.ok(err instanceof Error, "a second OPEN firm plan was admitted");
   assert.equal(err.code, "23505");
-  assert.equal(err.constraint, "uq_onboarding_plans_one_open_firm");
+  assert.equal(err.constraint, "uq_onboarding_plans_one_firm");
 
   // …while a CLIENT plan on the same firm is untouched by it (0017's index still governs those).
   const ok = await rootQuery(

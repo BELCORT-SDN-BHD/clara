@@ -712,10 +712,20 @@ to `clara_authenticated` alone.
 
 `clara.update_onboarding_plan` stays byte-identical and `clara_runtime`-only; `clara.commit_client_onboarding`
 still forces a client; `clara.promote_plan_answers_to_knowledge` is deliberately not used (its
-promotion loop joins one global `item_key` namespace with no scope discriminator). 0218 also adds
+promotion loop joins one global `item_key` namespace with no scope discriminator). 0218 also added
 `uq_onboarding_plans_one_open_firm` — a partial unique index on `(firm_id) where state='open' and
-scope_kind='firm'`, which is what makes `clara.claim_paid_firm`'s bare `select … into` replay arm
-single-row rather than silently first-row.
+scope_kind='firm'`, which was what made `clara.claim_paid_firm`'s bare `select … into` replay arm
+single-row rather than silently first-row, for as long as no firm ever held a SECOND firm-scope
+plan in any other state.
+
+**#894 (0255, hardened further)** replaced that index with `uq_onboarding_plans_one_firm` —
+same column, `(firm_id)`, predicated on `scope_kind='firm'` ALONE, with no `state` term at all.
+A second firm-scope plan for the same firm is now refused in EVERY state (open, committed or
+cancelled), not merely a second open one, so `claim_paid_firm`'s replay arm is single-row
+structurally rather than only because `clara._create_firm_core` is the sole writer and nothing
+today closes a firm plan. `clara.claim_paid_firm` itself is untouched — pinned pre- and
+post-image by `sha256(prosrc)` in 0255's own prestate/tail — and 0017's client-scope sibling
+index, `uq_onboarding_plans_one_open` on `(firm_id, client_id)`, is untouched too.
 
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on

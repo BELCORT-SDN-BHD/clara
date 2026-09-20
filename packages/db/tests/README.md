@@ -268,13 +268,29 @@ maker-checker distinctness, so a one-member firm cannot produce the foreign fixt
 contrasts against.
 
 `firm-setup.test.mjs` (#648, journey A5) needs the 0218 cohort — `clara.firm_setup_keys`, the four
-firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
-against a chain below that frontier FAILS by name; the package run preloads
+firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_firm` (RENAMED from
+`uq_onboarding_plans_one_open_firm` by #894, `0255_onboarding_plan_firm_uniqueness.sql` — see
+below). A focused run against a chain below that frontier FAILS by name; the package run preloads
 `firm-setup-preintegration-gate.mjs`, which turns the same absence into a loud skip. Its world is
 planted through the root connection because the subject is the setup doors rather than firm
 creation, but every assertion under test runs through a least-privileged persona (`humanQuery`) —
 the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
-`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent).
+`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent). Its cell `p648.plans.one_firm` proves only the ORIGINAL open-vs-open case that motivated 0218, now under the new name — the full any-state regression, including a CLOSED first plan, lives in `onboarding-plan-firm-uniqueness.test.mjs` below.
+
+## Onboarding plan firm uniqueness (#894, `0255_onboarding_plan_firm_uniqueness.sql`)
+
+`onboarding-plan-firm-uniqueness.test.mjs` is frontier-gated on its own stable stem
+(`onboarding_plan_firm_uniqueness$`), the `legal_acceptance$` / `checkout_convergence$` idiom, and
+preloads `onboarding-plan-firm-uniqueness-preintegration-gate.mjs` in the package run. It proves
+the widened index — `uq_onboarding_plans_one_firm`, partial UNIQUE on `(firm_id)` where
+`scope_kind='firm'` alone, no `state` term — three ways: the committed definition read off
+`pg_index` (root, by construction: it probes the catalog directly), a second firm-scope plan
+refused for the same firm in ANY state including when the FIRST is already CLOSED (cancelled;
+again root, since no door ever closes a firm plan), and `clara.claim_paid_firm`'s replay arm still
+answering the ORIGINAL `firm_id`/`plan_id` once a real firm is claimed through the live checkout
+doors — that one driven end-to-end through `checkout-convergence-fixtures.mjs`'s own
+`liveCheckout` / `deliver` / `claimPaidFirm`, the same helpers `checkout-convergence.test.mjs`
+drives, so this file adds no second implementation of that world.
 
 ## Firm knowledge defaults (#654, `0220_firm_knowledge_defaults.sql`)
 
