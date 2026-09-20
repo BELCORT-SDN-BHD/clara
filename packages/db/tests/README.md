@@ -113,7 +113,10 @@ close the purpose vocabulary, the two admission cores (only the sibling learned 
 how the posting core is proven unchanged. Its gate is
 `opening-balance-work-preintegration-gate.mjs`; a focused run leaves
 `CLARA_ALLOW_MISSING_OPENING_BALANCE_WORK` unset and must count zero skips, and against a pre-0239
-chain the premise check throws rather than skipping. The sibling pin lives in
+chain the premise check throws rather than skipping. `obw984.zero_entry` (fix round) pins the one ordering that block depends on: each door's own
+"has no draft entries" arm refuses an empty batch BEFORE the loop that builds the Work's entry
+array, so no `entry_count = 0` Work is reachable and a later recut that hoists the minting above
+that arm is a red cell. The sibling pin lives in
 `staff-expense-claim.test.mjs`'s `p638.core.no_regression`, whose CHECK literal #984 re-derived to
 the four-value text (deliberately, with each prior value re-asserted by name) rather than deleting
 or skipping the cell.
@@ -216,6 +219,12 @@ restates this per-lane; this section is the durable copy.
 fires and must be PROVEN blocked (`wait_event_type = 'Lock'` and `pg_blocking_pids` naming `a`'s
 backend — a schedule that never blocked proves nothing about a race) before `a` commits and `b`
 resolves against `a`'s committed state.
+
+`obw.claim.unknown_document` (fix round) sits beside them and is not a race cell: it drives
+`clara._lock_document_binding` directly with an id that names no document, because 0197's
+"locks nothing and RAISES NOTHING" tolerance is a SEAM contract no door can express (both lanes'
+writes are foreign-keyed to `clara.documents`). The claim is gated on the document existing, so
+the helper writes no token on a key no document owns.
 
 `clara.approve_opening_seed` / `clara.approve_opening_correction` refuse `CLR31 not_serializable`
 outside a genuinely SERIALIZABLE transaction, so driving the opening lane through this helper needs
