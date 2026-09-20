@@ -165,7 +165,7 @@ set role clara_fn_owner;
 create or replace function clara._authority_ref_refusal(p_ref_kind text, p_ref_id uuid,
     p_firm uuid, p_client uuid) returns text
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
-declare v_kind text;
+declare v_kind text; v_author uuid;
 begin
   if p_ref_kind = 'accounting_work' then
     -- UNCHANGED BY #977, and the owner's ruling says why: `clara.accounting_work.initiator` is
@@ -180,14 +180,20 @@ begin
 
   if p_ref_kind = 'chat_task' then
     -- THE CHAT LANE, NARROWED. The same firm-AND-client ladder both doors already applied, and
-    -- then the row's OWN kind: only a `chat_turn` is a turn a person typed. `wake`, `autodraft`,
-    -- `close_prep` and `accounting_work` are runs the estate started for itself.
-    select t.kind into v_kind from clara.agent_tasks t
+    -- then TWO facts about the row itself, as a CONJUNCTION:
+    --
+    --   its KIND is `chat_turn` -- only a turn is typed by a person. `wake`, `autodraft`,
+    --   `close_prep` and `accounting_work` are runs the estate started for itself, and the last
+    --   three carry an author (the human the run was started for) without being instructions.
+    --
+    --   its `created_by` is NOT NULL -- the column is nullable for every kind (0006:138) and the
+    --   chat ingress is what stamps it, so a turn row nobody signed is not an instruction either.
+    select t.kind, t.created_by into v_kind, v_author from clara.agent_tasks t
      where t.id = p_ref_id and t.firm_id = p_firm and t.client_id = p_client;
     if not found then
       return 'authority_ref_unresolved';
     end if;
-    if v_kind = 'chat_turn' then
+    if v_kind = 'chat_turn' and v_author is not null then
       return null;
     end if;
     return 'authority_ref_not_human_instruction';
@@ -531,9 +537,15 @@ begin
     raise exception '#977 tail T.4: clara._authority_ref_refusal does not name BOTH reason tokens'
       using errcode='CLR10';
   end if;
-  -- ...and it reads the row's OWN kind rather than merely testing existence.
-  if position('t.kind' in v_src) = 0 then
-    raise exception '#977 tail T.4b: clara._authority_ref_refusal never reads the named task''s own kind -- the narrowing is vacuous'
+  -- ...and it reads BOTH the row's own kind AND its author, rather than merely testing
+  -- existence: the rule is a conjunction, and a body that dropped either half would let a
+  -- machine-created row back through.
+  if position('t.kind' in v_src) = 0 or position('t.created_by' in v_src) = 0 then
+    raise exception '#977 tail T.4b: clara._authority_ref_refusal does not read BOTH the named task''s own kind and its author -- the narrowing is vacuous'
+      using errcode='CLR10';
+  end if;
+  if position('v_author is not null' in v_src) = 0 then
+    raise exception '#977 tail T.4b2: clara._authority_ref_refusal does not require the named turn to carry an author'
       using errcode='CLR10';
   end if;
 
@@ -647,6 +659,6 @@ begin
     end if;
   end loop;
 
-  raise notice '#977 tail OK: clara._authority_ref_refusal exists, is stable, definer-owned by clara_fn_owner and ungranted, and names BOTH reason tokens while reading the named task''s own kind; clara.sign_depreciation_authority and clara.create_accounting_plan BOTH read it, neither still carries its own inline chat-lane existence test, both branch on the new token, and each keeps its single pg_proc row, owner, definer flag, search_path and grants; the inline existence test now lives in exactly one clara function (_accrual_plan_core, which the owner''s ruling leaves alone) and exactly the two doors read the one definition; clara._accrual_plan_core and clara.create_prepayment_schedule are byte-for-byte unmoved.';
+  raise notice '#977 tail OK: clara._authority_ref_refusal exists, is stable, definer-owned by clara_fn_owner and ungranted, and names BOTH reason tokens while reading BOTH the named task''s own kind and its author; clara.sign_depreciation_authority and clara.create_accounting_plan BOTH read it, neither still carries its own inline chat-lane existence test, both branch on the new token, and each keeps its single pg_proc row, owner, definer flag, search_path and grants; the inline existence test now lives in exactly one clara function (_accrual_plan_core, which the owner''s ruling leaves alone) and exactly the two doors read the one definition; clara._accrual_plan_core and clara.create_prepayment_schedule are byte-for-byte unmoved.';
 end
 $p977_tail$;

@@ -182,3 +182,43 @@ test("p977.definition.one both doors READ clara._authority_ref_refusal and neith
     ["create_accounting_plan", "sign_depreciation_authority"],
     "…and exactly the two doors the ruling names read the one definition");
 });
+
+// ===========================================================================================
+// 4 · THE OTHER HALF OF THE CLAIM — AUTHORSHIP.
+//
+//     Kind alone is not the rule. `clara.agent_tasks.created_by` is nullable for every kind, and
+//     the chat ingress is what stamps it; a `chat_turn` row with no author is a turn nobody
+//     signed, and it is not a person's instruction either. This cell is what forces the
+//     predicate to be a CONJUNCTION rather than a kind test.
+// ===========================================================================================
+
+test("p977.both.unauthored_chat_turn_refused a chat_turn task carrying NO author is refused by both doors with the same new token — authorship is half the rule, not a consequence of the kind", async (t) => {
+  if (await gate(t)) return;
+
+  const w = await faWorld();
+  const faClient = await p651Client("sign_unauthored");
+  const authority = await proposeAuthority(w.users.bob, { client: faClient });
+  const faRef = await mintAgentTaskRef(faClient, { kind: "chat_turn", author: false });
+  const faDetail = await refusedWith(
+    () => signWithRef(w.users.hana, { client: faClient, authority, ref: faRef }),
+    { code: "CLR38", reason: NOT_HUMAN }, "p977.sign.unauthored_chat_turn");
+  assert.equal(faDetail.id, faRef.id);
+  assert.equal(
+    (await authorityRows(faClient)).find((a) => a.id === authority).status, "proposed",
+    "NOTHING is signed");
+
+  if (await gatePlans(t)) return;
+  const { w: pw, client } = await planClient("p977unauth");
+  const today = await todayInPlanZone();
+  const effectiveFrom = `${today.slice(0, 7)}-01`;
+  const planRef = await mintAgentTaskRef(client, { kind: "chat_turn", author: false });
+  const before = await planRowCount(client);
+  const planDetail = await refusedWith(
+    () => createAccountingPlan(pw.users.alice, {
+      client, kind: PLAN_KIND.recurring, purpose: "p977 unauthored turn",
+      authorityRef: planRef, effectiveFrom, basis: basis({ postingDate: effectiveFrom }),
+    }),
+    { code: "CLR10", reason: NOT_HUMAN }, "p977.plan.unauthored_chat_turn");
+  assert.equal(planDetail.id, planRef.id);
+  assert.equal(await planRowCount(client), before, "NOTHING is written");
+});
