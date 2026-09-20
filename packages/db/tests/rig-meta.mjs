@@ -1636,6 +1636,19 @@ const ACTIVITY_FEED_0181_HUMAN_FNS = ["list_activity", "get_activity_event"];
 // #721) states for `clara.answer_work_question`/`clara._tf_accounting_work_immutable`.
 // #840 END
 
+// #861 [0264, the kind ladder's five new rungs] — NO NEW COHORT, NO NEW NAME, NO GRANT CHANGE,
+// each MEASURED rather than assumed (0264's own tail re-reads owner/SECURITY/settings/ACL for both
+// names after the recut and refuses on drift). `clara.list_activity`/`clara.get_activity_event`
+// are STILL 0181's SAME two doors at their SAME signatures and grant
+// (ACTIVITY_FEED_0181_HUMAN_FNS above already covers them; 0183, 0202 and 0262 each recut these
+// same bodies before). 0264 adds FIVE rungs to each door's domain-event kind ladder (member.*/
+// invite.* -> people, asset.* -> assets, counterparty.* -> counterparties, client.*/knowledge.* ->
+// clients, firm.* -> firm) and the same five values to list_activity's closed p_kinds roster — a
+// WIDENING of accepted input, no parameter, no new function, no ACL movement — so no roster change
+// is owed for either name, the same "wholly present or wholly absent" reasoning 0183's note states
+// for this exact pair and #840's note above states for the recut before this one.
+// #861 END
+
 // #629 [0180, shared Work questions] — the SHARED-QUESTION lane, one cohort for the same "wholly
 // present or wholly absent" reason 0178's list above carries.
 //

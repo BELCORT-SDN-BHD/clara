@@ -992,6 +992,95 @@ routing — which no cohort here enumerates; the estate's coverage law over the 
 `rig-events-structure.test.mjs` §7, and 0263's tail re-reads that anti-join for itself. A `#843` /
 `#843 END` bracketed note beside the cohort records it, the same shape #840's note carries.
 
+## `activity-feed.test.mjs` `af.33`–`af.39b` — #861 / migration 0264
+
+Both activity doors computed a row's `kind` from a five-rung ladder — `sweep.run_completed`,
+`entry.%`, `document.%`, `close.%`, `work.%` — and swept everything else into `else 'documents'`.
+Six wave-2026-09-15 tickets (#625, #633, #639, #646, #647, #650) each hit the same residual and
+DECISIONS D13 deferred it rather than let six lanes patch one shared ladder mid-wave. The owner's
+ruling of 2026-09-18 on #861 fixes the vocabulary, and 0264 recuts BOTH bodies and the door's
+closed `p_kinds` roster in one transaction:
+
+| prefix(es) | kind |
+|---|---|
+| `member.%`, `invite.%` | `people` |
+| `asset.%` | `assets` |
+| `counterparty.%` | `counterparties` |
+| `client.%`, `knowledge.%` | `clients` |
+| `firm.%` | `firm` |
+
+Everything else still rides the STATED DEFAULT, `documents`.
+
+**`firm.%` is written with the dot on purpose.** In a SQL LIKE pattern `.` is an ordinary
+character but `_` is a single-character WILDCARD, so the natural-looking `firm_%` would also have
+swallowed `firm_registration.*` (the operator admission surface, three types) and `firm_setup.*`
+(the setup checklist, four) — two families the ruling does not name, and one of which os.20 pins
+on the stated default two commits earlier on this same branch. **os.20's own reading survives
+0264 unchanged**: all three operator support acts still ride `documents`, and af.37 asserts the
+`firm_registration.*` half of that from the other side.
+
+**The five cells that name a family** are af.33 (people), af.34 (assets), af.35 (counterparties),
+af.36 (clients) and af.37 (firm). Each proves the same three things and nothing more: the door's
+filter ADMITS the kind (before 0264 every one of them answered `CLR10 invalid_kind` — that is the
+red each cell was first seen in), `clara.list_activity` files the family's event type under it,
+and `clara.get_activity_event` answers the same kind for the same row. af.34 adds the departure
+half (the acquisition has LEFT the documents rung) and af.37 adds the look-alike negative above.
+
+**Real rows where the world has them, appended rows where it does not.** af.33's `member.added`
+and af.37's `firm.created` are written by `clara.add_member`/`clara.create_firm` when
+`buildWorld()` runs, so those two cells read product-written rows. The rest go through `mkEvent`,
+the same direct `clara._append_event` idiom `mkSweepEvent` uses: the ladder reads `event_type` and
+nothing else, so a row a real door would write and a row this writes are indistinguishable to it.
+One finding came out of drawing that line — **`client.created` is a REGISTERED but UNEMITTED event
+type** on this estate (measured on `clara.domain_events`: `client.activated`,
+`client.onboarding_started` and `client.resolved` are written, `client.created` never is), so
+af.36's first cut, which looked for a real one, was waiting for a row no door writes.
+
+**af.38 is the stated default**, driven through three families the ruling does not name
+(`bank.statement_ingested`, `egress.purpose_activated`, `open_item.created`) so the claim is about
+the `else` arm and not one lucky prefix. It is green before the recut as well as after, so it
+carries the vacuity control the house asks of such a cell: both installed bodies were hand recut
+on the rig with `else 'documents'` replaced by `else 'clients'` and af.38 failed; the bodies were
+restored by reversing that one replacement and re-applying 0264 through `CLARA_MIGRATION_REDO`.
+
+**af.39a and af.39b are the ticket's "the two ladders agree for EVERY event type" criterion, from
+both sides.** af.39a reads both INSTALLED bodies out of `pg_proc`, slices each one's ladder from
+the sweep rung to the stated default, drops comment lines and normalises whitespace, and asserts
+the two are the same sentence — comments are dropped because the two doors document identical
+rungs at different lengths, and what must match is the DECISION, not the prose. It then compares
+that sentence to `EXPECTED_LADDER`, written out once in the test from #728/#630 and the owner's
+ruling rather than re-derived from the SQL under test. af.39b is the behavioural half: it appends
+ONE event of every registered `clara.event_types` name, pages the feed until every one is seen,
+and asserts both doors answer the kind an independent prefix table predicts, then asks the door
+for each kind it saw so "correctly labelled" and "reachable" are one claim. `sweep.run_completed`
+is the single excluded name, with its reason: #728 keeps an effectless heartbeat out of the feed
+entirely, so a bare append of one could never reach a page; af.15 owns that rung behaviourally and
+af.39a covers it structurally. Both cells were shown red by hand-recutting the detail door's
+`assets` rung to `documents`, which makes the two ladders disagree for exactly one family.
+
+**Frontier**: stem `activity_kind_ladder$`, gate module
+`activity-kind-ladder-preintegration-gate.mjs` (`CLARA_ALLOW_MISSING_ACTIVITY_KIND_LADDER=1`),
+wired into `package.json`'s `test` script in migration order after
+`operator-support-timeline-preintegration-gate.mjs`. af.33 uses the LOUD discriminator
+(`assertKindLadderCohortPresent`); af.34–af.39b use the quiet `gateKindLadder` — the double-gate
+idiom `accrual-adjustments-fixtures.mjs` documents, and the same shape #840's af.31/af.32 use one
+frontier earlier in this file.
+
+**No new rig-meta cohort, measured rather than omitted.** `clara.list_activity` and
+`clara.get_activity_event` are still 0181's same two doors at their same signatures and grant
+(`ACTIVITY_FEED_0181_HUMAN_FNS` already covers them; 0183, 0202 and 0262 each recut these bodies
+before). 0264 changes body text only — no parameter, no new function, no widened or narrowed ACL —
+and its own tail re-reads owner, `SECURITY`, both pinned settings and the exact ACL for both names
+and refuses on drift. A `#861` / `#861 END` bracketed note beside the cohort records it, the same
+shape #840's and #843's notes carry.
+
+**The browser half is a separate contract kept in two places.** `apps/web/lib/firm/activity.ts`'s
+`ACTIVITY_KINDS` must equal the door's roster exactly — a value there the door refuses is a filter
+chip that answers CLR10, and a value the door carries that is missing there is a kind no bookmark
+can name. `lib/firm/activity.test.ts` pins the roster and the label map; the URL parser needed no
+change, because it already drops an unrecognised token (which is what makes a bookmark naming a
+retired kind degrade to "no filter on that axis").
+
 ## `reset-gate-routing.test.mjs` — #845
 
 Every `reset()`-gated upgrade-drill suite (checkout-convergence, hrd-a/hrd-b, rig-docs,

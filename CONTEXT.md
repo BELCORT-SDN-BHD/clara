@@ -478,6 +478,10 @@ _Avoid_: Conflating a source read with reading the extracted facts or overlay dr
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.
 
+**Activity kind**:
+The one closed group an Activity event is filed under, computed at read time from the event's own family and used as both the feed's filter vocabulary and its row badge: documents, journal, close, report, agent, work, people, assets, counterparties, clients or firm. A family the ladder does not name rides a stated default rather than inventing a group, and the browser's vocabulary is the door's, never a second list.
+_Avoid_: A per-event label chosen in the browser; a stored column on the event; "documents" as a place to put anything unclassified.
+
 **Kept sweep receipt**:
 A `sweep.run_completed` event whose run drafted or posted at least one item, and so remains in the Activity feed as an attributed agent act. A run that changed nothing is excluded rather than shown as unattributed noise.
 _Avoid_: Every sweep run; a refusal or a skip counted as "effect".
