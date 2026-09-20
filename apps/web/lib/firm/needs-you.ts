@@ -69,7 +69,16 @@
 //   (3) packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs's AND
 //       packages/db/tests/work-question-reads.test.mjs's own FULL_ROW_KEYS arrays (#629
 //       restated pin (3) as a second file-local copy rather than importing the first; #974
-//       keeps both in sync, but a future addition should collapse them to one shared const),
+//       keeps both in sync). THE TWO COPIES STAY TWO — the earlier version of this note asked a
+//       future addition to "collapse them to one shared const", and #974's code review picked
+//       that up as Duplicated Code. It is withdrawn, because the collapse would cost more than
+//       it saves and the hazard it guards against does not exist: each roster is compared with
+//       assert.deepEqual against the keys of a LIVE list_review_queue row, so a twelfth kind that
+//       updates only one copy REDS the other (measured, #974 fix round: authority_id removed from
+//       work-question-reads.test.mjs alone -> "row_kind='work_question' carries a DIFFERENT key
+//       set than the pinned shape", 18 pass / 1 fail). Two independent restatements of a pinned
+//       shape are the /tdd rule's "expected values from an independent source of truth"; one
+//       shared const would let a single wrong edit move both censuses together in silence.
 //   (4) components/firm/needs-you-affordances.tsx's NEEDS_YOU_AFFORDANCES registry +
 //       needs-you-affordances.test.ts's by-name resolution cases,
 //   (5) messages/en.json's `NeedsYou.rowKind.*` label map.

@@ -151,3 +151,29 @@ test("p974.role_floor: a caller other than the proposer/signer, at the queue's e
   assert.equal(rowFor(env, "depreciation_authority_pending").length, 1,
     "reaches exactly the callers who could already read the queue -- no new floor, no new gap");
 });
+
+// #974 code-review fix round (SPEC-L07-04) -----------------------------------------------------
+//
+// THE NARROWING AC1 DOES NOT STATE, PINNED EITHER WAY. The ticket says "a client with a proposed,
+// unsigned authority produces exactly one queue row" without qualifying the client. The installed
+// CTE qualifies it: `join clara.clients active_fda_client ... and active_fda_client.status='active'`.
+// That is the house rule (0017 R1-F5, carried by eight of the other ten kinds, and pinned for the
+// eleventh's immediate predecessor by w629.inbox.archived in work-question-reads.test.mjs), but it
+// was nowhere in this file, so the review could only read it off the migration's own comment. It is
+// measured here rather than argued: the row appears while the client is active and is withheld the
+// moment it is not, through the same real door and the same real read as every cell above.
+test("p974.row.non_active_client: the row is withheld once the client leaves 'active' -- the guard eight other kinds carry", async (t) => {
+  if (await gate974(t)) return;
+  const { client, authorityId } = await proposedClient("nonactive");
+  const live = await listReviewQueue(human(w.users.alice), { scope: { client_id: client } });
+  assert.equal(rowFor(live, "depreciation_authority_pending").length, 1,
+    "present while the client is active -- otherwise the second half below proves nothing");
+  await rootQuery("update clara.clients set status='archived' where id=$1", [client]);
+  const scoped = await listReviewQueue(human(w.users.alice), { scope: { client_id: client } });
+  assert.equal(rowFor(scoped, "depreciation_authority_pending").length, 0,
+    "a non-active client's proposed authority is not chased in the inbox");
+  // And not through the FIRM-wide read either -- the client scope is a filter, never the guard.
+  const firmWide = await listReviewQueue(human(w.users.alice), { scope: {} });
+  assert.equal(firmWide.rows.filter((r) => r.id === authorityId).length, 0,
+    "withheld at firm altitude too, not merely filtered out of the client-scoped read");
+});
