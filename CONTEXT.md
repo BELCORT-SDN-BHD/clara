@@ -232,6 +232,17 @@ tie-out compares the books against, never a posting in its own right.
 _Avoid_: Calling an unmapped target an error — it is work a person has still to do; calling a
 target a journal line.
 
+**Opening Work**:
+The Work record an approved opening batch carries: one per approval — the seed batch, then one per
+correction batch — under the `opening_balance` purpose, so the opening appears on the Work list,
+the Work detail and the firm Activity feed like every other accounting act. It is deterministic and
+human-approved, so it has no model run, no agent task and no journal basis: its entries were
+approved and tied out before it was written, and what it records is which batch of which seed was
+approved, by whom, and how many entries it carried.
+_Avoid_: Calling it the opening basis or the opening receipt — the basis is the versioned set of
+balances and the receipt is the per-entry approval record; treating it as work still to be done (it
+is written only once the batch is already finalized); expecting it to name a single posted entry.
+
 **Provenance (document / keyed)**:
 Whether a target came from stored evidence on the bound document — a named extraction region whose
 text the database re-derives the figure from — or from a named professional's keying. Every target

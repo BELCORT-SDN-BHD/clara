@@ -1893,3 +1893,80 @@ the schedule that deadlocked — an adversary holding the rung, then taking the 
 deadlock SQLSTATE as its oracle, races the door against `clara.record_wiki_source_ingest` to prove
 the source client is still serialised against publication, and re-runs the same census from the
 other side.
+
+## 0239 — the opening lane becomes a Work (#984)
+
+**What was wrong.** Approving an opening seed or an opening correction wrote opening's own receipt
+relation (`clara.opening_seed_approvals`, one row per approved entry) and nothing else: no
+`clara.accounting_work` row and no `clara.operation_receipts` row. The one accounting act every
+later figure carries down from got none of the Work list, Work detail, Work audit or firm Activity
+treatment every other accounting act gets, so a firm could not see its own opening at all. #656's
+AC5 asked for the Work-and-receipt pair here and the 2026-09-15 wave recorded it as "descoped
+(authority)"; the owner's ruling of 2026-09-20 on #984 settles that authority question and reverses
+that ticket's own recommended Option B.
+
+**Why it is a governed widening.** The purpose vocabulary is closed independently in six places,
+each of which refuses a fourth value on its own. 0239 widens four of them and deliberately leaves
+two alone:
+
+| where | 0239 |
+|---|---|
+| `accounting_work_purpose_check` | widened to four |
+| `operation_receipts_purpose_check` | widened to four |
+| `ck_accounting_work_adjustment_basis` | widened: `opening_balance` joins `journal_entry` on the no-particulars side |
+| `clara._assert_adjustment_basis` | one new arm, in the journal-entry arm's position and with its spelling |
+| `clara._admit_accounting_work_core` | **not** widened — it inserts an `agent_tasks` row and demands a model name |
+| `clara._record_journal_entry_core` | **not** widened — an opening Work never reaches the posting core |
+
+**Two shape CHECKs also read the purpose,** and they are why this file is bigger than a CHECK swap.
+`clara.operation_receipts.task_id` was `NOT NULL` with an FK to `clara.agent_tasks`; an opening
+approval owns no run, so the column becomes nullable behind a NEW purpose-keyed CHECK
+(`ck_operation_receipts_task_by_purpose`) that makes the nullability *exact*: the three
+model-served purposes still **require** a task and the opening purpose **refuses** one. The
+invariant is tightened, not loosened. `ck_operation_receipts_outcome_shape` demanded a non-blank
+`effects->>'entry_id'` on every committed receipt; an opening batch commits N entries and owns none
+singly, so its arm names `effects->>'seed_id'` instead and the other three keep the entry arm
+byte-for-byte. Leaving `entry_id` out is load-bearing twice: `clara._tf_assert_agent_post_receipt`
+counts receipts that name an entry and refuses any count but one, and
+`clara.list_activity` / `clara.get_activity_event` join their entry through that same text
+expression with left joins that already tolerate its absence.
+
+**The sibling admission path.** `clara._admit_opening_work(uuid,uuid,uuid,uuid,integer,jsonb,text,
+uuid,text)` is a `clara_fn_owner` `SECURITY DEFINER` internal granted to **nobody**, reached only
+from the two opening approvers, which have already taken `clara._human_ctx(role_rank('admin'))`,
+the registry row lock, the client advisory rung and the whole tie assertion before they call it. It
+mints **one Work per approved batch** (not per entry — `clara.opening_seed_approvals` already owns
+the per-entry record) at `status = 'completed'`, `basis_origin = 'user_direct'`,
+`adjustment_basis` null, `current_task_id` null, and its receipt with `task_id` null,
+`acting_actor` = `on_behalf_of` = the approving human and `via_wake_kind = 'opening_approval'`. The
+`run_id` is the door's own operation key, which is the only run identity a human door has. The
+intent key is `opening:<seed|correction>:<seed_id>:<batch_n>`, so a correction batch is a second
+Work rather than a conflict under `uq_accounting_work_intent`.
+
+**The basis is what was approved, not a journal basis.** No lines, no posting date, no memo: the
+entries were approved by `clara._approve_opening_entry` and tied out by `clara._assert_opening_tie`
+*before* the Work row is written. `source_refs` stays the empty array even on a tied seed — a
+source ref is the journal lane's evidence **claim** and stamping one would enrol the tie document
+in `clara._tf_intake_batch_member_work_stamp`'s open-batch hand-off — and the tie document is
+recorded as `basis.tie_document_id`, a fact rather than a claim. `apps/web`'s Work detail gained
+the matching guard: a basis with no `lines` array renders a sentence saying so instead of throwing
+on `basis.lines.map`.
+
+**Known cosmetic consequence, recorded rather than left to be discovered.** The firm Activity row
+renders "*person* on behalf of *the same person*" for an opening receipt, because
+`clara.operation_receipts.on_behalf_of` is `NOT NULL` and the approver acted for themselves. That
+is what the receipt says and it is true; suppressing the phrase when the two are equal is a web
+change 0239 deliberately does not reach for.
+
+[0239_opening_balance_work.sql](migrations/0239_opening_balance_work.sql) is redo-safe by
+construction (`create or replace`, `drop constraint if exists` before `add constraint`, an
+idempotent `drop not null`) and its prestate admits **both** lawful states of every object it
+replaces, naming which one it found. Its tail re-reads all four CHECKs (each must carry the three
+prior values *and* the fourth), the nullable-but-FK-bound `task_id`, the new internal's empty
+EXECUTE audience and the absence of `agent_tasks`/model from its body, both doors' owner,
+`SECURITY DEFINER` flag, pinned `search_path`, 0171 `SERIALIZABLE` proconfig and
+`clara_authenticated`-only audience, the whole-database count of isolation-pinned bodies (2, and
+they are the opening doors), and the two cores it must not have moved, by `sha256(prosrc)` and by
+re-reading the posting core's closed three-value IN-list.
+[tests/opening-balance-work.test.mjs](tests/opening-balance-work.test.mjs) drives both human doors
+for real and asserts what appears, what does not, and that opening's own relations are unchanged.

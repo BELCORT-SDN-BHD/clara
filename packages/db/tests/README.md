@@ -100,6 +100,24 @@ say which lock it is queued behind. Its gate is
 `CLARA_ALLOW_MISSING_CORRECTION_CLIENT_RUNG_ORDER` unset and must count zero skips — and against a
 pre-0238 chain it fails on the deadlock, which is the evidence.
 
+`opening-balance-work.test.mjs` drives both opening approval doors through the wave-B fixture
+(0239, #984) and asserts what the approval now leaves behind: exactly one `clara.accounting_work`
+row and one `clara.operation_receipts` row of the new `opening_balance` purpose per approved batch,
+with no `clara.agent_tasks` row for the client and none pointing at the Work, `task_id` null on the
+receipt, `effects` naming the seed and NOT an entry, and `clara.opening_seed_approvals` unchanged;
+a correction batch mints a SECOND Work and leaves the seed's byte-for-byte. Its counts are
+client-scoped so an estate sweep cannot move them, and the same predicate is what sees the Work,
+so the scoping is not vacuous. It also carries the catalogue census of the four places the columns
+close the purpose vocabulary, the two admission cores (only the sibling learned the value) and
+`clara._record_journal_entry_core`'s untouched three-value lookup — which is AC5's own wording for
+how the posting core is proven unchanged. Its gate is
+`opening-balance-work-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_OPENING_BALANCE_WORK` unset and must count zero skips, and against a pre-0239
+chain the premise check throws rather than skipping. The sibling pin lives in
+`staff-expense-claim.test.mjs`'s `p638.core.no_regression`, whose CHECK literal #984 re-derived to
+the four-value text (deliberately, with each prior value re-asserted by name) rather than deleting
+or skipping the cell.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator

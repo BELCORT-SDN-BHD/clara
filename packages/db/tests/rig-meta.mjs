@@ -2604,6 +2604,18 @@ export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FN
 export const OPENING_BINDING_CLAIM_0235_TABLES = ["document_binding_claims"];
 // #1014 END
 
+// #984 [0239, the opening lane becomes a Work] — NO cohort is owed here, and that is a measured
+// disposition rather than an omission. 0239 mints exactly one catalog name,
+// `clara._admit_opening_work`, and revokes EXECUTE from PUBLIC on it: it is an INTERNAL, reachable
+// only from clara.approve_opening_seed and clara.approve_opening_correction (both already recut in
+// place, so their ACLs did not move — `create or replace` preserves them, and 0239's tail asserts
+// each one). An internal granted to NOBODY is expected-false for every role in the live sweep
+// rather than listed here — the same disposition 0234's `clara._legal_enforcement_mode`, 0186's
+// `clara._admission_capacity_state` and 0188's `clara._operator_support_cases` carry. 0239 mints no
+// relation either, so there is no TABLE cohort to gate the way 0235's and 0217's are. What it DOES
+// move is four CHECK constraints and one column's nullability, none of which this file describes.
+// #984 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
