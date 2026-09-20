@@ -787,6 +787,11 @@ export function useClaraThread(
         // THE STREAM STATE IS LEFT ALONE WHEN IT ALREADY SAYS `revoked`. A revocation is the
         // stronger and later fact, and `markReattachFailed` writes `detached` — which the
         // surface renders as "Reconnecting…", the exact sentence this fix exists to retire.
+        //
+        // #1024 NARROWED WHAT REACHES THIS GUARD, and it is kept rather than dropped. A refused
+        // attach on THIS read no longer writes `revoked` at all, so the state it protects can
+        // now only have come from an EARLIER genuine revocation on this thread — still the
+        // stronger and later fact, and still not something a failed re-attach may paint over.
         if (handled || controller.signal.aborted) return;
         if (claraThreadStore.getThread(threadId).stream.status !== "revoked") {
           claraThreadStore.markReattachFailed(threadId);
