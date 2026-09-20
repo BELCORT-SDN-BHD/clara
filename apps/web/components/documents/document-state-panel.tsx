@@ -41,7 +41,7 @@ import { activityJournalsHref } from "@/lib/firm/activity";
 import { businessDateTime } from "@/lib/business-date";
 import {
   capabilityLimits, custodyVerdict, extractionTone, extractionVerdict, factsTone, factsVerdict,
-  failingChecks, landedFactsExtractions, operationVerdict, unmeasuredChecks,
+  failingChecks, landedFactsExtractions, operationTone, operationVerdict, unmeasuredChecks,
   type DocumentStateResult, type StateTone,
 } from "@/lib/documents/document-state";
 import { DoorFeedback } from "./door-feedback";
@@ -84,6 +84,9 @@ const FACTS_KEY = {
 
 const OPERATION_KEY = {
   not_applicable: "stateOperation.notApplicable",
+  // #988 — the fifth business_operation level, where nothing is coded yet. Its own word, because
+  // "Not coded yet" is the store-only pair's sentence and means the opposite thing here.
+  awaiting_confirmation: "stateOperation.awaitingConfirmation",
   uncoded: "stateOperation.uncoded",
   coded: "stateOperation.coded",
   posted: "stateOperation.posted",
@@ -285,10 +288,17 @@ function StateBody({ state, clientId, t }: { state: DocumentStateResult; clientI
       <StateRow
         label={t("stateOperationLabel")}
         state={t(OPERATION_KEY[operation])}
-        tone="neutral"
+        tone={operationTone(operation)}
       >
         {operation === "not_applicable" ? t("stateOperationNotApplicableDetail") : (
           <div className="flex flex-col gap-0.5">
+            {/* #988 — WHY nothing is coded, for the one level where the answer is not "nobody has
+                got to it yet". Clara has read the pair and has a proposal; the next move is a
+                person's. Rendered ABOVE the counts, which stay, because a professional still
+                needs to see that there are none. */}
+            {operation === "awaiting_confirmation"
+              ? <p>{t("stateOperationAwaitingConfirmationDetail")}</p>
+              : null}
             <p>{t("stateOperationDetail", {
               entries: state.operation.entries.length,
               statements: state.operation.statements.length,

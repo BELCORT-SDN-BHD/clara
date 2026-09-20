@@ -202,6 +202,15 @@ const POSTED_INVOICE: DocumentStateResult = {
   },
 };
 
+/** #988 — the same document, at business_operation's FIFTH level. Clara reads the pair and
+ *  derives a real proposal, and stops there: a person confirms before anything is booked.
+ *  Nothing is coded yet, which is the ONE state where this level and the store-only level had
+ *  been telling a professional the same thing. */
+const PROPOSAL_ONLY: DocumentStateResult = {
+  ...PAYROLL,
+  operation: { capability: "proposal_only", codeable_kind: true, entries: [], statements: [] },
+};
+
 const SUCCESS_WORDS = /\bvalidated\b|\bverified facts\b|\bcomplete\b|\bsuccess\b/i;
 
 /** Every anchor's href, in document order. */
@@ -310,6 +319,25 @@ test("an OFX bank statement is honestly stored: extraction NOT ATTEMPTED, facts 
     assert.match(t, /Cannot be read from this file/, "the facts state distinguishes 'no lane' from 'wrong kind'");
     assert.match(t, /no opening balance/, "the registry's measured reason is rendered verbatim");
     assert.doesNotMatch(t, /Failed/, "nothing failed — presenting this as a failure would be a different lie");
+  });
+});
+
+test("a proposal_only pairing reads DIFFERENTLY from a store-only one on the operation row (#988)", async () => {
+  let storeOnly = "";
+  await mount(PAYROLL, async (text) => { storeOnly = text(); });
+  assert.match(storeOnly, /Not coded yet/,
+    "the store-only pairing is the control: Clara derives nothing, so nothing is coded");
+
+  await mount(PROPOSAL_ONLY, async (text) => {
+    const t = text();
+    assert.match(t, /Proposed, needs your confirmation/,
+      "the fifth level gets its own word on the one row a professional opens for a filed document");
+    assert.doesNotMatch(t, /Not coded yet/,
+      "…and it must NOT reuse the store-only sentence, which is #988's whole complaint: "
+      + "'Clara derives nothing' and 'Clara has a proposal for you' are opposite facts");
+    assert.match(t, /never posts it on her own/,
+      "the row says WHY nothing is coded, so the state word is not the only thing a reader gets");
+    assert.doesNotMatch(t, SUCCESS_WORDS, "a proposal is not a success: nothing is booked yet");
   });
 });
 

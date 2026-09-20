@@ -209,6 +209,36 @@ test("operation: a draft is CODED, an approved entry is POSTED, and a withdrawn 
   );
 });
 
+// #988 fix round — the ticket's fourth acceptance criterion is that EVERY reader which renders or
+// branches on `business_operation` treats the new level as DISTINCT from the store-only level.
+// `operationVerdict` is the reader the filed-document detail panel actually calls, and it folded
+// `proposal_only` into `stored_only`'s verdict: both read "Not coded yet", which is the exact
+// "undersells what happens" #988 exists to fix. A pairing Clara can read and PROPOSE from is not
+// a pairing Clara derives nothing from.
+test("operation: proposal_only is its OWN verdict, never the store-only one", () => {
+  const proposal = state({ operation: { capability: "proposal_only" } });
+  const storeOnly = state({ operation: { capability: "stored_only" } });
+
+  assert.equal(operationVerdict(storeOnly), "uncoded",
+    "the store-only level is unchanged: Clara derives nothing, so nothing is coded");
+  assert.equal(operationVerdict(proposal), "awaiting_confirmation",
+    "Clara reads this pair and derives a real proposal; it stops short of posting on its own "
+    + "authority, and the word a professional reads must say so");
+  assert.notEqual(operationVerdict(proposal), operationVerdict(storeOnly));
+
+  // …and the distinction lives ONLY where the two levels really differ. Once a person has acted,
+  // the verdict is about what happened, not about what the registry permits.
+  assert.equal(
+    operationVerdict(state({ operation: { capability: "proposal_only", entries: [{ entry_id: "e", status: "draft" }] } })),
+    "coded", "a confirmed proposal that became a draft reads as coded, like any other draft");
+  assert.equal(
+    operationVerdict(state({ operation: { capability: "proposal_only", entries: [{ entry_id: "e", status: "posted" }] } })),
+    "posted", "…and a posted one reads as posted");
+  assert.equal(
+    operationVerdict(state({ operation: { capability: "unsupported" } })),
+    "not_applicable", "the unsupported level keeps its own resting state");
+});
+
 test("operation: a landed bank statement reads as the BANK lane, not as a journal entry", () => {
   const s = state({
     operation: {

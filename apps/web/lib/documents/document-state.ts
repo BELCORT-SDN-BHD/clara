@@ -158,7 +158,14 @@ export type ExtractionVerdict =
   | "not_attempted" | "pending" | "running" | "done" | "failed" | "stored_unparsed";
 export type FactsVerdict =
   | "unsupported_kind" | "unsupported_format" | "pending" | "none" | "partial" | "validated" | "invalid";
-export type OperationVerdict = "not_applicable" | "uncoded" | "coded" | "posted" | "reconciled";
+/** `awaiting_confirmation` is `business_operation: "proposal_only"` with nothing coded yet (#988):
+ *  Clara reads this pair deterministically and derives a real proposal, but never carries it into
+ *  a posted operation on its own authority. It is NOT `uncoded` — that word is the store-only
+ *  pair's, where Clara derives nothing and nothing is ever coming. Once a person has acted the
+ *  verdict is about what happened, so a confirmed proposal reads `coded` or `posted` like any
+ *  other entry. */
+export type OperationVerdict =
+  "not_applicable" | "awaiting_confirmation" | "uncoded" | "coded" | "posted" | "reconciled";
 
 /** CUSTODY. A legal hold is the loudest thing true about a document's bytes, so it wins; the
  *  rest is simply whether the stored bytes were re-hashed and matched. */
@@ -224,14 +231,21 @@ export function factsVerdict(state: DocumentStateResult): FactsVerdict {
 }
 
 /** OPERATION. `not_applicable` is the registry's own `unsupported` — this kind carries no
- *  accounting operation at all — and it is a legitimate resting state, never a failure. */
+ *  accounting operation at all — and it is a legitimate resting state, never a failure.
+ *
+ *  THE LEVEL ONLY SPEAKS WHERE NOTHING HAS HAPPENED YET. Statements, posted entries and drafts
+ *  are FACTS about this document, and they outrank what the registry permits; a proposal someone
+ *  confirmed and posted reads `posted`, not "awaiting confirmation". The two levels that differ
+ *  before anything is coded are `proposal_only` (Clara has a proposal, a person confirms) and
+ *  everything else (nothing is coded, and for a store-only pair nothing ever will be) — which is
+ *  the one place #988's "distinct from the store-only level" has anything to distinguish. */
 export function operationVerdict(state: DocumentStateResult): OperationVerdict {
   if (state.operation.capability === "unsupported") return "not_applicable";
   if (state.operation.statements.length > 0) return "reconciled";
   const live = state.operation.entries.filter((e) => e.status !== "withdrawn" && e.status !== "void");
   if (live.some((e) => e.status === "approved" || e.status === "posted")) return "posted";
   if (live.length > 0) return "coded";
-  return "uncoded";
+  return state.operation.capability === "proposal_only" ? "awaiting_confirmation" : "uncoded";
 }
 
 /** The tone each verdict wears. NOTHING here is green-by-default: an unsupported kind is
@@ -246,6 +260,14 @@ export function factsTone(verdict: FactsVerdict): StateTone {
     case "pending": return "info";
     default: return "neutral";
   }
+}
+
+/** #988 — the ONE operation verdict that is not a plain statement of record. "Clara has a
+ *  proposal and is waiting for you" is a pending state, and the panel's own ladder already spells
+ *  pending `info` (the same token capability-tiers.tsx gives the `proposal_only` tier). Every
+ *  other verdict stays `neutral`: a document that is simply not coded yet is not a warning. */
+export function operationTone(verdict: OperationVerdict): StateTone {
+  return verdict === "awaiting_confirmation" ? "info" : "neutral";
 }
 
 export function extractionTone(verdict: ExtractionVerdict): StateTone {

@@ -2834,6 +2834,7 @@
     "stateOperationLabel": "Operation",
     "stateOperation": {
       "notApplicable": "Not applicable to this type",
+      "awaitingConfirmation": "Proposed, needs your confirmation",
       "uncoded": "Not coded yet",
       "coded": "Coded, draft",
       "posted": "Posted",
@@ -2842,6 +2843,7 @@
     "stateOperationDetail": "{entries} journal entry/entries · {statements} statement(s)",
     "stateOperationEntryLink": "Open the {status} journal entry",
     "stateOperationNotApplicableDetail": "Clara never posts an entry from this type of document.",
+    "stateOperationAwaitingConfirmationDetail": "Clara reads this type and can put a proposal in front of you, but never posts it on her own. Nothing is booked until you confirm.",
     "capabilityRegistryVersion": "capability registry v{version}",
     "capabilityLimit": {
       "invoiceLineItems": "Per-line invoice facts: {level}. Clara records the header totals with their source regions; the questionnaire, autodraft and posting all work from those header facts alone.",
