@@ -1,4 +1,4 @@
-// #890 — the shared draft rule, read as one contract across all four counterparty door dialogs.
+// ticket 890 — the shared draft rule, read as one contract across all four counterparty door dialogs.
 //
 // THE RULE, written down once (AddCounterpartyAliasDialog's own header, because the four used to
 // differ): a refusal SURVIVES — the human's typed values stay in the fields and the refusal
@@ -17,7 +17,7 @@
 //      dialog open (with the refusal rendered) rather than silently discarding the pending act,
 //      and a success writes exactly once against the alias the human actually opened.
 //   3. RenameCounterpartyDialog — a CURRENT value, like the identifiers dialog: re-seeds on open,
-//      survives a refusal. #890 found it wired to NEITHER (no `refusal` prop, no `onOpened`
+//      survives a refusal. ticket 890 found it wired to NEITHER (no `refusal` prop, no `onOpened`
 //      callback) — its single field never cleared an abandoned draft. This cell pins the fix.
 
 import { test } from "node:test";
@@ -134,7 +134,7 @@ function identityMock(
   aliases: unknown[],
   opts: { refuseAdd?: boolean; refuseRetireFirst?: boolean } = {},
 ): typeof fetch {
-  // #890's own lesson: refusing every attempt for good (rather than gating on attempt count, the
+  // ticket 890's own lesson: refusing every attempt for good (rather than gating on attempt count, the
   // way `hygieneMock`'s `refuseFirst` below does) drives a cell's OWN "the door eventually
   // accepts" retry into a real, permanent mismatch — and `assert.equal(<a DOM node>, null, …)`
   // failing for real here hangs the whole process (Node's assertion-diff formatter choking on the
@@ -190,7 +190,7 @@ async function mountedIdentity(): Promise<{ h: H; body: ReturnType<typeof docBod
   return { h, body };
 }
 
-test("#890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves the typed alias, origin and basis intact, and a SUCCESSFUL one leaves no draft on the next open", async () => {
+test("ticket 890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves the typed alias, origin and basis intact, and a SUCCESSFUL one leaves no draft on the next open", async () => {
   const seen: Seen = [];
   await withMockedEnv(identityMock(seen, [], { refuseAdd: true }), async () => {
     const { h, body } = await mountedIdentity();
@@ -212,12 +212,12 @@ test("#890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves the typ
       for (let i = 0; i < 8; i++) await h.settle();
 
       const nameField = findIn(body, (n) => n.id === "cp-alias-name");
-      assert.ok(nameField, "#890: a REFUSED add-alias keeps the dialog open");
-      assert.equal(nameField.value, "Acme Retail", "#890: the typed alias survives the refusal");
+      assert.ok(nameField, "ticket 890: a REFUSED add-alias keeps the dialog open");
+      assert.equal(nameField.value, "Acme Retail", "ticket 890: the typed alias survives the refusal");
       assert.equal(
         (findIn(body, (n) => n.id === "cp-alias-basis") as Node).value,
         "seen on the delivery order",
-        "#890: the typed basis survives the refusal too",
+        "ticket 890: the typed basis survives the refusal too",
       );
       // Scoped to the DIALOG's own content (not `textOf(body)`) — the panel's page-level standing
       // banner renders the identical text outside every dialog, so a body-wide match would pass
@@ -252,7 +252,7 @@ test("#890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves the typ
       for (let i = 0; i < 4; i++) await h.settle();
       const reopened = findIn(body, (n) => n.id === "cp-alias-name");
       assert.ok(reopened, "the dialog reopens");
-      assert.equal(reopened.value, "", "#890: a SUCCESSFUL add-alias leaves no draft on the next open");
+      assert.equal(reopened.value, "", "ticket 890: a SUCCESSFUL add-alias leaves no draft on the next open");
 
       const writes = seenOk.filter((s) => s.fn === "add_counterparty_alias");
       assert.equal(writes.length, 1, "exactly one governed call, never a batch and never a double-fire");
@@ -263,7 +263,7 @@ test("#890 cell: AddCounterpartyAliasDialog — a REFUSED confirm leaves the typ
   });
 });
 
-test("#890 cell: RetireCounterpartyAliasDialog — a REFUSED retirement keeps this alias's own dialog open with the refusal rendered, and an accepted one writes exactly once", async () => {
+test("ticket 890 cell: RetireCounterpartyAliasDialog — a REFUSED retirement keeps this alias's own dialog open with the refusal rendered, and an accepted one writes exactly once", async () => {
   const seen: Seen = [];
   await withMockedEnv(identityMock(seen, [LIVE_ALIAS], { refuseRetireFirst: true }), async () => {
     const { h, body } = await mountedIdentity();
@@ -279,7 +279,7 @@ test("#890 cell: RetireCounterpartyAliasDialog — a REFUSED retirement keeps th
       for (let i = 0; i < 8; i++) await h.settle();
 
       confirm = footerButtonWithText(body, "Retire alias");
-      assert.ok(confirm, "#890: a REFUSED retirement keeps the dialog open");
+      assert.ok(confirm, "ticket 890: a REFUSED retirement keeps the dialog open");
       // Scoped to the DIALOG's own content — see dialogContentText's own header: the panel's
       // page-level banner renders the identical text outside every dialog, so a body-wide match
       // would pass whether or not RetireCounterpartyAliasDialog's own `refusal` prop is wired at
@@ -306,7 +306,7 @@ test("#890 cell: RetireCounterpartyAliasDialog — a REFUSED retirement keeps th
 
 // =====================================================================================
 // Cell 3 — RenameCounterpartyDialog, mounted through CounterpartyHygienePanel (its only
-// caller). #890's fix.
+// caller). ticket 890's fix.
 // =====================================================================================
 
 const VENDOR_BASE = {
@@ -372,7 +372,7 @@ async function openRename(h: H, body: Node): Promise<void> {
   for (let i = 0; i < 6; i++) await h.settle();
 }
 
-test("#890 cell: RenameCounterpartyDialog re-seeds its field on open and survives a refusal", async () => {
+test("ticket 890 cell: RenameCounterpartyDialog re-seeds its field on open and survives a refusal", async () => {
   const seen: Seen = [];
   await withMockedEnv(hygieneMock({ id: "v1", name: "Old Name Sdn Bhd" }, seen, { refuseFirst: true }), async () => {
     const { h, body } = await mountedHygiene();
@@ -391,11 +391,11 @@ test("#890 cell: RenameCounterpartyDialog re-seeds its field on open and survive
       await h.act(async () => { await clickButton(cancel as never); });
       for (let i = 0; i < 6; i++) await h.settle();
 
-      // 3. Reopen — #890: the abandoned draft must be GONE; the CURRENT name is what shows.
+      // 3. Reopen — ticket 890: the abandoned draft must be GONE; the CURRENT name is what shows.
       await openRename(h, body);
       field = findIn(body, (n) => n.id === "cp-rename-name");
       assert.ok(field, "the dialog reopens");
-      assert.equal(field.value, "Old Name Sdn Bhd", "#890: re-seeded from the live prop, not the abandoned draft");
+      assert.equal(field.value, "Old Name Sdn Bhd", "ticket 890: re-seeded from the live prop, not the abandoned draft");
 
       // 4. Type a real rename and confirm — the door refuses it.
       await h.act(() => { setFieldValue(field as never, "New Name Sdn Bhd"); });
@@ -406,12 +406,12 @@ test("#890 cell: RenameCounterpartyDialog re-seeds its field on open and survive
       for (let i = 0; i < 8; i++) await h.settle();
 
       field = findIn(body, (n) => n.id === "cp-rename-name");
-      assert.ok(field, "#890: a REFUSED rename keeps the dialog open");
-      assert.equal(field.value, "New Name Sdn Bhd", "#890: the typed name survives the refusal");
+      assert.ok(field, "ticket 890: a REFUSED rename keeps the dialog open");
+      assert.equal(field.value, "New Name Sdn Bhd", "ticket 890: the typed name survives the refusal");
       // Scoped to the DIALOG's own content — see dialogContentText's own header: the panel's
       // page-level banner (counterparty-hygiene-panel.tsx's `{err && <StateBanner>…}`) renders the
       // identical text outside every dialog, so a body-wide match would pass whether or not
-      // RenameCounterpartyDialog's own `refusal` prop is wired at all — exactly the wiring #890
+      // RenameCounterpartyDialog's own `refusal` prop is wired at all — exactly the wiring ticket 890
       // adds.
       const dialogText = dialogContentText(body);
       assert.match(dialogText, /collides with an existing identity or alias/, "the refusal renders verbatim inside the dialog");
