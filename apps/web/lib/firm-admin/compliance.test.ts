@@ -204,6 +204,9 @@ function makeRow(overrides: Partial<ReviewQueueRow>): ReviewQueueRow {
     client_name: null,
     batch_ids: null,
     open_proposal_count: null,
+    // #974 (0260) widened ReviewQueueRow with the depreciation authority id while #996 was
+    // being written in another lane; a compliance_watch row names no authority, so null.
+    authority_id: null,
     ...overrides,
   };
 }
