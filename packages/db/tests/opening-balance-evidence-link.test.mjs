@@ -24,6 +24,8 @@ import {
   gateOpeningWall,
   // #854 — the two-session driver (see the section-4 header there for `isolation`/`commitOrCapture`)
   humanHoldThenContend,
+  // #1014 — the binding-claim frontier this file's repaired race cells stand on
+  BINDING_CLAIM_STEM, gateBindingClaim,
 } from "./coding-lane-evidence-link-fixtures.mjs";
 import { approveEntry, createClient, freshResolution } from "./rig-fixtures.mjs";
 import {
@@ -31,8 +33,23 @@ import {
   approveOpeningSeed, approveOpeningSeedOn, planRevision, WB_COA,
 } from "./wave-b/wb-fixtures.mjs";
 
+const CLAIM_MIGRATION = "0235_opening_binding_claim.sql";
+
 let world = null;
 before(async () => {
+  // #1014 — A FOCUSED RUN MUST NEVER SKIP SILENTLY. The estate sweep preloads
+  // ./tests/opening-binding-claim-preintegration-gate.mjs and every claim cell then skips,
+  // counted; a focused invocation against a chain below 0235 fails HERE instead.
+  const at = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [BINDING_CLAIM_STEM]);
+  if (at.rows[0].n === 0 && process.env.CLARA_ALLOW_MISSING_OPENING_BINDING_CLAIM !== "1") {
+    throw new Error(
+      `opening-balance-evidence-link premise ${CLAIM_MIGRATION} is not applied (no `
+      + `${BINDING_CLAIM_STEM} row in clara.schema_migrations) and `
+      + "CLARA_ALLOW_MISSING_OPENING_BINDING_CLAIM is unset -- this is a FOCUSED run and must fail "
+      + "loudly, not skip. Preload ./tests/opening-binding-claim-preintegration-gate.mjs for an "
+      + "estate sweep against a pre-PR chain.");
+  }
   world = await buildWaveBWorld();
 });
 after(async () => {
@@ -336,8 +353,9 @@ test("obw.race.opening_then_evidence the opening approval holds; the evidence at
     "race.opening_then_evidence: no evidence link was written — the loser wrote nothing");
 });
 
-test("obw.race.evidence_then_opening #854 FINDING: the evidence attachment holds and the opening approval BLOCKS on it, proves it, then BOTH commit — a double posting this ticket did not repair (out of scope: see the file header)", async (t) => {
+test("obw.race.evidence_then_opening #1014: the evidence attachment holds, the opening approval BLOCKS on it and LOSES — exactly one side commits in THIS arrival order too", async (t) => {
   if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
   const s = await stagedSeed("race-eo");
   const host = await postedDocumentless(s.client);
   const rev = await planRevision(s.plan);
@@ -361,34 +379,30 @@ test("obw.race.evidence_then_opening #854 FINDING: the evidence attachment holds
     "race.evidence_then_opening: the opening approval must WAIT on the attachment's document lock "
     + `— a schedule that never blocked proves nothing (wait_event_type ${out.waitEventType}/${out.waitEvent})`);
   assert.equal(out.waitEventType, "Lock", "race.evidence_then_opening: …on a LOCK (waitEvent "
-    + `${out.waitEvent} — "transactionid" on this rig: waiting on a still-open FOR UPDATE holder,`
-    + " never a serialization-safe re-read)");
+    + `${out.waitEvent} — "transactionid" on this rig: waiting on a still-open FOR UPDATE holder)`);
 
-  // THE FINDING, asserted rather than hidden: the opening approval is NOT refused. It BLOCKED
-  // (proved above), then — once granted `clara.documents`' FOR UPDATE lock unchanged in content —
-  // committed against its OWN pre-attachment snapshot, which never saw the live link. If a future
-  // fix (successor ticket) makes it lose instead, this assertion is the one to update; a
-  // regression back to "both commit" after that fix is what this cell exists to catch too.
-  assert.equal(out.b.ok, true,
-    `race.evidence_then_opening: MEASURED, not a repair target here — the opening approval also `
-    + `commits (${JSON.stringify(out.b)}). #854's brief: "if both sides can commit, that is a new `
-    + `defect for its own ticket" — filed in this ticket's report, repair explicitly out of scope.`);
+  // THE REPAIR, asserted as OUTCOME rather than as mechanism: the side that took the document
+  // binding FIRST keeps it, and the side that blocked on it does NOT commit. #854 measured the
+  // opposite here (both committed); the shape of the loser's refusal is pinned by
+  // obw.race.typed_refusal below, so this cell stays about WHO WINS.
+  assert.equal(out.b.ok, false,
+    "race.evidence_then_opening: the opening approval LOSES — it blocked on a document whose "
+    + "binding another session had already taken, and the evidence wall exists so that exactly "
+    + `one of the two can stand on it (${JSON.stringify(out.b)})`);
 
   const standing = await postedEntriesOnDocument(s.doc.documentId);
-  assert.equal(standing.length, s.drafts.all.length + 1,
-    `race.evidence_then_opening: DOUBLE POSTING — the host entry (via its evidence link) AND `
-    + `every opening item all stand on the ONE tie document (got ${JSON.stringify(standing)}); `
-    + "the wall this migration (0213) exists to enforce did not hold in this arrival order");
-  assert.ok(standing.some((r) => r.id === host.entry_id && r.linked === true),
-    "race.evidence_then_opening: the host entry's link is live and counted");
+  assert.equal(standing.length, 1,
+    "race.evidence_then_opening: ONE posted entry stands on the tie document, not the host entry "
+    + `AND every opening item (got ${JSON.stringify(standing)})`);
+  assert.equal(standing[0].id, host.entry_id,
+    "race.evidence_then_opening: …and it is the winner — the host entry, through the evidence "
+    + "link the attaching session committed first");
+  assert.equal(standing[0].linked, true, "race.evidence_then_opening: …counted through its LIVE link");
   for (const d of s.drafts.all) {
-    assert.ok(standing.some((r) => r.id === d.entry_id),
-      "race.evidence_then_opening: every opening item ALSO posted, not merely drafted — the "
-      + "batch was not refused");
-    assert.equal((await entryStatus(d.entry_id)).status, "approved",
-      "race.evidence_then_opening: …approved, not draft (contrast obw.evidence_first's sequential "
-      + "cell, where the SAME shape correctly leaves the batch a draft)");
+    assert.equal((await entryStatus(d.entry_id)).status, "draft",
+      "race.evidence_then_opening: the refused batch is ATOMIC — every opening item is still a "
+      + "draft, exactly as the sequential obw.evidence_first cell leaves it");
   }
   assert.equal((await linksForDocument(s.doc.documentId)).length, 1,
-    "race.evidence_then_opening: the evidence link ALSO stands, live");
+    "race.evidence_then_opening: the winner's evidence link stands, live and alone");
 });
