@@ -1690,3 +1690,67 @@ set mode = 'enforce' where id;` as the superuser satisfies the relation's CHECK 
 it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no receipt — the change
 becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
 using it.
+
+## 0243 — the role at the instant of a governed act (#912)
+
+`clara.firm_memberships` has no history: `clara.set_member_role` updates the role in place and
+`clara.remove_member` flips `status` in place. So before this migration, "what authority did this
+act actually run under" was unanswerable once anybody was promoted or demoted, and
+`clara.list_firm_knowledge` could only report the promoter's role **now** — which is what its
+`_now` suffix has always said out loud.
+
+`0243_audit_actor_role.sql` closes it the way the owner ruled (issue #912, 2026-09-18): on the
+audit row, not in a new membership-revision relation.
+
+- **The column.** `clara.audit_log.actor_role`, nullable `text` under `ck_audit_log_actor_role`.
+  It carries a **three-way**, and the third value is the point:
+
+  | value | meaning |
+  |---|---|
+  | `NULL` | the row predates this mechanism. **Unknown**, and never guessed. |
+  | `'none'` | measured at write time: the actor held **no active membership** in that firm. |
+  | `viewer`/`bookkeeper`/`admin`/`owner` | measured at write time: the role held. |
+
+  Without `'none'`, `NULL` would mean both "before the mechanism" and "the wake lane's agent
+  identity, which holds no membership by construction" — and the ruling's own "unknown" would be a
+  guess. `clara.role_rank('none')` is `NULL`, so the marker can never be compared as authority.
+
+- **Where it is filled, and why not in `clara._audit`.** The ruling names `clara._audit`, the sole
+  writer of the table. It cannot be edited: it is **ordinal 10 of the frozen `metric_input_snapshot`
+  v1 producer closure**. `clara.metric_input_producer_version_members` pins
+  `sha256(pg_get_functiondef(...))` for each of the 15 members,
+  `clara.verify_metric_input_producer_freeze()` hard-codes that roster and raises
+  `metric input producer freeze mismatch` on drift, and `scripts/migrate.mjs`'s `FREEZE_GUARDS`
+  re-read every protected row's evidence around each migration. A first draft of 0243 did recut
+  `_audit` and the runner rolled the whole migration back with *"metric input producer protected
+  freeze evidence changed during the migration — refusing to migrate"*. There is no version-bump
+  escape: the freeze reads the LIVE body of every version row's members. **If you need to change
+  `clara._audit`, `clara._human_ctx`, `clara.role_rank`, `clara.jwt_sub`, `clara.jwt_firm`,
+  `clara.actor_role_rank`, `clara._reserve_op`, `clara._hash`, `clara._finish_op` or any other
+  member of that roster, you cannot — find a seam beside it.**
+
+  So the stamp is `clara._tf_audit_actor_role()`, a BEFORE INSERT row trigger
+  (`t_audit_actor_role`) on `clara.audit_log` itself. It is **wider** than the recut would have
+  been — it reaches the table, not one function — and all 304 `_audit` callers inherit the column
+  with no per-door change, which is exactly the ruling's own acceptance criterion.
+
+- **History is never handed a guess.** The column is added with no `DEFAULT` (a default could not
+  have been right anyway: a column default cannot see the row's own `firm_id` and `actor`), the
+  file contains no `UPDATE` of `clara.audit_log`, and §A *measures* on the live database that every
+  pre-existing row stayed `NULL`. The table's append-only triggers refuse any later back-fill. The
+  stamp also refuses to invent a role for **any row whose own `at` predates the transaction** —
+  `scripts/restore.mjs` replays a plain dump through `psql`, and BEFORE INSERT row triggers fire
+  for `COPY`, so without that arm a restore would rewrite every historical row's authority with
+  today's roster.
+
+- **Who cites it.** `clara.list_firm_knowledge`'s authority block gains `promoter_role_at_act`,
+  matched to the audit row the promotion itself wrote (`clara._knowledge_insert_revision` audits
+  every revision with that revision's own id in `args.revision_id`, and `actor` is re-checked
+  against `asserted_by` because the promotion lane audits each record under the **answerer**). It
+  sits beside `promoter_role_now` and `required_role` as a third, separately-labelled fact; the web
+  register renders all three and says *"Not recorded — this rule predates the record of authority"*
+  for a null. `ix_audit_log_knowledge_revision` keeps that citation off a sequential scan of the
+  whole log.
+
+Battery: `tests/audit-actor-role.test.mjs` (ar.01–ar.05), gated by
+`tests/audit-actor-role-preintegration-gate.mjs`.

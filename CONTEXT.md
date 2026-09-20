@@ -266,6 +266,18 @@ is re-read inside the door, after its lock, rather than trusted from the request
 _Avoid_: A client-side rank check as the wall; treating a control the interface shapes away as a
 permission; assuming a rank observed at page load is still the caller's.
 
+**Role at the act**:
+The role an actor held in a firm at the instant a governed act committed, recorded on the act's own
+audit row by the database that witnessed it and readable afterwards however the roster has moved
+since. Distinct from the actor's role *now* and from the authority the door *required*: the three
+are separate facts and a surface that shows one must not show it as another. An act recorded before
+Clara kept this is **unknown**, said in that word; a firm can also read `none`, which is the
+measured fact that the actor held no active membership — the agent identity on a wake act — and not
+the same thing as unknown.
+_Avoid_: Reading the current roster as the authority a past act ran under; back-dating or inferring
+a historical role; treating `unknown` as "no role"; re-evaluating work already run under an
+authority later found insufficient.
+
 **Access history**:
 Granting, changing and withdrawing access are receipted, append-only facts: each writes an audit
 row and a domain event in the same transaction as the change itself, and a withdrawal wins over

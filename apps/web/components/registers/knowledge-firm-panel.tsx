@@ -213,6 +213,12 @@ function FirmKnowledgeCard({
           </dd>
           <dt>{t("authorityRequiredRole")}</dt>
           <dd>{row.authority.required_role ?? "—"}</dd>
+          {/* #912 — TWO FACTS, NOT ONE. The role the act ran under is what a later
+              dispute turns on; the role the promoter holds today is a different
+              question, and a rule recorded before Clara kept the first says so
+              rather than borrowing the second. */}
+          <dt>{t("authorityRoleAtAct")}</dt>
+          <dd>{row.authority.promoter_role_at_act ?? t("authorityRoleAtActUnknown")}</dd>
           <dt>{t("authorityRoleNow")}</dt>
           <dd>{row.authority.promoter_role_now ?? t("authorityRoleUnknown")}</dd>
           <dt>{t("authorityReason")}</dt>

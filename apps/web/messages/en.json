@@ -3755,6 +3755,8 @@
     "authorityHeading": "Authority",
     "authorityPromoter": "Promoted by",
     "authorityRequiredRole": "Authority the act required",
+    "authorityRoleAtAct": "Their role at the time",
+    "authorityRoleAtActUnknown": "Not recorded — this rule predates the record of authority",
     "authorityRoleNow": "Their role now",
     "authorityRoleUnknown": "No current membership",
     "authorityRevoked": "This person is no longer an active member of this firm. The rule they recorded still stands; review it before relying on it.",

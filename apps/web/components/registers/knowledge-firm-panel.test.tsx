@@ -90,6 +90,7 @@ function firmRow(over: Partial<FirmKnowledgeRow> = {}): FirmKnowledgeRow {
       recorded_at: "2026-09-16T02:00:00Z",
       reason: "Partner meeting 2026-09-16: ringgit presentation is the firm's default",
       required_role: "admin",
+      promoter_role_at_act: "admin",
       promoter_role_now: "admin",
       promoter_active: true,
     },
@@ -486,4 +487,48 @@ test("[1005]: the kind filter trigger shows 'All kinds' on first render, never t
     // "All kinds" (capital A) must not be mistaken for it.
     assert.doesNotMatch(text, /\ball\b/, "the raw 'all' sentinel value must never render as trigger text");
   });
+});
+
+// =============================================================================
+// 6 — #912: the role at the act is a SECOND fact, never a restatement of the first
+// =============================================================================
+
+test("kf.12 a demoted promoter's rule shows the role the act ran under BESIDE the role they hold now", async () => {
+  await mount(
+    okFetch([firmRow({
+      authority: {
+        ...firmRow().authority,
+        promoter_role_at_act: "owner",
+        promoter_role_now: "bookkeeper",
+      },
+    })]),
+    async (h) => {
+      const text = h.text();
+      assert.match(text, /Their role at the time/,
+        "the authority the act ran under must be labelled as its own fact");
+      assert.match(text, /owner/, "…and carry the role the promoter actually held");
+      assert.match(text, /Their role now/);
+      assert.match(text, /bookkeeper/,
+        "…beside the CURRENT role, which the demotion moved -- two facts, not one");
+    },
+  );
+});
+
+test("kf.13 a rule recorded before Clara kept the role says UNKNOWN, and says why, rather than borrowing the current one", async () => {
+  await mount(
+    okFetch([firmRow({
+      authority: {
+        ...firmRow().authority,
+        promoter_role_at_act: null,
+        promoter_role_now: "admin",
+      },
+    })]),
+    async (h) => {
+      const text = h.text();
+      assert.match(text, /Not recorded — this rule predates the record of authority/,
+        "an unknown historical role is said plainly, with the reason it is unknown");
+      assert.match(text, /Their role now/,
+        "…and the current role is still shown, as the separate fact it is");
+    },
+  );
 });

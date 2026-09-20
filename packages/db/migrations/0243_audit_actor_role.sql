@@ -92,7 +92,6 @@ do $prestate$
 declare
   v_audit_sha text; v_register_sha text;
   v_col_type text; v_col_nullable text; v_col_default text; v_found boolean;
-  v_frozen_drift int;
 begin
   if to_regclass('clara.audit_log') is null or to_regclass('clara.firm_memberships') is null then
     raise exception '#912 prestate: clara.audit_log or clara.firm_memberships is absent' using errcode = 'CLR10';
@@ -122,14 +121,11 @@ begin
   end if;
 
   -- …and the freeze itself is whole BEFORE this file runs, so a failure afterwards can only be
-  -- this file's doing.
-  select count(*)::int into v_frozen_drift
-    from clara.metric_input_producer_version_members m
-   where m.body_sha256 is distinct from sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature)), 'UTF8'));
-  if v_frozen_drift <> 0 then
-    raise exception '#912 prestate: % frozen metric-input-producer member(s) already drift from their pinned body -- fix that before this file adds anything', v_frozen_drift
-      using errcode = 'CLR10';
-  end if;
+  -- this file's doing. Asked through the estate's OWN verifier rather than by re-deriving the
+  -- member hashes here: that function is the definition of the check (it raises
+  -- `metric input producer freeze mismatch`), and re-implementing it in this file would be a
+  -- second opinion that could drift from the one the migration runner actually enforces.
+  perform clara.verify_metric_input_producer_freeze();
 
   -- THE REGISTER §C RECUTS. Either the pristine 0220 body (first apply) or the exact body §C
   -- installs (a redo of this unedited file, whose `create or replace` is a no-op). Any third body
@@ -369,11 +365,10 @@ do $tail$
 declare
   v_def text; v_writers text[]; v_callers int; v_sha text;
   v_args text; v_secdef boolean; v_config text[]; v_owner text; v_acl text[];
-  v_relacl text[]; v_attacl_n int; v_policy text; v_triggers text[]; v_tgdef text;
+  v_relacl text[]; v_attacl_n int; v_policy text; v_triggers text[];
   v_reg_sha text; v_reg_secdef boolean; v_reg_config text[]; v_reg_owner text; v_reg_acl text[];
-  v_indexdef text;
+  v_indexdef text; v_tgtype smallint; v_tgfn text;
   v_tf_secdef boolean; v_tf_config text[]; v_tf_owner text; v_tf_acl text[];
-  v_frozen_drift int;
 begin
   if not exists (select 1 from information_schema.columns
                   where table_schema = 'clara' and table_name = 'audit_log'
@@ -388,11 +383,15 @@ begin
   end if;
 
   -- THE STAMP IS ATTACHED, and it is a BEFORE INSERT ROW trigger -- an AFTER trigger could not
-  -- set the column at all, and a statement trigger has no row to set it on.
-  select pg_get_triggerdef(oid) into v_tgdef from pg_trigger
-   where tgrelid = 'clara.audit_log'::regclass and not tgisinternal and tgname = 't_audit_actor_role';
-  if v_tgdef is distinct from 'CREATE TRIGGER t_audit_actor_role BEFORE INSERT ON clara.audit_log FOR EACH ROW EXECUTE FUNCTION clara._tf_audit_actor_role()' then
-    raise exception '#912 tail: t_audit_actor_role reads % -- the stamp must be BEFORE INSERT, FOR EACH ROW', v_tgdef using errcode = 'CLR10';
+  -- set the column at all, and a statement trigger has no row to set it on. Read off pg_trigger's
+  -- own columns: `tgtype` 7 is ROW(1) | BEFORE(2) | INSERT(4), the three bits that matter, and
+  -- `tgfoid` names the body by signature.
+  select t.tgtype, t.tgfoid::regprocedure::text into v_tgtype, v_tgfn
+    from pg_trigger t
+   where t.tgrelid = 'clara.audit_log'::regclass and not t.tgisinternal and t.tgname = 't_audit_actor_role';
+  if v_tgtype is distinct from 7::smallint or v_tgfn is distinct from 'clara._tf_audit_actor_role()' then
+    raise exception '#912 tail: t_audit_actor_role reads (tgtype=%, fn=%) -- the stamp must be BEFORE INSERT, FOR EACH ROW, on this file''s own body', v_tgtype, v_tgfn
+      using errcode = 'CLR10';
   end if;
   select p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner), p.proacl::text[]
     into v_tf_secdef, v_tf_config, v_tf_owner, v_tf_acl
@@ -442,13 +441,6 @@ begin
   end if;
   if v_sha <> '000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1' then
     raise exception '#912 tail: clara._audit''s body moved to sha256 % -- this file must not touch a frozen metric-input-producer member', v_sha
-      using errcode = 'CLR10';
-  end if;
-  select count(*)::int into v_frozen_drift
-    from clara.metric_input_producer_version_members m
-   where m.body_sha256 is distinct from sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature)), 'UTF8'));
-  if v_frozen_drift <> 0 then
-    raise exception '#912 tail: % frozen metric-input-producer member(s) drift from their pinned body after this file ran', v_frozen_drift
       using errcode = 'CLR10';
   end if;
   perform clara.verify_metric_input_producer_freeze();

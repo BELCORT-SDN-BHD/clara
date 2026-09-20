@@ -282,9 +282,14 @@ export type FirmKnowledgeWork = {
 /** WHOSE ACT THE PROMOTION WAS. `required_role` is the authority the door
  *  VERIFIED at the time (`clara._knowledge_floor(key,'firm')`), which is the
  *  durable half; `promoter_role_now` / `promoter_active` are the promoter's
- *  CURRENT membership and are labelled as current by the surface, because
- *  `clara.firm_memberships` carries no history to reconstruct the role at the
- *  instant from. */
+ *  CURRENT membership and are labelled as current by the surface.
+ *
+ *  `promoter_role_at_act` (#912) is the role the promoter ACTUALLY held when the
+ *  rule was recorded, read from `clara.audit_log.actor_role` on the audit row the
+ *  promotion itself wrote. `clara.firm_memberships` still carries no history, so
+ *  a rule recorded before that column existed reads `null` — UNKNOWN, which the
+ *  surface says in those words. It is never the current role by another name: the
+ *  two disagree exactly when it matters, after a promotion or a demotion. */
 export type FirmKnowledgeAuthority = {
   promoter: string;
   promoter_name: string | null;
@@ -292,6 +297,7 @@ export type FirmKnowledgeAuthority = {
   recorded_at: string;
   reason: string;
   required_role: string | null;
+  promoter_role_at_act: string | null;
   promoter_role_now: string | null;
   promoter_active: boolean;
 };
