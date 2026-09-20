@@ -27,6 +27,7 @@ import {
   getWatchDisposition,
   lastDispositionAct,
   type WatchDisposition,
+  type WatchDispositionEvent,
 } from "@/lib/firm/compliance-disposition";
 import {
   ackComplianceWatch,
@@ -104,6 +105,29 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
     return <p className="text-xs text-muted-foreground">{t("receiptNone")}</p>;
   }
 
+  return <WatchDispositionLine act={act} resolvedEvidence={disposition?.resolvedEvidence ?? null} />;
+}
+
+/**
+ * #996 — EXTRACTED, NOT COPIED, from what used to be this file's own inline JSX (the C88.10
+ * receipt's "there IS a recorded act" branch, byte-identical otherwise). `/settings/compliance`'s
+ * register panel needs the SAME rendering of an already-resolved `WatchDisposition`'s last act —
+ * without this file's own on-mount fetch, which that panel's own read (lib/firm-admin/compliance.ts's
+ * `loadComplianceWatchDispositions`) already performed once for every row, not once per row again.
+ * Reusing this exact component is what keeps the wording (and the actor-resolution rule) identical
+ * across all three C88.10 mount points, rather than a second copy of either free to drift from
+ * this one.
+ */
+export function WatchDispositionLine({
+  act,
+  resolvedEvidence,
+}: {
+  act: WatchDispositionEvent;
+  resolvedEvidence: string | null;
+}) {
+  const t = useTranslations("FirmAdminCompliance.needsYou");
+  const memberNames = useMemberNames(sessionTokenAccessor);
+
   const at = act.createdAt === null ? "" : businessDateTime(act.createdAt);
   const kind = act.eventKind ?? "";
   // `t.rich` rather than a resolved STRING, so the actor slot is the shared `MemberName` cell
@@ -124,9 +148,7 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
         <span>{t("receiptTransition", { before: act.stateBefore, after: act.stateAfter })}</span>
       ) : null}
       {act.rationale !== null ? <span>{t("receiptRationale", { rationale: act.rationale })}</span> : null}
-      {disposition?.resolvedEvidence != null ? (
-        <span>{t("receiptEvidence", { evidence: disposition.resolvedEvidence })}</span>
-      ) : null}
+      {resolvedEvidence != null ? <span>{t("receiptEvidence", { evidence: resolvedEvidence })}</span> : null}
       <span>{t("receiptNoVersion")}</span>
     </div>
   );
