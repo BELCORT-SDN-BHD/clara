@@ -690,6 +690,19 @@ refused, with which of the three ways the accrual failed to stand behind it.
 _Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
 as a posted one.
 
+**Accrual correction**:
+A restatement of an accrual's own particulars — amount, either account leg, the service period, the
+method or the instruction — that advances its schedule to a NEW plan revision and writes a
+SUCCESSOR accrual-adjustment row for it, naming the row it supersedes. The superseded row is kept,
+stamped with which row corrected it, and is otherwise unchanged; occurrences the schedule has
+already admitted keep naming the revision they ran under, so a correction reaches only what has not
+yet come due. It moves neither the schedule nor the authority window — those are the LIVE revision's
+own, carried through unchanged — because a correction restates what was STATED, not when or how
+often the plan runs.
+_Avoid_: The generic plan revision alone (it advances the schedule but leaves the accrual's own
+detail naming the first revision — #936's own bug); editing a posted entry; a second correction of
+an already-corrected row (refused by name: one correction per target).
+
 **Calculation method**:
 The rule that says WHICH stated amount each of a schedule's periods uses. It selects among amounts a
 person supplied; it computes none, which is why it is a closed set of named rules rather than a
