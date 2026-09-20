@@ -1403,29 +1403,44 @@ human as `cancel_blocked`.
 single-shot observations (one sweep, one read, twice) of facts the World produces asynchronously,
 and it discarded its own settle failures. Both observations reddened CI at random, on `main` and on
 a feature branch (jobs 105954490814 and 106051996127). Both are now bounded polls in
-`tests/queue-drain.mjs`'s shape — re-run the sweep, re-read the state, to `CLARA_P636_LEG4_DEADLINE_MS`
-(default 30 s, poll 500 ms) — with nothing weakened: the refusal count is cumulative over the
-polled sweeps and must still reach at least one, firm Q must still reach `cancelled`, `batchCancelOk`
-is now asserted on EVERY sweep rather than one, and a settle that cannot be performed is retried
-inside the same deadline and then named with its task id and last error instead of being swallowed.
-A deadline prints both firms, both parents, both states, every child's Work status and the last
-receipt, so a red is diagnosable from the job log alone.
+`tests/queue-drain.mjs`'s shape — re-run the sweep, re-read the state — each with ITS OWN measured
+deadline: `CLARA_P636_LEG4_P_DEADLINE_MS` 5 s for the refusal count (3.3x the worst lateness ever
+measured, and deliberately under the ~8 s in which the World drives firm P's own children terminal,
+past which no amount of waiting can help) and `CLARA_P636_LEG4_Q_DEADLINE_MS` 8 s for firm Q's
+terminal state (2.9x its worst, larger because the engine rather than this fixture produces it);
+poll 500 ms. Nothing is weakened: the refusal count is cumulative over the polled sweeps and must
+still reach at least one, it must now ALSO be ATTRIBUTED to firm P (`batchCancelBlocked`, which the
+belt raises only for a parent whose every child refused CLR04, plus `clara.get_intake_batch`'s own
+per-parent `cancel_blocked` verdict observed inside the same loop), firm Q must still reach
+`cancelled`, `batchCancelOk` is asserted on EVERY sweep rather than one, and a settle that cannot be
+performed is retried inside the deadline and then named with its task id and last error instead of
+being swallowed. A deadline prints both firms, both parents, both states, every child's Work status,
+the refusal and blocked counts, both `cancel_blocked` verdicts and the last receipt, so a red is
+diagnosable from the job log alone.
 
-Measured on a throwaway clone of a migrated database (WSL, Node 22): unperturbed, both polls
-converge on the FIRST sweep in under 20 ms, so the happy path costs nothing. Under
-`CLARA_P636_LEG4_FAULT=slow_settle` (firm Q's children held running with every settle held back)
-the leg's own settles never land and firm Q's parent still converges in 6 sweeps over 2774 ms —
-driven by the World — where the single-shot read failed at once. Under
-`CLARA_P636_LEG4_FAULT=late_poison` (the poisoned parent's decision lands 1.5 s late) the refusal
-is counted after 4 sweeps in 1516 ms, where the single-shot read failed at once. With the belt
-deliberately broken so a refusal is recorded as a success, the polled block still reds — at its
-deadline, after 59 sweeps in 30.5 s, with the census.
+Measured on throwaway clones of a migrated database (WSL, Node 22): unperturbed, both polls converge
+on the FIRST sweep in 8-40 ms, so the happy path costs nothing. Under
+`CLARA_P636_LEG4_FAULT=slow_settle` (firm Q's children held running with every settle held back) the
+leg's own settles never land and firm Q's parent still converges — 6 sweeps over 2774 ms, driven by
+the World — where the single-shot read failed at once. Under `CLARA_P636_LEG4_FAULT=late_poison` (the
+poisoned parent's decision lands 1.5 s late) the refusal is counted after 4 sweeps in 1554-1673 ms,
+where the single-shot read failed at once; that run is also the standing proof that the per-parent
+`cancel_blocked` verdict is not a constant, because the loop polls through three sweeps of `null`
+before it flips. With the belt deliberately broken so a refusal is recorded as a success, the polled
+block still reds — at its deadline, 11 sweeps in 5560 ms, with the census.
 
 **What #1027 did NOT fix, and how to recognise it.** Firm P's children are ordinary admitted Work,
-so the World can drive them terminal on its own within seconds; when it does, the parent has no
-live children left and the belt settles it — correctly. A leg slow enough to see that reds on
-"firm P's is honestly still stopping" or on the refusal deadline with the census showing P's
-children already `failed`. That is a different defect from the two above and is not addressed here.
+so the World can drive them terminal on its own within seconds; when it does, the parent has no live
+children left and the belt settles it — correctly. A leg slow enough to see that reds on "firm P's is
+honestly still stopping", or on the refusal deadline. THE CENSUS IS WHAT TELLS THAT APART FROM A REAL
+BELT REGRESSION, and firm P's children reading `failed` is not by itself the discriminator: the same
+census appears when the belt stops counting refusals at all. Read the counters instead.
+`blocked >= 1` (and `cancel_blocked=canceller_not_active` at the moment of the red) means the belt
+DID refuse firm P's children, so a terminal parent means the World terminalised them first: the
+separate, unfixed defect. `refusals=0 blocked=0` means the belt is not counting firm P's refusals at
+all: a regression, and exactly what this leg's vacuity control produces (measured: a `fanOutCancel`
+that records a CLR04 refusal as a success reds the P loop at its deadline after 11 sweeps in 5560 ms
+with `refusals=0 blocked=0`, throwaway clara_814).
 
 ## #1026 — the live gates' heap budget
 

@@ -127,13 +127,37 @@ const RESUME_N = Number(process.env.CLARA_P636_RESUME_N || 100);
 // sweep still asserts `batchCancelOk`; and a settle that cannot be performed is RETRIED inside the
 // same deadline and then NAMED — task id and last error — instead of being discarded.
 //
-// READING A DEADLINE THAT DOES FIRE. The message carries both firms, both parents, both states and
-// every child's Work status. If firm P's children are already `failed` there, this race is not what
-// happened: the poisoned parent was declared done because its children died on their own under the
-// World, which is a different (and correct) belt behaviour meeting a leg that assumes they stay
-// live. That is NOT fixed here — it is a separate defect, recorded in #1027's report as a
-// follow-up — and the census is what lets the next reader tell the two apart in one glance.
-const LEG4_DEADLINE_MS = Number(process.env.CLARA_P636_LEG4_DEADLINE_MS || 30000);
+// READING A DEADLINE THAT DOES FIRE, AND THE DISCRIMINATOR THAT MAKES IT READABLE. The message
+// carries both firms, both parents, both states, every child's Work status, the cumulative refusal
+// and BLOCKED counts and the estate's own per-parent `cancel_blocked` verdict. Firm P's children
+// reading `failed` is CONSISTENT WITH, but does not by itself establish, the separate defect below:
+// the same census appears when the belt stops counting refusals at all, which is what this leg's
+// vacuity control produces. What tells them apart is the blocked signal — `blocked >= 1` with
+// `cancel_blocked=canceller_not_active` means the belt DID refuse firm P's children and the parent
+// went terminal because the World had already terminalised them (the separate defect, NOT fixed
+// here); `blocked = 0` with `refusals = 0` means the belt is not counting firm P's refusals, which
+// is a regression in the belt and is this leg's business.
+//
+// THE FAULT KNOB STAYS, DELIBERATELY (review SPEC-1027-04). It is the only way to re-run the red
+// this fix removes, it is how the fix round re-verified both deadlines, and it is inert by default
+// on both branches (`LEG4_FAULT` empty, `settleGateUntil` 0).
+//
+// TWO DEADLINES, NOT ONE, AND EACH IS MEASURED (review SPEC-1027-01).
+//   P-loop 5 s. The worst lateness ever measured for the refusal is 1516 ms (4 sweeps under
+//   `late_poison` at 1.5 s, throwaway clara_929) against 10-102 ms unperturbed, so this is 3.3x the
+//   worst case. It is also WELL under the ~8 s in which the World drives firm P's OWN children to
+//   `failed` (clara_922, clara_927, clara_933): past that point the belt correctly settles firm P's
+//   parent and the disjointness assertion below reds whatever this loop does, so a longer deadline
+//   here cannot buy a pass. It buys a LATER red, in a different place, with a census that looks
+//   like a different defect. Five seconds is the largest number that is still inside the band where
+//   waiting can still help.
+//   Q-loop 8 s. The worst measured convergence is 2774 ms (6 sweeps under `slow_settle`,
+//   clara_928 — where this leg's own settles never landed at all and the WORLD drove the runs
+//   terminal), so this is 2.9x it. It is deliberately larger than the P-loop's because the fact it
+//   waits for is produced by the engine rather than by this fixture, and it still leaves LEG 4's
+//   total polling bounded by 13 s against the 60 s one shared 30 s constant allowed.
+const LEG4_P_DEADLINE_MS = Number(process.env.CLARA_P636_LEG4_P_DEADLINE_MS || 5000);
+const LEG4_Q_DEADLINE_MS = Number(process.env.CLARA_P636_LEG4_Q_DEADLINE_MS || 8000);
 const LEG4_POLL_MS = Number(process.env.CLARA_P636_LEG4_POLL_MS || 500);
 // THE FAULT KNOB, on `CLARA_WORK_TEST_FAULT`'s precedent: inert unless asked for, and it moves
 // only WHEN THIS FIXTURE ACTS — never what the belt does. Two values, one per observation, each
@@ -151,7 +175,9 @@ const LEG4_POLL_MS = Number(process.env.CLARA_P636_LEG4_POLL_MS || 500);
 // belt's `skip locked` worklist pass it by, it made the whole sweep WAIT (8087 ms under an 8000 ms
 // lock, clara_923) and then proceed, which perturbs the leg's clock rather than its observations.
 const LEG4_FAULT = process.env.CLARA_P636_LEG4_FAULT || "";
-const LEG4_FAULT_MS = Number(process.env.CLARA_P636_LEG4_FAULT_MS || 6000);
+// The default is 1500 ms: the lateness both faults were MEASURED at, and comfortably inside the
+// P-loop deadline above. A fault longer than that deadline is a vacuity control, not a repro.
+const LEG4_FAULT_MS = Number(process.env.CLARA_P636_LEG4_FAULT_MS || 1500);
 
 const pdfBytes = (marker) =>
   Buffer.from(`%PDF-1.7\n1 0 obj << /Type /Page /Marker (${marker}) >> endobj\nstartxref\n0\n%%EOF\n`);
@@ -664,106 +690,188 @@ async function main() {
     await applyPoison();
   }
   /** WHAT A DEADLINE IN THIS LEG SAYS. Both firms by name, both parents by id, the state actually
-   *  observed on each, every child's Work status and current task, the last belt receipt and how
-   *  long the leg waited — read FRESH at the moment of failure, so a red in CI is diagnosable from
-   *  the job log alone (the whole point of #1027: the two reds it replaces said only
-   *  `actual: 'cancelling'`). */
-  async function leg4Diagnosis(headline, { sweeps, elapsedMs, receipt, settles = null }) {
+   *  observed on each, every child's Work status and current task, the BLOCKED count and the
+   *  estate's own per-parent `cancel_blocked` verdict, the last belt receipt and how long the leg
+   *  waited — read FRESH at the moment of failure, so a red in CI is diagnosable from the job log
+   *  alone (the whole point of #1027: the two reds it replaces said only `actual: 'cancelling'`).
+   *
+   *  THE DISCRIMINATOR (review SPEC-1027-03). `blocked` and `cancel_blocked` are what tell the two
+   *  failures apart when firm P's children read `failed`:
+   *    blocked >= 1 / cancel_blocked=canceller_not_active — the belt DID see and refuse firm P's
+   *      children; if its parent is nevertheless terminal, the World drove those children terminal
+   *      first and the belt settled the parent correctly. That is the separate, unfixed defect.
+   *    blocked = 0 AND refusals = 0 — the belt is not counting firm P's refusals at all. That is a
+   *      REGRESSION in the belt, and it is exactly what the vacuity control (`fanOutCancel`
+   *      rewritten so a CLR04 refusal records as a success) produces. */
+  async function leg4Diagnosis(headline, { sweeps, elapsedMs, deadlineMs, receipt, settles = null }) {
     const census = async (ids) => (await rig.rootQuery(
       "select id, status, current_task_id from clara.accounting_work where id = any($1::uuid[]) order by id",
       [ids])).rows;
     const [p, q] = [await batchState(pBatch), await batchState(qBatch)];
+    const verdict = async (owner, batch) => {
+      try {
+        return (await getBatch(owner, batch))?.cancel_blocked ?? null;
+      } catch (err) {
+        return `unreadable: ${err?.message ?? err}`;
+      }
+    };
     return `${headline} — after ${sweeps} sweep(s) in ${elapsedMs}ms `
-      + `(deadline ${LEG4_DEADLINE_MS}ms, poll ${LEG4_POLL_MS}ms).\n`
+      + `(deadline ${deadlineMs}ms, poll ${LEG4_POLL_MS}ms).\n`
       + `  firm P (poisoned) parent=${pBatch} state=${p?.state} `
-      + `children=${JSON.stringify(await census(pChildren.map((c) => c.work_id)))}\n`
+      + `cancel_blocked=${await verdict(P.owner, pBatch)} `
+      + `refusals=${pWatch.refusals} blocked=${pWatch.blocked} over ${pWatch.sweeps} sweep(s)\n`
+      + `    children=${JSON.stringify(await census(pChildren.map((c) => c.work_id)))}\n`
       + `  firm Q (healthy)  parent=${qBatch} state=${q?.state} `
-      + `children=${JSON.stringify(await census(qChildren.map((c) => c.work_id)))}\n`
+      + `cancel_blocked=${await verdict(Q.owner, qBatch)}\n`
+      + `    children=${JSON.stringify(await census(qChildren.map((c) => c.work_id)))}\n`
       + `  last belt receipt: ${JSON.stringify(receipt)}`
       + (settles ? `\n  settles: ${JSON.stringify(settles)}` : "");
   }
 
-  // (1) FIRM P'S REFUSALS ARE COUNTED — over the polled sweeps, never from a single one. The
-  //     count is CUMULATIVE: a refusal seen on any sweep is a refusal counted, and 0 across the
-  //     whole deadline is the failure.
-  const leg4StartedAt = Date.now();
-  const pWatch = { sweeps: 0, refusals: 0, blocked: 0, receipt: null };
-  for (;;) {
-    pWatch.sweeps += 1;
-    const sweep = await withRuntime((c) => reconcileIntakeBatchCancellations(c, { withRuntime }));
-    pWatch.receipt = sweep;
-    // UNCHANGED, AND NOW ASSERTED ON EVERY SWEEP rather than on one: a belt that says "we do not
-    // know" is a failure to report at once, never something to poll through.
-    assert.equal(sweep.batchCancelOk, true,
-      "a permanently-refusing firm never makes the belt claim 'we do not know' about the whole estate");
-    pWatch.refusals += (sweep.batchCancelFailed ?? 0);
-    pWatch.blocked += (sweep.batchCancelBlocked ?? 0);
-    if (pWatch.refusals >= 1) break;
-    if (Date.now() - leg4StartedAt >= LEG4_DEADLINE_MS) {
-      throw new Error(await leg4Diagnosis(
-        "firm P's refusals are COUNTED, not swallowed: batchCancelFailed stayed 0",
-        { sweeps: pWatch.sweeps, elapsedMs: Date.now() - leg4StartedAt, receipt: sweep }));
+  /** THE ONE WAIT SHAPE IN THIS LEG, taking its deadline as an argument so each loop's own
+   *  measured number is visible at its call site (review STD-3 / SPEC-1027-01). `step(sweeps)`
+   *  returns true when the fact has landed; `diagnose(ctx)` builds the deadline's message. */
+  async function pollToDeadline({ deadlineMs, step, diagnose }) {
+    const startedAt = Date.now();
+    for (let sweeps = 1; ; sweeps += 1) {
+      if (await step(sweeps)) return { sweeps, elapsedMs: Date.now() - startedAt };
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= deadlineMs) throw new Error(await diagnose({ sweeps, elapsedMs, deadlineMs }));
+      await sleep(LEG4_POLL_MS);
     }
-    await sleep(LEG4_POLL_MS);
   }
-  console.log(`[p636] LEG4 firm P refusals COUNTED: ${pWatch.refusals} refusal(s), `
-    + `blocked=${pWatch.blocked}, over ${pWatch.sweeps} sweep(s) in ${Date.now() - leg4StartedAt}ms`);
-  assert.ok(pWatch.refusals >= 1, "firm P's refusals are COUNTED, not swallowed");
 
-  // (2) Firm Q's children were still asked, and its parent settles once its runs do — polled to
-  //     the same deadline, with the settle RETRIED inside it and its failure never discarded.
+  // (1) FIRM P'S REFUSALS ARE COUNTED — over the polled sweeps, never from a single one. The count
+  //     is CUMULATIVE: a refusal seen on any sweep is a refusal counted, and 0 across the whole
+  //     deadline is the failure.
+  //
+  //     AND THEY ARE ATTRIBUTED TO FIRM P (review SPEC-1027-02). `batchCancelFailed` is ESTATE-WIDE
+  //     — `reconciler-batches.mjs` increments it in a catch-all for ANY parent on the worklist, and
+  //     LEG 2's parent is still `cancelling` and still on that worklist here — so a poll that
+  //     accepted it alone could be satisfied by somebody else's error, once per sweep. The belt's
+  //     `batchCancelBlocked` is incremented ONLY for a parent whose refusals are ALL CLR04, which in
+  //     this leg is firm P and nothing else, and the estate's own per-parent door is asserted after
+  //     the loop. Neither counter's meaning changes and the belt is untouched.
+  const pWatch = { sweeps: 0, refusals: 0, blocked: 0, doorVerdict: null, receipt: null };
+  const pRun = await pollToDeadline({
+    deadlineMs: LEG4_P_DEADLINE_MS,
+    step: async (sweeps) => {
+      pWatch.sweeps = sweeps;
+      const sweep = await withRuntime((c) => reconcileIntakeBatchCancellations(c, { withRuntime }));
+      pWatch.receipt = sweep;
+      // UNCHANGED, AND NOW ASSERTED ON EVERY SWEEP rather than on one: a belt that says "we do not
+      // know" is a failure to report at once, never something to poll through.
+      assert.equal(sweep.batchCancelOk, true,
+        "a permanently-refusing firm never makes the belt claim 'we do not know' about the whole estate");
+      pWatch.refusals += (sweep.batchCancelFailed ?? 0);
+      pWatch.blocked += (sweep.batchCancelBlocked ?? 0);
+      // THE PER-PARENT VERDICT IS OBSERVED ON THE SAME SWEEP, INSIDE THE SAME DEADLINE (review
+      // SPEC-META-01). It is a fact the World can invalidate — once firm P's children go terminal
+      // the parent leaves `cancelling` and the field reads null again — so reading it once after
+      // the loop would be the very shape #1027 exists to delete.
+      pWatch.doorVerdict = (await getBatch(P.owner, pBatch)).cancel_blocked ?? null;
+      return pWatch.refusals >= 1 && pWatch.blocked >= 1
+        && pWatch.doorVerdict === "canceller_not_active";
+    },
+    diagnose: (ctx) => leg4Diagnosis(
+      "firm P's refusals are COUNTED AND ATTRIBUTED: no sweep reported a refusal, a blocked parent "
+      + "and the door's own `canceller_not_active` together",
+      { ...ctx, receipt: pWatch.receipt }),
+  });
+  console.log(`[p636] LEG4 firm P refusals COUNTED: ${pWatch.refusals} refusal(s), `
+    + `blocked=${pWatch.blocked}, door=${pWatch.doorVerdict}, `
+    + `over ${pRun.sweeps} sweep(s) in ${pRun.elapsedMs}ms`);
+  assert.ok(pWatch.refusals >= 1, "firm P's refusals are COUNTED, not swallowed");
+  assert.ok(pWatch.blocked >= 1,
+    "…and they are ATTRIBUTED: a parent whose every child refused CLR04 is counted as BLOCKED, "
+    + "which on this worklist is firm P's condition and nobody else's");
+  // THE SAME FACT AT THE ESTATE'S OWN PER-PARENT DOOR, which no other firm's error can satisfy:
+  // `clara.get_intake_batch` derives `cancel_blocked` from the stored canceller's LIVE membership
+  // (0229:1088-1095), so it names firm P and only firm P. Established INSIDE the loop above; this
+  // restates it, as the two lines before it restate their own counters.
+  assert.equal(pWatch.doorVerdict, "canceller_not_active",
+    "the door reports firm P's stop as BLOCKED by its own canceller's lost authority");
+  // NO PAIRED CONTROL ON FIRM Q, AND THE REASON IS THE DOOR'S OWN DERIVATION (review SPEC-META-01):
+  // `cancel_blocked` is computed only while a parent is `cancelling` (0229:1088), and no moment in
+  // this leg holds firm Q there deterministically — its own sweeps, or the leader's, can settle it
+  // at any point — so a `cancel_blocked === null` on firm Q would assert a constant, which is worse
+  // than no cell at all. What keeps the verdict above honest is measured instead: under
+  // `CLARA_P636_LEG4_FAULT=late_poison` this very loop polls while the door reads null and converges
+  // only when it flips (4 sweeps / 1673 ms, throwaway clara_802), and under the vacuity control it
+  // never converges at all.
+
+  // (2) Firm Q's children were still asked, and its parent settles once its runs do — polled to its
+  //     OWN deadline, with the settle RETRIED inside it and its failure never discarded.
   // THE SECOND FAULT: `slow_settle` holds every settle back for `CLARA_P636_LEG4_FAULT_MS`, which
   // is the documented mechanism of CI job 106051996127's red — "a settle that has not landed by
   // the time the second sweep runs leaves firm Q's parent in `cancelling`".
   const settleGateUntil = LEG4_FAULT === "slow_settle" ? Date.now() + LEG4_FAULT_MS : 0;
   const settleGateOpen = () => Date.now() >= settleGateUntil;
-  const qSettles = qChildren.map((child) => ({ work_id: child.work_id, task_id: null, settled: false, error: null }));
+  // EACH CHILD CARRIES ITS OWN STATE, not one overloaded error string (review SPEC-1027-06):
+  // "settled" and "nothing-to-settle" are outcomes, "settle-refused" is a failure, and a reader can
+  // tell them apart at a glance in the deadline message.
+  const qSettles = qChildren.map((child) => ({
+    work_id: child.work_id, task_id: null, work_status: null, state: "not-attempted", error: null,
+  }));
   const qWatch = { sweeps: 0, state: null, receipt: null };
-  const qStartedAt = Date.now();
-  for (;;) {
-    for (const s of qSettles) {
-      if (s.settled) continue;
-      const task = (await rig.rootQuery(
-        "select current_task_id from clara.accounting_work where id=$1", [s.work_id])).rows[0]?.current_task_id;
-      s.task_id = task ?? s.task_id;
-      if (!task) { s.error = "no current task to settle at this poll"; continue; }
-      if (!settleGateOpen()) { s.error = `held back by CLARA_P636_LEG4_FAULT=${LEG4_FAULT}`; continue; }
-      try {
-        await settleRun(task, "cancelled");
-        s.settled = true; s.error = null;
-      } catch (err) {
-        // #1027: NEVER `.catch(() => {})` again. A settle that cannot be performed is RETRIED on
-        // the next poll, and if the deadline expires it is named — task id and last error — in
-        // the failure message instead of vanishing.
-        s.error = `${err?.code ?? ""} ${err?.message ?? err}`.trim();
+  const qRun = await pollToDeadline({
+    deadlineMs: LEG4_Q_DEADLINE_MS,
+    step: async (sweeps) => {
+      qWatch.sweeps = sweeps;
+      for (const s of qSettles) {
+        if (s.state === "settled") continue;
+        const row = (await rig.rootQuery(
+          "select status, current_task_id from clara.accounting_work where id=$1", [s.work_id])).rows[0];
+        s.work_status = row?.status ?? null;
+        s.task_id = row?.current_task_id ?? s.task_id;
+        if (!row?.current_task_id) {
+          // NOT AN ERROR. A child the World has already driven terminal has no run left to settle,
+          // and printing that beside a genuine refusal is the opposite of diagnosable.
+          s.state = "nothing-to-settle";
+          s.error = null;
+          continue;
+        }
+        if (!settleGateOpen()) {
+          s.state = "held-by-fault";
+          s.error = `held back by CLARA_P636_LEG4_FAULT=${LEG4_FAULT}`;
+          continue;
+        }
+        try {
+          await settleRun(row.current_task_id, "cancelled");
+          s.state = "settled";
+          s.error = null;
+        } catch (err) {
+          // #1027: NEVER `.catch(() => {})` again. A settle that cannot be performed is RETRIED on
+          // the next poll, and if the deadline expires it is named — task id and last error — in
+          // the failure message instead of vanishing.
+          s.state = "settle-refused";
+          s.error = `${err?.code ?? ""} ${err?.message ?? err}`.trim();
+        }
       }
-    }
-    qWatch.sweeps += 1;
-    qWatch.receipt = await withRuntime((c) => reconcileIntakeBatchCancellations(c, { withRuntime }));
-    assert.equal(qWatch.receipt.batchCancelOk, true,
-      "a permanently-refusing firm never makes the belt claim 'we do not know' about the whole estate");
-    qWatch.state = (await batchState(qBatch))?.state ?? null;
-    if (qWatch.state === "cancelled") break;
-    if (Date.now() - qStartedAt >= LEG4_DEADLINE_MS) {
-      throw new Error(await leg4Diagnosis(
-        "firm Q's batch, swept in the SAME belt call as firm P's poison, never reached its terminal state",
-        { sweeps: qWatch.sweeps, elapsedMs: Date.now() - qStartedAt, receipt: qWatch.receipt, settles: qSettles }));
-    }
-    await sleep(LEG4_POLL_MS);
-  }
-  console.log(`[p636] LEG4 firm Q terminal after ${qWatch.sweeps} sweep(s) in ${Date.now() - qStartedAt}ms; `
+      qWatch.receipt = await withRuntime((c) => reconcileIntakeBatchCancellations(c, { withRuntime }));
+      assert.equal(qWatch.receipt.batchCancelOk, true,
+        "a permanently-refusing firm never makes the belt claim 'we do not know' about the whole estate");
+      qWatch.state = (await batchState(qBatch))?.state ?? null;
+      return qWatch.state === "cancelled";
+    },
+    diagnose: (ctx) => leg4Diagnosis(
+      "firm Q's batch, swept in the SAME belt call as firm P's poison, never reached its terminal state",
+      { ...ctx, receipt: qWatch.receipt, settles: qSettles }),
+  });
+  console.log(`[p636] LEG4 firm Q terminal after ${qRun.sweeps} sweep(s) in ${qRun.elapsedMs}ms; `
     + `settles=${JSON.stringify(qSettles)}`);
   assert.equal(qWatch.state, "cancelled",
     "firm Q's batch, swept in the SAME belt call as firm P's poison, still reached its terminal state");
-  // THE DISJOINTNESS, unpolled ON PURPOSE: this one is a NEGATIVE, and a negative that converges
-  // is a negative that was never true. It is read once, at the end, and its message carries the
-  // same census as a deadline would — firm P's parent going terminal here means its children went
-  // terminal on their own (the World ran them), which is a different fact from the two above and
-  // must not be mistaken for one.
+  // THE DISJOINTNESS, unpolled ON PURPOSE: this one is a NEGATIVE, and a negative that converges is
+  // a negative that was never true. It is read once, at the end, and its message carries the same
+  // census as a deadline would — firm P's parent going terminal here, WITH blocked >= 1 and the
+  // door's `canceller_not_active`, means its children went terminal on their own under the World,
+  // which is a different fact from the two above and must not be mistaken for one.
   const pFinal = await batchState(pBatch);
   const pTail = pFinal?.state === "cancelling" ? "" : `\n  ${await leg4Diagnosis(
     "firm P was declared done while this leg watched",
-    { sweeps: pWatch.sweeps + qWatch.sweeps, elapsedMs: Date.now() - leg4StartedAt, receipt: qWatch.receipt })}`;
+    { sweeps: pRun.sweeps + qRun.sweeps, elapsedMs: pRun.elapsedMs + qRun.elapsedMs,
+      deadlineMs: LEG4_P_DEADLINE_MS + LEG4_Q_DEADLINE_MS, receipt: qWatch.receipt })}`;
   assert.equal(pFinal.state, "cancelling",
     "…and firm P's is honestly still stopping, rather than silently declared done" + pTail);
   void pChildren;
