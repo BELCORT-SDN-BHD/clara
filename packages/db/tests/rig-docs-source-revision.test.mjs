@@ -882,8 +882,11 @@ cell("p646.question.version: a changed source and an open Work question — meas
       "the revision receipt names the ONE Work its correction retired");
     assert.equal(revision.superseded_work[0].work_id, admitted.work_id);
     assert.equal(revision.superseded_work[0].reason, "source_corrected");
+    assert.equal(revision.superseded_work[0].replaced, true,
+      "this fixture's basis is the human's own (user_direct), so a successor IS admitted");
     assert.equal(rowAfter.superseded_by, revision.superseded_work[0].new_work_id,
-      "the Work points at the successor admitted on the corrected reading");
+      "the Work points at the successor, which carries the SAME admitted instruction and re-reads "
+      + "the corrected document (a DERIVED basis is not carried at all -- see w885.interpreted.not_carried)");
     assert.equal(rowAfter.status, "cancelled", "…and its question is closed");
     assert.ok(answered, "ANSWERING AT THE PRE-REVISION VERSION IS REFUSED — the ruling, measured");
     assert.equal(answered.code, "CLR13", "…as a convergence");

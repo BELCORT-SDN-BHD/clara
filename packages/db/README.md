@@ -865,7 +865,7 @@ the corrected document and the still-answerable question coexist):
 |---|---|
 | `clara._source_corrected_work(uuid,uuid)` | The ONE rule: a Work of this firm that still has a PENDING question, names this document in its own `source_refs`, holds NO committed receipt, and is in `queued` / `running` / `awaiting_input`. The write-side twin of `list_source_dependents`' `work_questions` arm, narrowed by the last two terms. Ungranted. |
 | `clara._lock_source_corrected_work(uuid,uuid)` | Takes the `accounting_work → agent_tasks → agent_interruptions` rungs for that set and returns exactly the ids it locked. Ungranted. |
-| `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and calls `clara.restate_accounting_work` once per Work. Ungranted. |
+| `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and retires each Work — through `clara.restate_accounting_work` when a successor may be admitted, through `clara.cancel_accounting_work` alone when it may not. Ungranted. |
 
 **The four supersession writes are not re-spelled.** `clara.restate_accounting_work` (0200 §E)
 already admits the successor, stamps `supersedes`, stamps `superseded_by` on the old Work and
@@ -873,12 +873,27 @@ cancels it through `clara.cancel_accounting_work` — which appends the single `
 event whose payload carries `outcome = 'superseded'` and the successor's id, the link the activity
 feed renders (#840). 0268 registers **no** new event type and **no** taxonomy row.
 
-**The successor carries the same admitted basis, `basis_origin` and `source_refs`, verbatim.** The
-instruction did not change, the document did; the new Work is admitted `queued` and its run reads the
-corrected reading from the top. The REASON is durable in two places: the successor's `intent_key` and
-the restatement's op key both read `source_corrected:<revision id>:<old work id>`, on
-`clara.accounting_work` and `clara.op_receipts` respectively — plus the `superseded_work` array 0268
-adds to the revision's receipt and audit row.
+**Every affected Work is retired. A successor is admitted only when the instruction survived the
+correction.** A `user_direct` basis is what a human asked for: correcting what the document *says*
+does not change it, so the successor carries that basis, its `basis_origin` and its `source_refs`
+verbatim, is admitted `queued`, and its run reads the corrected reading from the top. A
+`clara_interpreted` basis was DERIVED from the reading that just moved, and re-admitting it verbatim
+would be an instruction that is now false — `clara._record_journal_entry_core` compares a posted basis
+against the Work's `basis_digest` (fixed at admission) and nothing in the estate compares a posted
+amount against the document's facts, so such a successor could post ONLY the pre-correction figure,
+against the corrected document, and be accepted. That Work is therefore cancelled and **not**
+replaced, and the receipt says so (`replaced: false`, `not_replaced_reason: "interpreted_basis"`).
+The split is the estate's own: 0184's BASIS GATE in `clara.take_over_accounting_work` already treats
+`user_direct` as carryable and anything else as needing a human's confirmation.
+
+The REASON is durable on the cancellation's own op key — and, when a successor exists, on its
+`intent_key` too — both reading `source_corrected:<revision id>:<old work id>`, on
+`clara.op_receipts` and `clara.accounting_work` respectively, plus the `superseded_work` array 0268
+adds to the revision's receipt and audit row. It is a *derived key*, not a first-class cancellation
+reason: `clara.cancel_accounting_work(uuid,uuid,text)` takes no reason argument and its
+`work.cancelled` payload carries none, so a feed row recovers the cause by reading that key. Giving
+the cancellation a reason column or event key is a recut of 0199's door and belongs to the ticket
+that needs it (#840).
 
 **The lock order is why `clara.documents` is no longer this door's first lock.** The declared global
 order is `accounting_plans → accounting_work → agent_tasks → agent_interruptions` (0193:248). The
@@ -890,10 +905,15 @@ against any posting transaction. So `clara.revise_document_fact` takes the Work 
 the lock helper, and 0217's own document lock — unmoved, not one line changed — now sits below them.
 0268's tail asserts that order positionally in the committed body text.
 
-**If a replacement cannot be admitted, the whole correction refuses.** `restate_accounting_work`'s
-own typed refusals (a non-journal purpose, a document already backing a posted entry, an inactive
-client) propagate; nothing half-done commits. A correction that cancelled a Work and could not
-replace it would leave a professional with neither the old question nor a new one.
+**If a replacement cannot be admitted, the Work is still retired and the correction still commits.**
+`restate_accounting_work` raises typed refusals that are about a *Work* rather than about the
+document: a non-journal purpose, a document that already backs a posted entry **of some other
+Work**, a client gone inactive. Letting those propagate made a human door hostage to a Work the human
+was not acting on — measured on the lane rig: a sibling Work's posting refused a bookkeeper's
+correction outright with CLR13 `source_already_posted`, naming an entry they never touched. Only
+`CLR10`/`CLR13` are caught that way, the reason is carried to the receipt
+(`not_replaced_reason`), and the Work is cancelled through 0199's door regardless. An authority
+refusal (`CLR04`) is never downgraded and still stops the call.
 
 **`clara.answer_work_question` gains one word, not an arm.** Its existing CLR13 status refusal reads
 `detail.reason = 'superseded'` — instead of `cancelled` — when the question was closed by the cancel

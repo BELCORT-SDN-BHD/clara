@@ -47,11 +47,25 @@
 -- restatement door, per Work. A viewer cannot correct a fact and therefore cannot restate; an
 -- agent identity cannot do either.
 --
--- WHAT THE REPLACEMENT CARRIES. The SAME admitted basis, the SAME `basis_origin` and the SAME
--- `source_refs`, verbatim off the old row — because the INSTRUCTION did not change, the DOCUMENT
--- did. The successor is admitted `queued`, so the run that picks it up reads the document's
--- CORRECTED reading from the top and asks its own question against it. Re-deriving a basis from
--- the corrected facts is not this door's judgement to make: a basis is what a human asked for.
+-- WHAT THE REPLACEMENT CARRIES, AND WHEN THERE IS NO REPLACEMENT AT ALL (fix round, review
+-- findings L09-ADV-01 and L09-SPEC-02). A `user_direct` basis is what a HUMAN asked for: correcting
+-- what the document SAYS does not change it, so the successor carries that basis, its
+-- `basis_origin` and its `source_refs` verbatim off the old row, is admitted `queued`, and its run
+-- reads the CORRECTED reading from the top.
+--
+-- A `clara_interpreted` basis is NOT an instruction anybody gave. It is what Clara DERIVED from the
+-- very reading that has just been corrected, and re-admitting it verbatim hands the successor an
+-- instruction that is now false. That is not cosmetic: `clara._record_journal_entry_core` compares
+-- the posted basis against the Work's `basis_digest`, which is fixed at admission, and NOTHING in
+-- the estate compares a posted amount against the document's facts — so a successor carrying a
+-- derived basis can post ONLY the pre-correction figure, against the corrected document, and be
+-- accepted. Re-deriving the basis from the corrected facts is not this door's judgement to make.
+-- So for that origin the Work is RETIRED AND NOT REPLACED, and the receipt says so by name
+-- (`replaced: false`, `not_replaced_reason: 'interpreted_basis'`).
+--
+-- THE SPLIT IS THE ESTATE'S OWN, not this file's invention: `clara.take_over_accounting_work`
+-- (0184's BASIS GATE) already treats a `user_direct` basis as carryable and anything else as
+-- needing a human's confirmation of the figures before the Work changes hands.
 --
 -- WHICH WORKS ARE AFFECTED — ONE RULE, `clara._source_corrected_work`, and nothing else in this
 -- file re-states it. A Work of this firm that (a) still has a PENDING question, (b) names this
@@ -87,12 +101,22 @@
 -- serialises `clara.open_work_question` against a document row, so that is a property of the
 -- world at the moment of correction rather than a gap this file could close by locking harder.
 --
--- IF A REPLACEMENT CANNOT BE ADMITTED, THE WHOLE CORRECTION REFUSES. `clara.restate_accounting_work`
--- raises typed refusals of its own (a non-journal purpose, a document that already backs a posted
--- entry, a client gone inactive). None is swallowed: the correction refuses with that door's own
--- (errcode, detail.reason) and nothing half-done commits. Fail-closed is the only posture
--- compatible with the ruling — a correction that cancelled a Work and could not replace it would
--- leave a professional with neither the old question nor a new one.
+-- IF A REPLACEMENT CANNOT BE ADMITTED, THE WORK IS STILL RETIRED AND THE CORRECTION STILL COMMITS
+-- (fix round, review finding L09-ADV-03). `clara.restate_accounting_work` raises typed refusals of
+-- its own that are about a Work rather than about the document: a non-journal purpose, a document
+-- that ALREADY BACKS A POSTED ENTRY of some OTHER Work, a client gone inactive. This file used to
+-- let all three propagate, and that made a human door hostage to a Work the human was not acting
+-- on — MEASURED: a sibling Work's posting refused a bookkeeper's correction outright with CLR13
+-- `source_already_posted`, naming an entry they never touched, with no way forward.
+--
+-- The posture is now the ruling's own two halves, ranked. The non-negotiable half is that NOBODY
+-- may answer a question asked against a corrected reading: every affected Work is retired, through
+-- 0199's `clara.cancel_accounting_work` — the same door the restatement's own step 4 calls, so the
+-- single `work.cancelled` event still has exactly one spelling. The best-effort half is the
+-- successor: it is admitted when the instruction survives the correction AND the restatement door
+-- accepts it, and otherwise the retirement is recorded with the door's OWN `detail.reason` on the
+-- receipt. Only `CLR10`/`CLR13` (payload and world refusals) are caught that way; an authority
+-- refusal (`CLR04`) is never downgraded and still stops the call.
 --
 -- THE ANSWER DOOR GAINS ONE WORD, NOT A NEW ARM. A question closed by the cancel cascade already
 -- refuses CLR13; this file makes its `detail.reason` read `superseded` (instead of `cancelled`)
@@ -103,10 +127,16 @@
 --
 -- THIS FILE CREATES NO RELATION, NO EVENT TYPE AND NO TAXONOMY ROW. The cancellation is recorded
 -- by 0199's existing `work.cancelled` event (already carrying `outcome` and `superseded_by`); the
--- REASON is carried by the successor's `intent_key` and the restatement's op key, both of which
--- read `source_corrected:<revision id>:<old work id>` and are durable on `clara.accounting_work`
--- and `clara.op_receipts` respectively, and by the `superseded_work` array this file adds to the
--- revision's own receipt, audit row and `document.fact_revised` reader contract.
+-- REASON is carried by the cancellation's own op key — and, when a successor is admitted, by that
+-- successor's `intent_key` too — both of which read `source_corrected:<revision id>:<old work id>`
+-- and are durable on `clara.op_receipts` and `clara.accounting_work` respectively, and by the
+-- `superseded_work` array this file adds to the revision's own receipt and audit row.
+--
+-- WHAT THAT SHAPE DOES NOT GIVE (fix round, review finding L09-SPEC-07): the reason is a DERIVED
+-- KEY, not a first-class cancellation reason. `clara.cancel_accounting_work(uuid,uuid,text)` takes
+-- no reason argument and its `work.cancelled` payload carries none, so a feed row can recover WHY
+-- a Work was retired only by reading that op key. Giving the cancellation a reason of its own is a
+-- recut of 0199's door and belongs to the ticket that needs it (#840's feed surface).
 --
 -- EVERY (errcode, detail.reason) PAIR THIS FILE RAISES AT RUNTIME: NONE THAT IS NEW. The three
 -- new bodies raise nothing of their own; the two recuts keep every refusal they had, and
@@ -328,18 +358,28 @@ comment on function clara._lock_source_corrected_work(uuid,uuid) is
 -- that became eligible in between must not be touched at all, because this transaction never
 -- locked it.
 --
--- THE KEY IS DERIVED AND DETERMINISTIC. `source_corrected:<revision>:<work>` is both the
--- successor's `intent_key` (durable on clara.accounting_work, unique per firm+client) and this
--- restatement's op key (durable on clara.op_receipts), so the REASON a Work was retired is a
--- fact on two relations rather than prose in a comment. The revision id makes it unique per
--- correction, which is what keeps a second correction of the same document from replaying the
--- first one's restatement.
+-- THE KEY IS DERIVED AND DETERMINISTIC. `source_corrected:<revision>:<work>` is the successor's
+-- `intent_key` (durable on clara.accounting_work, unique per firm+client), this restatement's op
+-- key, and — when no successor is admitted — the plain cancellation's op key (both durable on
+-- clara.op_receipts), so the REASON a Work was retired is a fact on a relation rather than prose
+-- in a comment. The revision id makes it unique per correction, which is what keeps a second
+-- correction of the same document from replaying the first one's effect.
+--
+-- TWO ARMS, ONE RETIREMENT (fix round, L09-ADV-01 and L09-ADV-03 — see this file's header for the
+-- measurements). EVERY affected Work is retired. A SUCCESSOR is admitted only when the retired
+-- Work's instruction survives the correction (`basis_origin = 'user_direct'`) and 0200's door
+-- actually accepts it; otherwise the Work is cancelled through 0199's own door with no successor
+-- and the receipt carries `replaced: false` plus the reason. Retiring through
+-- `clara.cancel_accounting_work` here is not a second spelling of the supersession: it is the
+-- ABSENCE of three of its four writes, and §T asserts that this body still mints no `supersedes`,
+-- no `superseded_by` and no admission of its own.
 create or replace function clara._supersede_source_corrected_work(p_document uuid, p_firm uuid,
     p_locked uuid[], p_actor uuid, p_revision uuid) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   v_eligible uuid[]; v_id uuid; w record; v_model text; v_key text;
   v_restated jsonb; v_out jsonb := '[]'::jsonb;
+  v_withheld text; v_detail text;
 begin
   if p_locked is null or cardinality(p_locked) = 0 then return v_out; end if;
   v_eligible := clara._source_corrected_work(p_document, p_firm);
@@ -354,23 +394,58 @@ begin
                where i.work_id = v_id and i.status = 'pending'
                order by i.created_at, i.id limit 1));
     v_key := 'source_corrected:' || p_revision::text || ':' || v_id::text;
-    v_restated := clara.restate_accounting_work(v_id, p_actor, v_key, w.basis, w.basis_origin,
-      w.source_refs, v_model, v_key);
+    v_restated := null;
+    v_withheld := null;
+
+    -- ARM 1 · THE INSTRUCTION SURVIVED THE CORRECTION, so the Work is REPLACED. A derived basis
+    -- never reaches this arm: it was read off the reading that just moved (L09-ADV-01).
+    if w.basis_origin = 'user_direct' then
+      begin
+        v_restated := clara.restate_accounting_work(v_id, p_actor, v_key, w.basis, w.basis_origin,
+          w.source_refs, v_model, v_key);
+      exception when sqlstate 'CLR10' or sqlstate 'CLR13' then
+        -- A REFUSAL ABOUT THIS WORK IS NOT A REFUSAL OF THE HUMAN'S CORRECTION (L09-ADV-03). The
+        -- subtransaction this handler opens discards everything the door had done, the reason is
+        -- carried to the receipt, and the retirement falls through to ARM 2. CLR04 is deliberately
+        -- NOT caught: an authority refusal is never downgraded into a silent skip.
+        get stacked diagnostics v_detail = pg_exception_detail;
+        v_restated := null;
+        begin
+          v_withheld := coalesce(nullif(btrim(coalesce(v_detail, '')), '')::jsonb ->> 'reason',
+                                 'restatement_refused');
+        exception when others then
+          v_withheld := 'restatement_refused';
+        end;
+      end;
+    else
+      v_withheld := 'interpreted_basis';
+    end if;
+
+    -- ARM 2 · NO SUCCESSOR, BUT STILL RETIRED. The ruling's non-negotiable half, through the SAME
+    -- door 0200's step 4 calls, so the one work.cancelled event keeps one spelling.
+    if v_restated is null then
+      perform clara.cancel_accounting_work(v_id, p_actor, v_key);
+    end if;
+
     v_out := v_out || jsonb_build_array(jsonb_build_object(
       'work_id', v_id,
       'new_work_id', v_restated->>'work_id',
       'task_id', v_restated->'task_id',
       'reason', 'source_corrected',
+      'replaced', v_restated is not null,
+      'not_replaced_reason', v_withheld,
       'revision_id', p_revision));
   end loop;
   return v_out;
 end $$;
 revoke all on function clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid) from public;
 comment on function clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid) is
-  '#885: cancels and re-admits every LOCKED Work that is still affected by a correction of this '
-  'document, through clara.restate_accounting_work (0200 §E) so the four supersession writes and '
-  'the single work.cancelled event keep exactly one spelling. Returns one {work_id, new_work_id, '
-  'task_id, reason:source_corrected, revision_id} object per Work.';
+  '#885: RETIRES every LOCKED Work that is still affected by a correction of this document, and '
+  're-admits a successor for it through clara.restate_accounting_work (0200 §E) when the '
+  'instruction survives the correction (basis_origin = user_direct) and that door accepts it -- '
+  'otherwise it cancels through clara.cancel_accounting_work (0199) with no successor and reports '
+  'the reason. Returns one {work_id, new_work_id, task_id, reason:source_corrected, replaced, '
+  'not_replaced_reason, revision_id} object per Work.';
 
 -- =====================================================================================
 -- §B  clara.revise_document_fact — 0217 §4's body VERBATIM plus exactly THREE additions:
@@ -603,12 +678,13 @@ begin
       'facts_version', obs.facts_version + 1, 'source', 'human'));
 
   -- #885 · THE EFFECT. Every Work this call LOCKED that is still parked on a question about this
-  -- document is cancelled with the correction as its reason and superseded by a fresh Work on the
-  -- same admitted basis -- the owner's 2026-09-17 ruling, re-confirmed 2026-09-20. It runs in THIS
-  -- transaction: a runtime consumer would leave a window in which the stale question is still
-  -- answerable, which is the one thing the ruling forbids. If a replacement cannot be admitted,
-  -- the restate door's own typed refusal propagates and the WHOLE correction refuses -- nothing
-  -- half-done is ever committed.
+  -- document is retired with the correction as its reason -- the owner's 2026-09-17 ruling,
+  -- re-confirmed 2026-09-20. It runs in THIS transaction: a runtime consumer would leave a window
+  -- in which the stale question is still answerable, which is the one thing the ruling forbids. A
+  -- SUCCESSOR is admitted on the same basis when that basis is the human's own (`user_direct`) and
+  -- 0200's door accepts it; a DERIVED basis is not re-admitted (it was read off the reading that
+  -- just moved) and a Work that door refuses is retired anyway, with the reason on the receipt --
+  -- a bookkeeper's correction is never refused because of a Work they were not acting on.
   v_superseded := clara._supersede_source_corrected_work(p_document, c.firm, v_locked, c.actor,
     v_revision);
 
@@ -844,7 +920,7 @@ begin
   if position('clara.restate_accounting_work(' in v_src) = 0 then
     raise exception '#885 tail: the effect does not call clara.restate_accounting_work' using errcode='CLR10';
   end if;
-  foreach v_sig in array array['clara.admit_journal_work', 'clara.cancel_accounting_work',
+  foreach v_sig in array array['clara.admit_journal_work',
       'set superseded_by', 'set supersedes'] loop
     if position(v_sig in v_src) <> 0 then
       raise exception '#885 tail: the effect re-spells % instead of delegating to clara.restate_accounting_work', v_sig
@@ -854,6 +930,20 @@ begin
   if position('''source_corrected''' in v_src) = 0
      or position('''source_corrected:''' in v_src) = 0 then
     raise exception '#885 tail: the effect does not carry the source_corrected reason and derived key'
+      using errcode='CLR10';
+  end if;
+  -- 2d · THE TWO ARMS ARE BOTH THERE (fix round, L09-ADV-01 and L09-ADV-03). The successor is
+  -- withheld for a DERIVED basis, a refusal about one Work is caught rather than propagated, an
+  -- AUTHORITY refusal is not, and a Work with no successor is still retired through 0199's door.
+  v_missing := '';
+  if position('w.basis_origin = ''user_direct''' in v_src) = 0 then v_missing := v_missing || ' carryable-basis-arm'; end if;
+  if position('''interpreted_basis''' in v_src) = 0 then v_missing := v_missing || ' interpreted-basis-reason'; end if;
+  if position('when sqlstate ''CLR10'' or sqlstate ''CLR13''' in v_src) = 0 then v_missing := v_missing || ' typed-refusal-catch'; end if;
+  if position('sqlstate ''CLR04''' in v_src) <> 0 then v_missing := v_missing || ' CLR04-must-not-be-caught'; end if;
+  if position('clara.cancel_accounting_work(v_id, p_actor, v_key)' in v_src) = 0 then v_missing := v_missing || ' retire-without-successor'; end if;
+  if position('''not_replaced_reason''' in v_src) = 0 then v_missing := v_missing || ' receipt-reason-key'; end if;
+  if v_missing <> '' then
+    raise exception '#885 tail: clara._supersede_source_corrected_work is missing arm(s)/key(s):%', v_missing
       using errcode='CLR10';
   end if;
 
@@ -990,6 +1080,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#885 tail: OK -- clara._source_corrected_work, clara._lock_source_corrected_work and clara._supersede_source_corrected_work exist as clara_fn_owner SECURITY DEFINERs with pinned search_paths and NO grant to any application role; the lock and the effect both ASK the one rule and neither re-spells it; clara.revise_document_fact takes the accounting_work/agent_tasks/agent_interruptions rungs BEFORE clara.documents, records the revision before it supersedes, appends document.fact_revised before the cancellations it causes, and keeps every 0217 guard; clara.answer_work_question gained the narrow (cancelled AND superseded_by) -> superseded word plus the successor on detail.current and kept every refusal 0180/0200 gave it; and clara.restate_accounting_work, clara.cancel_accounting_work, clara._work_committed_receipt and clara.list_source_dependents are byte-identical to their pinned shas.';
+  raise notice '#885 tail: OK -- clara._source_corrected_work, clara._lock_source_corrected_work and clara._supersede_source_corrected_work exist as clara_fn_owner SECURITY DEFINERs with pinned search_paths and NO grant to any application role; the lock and the effect both ASK the one rule and neither re-spells it; the effect replaces a retired Work only when its basis is the human''s own and 0200''s door accepts it, retires it through 0199''s door with a reported reason otherwise, and never catches an authority refusal; clara.revise_document_fact takes the accounting_work/agent_tasks/agent_interruptions rungs BEFORE clara.documents, records the revision before it supersedes, appends document.fact_revised before the cancellations it causes, and keeps every 0217 guard; clara.answer_work_question gained the narrow (cancelled AND superseded_by) -> superseded word plus the successor on detail.current and kept every refusal 0180/0200 gave it; and clara.restate_accounting_work, clara.cancel_accounting_work, clara._work_committed_receipt and clara.list_source_dependents are byte-identical to their pinned shas.';
 end
 $w885_tail$;
