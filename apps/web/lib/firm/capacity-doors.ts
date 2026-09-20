@@ -86,7 +86,7 @@ export type SetProcessingCapsOutcome =
 
 export type SetFirmDocumentLimitsParams = {
   readonly edits: ProcessingCapEdits;
-  /** Minted and held by the CALLER (see `processingCapsOpKey`). */
+  /** Minted FRESH by the caller for THIS submission (see `newProcessingCapsOpKey`). */
   readonly opKey: string;
 };
 
@@ -165,24 +165,40 @@ export const setFirmDocumentLimits: SetFirmDocumentLimits = async (params, opts)
   }
 };
 
-/** THE OPERATION IDENTITY for one cap change, deterministic in exactly the way
- *  `clara._reserve_op` needs (0004: replay is keyed on `(firm, fn, op_key)` and the arguments are
- *  re-hashed, so a retry that carries a FRESH key re-enters the body instead of replaying the
- *  receipt the first call already earned).
+/** THE OPERATION IDENTITY for ONE SUBMISSION, minted FRESH every time the person asks to save.
  *
- *  NO DIGEST HERE, unlike `lib/operator/op-key.ts`'s builders, and the difference is the inputs:
- *  those bind FREE TEXT (a reason a person typed), which has to be hashed to become a key. This
- *  binds four optional integers and a uuid, all of which spell themselves unambiguously — so a
- *  collision between two different edits is not possible rather than merely unlikely, and there
- *  is no async crypto call on the path.
+ *  WHY NOT A DETERMINISTIC KEY, which is what `lib/operator/op-key.ts` builds and what this
+ *  module shipped first. `clara._reserve_op` keys replay on `(firm, fn, op_key)` (0004:46-59)
+ *  and `clara.op_receipts` rows NEVER EXPIRE, so a key derived from the caller and the four cap
+ *  values makes any REPEAT of an earlier edit a permanent no-op: the door replays the receipt
+ *  the first call earned, writes nothing, records no audit row, and the card renders "Saved …"
+ *  off a receipt it did not earn while the stored cap sits where the intervening edit left it.
+ *  Measured live against `clara_l10` on 2026-09-20 (adversarial review ADV-L10-01, spec review
+ *  S-960-1): set(8) → set(2) → set(8) left the row at 2 with two audit rows, and the card
+ *  reported 8. Folding the BEFORE-image into the key does not close it either — a toggle
+ *  returns to a key it has already used.
  *
- *  `callerId` is folded in because `_reserve_op` is scoped only by `(firm, fn, op_key)` — the
- *  actor lives inside the re-hashed arguments, never in the reservation's identity — so two
- *  admins making the SAME edit at once would otherwise collide on one key and the second would
- *  meet `op_key_conflict` instead of the honest answer a second writer should get. */
-export function processingCapsOpKey(callerId: string, edits: ProcessingCapEdits): string {
-  const spelled = PROCESSING_CAPS
-    .map((cap) => (edits[cap] === undefined ? "x" : String(edits[cap])))
-    .join("-");
-  return `op-caps-${callerId}-${spelled}`;
+ *  THE DETERMINISTIC SHAPE IS RIGHT FOR THE OPERATOR CONSOLE AND WRONG HERE, and the difference
+ *  is what the operation is FOR. An operator's approve/reject/resolve is a decision about ONE
+ *  case that is taken ONCE: re-deciding the same case with the same words IS the same operation,
+ *  and replay is the behaviour a lost response wants. A processing cap is a SETTING: setting it
+ *  back to a number it once held is a NEW, genuine change of the firm's state, and the estate
+ *  means to bill from the trail of those changes (the owner's 2026-09-20 ruling: "every change
+ *  must be receipted and audited as usage-billing evidence … complete and attributable, not
+ *  best-effort logging"). An operation identity that cannot tell the second change from the
+ *  first cannot carry that evidence.
+ *
+ *  SO THERE IS NOTHING TO REPLAY, AND NOTHING RETRIES. `ProcessingCapacityCard.submit` issues
+ *  exactly one door call per click and never re-issues it; a second click is a second decision
+ *  by a person who has seen the first answer, which must re-enter the door rather than replay.
+ *  That is the same rule `lib/firm/needs-you.ts:289` and `lib/firm-admin/compliance.ts:206`
+ *  already state for every other web door in this app: "a fresh op_key per call
+ *  (crypto.randomUUID()) — never reused across a retry".
+ *
+ *  IT TAKES NO CALLER ID, which removes the other half of the first cut: the panel had to reach
+ *  for `scope.user_id ?? ""`, and a half-typed firm scope would have given two different admins
+ *  the identical key (spec review S-960-2 / adversarial ADV-L10-09). A uuid needs no actor to be
+ *  unique, and `_reserve_op` re-hashes the actor into the request hash anyway. */
+export function newProcessingCapsOpKey(): string {
+  return `op-caps-${crypto.randomUUID()}`;
 }

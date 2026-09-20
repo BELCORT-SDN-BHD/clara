@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  processingCapsOpKey,
+  newProcessingCapsOpKey,
   SET_FIRM_DOCUMENT_LIMITS_DOOR,
   setFirmDocumentLimits,
 } from "./capacity-doors";
@@ -136,26 +136,21 @@ test("#960 a refusal is classified by CODE and REASON, and its sentence travels 
   );
 });
 
-test("#960 the op key is deterministic, and an unset cap spells differently from a set one", async () => {
-  const caller = "11111111-1111-4111-8111-111111111111";
-  assert.equal(
-    processingCapsOpKey(caller, { pagesPerDay: 77 }),
-    processingCapsOpKey(caller, { pagesPerDay: 77 }),
-    "the same edit by the same person reproduces the same key -- that is what makes a retry REPLAY",
-  );
-  assert.notEqual(
-    processingCapsOpKey(caller, { pagesPerDay: 77 }),
-    processingCapsOpKey(caller, { pagesPerDay: 78 }),
-    "a different value is a different operation",
-  );
-  assert.notEqual(
-    processingCapsOpKey(caller, { pagesPerDay: 77 }),
-    processingCapsOpKey(caller, { pagesPerDay: 77, docsPerDay: 11 }),
-    "naming a second cap is a different operation, because the door re-hashes all four",
-  );
-  assert.notEqual(
-    processingCapsOpKey(caller, { docsPerDay: 11 }),
-    processingCapsOpKey("22222222-2222-4222-8222-222222222222", { docsPerDay: 11 }),
-    "two admins making the SAME edit must not collide on one key",
-  );
+test("#960 every save mints its OWN operation identity — two saves of the SAME edit never share one", () => {
+  // THE DEFECT THIS CELL EXISTS FOR (adversarial review ADV-L10-01 / spec review S-960-1,
+  // 2026-09-20): the first cut derived the key from `(caller, the four values)`, so the SAME
+  // person setting a cap back to a number they had set before re-minted the SAME key.
+  // `clara._reserve_op` then replayed the ORIGINAL receipt (0004:46-59 — replay is keyed on
+  // `(firm, fn, op_key)` and `clara.op_receipts` rows never expire), the door wrote nothing, and
+  // the card rendered "Saved …" off a receipt it had not earned. Proved live against clara_l10:
+  // set(8) → set(2) → set(8) left the stored cap at 2 and wrote two audit rows, not three.
+  const a = newProcessingCapsOpKey();
+  const b = newProcessingCapsOpKey();
+  assert.notEqual(a, b, "a second save is a second operation and must re-enter the door");
+  assert.match(a, /^op-caps-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    "the key is this door's own prefix plus one uuid — nothing derived from what was typed");
+  // 64 mints, all distinct: the property this door needs is UNIQUENESS per submission, and a
+  // single pair passing could be luck.
+  const many = new Set(Array.from({ length: 64 }, () => newProcessingCapsOpKey()));
+  assert.equal(many.size, 64);
 });

@@ -33,7 +33,7 @@ const STEM = "firm_document_limits_writer$";
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 9;
+const EXPECTED_CELLS = 11;
 
 before(async () => {
   try {
@@ -450,5 +450,102 @@ test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exa
     "clara._firm_document_limit_ceiling(text) :: clara_fn_owner | false | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner",
     "clara.set_firm_document_limits(integer,integer,integer,integer,text) :: clara_fn_owner | true | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner",
   ], "exactly one granted door, granted to clara_authenticated alone; the estate's ceiling is granted to nobody");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 10 — A CAP SET BACK TO A NUMBER IT ONCE HELD IS A **NEW** CHANGE, and the operation
+// identity has to be able to say so.
+//
+// WHY THIS CELL EXISTS (adversarial review ADV-L10-01 / spec review S-960-1, 2026-09-20). The
+// door itself was never wrong; the WEB layer minted a key that was a pure function of the caller
+// and the four values, so the third call below re-minted the key of the first and
+// `clara._reserve_op` replayed its receipt: no write, no audit row, and a card rendering
+// "Saved … 8" over a stored 2. This cell pins BOTH halves from the door's own side, so the
+// hazard is measured here and not only in a web cell:
+//
+//   (a) under FRESH keys the set → change → set-back sequence MOVES the row every time and
+//       receipts each move with its true before-image;
+//   (b) under the REPEATED key the same third call is a silent no-op that hands back the FIRST
+//       receipt byte for byte — which is exactly what a caller must never mint, and is the
+//       vacuity control for (a): the assertions in (a) genuinely fail if the caller reuses a key.
+// ===========================================================================
+test("#960 cell 10 · setting a cap back to a number it once held is a NEW change under a fresh key, and a REPEATED key silently re-serves the first receipt", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("reset_back");
+  const first = opk("p960_back_1");
+
+  const r1 = await setLimits(scene.owner, { ocr_concurrency: 8 }, { opKey: first });
+  assert.equal(r1.caps.ocr_concurrency, 8);
+  const r2 = await setLimits(scene.owner, { ocr_concurrency: 2 }, { opKey: opk("p960_back_2") });
+  assert.equal(r2.caps.ocr_concurrency, 2);
+  assert.equal(r2.previous.ocr_concurrency, 8, "the second change's before-image is the first's value");
+
+  // (a) THE SAME EDIT AGAIN, under a key of its own.
+  const r3 = await setLimits(scene.owner, { ocr_concurrency: 8 }, { opKey: opk("p960_back_3") });
+  assert.deepEqual(r3.changed, ["ocr_concurrency"], "the third call moved a cap, and says which");
+  assert.equal(r3.previous.ocr_concurrency, 2, "...from where the SECOND call left it, not from nothing");
+  assert.equal(r3.created, false, "...on a row that already existed");
+  assert.equal((await storedRow(scene.firm)).ocr_concurrency, 8, "...and the stored cap actually moved");
+  assert.equal((await auditRows(scene.firm)).length, 3,
+    "three genuine changes leave three audit rows -- this trail is usage-billing evidence");
+
+  // (b) THE TRAP, measured. Nothing is written and the ORIGINAL receipt comes back.
+  const replayed = await setLimits(scene.owner, { ocr_concurrency: 8 }, { opKey: first });
+  assert.deepEqual(replayed, r1, "a repeated key re-serves the FIRST receipt, not a fresh one");
+  assert.equal(replayed.previous.ocr_concurrency, null,
+    "...including its before-image, which by now names a state two changes old");
+  assert.equal((await storedRow(scene.firm)).ocr_concurrency, 8, "and nothing moved");
+  assert.equal((await auditRows(scene.firm)).length, 3, "and no fourth audit row was written");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 11 — THE CLR13 `operation_in_flight` ARM, OBSERVED.
+//
+// WHY THIS CELL EXISTS (adversarial review ADV-L10-06, 2026-09-20). The reviewer measured that
+// two real sessions racing ONE key never reach this arm: `clara._reserve_op`'s speculative
+// `on conflict do nothing` BLOCKS the second session until the first commits, and by then the
+// row carries its `_finish_op` result — so the second replays a settled receipt. The arm was
+// therefore documented (the migration's §D census, this module's refusal map, the successor
+// contract) but never observed, and a refusal nobody can see should not be handed to a future
+// tool author as one it must handle.
+//
+// IT IS NOT DROPPED, and the reason is the shared helper's own contract rather than this door's
+// taste: `clara._reserve_op` (0004:46-59) SYNTHESISES `{"pending": true}` for any committed
+// receipt row whose `result` is still null, and EIGHTEEN migration files in this estate answer
+// that with exactly this CLR13 — 0178, 0180, 0182, 0184, 0185, 0186, 0193, 0194, 0195, 0200 and
+// the rest (`grep -rln operation_in_flight packages/db/migrations`). A door that dropped the arm
+// would RETURN `{"pending": true}` to the caller as if it were a receipt, which is strictly
+// worse than a typed refusal and would make this the one governed door in the estate that does.
+//
+// SO THE ARM IS PROVED INSTEAD, from a receipt row arranged as root. That row is a PRESTATE, not
+// a side channel: the observation below is the DOOR's own refusal, through the same human
+// session every other cell uses. The request hash is built the way §B builds it, so the call
+// gets past `_reserve_op`'s "reused with different args" wall and reaches the pending arm.
+// ===========================================================================
+test("#960 cell 11 · a committed receipt row with no result yet is refused CLR13 operation_in_flight", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("in_flight");
+  const key = opk("p960_in_flight");
+
+  // The reservation §B would have made, WITHOUT the `_finish_op` that always follows it in one
+  // transaction. `clara._hash(jsonb_build_object(...))` is the door's own expression, with the
+  // four cap arguments in its own order and the actor last.
+  await rootQuery(
+    `insert into clara.op_receipts(firm_id, fn, op_key, request_hash)
+     values ($1, 'set_firm_document_limits', $2,
+       clara._hash(jsonb_build_object(
+         'docs_per_day', 33, 'pages_per_day', null::int, 'ocr_concurrency', null::int,
+         'llm_witness_concurrency', null::int, 'actor', $3::uuid)))`,
+    [scene.firm, key, scene.owner],
+  );
+
+  const err = await assertRaises("CLR13",
+    () => setLimits(scene.owner, { docs_per_day: 33 }, { opKey: key }), "already being recorded");
+  assert.equal(JSON.parse(err.detail ?? "{}").reason, "operation_in_flight",
+    "the in-flight refusal is TYPED, so a surface branches on the reason and never on the sentence");
+  assert.equal(await storedRow(scene.firm), null, "and the refusal wrote nothing");
+  assert.equal((await auditRows(scene.firm)).length, 0, "and left no audit row");
   executed += 1;
 });

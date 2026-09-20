@@ -50,7 +50,7 @@ import { ProcessingCapacityCard } from "@/components/firm-admin/processing-capac
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { isDoorRefusal } from "@/lib/doors";
 import {
-  processingCapsOpKey,
+  newProcessingCapsOpKey,
   setFirmDocumentLimits,
   type ProcessingCapEdits,
   type SetProcessingCapsOutcome,
@@ -229,22 +229,23 @@ export function FirmSettingsPanelView({
 
   const createdAt = commercial.status === "ready" ? commercial.data.firm.createdAt : null;
 
-  // #960 — THE CAP WRITE, and the re-read that always follows it. The op key is DETERMINISTIC in
-  // the caller and the exact edit (`lib/firm/capacity-doors.ts` says why), so a retry after a
-  // lost response replays the receipt the first call earned instead of re-entering the door.
+  // #960 — THE CAP WRITE, and the re-read that always follows it. A FRESH op key per
+  // submission (`lib/firm/capacity-doors.ts`'s own header says why at length): a cap set back to
+  // a number it once held is a NEW change of the firm's state, and a key derived from the values
+  // would make the door replay the first receipt and write nothing.
   // The re-read is unconditional — accepted, refused or unavailable — because the figures above
   // the control belong to `clara.get_firm_commercial_state` and to nothing else, and because a
   // refusal is exactly the moment the page's idea of the caps is most worth checking.
   const saveCaps = useCallback(async (edits: ProcessingCapEdits): Promise<SetProcessingCapsOutcome> => {
     const call = setCaps ?? ((e: ProcessingCapEdits) => setFirmDocumentLimits({
-      edits: e, opKey: processingCapsOpKey(scope.user_id ?? "", e),
+      edits: e, opKey: newProcessingCapsOpKey(),
     }));
     try {
       return await call(edits);
     } finally {
       await readCommercial();
     }
-  }, [setCaps, scope.user_id, readCommercial]);
+  }, [setCaps, readCommercial]);
 
   return (
     <div className="flex flex-col gap-4">
