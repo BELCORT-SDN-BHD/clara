@@ -81,13 +81,34 @@ export function resolveChildOs(explicitChildOs, cmd) {
  * #917 — the `WSLENV` list this bridge emits for a `wsl` child: the six PG identity vars
  * (needed by a bare `pg_dump`/`psql` on the WSL side, exactly like a native child) plus the two
  * CA vars, which are ALREADY respelled to `/mnt/<drive>/…` by the time they reach this list (no
- * `/p` flag — that would ask WSL to translate an already-WSL-native path a second time).
- * `DATABASE_URL` is deliberately never listed: only the PG* + CA vars need to reach the WSL side,
- * and crossing the whole DSN over the Windows/WSL environment boundary as one string is exactly
- * the wider leak surface this bridge exists to avoid — MEASURED to actually work end-to-end
- * against a real `wsl.exe` on this rig (this selftest's own WSL-boundary cell).
+ * `/p` flag — that would ask WSL to translate an already-WSL-native path a second time), plus
+ * `CLARA_BACKUP_DIR/p` — carried over from the hand wrapper this bridge replaces
+ * (RELEASE-RUNBOOK-0225-0233.md:213), WITH its `/p` flag: unlike the CA vars, dsn-pipe.mjs never
+ * reads or respells `CLARA_BACKUP_DIR` itself, so WSL's own WSLENV machinery must translate the
+ * Windows path an operator sets on the Windows side into the `/mnt/<drive>/…` form
+ * `packages/db/scripts/backup.mjs`'s own `CLARA_BACKUP_DIR` read (line 54) expects — dropping it
+ * from this list would silently fall back to `backup.mjs`'s default directory instead of the
+ * operator's chosen one (L05B-S02). `DATABASE_URL` is deliberately never listed: only the PG* +
+ * CA + backup-dir vars need to reach the WSL side, and crossing the whole DSN over the
+ * Windows/WSL environment boundary as one string is exactly the wider leak surface this bridge
+ * exists to avoid — MEASURED to actually work end-to-end against a real `wsl.exe` on this rig
+ * (this selftest's own WSL-boundary cell).
+ *
+ * IMPORTANT — read with L05B-S01: naming a var in `WSLENV` only gets it INTO the WSL child's
+ * environment; it says nothing about how that child's TLS stack USES it. A bare `pg_dump`/`psql`
+ * on the WSL side reads `PGSSLMODE`/`PGSSLROOTCERT` and treats the pinned CA as EXCLUSIVE, same
+ * as the Windows side. A Node `pg` client running ON THE WSL SIDE (e.g. `backup.mjs`'s own
+ * `--profile full` path, which this bridge's own AC1 command runs there) is DIFFERENT: with no
+ * `DATABASE_URL` in its environment, `packages/db/lib/pg.mjs`'s `connConfig()` returns `{}`, so
+ * node-postgres falls back to `readSSLConfigFromEnvironment()`, which maps `PGSSLMODE=verify-full`
+ * to a bare `ssl: true` — NODE_EXTRA_CA_CERTS then only AUGMENTS Node's global trust store; it
+ * does not make the pinned CA exclusive the way an explicit DSN `sslrootcert` does for the `pg`
+ * path on the Windows side. This is not a regression (the wrapper being replaced had the same
+ * shape) and is not a defect in `pg_dump`'s own trust (libpq is unaffected) — it is a real,
+ * narrower guarantee for a WSL-side Node client specifically, recorded here so the next reader
+ * does not assume the exclusivity DSN-pin/README paragraph above covers this leg too.
  */
-export const WSL_ENV_LIST = "PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS";
+export const WSL_ENV_LIST = "PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS:CLARA_BACKUP_DIR/p";
 
 // Captured from the live pooler 2026-08-23 and independently confirmed byte-identical against
 // Supabase's own publicly-hosted copy (https://supabase-downloads.s3-ap-southeast-1.amazonaws.com

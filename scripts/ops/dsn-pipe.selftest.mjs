@@ -318,7 +318,7 @@ testCase("(#917) buildChildEnv with a WSL-respelled caPath carries it into PGSSL
 const harnessForOpenssl = { reportFail, reportSkip };
 const SYNTHETIC_DSN = fakeDsn({ user: "selftest_" + MARKER, pass: "pw_" + MARKER, hostport: "127.0.0.1:59999", db: "selftestdb" });
 
-await asyncTestCase("(#917) through the REAL CLI with --child-os wsl: WSLENV names exactly the six PG identity vars plus the two CA vars, the two CA vars carry the /mnt/<drive> spelling of the REAL committed CA, and DATABASE_URL is deliberately absent from WSLENV", async () => {
+await asyncTestCase("(#917) through the REAL CLI with --child-os wsl: WSLENV names exactly the six PG identity vars plus the two CA vars plus CLARA_BACKUP_DIR/p, the two CA vars carry the /mnt/<drive> spelling of the REAL committed CA, and DATABASE_URL is deliberately absent from WSLENV", async () => {
   // The "child" here is a plain `node` process standing in for `wsl` -- this cell proves what
   // dsn-pipe.mjs ITSELF builds and hands to its child's env, hermetically (no real wsl.exe
   // needed, so this runs on the Linux CI runners too). The literal `wsl.exe` end-to-end shape
@@ -334,13 +334,32 @@ await asyncTestCase("(#917) through the REAL CLI with --child-os wsl: WSLENV nam
   const line = r.stdout.split("\n").find((l) => l.startsWith("REPORT:"));
   if (!line) throw new Error(`grandchild never reported; stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
   const report = JSON.parse(line.slice("REPORT:".length));
-  const expectedWslEnv = "PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS";
+  const expectedWslEnv = "PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS:CLARA_BACKUP_DIR/p";
   if (report.wslenv !== expectedWslEnv) throw new Error(`WSLENV: expected ${expectedWslEnv}, got ${report.wslenv}`);
   const expectedCa = toWslPath(COMMITTED_CA);
   if (report.cert !== expectedCa) throw new Error(`PGSSLROOTCERT: expected ${expectedCa}, got ${report.cert}`);
   if (report.nodeCa !== expectedCa) throw new Error(`NODE_EXTRA_CA_CERTS: expected ${expectedCa}, got ${report.nodeCa}`);
   if (report.dburl.includes(COMMITTED_CA)) throw new Error(`DATABASE_URL must carry the RESPELLED path, not the raw Windows one: ${report.dburl}`);
   if (!report.dburl.includes(encodeURIComponent(expectedCa))) throw new Error(`DATABASE_URL must still carry sslrootcert=${expectedCa}, got: ${report.dburl}`);
+});
+
+await asyncTestCase("(#917 fix round, L05B-S02) WSLENV also names CLARA_BACKUP_DIR with the /p path-translation flag, so an operator's Windows-side CLARA_BACKUP_DIR reaches the WSL child the same way the retired hand wrapper carried it (RELEASE-RUNBOOK-0225-0233.md:213)", async () => {
+  const grandchildScript = "console.log('REPORT:' + JSON.stringify({wslenv: process.env.WSLENV}));";
+  const r = await runDsnPipe({
+    scriptPath: DSN_PIPE_SRC,
+    dsn: SYNTHETIC_DSN,
+    args: ["--child-os", "wsl", "--", "node", "-e", grandchildScript],
+    env: { ...process.env, CLARA_BACKUP_DIR: "C:\\Users\\ops\\backups" },
+  });
+  const line = r.stdout.split("\n").find((l) => l.startsWith("REPORT:"));
+  if (!line) throw new Error(`grandchild never reported; stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
+  const report = JSON.parse(line.slice("REPORT:".length));
+  // /p, not a pre-respelling like the two CA vars: dsn-pipe.mjs never reads or touches
+  // CLARA_BACKUP_DIR itself (unlike PGSSLROOTCERT/NODE_EXTRA_CA_CERTS), so WSL's own WSLENV
+  // machinery must do the Windows-path -> /mnt/<drive>/... translation on the way across.
+  if (!report.wslenv.includes("CLARA_BACKUP_DIR/p")) {
+    throw new Error(`WSLENV must name CLARA_BACKUP_DIR/p so backup.mjs's own CLARA_BACKUP_DIR (packages/db/scripts/backup.mjs:54) resolves on the WSL side too, got: ${report.wslenv}`);
+  }
 });
 
 await asyncTestCase("(#917 AC2) the Windows-side fingerprint refusal for a SWAPPED CA still fires under --child-os wsl, before the child ever starts", async () => {

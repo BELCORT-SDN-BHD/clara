@@ -192,8 +192,11 @@ two ceremonies.
 **Update (#917, shipped after this ceremony ran):** `scripts/ops/dsn-pipe.mjs` now accepts
 `--child-os wsl` (or simply invoking `wsl` as the child command — it is auto-detected too), which
 respells the DSN's `sslrootcert` plus `PGSSLROOTCERT`/`NODE_EXTRA_CA_CERTS` to the `/mnt/<drive>/…`
-form and sets `WSLENV` for those two vars plus the six PG identity vars — never `DATABASE_URL`. The
-NEXT ceremony's invocation is:
+form and sets `WSLENV` for those two vars, the six PG identity vars and `CLARA_BACKUP_DIR/p` —
+never `DATABASE_URL`. (Fix round L05B-S01: a WSL-side Node `pg` client, unlike `pg_dump`/`psql`,
+still authenticates TLS additively via `NODE_EXTRA_CA_CERTS` on this path, not via an exclusive
+DSN pin — see `packages/db/README.md`'s "Backup and recovery" section.) The NEXT ceremony's
+invocation is:
 
 ```sh
 <probe dsn pipe> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- \

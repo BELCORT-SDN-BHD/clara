@@ -942,8 +942,10 @@ only in WSL on the Windows release rig, and the committed CA's path is written i
 spelling, which a WSL child cannot open — pass `--child-os wsl` (or simply invoke `wsl` as the
 child command; it is auto-detected too) and dsn-pipe respells the DSN's `sslrootcert` plus
 `PGSSLROOTCERT`/`NODE_EXTRA_CA_CERTS` to the `/mnt/<drive>/…` form, and sets `WSLENV` so those two
-vars and the six PG identity vars actually cross the Windows/WSL boundary (`DATABASE_URL` is
-deliberately never listed there — only the WSL-side client tools need the PG\* vars):
+vars, the six PG identity vars and `CLARA_BACKUP_DIR` (translated by WSL's own `/p` flag, since
+dsn-pipe never touches it directly) actually cross the Windows/WSL boundary (`DATABASE_URL` is
+deliberately never listed there — the DSN itself stays local to this process and its direct
+`wsl` child; only the individual PG\*/backup-dir vars cross):
 
 ```sh
 <dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- \
@@ -952,6 +954,17 @@ deliberately never listed there — only the WSL-side client tools need the PG\*
 
 The CA fingerprint check always runs against the original Windows-spelled file; only the emitted
 values are respelled (#917).
+
+**TLS exclusivity on the WSL side is narrower than on the Windows side (#917, L05B-S01).** A bare
+`pg_dump`/`psql` on the WSL side reads `PGSSLMODE=verify-full` + `PGSSLROOTCERT` and still treats
+the pinned CA as EXCLUSIVE, same as any native invocation. But `backup.mjs --profile full` also
+opens a Node `pg` client, and on the WSL side that client sees no `DATABASE_URL` (it is
+deliberately not in `WSLENV`), so `packages/db/lib/pg.mjs`'s `connConfig()` returns `{}` and
+node-postgres falls back to reading TLS settings from the environment: `PGSSLMODE=verify-full`
+becomes a bare `ssl: true`, and `NODE_EXTRA_CA_CERTS` only AUGMENTS Node's global trust store
+rather than PINNING it the way an explicit DSN `sslrootcert` does on the Windows side. This is not
+a regression — the hand wrapper this flag replaces had the identical shape — but it means the
+DSN-level pin's exclusivity is unchanged for libpq tools only, not for a WSL-side Node client.
 
 `restore:full` runs role bootstrap before the transactional dump restore, then prints manual
 follow-ups. Complete those follow-ups against the current estate: private Storage bucket/policies
