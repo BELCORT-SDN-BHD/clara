@@ -95,6 +95,19 @@ export const HOME_WORK_PACK_CLIENT = {
   name: "Miri Seafood Bistro",
 };
 
+/**
+ * THE ROWS ARE THE DOOR'S OWN FIELD NAMES (review-round L01-SPEC-01 fix), not an invented
+ * `{id, label, state, updated_at}` shape. `clara.get_client_work_pack`
+ * (`packages/db/migrations/0214_client_work_pack.sql`) projects `work_id`/`purpose`/`status`/
+ * `memo`/`attempts`/`current_run_status`/`retrying`/`created_at` for the ACTIVE facet (0214
+ * :324-337) and `work_id`/`purpose`/`status`/`memo`/`receipt_id`/`entry_id`/`committed_at` for
+ * RECENT_SUCCESS (0214 :365-390) — never `id`/`label`/`state`. `apps/web/lib/work/
+ * client-work-pack.ts`'s `hydrateRow` requires `work_id` and returns `null` for a row without
+ * one, so the old shape hydrated to a COUNT with an EMPTY preview, a shape the real door cannot
+ * produce and this fixture never proved. `status` is drawn from `clara.accounting_work`'s own
+ * roster (0178 :306-307: `queued`/`running`/`awaiting_input`/`stopping`/`completed`/`refused`/
+ * `failed`/`cancelled`/`expired` — `in_progress` was never a member).
+ */
 export const POPULATED_WORK_PACK = {
   computed_at: "2026-09-16T02:00:00.000Z",
   preview_limit: 5,
@@ -106,16 +119,27 @@ export const POPULATED_WORK_PACK = {
     active: {
       status: "ok", count: 1, coverage: "ok", coverage_reason: null,
       rows: [{
-        id: "90290290-9029-4029-8029-902902902001", label: "September bank reconciliation",
-        state: "in_progress", updated_at: "2026-09-15T08:00:00.000Z",
+        work_id: "90290290-9029-4029-8029-902902902001",
+        purpose: "journal_entry",
+        status: "running",
+        memo: "September bank reconciliation",
+        attempts: 1,
+        current_run_status: "running",
+        retrying: false,
+        created_at: "2026-09-15T08:00:00.000Z",
       }],
     },
     recent_success: {
       status: "ok", count: 1, coverage: "ok", coverage_reason: null,
       uncounted_completions: 0,
       rows: [{
-        id: "90290290-9029-4029-8029-902902902002", label: "August GST filing",
-        state: "completed", updated_at: "2026-09-10T03:00:00.000Z",
+        work_id: "90290290-9029-4029-8029-902902902002",
+        purpose: "journal_entry",
+        status: "completed",
+        memo: "August GST filing",
+        receipt_id: "90290290-9029-4029-8029-902902902003",
+        entry_id: "90290290-9029-4029-8029-902902902004",
+        committed_at: "2026-09-10T03:00:00.000Z",
       }],
     },
   },

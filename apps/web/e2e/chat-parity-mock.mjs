@@ -203,9 +203,15 @@ function interruptionRow() {
 
 import { readCachedJson as readJson } from "./mock-dispatch.mjs";
 
-async function drain(request) {
-  for await (const _chunk of request) void _chunk;
-}
+// NO SECOND, PRIVATE `drain(request)` (#862's L01-SPEC-03 fix). This lane used to carry its own
+// `for await (const _chunk of request) void _chunk;` loop for the two callers below that never
+// need the parsed body — `record_client_resolution`, which answers unconditionally, and the raw
+// `PUT .../bytes` upload leg. Both are `readJson` (the shared `readCachedJson`) callers that
+// discard the result: an unparsable body (the raw upload bytes) resolves to `{}`, exactly what
+// `drain` used to leave behind, and reusing the ONE shared implementation is what
+// `e2e-fixture-ownership.test.ts`'s body-reader census now measures — a bespoke stream-drain
+// under any function name is the same hazard the census exists to catch, whether or not it
+// parses what it reads.
 
 /** The PostgREST half. Returns true when it answered. Placed BEFORE serve-built's own
  *  404 fallback and AFTER its existing routes, so nothing already mocked changes. */
@@ -338,7 +344,7 @@ export async function handleChatParitySupabase(request, response, path, url, sen
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/record_client_resolution") {
-    await drain(request);
+    await readJson(request);
     sendJson(response, 200, { resolution_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }, cors);
     return true;
   }
@@ -569,7 +575,7 @@ export function startMockRuntime(port = Number(process.env.CLARA_E2E_RUNTIME_POR
         return true;
       }
       if (request.method === "PUT" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/bytes`) {
-        void drain(request).then(() => { response.writeHead(204); response.end(); });
+        void readJson(request).then(() => { response.writeHead(204); response.end(); });
         return true;
       }
       if (request.method === "POST" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/finalize`) {

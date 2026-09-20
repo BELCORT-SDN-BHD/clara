@@ -735,9 +735,10 @@ async function handleSupabase(request, response, url) {
   // returning []), so a bank lane dispatched BELOW handleHomeBoardSupabase silently receives []
   // for both and renders an empty account selector with no error anywhere. Every branch here is
   // scoped to this lane own client or line ids and falls through otherwise, so the honest
-  // empties still answer every other walk. Do NOT move this below the home board, and do NOT
-  // declare those two verbs in SHARED_RPC_VERBS: the ownership census cannot see an
-  // array-dispatched arm, so a declaration would fail its own 2+ claimant reverse check.
+  // empties still answer every other walk. Do NOT move this below the home board. UPDATE
+  // (review-round L01-SPEC-02): the ownership census WAS blind to this array-dispatched arm —
+  // that has been fixed (`e2e-fixture-ownership.test.ts`'s `arrayMembershipVerbs`), and both
+  // verbs are now declared, correctly, in `SHARED_RPC_VERBS`.
   if (await handleP657Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE

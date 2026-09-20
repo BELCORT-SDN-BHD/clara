@@ -167,11 +167,17 @@ function documentRow(id, over = {}) {
 // every field is `undefined`, which a permissive guard accepts just well enough for the
 // failure to be silent. `readCachedJson` parses once and re-serves the SAME object to every
 // caller in any order, so declining after reading costs nobody anything.
+//
+// NO SECOND, PRIVATE `drain(request)` EITHER (#862's L01-SPEC-03 fix). This lane used to carry
+// its own `for await (const chunk of request) void chunk;` loop for the two callers below that
+// never need the parsed body — a raw `PUT .../bytes` upload, and `list_unassigned_documents`,
+// which answers unconditionally. Both are `readCachedJson` callers that discard the result:
+// an unparsable body (the raw upload bytes) resolves to `{}`, exactly what `drain` used to
+// leave behind, and reusing the ONE shared implementation is what
+// `e2e-fixture-ownership.test.ts`'s body-reader census now measures — a bespoke stream-drain
+// under any function name is the same hazard the census exists to catch, whether or not it
+// parses what it reads.
 const readJson = readCachedJson;
-
-async function drain(request) {
-  for await (const chunk of request) void chunk;
-}
 
 /** Every document id this lane speaks for: the two client-tab fixtures, the firm leaf's own
  *  subject, and anything uploaded during a walk. A read naming any other document is not this
@@ -475,7 +481,7 @@ export async function handleDocumentsIntakeSupabase(request, response, path, url
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/list_unassigned_documents") {
-    await drain(request);
+    await readJson(request);
     // ASK ONCE: once attributed, the document LEAVES the population — the DB's own
     // predicate stops matching it, and the leaf must stop offering the question.
     sendJson(response, 200, state.attributed ? [] : [{
@@ -643,7 +649,7 @@ export async function handleDocumentsIntakeRuntime(request, response, url) {
   if (leg && state.uploads.has(leg[1])) {
     const issued = state.uploads.get(leg[1]);
     if (request.method === "PUT" && leg[2] === "bytes") {
-      await drain(request);
+      await readJson(request);
       response.writeHead(204);
       response.end();
       return true;

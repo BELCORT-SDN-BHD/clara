@@ -47,26 +47,15 @@ const DRAFT_KEY = `clara:journal-draft:11111111-1111-1111-1111-111111111111:3333
  * session, passes the real firm-scope guard and proves the proxy is reachable
  * for this lane at the same time. The alternative — an app-origin backdoor —
  * would have been a second mechanism to trust.
+ *
+ * ONE `page.evaluate` FETCH (review-round STD-2 fix), not two: `control` and `controlRead` used
+ * to carry an identical fetch/evaluate body, differing only in `res.status` vs `res.json()`.
+ * `controlFetch` returns the RAW text rather than a parsed body, deliberately — `control` never
+ * has to parse a body it does not read (and never risks throwing a JSON-parse error on a non-200
+ * response, which would replace its own clear `toBe(200)` failure message with an opaque parse
+ * error), while `controlRead` parses it exactly once, in Node rather than inside the page.
  */
-async function control(page: Page, body: Record<string, unknown>): Promise<void> {
-  const status = await page.evaluate(
-    async (call: { path: string; payload: Record<string, unknown> }) => {
-      const res = await fetch(call.path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(call.payload),
-      });
-      return res.status;
-    },
-    { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },
-  );
-  expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
-}
-
-/** #848 — the same shape as `control` above, but returning the JSON body rather than only the
- *  status: `egress_reactivate_keys` (and `cancel_keys` before it) answer WITH data a cell needs
- *  to read, not only a side effect to trigger. */
-async function controlRead(page: Page, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function controlFetch(page: Page, body: Record<string, unknown>): Promise<{ status: number; text: string }> {
   return page.evaluate(
     async (call: { path: string; payload: Record<string, unknown> }) => {
       const res = await fetch(call.path, {
@@ -74,10 +63,23 @@ async function controlRead(page: Page, body: Record<string, unknown>): Promise<R
         headers: { "content-type": "application/json" },
         body: JSON.stringify(call.payload),
       });
-      return res.json() as Promise<Record<string, unknown>>;
+      return { status: res.status, text: await res.text() };
     },
     { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },
   );
+}
+
+async function control(page: Page, body: Record<string, unknown>): Promise<void> {
+  const { status } = await controlFetch(page, body);
+  expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
+}
+
+/** #848 — reads the JSON body `controlFetch` returned as text rather than only checking its
+ *  status: `egress_reactivate_keys` (and `cancel_keys` before it) answer WITH data a cell needs
+ *  to read, not only a side effect to trigger. */
+async function controlRead(page: Page, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { text } = await controlFetch(page, body);
+  return JSON.parse(text) as Record<string, unknown>;
 }
 
 /**

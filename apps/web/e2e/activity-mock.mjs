@@ -286,6 +286,25 @@ const PAGE_2_NEW_ROW = eventRow({
 // dedupe-by-(source,id) cell.
 const PAGE_2 = [PAGE_2_NEW_ROW, DOCUMENT_ROW];
 
+/**
+ * #853 REVIEW-ROUND (L01-SPEC-06) — whether a `p_work`-filtered page-1 read still has a matching
+ * row waiting on page 2, decided from PAGE_2's OWN membership rather than a blanket "p_work
+ * disables paging" flag. Migration 0202 applies its `p_work` predicate INSIDE each union arm
+ * BEFORE the limit (`0202_list_activity_p_work.sql:54-61`); this mock cannot run a live
+ * LIMIT/OFFSET query — its "pages" are two hand-authored arrays — so the most faithful thing it
+ * can do is compute truncation from the SAME population the door's predicate would see, not
+ * override it because a filter happened to be present. Exported so a unit cell can drive it on a
+ * synthetic page-2 population directly, without needing a page-2 fixture row for either of
+ * today's two Work ids (neither has one, so this still resolves to `false` for both — the SAME
+ * value the prior blanket rule gave, but because nothing further matches, not because `p_work`
+ * was merely present). A future Work-Activity walk (this ticket's own named successor, out of
+ * scope here) that seeds a page-2 row for its own Work pages correctly against this mock without
+ * a second change here.
+ */
+export function pageHasWork(work, page2 = PAGE_2) {
+  return page2.some((r) => r.work_id === work);
+}
+
 let flipCallCount = 0;
 
 function clr(status, code, message, reason) {
@@ -324,7 +343,9 @@ export async function handleActivitySupabase(request, response, path, url, sendJ
       // rather than the same one twice.
       const work = typeof body.p_work === "string" ? body.p_work : null;
       if (work !== null) rows = rows.filter((r) => r.work_id === work);
-      const paginated = !kinds && work === null;
+      // `pageHasWork` (above) decides truncation for a work-filtered read; an un-filtered read
+      // keeps its pre-#853 rule (paginated unless kinds narrowed it).
+      const paginated = work !== null ? pageHasWork(work) : !kinds;
       sendJson(response, 200, { rows, next_cursor: paginated ? PAGE_2_CURSOR : null, truncated: paginated }, cors);
       return true;
     }

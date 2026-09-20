@@ -25,7 +25,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ACTIVITY, handleActivitySupabase } from "./activity-mock.mjs";
+import { ACTIVITY, handleActivitySupabase, pageHasWork } from "./activity-mock.mjs";
 import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 import { handleL7Supabase, L7_RPC_VERBS } from "./bank-close-registers-mock.mjs";
 import { handleCheckoutMock } from "./fs4-checkout-mock.mjs";
@@ -33,6 +33,7 @@ import {
   EMPTY_WORK_PACK, HOME_WORK_PACK_CLIENT, POPULATED_WORK_PACK, handleHomeBoardSupabase,
 } from "./home-board-mock.mjs";
 import { JOURNAL_WORK, handleJournalWorkRuntime } from "./journal-work-mock.mjs";
+import { hydrateClientWorkPack } from "../lib/work/client-work-pack";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
@@ -895,10 +896,28 @@ test("N7 (L7) · a verb this lane does not own leaves the request body COMPLETEL
 // run any mock, it only reads what each one imports and defines.
 // ---------------------------------------------------------------------------
 
-/** A mock defining its OWN async body-reading function instead of importing the shared one. */
-const PRIVATE_BODY_READER_FUNCTION = /\b(?:export\s+)?(?:async\s+)?function\s+(readJson|readBody)\s*\(/;
-/** A mock draining the request stream directly rather than through any named function at all. */
-const PRIVATE_BODY_READER_STREAM = /request\.on\(\s*["'](?:data|end)["']/;
+/** A mock defining its OWN async body-reading function instead of importing the shared one —
+ *  either a `function readJson(...)` declaration, or the same name bound to an `async` arrow
+ *  (the review-round L01-SPEC-03 gap: a mock that spells the identical private reader as
+ *  `const readJson = async (request) => {...}` sailed through the declaration-only pattern). An
+ *  alias of the shared reader itself (`const readJson = readCachedJson;`, `documents-intake-mock.mjs`'s
+ *  own shape) does NOT match: there is no `async` and no `(` right after the `=`. */
+const PRIVATE_BODY_READER_FUNCTION =
+  /\b(?:export\s+)?(?:async\s+)?function\s+(readJson|readBody)\s*\(|\b(?:const|let)\s+(readJson|readBody)\s*=\s*async\s*\(/;
+/**
+ * A mock draining the request stream directly rather than through any named function at all —
+ * either the raw `request.on("data"/"end")` event pair, or a bare `for await (const x of
+ * request)` loop (the review-round L01-SPEC-03 gap: `readCachedJson` itself is written this way,
+ * so a lane that copies the LOOP instead of the FUNCTION reads the same stream by hand and stays
+ * invisible). The `(?<!`)` guard excludes the shape when it is quoted in backtick-fenced prose —
+ * `periodic-adjustment-mock.mjs`, `staff-expense-claim-mock.mjs`, `trade-invoice-mock.mjs` and
+ * `work-list-mock.mjs` all describe `readCachedJson`'s own mechanism this way in a header comment
+ * (` `` `for await (const chunk of request)` `` `), and none of them defines a second reader —
+ * flagging prose that merely NAMES the shared implementation would be a false positive, not a
+ * private reader.
+ */
+const PRIVATE_BODY_READER_STREAM =
+  /request\.on\(\s*["'](?:data|end)["']|(?<!`)\bfor\s+await\s*\(\s*const\s+\w+\s+of\s+request\s*\)/;
 
 /**
  * `null` when `source` (the text of a `*-mock.mjs` file, real or synthetic) reads its POST body
@@ -909,10 +928,11 @@ const PRIVATE_BODY_READER_STREAM = /request\.on\(\s*["'](?:data|end)["']/;
 function bodyReaderViolation(mock: string, source: string): string | null {
   const fnMatch = PRIVATE_BODY_READER_FUNCTION.exec(source);
   if (fnMatch) {
-    return `${mock} defines its own ${fnMatch[1]}(...) instead of importing readCachedJson from mock-dispatch.mjs`;
+    const name = fnMatch[1] ?? fnMatch[2];
+    return `${mock} defines its own ${name}(...) instead of importing readCachedJson from mock-dispatch.mjs`;
   }
   if (PRIVATE_BODY_READER_STREAM.test(source)) {
-    return `${mock} reads the request stream directly (request.on("data"/"end")) instead of importing readCachedJson from mock-dispatch.mjs`;
+    return `${mock} reads the request stream directly (request.on("data"/"end"), or a bare "for await" drain) instead of importing readCachedJson from mock-dispatch.mjs`;
   }
   return null;
 }
@@ -957,6 +977,56 @@ test("body-reader census POSITIVE CONTROL · a synthetic raw request.on(\"data\"
   ].join("\n");
   const violation = bodyReaderViolation("fake-lane-mock.mjs", synthetic);
   assert.match(violation ?? "", /fake-lane-mock\.mjs/);
+});
+
+test("body-reader census POSITIVE CONTROL · a synthetic arrow-assigned readJson IS caught (L01-SPEC-03)", () => {
+  // The shape the review found genuinely invisible: the same private reader as the first
+  // POSITIVE CONTROL above, spelled as an `async` arrow bound to `readJson` instead of a
+  // `function readJson(...)` declaration. `documents-intake-mock.mjs`'s real
+  // `const readJson = readCachedJson;` alias must NOT match this — see the third control below.
+  const synthetic = [
+    "const readJson = async (request) => {",
+    "  const chunks = [];",
+    "  for await (const chunk of request) chunks.push(chunk);",
+    "  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};",
+    "};",
+  ].join("\n");
+  const violation = bodyReaderViolation("fake-lane-mock.mjs", synthetic);
+  assert.match(violation ?? "", /fake-lane-mock\.mjs/);
+  assert.match(violation ?? "", /readJson/);
+});
+
+test("body-reader census POSITIVE CONTROL · a synthetic bare \"for await\" stream drain IS caught (L01-SPEC-03)", () => {
+  // `readCachedJson` itself (`mock-dispatch.mjs`) is written as `for await (const chunk of
+  // request)`, so a lane that copies the LOOP under any function name (not only `readJson`/
+  // `readBody`) reads the same stream by hand and was invisible to the pre-fix census — the
+  // exact shape `chat-parity-mock.mjs`'s and `documents-intake-mock.mjs`'s own `drain(request)`
+  // used before this round repointed them onto the shared reader.
+  const synthetic = [
+    "async function drain(request) {",
+    "  for await (const chunk of request) void chunk;",
+    "}",
+  ].join("\n");
+  const violation = bodyReaderViolation("fake-lane-mock.mjs", synthetic);
+  assert.match(violation ?? "", /fake-lane-mock\.mjs/);
+  assert.match(violation ?? "", /for await/);
+});
+
+test("body-reader census NEGATIVE CONTROL · backtick-quoted PROSE naming \"for await\" does NOT trip the census", () => {
+  // The real shape `periodic-adjustment-mock.mjs`, `staff-expense-claim-mock.mjs`,
+  // `trade-invoice-mock.mjs` and `work-list-mock.mjs` all carry today: a header comment that
+  // NAMES `readCachedJson`'s own mechanism in backtick-fenced prose. None of the four defines a
+  // second reader, so this must read as clean.
+  const synthetic = [
+    "import { readCachedJson } from \"./mock-dispatch.mjs\";",
+    "",
+    "/** Whichever lane read the body first wins the parse: `for await (const chunk of request)`",
+    " *  drains the stream exactly once, so an uncached second reader would see `{}`. */",
+    "async function handle(request) {",
+    "  return readCachedJson(request);",
+    "}",
+  ].join("\n");
+  assert.equal(bodyReaderViolation("fake-lane-mock.mjs", synthetic), null);
 });
 
 test("body-reader census · importing the shared readCachedJson does NOT trip the census", () => {
@@ -1257,12 +1327,37 @@ test("concurrency counter-example · two identities racing the SAME shared mutab
 const RPC_VERB_OPENER =
   /(?:verb === "([a-z0-9_]+)"|fn === "([a-z0-9_]+)"|rpc === "([a-z0-9_]+)"|path (?:===|!==) "\/rest\/v1\/rpc\/([a-z0-9_]+)")/g;
 
+/**
+ * The SIXTH dispatch spelling (review-round L01-SPEC-02 fix): an ARRAY of `/rest/v1/rpc/<verb>`
+ * strings consumed through `NAME.includes(path)` — `home-board-mock.mjs`'s own `EMPTY_RPCS`,
+ * measured to carry SIX verbs, five of which are ALSO answered (under a spelling
+ * `RPC_VERB_OPENER` already recognises) by another lane mock entirely — real multi-claimant
+ * verbs the opener above reports as single-owner because it never looks inside an array
+ * literal. Two passes, because the shape IS two things: a declaration (the array) and a
+ * SEPARATE call-site (`.includes(path)`) — every other opener spelling above is one inline
+ * conditional.
+ */
+const ARRAY_MEMBERSHIP_DISPATCH = /\b([A-Za-z_$][A-Za-z0-9_$]*)\.includes\(path\)/g;
+
+function arrayMembershipVerbs(source: string): string[] {
+  const verbs: string[] = [];
+  for (const [, arrayName] of source.matchAll(ARRAY_MEMBERSHIP_DISPATCH)) {
+    const decl = new RegExp(`\\bconst\\s+${arrayName}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*;`).exec(source);
+    if (!decl) continue;
+    for (const [, verb] of decl[1]!.matchAll(/\/rest\/v1\/rpc\/([a-z0-9_]+)/g)) verbs.push(verb!);
+  }
+  return verbs;
+}
+
 /** Every RPC verb `source` (a lane mock's text, real or synthetic) declares an opener for, in the
  *  order matched. Pure and synchronous so the real census and its synthetic positive controls
  *  below share one implementation — the same split `verbCollisions` and `bodyReaderViolation`
  *  (above) use. */
 function verbsInSource(source: string): string[] {
-  return [...source.matchAll(RPC_VERB_OPENER)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]!);
+  return [
+    ...[...source.matchAll(RPC_VERB_OPENER)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]!),
+    ...arrayMembershipVerbs(source),
+  ];
 }
 
 /** verb -> every lane mock (sorted) whose own dispatch recognises it. */
@@ -1451,6 +1546,25 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   resume_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
   end_accounting_plan: ["plans-mock.mjs", "prepayments-mock.mjs"],
   request_plan_catch_up: ["plans-mock.mjs", "prepayments-mock.mjs"],
+  // REVIEW-ROUND L01-SPEC-02 — five of home-board-mock.mjs's own `EMPTY_RPCS` array-dispatched
+  // verbs are ALSO answered by the lane that actually owns the fixture, a real share the
+  // pre-#863-fix-round census could not see at all (an array literal consumed through
+  // `.includes(path)`, not an inline `verb === "…"`/`fn === "…"`/`path === "…"` conditional).
+  // `serve-built.mjs`'s own dispatch-order comment already named this exact hazard and pinned
+  // `home-board-mock.mjs` LAST among these three lanes for it — DISPATCH ORDER IS LOAD-BEARING,
+  // not this declaration: `bank-close-registers-mock.mjs`, `bank-match-mock.mjs` and
+  // `documents-viewer-mock.mjs` each gate on their own client/subject before answering and fall
+  // through otherwise; `home-board-mock.mjs` answers ALL FIVE unconditionally through
+  // `EMPTY_RPCS`, which is safe ONLY because its hook runs after all three (see
+  // `serve-built.mjs`'s own comment at the `handleP657Supabase`/`handleHomeBoardSupabase` calls,
+  // now updated to say the census CAN see this share and requires the declaration below, not
+  // that it cannot). `list_bank_account_proposals` — `EMPTY_RPCS`'s sixth verb — has no second
+  // claimant today and stays undeclared, correctly a single-owner verb.
+  list_fiscal_years: ["bank-close-registers-mock.mjs", "home-board-mock.mjs"],
+  list_agent_act_receipts: ["bank-close-registers-mock.mjs", "home-board-mock.mjs"],
+  list_bank_accounts: ["bank-match-mock.mjs", "home-board-mock.mjs"],
+  list_bank_statements: ["bank-match-mock.mjs", "home-board-mock.mjs"],
+  list_uncoded_filings: ["documents-viewer-mock.mjs", "home-board-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of
@@ -1587,6 +1701,91 @@ test("RPC-opener census · a synthetic rpc === \"…\" claimant and a synthetic 
   assert.match(problems[0]!, /list_entry_links/);
   assert.match(problems[0]!, /synthetic-guard-claimant-mock\.mjs/);
   assert.match(problems[0]!, /synthetic-rpc-claimant-mock\.mjs/);
+});
+
+test("RPC-opener census · the SAME synthetic pair, corrected, produces ZERO problems (L01-SPEC-04)", () => {
+  // AC1's other, previously-missing half: the cell above is the RED side (a synthetic
+  // undeclared collision IS flagged); this is the GREEN side (the synthetic source, corrected,
+  // is NOT flagged) — without it, a `verbCollisions` that flagged EVERYTHING would still pass
+  // the RED cell alone. Two real corrections, both checked: dropping to a single claimant, and
+  // naming both claimants on a declared share.
+  const soleSource: Record<string, string> = {
+    "synthetic-rpc-claimant-mock.mjs": 'if (request.method === "POST" && rpc === "list_entry_links") { return true; }',
+  };
+  const soleOwners = new Map<string, Set<string>>();
+  for (const [file, source] of Object.entries(soleSource)) {
+    for (const verb of verbsInSource(source)) {
+      const set = soleOwners.get(verb) ?? new Set<string>();
+      set.add(file);
+      soleOwners.set(verb, set);
+    }
+  }
+  const soleCensus = new Map([...soleOwners].map(([verb, set]) => [verb, [...set].sort()]));
+  assert.deepEqual(
+    verbCollisions(soleCensus, SHARED_RPC_VERBS), [],
+    "a single claimant must never be flagged as a collision",
+  );
+
+  const pairSources: Record<string, string> = {
+    "synthetic-rpc-claimant-mock.mjs": 'if (request.method === "POST" && rpc === "list_entry_links") { return true; }',
+    "synthetic-guard-claimant-mock.mjs": 'if (request.method !== "POST" || path !== "/rest/v1/rpc/list_entry_links") return false;',
+  };
+  const pairOwners = new Map<string, Set<string>>();
+  for (const [file, source] of Object.entries(pairSources)) {
+    for (const verb of verbsInSource(source)) {
+      const set = pairOwners.get(verb) ?? new Set<string>();
+      set.add(file);
+      pairOwners.set(verb, set);
+    }
+  }
+  const pairCensus = new Map([...pairOwners].map(([verb, set]) => [verb, [...set].sort()]));
+  const declaredWithBothSynthetic = {
+    ...SHARED_RPC_VERBS,
+    list_entry_links: [...pairCensus.get("list_entry_links")!],
+  };
+  assert.deepEqual(
+    verbCollisions(pairCensus, declaredWithBothSynthetic), [],
+    "the same pair, named on a declared share, must pass",
+  );
+});
+
+test("RPC-opener census · the array-membership `NAME.includes(path)` spelling is recognised (L01-SPEC-02)", () => {
+  // SYNTHETIC source, modelled on home-board-mock.mjs's real EMPTY_RPCS array-dispatch shape.
+  const synthetic = [
+    "const EMPTY_RPCS = [",
+    '  "/rest/v1/rpc/list_widgets",',
+    '  "/rest/v1/rpc/list_gadgets",',
+    "];",
+    'if (request.method === "POST" && EMPTY_RPCS.includes(path)) { return true; }',
+  ].join("\n");
+  assert.deepEqual(verbsInSource(synthetic), ["list_widgets", "list_gadgets"]);
+});
+
+test("RPC-opener census · an array NOT consumed through .includes(path) contributes no verb", () => {
+  // NEGATIVE CONTROL: an array of RPC-shaped strings that is never dispatched through
+  // `.includes(path)` at all (home-board-mock.mjs's own `EMPTY_RELATIONS` is this shape, for
+  // GET table/view reads rather than RPC verbs) must not be mistaken for a dispatch arm.
+  const synthetic = [
+    "const OTHER_LIST = [",
+    '  "/rest/v1/rpc/list_widgets",',
+    "];",
+    "if (OTHER_LIST.includes(somethingElse)) {}",
+  ].join("\n");
+  assert.deepEqual(verbsInSource(synthetic), []);
+});
+
+test("RPC-opener census · home-board-mock.mjs's real EMPTY_RPCS verbs are no longer invisible (L01-SPEC-02)", () => {
+  // NOT synthetic: the real file, the real blind spot L01-SPEC-02 closes. Five of EMPTY_RPCS's
+  // six verbs have a real second claimant elsewhere, using a spelling the opener already
+  // recognised — genuine multi-claimant verbs the pre-fix census reported as single-owner.
+  const census = rpcVerbCensus();
+  assert.deepEqual(census.get("list_fiscal_years"), ["bank-close-registers-mock.mjs", "home-board-mock.mjs"]);
+  assert.deepEqual(census.get("list_agent_act_receipts"), ["bank-close-registers-mock.mjs", "home-board-mock.mjs"]);
+  assert.deepEqual(census.get("list_bank_accounts"), ["bank-match-mock.mjs", "home-board-mock.mjs"]);
+  assert.deepEqual(census.get("list_bank_statements"), ["bank-match-mock.mjs", "home-board-mock.mjs"]);
+  assert.deepEqual(census.get("list_uncoded_filings"), ["documents-viewer-mock.mjs", "home-board-mock.mjs"]);
+  // The sixth verb has no second claimant today and correctly stays single-owner.
+  assert.deepEqual(census.get("list_bank_account_proposals"), ["home-board-mock.mjs"]);
 });
 
 // --- THE CORE HANDOVER CENSUS (#625) ------------------------------------------
@@ -1832,6 +2031,30 @@ test("#902 · the dedicated fixture client reads the POPULATED pack, distinct fr
   assert.notDeepEqual(populated, EMPTY_WORK_PACK, "the populated and empty packs must actually differ, or this proves nothing");
 });
 
+test("#902 · the POPULATED pack HYDRATES to real preview rows, not a count with an empty preview (L01-SPEC-01)", async () => {
+  // The wire fixture asserted byte-for-byte above is necessary but not sufficient: a fixture
+  // shaped `{id, label, state, updated_at}` instead of the door's own `{work_id, purpose,
+  // status, memo, ...}` (0214_client_work_pack.sql) would pass that deepEqual and STILL
+  // hydrate to a count of 1 with ZERO preview rows, because `hydrateRow`
+  // (lib/work/client-work-pack.ts) drops any row with no `work_id`. This cell reads the pack
+  // through the app's own hydrator — the same one `getClientWorkPack` calls — so the fixture
+  // cannot drift back to a shape the real door cannot produce without this cell catching it.
+  const populated = await readWorkPack(HOME_WORK_PACK_CLIENT.id);
+  const hydrated = hydrateClientWorkPack(populated);
+
+  assert.equal(hydrated.active.status, "ok");
+  assert.equal(hydrated.active.count, 1);
+  assert.equal(hydrated.active.rows.length, 1, "count:1 with an empty preview is the exact defect this cell exists to catch");
+  assert.equal(hydrated.active.rows[0]?.work_id, "90290290-9029-4029-8029-902902902001");
+  assert.equal(hydrated.active.rows[0]?.status, "running", "'in_progress' is not a member of accounting_work's status roster (0178)");
+
+  assert.equal(hydrated.recentSuccess.status, "ok");
+  assert.equal(hydrated.recentSuccess.count, 1);
+  assert.equal(hydrated.recentSuccess.rows.length, 1, "count:1 with an empty preview is the exact defect this cell exists to catch");
+  assert.equal(hydrated.recentSuccess.rows[0]?.receipt_id, "90290290-9029-4029-8029-902902902003");
+  assert.equal(hydrated.recentSuccess.rows[0]?.committed_at, "2026-09-10T03:00:00.000Z");
+});
+
 test("#902 · every other client id — including the unscoped default and undefined — keeps the honest-empty pack", async () => {
   const forUnrelatedClient = await readWorkPack("11111111-1111-4111-8111-111111111111");
   const forNoClientAtAll = await readWorkPack(null);
@@ -1846,6 +2069,25 @@ test("#902 · HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT and mints no i
   const onboardingMatch = /HOME_ONBOARDING_CLIENT = \{\s*id: "([0-9a-f-]+)"/.exec(homeBoard);
   assert.ok(onboardingMatch, "home-board-mock.mjs must still declare HOME_ONBOARDING_CLIENT's id in this shape");
   assert.notEqual(HOME_WORK_PACK_CLIENT.id, onboardingMatch![1]);
+
+  // REVIEW-ROUND STD-3 fix — the title's own SECOND claim ("mints no id any other lane owns")
+  // is a CROSS-LANE guarantee the assertion above never checked, and `clientIdCensus` (below)
+  // cannot stand in for it: that census only matches property KEYS containing "client"
+  // (`xxxClientId: "…"`), while this id lives under a plain `id:` key inside a `..._CLIENT`
+  // object — measured invisible to it (a scratch run of `CLIENT_ID_KEY` against
+  // `home-board-mock.mjs` matches neither `HOME_WORK_PACK_CLIENT.id` nor
+  // `HOME_ONBOARDING_CLIENT.id` at all). Grepping every OTHER `LANE_MOCKS` file's own source
+  // text for the literal id is the direct, correct way to check the claim the title actually
+  // makes, the same "read every lane mock's own source" idiom `bodyReaderCensus`/`rpcVerbCensus`
+  // above already use.
+  for (const mock of LANE_MOCKS) {
+    if (mock === "home-board-mock.mjs") continue;
+    const source = readFileSync(join(E2E_DIR, mock), "utf8");
+    assert.ok(
+      !source.includes(HOME_WORK_PACK_CLIENT.id),
+      `${mock} must not mint HOME_WORK_PACK_CLIENT's own id (${HOME_WORK_PACK_CLIENT.id})`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1853,8 +2095,14 @@ test("#902 · HOME_WORK_PACK_CLIENT is not HOME_ONBOARDING_CLIENT and mints no i
 // (`p_work is null or work_id = p_work`) — the e2e mock ignored it entirely before this ticket.
 // ---------------------------------------------------------------------------
 
-async function listActivity(body: Record<string, unknown>): Promise<{ rows: Array<{ id: string; work_id: string | null }> }> {
-  let sent: { rows: Array<{ id: string; work_id: string | null }> } | undefined;
+type ActivityPage = {
+  rows: Array<{ id: string; work_id: string | null }>;
+  next_cursor: string | null;
+  truncated: boolean;
+};
+
+async function listActivity(body: Record<string, unknown>): Promise<ActivityPage> {
+  let sent: ActivityPage | undefined;
   const sendJson = (_response: unknown, _status: number, payload: unknown) => {
     sent = payload as never;
   };
@@ -1887,4 +2135,34 @@ test("#853 · every existing shape (no p_work at all) is UNCHANGED — activity-
   const ids = noWork.rows.map((r) => r.id);
   assert.ok(ids.includes(ACTIVITY.workReceiptId));
   assert.ok(ids.includes(ACTIVITY.secondWorkReceiptId));
+});
+
+test("#853 · pageHasWork decides truncation from PAGE_2's real membership, not from whether p_work was merely present (L01-SPEC-06)", () => {
+  // POSITIVE/NEGATIVE CONTROL on the exported pure decision, driven on a SYNTHETIC page-2
+  // population — neither of today's two real fixture Works has a row on the real PAGE_2, so this
+  // is the only way to prove the function is populated-driven rather than a relabelled "if work,
+  // always false" flag.
+  assert.equal(
+    pageHasWork("some-work-id", [{ work_id: "some-work-id" }]), true,
+    "a work WITH a matching row on page 2 must report more to page",
+  );
+  assert.equal(
+    pageHasWork("some-work-id", [{ work_id: "a-different-work-id" }]), false,
+    "a work with NO matching row on page 2 must report nothing more to page",
+  );
+});
+
+test("#853 · a p_work-filtered read against the REAL fixture carries the SAME next_cursor/truncated 0202's own predicate would give it", async () => {
+  // Neither ACTIVITY.workId nor ACTIVITY.secondWorkId has a row on the real PAGE_2
+  // (`pageHasWork` against the real, un-overridden PAGE_2 — asserted directly, not inferred),
+  // so a work-filtered page-1 read has truthfully nothing left to page to.
+  assert.equal(pageHasWork(ACTIVITY.workId), false);
+  assert.equal(pageHasWork(ACTIVITY.secondWorkId), false);
+
+  const firstWork = await listActivity({ p_client: ACTIVITY.clientId, p_work: ACTIVITY.workId });
+  const secondWork = await listActivity({ p_client: ACTIVITY.clientId, p_work: ACTIVITY.secondWorkId });
+  assert.equal(firstWork.next_cursor, null);
+  assert.equal(firstWork.truncated, false);
+  assert.equal(secondWork.next_cursor, null);
+  assert.equal(secondWork.truncated, false);
 });
