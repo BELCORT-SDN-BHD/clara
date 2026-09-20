@@ -23,7 +23,7 @@ import { randomUUID } from "node:crypto";
 import { ROLES, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
 import { auditActorRoleCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 let live = false;
 let executed = 0;
 
@@ -191,4 +191,42 @@ cell("ar.03 a promotion keeps the authority it actually ran under -- the registe
     "…and the authority the door verified at the time is unchanged by either");
   assert.equal(entry.authority.promoter_active, true,
     "a demoted member is still an active member -- that is a different fact again");
+});
+
+cell("ar.04 a promotion the mechanism never saw says UNKNOWN -- and the register does not quietly substitute the role its promoter holds today", async () => {
+  const w = await knowledgeWorld("p912a4");
+
+  // A PROMOTION EXACTLY AS A PRE-#912 DATABASE HOLDS ONE: the revision and the audit row
+  // `clara._knowledge_insert_revision` wrote beside it, both dated before the column existed.
+  // Minted through root, the way this battery's whole world is minted -- and the audit row keeps
+  // its NULL for a REAL reason, not because the fixture asked: the stamp refuses to invent a role
+  // for a row arriving from the past (ar.02c). That is byte-for-byte the shape 0243 left the
+  // ~66.9k rows already in this log.
+  const revision = randomUUID();
+  await rootQuery(
+    `insert into clara.knowledge_records(
+        id, record_id, revision_n, firm_id, scope_kind, knowledge_key, kind, value,
+        source_kind, trust, basis, asserted_by, recorded_via, recorded_at,
+        knowledge_version, revision_kind, state)
+     values ($1, $1, 1, $2, 'firm', 'default_currency', 'assertion', '"MYR"'::jsonb,
+        'user_statement', 'asserted', 'Partner meeting, recorded before Clara kept the role',
+        $3, 'human_ui', now() - interval '400 days', 1, 'capture', 'live')`,
+    [revision, w.firm, w.admin]);
+  await rootQuery(
+    `insert into clara.audit_log(firm_id, actor, fn, args, at)
+     values ($1, $2, 'capture_knowledge', jsonb_build_object('revision_id', $3::text),
+             now() - interval '400 days')`,
+    [w.firm, w.admin, revision]);
+  const stored = (await rootQuery(
+    "select actor_role from clara.audit_log where args ->> 'revision_id' = $1", [revision])).rows[0];
+  assert.equal(stored.actor_role, null, "the fixture is only honest if the audit row really is unstamped");
+
+  const entry = (await listFirmKnowledge(w.viewer)).records
+    .find((x) => x.knowledge_key === "default_currency");
+  assert.ok(entry, "the firm register did not return the pre-mechanism rule");
+  assert.equal(entry.authority.promoter_role_at_act, null,
+    "an act recorded before the mechanism existed is UNKNOWN -- the register must say so rather than guess");
+  assert.equal(entry.authority.promoter_role_now, "admin",
+    "…and the promoter's CURRENT role is still reported, as the separate fact it is: an unknown "
+    + "historical role must never be filled in from the live roster");
 });
