@@ -55,6 +55,15 @@ const FORMATS = Object.freeze({
 
 const LEVELS = Object.freeze(["supported", "stored_only", "unsupported", "planned"]);
 
+/** #988 — `business_operation`'s OWN fifth level ("Clara proposes, a person confirms"; the exact
+ *  token, left to the implementer by the ticket, is `proposal_only`). `custody`, `byte_extraction`
+ *  and `typed_facts` are OUT OF SCOPE for #988 (its own words) and keep the original four-value
+ *  CHECK unchanged — only `business_operation`'s (0246_business_operation_proposal_only.sql)
+ *  admits the fifth. A shared five-value set for all four columns would silently loosen the other
+ *  three's own closed-vocabulary assertion below, so this is its OWN constant rather than a widen
+ *  of LEVELS. */
+const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
+
 /** THE VERSION THE REGISTRY PUBLISHES TODAY, written as a LITERAL rather than read back out of
  *  the table — a cell that reads the number it is about to assert proves nothing.
  *
@@ -78,6 +87,14 @@ const LEVELS = Object.freeze(["supported", "stored_only", "unsupported", "planne
  *  (`packages/runtime/lib/trade-invoice-basis.ts`'s `.strict()` schema admits no `line_items`
  *  field), so header-only is a standing boundary rather than a future build.
  *
+ *  STILL 3 after #988's `0246_business_operation_proposal_only.sql`. #988 widens ONE column's
+ *  CHECK (business_operation gains its own fifth level, `proposal_only`) and moves ZERO rows: the
+ *  owner's ruling names no row for reclassification this round (`prior_gl` stays `stored_only`,
+ *  #983/#1012). registry_version is a per-row PUBLICATION mark; a vocabulary change that
+ *  republishes no row's content does not raise it, exactly as this lane's own #846 (0244, which
+ *  minted a whole relation and two walls, touched zero rows and did not move the version either)
+ *  precedents.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
@@ -88,12 +105,16 @@ let executed = 0;
 // #779 — the three monotonicity cells below ride 0207's BEFORE UPDATE trigger, which sits ABOVE
 // 0191 in the chain. They are gated on THAT object (by its stem's own catalog shape, never by a
 // migration number), so this file keeps passing on a database that has 0191 and not yet 0207 —
-// the frontier rule every battery here follows. EXPECTED_CELLS is the count WITH 0207 applied;
-// the `after` hook below asserts the executed count equals whichever constant the live
-// frontier makes true, so forgetting to bump either one still fails the whole battery.
-const EXPECTED_CELLS = 19;
-const EXPECTED_CELLS_PRE_0207 = 16;
+// the frontier rule every battery here follows. EXPECTED_CELLS is the count WITH 0207 AND #988's
+// 0246 both applied; EXPECTED_CELLS_PRE_988 is 0207 applied but not yet 0246 (0246 cannot apply
+// before 0207 — migrations run in strict numeric order — so there is no "0246 without 0207" state
+// to name); the `after` hook below asserts the executed count equals whichever constant the live
+// frontier makes true, so forgetting to bump one of these still fails the whole battery.
+const EXPECTED_CELLS = 22;
+const EXPECTED_CELLS_PRE_988 = 20;
+const EXPECTED_CELLS_PRE_0207 = 17;
 let monotoneLive = false;
+let proposalLevelLive = false;
 
 async function cohortApplied() {
   const r = await rootQuery(`select
@@ -123,12 +144,23 @@ async function monotoneWallApplied() {
   return r.rows[0].ok === true;
 }
 
+/** #988 — is `document_capabilities_business_operation_check` at ITS FIVE-VALUE FORM (0246), or
+ *  still at 0191's original four? Read from the LIVE CATALOG, never from a migration number, the
+ *  same law `monotoneWallApplied` follows for 0207. */
+async function proposalLevelApplied() {
+  const r = await rootQuery(`select pg_get_constraintdef(c.oid) as def from pg_constraint c
+     where c.conrelid = 'clara.document_capabilities'::regclass and c.contype = 'c'
+       and c.conname = 'document_capabilities_business_operation_check'`);
+  return (r.rows[0]?.def ?? "").includes("proposal_only");
+}
+
 before(async () => {
   live = await cohortApplied();
   monotoneLive = live && await monotoneWallApplied();
+  proposalLevelLive = live && await proposalLevelApplied();
 });
 after(async () => {
-  const want = monotoneLive ? EXPECTED_CELLS : EXPECTED_CELLS_PRE_0207;
+  const want = !monotoneLive ? EXPECTED_CELLS_PRE_0207 : (proposalLevelLive ? EXPECTED_CELLS : EXPECTED_CELLS_PRE_988);
   if (live) assert.equal(executed, want, `expected ${want} cells to run, ${executed} did`);
   await endPool();
 });
@@ -154,6 +186,19 @@ const monotoneCell = (name, fn) => test(name, async (t) => {
   if (gate(t)) return;
   if (!monotoneLive) {
     t.skip("0207_document_capabilities_version_monotone is not applied on this database");
+    return;
+  }
+  executed += 1;
+  await fn(t);
+});
+
+/** #988 — a cell that additionally needs 0246's five-value business_operation CHECK. SKIPS (never
+ *  fails) below that frontier, counted only when it actually ran, the same shape monotoneCell
+ *  uses for 0207. */
+const proposalLevelCell = (name, fn) => test(name, async (t) => {
+  if (gate(t)) return;
+  if (!proposalLevelLive) {
+    t.skip("0246_business_operation_proposal_only is not applied on this database");
     return;
   }
   executed += 1;
@@ -213,7 +258,7 @@ cell("every live document kind × every canonical intake format has EXACTLY ONE 
   assert.deepEqual(extra, [], "the registry names a kind the live vocabulary does not admit");
 });
 
-cell("every registry row names a canonical intake mime, one mime per format, and the four levels are a closed set", async () => {
+cell("every registry row names a canonical intake mime, one mime per format, and the level vocabulary is closed (four shared levels, business_operation's own fifth beside them, #988)", async () => {
   const rows = (await rootQuery(
     "select distinct format, mime_type from clara.document_capabilities order by 1")).rows;
   assert.deepEqual(
@@ -225,8 +270,9 @@ cell("every registry row names a canonical intake mime, one mime per format, and
     `select format, document_kind, custody, byte_extraction, typed_facts, business_operation
        from clara.document_capabilities
       where custody <> all($1::text[]) or byte_extraction <> all($1::text[])
-         or typed_facts <> all($1::text[]) or business_operation <> all($1::text[])`, [LEVELS])).rows;
-  assert.deepEqual(bad, [], "a level outside the closed four-value set");
+         or typed_facts <> all($1::text[]) or business_operation <> all($2::text[])`,
+    [LEVELS, BUSINESS_OPERATION_LEVELS])).rows;
+  assert.deepEqual(bad, [], "a level outside the closed vocabulary");
 });
 
 cell("the registry carries ONE monotone registry_version and a non-blank basis on every row", async () => {
@@ -312,6 +358,24 @@ cell("business_operation never claims 'supported' where typed_facts is not suppo
        from clara.document_capabilities
       where business_operation='supported' and typed_facts<>'supported'`)).rows;
   assert.deepEqual(rows, [], "an operation promised over facts that do not exist");
+});
+
+// #988 — proposal_only's OWN honesty rule, stated the same way its sibling above is: a repeatable
+// TEST cell, never a table CHECK. The pre-existing rule for `supported` has ALWAYS lived only
+// here (and, once, in 0191's own apply-time tail) — never as a cross-column CHECK constraint —
+// and #988's brief names this cell "the existing check" the new rule sits beside, so the new rule
+// is added the same way rather than minting a mechanism the estate does not otherwise use for
+// this family of invariant.
+cell("proposal_only reclassifies no row for #988 itself, and business_operation never claims it where typed_facts is not supported (the new level's own honesty rule)", async () => {
+  const rows = (await rootQuery(
+    `select format, document_kind, typed_facts from clara.document_capabilities
+      where business_operation = 'proposal_only'`)).rows;
+  assert.deepEqual(rows, [],
+    "the owner named no row for #988's migration -- prior_gl stays stored_only pending the Client KB (#983/#1012)");
+  const violations = (await rootQuery(
+    `select format, document_kind from clara.document_capabilities
+      where business_operation = 'proposal_only' and typed_facts <> 'supported'`)).rows;
+  assert.deepEqual(violations, [], "a proposal promised over facts that do not exist");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -507,3 +571,55 @@ monotoneCell("ROLLBACK HYGIENE — after the probes the registry is byte-identic
         and pg_get_constraintdef(oid) ilike '%registry_version >= 1%'`)).rows[0].n;
   assert.equal(positivity, 1, "0191's registry_version >= 1 positivity CHECK must still be on the column");
 });
+
+// ---------------------------------------------------------------------------------------------
+// #988 — business_operation's FIFTH LEVEL. `document_capabilities_business_operation_check`
+// widens (0246_business_operation_proposal_only.sql); custody, byte_extraction and typed_facts
+// stay on the original four (out of scope, the ticket's own words). Behavioural, not merely
+// textual: this cell PROVES the CHECK actually admits the new value (not only that its
+// pg_get_constraintdef mentions the token) and PROVES the honesty rule above actually
+// discriminates rather than passing only because zero real rows carry the level yet.
+// ---------------------------------------------------------------------------------------------
+
+proposalLevelCell(
+  "business_operation admits proposal_only, distinct from stored_only, and the level's own honesty rule actually discriminates",
+  async () => {
+    const seen = await inRolledBackTxn(async (c) => {
+      // (a) A pair whose typed_facts IS supported may carry the new level — exactly the shape
+      // #988 exists for: Clara reads deterministically and proposes. pdf x invoice's typed_facts
+      // is 'supported' (this file's own cell above), so this is an HONEST use of the level.
+      const honest = (await c.query(
+        `update clara.document_capabilities set business_operation = 'proposal_only' ${PDF_INVOICE}
+           returning business_operation`)).rows[0].business_operation;
+
+      // (b) The SAME level over a pair whose typed_facts is NOT supported (ofx x bank_statement,
+      // C-37) is the exact over-claim #988's honesty invariant exists to catch. The CHECK itself
+      // has no opinion on typed_facts — only the cross-column rule does — so this UPDATE succeeds
+      // and the invariant query below must be what flags it.
+      await c.query(
+        "update clara.document_capabilities set business_operation = 'proposal_only' "
+        + "where format = 'ofx' and document_kind = 'bank_statement'");
+      const violations = (await c.query(
+        `select format, document_kind from clara.document_capabilities
+          where business_operation = 'proposal_only' and typed_facts <> 'supported'`)).rows;
+
+      return { honest, violations };
+    });
+    assert.equal(seen.honest, "proposal_only",
+      "the CHECK refused a value document-capability-registry.test.mjs itself now names as admitted");
+    assert.notEqual(seen.honest, "stored_only", "the new level must not collapse into stored_only");
+    assert.deepEqual(seen.violations, [{ format: "ofx", document_kind: "bank_statement" }],
+      "the new level's own honesty rule must actually flag a pair proposing from facts it does not have, not merely pass because no real row uses the level yet");
+  },
+);
+
+proposalLevelCell(
+  "the CHECK still refuses a sixth, out-of-set value — widening the vocabulary did not remove the wall", async () => {
+    const err = await caught(() => rootQuery(
+      `insert into clara.document_capabilities(format,document_kind,mime_type,custody,byte_extraction,
+          typed_facts,business_operation,engine_id,engine_byte,registry_version,basis)
+       values ('zzz988','invoice','application/zzz988','supported','supported','supported','maybe_someday',null,null,1,'probe')`));
+    assert.ok(err, "an out-of-set level was accepted after #988 widened the CHECK");
+    assert.equal(err.code, "23514", `expected a CHECK violation, got ${err.code}`);
+  },
+);

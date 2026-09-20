@@ -1637,6 +1637,42 @@ same branch. The tail re-hashes all five again, and asserts the high-water mark 
 every pair via #846's ordinary AFTER-trigger writer path — never a first publication, never a
 partial raise.
 
+## #988 — a fifth business_operation level, proposal_only (0246)
+
+`0246_business_operation_proposal_only.sql` widens ONE column CHECK — nothing else.
+`business_operation` now admits a fifth value, `proposal_only` ("Clara proposes, a person
+confirms": Clara reads the pair deterministically and derives a real proposal, but never carries
+it into a posted operation on its own authority), alongside the four `custody`, `byte_extraction`
+and `typed_facts` keep unchanged (`supported`/`stored_only`/`unsupported`/`planned`) — those three
+are out of scope for #988 and the tail proves them byte-identical.
+
+**No row moves.** Owner ruling 2026-09-20 names no row for reclassification here: `prior_gl` —
+the pairing #656 measured as fitting the new level's own description — stays `stored_only`,
+because the SAME session's #983 ruling retires the prior-GL seeding lane outright (the Client KB,
+not a hand-registered pairing, is the intended ingestion path for it going forward, #1012). Since
+zero rows' data changes, `registry_version` does NOT move. The direct precedent is this lane's own
+#846 (0244): it minted a whole new relation and two new walls, touched zero registry rows, and
+left `registry_version` exactly where 0228 published it (2) until 0245 (#782) separately raised it
+for an actual content correction. `0246` follows that shape — it changes VOCABULARY, not DATA —
+and its tail proves the registry is still uniformly at 3 (0245's own publish) after it runs.
+
+**The honesty invariant is a test cell, matching the one it sits beside.** `business_operation`
+never claiming `supported` where `typed_facts` is not has ALWAYS lived only in
+`document-capability-registry.test.mjs`'s repeatable battery, never in a table CHECK (0191's own
+one-time apply-tail is the only other place it was ever stated, and that runs once, at migration
+time, never again). `proposal_only`'s own rule — never claiming the level where `typed_facts` is
+not `supported` either, since a proposal with no facts to propose from is the identical
+over-claim — is added the same way, beside it, and PROVEN discriminating: the migration's own tail
+(§C.4) sets up one honest row and one dishonest one inside a rolled-back probe, and the repeatable
+test file's own new cell reads the same shape live.
+
+**Web.** `CapabilityLevel` (`apps/web/lib/documents/document-state.ts`) and the readers keyed off
+it (`capability-tiers.tsx`'s tone map, `capabilityTier.*` in `en.json`) admit the fifth value and
+render it distinctly from `stored_only`; `resolveCapability`/`tierStateKey`
+(`capability-registry.ts`) already pass any level through generically and needed no change beyond
+the shared type. No reader anywhere branches on `business_operation === 'supported'` in a way that
+would silently fold the new level into an existing one.
+
 ## 0234 — the platform's legal enforcement mode (#1008)
 
 The owner ruled on 2026-09-20 that during the beta **the state of a firm's agreements must never

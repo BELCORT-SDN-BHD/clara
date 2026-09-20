@@ -1982,6 +1982,27 @@ export const DOCUMENT_CAPABILITY_HIGH_WATER_0244_COHORT = [
 //   `packages/db/tests/document-capability-high-water.test.mjs`'s rollback-hygiene cell, never by
 //   a new name here.
 // #782 END
+// #988 [0246, business_operation's fifth level, proposal_only] — COMMENT-ONLY, deliberately, and
+// for the SAME reason #782's entry above carries none.
+//
+//   0246_business_operation_proposal_only.sql INSTALLS NO FUNCTION, NO TABLE AND NO TRIGGER, AND
+//   RECUTS NONE. Its whole content is DROP + ADD on `document_capabilities_business_operation_
+//   check` (the SAME auto-generated name, widened from four values to five) plus a column comment
+//   update — no row of `clara.document_capabilities` is inserted, deleted, or has any column
+//   other than the constraint's own definition changed. So there is no granted name to roster and
+//   no ungranted closure to pin: a cohort array would be empty and `cohortFailures` would compare
+//   it against nothing.
+//
+//   THE FRONTIER IS READ FROM THE CHECK'S OWN DEFINITION, never from a migration number:
+//   `document-capability-registry.test.mjs`'s `proposalLevelApplied()` greps
+//   `pg_get_constraintdef` for the `proposal_only` token, the same law `monotoneWallApplied()`
+//   already follows for 0207's trigger.
+//
+//   REGISTRY_VERSION DOES NOT MOVE: #988's owner ruling reclassifies no row onto the new level
+//   this round (`prior_gl` stays `stored_only`, #983/#1012), and a vocabulary widening that
+//   republishes no row's content does not raise the per-row publication mark — the migration's
+//   own tail proves the registry is still uniformly at 3 (0245's own publish) afterward.
+// #988 END
 // #639 [0216, fixed-asset acquisition] — the ACQUISITION lane, its own cohort for the same
 // "wholly present or wholly absent" reason every roster above carries: folding these names into
 // 0041's FA cohort would red every database between the two frontiers, and `cohortFailures()`
