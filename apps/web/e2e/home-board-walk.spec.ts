@@ -1281,9 +1281,21 @@ test("p1009.home.legal_prompt — an owner sees the outstanding agreement named 
   // The already-accepted kind is not offered as something still to accept.
   await expect(board.getByText("Data processing agreement")).toHaveCount(0);
 
-  await board.getByRole("link", { name: "Accept on firm settings" }).click();
-  await expect(page).toHaveURL(/\/settings\/firm$/);
-
+  // THE SCAN MOVED AHEAD OF THE CLICK (fix round). It ran after the navigation, so it was
+  // scanning /settings/firm under a label that claimed Firm Home — the one surface this cell is
+  // about was never actually scanned.
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "Firm Home with the legal-standing prompt on screen").toEqual([]);
+
+  // AC1 ASKS FOR THE CONTROL, NOT THE ROUTE (fix round, SPEC-L07-05): "its link lands on the
+  // accept control". The URL alone would stay green if `/settings/firm` stopped mounting
+  // LegalStandingCard, or mounted it without an accept affordance for this caller. The mocked
+  // standing is the same one this whole cell runs on — terms v2 published and unaccepted by this
+  // owner, `can_accept_for_firm: true` — so the card offers exactly one accept control, for the
+  // terms kind; the DPA is current at version 1 and offers none.
+  await board.getByRole("link", { name: "Accept on firm settings" }).click();
+  await expect(page).toHaveURL(/\/settings\/firm$/);
+  await expect(page.getByRole("heading", { name: "Legal standing", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept for this firm" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Accept for this firm" })).toBeVisible();
 });
