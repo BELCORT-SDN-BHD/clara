@@ -14,8 +14,9 @@
 //   AC3 — a test in this battery inserts a catalog key that violates the tightened grammar and
 //         asserts the catalog refuses it (kg.02, kg.03 — this file IS that test).
 //   AC4 — `clara.record_work_knowledge_read`'s own grammar check is untouched: this migration
-//         never recuts that function at all (kg.05 re-measures its live prosrc, proving no byte of
-//         it moved -- the function still resolves at its exact 0230 signature).
+//         never recuts that function at all (kg.05 pins its live prosrc sha256 against the value
+//         0230 produces, and re-asserts that the recorder still runs the same grammar literal
+//         0242 copied into the two catalog CHECKs).
 //
 // kg.04/kg.05 need NO new code beyond the migration slice.01-.03 already turned green: they are
 // the emergent-behaviour proof of AC2/AC4, exactly as knowledge-scope-default-drop.test.mjs's
@@ -156,18 +157,35 @@ cell("kg.04 every key currently registered in both catalogs continues to validat
 });
 
 cell("kg.05 clara.record_work_knowledge_read's own grammar check is untouched by this migration", async () => {
+  // AC4 IS AN OUT-OF-SCOPE GUARD, so it is pinned as one. An earlier cut of this cell measured
+  // the body's sha256 and then asserted only that it LOOKED like a sha (`/^[0-9a-f]{64}$/`),
+  // which passes against any body at all -- the review caught it (SPEC-L02-01) and it is the
+  // reason a measurement is never evidence until something compares it to a value fixed in
+  // advance.
+  //
+  // THE VALUE, AND WHERE IT COMES FROM. 0230_knowledge_retrieval.sql is the ONLY file in
+  // packages/db/migrations that creates clara.record_work_knowledge_read and no file recuts it
+  // (grepped over the whole directory), so its `prosrc` is a property of the migration CHAIN and
+  // is the same on every database that ran it -- a literal here is portable, not a rig fact.
+  // When a LATER ticket legitimately recuts the recorder, this cell is supposed to go red: move
+  // the pin in that ticket's own commit, deliberately.
+  const RECORDER_0230_PROSRC_SHA256 =
+    "8f745815512727bbedfa01f25e66177a066574c461f964574d120b532ac8fc79";
+
   const r = await rootQuery(
-    `select encode(sha256(prosrc::bytea), 'hex') as sha
+    `select prosrc, encode(sha256(prosrc::bytea), 'hex') as sha
        from pg_proc
       where oid = 'clara.record_work_knowledge_read(uuid,text,int,text,date,text,text[],jsonb,int,boolean,text,text)'::regprocedure`);
   assert.equal(r.rowCount, 1, "clara.record_work_knowledge_read must still resolve at its 0230 signature");
-  // 0230's own body, byte-identical: this migration recuts no function at all, so the recorder's
-  // grammar (the SOURCE of truth the brief names) stays whatever 0230 shipped, unweakened and
-  // unwidened -- proved by re-measuring its prosrc rather than merely arguing this file adds no
-  // CREATE OR REPLACE for it (grepped: it does not).
-  assert.match(r.rows[0].sha, /^[0-9a-f]{64}$/);
-});
+  assert.equal(r.rows[0].sha, RECORDER_0230_PROSRC_SHA256,
+    "#993 must not move one byte of the recorder: 0242 adds no CREATE OR REPLACE for it, and this is what proves it");
 
+  // …and the thing AC4 is actually ABOUT, said in its own terms rather than only as a hash: the
+  // grammar the recorder runs is still the grammar 0242 copied into the two catalog CHECKs, so
+  // the catalog cannot have been tightened to something the recorder would not also refuse.
+  assert.ok(r.rows[0].prosrc.includes("^[a-z][a-z0-9_]{0,62}$"),
+    "the recorder must still enforce the exact grammar this migration copied into both catalogs");
+});
 /** Like assertRaises(PG.checkViolation, ...), but ALSO tolerates the harness's own pooled-client
  *  reset (a CHECK violation aborts the current implicit transaction; rootQuery's withActor always
  *  rolls back before releasing the client, so no probe row is ever left behind). */
