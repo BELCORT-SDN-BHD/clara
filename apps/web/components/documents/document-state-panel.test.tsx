@@ -144,11 +144,11 @@ const INVALID_INVOICE: DocumentStateResult = {
     document_kind: "invoice", typed_facts: "supported", business_operation: "supported",
     engine_id: "llm-openai:gpt-5.6-terra:v2",
     basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:v2. A filed document of this kind carries a business operation Clara can drive from those facts.",
-    limits: { invoice_line_items: "planned" },
+    limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
   },
   facts: {
     capability: "supported",
-    limits: { invoice_line_items: "planned" },
+    limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
     extractions: [{
       id: "ext-1", engine_kind: "llm_text_facts", engine_id: "llm-openai:gpt-5.6-terra:v2",
       version_n: 3, status: "done", superseded_by: null,
@@ -293,8 +293,12 @@ test("a FAILED arithmetic check names the check, keeps the facts readable, and s
 
 test("a supported invoice still declares its LINE-ITEM limit — header facts are not per-line facts", async () => {
   await mount(INVALID_INVOICE, async (text) => {
-    assert.match(text(), /Per-line invoice facts are planned/,
+    assert.match(text(), /Per-line invoice facts: accepted_limitation/,
       "the registry's named limit must reach the reader, or 'facts recorded' overstates what was read");
+    assert.doesNotMatch(text(), /planned/i,
+      "ticket 782: invoice line items are a standing limitation, never described as coming");
+    assert.match(text(), /Reason: no_consumer_reads_line_facts/,
+      "the limitation carries its own reason, not a bare verdict (ticket 782)");
   });
 });
 

@@ -42,7 +42,7 @@ const ROWS: CapabilityRegistryRow[] = [
     format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
     typed_facts: "supported", business_operation: "supported",
     engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
-    limits: { invoice_line_items: "planned" },
+    limits: { invoice_line_items: "accepted_limitation", invoice_line_items_reason: "no_consumer_reads_line_facts" },
   }),
   row({
     format: "pdf", document_kind: "payroll_summary", mime_type: "application/pdf",

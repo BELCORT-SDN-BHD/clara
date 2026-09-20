@@ -217,10 +217,10 @@ test("operation: a landed bank statement reads as the BANK lane, not as a journa
 
 test("capability limits are stable, sorted pairs — never raw JSON interpolated at a reader", () => {
   const cap = state({
-    capability: { limits: { reader: "myinvois_ubl_only", invoice_line_items: "planned" } },
+    capability: { limits: { reader: "myinvois_ubl_only", invoice_line_items: "accepted_limitation" } },
   }).capability;
   assert.deepEqual(capabilityLimits(cap), [
-    ["invoice_line_items", "planned"],
+    ["invoice_line_items", "accepted_limitation"],
     ["reader", "myinvois_ubl_only"],
   ]);
   assert.deepEqual(capabilityLimits({ ...cap, limits: {} }), []);

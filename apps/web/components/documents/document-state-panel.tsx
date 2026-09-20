@@ -98,6 +98,9 @@ const CHECK_KEY: Record<string, string> = {
 
 const LIMIT_KEY: Record<string, string> = {
   invoice_line_items: "capabilityLimit.invoiceLineItems",
+  // #782: the invoice family's line-item limit carries a sibling reason key, the same two-key
+  // shape `opening_balance` + `reader` already uses for the OFX row.
+  invoice_line_items_reason: "capabilityLimit.invoiceLineItemsReason",
   opening_balance: "capabilityLimit.openingBalance",
   reader: "capabilityLimit.reader",
   router: "capabilityLimit.router",

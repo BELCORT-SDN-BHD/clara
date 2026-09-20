@@ -2843,7 +2843,8 @@
     "stateOperationNotApplicableDetail": "Clara never posts an entry from this type of document.",
     "capabilityRegistryVersion": "capability registry v{version}",
     "capabilityLimit": {
-      "invoiceLineItems": "Per-line invoice facts are {level}: Clara records the header totals with their source regions, not the individual lines.",
+      "invoiceLineItems": "Per-line invoice facts: {level}. Clara records the header totals with their source regions; the questionnaire, autodraft and posting all work from those header facts alone.",
+      "invoiceLineItemsReason": "Reason: {level}.",
       "openingBalance": "The opening balance is {level} from this file format, so the statement’s own balance chain can never be closed.",
       "reader": "Reader limit: {level}.",
       "router": "Routing limit: {level}."
