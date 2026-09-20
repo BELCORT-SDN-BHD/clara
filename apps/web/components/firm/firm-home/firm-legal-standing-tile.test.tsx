@@ -88,3 +88,67 @@ test("p1009.web.legal_owner_prompt — an owner sees the outstanding agreement, 
     assert.equal(link!.getAttribute!("href"), "/settings/firm", "landing on the existing accept control");
   } finally { await h.unmount(); }
 });
+
+test("p1009.web.legal_member_prompt — a member who cannot accept sees who must, and is offered no link", async () => {
+  const h = await mount(() => Promise.resolve(standing({ standingLive: false, canAcceptForFirm: false })));
+  try {
+    assert.match(h.text(), /An owner of this firm needs to accept/, "who must act, not a demand on this reader");
+    assert.equal(h.find((n) => n.tagName === "A"), null,
+      "no accept control and no dead link for a reader who cannot use it");
+  } finally { await h.unmount(); }
+});
+
+test("p1009.web.legal_read_failed — a failed read says the standing could not be read, and never renders as current", async () => {
+  const h = await mount(() => Promise.reject(new Error("network boom")));
+  try {
+    assert.match(h.text(), /could not be read/i, "the failure is said, not swallowed into an absent prompt");
+    assert.doesNotMatch(h.text(), /accepts the current versions|not all accepted/i,
+      "an unread standing is never painted as current by default");
+  } finally { await h.unmount(); }
+});
+
+test("p1009.web.legal_mode_copy — the body follows the platform's enforcement mode, never a second derivation", async () => {
+  const promptCopy = await mount(() => Promise.resolve(standing({ standingLive: false, enforcementMode: "prompt" })));
+  try {
+    assert.match(promptCopy.text(), /does not stop Clara working/i, "prompt mode asks plainly and says nothing is switched off");
+    assert.doesNotMatch(promptCopy.text(), /Clara cannot use a model/i);
+  } finally { await promptCopy.unmount(); }
+
+  const enforceCopy = await mount(() => Promise.resolve(standing({ standingLive: false, enforcementMode: "enforce" })));
+  try {
+    assert.match(enforceCopy.text(), /Clara cannot use a model on any client's books/i, "enforce mode says what is switched off");
+    assert.doesNotMatch(enforceCopy.text(), /does not stop Clara working/i);
+  } finally { await enforceCopy.unmount(); }
+});
+
+test("p1009.web.legal_two_outstanding — EACH outstanding agreement is named, an accepted kind is not, and a missing date is said rather than guessed", async () => {
+  const h = await mount(() => Promise.resolve(standing({
+    standingLive: false,
+    documents: [
+      doc({ kind: "terms", version: 4, firmAccepted: false, effectiveFrom: null }),
+      doc({ kind: "dpa", version: 2, firmAccepted: false, effectiveFrom: "2026-08-30T16:00:00.000Z" }),
+    ],
+  })));
+  try {
+    const text = h.text();
+    assert.match(text, /Terms of Service.*version 4/, "the first outstanding kind, named");
+    assert.match(text, /no effective date recorded/, "and its missing date is said, not invented");
+    assert.match(text, /Data processing agreement.*version 2.*effective/i, "the second outstanding kind, named too");
+  } finally { await h.unmount(); }
+});
+
+test("p1009.web.legal_one_accepted_one_not — an already-accepted kind is not listed among what still needs accepting", async () => {
+  const h = await mount(() => Promise.resolve(standing({
+    standingLive: false,
+    documents: [
+      doc({ kind: "terms", version: 2, firmAccepted: false }),
+      doc({ kind: "dpa", version: 1, firmAccepted: true }),
+    ],
+  })));
+  try {
+    const text = h.text();
+    assert.match(text, /Terms of Service/, "the outstanding kind is named");
+    assert.doesNotMatch(text, /Data processing agreement/,
+      "a kind the firm already accepted is not offered as something still to accept");
+  } finally { await h.unmount(); }
+});

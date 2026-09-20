@@ -48,7 +48,28 @@ export function FirmLegalStandingTile({ loader = () => loadFirmLegalStanding() }
   // competes with Firm Home's own orientation sentence while it is still unread.
   if (standing.loading) return null;
 
+  // THE READ FAILED. Said as a failure, never swallowed into an absent prompt and never painted
+  // as "current" by default (AC5) — an unread standing is not evidence that nothing is
+  // outstanding, and the fail-closed reading is the one this estate always takes when a fact it
+  // needs cannot be read (`decodeLegalEnforcementMode`'s own note makes the same call).
+  if (standing.error) {
+    return (
+      <Card data-testid={TESTID}>
+        <CardHeader>
+          <CardTitle><SectionHeader level={2}>{t("legalPrompt.heading")}</SectionHeader></CardTitle>
+        </CardHeader>
+        <CardContent>
+          <StateBanner tone="error">{t("legalPrompt.readFailed")}</StateBanner>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const data = standing.data;
+  // Never reached in practice — `loadFirmLegalStanding` throws rather than resolving a payload it
+  // cannot read (`commercial-reads.ts`'s "THE THREE SCALARS ARE REQUIRED" note), so an unreadable
+  // answer always lands in the `standing.error` branch above. Kept as the honest fail-closed
+  // branch for a `loader` a future cell hands in directly.
   if (data === null) return null;
   // STANDING IS LIVE: the prompt has nothing to ask, and it is never dismissible while something
   // IS outstanding — so there is nothing here to dismiss in the first place.
@@ -72,11 +93,19 @@ export function FirmLegalStandingTile({ loader = () => loadFirmLegalStanding() }
             ))}
           </ul>
         ) : null}
-        <p className="text-sm">
-          <Link href="/settings/firm" className="text-primary underline-offset-4 hover:underline">
-            {t("legalPrompt.action")}
-          </Link>
-        </p>
+        {data.canAcceptForFirm ? (
+          <p className="text-sm">
+            <Link href="/settings/firm" className="text-primary underline-offset-4 hover:underline">
+              {t("legalPrompt.action")}
+            </Link>
+          </p>
+        ) : (
+          // NO ACCEPT CONTROL AND NO DEAD LINK — `can_accept_for_firm` is the door's own,
+          // re-derived every call from 0195:905's membership predicate, and nothing here mirrors
+          // a rank of its own to second-guess it (裁-187's ruling, applied here as everywhere
+          // else in `lib/firm/capabilities.ts`).
+          <p className="text-xs text-muted-foreground">{t("legalPrompt.ownerHint")}</p>
+        )}
       </CardContent>
     </Card>
   );
