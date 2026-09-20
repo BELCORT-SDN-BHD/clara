@@ -2015,3 +2015,119 @@ test("af.38 an event type whose prefix no rung names lands on the STATED DEFAULT
     assert.equal(detail.kind, "documents", `af.38 get_activity_event agrees for ${ev.type}`);
   }
 });
+
+/** The kind ladder of ONE installed body, as an ordered, comment-free, whitespace-normalised
+ *  sentence: from the sweep arm (the ladder's first rung, #728) to the stated default that closes
+ *  it. Comments are dropped because the two doors document the same rungs at different lengths —
+ *  what must match is the DECISION, not the prose around it. */
+function ladderOf(prosrc) {
+  const FIRST = "when v.event_type = 'sweep.run_completed'";
+  const LAST = "else 'documents'";
+  const start = prosrc.indexOf(FIRST);
+  assert.notEqual(start, -1, "the installed body has no kind ladder at all");
+  const end = prosrc.indexOf(LAST, start);
+  assert.notEqual(end, -1, "the installed kind ladder has no stated default");
+  return prosrc.slice(start, end + LAST.length)
+    .split("\n").map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("--"))
+    .join(" ").replace(/\s+/g, " ");
+}
+
+/** The ladder the ticket asks for, written out ONCE from its sources rather than re-derived from
+ *  the SQL: the sweep arm is #728's (0183), entry/document/close are 0181's, `work.%` is #630's
+ *  (0184), the five that follow are the owner's ruling of 2026-09-18 on #861 in the order it names
+ *  them, and `documents` closes it as the stated default 0181 chose. */
+const EXPECTED_LADDER = [
+  "when v.event_type = 'sweep.run_completed' then 'agent'",
+  "when v.event_type like 'entry.%' then 'journal'",
+  "when v.event_type like 'document.%' then 'documents'",
+  "when v.event_type like 'close.%' then 'close'",
+  "when v.event_type like 'work.%' then 'work'",
+  "when v.event_type like 'member.%' or v.event_type like 'invite.%' then 'people'",
+  "when v.event_type like 'asset.%' then 'assets'",
+  "when v.event_type like 'counterparty.%' then 'counterparties'",
+  "when v.event_type like 'client.%' or v.event_type like 'knowledge.%' then 'clients'",
+  "when v.event_type like 'firm.%' then 'firm'",
+  "else 'documents'",
+].join(" ");
+
+test("af.39a the two installed ladders are the SAME ladder, rung for rung, and they are the ladder the ruling names", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const sig = await listActivitySignature();
+  const list = (await rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [sig])).rows[0].prosrc;
+  const detail = (await rootQuery(
+    "select prosrc from pg_proc where oid = 'clara.get_activity_event(text,text)'::regprocedure")).rows[0].prosrc;
+
+  assert.equal(ladderOf(list), ladderOf(detail),
+    "af.39a list_activity and get_activity_event carry byte-comparable ladders");
+  assert.equal(ladderOf(list), EXPECTED_LADDER,
+    "af.39a …and it is the ladder #728/#630 and the owner's #861 ruling name, in that order");
+});
+
+test("af.39b EVERY registered event type answers the SAME kind in both doors, and the kind its family was assigned", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A2;
+
+  // The independent source of truth for the expected value: the prefix -> kind table, transcribed
+  // from the owner's ruling of 2026-09-18 (the five new rungs) and from the arms 0183/0181/0184
+  // already documented. FIRST MATCH WINS, exactly as a SQL `case` resolves, and anything that
+  // matches nothing rides the stated default.
+  const RULING = [
+    [(n) => n === "sweep.run_completed", "agent"],
+    [(n) => n.startsWith("entry."), "journal"],
+    [(n) => n.startsWith("document."), "documents"],
+    [(n) => n.startsWith("close."), "close"],
+    [(n) => n.startsWith("work."), "work"],
+    [(n) => n.startsWith("member.") || n.startsWith("invite."), "people"],
+    [(n) => n.startsWith("asset."), "assets"],
+    [(n) => n.startsWith("counterparty."), "counterparties"],
+    [(n) => n.startsWith("client.") || n.startsWith("knowledge."), "clients"],
+    [(n) => n.startsWith("firm."), "firm"],
+  ];
+  const expectedKind = (name) => (RULING.find(([p]) => p(name)) ?? [null, "documents"])[1];
+
+  // `sweep.run_completed` is the ONE registered type this census cannot drive this way: #728
+  // EXCLUDES a heartbeat with no measured effect from the feed entirely, so a bare append of one
+  // would never reach a page at all. Its rung is proven by af.15 (a kept heartbeat reads
+  // kind=agent) and by af.39a's structural comparison, which covers it like every other rung.
+  const types = (await rootQuery(
+    "select name, client_scoped from clara.event_types where name <> 'sweep.run_completed' order by name")).rows;
+  assert.ok(types.length >= 100,
+    `af.39b the census is real (got ${types.length} registered event types, expected at least 100)`);
+
+  const seeded = new Map();
+  for (const row of types) {
+    const ev = await mkEvent({
+      firm: FIRM_A(), type: row.name, client: row.client_scoped ? cli : null, actor: ALICE(),
+    });
+    seeded.set(ev.eventId, row.name);
+  }
+
+  // Page the feed until every seeded id has been seen. They are the newest rows in the firm, so
+  // this terminates in ceil(n/100) pages; the guard is there so a cursor defect fails loudly
+  // instead of looping.
+  const seen = new Map();
+  let cursor = null;
+  for (let guard = 0; guard < 20 && seen.size < seeded.size; guard += 1) {
+    const page = await listActivity(BOB(), { cursor, limit: 100 });
+    for (const r of rowsOf(page)) if (seeded.has(r.id)) seen.set(r.id, r.kind);
+    cursor = page.next_cursor;
+    if (!cursor) break;
+  }
+  assert.equal(seen.size, seeded.size,
+    `af.39b every seeded event reached the feed (${seen.size} of ${seeded.size})`);
+
+  for (const [id, name] of seeded) {
+    const want = expectedKind(name);
+    assert.equal(seen.get(id), want, `af.39b list_activity files ${name} under ${want}`);
+    const detail = await getActivityEvent(BOB(), "event", id);
+    assert.equal(detail.kind, want, `af.39b get_activity_event files ${name} under ${want} too`);
+  }
+
+  // …and every kind the ladder just produced is a value the door's own filter admits, which is
+  // what makes each of them reachable rather than merely correctly labelled.
+  for (const kind of new Set(seen.values())) {
+    const page = rowsOf(await listActivity(BOB(), { kinds: [kind], limit: 1 }));
+    assert.ok(Array.isArray(page), `af.39b the closed roster admits ${kind}`);
+  }
+});
