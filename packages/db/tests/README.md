@@ -1016,7 +1016,7 @@ rather than a `prosrc` string match proving only that the guard's TEXT exists.
 ## The fixed-asset birth-watermark battery (#972)
 
 `fa-birth-watermark.test.mjs` is frontier-gated on the `fa_birth_watermark$` stem (migration 0247)
-— never on a number — and shares `fa-birth-watermark-fixtures.mjs`. Four `p972.*` cells:
+— never on a number — and shares `fa-birth-watermark-fixtures.mjs`. Five `p972.*` cells:
 `p972.law` reads the recut birth body off the CATALOG (the watermark expression present exactly
 once, 0216's watermark-free join gone, NO bare clock token — arm (D)'s own detector, imported from
 `x42-s5-helpers.mjs` rather than restated — and `clara.fa_register_tie` still phrasing the
@@ -1027,7 +1027,8 @@ as-ofs, classified by `x41.s4`'s own `isRed`/`isExplained`; `p972.refire` proves
 did not close the lane 0216 opened; `p972.source` drives the assumption the predicate rests on
 instead of asserting it — an approved entry can never carry a NULL `approved_at`, because
 `clara._tf_entry_immutable` refuses the draft→approved transition without one and its
-approved→approved allow-list is exactly `{reversed_by, reversal_reason, updated_at}`.
+approved→approved allow-list is exactly `{reversed_by, reversal_reason, updated_at}`;
+`p972.sites` records the SECOND birth site rather than aligning it.
 
 **Why the predicate is the TIE's, negated, and not the BELT's.** The belt
 (`clara._tf_fa_movement_belt`, 0041 §S2.6) spells its own watermark
@@ -1043,6 +1044,24 @@ would re-admit exactly the entry the file excludes; and the clock read reddened 
 v_enrolled`, once per column), so the instrument that BIRTHS a register row and the instrument
 `x41.s4` reads to AUDIT it cannot disagree about scope. It spends no clock read, so arm (D)'s
 roster stays true unwidened, and 0247's own tail (T.8) re-proves that off the catalog.
+
+**The second birth site is PINNED, not aligned (`p972.sites`).** `clara._fa_on_approve` arm 4
+makes the same insert with the same conflict target, and 0247 deliberately leaves its join
+watermark-free — two birth sites that now differ in text is exactly the condition that produced
+#972's defect, so the reasons it is safe here are measured off the catalog instead of argued.
+Two facts, and the cell reds if either moves: arm 4's own guard still reads `not
+e.is_opening_balance and e.reversal_of is null and not (e.flags ? 'fa_disposal')`, which excludes
+the reversal MIRROR — the only entry arm 4 sees during a reversal, since `clara.reverse_entry`
+hands its hook `v_mirror`, never the original; and the caller ladder is exactly
+`_fa_on_approve` ← `_subledger_on_approve` ← the six approve writers (`_approve_entry_core`,
+`_approve_opening_entry`, `approve_wrong_client_correction`, `finalize_close`,
+`reopen_fiscal_year`, `reverse_entry`), each of which hands the hook an entry approved in the
+SAME transaction. A seventh writer, or anything reaching `_fa_on_approve` directly, reds the
+cell — which is the point: the next person to widen the ladder is asked #972's question first.
+The behavioural half is already driven by `p972.retro`, whose reversal runs
+`reverse_entry`'s own hook call inside the same transaction. VACUITY CONTROL RUN: a throwaway
+`clara._p972_vacuity_probe(uuid)` calling `clara._fa_on_approve` was created on the lane rig, the
+cell went RED on the caller-set assertion, and the probe was dropped and the cell re-run green.
 
 `fa-birth-watermark-preintegration-gate.mjs` is the package-wide sweep's escape
 (`CLARA_ALLOW_MISSING_FA_BIRTH_WATERMARK=1`), registered in `packages/db/package.json`'s `"test"`

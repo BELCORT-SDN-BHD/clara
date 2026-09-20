@@ -125,6 +125,27 @@ export const NULL_APPROVED_AT_UPDATE =
   "update clara.journal_entries set approved_at = null, reversed_by = id, "
   + "reversal_reason = 'p972 watermark probe' where id = $1";
 
+/** `clara._fa_on_approve` arm 4's guard and its own watermark-FREE join, verbatim off the live
+ *  catalog. 0247 deliberately leaves arm 4 alone, and `p972.sites` pins BOTH halves of the
+ *  reason: the guard is what makes the reversal mirror unreachable here, and the join is the
+ *  divergence — recorded rather than hidden, so a later cut cannot claim the two birth sites
+ *  agree in text when they do not. */
+export const ARM4_GUARD =
+  "if not e.is_opening_balance and e.reversal_of is null and not (e.flags ? 'fa_disposal') then";
+export const ARM4_WATERMARK_FREE_JOIN =
+  `               and fp.asset_account_code = jl.account_code and fp.active
+             where jl.entry_id = p_entry`;
+
+/** The ONE function that calls `clara._fa_on_approve`, and the approve writers that call THAT.
+ *  Measured off the live catalog; a SEVENTH approve writer — or any other caller reaching
+ *  `_fa_on_approve` directly — is exactly the condition that produced #972's defect at the
+ *  trigger, and `p972.sites` reds on it. */
+export const FA_ON_APPROVE_CALLERS = ["_subledger_on_approve"];
+export const SUBLEDGER_ON_APPROVE_CALLERS = [
+  "_approve_entry_core", "_approve_opening_entry", "approve_wrong_client_correction",
+  "finalize_close", "reopen_fiscal_year", "reverse_entry",
+];
+
 /** 0216's watermark-FREE join, verbatim. Its absence is what makes the recut non-vacuous. */
 export const WATERMARK_FREE_JOIN = `             and fp.asset_account_code = jl.account_code and fp.active
            where jl.entry_id = new.id`;

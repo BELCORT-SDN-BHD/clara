@@ -17,6 +17,14 @@
 //                acquisition still births at approve, and its own `reversed_by` re-fire still
 //                finds its row through the same `on conflict (acquisition_line_id) do nothing`
 //                — one row, never a twin, and 'unwound' by the reversal hook.
+//   p972.sites   THE OTHER BIRTH SITE, PINNED RATHER THAN ALIGNED. `clara._fa_on_approve`
+//                arm 4 makes the same insert and its join still carries NO watermark. 0247
+//                leaves it alone deliberately; this cell records the divergence off the
+//                catalog and pins the two facts that make it unreachable — arm 4's own
+//                `e.reversal_of is null` guard, and the caller ladder that hands it only
+//                entries approved in the SAME transaction. A seventh approve writer, or any
+//                new caller reaching `_fa_on_approve` directly, reds this cell: that is the
+//                condition that produced #972's defect at the trigger.
 //   p972.source  THE ASSUMPTION THE PREDICATE RESTS ON, driven rather than assumed: the
 //                watermark's first operand can never be NULL on a row this trigger fires for,
 //                because `clara._tf_entry_immutable` refuses an approval that carries no
@@ -37,6 +45,7 @@ import assert from "node:assert/strict";
 import {
   gate972, p972Client, birthBodySource, WATERMARK_EXPR, WATERMARK_FREE_JOIN,
   TIE_PRE_ENROLMENT_EXPR, NULL_APPROVED_AT_UPDATE, FA_BIRTH_WATERMARK_STEM,
+  ARM4_GUARD, ARM4_WATERMARK_FREE_JOIN, FA_ON_APPROVE_CALLERS, SUBLEDGER_ON_APPROVE_CALLERS,
   rootQuery, opk, noteLane, endPool, printLaneNotes, printSkipCount, x41EnsureReady, skip41,
   faWorld, faRows, faRow, entryRowOf, approvedEntry, buyAsset, reverseEntry, upsertFaProfile,
   faRegisterTie, caught, mon, dayIn, COST, ACCUM, EXPENSE, BANK,
@@ -256,4 +265,64 @@ test("p972.source the watermark's first operand can never be NULL on a row this 
   noteLane("p972.source: approved_at cannot be nulled on an approved entry (CLR08) and cannot be "
     + "absent at approval, and created_at is NOT NULL — 0247's watermark has no NULL branch to "
     + "reach, and no clock to fall back on");
+});
+
+// ===========================================================================================
+// p972.sites — THE SECOND BIRTH SITE. RECORDED, NOT ALIGNED.
+// ===========================================================================================
+
+test("p972.sites clara._fa_on_approve arm 4 still births with NO watermark, and that is safe only because of two facts this cell pins off the catalog: arm 4's own reversal_of guard, and a caller ladder that hands it nothing but entries approved in the same transaction", async (t) => {
+  if (await shut(t)) return;
+
+  // THE DIVERGENCE, STATED. 0247 recuts the TRIGGER and deliberately not the hook (its own
+  // header says so), so the two birth sites now differ in text. A reviewer is right to call that
+  // the condition that produced this defect in the first place — a body gated on the approved
+  // STATE driven again by a caller nobody modelled — so the reasons it is safe HERE are measured
+  // rather than asserted in prose.
+  const occurrences = (hay, needle) => hay.split(needle).length - 1;
+  const arm4 = (await rootQuery(
+    "select p.prosrc as src from pg_proc p where p.oid = 'clara._fa_on_approve(uuid)'::regprocedure",
+  )).rows[0].src;
+  assert.equal(occurrences(arm4, ARM4_WATERMARK_FREE_JOIN), 1,
+    "clara._fa_on_approve arm 4 still carries its watermark-FREE join, exactly once — the "
+    + "divergence 0247 leaves open, recorded here so a later cut cannot claim the two sites agree");
+  assert.equal(occurrences(arm4, WATERMARK_EXPR), 0,
+    "…and it carries no copy of the trigger's watermark: this cell is about an ABSENCE, and it "
+    + "would be vacuous if the absence were not real");
+
+  // FACT 1 — THE REVERSAL MIRROR CANNOT REACH ARM 4. The trigger's defect was that a reversal
+  // re-fires it on the ORIGINAL, which stays approved. Arm 4 is never handed the original: every
+  // caller hands it the freshly-approved entry, and the one caller that runs during a reversal
+  // (clara.reverse_entry) hands it the MIRROR — which arm 4's own guard excludes by
+  // `e.reversal_of is null`.
+  assert.equal(occurrences(arm4, ARM4_GUARD), 1,
+    "arm 4's guard is still `not e.is_opening_balance and e.reversal_of is null and not (e.flags "
+    + "? 'fa_disposal')`, exactly once — the clause that keeps the reversal mirror out");
+
+  // FACT 2 — THE CALLER LADDER, OFF THE CATALOG. `_fa_on_approve` is reached through exactly one
+  // function, and that function is reached from exactly the approve writers measured below. A
+  // SEVENTH writer, or anything calling `_fa_on_approve` directly, reds this cell — which is the
+  // point: the next person to widen this ladder is asked #972's question before they do.
+  for (const [callee, expected] of [
+    ["clara._fa_on_approve(", FA_ON_APPROVE_CALLERS],
+    ["_subledger_on_approve(", SUBLEDGER_ON_APPROVE_CALLERS],
+  ]) {
+    const self = callee.replace("clara.", "").replace("(", "");
+    const callers = await rootQuery(
+      `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'clara' and p.proname <> $2 and position($1 in p.prosrc) <> 0
+        order by p.proname`, [callee, self]);
+    assert.deepEqual(callers.rows.map((r) => r.proname), expected,
+      `${callee}'s caller set is exactly ${JSON.stringify(expected)} (got `
+      + `${JSON.stringify(callers.rows.map((r) => r.proname))}) — a new caller is the condition `
+      + "that produced #972's defect at the trigger, and 0247 does not protect arm 4 from it");
+  }
+
+  // …AND THE COMBINED SYSTEM IS ALREADY DRIVEN: p972.retro reverses a pre-enrolment acquisition
+  // through the real door, and clara.reverse_entry's own hook call reaches arm 4 inside that same
+  // transaction. The register stays empty there, which is the behavioural half of this argument.
+  noteLane("p972.sites: clara._fa_on_approve arm 4 keeps its watermark-free join (divergence "
+    + "recorded, not fixed); it is unreachable for a pre-enrolment entry because its "
+    + "`e.reversal_of is null` guard excludes the reversal mirror and its caller ladder is "
+    + `exactly {${FA_ON_APPROVE_CALLERS.join(", ")}} <- {${SUBLEDGER_ON_APPROVE_CALLERS.join(", ")}}`);
 });
