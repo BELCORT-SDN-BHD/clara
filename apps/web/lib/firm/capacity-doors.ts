@@ -95,12 +95,24 @@ export type SetFirmDocumentLimits = (
   opts?: CallDoorOptions,
 ) => Promise<SetProcessingCapsOutcome>;
 
-function readCaps(raw: unknown, key: Record<ProcessingCap, string>): ProcessingCapValues | null {
+// THREE READERS, NOT ONE GENERIC WALK (standards review L10-STD-04, 2026-09-20, a judgement
+// call left as three). They look alike because they all walk `PROCESSING_CAPS`, but each
+// answers a DIFFERENT question about a DIFFERENT shape: an object of integers, an object of
+// integers-or-null (where `null` is the fact "no cap was stored", not a bad field), and an
+// ARRAY of column names read backwards to app spellings. A generic "walk the caps with a
+// predicate" helper would have to carry both input shapes and three failure semantics as
+// parameters, which is more machinery than the ~8 lines each costs, and would put the one
+// thing a reader of a receipt-parser cares about -- what makes THIS field unacceptable --
+// behind an indirection. The reviewer scored it the same way ("a minor judgement call and
+// not required"). What DID go was `readCaps`'s `key` parameter: it had one call site and one
+// possible value, `RECEIPT_KEY`, and its only effect was to make this function look
+// gratuitously unlike `readPrevious`, which reads the same constant directly.
+function readCaps(raw: unknown): ProcessingCapValues | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
   const out: Partial<ProcessingCapValues> = {};
   for (const cap of PROCESSING_CAPS) {
-    const v = r[key[cap]];
+    const v = r[RECEIPT_KEY[cap]];
     if (typeof v !== "number" || !Number.isInteger(v)) return null;
     out[cap] = v;
   }
@@ -146,7 +158,7 @@ export const setFirmDocumentLimits: SetFirmDocumentLimits = async (params, opts)
     // evidence that a write happened, and this card must never report caps nobody stored.
     if (typeof out !== "object" || out === null) return { kind: "unavailable" };
     if (out.status !== "set") return { kind: "unavailable" };
-    const caps = readCaps(out.caps, RECEIPT_KEY);
+    const caps = readCaps(out.caps);
     const previous = readPrevious(out.previous);
     const changed = readChanged(out.changed);
     if (caps === null || previous === null || changed === null) return { kind: "unavailable" };
