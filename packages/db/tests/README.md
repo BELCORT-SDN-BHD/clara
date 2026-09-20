@@ -1037,15 +1037,19 @@ which returns a boolean instead of calling `t.skip()` so the rest of the host ce
 
 **Its clients are `p972_…`, outside the x41 family, on purpose.** Every fixture here is a
 deliberate pre-enrolment shape, and `x41.s4` holds each EXPLAINED difference among `x41_…` clients
-to an allow-list pinned at exactly one entry. Naming them `x41_…` would force that list to grow;
+to an allow-list pinned at exactly one entry. Naming them `x41_…` would put pressure on that list;
 the classification law is still the sweep's own, imported rather than restated.
 
-**What 0247 changed about `x41.s4`'s reading of `x41.b3`.** Before 0247 the reversal birthed a
-phantom register row whose cost netted the GL out at the two earlier as-ofs and left one
-UNEXPLAINED difference at the settled one. After it, the register is empty and the client shows one
-EXPLAINED difference at the two earlier as-ofs (pre-enrolment GL the register can never hold) and
-ties at the settled one — the same shape `x41.r3` already builds. `x41.b3` therefore JOINED
-`ALLOWED_RED`'s single existing entry (`/^x41_(r3|b3)_/`) rather than getting one of its own: the
-list is still ONE. A register row born by the pre-0247 body survives on a long-lived rig — the
-`fixed_assets` immutability trigger forbids DELETE — so a rig that ran the defect keeps reading
-those clients as unexplained until it is rebuilt; #972 puts cleaning them out of scope explicitly.
+**What 0247 changed about `x41.s4`'s reading of `x41.b3`, and why no allow-list moved.** Before
+0247 the reversal birthed a phantom register row whose cost netted the GL out at the two earlier
+as-ofs and left one UNEXPLAINED difference at the settled one. After it the register is empty, and
+the difference the two earlier as-ofs now show is pre-enrolment GL the register can never hold —
+which `x41.s4` classifies as an **A6 correction window** (derived from the data, not from a name:
+an approved entry the GL still carries at that as-of whose approved mirror is dated LATER), a class
+that has provably closed by the settled as-of and never reaches `ALLOWED_RED` at all. Both
+allow-lists are therefore untouched by #972; `ALLOWED_RED` is still its single `/^x41_r3_/` entry.
+
+A register row born by the PRE-0247 body does survive on a long-lived rig — the `fixed_assets`
+immutability trigger forbids DELETE (CLR13) — so a rig that ran the defect keeps reading those
+clients as one UNEXPLAINED difference at the settled as-of until it is rebuilt. #972 puts cleaning
+them out of scope explicitly, and the count drifts run to run; it is not a number to quote.

@@ -79,16 +79,8 @@ const skipHere = (t) => skip41(t, live, "the Wave-D-a round-3.5 tie-instrument b
 
 const ALLOWED_RED = [
   {
-    // [#972, 0247] x41.b3 JOINED THIS ENTRY RATHER THAN GETTING ONE OF ITS OWN — the list is
-    // still ONE. Both fixtures build the identical deliberate shape this reason describes, and
-    // x41.b3's residue was invisible here until 0247 only because the defect #972 fixes was
-    // MASKING it: the reversed_by stamp re-fired the birth trigger and planted a phantom register
-    // row whose cost netted the GL out at every as-of before the mirror landed, leaving one
-    // UNEXPLAINED red at the settled as-of instead of one explained red at the two earlier ones.
-    // Removing the mask did not create a new fixture class; it revealed that this entry always
-    // covered two fixtures.
-    match: /^x41_(r3|b3)_/,
-    why: "x41.r3's and x41.b3's DELIBERATE pre-enrolment fixtures — GL history approved on the cost account BEFORE anyone enrolled it. §1.2's watermark forbids a retroactive birth and there is no back-fill door, so the register HONESTLY holds less than the GL; the tie's own pre-enrolment column reports the whole residue (F9), which is why this red is EXPLAINED and never unexplained. x41.b3 reverses its pre-enrolment entry, so its residue is a window that SHUTS by the settled as-of; x41.r3 leaves its standing.",
+    match: /^x41_r3_/,
+    why: "x41.r3's DELIBERATE pre-enrolment fixture — GL history approved on the cost account BEFORE anyone enrolled it. §1.2's watermark forbids a retroactive birth and there is no back-fill door, so the register HONESTLY holds less than the GL; the tie's own pre-enrolment column reports the whole residue (F9), which is why this red is EXPLAINED and never unexplained.",
   },
 ];
 
