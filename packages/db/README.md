@@ -1718,17 +1718,22 @@ act actually run under" was unanswerable once anybody was promoted or demoted, a
 audit row, not in a new membership-revision relation.
 
 - **The column.** `clara.audit_log.actor_role`, nullable `text` under `ck_audit_log_actor_role`.
-  It carries a **three-way**, and the third value is the point:
+  It carries **four words, one fact each**, and the two markers are the point:
 
   | value | meaning |
   |---|---|
   | `NULL` | the row predates this mechanism. **Unknown**, and never guessed. |
-  | `'none'` | measured at write time: the actor held **no active membership** in that firm. |
-  | `viewer`/`bookkeeper`/`admin`/`owner` | measured at write time: the role held. |
+  | `'no_actor'` | measured at the write: the row names **no actor at all**. |
+  | `'none'` | measured at the write: a **named** actor who held **no active membership** in that firm. |
+  | `viewer`/`bookkeeper`/`admin`/`owner` | measured at the write: the role that actor held. |
 
   Without `'none'`, `NULL` would mean both "before the mechanism" and "the wake lane's agent
   identity, which holds no membership by construction" — and the ruling's own "unknown" would be a
-  guess. `clara.role_rank('none')` is `NULL`, so the marker can never be compared as authority.
+  guess. `'no_actor'` is the same discipline one step further: `clara.audit_log.actor` is nullable
+  and much of this estate's traffic (estate notices, seeding, sweeps) carries no person at all, and
+  saying *"the mechanism looked and found no membership"* about a row with nobody in it would be
+  the same conflation in a third place. `clara.role_rank(...)` is `NULL` for both markers, so
+  neither can ever be compared as authority.
 
 - **Where it is filled, and why not in `clara._audit`.** The ruling names `clara._audit`, the sole
   writer of the table. It cannot be edited: it is **ordinal 10 of the frozen `metric_input_snapshot`
@@ -1753,10 +1758,30 @@ audit row, not in a new membership-revision relation.
   have been right anyway: a column default cannot see the row's own `firm_id` and `actor`), the
   file contains no `UPDATE` of `clara.audit_log`, and §A *measures* on the live database that every
   pre-existing row stayed `NULL`. The table's append-only triggers refuse any later back-fill. The
-  stamp also refuses to invent a role for **any row whose own `at` predates the transaction** —
-  `scripts/restore.mjs` replays a plain dump through `psql`, and BEFORE INSERT row triggers fire
-  for `COPY`, so without that arm a restore would rewrite every historical row's authority with
-  today's roster.
+  stamp also refuses to invent a role for **any row whose own `at` predates the transaction** — a
+  rig minting a pre-mechanism world, or a hand-loaded row. That arm **clears** the column rather
+  than keeping what the insert supplied: otherwise `at` would be a dial, and as `clara_fn_owner`
+  (the identity every `SECURITY DEFINER` body runs as) a row backdated by one second could carry
+  a forged `'owner'` past `ck_audit_log_actor_role`. So the guarantee is a property of the
+  **table's** write path, not of `clara._audit` alone: **no insert can assert a role this
+  database did not measure.** A restore is unaffected, measured rather than assumed —
+  `scripts/restore.mjs` replays a plain `pg_dump` through `psql`, and pg_dump emits triggers in
+  its **post-data** section, after the data (`pg_dump --section=post-data -t clara.audit_log` is
+  where `CREATE TRIGGER t_audit_actor_role` appears), so `clara.audit_log`'s `COPY` runs before
+  the trigger exists and every restored row keeps the `actor_role` the dump carried.
+
+- **When the role is resolved, exactly.** At the **audit write**, inside the act's own
+  transaction — not at the moment the door admitted the call. Under `READ COMMITTED` each statement
+  takes a fresh snapshot, so a role change that *commits* between a door's `clara._human_ctx`
+  admission check and the act's audit write is what the column then reports (reproduced on the rig
+  with two connections: a bookkeeper's `clara.correct_knowledge` parks on a row lock, the caller is
+  promoted to owner and commits, and the resulting audit row reads `owner`). Carrying the
+  admission-time role instead would mean a transaction-local value set where the admission happens
+  — and **every** function on that path is a frozen `metric_input_snapshot` v1 producer member:
+  `clara._human_ctx`, `clara.role_rank`, `clara.actor_role_rank`, `clara.jwt_sub`,
+  `clara.jwt_firm`, `clara._reserve_op` and `clara._audit` itself. The same freeze that forbids the
+  recut forbids the carry, so the column's meaning is stated rather than stretched: *the role the
+  actor held when the database recorded the act*. `tests/audit-actor-role.test.mjs` ar.07 pins it.
 
 - **Who cites it.** `clara.list_firm_knowledge`'s authority block gains `promoter_role_at_act`,
   matched to the audit row the promotion itself wrote (`clara._knowledge_insert_revision` audits
@@ -1767,5 +1792,5 @@ audit row, not in a new membership-revision relation.
   for a null. `ix_audit_log_knowledge_revision` keeps that citation off a sequential scan of the
   whole log.
 
-Battery: `tests/audit-actor-role.test.mjs` (ar.01–ar.05), gated by
+Battery: `tests/audit-actor-role.test.mjs` (ar.01–ar.07), gated by
 `tests/audit-actor-role-preintegration-gate.mjs`.

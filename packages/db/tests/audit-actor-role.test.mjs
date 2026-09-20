@@ -31,10 +31,10 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { AGENT_USER_ID, ROLES, assertRaises, endPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
+import { AGENT_USER_ID, ROLES, assertRaises, endPool, getPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
 import { auditActorRoleCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 7;
 let live = false;
 let executed = 0;
 
@@ -79,6 +79,50 @@ function capture(sub, o) {
 
 const listFirmKnowledge = (sub) =>
   humanQuery(sub, "select clara.list_firm_knowledge() as r", []).then((r) => r.rows[0].r);
+
+/**
+ * EVERY function in this estate that writes `clara.audit_log` itself, read off the catalog.
+ *
+ * The census is the wall the ruling's "every governed door inherits the column with no per-door
+ * change" actually rests on, so it must not be a SPELLING. Every definer body here carries
+ * `set search_path = clara, pg_temp`, so `insert into audit_log(...)` is as lawful as
+ * `INSERT INTO clara.audit_log (...)` or a line break after `into` -- and a census that matched
+ * one exact lowercase, schema-qualified string would call a second writer "no writer at all".
+ * Line comments are stripped first (`regexp_replace(..., '--.*', '', 'gn')`): without that, the
+ * case-insensitive match reads the PROSE in clara.set_wake_source_enabled -- "never a direct
+ * multi-row INSERT into audit_log" -- as a writer. `query` is whichever connection the caller
+ * passes, so the CONTROL in ar.06 can show the census catching a real, uncommitted second writer.
+ */
+async function auditWriters(query = rootQuery) {
+  const r = await query(
+    `select ns.nspname || '.' || p.proname as f
+       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+      where ns.nspname not in ('pg_catalog', 'information_schema')
+        and regexp_replace(p.prosrc, '--.*', '', 'gn')
+            ~* 'insert[[:space:]]+into[[:space:]]+(clara[[:space:]]*[.][[:space:]]*)?audit_log'
+      order by 1`);
+  return r.rows.map((x) => x.f);
+}
+
+/**
+ * Wait until some backend in THIS database is really parked on a lock, polled off pg_stat_activity
+ * rather than slept on a guess. ar.07's whole claim depends on the door being admitted and then
+ * BLOCKED with its audit write still ahead of it; if that never happens the cell must fail loudly
+ * instead of quietly asserting nothing.
+ */
+async function awaitBlockedBackend(deadlineMs = 20000) {
+  const started = Date.now();
+  for (;;) {
+    const r = await rootQuery(
+      `select count(*)::int as n from pg_stat_activity
+        where datname = current_database() and state = 'active' and wait_event_type = 'Lock'`);
+    if (r.rows[0].n > 0) return;
+    if (Date.now() - started > deadlineMs) {
+      throw new Error("no backend ever parked on the lock -- ar.07's race did not set up, so the cell would assert nothing");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 /** The committed audit row a door left behind, READ BACK (never the caller of the act). */
 function auditRowOf(firm, fn, actor) {
@@ -259,15 +303,11 @@ cell("ar.04 a promotion the mechanism never saw says UNKNOWN -- and the register
 // =============================================================================================
 
 cell("ar.05 every governed door inherits the column with no per-door change -- one writer, one stamp, and no second overload to drift into", async () => {
-  // (a) THE SOLE WRITER. If any function wrote the audit row itself it would write it around the
-  // stamp, and the ruling's "no per-door change" would be false for exactly that door.
-  const writers = (await rootQuery(
-    `select ns.nspname || '.' || p.proname as f
-       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
-      where ns.nspname not in ('pg_catalog', 'information_schema')
-        and p.prosrc like '%insert into clara.audit_log%'
-      order by 1`)).rows.map((r) => r.f);
-  assert.deepEqual(writers, ["clara._audit"],
+  // (a) THE SOLE WRITER, counted by `auditWriters` rather than by one exact spelling (ar.06c
+  // shows the difference is real). A second writer would not escape the STAMP -- the trigger is
+  // attached to the table -- but it would escape `clara._audit`'s discipline of naming neither
+  // `at` nor `actor_role`, which is what ar.06 shows the unforgeability guarantee rests on.
+  assert.deepEqual(await auditWriters(), ["clara._audit"],
     "clara.audit_log must have exactly one writer -- every door's audit row goes through it");
 
   // (b) ONE SIGNATURE, ONE OVERLOAD. A door that needed a per-door change would show up here as a
@@ -313,4 +353,167 @@ cell("ar.05 every governed door inherits the column with no per-door change -- o
   // …and 'none' is not a rank, so nothing can compare it as authority.
   const rank = (await rootQuery("select clara.role_rank('none') as r")).rows[0].r;
   assert.equal(rank, null);
+
+  // (e) AN ACT WITH NO ACTOR AT ALL IS A FOURTH WORD, NOT 'none'. clara.audit_log.actor is
+  // nullable and the estate writes a great many rows through it: on this rig, 39,272 of the
+  // 40,369 rows carrying a role of 'none' have no actor whatsoever (estate notices, seeding,
+  // sweeps). 'none' is DEFINED as "the mechanism looked the actor up and they held no active
+  // membership in this firm" -- a fact about a person. Saying that about a row with nobody in it
+  // is the exact conflation the three-way exists to prevent, so a row with no actor records
+  // 'no_actor' and the four words stay one meaning each.
+  await rootQuery(
+    `insert into clara.audit_log(firm_id, actor, fn, args)
+     values ($1, null, 'rig_912_no_actor', '{}'::jsonb)`, [w.firm]);
+  const actorless = (await rootQuery(
+    "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_no_actor'",
+    [w.firm])).rows[0];
+  assert.equal(actorless.actor_role, "no_actor",
+    "an act with no actor at all was never looked up -- it is 'no_actor', not the 'none' that means a person with no membership");
+  assert.equal((await rootQuery("select clara.role_rank('no_actor') as r")).rows[0].r, null,
+    "…and like 'none' it is deliberately not a rank");
+});
+
+cell("ar.06 no insert into clara.audit_log can assert a role the database did not measure -- not by supplying one, not by backdating itself, and not by becoming a second writer", async () => {
+  const w = await knowledgeWorld("p912a6");
+
+  // (a) A SUPPLIED ROLE ON AN ACT HAPPENING NOW IS THROWN AWAY. The writer says 'owner'; the
+  // database measures the roster and records what it measured.
+  await rootQuery(
+    `insert into clara.audit_log(firm_id, actor, fn, args, actor_role)
+     values ($1, $2, 'rig_912_supplied_now', '{}'::jsonb, 'owner')`, [w.firm, w.bookkeeper]);
+  assert.equal((await rootQuery(
+    "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_supplied_now'",
+    [w.firm])).rows[0].actor_role, "bookkeeper",
+  "a role supplied by the writer is replaced by the one the database measured -- for every act it witnesses");
+
+  // (b) …AND SO IS A ROW THAT BACKDATES ITSELF. `at` is the only thing separating an act from
+  // history, so if the history arm KEPT what the insert carried, `at` would be a dial: an
+  // earlier cut of 0243 returned that row unchanged, and as clara_fn_owner -- the identity every
+  // SECURITY DEFINER body in this estate runs as -- a row backdated by one second kept a forged
+  // 'owner' for an actor holding no membership anywhere (review finding ADV-06). The arm now
+  // CLEARS the column: an act this database did not witness reads unknown, which is the honest
+  // word, and there is no value of `at` that buys a writer an authority.
+  await rootQuery(
+    `insert into clara.audit_log(firm_id, actor, fn, args, at, actor_role)
+     values ($1, $2, 'rig_912_supplied_past', '{}'::jsonb, now() - interval '1 second', 'owner')`,
+    [w.firm, w.bookkeeper]);
+  assert.equal((await rootQuery(
+    "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_supplied_past'",
+    [w.firm])).rows[0].actor_role, null,
+  "a row that backdates itself is not an act this database witnessed -- its role is cleared to unknown, never kept from the writer");
+
+  // …and a RESTORE is untouched by that, which is measured rather than argued: pg_dump emits
+  // triggers in its POST-DATA section, after the data, so clara.audit_log's COPY runs before
+  // t_audit_actor_role exists and every restored row keeps the role the dump carried. The
+  // measurement is recorded in 0243 §B beside the arm (`pg_dump --section=post-data`); it is a
+  // property of pg_dump's own section order, not of this database, so there is nothing here for
+  // a cell on this rig to assert.
+
+  // (c) …SO THE SOLE-WRITER CENSUS IS THE WALL, AND IT MAY NOT BE A SPELLING. CONTROL: a real
+  // second writer, spelled the other lawful way (uppercase, unqualified -- every definer body
+  // here sets search_path = clara, pg_temp), created and censused inside a transaction that is
+  // then rolled back. The census this battery and 0243's §Z share must SEE it.
+  const client = await getPool().connect();
+  try {
+    await client.query("reset role");
+    await client.query("begin");
+    await client.query(`create function clara._rig_912_second_writer(p_firm uuid) returns void
+      language plpgsql security definer set search_path = clara, pg_temp as $rig$
+      begin
+        INSERT INTO audit_log(firm_id, fn, args) values (p_firm, 'rig_912_second', '{}'::jsonb);
+      end $rig$;`);
+    const seen = await auditWriters((sql, params) => client.query(sql, params));
+    assert.ok(seen.includes("clara._rig_912_second_writer"),
+      `a second writer spelled INSERT INTO audit_log must be caught by the census, got ${JSON.stringify(seen)}`);
+  } finally {
+    await client.query("rollback").catch(() => {});
+    await client.query("reset all").catch(() => {});
+    client.release();
+  }
+  assert.deepEqual(await auditWriters(), ["clara._audit"],
+    "the control's second writer survived its own rollback");
+
+  // (d) …AND THE SOLE WRITER NAMES NEITHER ESCAPE. `clara._audit`'s INSERT column list carries no
+  // `at` and no `actor_role`, so every one of its 304 callers arrives with this transaction's
+  // timestamp and no role to assert -- and that body is frozen (ordinal 10 of the
+  // metric_input_snapshot v1 producer closure), so it can never be made to name either.
+  const body = (await rootQuery(
+    `select prosrc from pg_proc where oid = 'clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)'::regprocedure`
+  )).rows[0].prosrc;
+  const open = body.indexOf("clara.audit_log(") + "clara.audit_log(".length;
+  const columns = body.slice(open, body.indexOf(")", open)).split(",").map((c) => c.trim());
+  assert.ok(columns.length > 1 && columns.every((c) => /^[a-z_]+$/.test(c)),
+    `could not read clara._audit's INSERT column list, got ${JSON.stringify(columns)}`);
+  // Compared as TOKENS, not as substrings: 'at' occurs inside plenty of lawful column names, and
+  // a substring test would call a body that named `created_at` clean while calling one that
+  // named `format` dirty.
+  for (const forbidden of ["at", "actor_role"]) {
+    assert.ok(!columns.includes(forbidden),
+      `clara._audit's INSERT column list must not name '${forbidden}', got ${JSON.stringify(columns)}`);
+  }
+});
+
+cell("ar.07 the role is resolved at the AUDIT WRITE, not at the door's admission -- a promotion that commits while the act is parked on a lock is what the row then carries", async () => {
+  // WHAT THIS CELL IS FOR. 0243's column means "the role the actor held WHEN THE DATABASE
+  // RECORDED THE ACT", and the header, the column comment, packages/db/README.md and CONTEXT.md
+  // all say so in those words because the admission-time role cannot be carried: every function
+  // between the door's check and the write -- clara._human_ctx, clara.role_rank,
+  // clara.actor_role_rank, clara.jwt_sub, clara.jwt_firm, clara._reserve_op and clara._audit
+  // itself -- is a pinned member of the frozen metric_input_snapshot v1 producer closure
+  // (measured: select member_signature from clara.metric_input_producer_version_members). Prose
+  // that nothing tests is prose that drifts, so the difference is PINNED here as a property: if
+  // some later change ever did resolve the role at admission, this cell goes red and the four
+  // places that state the meaning have to be rewritten deliberately rather than by accident.
+  const w = await knowledgeWorld("p912a7");
+
+  // THE CONTROL, FIRST: the same actor through the same lane with nothing racing records the
+  // role they were admitted at. Without this, the assertion below could be green because the
+  // roster was misread rather than because the resolution moment is late.
+  const rule = await capture(w.bookkeeper, { key: "default_currency", client: w.clientA,
+    value: "USD", basis: "the client invoices in dollars" });
+  assert.equal(rule.status, "captured");
+  assert.equal((await auditRowOf(w.firm, "capture_knowledge", w.bookkeeper)).actor_role, "bookkeeper",
+    "with nothing racing, the act carries the role its actor was admitted at");
+
+  const blocker = await getPool().connect();
+  let raced;
+  try {
+    await blocker.query("reset role");
+    await blocker.query("begin");
+    // Park on the live revision the correction must supersede. The door is admitted BEFORE it
+    // reaches this row (clara._human_ctx runs first), so the act waits here with its audit write
+    // still ahead of it -- the exact window the claim is about.
+    const held = await blocker.query(
+      `select id from clara.knowledge_records
+        where record_id = $1 and firm_id = $2 and superseded_at is null for update`,
+      [rule.record_id, w.firm]);
+    assert.equal(held.rowCount, 1, "the cell must hold exactly the row the correction will supersede");
+
+    // The act, through the real governed door, at BOOKKEEPER rank. Not awaited yet: it parks.
+    raced = humanQuery(w.bookkeeper,
+      `select clara.correct_knowledge(p_record => $1, p_value => $2::jsonb, p_reason => $3,
+          p_op_key => $4) as r`,
+      [rule.record_id, JSON.stringify("SGD"), "the client re-based to Singapore dollars",
+        opk("p912race")]);
+    await awaitBlockedBackend();
+
+    // THE ROSTER MOVES UNDER THE PARKED ACT, and commits. Minted through the table the way this
+    // battery mints every other roster fact (ar.03 mints its second owner the same way): the
+    // subject under test is WHEN the stamp reads the roster, not how the roster changed.
+    await blocker.query(
+      `update clara.firm_memberships set role = 'owner'
+        where firm_id = $1 and user_id = $2 and status = 'active'`, [w.firm, w.bookkeeper]);
+    await blocker.query("commit");
+  } finally {
+    await blocker.query("rollback").catch(() => {});
+    await blocker.query("reset all").catch(() => {});
+    blocker.release();
+  }
+
+  const corrected = (await raced).rows[0].r;
+  assert.equal(corrected.status, "corrected");
+  assert.equal((await auditRowOf(w.firm, "correct_knowledge", w.bookkeeper)).actor_role, "owner",
+    "the column is resolved at the audit write: a promotion that COMMITTED while the act was "
+    + "parked is what the row carries, which is why nothing in this estate calls it the role at "
+    + "the door's admission");
 });

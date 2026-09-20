@@ -267,16 +267,19 @@ _Avoid_: A client-side rank check as the wall; treating a control the interface 
 permission; assuming a rank observed at page load is still the caller's.
 
 **Role at the act**:
-The role an actor held in a firm at the instant a governed act committed, recorded on the act's own
+The role an actor held in a firm when the database recorded a governed act, written on the act's own
 audit row by the database that witnessed it and readable afterwards however the roster has moved
 since. Distinct from the actor's role *now* and from the authority the door *required*: the three
-are separate facts and a surface that shows one must not show it as another. An act recorded before
-Clara kept this is **unknown**, said in that word; a firm can also read `none`, which is the
-measured fact that the actor held no active membership — the agent identity on a wake act — and not
-the same thing as unknown.
+are separate facts and a surface that shows one must not show it as another. It is measured at the
+moment the act is recorded, not at the moment the door admitted the call, so a role change that
+lands between the two is what the act then carries. An act recorded before Clara kept this is
+**unknown**, said in that word; a firm can also read `none`, the measured fact that a named actor
+held no active membership — the agent identity on a wake act — and `no actor`, the measured fact
+that the act names nobody at all. Neither marker is a rank, and neither is the same thing as
+unknown.
 _Avoid_: Reading the current roster as the authority a past act ran under; back-dating or inferring
-a historical role; treating `unknown` as "no role"; re-evaluating work already run under an
-authority later found insufficient.
+a historical role; treating `unknown` as "no role" or "no actor"; re-evaluating work already run
+under an authority later found insufficient.
 
 **Access history**:
 Granting, changing and withdrawing access are receipted, append-only facts: each writes an audit

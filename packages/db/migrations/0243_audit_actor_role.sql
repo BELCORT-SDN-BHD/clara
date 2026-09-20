@@ -38,22 +38,62 @@
 --
 -- The trigger honours every clause of the ruling and is strictly WIDER than the recut would have
 -- been: the stamp is on the TABLE's own write path, so it reaches any writer, not only the one
--- function. `clara._audit` is left byte-for-byte as 0004 wrote it -- §0 and §Z both pin it -- and
--- that frozen body is also what makes the column unforgeable: `_audit`'s INSERT column list does
--- not name `actor_role` and now can never be made to.
+-- function. `clara._audit` is left byte-for-byte as 0004 wrote it -- §0 and §Z both pin it.
 --
--- THE THREE-WAY THE COLUMN CARRIES, AND WHY IT IS NOT TWO. The ruling asks for NULL to mean
--- "written before the mechanism existed, so unknown". If the stamp ALSO wrote NULL whenever the
--- actor holds no active membership -- the ordinary case for the WAKE lane, whose actor is always
--- the global agent identity (0004's own lane split: "actor is ALWAYS the global agent user") --
--- then NULL would mean two different things and the ruling's "unknown" would itself be a guess.
--- So the trigger stores the literal `'none'` for "the mechanism looked and the actor held no
--- active membership in this firm", and NULL is left to mean exactly one thing:
+-- UNFORGEABLE, AND ON WHICH WRITE PATH. No INSERT into clara.audit_log can assert a role this
+-- database did not measure, whatever identity it runs as and whatever it supplies. §B has two
+-- arms and neither leaves a gap: an act the database WITNESSES (`at` >= this transaction's
+-- `now()`) has whatever the writer supplied thrown away and replaced by the roster's answer, and
+-- a row arriving from BEFORE this transaction has the column CLEARED to NULL -- unknown, the
+-- honest word, rather than the writer's word. An earlier cut of this file returned that second
+-- arm's row unchanged, which made `at` a dial: as clara_fn_owner -- the identity EVERY SECURITY
+-- DEFINER body in this estate runs as -- an insert backdated by one second kept `actor_role =
+-- 'owner'` for an actor with no membership anywhere (found by review, ADV-06). Clearing closes
+-- that without weakening anything: §B's own comment records the pg_dump measurement showing a
+-- restore's COPY runs before this trigger exists.
+--
+-- `clara._audit` is a SECOND, independent wall for the traffic that matters, not the only one:
+-- §Z's census proves it is the table's sole writer, and its INSERT column list names neither
+-- `at` nor `actor_role`, so every governed act arrives with this transaction's timestamp and no
+-- role to assert -- and the freeze means it can never be made to name either. That census is
+-- load-bearing and is therefore written as a MEASUREMENT rather than a spelling (see §Z).
+--
+-- THE FOUR WORDS THE COLUMN CARRIES, AND WHY EACH ONE IS ITS OWN. The ruling asks for NULL to
+-- mean "written before the mechanism existed, so unknown". If the stamp ALSO wrote NULL whenever
+-- the actor holds no active membership -- the ordinary case for the WAKE lane, whose actor is
+-- always the global agent identity (0004's own lane split: "actor is ALWAYS the global agent
+-- user") -- then NULL would mean two different things and the ruling's "unknown" would itself be
+-- a guess. And `clara.audit_log.actor` is NULLABLE: a great many of this estate's rows are estate
+-- notices, seeding and sweeps with NO actor at all (measured on this rig: 39,272 of the 40,369
+-- rows an earlier cut of this file stamped `'none'` carry `actor is null`). Calling THOSE "the
+-- mechanism looked and found no membership" is the same conflation in a third place -- there was
+-- nobody to look up. So each word carries exactly one fact:
 --   NULL                          -- this row predates the column. UNKNOWN, and never guessed.
---   'none'                        -- measured at write time: no active membership in this firm.
---   viewer|bookkeeper|admin|owner -- measured at write time: the role held.
--- `'none'` is deliberately NOT a rank: `clara.role_rank('none')` is NULL (0002:326-332, the
--- `else null` arm), so nothing can accidentally compare it as authority.
+--   'no_actor'                    -- measured at write time: the row names no actor at all.
+--   'none'                        -- measured at write time: a NAMED actor who held no active
+--                                    membership in this firm (the wake lane's agent identity).
+--   viewer|bookkeeper|admin|owner -- measured at write time: the role that actor held.
+-- `'none'` and `'no_actor'` are deliberately NOT ranks: `clara.role_rank(...)` returns NULL for
+-- both (0002:326-332, the `else null` arm), so nothing can compare either as authority.
+--
+-- WHEN THE ROLE IS RESOLVED, EXACTLY -- AND WHY IT CANNOT BE THE ADMISSION. The stamp resolves
+-- the roster at the AUDIT WRITE, inside the act's own transaction. Under `READ COMMITTED` every
+-- statement takes a fresh snapshot, so a role change that COMMITS between a door's
+-- `clara._human_ctx` admission check and that write is what the column then reports. Measured on
+-- this rig with two real connections: a bookkeeper's `clara.correct_knowledge` is admitted, parks
+-- on a row lock held by a second connection, that connection promotes the same caller to `owner`
+-- and commits, and the correction's audit row reads `owner`.
+--
+-- Carrying the ADMISSION-time role instead needs a transaction-local value set where the
+-- admission happens -- and every function on that path is a frozen `metric_input_snapshot` v1
+-- producer member, by the same roster that forbids recutting `_audit`: `clara._human_ctx`,
+-- `clara.role_rank`, `clara.actor_role_rank`, `clara.jwt_sub`, `clara.jwt_firm`,
+-- `clara._reserve_op`. There is no unfrozen seam between the admission and the write, so the
+-- column's meaning is STATED rather than stretched, here, in the column comment, in CONTEXT.md's
+-- "Role at the act" and in packages/db/README.md: the role the actor held WHEN THE DATABASE
+-- RECORDED THE ACT. `tests/audit-actor-role.test.mjs` ar.07 pins it as a property rather than
+-- leaving it as prose. Closing the window for real is a membership-history relation -- the shape
+-- the owner ruled against for this ticket -- or an unfreeze, and both are somebody else's ticket.
 --
 -- NOTHING IS BACK-DATED, AND HISTORY BEING RE-LOADED IS NOT AN ACT. `alter table ... add column`
 -- with no DEFAULT leaves every existing row NULL, and this file contains no UPDATE of
@@ -177,18 +217,23 @@ begin
 end
 $column$;
 
--- The CHECK, dropped-then-added so the statement pair is its own redo guard. `'none'` is the
--- measured "no active membership" marker the header explains; NULL (pre-mechanism) is admitted by
--- the first arm, never by the IN list.
+-- The CHECK, dropped-then-added so the statement pair is its own redo guard. `'none'` and
+-- `'no_actor'` are the two measured markers the header explains; NULL (pre-mechanism) is admitted
+-- by the first arm, never by the IN list.
 alter table clara.audit_log drop constraint if exists ck_audit_log_actor_role;
 alter table clara.audit_log add constraint ck_audit_log_actor_role
-  check (actor_role is null or actor_role in ('viewer','bookkeeper','admin','owner','none'));
+  check (actor_role is null or actor_role in ('viewer','bookkeeper','admin','owner','none','no_actor'));
 
 comment on column clara.audit_log.actor_role is
-  '#912: the role `actor` held in `firm_id` AT WRITE TIME, stamped by clara._tf_audit_actor_role. '
-  'NULL means the row predates this mechanism (unknown -- never a guess); ''none'' means the '
-  'mechanism looked and the actor held no active membership in this firm (the wake lane''s agent '
-  'identity); otherwise one of viewer/bookkeeper/admin/owner. Never back-dated, never updated.';
+  '#912: the role `actor` held in `firm_id` AT THE AUDIT WRITE, inside the act''s own transaction, '
+  'stamped by clara._tf_audit_actor_role. NULL means the row predates this mechanism (unknown -- '
+  'never a guess); ''no_actor'' means the row names no actor at all; ''none'' means the mechanism '
+  'looked a NAMED actor up and they held no active membership in this firm (the wake lane''s agent '
+  'identity); otherwise one of viewer/bookkeeper/admin/owner. Resolved when the audit row is '
+  'written, not when the door admitted the call: a role change that COMMITS between the two is '
+  'what this column then reports. A row whose own `at` predates the inserting transaction was '
+  'not witnessed here (a restore, a hand-loaded row): the column is CLEARED to NULL rather than '
+  'keeping what the writer supplied. Never back-dated, never updated.';
 
 -- =====================================================================================
 -- §B — THE STAMP. One BEFORE INSERT row trigger on clara.audit_log. Every governed door reaches
@@ -200,27 +245,54 @@ create or replace function clara._tf_audit_actor_role() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $tf$
 declare v_role text;
 begin
-  -- HISTORY BEING RE-LOADED IS NOT AN ACT. `at` defaults to now() and is filled in before this
-  -- trigger runs, so an ordinary audit write carries exactly this transaction's timestamp. A row
-  -- arriving with an OLDER one is a restore replaying a dump (scripts/restore.mjs pipes a plain
-  -- dump through psql, and BEFORE INSERT row triggers fire for COPY) or a rig minting a
-  -- pre-mechanism world: either way the database did not witness that act and must not invent a
-  -- role for it. Left exactly as it arrived -- NULL stays NULL, and NULL still means unknown.
-  if new.at is null or new.at < now() then return new; end if;
+  -- AN ACT THIS DATABASE DID NOT WITNESS IS UNKNOWN -- AND UNKNOWN IS WRITTEN, NOT INHERITED.
+  -- `at` defaults to now() and is filled in before this trigger runs, so an ordinary audit write
+  -- carries exactly this transaction's timestamp. A row arriving with an OLDER one was not
+  -- witnessed here: a rig minting a pre-mechanism world, or a hand-loaded row. The database must
+  -- not invent a role for such a row -- and must not keep the one the INSERT happened to carry
+  -- either, or `at` would be a dial any writer could turn to assert an authority it never held.
+  -- So the column is CLEARED. That is what makes the guarantee a property of the TABLE's write
+  -- path rather than of `clara._audit` alone: there is no value of `at`, and no writer, for
+  -- which this trigger returns a role the database did not measure.
+  --
+  -- A RESTORE IS UNAFFECTED, AND THAT IS MEASURED RATHER THAN ASSUMED. scripts/restore.mjs pipes
+  -- a PLAIN pg_dump through psql. pg_dump emits triggers in its POST-DATA section, after the
+  -- data: `pg_dump --section=post-data -t clara.audit_log` on this rig is where
+  -- `CREATE TRIGGER t_audit_actor_role` appears, while --section=pre-data carries only the table
+  -- itself. clara.audit_log's COPY therefore runs before this trigger exists, and every restored
+  -- row keeps the actor_role the dump carried. Should some future path ever load audit rows with
+  -- the trigger already in place, it degrades them to UNKNOWN -- the honest word for a role this
+  -- database did not measure -- instead of rewriting them to today's roster, which is what an
+  -- unconditional stamp would do.
+  if new.at is null or new.at < now() then
+    new.actor_role := null;
+    return new;
+  end if;
 
-  -- THE ROLE AT THE INSTANT. Read from the LIVE roster inside the same transaction as the act
+  -- NO ACTOR, NOTHING TO LOOK UP. `clara.audit_log.actor` is nullable and the estate writes many
+  -- rows through it with no person behind them (estate notices, seeding, sweeps). Those are
+  -- 'no_actor' -- NOT the 'none' below, which is the measured fact that a NAMED actor held no
+  -- active membership. Two different facts, two different words.
+  if new.actor is null then
+    new.actor_role := 'no_actor';
+    return new;
+  end if;
+
+  -- THE ROLE AT THE AUDIT WRITE. Read from the LIVE roster inside the same transaction as the act
   -- itself, so a demotion a second later cannot change what this row says. The lookup is
   -- firm-pinned (`m.firm_id = new.firm_id`): a role is a fact about one firm, and the act's own
-  -- firm is the only one this row may speak for.
+  -- firm is the only one this row may speak for. It is resolved HERE, at the write, not at the
+  -- door's admission -- see the header's "WHEN THE ROLE IS RESOLVED, EXACTLY" for why the estate
+  -- cannot carry the admission-time role and what follows from that.
   select m.role into v_role
     from clara.firm_memberships m
    where m.firm_id = new.firm_id and m.user_id = new.actor and m.status = 'active'
    limit 1;
 
   -- UNCONDITIONAL for an act happening now: whatever the caller supplied is replaced by what the
-  -- database measures, so no writer can assert an authority it did not hold. No active membership
-  -- is stored as the literal 'none' so that NULL in this column keeps exactly one meaning: the
-  -- row predates the column.
+  -- database measures, so no writer can assert an authority it did not hold. A NAMED actor with
+  -- no active membership is stored as the literal 'none' so that NULL in this column keeps
+  -- exactly one meaning: the row predates the column.
   new.actor_role := coalesce(v_role, 'none');
   return new;
 end $tf$;
@@ -378,7 +450,7 @@ begin
 
   select pg_get_constraintdef(oid) into v_def from pg_constraint
    where conrelid = 'clara.audit_log'::regclass and conname = 'ck_audit_log_actor_role';
-  if v_def is distinct from 'CHECK (((actor_role IS NULL) OR (actor_role = ANY (ARRAY[''viewer''::text, ''bookkeeper''::text, ''admin''::text, ''owner''::text, ''none''::text]))))' then
+  if v_def is distinct from 'CHECK (((actor_role IS NULL) OR (actor_role = ANY (ARRAY[''viewer''::text, ''bookkeeper''::text, ''admin''::text, ''owner''::text, ''none''::text, ''no_actor''::text]))))' then
     raise exception '#912 tail: ck_audit_log_actor_role carries an unexpected definition (%)', v_def using errcode = 'CLR10';
   end if;
 
@@ -407,13 +479,21 @@ begin
   end if;
 
   -- THE SOLE-WRITER CENSUS. This is what makes "every governed door inherits the column with no
-  -- per-door change" a measured fact rather than a hope: every one of them writes its audit row
-  -- through this one function, and that function reaches the table through the trigger above.
+  -- per-door change" a measured fact rather than a hope, AND -- per the header's "HOW FAR
+  -- UNFORGEABLE GOES" -- what keeps every act on the one write path that names neither `at` nor
+  -- `actor_role`. So it is written as a MEASUREMENT, not a spelling: every definer body in this
+  -- estate carries `set search_path = clara, pg_temp`, which makes `insert into audit_log(...)`,
+  -- `INSERT INTO clara.audit_log (...)` and a line break after `into` all lawful ways to write
+  -- the same statement, and a `like '%insert into clara.audit_log%'` census would read a second
+  -- writer spelled any of those as no writer at all. Line comments are stripped first: without
+  -- that, the case-insensitive match reads clara.set_wake_source_enabled's own PROSE ("never a
+  -- direct multi-row INSERT into audit_log") as a writer.
   select coalesce(array_agg(ns.nspname || '.' || p.proname order by p.proname), '{}')
     into v_writers
     from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
    where ns.nspname not in ('pg_catalog', 'information_schema')
-     and p.prosrc like '%insert into clara.audit_log%';
+     and regexp_replace(p.prosrc, '--.*', '', 'gn')
+         ~* 'insert[[:space:]]+into[[:space:]]+(clara[[:space:]]*[.][[:space:]]*)?audit_log';
   if v_writers is distinct from array['clara._audit'] then
     raise exception '#912 tail: clara.audit_log has % writer(s) (%) -- clara._audit must be the only one', array_length(v_writers, 1), v_writers
       using errcode = 'CLR10';
