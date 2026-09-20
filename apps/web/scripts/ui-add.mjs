@@ -378,17 +378,28 @@ export async function main(argv, env, deps = {}) {
     log(`[ui-add] OVERRIDE USED (${OVERRIDE_ENV_VAR}=1): keeping ${local.join(", ")} as a REAL npm dependency this run, instead of the usual local stand-in.`);
   }
 
-  const code = spawnAdd(argv);
-  if (code !== 0) return code;
-
   const isDryRun = argv.includes("--dry-run");
+  const code = spawnAdd(argv);
+
+  // #969 fix round (L05B-S03) — a non-zero exit here is NOT "nothing was written". MEASURED
+  // against the pinned shadcn 4.19.0 bundle (apps/web/node_modules/shadcn/dist/chunk-CDOZT3OO.js):
+  // the add flow installs dependencies FIRST, then writes files (tailwind config, cn env vars,
+  // fonts, the components themselves) — so a failure in that LATER, file-writing half still
+  // leaves any local-classified dependency (cn) already sitting in package.json and the
+  // lockfile. A dry run is the one exception: it writes nothing at all, dependencies included,
+  // regardless of spawnAdd's own exit code, so there is nothing to strip either way.
   if (local.length > 0 && !override && !isDryRun) {
     const stripCode = stripLocalDependencies(local);
     if (stripCode !== 0) {
-      log(`[ui-add] WARNING: the pinned CLI added ${local.join(", ")} as a real dependency and this guard's own cleanup FAILED (exit ${stripCode}) — remove ${local.length === 1 ? "it" : "them"} from package.json and the lockfile by hand before committing.`);
-      return stripCode;
+      const cause = code !== 0 ? ` (the pinned CLI itself also exited ${code})` : "";
+      log(`[ui-add] WARNING: the pinned CLI added ${local.join(", ")} as a real dependency and this guard's own cleanup FAILED (exit ${stripCode})${cause} — remove ${local.length === 1 ? "it" : "them"} from package.json and the lockfile by hand before committing.`);
+      return code !== 0 ? code : stripCode;
     }
-    log(`[ui-add] dropped ${local.length} bogus local dependency stand-in(s) the pinned CLI added: ${local.join(", ")} — this repo already provides ${local.length === 1 ? "it" : "them"} locally (lib/utils.ts), never as a package. No manual revert needed. Set ${OVERRIDE_ENV_VAR}=1 to take the real npm package instead.`);
+    if (code !== 0) {
+      log(`[ui-add] the pinned CLI exited ${code} (add failed) but had already installed ${local.join(", ")} as a real dependency before failing — it installs dependencies BEFORE it writes files. Dropped ${local.length === 1 ? "it" : "them"} the same way a successful run would. No manual revert needed.`);
+    } else {
+      log(`[ui-add] dropped ${local.length} bogus local dependency stand-in(s) the pinned CLI added: ${local.join(", ")} — this repo already provides ${local.length === 1 ? "it" : "them"} locally (lib/utils.ts), never as a package. No manual revert needed. Set ${OVERRIDE_ENV_VAR}=1 to take the real npm package instead.`);
+    }
   }
 
   return code;

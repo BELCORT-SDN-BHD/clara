@@ -334,6 +334,47 @@ await testCase("[AC4] a PROTECTED payload that also resolves cn is still refused
   assert(stripCalls.length === 0);
 });
 
+await testCase("(L05B-S03) spawnAdd exits non-zero AFTER already installing cn (the pinned CLI installs dependencies BEFORE it writes files): the guard still strips cn instead of silently returning", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const lines = [];
+  const code = await main(["avatar"], {}, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    spawnAdd: (args) => { spawnCalls.push(args); return 1; },
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+    log: (l) => lines.push(String(l)),
+  }));
+  assert(code === 1, `a failed add must still propagate the CLI's own exit code, got ${code}`);
+  assert(stripCalls.length === 1 && JSON.stringify(stripCalls[0]) === JSON.stringify(["cn"]),
+    `expected the guard to strip cn even though spawnAdd itself failed (it already installed cn before failing), got ${JSON.stringify(stripCalls)}`);
+  const said = lines.join("\n");
+  assert(/\bcn\b/.test(said), `expected the log to mention cn on this path; it said:\n${said}`);
+});
+
+await testCase("(L05B-S03) a --dry-run that itself exits non-zero never strips — a dry run writes nothing, whatever spawnAdd's own exit code, so the install-before-write ordering guarantee does not apply", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const code = await main(["avatar", "--dry-run"], {}, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    spawnAdd: (args) => { spawnCalls.push(args); return 1; },
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+  }));
+  assert(code === 1, `a failed dry run must still propagate its own exit code, got ${code}`);
+  assert(stripCalls.length === 0, "a dry run writes nothing — there is still nothing to strip, even on a failed exit");
+});
+
+await testCase("(L05B-S03) a failed add with cn resolved and the override set: no strip call — the caller wants cn kept regardless of how the add went", async () => {
+  const spawnCalls = [];
+  const stripCalls = [];
+  const code = await main(["avatar"], { [OVERRIDE_ENV_VAR]: "1" }, fakeDeps(AVATAR_PAYLOAD, spawnCalls, {
+    resolveDependencies: async () => AVATAR_DEPS,
+    spawnAdd: (args) => { spawnCalls.push(args); return 1; },
+    stripLocalDependencies: (names) => { stripCalls.push(names); return 0; },
+  }));
+  assert(code === 1);
+  assert(stripCalls.length === 0, "the override must skip the strip even when spawnAdd itself failed");
+});
+
 await testCase("a FAILED strip is surfaced loudly, not swallowed: non-zero exit, a WARNING naming cn", async () => {
   const spawnCalls = [];
   const lines = [];

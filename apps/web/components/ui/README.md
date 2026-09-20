@@ -76,11 +76,23 @@ no flag to skip or filter its dependency-install step — `-y`/`-o`/`-a`/`-p`/`-
 would need this repo to ship a real (if empty) `cn` package for the installer to find satisfied,
 trading one workaround for a stranger one. A caller who cannot tolerate the window (a fully
 unattended pipeline, say) should run `--dry-run` first, confirm `cn` is the only local dependency
-named, and treat a failure between the two spawns as a signal to re-run `git status` and revert
+named, and treat an INTERRUPT between the two spawns (the process killed, the machine crashed —
+never observed as this guard's own return path) as a signal to re-run `git status` and revert
 `package.json`/`pnpm-lock.yaml` by hand before retrying — the same hand-revert #642 already
 described, now a documented fallback rather than the every-time norm. A follow-up that wants the
 pre-filter shape instead would need to intercept the pinned CLI's own package-manager invocation,
 which is out of this ticket's scope.
+
+**An ORDINARY non-zero exit from the pinned CLI is not that window (fix round, L05B-S03).**
+MEASURED against the pinned 4.19.0 bundle (`apps/web/node_modules/shadcn/dist/chunk-CDOZT3OO.js`):
+the add flow's own `yh()` runs its dependency-install step FIRST and only then writes files
+(tailwind config, `cn` env vars, fonts, the components themselves) — so a `spawnAdd` that returns
+non-zero because the LATER, file-writing half failed has still already installed `cn`. `main()`
+now runs `stripLocalDependencies` on that path too (skipped only for a `--dry-run`, which writes
+nothing at all regardless of its own exit code, and for the override, which wants `cn` kept), and
+names the CLI's own exit code in what it logs either way. Only a genuine interrupt of the guard's
+own process between the two spawns — not a CLI failure the guard's own `main()` gets to run
+after — still needs the hand-revert above.
 
 ### Proof
 
