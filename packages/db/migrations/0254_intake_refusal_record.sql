@@ -124,7 +124,7 @@ begin
   v_r1 := $r1$declare v_firm uuid; v_dedupe jsonb; v_id uuid; v_res uuid; v_pages int;
         -- #965: the ceiling refusal's own state. `v_refused` is the ONLY new control flow in this
         -- body; every other declaration is 0007's.
-        v_refused boolean := false;$r1$;
+        v_refused boolean := false; v_ceiling text; v_reason text; v_at timestamptz;$r1$;
 
   v_t2 := $t2$  v_res := clara._reserve_document_ingest(v_firm,v_id,v_pages,p_expires_at);$t2$;
   v_r2 := $r2$  -- #965: A CEILING REFUSAL IS A COMMITTED RECORD, NOT A ROLLBACK. The block below
@@ -135,16 +135,34 @@ begin
   begin
     v_res := clara._reserve_document_ingest(v_firm,v_id,v_pages,p_expires_at);
   exception when sqlstate 'CLR18' then
+    -- THE DATABASE'S OWN SENTENCE, VERBATIM. 0229's capacity wait already carries exactly this
+    -- text into the batch card as the operator remedy; paraphrasing it here would put two
+    -- spellings of one fact into the estate. WHICH ceiling is read off that same sentence -- the
+    -- reserve helper raises two fixed messages, '(docs)' and '(pages)', and this file must not
+    -- edit the helper to add a structured detail (the reservation check is #965's own
+    -- out-of-scope line). The tail re-reads the helper to prove both sentences are still there.
+    get stacked diagnostics v_reason = message_text;
+    v_ceiling := case when position('(pages)' in v_reason) > 0 then 'pages' else 'documents' end;
     v_refused := true;
   end;
   if v_refused then
+    v_at := now();
     -- The lane's EXISTING vocabulary: `uploading -> failed` is _tf_document_intake_update's first
     -- legal transition and `limit` is already in the failure_code check's list. No new status, no
     -- new reason, no new column.
     update clara.document_intakes set status='failed', failure_code='limit' where id=v_id;
+    -- A refusal is as auditable as the admission it replaced: the SAME append-only call the
+    -- accepted path makes, under the same fn, naming the intake it committed and the ceiling
+    -- that refused it. `outcome` stays 'ok' because the DOOR answered; `args.refused` is what
+    -- says the answer was a refusal.
+    perform clara._audit(v_firm,p_uploaded_by,null,null,'create_document_intake',null,
+      jsonb_build_object('intake',v_id,'refused',true,'ceiling',v_ceiling,'reason',v_reason,
+        'origin',p_origin,'op_key',p_op_key));
     return clara._finish_op(v_firm,'create_document_intake',p_op_key,
       jsonb_build_object('intake_id',v_id,'reservation_id',null,'status','failed',
-                         'failure_code','limit','refused',true));
+                         'failure_code','limit','refused',true,'ceiling',v_ceiling,
+                         'firm_id',v_firm,'filename',p_filename,'refused_at',v_at,
+                         'reason',v_reason));
   end if;$r2$;
 
   if v_src like ('%' || v_r2 || '%') then
@@ -191,8 +209,10 @@ comment on function clara.create_document_intake(uuid,text,uuid,text,text,bigint
   '''uploading'', expires_at} exactly as 0007 shipped it. When the firm''s daily document/page '
   'ceiling refuses the reservation, the intake row is NOT rolled back: it is committed at '
   'status=''failed'' / failure_code=''limit'' and the door RETURNS a refusal outcome carrying '
-  'refused=true, never a CLR18 exception. Every other refusal (authorisation, op-key reuse) still '
-  'raises.';
+  'refused=true, ceiling (''documents''/''pages''), firm_id, filename, refused_at and the '
+  'database''s own refusal sentence -- never a CLR18 exception. The refusal is audited through '
+  'the same append-only clara._audit call the admission uses. Every other refusal '
+  '(authorisation, op-key reuse) still raises.';
 
 reset role;
 
@@ -212,6 +232,20 @@ begin
      or v_src not like '%update clara.document_intakes set status=''failed'', failure_code=''limit'' where id=v_id;%'
      or v_src not like '%''refused'',true%' then
     raise exception '#965 tail: clara.create_document_intake does not carry the committed refusal'
+      using errcode='CLR10';
+  end if;
+
+  -- (T1b) THE RECORD IDENTIFIES ITSELF. Which ceiling, whose firm, which file, which moment, and
+  -- the database's own sentence -- all five in the ONE returned outcome, and the refusal is
+  -- audited through the SAME append-only call the admission uses.
+  if v_src not like '%get stacked diagnostics v_reason = message_text;%'
+     or v_src not like '%position(''(pages)'' in v_reason)%'
+     or v_src not like '%''firm_id'',v_firm,''filename'',p_filename,''refused_at'',v_at%' then
+    raise exception '#965 tail: the refusal outcome does not name its ceiling, firm, file and moment'
+      using errcode='CLR10';
+  end if;
+  if (length(v_src) - length(replace(v_src, 'clara._audit(', ''))) / length('clara._audit(') <> 2 then
+    raise exception '#965 tail: expected exactly two clara._audit calls (the admission and the refusal), found a different count'
       using errcode='CLR10';
   end if;
 

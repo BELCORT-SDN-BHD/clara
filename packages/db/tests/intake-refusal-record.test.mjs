@@ -135,6 +135,12 @@ const reservationsFor = (intake) => rootQuery(
   "select id, state, pages_reserved from clara.document_ingest_reservations where intake_id=$1",
   [intake]).then((r) => r.rows);
 
+/** Every `create_document_intake` row the append-only audit log holds for this firm, oldest
+ *  first. `clara.audit_log` is append-only (0002:270-288), so a row here is permanent evidence. */
+const auditFor = (firm) => rootQuery(
+  "select actor, args, outcome from clara.audit_log where firm_id=$1 and fn='create_document_intake' order by id",
+  [firm]).then((r) => r.rows);
+
 // ===========================================================================================
 // SLICE 1 — the refusal is a RETURNED outcome and the record survives it.
 // ===========================================================================================
@@ -171,4 +177,59 @@ test("p965.refusal.docs_ceiling_commits_a_record — the DOCS guard RETURNS a re
   assert.equal(admittedRow.status, "uploading", "the admitted file is untouched by the refusal");
   assert.deepEqual(await reservationsFor(refused.intake_id), [],
     "no capacity was consumed by the refused file — the ceiling REFUSED, it did not admit");
+});
+
+// ===========================================================================================
+// SLICE 2 — the record says WHICH ceiling, WHOSE firm, WHICH file and WHEN, and the refusal is
+// as auditable as the admission it replaced.
+// ===========================================================================================
+
+test("p965.refusal.record_names_the_docs_ceiling_firm_file_and_moment", async (t) => {
+  if (await gate(t)) return;
+  const { owner, firm } = await firmWithCeiling("named", { docsPerDay: 1, pagesPerDay: 1000 });
+  const before = new Date();
+  await createIntake(owner, { filename: "p965-first.pdf" });
+  const refused = await createIntake(owner, { filename: "p965-turned-away.pdf" });
+  const after = new Date();
+
+  assert.equal(refused.ceiling, "documents",
+    "the record says WHICH ceiling refused — docs_per_day 1 with 1000 pages spare can only be the docs guard");
+  assert.equal(refused.firm_id, firm, "…the firm");
+  assert.equal(refused.filename, "p965-turned-away.pdf", "…enough to identify the attempted file");
+  assert.match(String(refused.reason), /document daily limit reached \(docs\)/,
+    "…and the database's OWN refusal sentence, verbatim, the way 0229's capacity wait carries it");
+
+  const at = new Date(refused.refused_at);
+  assert.ok(Number.isFinite(at.getTime()), "refused_at is a real timestamp");
+  assert.ok(at >= new Date(before.getTime() - 5000) && at <= new Date(after.getTime() + 5000),
+    "…the moment of the attempt, not a default or a zero");
+
+  // The AUDIT LOG — append-only — carries the refusal beside the admission it followed.
+  const rows = await auditFor(firm);
+  assert.equal(rows.length, 2, "both the admission and the refusal are audited; a refusal is not a silent event");
+  assert.equal(rows[0].args.refused ?? false, false, "the first row is the admission");
+  assert.ok(rows[0].args.reservation, "…which names the reservation it took");
+  assert.equal(rows[1].args.refused, true, "the second row is the refusal");
+  assert.equal(rows[1].args.intake, refused.intake_id, "…naming the intake record it committed");
+  assert.equal(rows[1].args.ceiling, "documents", "…and which ceiling was hit");
+  assert.equal(rows[1].actor, owner, "…attributed to the uploader, exactly as the admission is");
+});
+
+test("p965.refusal.pages_ceiling_is_named_apart_from_the_docs_ceiling", async (t) => {
+  if (await gate(t)) return;
+  // pages_per_day 10 with 100 docs to spare: a single <=1MB PDF declares 10 pages
+  // (clara._declared_page_ceiling's second rung), so the FIRST file lands flush and the second
+  // can only be refused by the PAGES guard.
+  const { owner } = await firmWithCeiling("pages", { docsPerDay: 100, pagesPerDay: 10 });
+  const admitted = await createIntake(owner, { filename: "p965-pages-first.pdf" });
+  assert.equal(admitted.status, "uploading", "the first file fills the page ceiling exactly");
+
+  const refused = await createIntake(owner, { filename: "p965-pages-refused.pdf" });
+  assert.equal(refused.refused, true);
+  assert.equal(refused.ceiling, "pages",
+    "the PAGES guard is named apart from the docs guard — the two are not collapsed into one word");
+  assert.match(String(refused.reason), /document daily limit reached \(pages\)/,
+    "…and it is the database's own sentence that says so");
+  assert.equal(refused.failure_code, "limit",
+    "both ceilings land at the ONE existing failure reason; `ceiling` is the detail, not a second vocabulary");
 });
