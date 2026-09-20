@@ -2323,8 +2323,14 @@ export const DOCUMENT_SOURCE_REVISION_0217_TABLES = ["document_fact_revisions"];
 //   second listing of a name that exists at an EARLIER frontier would make this cohort resolve on
 //   databases 0268 has not touched, which is exactly the partial-cohort condition the gate exists
 //   to catch (#721's own block states the same rule for the same reason).
+//   THE FOURTH NAME (second fix round): `_question_source_corrected` answers "was this question
+//   asked against a reading that has since moved?" for `clara.answer_work_question` and for the
+//   shared question record. Ungranted for the same reason as the other three -- it reads
+//   clara.document_fact_revisions joined to clara.accounting_work across the Work lane, and the
+//   only callers that should ever ask it are SECURITY DEFINER doors that already hold a firm.
 const WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS = [
   "_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
+  "_question_source_corrected",
 ];
 export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS];
 // #885 END

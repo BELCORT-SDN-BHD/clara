@@ -51,9 +51,10 @@ async function cohortApplied() {
   const fns = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
       where ns.nspname = 'clara' and p.proname = any($1::text[])`,
-    [["_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work"]]);
-  if (fns.rows[0].n !== 3) {
-    assert.fail(`0268 ledger row present but only ${fns.rows[0].n}/3 of its routines exist — half-applied migration`);
+    [["_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
+      "_question_source_corrected"]]);
+  if (fns.rows[0].n !== 4) {
+    assert.fail(`0268 ledger row present but only ${fns.rows[0].n}/4 of its routines exist — half-applied migration`);
   }
   return true;
 }
