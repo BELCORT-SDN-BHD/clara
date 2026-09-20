@@ -66,6 +66,12 @@ testCase("the message states the recommended fix for that case: reword the strin
   assert(/reword/i.test(rawColorRule.message), `expected the message to say "reword"; got:\n${rawColorRule.message}`);
 });
 
+testCase("(L05B-S05 fix round) the message states the ACTUAL trip condition — 3, 4, 6 or 8 hex-looking characters immediately after `#` — not just \"a short hex-looking token\"", () => {
+  assert(/\b3\b/.test(rawColorRule.message) && /\b4\b/.test(rawColorRule.message) && /\b6\b/.test(rawColorRule.message) && /\b8\b/.test(rawColorRule.message),
+    `expected the message to state all four hex-run lengths (3, 4, 6, 8) the selector actually matches; got:\n${rawColorRule.message}`);
+  assert(/hex/i.test(rawColorRule.message), `expected the word "hex" describing the character class; got:\n${rawColorRule.message}`);
+});
+
 testCase("the message still carries the original Q4 ruling citation and token-map guidance (nothing removed, only added to)", () => {
   assert(rawColorRule.message.includes("owner ruling Q4, 2026-08-27"), "the ruling citation must survive");
   assert(rawColorRule.message.includes("app/globals.css"), "the semantic-token-map guidance must survive");
