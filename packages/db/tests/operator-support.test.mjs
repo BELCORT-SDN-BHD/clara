@@ -1199,6 +1199,33 @@ timelineCell("os.20 every support act the console offers is readable on the OPER
     { name: SUPPORT_EVENT.problemResolved, client_scoped: false, decision: "context_update" },
   ], "both new event types are registered firm-level and routed context_update, 0145's own choice");
 
+  // …AND NO OTHER FIRM READS ONE OF THEM. The estate admits exactly ONE operator firm
+  // (uq_firms_one_operator, 0133:274), so "a second firm's operator" is necessarily the owner of a
+  // firm that is NOT the operator firm — and that is the sharper test anyway: the wall which
+  // refuses them is `clara.firm_timeline_visible`'s own `firm_id = clara.jwt_firm()`, which is
+  // firm IDENTITY and has nothing to do with operator status, so nothing about these three rows
+  // could leak to a second operator firm that would not already leak here.
+  const outsider = await insertUser("w615", "os20-outside");
+  await ordinaryFirm(outsider, "owner");
+  const theirs = await firmActivity(outsider, { since });
+  const theirTypes = new Set(theirs.rows.map((r) => r.event_type));
+  for (const type of [SUPPORT_EVENT.registrationRejected, SUPPORT_EVENT.capacitySet,
+    SUPPORT_EVENT.problemResolved]) {
+    assert.ok(!theirTypes.has(type), `another firm's owner reads no ${type} row`);
+  }
+  // …and not by the narrower route either: no row on their page is attributed to the operator.
+  for (const row of theirs.rows) {
+    assert.notEqual(row.actor, operator.owner,
+      `another firm's page carries a row acted by the operator (${row.event_type ?? row.source})`);
+  }
+
+  // …AND A BELOW-FLOOR CALLER MEETS A REFUSAL, NOT AN EMPTY LIST — the brief's own words. A
+  // VIEWER of the operator firm is the sharpest persona for it: the right firm, one rung under
+  // `clara.list_activity`'s bookkeeper floor, so what refuses them is the floor and not the fence.
+  const viewer = await operatorFirmViewer(operator, "os20");
+  await assertRaises(CLR.authz, () => firmActivity(viewer, { since }),
+    "an operator-firm VIEWER reading the timeline");
+
   await setCapacity(operator.owner, { maxFirms: null, reason: "#843 os.20 release" });
 }, assertSupportTimelineCohortPresent);
 
