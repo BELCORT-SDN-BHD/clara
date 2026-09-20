@@ -92,7 +92,7 @@ export function DocumentKindDialog({
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
             <SelectValue
               placeholder={t("kindPlaceholder")}
-              items={DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+              items={CLASSIFIABLE_DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
             />
           </SelectTrigger>
           <SelectContent>
