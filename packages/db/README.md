@@ -1941,7 +1941,14 @@ the per-entry record) at `status = 'completed'`, `basis_origin = 'user_direct'`,
 `acting_actor` = `on_behalf_of` = the approving human and `via_wake_kind = 'opening_approval'`. The
 `run_id` is the door's own operation key, which is the only run identity a human door has. The
 intent key is `opening:<seed|correction>:<seed_id>:<batch_n>`, so a correction batch is a second
-Work rather than a conflict under `uq_accounting_work_intent`.
+Work rather than a conflict under `uq_accounting_work_intent`. The one authority question it
+re-derives for itself is membership, and it asks it the way the rest of the estate does —
+`and m.status = 'active'` — so the `actor_not_active` refusal it raises names the predicate it
+actually tested and `initiator_role` can only be read off a live membership row. (It first ordered
+active rows first and took the top one, which admitted a **removed** member; unreachable through
+the two doors, whose `clara._human_ctx` already filters on `active`, but the seam's own guard is
+what a third caller would inherit. Fixed in the #984 fix round, ADV-L01-04; the tail re-reads the
+predicate off the live body and `obw984.admit.membership` drives it.)
 
 **The basis is what was approved, not a journal basis.** No lines, no posting date, no memo: the
 entries were approved by `clara._approve_opening_entry` and tied out by `clara._assert_opening_tie`

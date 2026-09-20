@@ -56,6 +56,8 @@ import {
   // fix round (L01W2-SPEC-09) -- the three READ doors AC7 is really about, driven as a signed-in
   // bookkeeper rather than argued about from their bodies.
   humanQuery,
+  // fix round (ADV-L01-04) -- a person who is no longer a member of this firm.
+  insertUser, addMember,
 } from "./wave-b/wb-fixtures.mjs";
 
 /** The migration whose effects this file describes, and the stem its gate module keys on. */
@@ -537,4 +539,68 @@ test("obw984.read_doors: an approved opening batch is listed, addressable and on
   assert.equal(journalOnly.rows.some((r) => r.id === rec.id), false,
     "...and the journal kind does NOT carry it, so the work-kind read above is a real filter");
   noteLane(`obw984: the three read doors surface opening work ${work.id} / receipt ${rec.id} to a bookkeeper`);
+});
+
+// =============================================================================================
+// 6 - obw984.admit.membership -- THE NEW ADMISSION SEAM'S OWN FLOOR, asked the question its
+// refusal claims to answer.
+//
+// WHY THIS CELL EXISTS (fix round, ADV-L01-04). `clara._admit_opening_work` is the sibling
+// admission path 0239 adds beside `clara._admit_accounting_work_core`, and the ONE authority
+// question it re-derives for itself is membership: "except the one thing it CAN check cheaply
+// and must: that the approver is still a member of this firm" (0239 section D). Its refusal is
+// spelled `actor_not_active` -- a claim about STATUS -- but nothing measured that the predicate
+// behind it reads status at all.
+//
+// THE SEAM is the internal itself, reached as root, exactly as section 1 reaches
+// `clara._assert_adjustment_basis`: an owner-only body with no application-role EXECUTE grant is
+// reached this way by every caller and by every cell in this estate that tests one.
+//
+// NOT REACHABLE THROUGH THE TWO DOORS TODAY, and the cell does not pretend otherwise: both
+// callers pass `c.firm`/`c.actor` from `clara._human_ctx`, whose `clara.jwt_firm()` and
+// `clara.actor_role_rank()` each select `where ... and m.status = 'active'`, so a removed member
+// never reaches this body through `clara.approve_opening_seed`. What this cell pins is the seam's
+// OWN contract, which a third caller would inherit -- and which its own sentence already claims.
+// =============================================================================================
+
+/** `clara._admit_opening_work` as root — the only way an owner-only internal is ever reached. */
+const admitOpening = (actor, s, { batch = 41, entries = [], kind = "seed", opKey } = {}) => rootQuery(
+  `select clara._admit_opening_work($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::int, $6::jsonb,
+                                    $7::text, $8::uuid, $9::text) as r`,
+  [w.firms.A, s.onb.client, actor, s.seed, batch, JSON.stringify(entries), opKey,
+    s.doc.documentId, kind]);
+
+test("obw984.admit.membership: the admission seam refuses an actor whose membership in this firm is REMOVED, and says so in the same word its detail uses", async (t) => {
+  if (unready(t)) return;
+  const s = await stagedSeed();
+
+  // A person who WAS an admin of firm A and is not one any more. Built through the real door,
+  // then retired with the root idiom every membership-floor cell in this estate uses
+  // (intake-batch.test.mjs, work-journal-admission.test.mjs, trade-invoice.test.mjs).
+  const ghost = await insertUser(w.prefix, "obw984ghost");
+  await addMember(w.users.alice, { firm: w.firms.A, user: ghost, role: "admin", opKey: opk("obw984-mem") });
+  const retired = await rootQuery(
+    "update clara.firm_memberships set status='removed', removed_at=now() where user_id=$1 and firm_id=$2 returning role, status",
+    [ghost, w.firms.A]);
+  assert.deepEqual(retired.rows, [{ role: "admin", status: "removed" }],
+    "mandatory setup: exactly one membership row for this person in firm A, and it is removed");
+
+  const err = await assertRaises("CLR04", () => admitOpening(ghost, s, { opKey: opk("obw984-ghost") }),
+    "a removed member reaching the opening admission seam");
+  assert.equal(JSON.parse(err.detail ?? "{}").reason, "actor_not_active",
+    "the detail names activeness, which is now the thing the predicate actually tested");
+  assert.deepEqual(await workRows(s.onb.client), [],
+    "and nothing was minted: a refusal that still wrote the Work would be the same defect with a message on top");
+  assert.deepEqual(await receiptRows(s.onb.client), [], "...nor a receipt");
+
+  // THE CONTROL, so the refusal above is not simply "this call never works". The same call,
+  // same client, same seed, with an ACTIVE member is admitted and mints the pair.
+  const ok = await admitOpening(w.users.hana, s, { batch: 42, opKey: opk("obw984-live") });
+  const minted = ok.rows[0].r;
+  assert.equal(typeof minted.work_id, "string", "an active member IS admitted by the same seam");
+  const works = await workRows(s.onb.client);
+  assert.equal(works.length, 1, "exactly the one Work the control minted");
+  assert.equal(works[0].initiator_role, "admin",
+    "and its initiator_role comes from the ACTIVE membership row, which is the role this Work was taken under");
+  noteLane(`obw984: the admission seam's membership floor reads status; removed member refused, active member minted work ${works[0].id}`);
 });

@@ -551,11 +551,21 @@ begin
     raise exception 'an opening work receipt requires the operation key it was taken under'
       using errcode='CLR10', detail='{"reason":"invalid_intent_key","constraint":"nonempty"}';
   end if;
+  -- THE PREDICATE SAYS WHAT THE REFUSAL SAYS (fix round, ADV-L01-04). This probe first ordered
+  -- `active` rows ahead of the rest and took the top one, which tested membership EXISTENCE while
+  -- the sentence and the `actor_not_active` detail claimed it had tested membership STATUS -- and
+  -- `initiator_role`, the role this Work is recorded as taken under, could then be read off a
+  -- REMOVED row. Unreachable through the two doors (both pass `c.firm`/`c.actor` from
+  -- `clara._human_ctx`, whose `clara.jwt_firm()` and `clara.actor_role_rank()` each select
+  -- `and m.status='active'`), but this body is a SEAM, and a third caller would inherit its own
+  -- guard, not its callers'. The house pattern is the one §F uses 150 lines below.
+  -- `order by created_at desc` stays: it makes the pick deterministic if a firm ever carries two
+  -- active rows for one person, which is a different question from this one.
   select m.role into v_role from clara.firm_memberships m
-   where m.user_id = p_actor and m.firm_id = p_firm
-   order by (m.status = 'active') desc, m.created_at desc limit 1;
+   where m.user_id = p_actor and m.firm_id = p_firm and m.status = 'active'
+   order by m.created_at desc limit 1;
   if v_role is null then
-    raise exception 'the approver is not a member of this firm' using errcode='CLR04',
+    raise exception 'the approver is not an active member of this firm' using errcode='CLR04',
       detail='{"reason":"actor_not_active"}';
   end if;
 
@@ -1124,6 +1134,12 @@ begin
   end if;
   if position('clara._assert_adjustment_basis' in v_src) = 0 then
     raise exception '#984 tail: clara._admit_opening_work does not ask the vocabulary gate -- §B''s new arm would be decorative'
+      using errcode='CLR10';
+  end if;
+  -- (fix round, ADV-L01-04) The one authority question this body re-derives must be the one its
+  -- refusal names. Read off the live body, not off the file this tail ships in.
+  if position('m.status = ''active''' in v_src) = 0 then
+    raise exception '#984 tail: clara._admit_opening_work''s membership probe does not filter status=''active'' -- it raises actor_not_active, so the predicate must test activeness and not mere membership'
       using errcode='CLR10';
   end if;
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
