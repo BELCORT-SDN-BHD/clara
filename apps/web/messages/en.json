@@ -6998,7 +6998,7 @@
     "uncountedCompletions": "{n} finished without a receipt this read could date",
     "waitingBasis": "Waiting: {question} on an open question, {fact} awaiting a fact, {attribution} awaiting attribution, {capacity} awaiting the daily quota, {unfiled} not yet filed to a client.",
     "residual": {
-      "preIntakeRefusal": "A file refused by the daily quota before it was accepted never joins a batch — look for it in the upload list above, which shows the database's own message and remedy."
+      "preIntakeRefusal": "A file the daily quota turned away keeps its record and shows here as waiting for the quota, but none of its bytes were stored — upload it again after the reset. The upload list above carries the database's own message and remedy."
     },
     "state": {
       "open": "open",
@@ -7027,7 +7027,7 @@
     },
     "cancelBlocked": {
       "title": "This batch cannot finish stopping",
-      "body": "The person who stopped it is no longer an active member of this firm, so the remaining operations cannot be asked to stop under that decision. An owner or admin needs to restore their membership, or stop each remaining work item from its own page."
+      "body": "The person who stopped it is no longer an active member of this firm, so the remaining operations cannot be asked to stop under that decision. Any other bookkeeper, admin or owner of this firm can press Stop again to take the decision over. Restoring that person's membership, or stopping each remaining work item from its own page, also works."
     },
     "cancelled": {
       "title": "This batch was stopped",
@@ -7035,7 +7035,8 @@
     },
     "capacity": {
       "title": "Waiting for the daily document quota",
-      "body": "The firm's daily document allowance resets at {at} {zone}. Sources blocked by the quota keep their place and continue after the reset."
+      "reset": "The firm's daily document allowance resets at {at} {zone}.",
+      "body": "A source the quota turned away keeps its place on this board with the database's own reason, but nothing re-reads it on its own — upload it again after the reset."
     },
     "column": {
       "file": "File",

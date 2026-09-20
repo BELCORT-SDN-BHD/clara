@@ -272,22 +272,29 @@ export function IntakeBatchCard({
         })}
       </p>
 
-      {/* THE CAPACITY SENTENCE — the door's own reset moment, never "midnight" and never
-          "tomorrow". */}
+      {/* THE CAPACITY SENTENCE. TWO strings, not one, and no local constant behind either.
+          `capacity.reset` names the DOOR's own reset moment and renders only when the door
+          supplied one — there is no `?? "00:00"` fallback, because a literal here is a second
+          copy of a wall the database owns and the next window move would have to come back for it
+          (L05-SPEC-04). `capacity.body` carries the part that is true whatever the moment is, and
+          it deliberately promises NO automatic resume: a quota-refused file holds no reservation
+          and no capability, nothing in the belt re-drives a `failed` intake, so the firm's real
+          remedy is to upload it again (ADV-W2L05-03). */}
       {(ready.waitingBasis.byDependency.awaiting_capacity ?? 0) > 0
         || (ready.waitingBasis.byCapacityFailure ?? 0) > 0 ? (
           <StateBanner tone="info" title={t("capacity.title")}>
-            {t("capacity.body", {
-              at: ready.capacity.resetsAtLocal ?? "00:00",
-              zone: ready.capacity.timezone ?? "Asia/Kuala_Lumpur",
-            })}
+            {ready.capacity.resetsAtLocal && ready.capacity.timezone
+              ? `${t("capacity.reset", { at: ready.capacity.resetsAtLocal, zone: ready.capacity.timezone })} `
+              : ""}
+            {t("capacity.body")}
           </StateBanner>
         ) : null}
 
-      {/* THE NAMED RESIDUAL, ON THE SURFACE RATHER THAN ONLY IN A REPORT: a file refused by the
-          daily ceiling BEFORE its intake exists never becomes a member, because a member's
-          identity IS its intake. The upload list above already renders the database's own message
-          and remedy for it. */}
+      {/* THE NAMED RESIDUAL, ON THE SURFACE RATHER THAN ONLY IN A REPORT. Since #965 a file the
+          ceiling refuses at CREATION keeps its record (committed at failed/limit) and the runtime
+          attaches it as an `awaiting_capacity` wait, so it DOES appear on this card — the card
+          used to say the opposite. What it still has to say is that nothing was stored for it and
+          nothing will re-read it, and where the database's own message and remedy are. */}
       <p className="text-muted-foreground text-xs">{t("residual.preIntakeRefusal")}</p>
 
       <div className="flex flex-wrap items-center gap-2">

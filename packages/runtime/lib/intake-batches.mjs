@@ -297,8 +297,9 @@ export async function beginIntakeInBatch({ client, principal, input, batchId, op
 //
 // IT SWALLOWS ITS OWN REFUSAL. A CLR04 (the uploader's authority was revoked between upload and
 // refusal) or a CLR11 (this intake is in no batch) is logged and returned typed. It must NEVER
-// turn the finalize route's honest 429 into a 500: the accountant's remedy is "wait for 08:00",
-// not "something exploded".
+// turn the finalize route's honest 429 into a 500: the accountant's remedy is "wait for the daily
+// reset" — MYT midnight since #964's 0252 moved the window off the UTC day, not the retired 08:00
+// MYT — not "something exploded".
 // ---------------------------------------------------------------------------------------------
 
 /** @returns {Promise<BatchAnswer>} */

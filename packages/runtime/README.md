@@ -1402,7 +1402,8 @@ raises and still maps there.
 
 **The World leg.** `tests/intake-batch-e2e.mjs` is standalone (not collected by `node --test`) and
 needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
-MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,
+MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one daily window — an
+`Asia/Kuala_Lumpur` calendar day since #964's 0252, not the UTC day this line used to name. It records,
 rather than hides, children lost to a Windows-only EPERM race between the reconciler's sidecar
 reads and `writeIntakeMeta`'s `rename` (the #693 family). Runs THIRD on the same shared
 `clara_intake_ci` database and world `intake-e2e.mjs` and `intake-admission-e2e.mjs` build (#967) —

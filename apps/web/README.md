@@ -846,11 +846,22 @@ numerator/denominator and says "Indeterminate agent Work keeps its durable named
 with their coverage word. The five facets OVERLAP — a member can be admitted AND waiting — so they
 legitimately exceed the member count and are never summed.
 
-**THE CAPACITY COPY SAYS 08:00, NEVER "MIDNIGHT" AND NEVER "TOMORROW".** The daily document window
-is `date_trunc('day', now() at time zone 'utc')` (0007:1644), whose boundary is 08:00
-`Asia/Kuala_Lumpur` — MEASURED on a migrated rig. The card renders the DOOR's own
-`resets_at_local`, so the string cannot drift from the wall it describes, and
-`lib/documents/batch-url-state.test.ts` fails if either word is ever written into the catalogue.
+**THE CAPACITY COPY CARRIES THE DOOR'S OWN RESET MOMENT, NEVER A LOCAL CONSTANT.** The daily
+document window is `date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')` — an MYT calendar
+day, reset at **MYT midnight**, since #964's migration 0252 moved it off the UTC day (whose
+boundary was 08:00 `Asia/Kuala_Lumpur`). The card renders the DOOR's own `resets_at_local` and
+`timezone`, with NO `??` fallback behind either: when the door supplies them the reset sentence
+renders, when it does not the banner keeps the part that is true whatever the moment is. A second
+copy of the wall in this app is what the next window move would have to come back for.
+`lib/documents/batch-url-state.test.ts` fails if a clock time is ever written into the catalogue.
+
+**AND IT PROMISES NO RESUME.** A source the quota turned away keeps its place on the board — since
+#965 even one refused at intake CREATION, whose record is now committed at `failed`/`limit` and
+attached as an `awaiting_capacity` wait — but nothing in the estate re-drives it: the refusal takes
+no reservation, mints no capability, writes no spool sidecar, and
+`recoverPendingDocumentIntakes` re-drives only the six recoverable states, of which `failed` is not
+one. The copy therefore says "upload it again after the reset", and a cell asserts the banner never
+says it continues on its own.
 
 **NO NEW ROUTE AND NO NAVIGATION LEAF.** The batch is `?batch=<uuid>` URL state on the two
 Documents leaves that already exist, on `lib/documents/url-state.ts`'s own idiom: `router.push` to
