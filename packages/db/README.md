@@ -1867,7 +1867,7 @@ violation — explicitly not #649's to fix.
 | 3 | `clara.documents` row `for update` (0027 task #29) | unchanged |
 | 4 | `clara.document_filings` rows `order by id for update` | unchanged |
 | 5 | **`clara.clients` row on `x.from_client`** | `clara.journal_entries` rows `for update of je` |
-| 6 | `clara.journal_entries` rows `for update of je` | **client rung `203005004` on `x.from_client`, once** |
+| 6 | `clara.journal_entries` rows `for update of je` | **client rung `203005004` on `x.from_client`, once, unconditionally** |
 | 7 | client rung `203005004` on `o.client_id`, per item, inside the reverse branch | **`clara.clients` row on `x.from_client`** |
 
 **Why the remedy is to move the ROW down, not the rung up.** 0037 §K states the rung ladder as a
@@ -1890,7 +1890,12 @@ and the `t_je_provenance` constraint trigger refuses any entry with a document w
 structurally — and neither column can drift afterwards (neither appears in any allowset of
 `t_je_immutable`, and a filing's identity is immutable as well). Advisory xact locks are
 re-entrant, so the old per-item acquisition was already a no-op after the first item; 0238 takes
-the same key once, earlier, and holds it a little longer. Its prestate refuses to apply if either
+the same key once, earlier, and holds it a little longer. The hoist also drops a **condition**
+(fix round, ADV-L01-07): in 0125 the rung sat inside `if it.action = 'reverse'`, so a correction
+whose items are all `withdraw_draft` or `already_reversed` — one that reverses nothing — took no
+client rung at all, and now takes it like every other correction. That is strictly more locking and
+adds no pair: every `rung → Y` the straight-line acquisition creates already existed on the reverse
+arm, and 0037 §H.3's "rung before `clara._subledger_allocated_items_present(`" order is intact. Its prestate refuses to apply if either
 of those two walls is missing.
 
 **The new pair this creates, stated rather than hoped.** The `journal_entries` row locks now

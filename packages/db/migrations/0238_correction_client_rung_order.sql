@@ -27,7 +27,9 @@
 --       -> documents ROW (for update)                     [0027 task #29, unmoved]
 --       -> document_filings ROWS (order by id, for update)[0027 task #29, unmoved]
 --       -> journal_entries ROWS (order by id, for update of je)
---       -> client rung 203005004 on x.from_client, ONCE   [hoisted out of the loop]
+--       -> client rung 203005004 on x.from_client, ONCE   [hoisted out of the loop AND out of its
+--                                                          `action = 'reverse'` branch: now taken
+--                                                          by EVERY correction]
 --       -> clara.clients ROW on x.from_client             [moved DOWN, below the rung]
 --
 -- WHY THIS DOES NOT INVERT AGAINST ANY NEIGHBOUR.
@@ -74,6 +76,19 @@
 -- filing's identity is immutable as well (`_tf_document_filing_update`). The old per-item
 -- acquisition was therefore already a re-entrant no-op after the first item; this file takes the
 -- same key once, earlier, and holds it a little longer.
+--
+-- THE HOIST ALSO DROPS A CONDITION, AND THAT IS A REAL (IF SMALL) BEHAVIOUR CHANGE (fix round,
+-- ADV-L01-07). In 0125 the rung sat inside `if it.action = 'reverse' then`, so a correction whose
+-- items are ALL `withdraw_draft` or `already_reversed` -- one that reverses nothing -- took no
+-- client rung at all. Here it takes 203005004 like every other correction. This is strictly MORE
+-- locking and it adds no pair: every `rung -> Y` the straight-line acquisition creates (the
+-- `clara.clients` row, the item-state-hash and closed-period reads, the `client_resolutions` read,
+-- the allocated/bank probes, the draft-mirror `for update` on `clara.journal_entries`) already
+-- existed on the reverse arm, and 0037 SECTION H.3's "rung before
+-- `clara._subledger_allocated_items_present(`" order is intact. Taking the rung on the
+-- nothing-to-reverse path is also the honest posture: the door still reads and writes that
+-- client's rows (the filing retirement, the coding task, the receipt) whichever branch its items
+-- take.
 --
 -- WHAT THIS FILE DOES NOT DO (out of scope per the Agent Brief).
 --   * No new or renumbered rung. The two identifiers (203005002 firm, 203005004 client) and the
