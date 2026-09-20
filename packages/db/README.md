@@ -773,6 +773,7 @@ is.
 | `clara._fa_assert_period_open(uuid,date)` | NONE — ungranted | **The fixed-asset lane's whole locked-period law, in one body.** It selects the fiscal year containing `p_date` exactly the way `0056:656-662` does, returns silently when there is none or it is `open`/`reopened`, and otherwise raises CLR38 `period_request_invalid` / axis `period_closed` naming the year, its status and the reopen path. **#678 adopts it unchanged rather than minting a second predicate.** |
 | `clara.preview_depreciation_run(uuid)` | `clara_authenticated` | What the NEXT run would do: the period the DATABASE chose, per-asset amounts, the two GL legs, the skipped assets with reasons, and `mode_would_be`. It is `stable`, so the LANGUAGE refuses to let it write. The ungranted-core/granted-wrapper idiom: `clara._fa_compute_charges` stays ungranted and `rig-meta.mjs`' main sweep fails the moment a grant appears on it. |
 | `clara._fa_depreciation_leg_pairing(jsonb)` | NONE — ungranted | **#973 (migration 0248).** The ONE routine that turns a charge set into the two-line-per-pair GL legs both `preview_depreciation_run` and `_fa_run_period_core` post, grouped by the PAIR of (expense account, accumulated account) — never by either account alone. Folds what used to be two independent copies of the same aggregation. |
+| `clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)` | NONE — ungranted | **#976 (migration 0249).** The ONE routine that owns the fixed-asset particulars completion WALL — "first completion is not a change" (`fa_change_class_on_completion`), "already complete" (`fa_particulars_already_complete`), the lifecycle check, the `_fa_validate_particulars` call and the non-depreciable/residual bounds. Called by both `clara.complete_fixed_asset_particulars` and `clara._fa_complete_particulars_core` in place of each carrying its own copy. |
 | `clara.run_depreciation_period_for(uuid,date,text,uuid)` | `clara_runtime` ONLY | The OBO machine door, on `complete_fixed_asset_particulars_for`'s live-authority ladder verbatim (including the measured `firms … for key share` then `firm_memberships … for share` lock pair). It DELEGATES to `clara._fa_run_period_core` and inserts nothing, and carries NO floor bypass. **A NEW NAME is mandatory, not stylistic:** `rig-meta.mjs:691-693` is an executable census that fails the moment `run_depreciation_manual` reaches a machine role, because that would give the maker-checker ladder a bypass. |
 | `clara.sign_depreciation_authority(uuid,uuid,text,jsonb)` | `clara_authenticated` | DROP + CREATE'd from three arguments to four — one `pg_proc` row per name, never an overload. The `0018:188` scar is the precedent: the old arity's grant died with it, so this file re-states the grant and the owner. |
 | `clara.retire_depreciation_authority(uuid,uuid,text,text)` | `clara_authenticated` | RECUT by 0227 §B.3 because 0227's own `ck_fa_authorities_window` broke it. It is the ONE way a NEVER-SIGNED authority leaves `proposed` (a firm withdraws the wrong cadence), and 0041 wrote it for that case by coalescing the signature stamps rather than demanding them. It now stamps the window floor by the same `coalesce`, so the withdrawal cannot meet the CHECK as a raw 23514 with no CLR code. A SIGNED authority's floor is carried through untouched. |
@@ -820,6 +821,26 @@ owned by `clara_fn_owner` like `_fa_compute_charges` and `_fa_assert_period_open
 because there is only one aggregation; 0227's own T.13 is untouched (it still passes at its own
 point in a from-scratch chain, against the pre-fold bodies), and 0248's own tail proves the shared
 call replaces its job going forward.
+
+**The particulars-completion wall this lane named as a residual is FOLDED too (#976, migration
+0249).** `clara.complete_fixed_asset_particulars` (the human door, 0041) and
+`clara._fa_complete_particulars_core` (the shared core behind the runtime door
+`complete_fixed_asset_particulars_for`, 0216) never routed through each other and each carried
+its own copy of the "first completion is not a change" refusal and the "already complete"
+refusal — #651 (0227) had to splice its new `fa_change_class_on_completion` check into BOTH
+bodies separately, as two unrolled blocks with different anchors, because the human door's
+anchor carries `_human_ctx` first and the core's does not. #651's own final report named the
+duplication and deferred the fold; #973 named it again, out of its own scope. #976 lifts both
+wall fragments, byte-for-byte unchanged, into `clara._fa_assert_particulars_completable(uuid,
+clara.fixed_assets, jsonb)` — an ungranted internal core, `stable`, owned by `clara_fn_owner`
+like `_fa_depreciation_leg_pairing` above — and both completion bodies now call it in place of
+their own six-check copy. Each door keeps its own op-key check, firm-membership check,
+row-lock, UPDATE, audit and finish-op exactly as they were (including the DIFFERING detail
+shapes those OTHER refusals already carried); only the wall in the middle moved. One measured,
+harmless side effect: the change-class check now runs after the op-key reservation and the row
+lock instead of before, which changes nothing observable because this estate's own writers
+document that a RAISE aborts the whole transaction including the reservation (`0004_governed_fns.sql`
+header) — a retry sees no stale reservation whichever side of it the refusal fires on.
 
 **And one thing this file is not.** It does NOT unpark `close_prep`: the wake source stays
 registered-and-disabled, asserted in the prestate AND the tail in `0223:247-250`'s own idiom.
