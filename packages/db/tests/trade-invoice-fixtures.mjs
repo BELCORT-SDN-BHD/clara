@@ -52,6 +52,41 @@ export async function tiLaneReady() {
   return _ready;
 }
 
+/** #982's migration STABLE STEM — a SEPARATE frontier from `TI_STEM`: a chain can carry 0225 and
+ *  not 0274, and on that chain #655's battery must still run in full while #982's skips. */
+export const TI_TIN_STEM = "trade_invoice_party_tin$";
+
+let _tinReady = null;
+export async function tiTinLaneReady() {
+  if (_tinReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [TI_TIN_STEM]);
+      _tinReady = r.rows[0].n > 0;
+    } catch {
+      _tinReady = false;
+    }
+  }
+  return _tinReady;
+}
+
+/** `if (await gateTiTin(t)) return;` — #982's own per-cell frontier gate, the same idiom as
+ *  `gateTi` below and keyed on `TI_TIN_STEM`. */
+export async function gateTiTin(t) {
+  if (await tiTinLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_TRADE_INVOICE_PARTY_TIN === "1") {
+    markSkip();
+    t.skip(`#982 trade-invoice TIN resolution absent (no ${TI_TIN_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#982: the trade-invoice TIN resolution arm is absent. Apply 0274_trade_invoice_party_tin.sql "
+    + "(or its numbered suite copy), or set CLARA_ALLOW_MISSING_TRADE_INVOICE_PARTY_TIN=1 for the "
+    + "package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
 /**
  * `if (await gateTi(t)) return;` — the house per-cell frontier gate.
  *
@@ -144,24 +179,26 @@ export async function ensureTiChart(sub, client, label = "ti") {
   await mk(TICHART.nonControl, "Other Payables", "liability", null);
 }
 
-/** A vendor of this client, optionally with agreed payment terms. */
-export async function vendor(sub, { client, name = null, registration = null, termsDays = null }) {
+/** A vendor of this client, optionally with agreed payment terms. `tin` rides through to
+ *  `clara.create_counterparty`'s own `p_tin`, which is how #982's TIN resolution arm gets a party
+ *  to find without a root UPDATE. */
+export async function vendor(sub, { client, name = null, registration = null, tin = null, termsDays = null }) {
   const { createCounterparty } = await import("./wave-a-fixtures.mjs");
   const r = await createCounterparty(sub, {
     client, kind: "vendor", name: name ?? `Alpha Supplies ${randomUUID().slice(0, 8)}`,
-    registration, opKey: opk("ti-cp"),
+    registration, tin, opKey: opk("ti-cp"),
   });
   const id = r.counterparty_id ?? r;
   if (termsDays !== null) await setTerms(sub, { counterparty: id, days: termsDays });
   return id;
 }
 
-/** A customer of this client, optionally with agreed payment terms. */
-export async function customer(sub, { client, name = null, registration = null, termsDays = null }) {
+/** A customer of this client, optionally with agreed payment terms and a TIN (#982). */
+export async function customer(sub, { client, name = null, registration = null, tin = null, termsDays = null }) {
   const { createCounterparty } = await import("./wave-a-fixtures.mjs");
   const r = await createCounterparty(sub, {
     client, kind: "customer", name: name ?? `Rome Properties ${randomUUID().slice(0, 8)}`,
-    registration, opKey: opk("ti-cp"),
+    registration, tin, opKey: opk("ti-cp"),
   });
   const id = r.counterparty_id ?? r;
   if (termsDays !== null) await setTerms(sub, { counterparty: id, days: termsDays });
