@@ -24,6 +24,7 @@ import {
 import {
   readInvitePreview,
   INVITE_PREVIEW_ROLES,
+  INVITE_PREVIEW_NON_BLOCKING_STATUSES,
   type InvitePreviewOutcome,
   type InvitePreviewRole,
   type InvitePreviewRow,
@@ -219,7 +220,9 @@ function BlockedInvitationFace({
   status,
 }: {
   firm: string;
-  status: Exclude<InvitePreviewRow["status"], "pending">;
+  // #872 — `issuer_lapsed` is also excluded: it is a NON-BLOCKING status (see
+  // `INVITE_PREVIEW_NON_BLOCKING_STATUSES`), so this face is never reached for it.
+  status: Exclude<InvitePreviewRow["status"], "pending" | "issuer_lapsed">;
 }) {
   const t = useTranslations("Invite.preview");
   return (
@@ -527,7 +530,11 @@ export function InviteAcceptForm({
     // read that never came back is not a verdict and must not become one here. This is the same
     // reading `confirmMembership` already applies to the membership post-condition, in the other
     // direction — absence is not evidence either way.
-    if (outcome.ok ? outcome.preview.status !== "pending" : outcome.kind === "refused") {
+    if (
+      outcome.ok
+        ? !(INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(outcome.preview.status)
+        : outcome.kind === "refused"
+    ) {
       setStage("blocked");
       return;
     }
@@ -747,8 +754,16 @@ export function InviteAcceptForm({
   // them: there is nothing left to accept, so offering the fields would be offering a control
   // that can only refuse (E-7 / 裁-187's reading, one journey over).
   if (stage === "blocked") {
-    if (preview?.ok && preview.preview.status !== "pending") {
-      return <BlockedInvitationFace firm={preview.preview.firm_name} status={preview.preview.status} />;
+    if (
+      preview?.ok
+      && !(INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(preview.preview.status)
+    ) {
+      return (
+        <BlockedInvitationFace
+          firm={preview.preview.firm_name}
+          status={preview.preview.status as Exclude<InvitePreviewRow["status"], "pending" | "issuer_lapsed">}
+        />
+      );
     }
     return <NoOracleFace />;
   }
@@ -833,7 +848,7 @@ export function InviteAcceptForm({
             authority: `clara.accept_invite` re-checks every one of these facts inside its own
             transaction, which is why an INDEFINITE read degrades to one honest line rather than
             blocking a journey the door is still perfectly able to complete. */}
-        {preview?.ok && preview.preview.status === "pending" ? (
+        {preview?.ok && (INVITE_PREVIEW_NON_BLOCKING_STATUSES as readonly string[]).includes(preview.preview.status) ? (
           <section
             aria-labelledby="invite-preview-heading"
             className="rounded-lg border border-border bg-muted/40 p-4"
@@ -855,6 +870,11 @@ export function InviteAcceptForm({
               <dd className="font-medium text-foreground">{preview.preview.masked_email}</dd>
             </dl>
             <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("roleNote")}</p>
+            {/* #872 — a NOTICE, never a block: the owner ruling is explicit that acceptance stays
+                open in this state, so the ONLY difference from `pending` is this one line. */}
+            {preview.preview.status === "issuer_lapsed" ? (
+              <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("issuerLapsedNote")}</p>
+            ) : null}
           </section>
         ) : preview && !preview.ok && preview.kind === "indefinite" ? (
           <p className="max-w-prose text-xs text-muted-foreground">{tPreview("indefiniteNote")}</p>

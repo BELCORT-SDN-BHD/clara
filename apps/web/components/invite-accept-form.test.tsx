@@ -1068,6 +1068,68 @@ test("p625.web.preview_blocks: an INDEFINITE preview DEGRADES — the password f
   });
 });
 
+// ---------------------------------------------------------------------------
+// #872 — issuer_lapsed is a NOTICE, never a block
+// ---------------------------------------------------------------------------
+
+test("p872.web.preview_issuer_lapsed: does NOT block -- the password form renders WITH the preview and its one-line notice, and acceptance still succeeds", async () => {
+  const { state, impl } = fakeEstate({
+    preview: async () => jsonResponse({ ...PREVIEW_ROW, status: "issuer_lapsed" }),
+  });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const text = textOf(h.container as never);
+      // NOT the blocked face: the preview block itself renders, exactly as it does for `pending`.
+      assert.match(text, /ROME PROPERTIES/, "the preview block still renders -- this is not a blocked face");
+      assert.match(text, /Bookkeeper/);
+      assert.ok(
+        findIn(h.container as never, byLabelledInput(/Password/)),
+        "issuer_lapsed must still offer the password form -- the owner ruling on ticket 872 keeps acceptance open",
+      );
+      // THE ONE-LINE NOTICE, and nothing that reads as a block.
+      assert.match(text, /no longer an admin or owner/i, "the owner ruling's own notice, rendered");
+      assert.equal(state.acceptCalls.length, 0, "nothing is submitted yet");
+
+      // …and the journey really does complete: #872 does not touch accept_invite at all.
+      await fillAndSubmit(h, "Issuer Lapsed Web", { enter: false });
+      assert.equal(state.acceptCalls.length, 1, "acceptance was called exactly once");
+      assert.equal(state.membership, true, "…and it really minted the membership");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("p872.web.preview_issuer_lapsed: an issuer_lapsed preview never reaches BlockedInvitationFace's raw status render", async () => {
+  const { impl } = fakeEstate({
+    preview: async () => jsonResponse({ ...PREVIEW_ROW, status: "issuer_lapsed" }),
+  });
+  await withMockedEnv(impl, async () => {
+    const { h } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToPassword(h);
+      const text = textOf(h.container as never);
+      assert.doesNotMatch(text, /was revoked/);
+      assert.doesNotMatch(text, /invitation has expired/);
+      assert.doesNotMatch(text, /already accepted/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("p625.web.joined: the firm name and the accepted role are in the document BEFORE any navigation fires", async () => {
   const { state, impl } = fakeEstate();
   await withMockedEnv(impl, async () => {

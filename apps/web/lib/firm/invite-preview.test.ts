@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 
 import {
   INVITE_PREVIEW_STATUSES,
+  INVITE_PREVIEW_NON_BLOCKING_STATUSES,
   isInvitePreviewRow,
   readInvitePreview,
   PREVIEW_INVITE_DOOR,
@@ -78,8 +79,22 @@ test("p625.lib.wire: the door is called by SIGNATURE — one argument, named p_t
   );
 });
 
-test("p625.lib.wire: the four invite statuses the DB can report are the four this module admits", () => {
-  assert.deepEqual([...INVITE_PREVIEW_STATUSES].sort(), ["accepted", "expired", "pending", "revoked"]);
+test("p625.lib.wire: the invite statuses the DB can report are the ones this module admits", () => {
+  assert.deepEqual(
+    [...INVITE_PREVIEW_STATUSES].sort(),
+    ["accepted", "expired", "issuer_lapsed", "pending", "revoked"],
+  );
+});
+
+test("p872.lib.wire: `issuer_lapsed` is a valid, non-blocking preview row -- read-time colour, not a sixth unknown value", () => {
+  assert.equal(isInvitePreviewRow({ ...GOOD, status: "issuer_lapsed" }), true);
+});
+
+test("p872.lib.non_blocking: exactly `pending` and `issuer_lapsed` do not block the password form -- the other three are DEFINITE negatives", () => {
+  assert.deepEqual([...INVITE_PREVIEW_NON_BLOCKING_STATUSES].sort(), ["issuer_lapsed", "pending"]);
+  for (const s of INVITE_PREVIEW_NON_BLOCKING_STATUSES) {
+    assert.ok((INVITE_PREVIEW_STATUSES as readonly string[]).includes(s), `${s} must still be an admitted status`);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -47,6 +47,7 @@ components/admin/members-a11y.test.tsx
 components/admin/members-dates.test.tsx
 components/admin/members-keyboard.test.tsx
 components/admin/members-single-fire.test.tsx
+components/admin/members-tables.test.tsx
 components/admin/members-walls.test.tsx
 components/app-shell/app-breadcrumb.test.tsx
 components/app-shell/app-sidebar.test.tsx

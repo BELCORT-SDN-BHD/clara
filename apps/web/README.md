@@ -382,15 +382,20 @@ Pre-authentication preview is a NAMED RESIDUAL: `clara.preview_invite` is grante
 `clara_authenticated` only and this estate declares no `anon` role, so showing an invitation to a
 signed-out visitor needs a server route holding a service key, which is a separate ticket.
 
-A SECOND NAMED RESIDUAL, in the other direction: the preview reproduces two of `clara.accept_invite`'s
-three walls, not three. The acceptance door also re-checks the ISSUER's *current* rank, so an
-invitation whose issuer has since been demoted — or who has left the firm at all — previews as
-pending, the password form renders, and the refusal arrives at the last step in the database's own
-words ("re-issue by an owner"), relayed verbatim. The admin roster is blind in exactly the same
-place, because `clara.firm_invites_visible` does not carry the issuer's rank either; closing it means
-a fifth effective status on both, which is a ticket of its own. See `packages/db/README.md`'s 0224
-note; the divergence is pinned by `packages/db/tests/preview-invite.test.mjs`
-(`p625.preview.issuer_rank`).
+CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
+now covers exactly the gap the paragraph below used to describe. When a still-`pending`
+invitation's issuer no longer holds an active admin-or-above membership (demoted, or gone from
+the firm entirely), BOTH `clara.preview_invite` and the admin roster (`clara.firm_invites_visible`)
+report `issuer_lapsed` — one shared expression, so the two agree by construction — and the preview
+surface renders it as a NOTICE, not a block: `INVITE_PREVIEW_NON_BLOCKING_STATUSES`
+(`lib/firm/invite-preview.ts`) keeps the password form open, because `clara.accept_invite`'s own
+issuer-rank wall is what still decides acceptance, unchanged. Original text, for the record: the
+preview used to reproduce two of `clara.accept_invite`'s three walls, not three — the acceptance
+door also re-checks the ISSUER's *current* rank, so an invitation whose issuer had since been
+demoted previewed as plain `pending` with no signal at all, and the refusal arrived only at the
+last step, in the database's own words ("re-issue by an owner"). See `packages/db/README.md`'s
+0269 note; `packages/db/tests/preview-invite.test.mjs`'s `p625.preview.issuer_rank` cell was
+rewritten to assert the new, agreeing behaviour.
 
 ## #879 — the staffAdvances register tab gets its first browser coverage
 
