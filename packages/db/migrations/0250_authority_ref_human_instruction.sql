@@ -117,10 +117,10 @@ begin
   -- pin below); the tail re-reads every one afterwards to confirm the final state either way.
   for v_pin in select * from (values
       ('clara.sign_depreciation_authority(uuid,uuid,text,jsonb)', c_sign_pre, 'recut'),
-      -- NON-REGRESSION: the plan lane's own door is untouched BY THIS SLICE, and the two bodies
-      -- the owner's ruling leaves alone are untouched by this file at all.
       ('clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)',
-       '06effb07798e69f8f316c2b97ab4e766cad7895f8cca45508699be31f8e5b7d3', 'unmoved'),
+       '06effb07798e69f8f316c2b97ab4e766cad7895f8cca45508699be31f8e5b7d3', 'recut'),
+      -- NON-REGRESSION: the two bodies the owner's ruling leaves alone are untouched by this
+      -- file at all.
       ('clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)',
        'b3bd10065ed7a117ff3a324eff7ebebfcd06adaac38300fc9d77b99ef1759da8', 'unmoved'),
       ('clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
@@ -327,6 +327,150 @@ comment on function clara.sign_depreciation_authority(uuid,uuid,text,jsonb) is
   'never moves again. Replaces the three-argument door (0041:3316) -- one pg_proc row, no '
   'overload.';
 
+-- =====================================================================================
+-- §C  THE PLAN LANE'S DOOR. `clara.create_accounting_plan` (0193:1438, recut by 0223) --
+--     signature, grants, BOOKKEEPER+ floor, the supported-kind list, the schedule assertion,
+--     the basis predicate, the reservation payload, the overlap warning and the audit row all
+--     UNCHANGED. Only the resolution in the middle now reads the SAME shared definition the
+--     signing door reads, which is the whole point of the ticket: one meaning of "an
+--     instruction a person gave", not two.
+-- =====================================================================================
+create or replace function clara.create_accounting_plan(
+    p_client uuid, p_kind text, p_purpose text,
+    p_authority_kind text, p_authority_ref jsonb,
+    p_frequency text, p_day_rule text, p_day_of_month int, p_timezone text,
+    p_effective_from date, p_effective_to date,
+    p_basis jsonb, p_reversal_day_rule text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $p977plan$
+
+declare
+  v_actor uuid; v_firm uuid; v_client_firm uuid; v_client_status text;
+  v_dedupe jsonb; v_plan uuid; v_rev uuid; v_digest text; v_auto boolean;
+  v_ref_kind text; v_ref_id uuid; v_reason text; v_warning jsonb; v_next jsonb; v_result jsonb;
+begin
+  if p_op_key is null or p_op_key ~ '^\s*$' then
+    raise exception 'creating an accounting plan requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('bookkeeper')) a;
+
+  select c.firm_id, c.status into v_client_firm, v_client_status from clara.clients c where c.id = p_client;
+  if v_client_firm is null or v_client_firm <> v_firm then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new accounting plan' using errcode='CLR10',
+      detail='{"reason":"client_inactive"}';
+  end if;
+
+  -- THE EXCLUDED ADAPTERS, REFUSED BY NAME (the header's scope note).
+  -- #653 widens this list by ONE member. Depreciation and close schedules STILL answer
+  -- `plan_kind_unsupported` BY NAME, so a later file can widen it again additively and every
+  -- caller that tried one in the meantime got a typed answer rather than a silent success.
+  if p_kind is null or p_kind not in ('recurring_journal','reversing_journal','amortisation_schedule') then
+    raise exception 'plan kind % is not supported in this slice (recurring_journal, reversing_journal, amortisation_schedule)', coalesce(p_kind,'(null)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','plan_kind_unsupported','kind',p_kind,
+          'supported', jsonb_build_array('recurring_journal','reversing_journal','amortisation_schedule'))::text;
+  end if;
+  -- THE AUTHORITY SHAPE.
+  if p_authority_kind = 'authority_rule' then
+    raise exception 'an authority rule cannot yet authorise a plan; record the explicit instruction instead'
+      using errcode='CLR10', detail='{"reason":"authority_rule_unsupported"}';
+  end if;
+  if p_authority_kind is distinct from 'explicit_instruction' then
+    raise exception 'unknown plan authority kind %', coalesce(p_authority_kind,'(null)')
+      using errcode='CLR10', detail='{"reason":"invalid_authority_kind"}';
+  end if;
+  if p_authority_ref is null or jsonb_typeof(p_authority_ref) <> 'object' then
+    raise exception 'a plan authority names the instruction that carries it'
+      using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"object"}';
+  end if;
+  v_ref_kind := p_authority_ref ->> 'kind';
+  if v_ref_kind is null or v_ref_kind not in ('accounting_work','chat_task') then
+    raise exception 'a plan authority reference names an accounting_work or a chat_task'
+      using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"kind"}';
+  end if;
+  begin
+    v_ref_id := (p_authority_ref ->> 'id')::uuid;
+  exception when others then
+    v_ref_id := null;
+  end;
+  if v_ref_id is null then
+    raise exception 'a plan authority reference names a row by id'
+      using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"id"}';
+  end if;
+  -- #977 (0250): RESOLVED, not merely well-shaped -- and, on the CHAT-LANE arm, a PERSON'S
+  -- INSTRUCTION rather than a task the estate enqueued for itself. A Knowledge preference, a
+  -- calculation policy or a repeated debit has no row here, so none of them can supply authority
+  -- (#640's own criterion); an agent run HAS one, and #977 is the ruling that stops it counting.
+  -- clara._authority_ref_refusal is the ONE definition this door and
+  -- clara.sign_depreciation_authority both read; this door keeps its OWN error class (CLR10).
+  v_reason := clara._authority_ref_refusal(v_ref_kind, v_ref_id, v_firm, p_client);
+  if v_reason = 'authority_ref_not_human_instruction' then
+    raise exception 'the instruction this plan cites is not a person''s instruction'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason',v_reason,'kind',v_ref_kind,'id',v_ref_id)::text;
+  elsif v_reason is not null then
+    raise exception 'the instruction this plan cites does not exist for this client'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason',v_reason,'kind',v_ref_kind,'id',v_ref_id)::text;
+  end if;
+
+  if p_purpose is null or btrim(p_purpose) = '' then
+    raise exception 'an accounting plan needs a purpose' using errcode='CLR10',
+      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
+  end if;
+  perform clara._assert_plan_schedule(p_kind, p_frequency, p_day_rule, p_day_of_month, p_timezone,
+    p_effective_from, p_effective_to, p_reversal_day_rule);
+  perform clara._assert_journal_basis(p_basis);
+  v_digest := clara._journal_basis_digest(p_basis);
+  v_auto := (p_kind = 'reversing_journal');
+
+  v_dedupe := clara._reserve_op(v_firm, 'create_accounting_plan', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'kind', p_kind, 'purpose', p_purpose,
+      'authority', p_authority_ref, 'frequency', p_frequency, 'day_rule', p_day_rule,
+      'day_of_month', p_day_of_month, 'timezone', p_timezone,
+      'effective_from', p_effective_from, 'effective_to', p_effective_to, 'digest', v_digest)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this plan key is held by an in-flight sibling' using errcode='CLR13',
+        detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  v_plan := gen_random_uuid();
+  insert into clara.accounting_plans(id, firm_id, client_id, kind, status, purpose, authority_kind,
+      authority_ref, authorised_by, authority_from, current_revision, created_by)
+    values (v_plan, v_firm, p_client, p_kind, 'active', btrim(p_purpose), p_authority_kind,
+      p_authority_ref, v_actor, p_effective_from, 1, v_actor);
+  insert into clara.accounting_plan_revisions(plan_id, firm_id, client_id, plan_kind, revision,
+      frequency, day_rule, day_of_month, timezone, effective_from, effective_to, basis,
+      basis_digest, auto_reverse, reversal_day_rule, created_by)
+    values (v_plan, v_firm, p_client, p_kind, 1, p_frequency, p_day_rule, p_day_of_month,
+      p_timezone, p_effective_from, p_effective_to, p_basis, v_digest, v_auto,
+      case when v_auto then coalesce(p_reversal_day_rule,'next_period_first_day') else null end,
+      v_actor)
+    returning id into v_rev;
+
+  v_warning := clara._plan_overlap_warning(p_client, p_basis);
+  select jsonb_agg(jsonb_build_object('due_date', to_char(e.due_date,'YYYY-MM-DD'), 'leg', e.leg)
+           order by e.due_date) into v_next
+    from clara._plan_due_events(p_effective_from, p_frequency, p_day_rule, p_day_of_month, v_auto,
+           p_effective_from, coalesce(p_effective_to, (p_effective_from + 3650)), 3) e;
+
+  perform clara._audit(v_firm, v_actor, null, null, 'create_accounting_plan', null,
+    jsonb_build_object('client', p_client, 'plan', v_plan, 'kind', p_kind, 'revision', 1,
+      'authority', p_authority_ref, 'op_key', p_op_key));
+
+  v_result := jsonb_build_object('plan_id', v_plan, 'revision_id', v_rev, 'revision', 1,
+    'status', 'active', 'kind', p_kind, 'next_occurrences', coalesce(v_next, '[]'::jsonb),
+    'overlap_warning', v_warning);
+  return clara._finish_op(v_firm, 'create_accounting_plan', p_op_key, v_result);
+end $p977plan$;
+
 reset role;
 
 -- =====================================================================================
@@ -334,7 +478,7 @@ reset role;
 -- =====================================================================================
 do $p977_tail$
 declare
-  v_src text; v_n int; v_pin record; v_sha text;
+  v_src text; v_n int; v_pin record; v_sha text; v_names text[];
   c_inline constant text := 'from clara.agent_tasks t where t.id = v_ref_id and t.firm_id =';
 begin
   -- T.1 THE SHARED DEFINITION EXISTS, is STABLE, SECURITY DEFINER, owned by clara_fn_owner, its
@@ -419,6 +563,72 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- T.4c THE PLAN DOOR READS THE SAME DEFINITION, no longer carries its own inline copy, and
+  -- branches on the new token -- the two doors now have ONE meaning of "an instruction a person
+  -- gave" instead of two independently maintained ones.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)'::regprocedure;
+  if position('clara._authority_ref_refusal(' in v_src) = 0 then
+    raise exception '#977 tail T.4c: clara.create_accounting_plan does not read the shared definition'
+      using errcode='CLR10';
+  end if;
+  if position(c_inline in lower(regexp_replace(regexp_replace(v_src, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))) <> 0 then
+    raise exception '#977 tail T.4d: clara.create_accounting_plan still carries its own inline chat-lane existence test -- the fold was vacuous'
+      using errcode='CLR10';
+  end if;
+  if position('authority_ref_not_human_instruction' in v_src) = 0 then
+    raise exception '#977 tail T.4e: clara.create_accounting_plan does not branch on the new reason token'
+      using errcode='CLR10';
+  end if;
+
+  -- T.4f THE INLINE EXISTENCE TEST NOW SURVIVES IN EXACTLY ONE clara FUNCTION, NAMED: the
+  -- accrual lane's core, which the owner's ruling of 2026-09-20 deliberately leaves alone.
+  -- Never zero (a body was rewritten out from under the ruling), never two (a door kept its
+  -- copy), never a third name (somebody minted a fourth copy while this file was in flight).
+  select array_agg(p.proname order by p.proname) into v_names
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and position(c_inline in lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))) <> 0;
+  if v_names is distinct from array['_accrual_plan_core'] then
+    raise exception '#977 tail T.4f: the inline chat-lane existence test now lives in %, expected exactly {_accrual_plan_core}', v_names
+      using errcode='CLR10';
+  end if;
+
+  -- T.4g ...AND EXACTLY THE TWO DOORS THE RULING NAMES READ THE ONE DEFINITION.
+  select array_agg(p.proname order by p.proname) into v_names
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
+     and position('clara._authority_ref_refusal(' in p.prosrc) <> 0;
+  if v_names is distinct from array['create_accounting_plan', 'sign_depreciation_authority'] then
+    raise exception '#977 tail T.4g: clara._authority_ref_refusal is read by %, expected exactly {create_accounting_plan, sign_depreciation_authority}', v_names
+      using errcode='CLR10';
+  end if;
+
+  -- T.4h THE PLAN DOOR KEEPS ITS OWN SHAPE too: one pg_proc row, owner, definer flag,
+  -- search_path, no PUBLIC grant, and clara_authenticated still holding EXECUTE.
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname = 'create_accounting_plan';
+  if v_n <> 1 then
+    raise exception '#977 tail T.4h: clara.create_accounting_plan has % pg_proc rows, expected exactly 1', v_n
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)'::regprocedure
+     and p.proowner::regrole::text = 'clara_fn_owner' and p.prosecdef
+     and 'search_path=clara, pg_temp' = any(p.proconfig);
+  if v_n <> 1 then
+    raise exception '#977 tail T.4i: clara.create_accounting_plan lost its owner, its SECURITY DEFINER flag or its pinned search_path'
+      using errcode='CLR10';
+  end if;
+  if has_function_privilege('public', 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)'::regprocedure, 'EXECUTE') then
+    raise exception '#977 tail T.4j: PUBLIC gained EXECUTE on clara.create_accounting_plan'
+      using errcode='CLR10';
+  end if;
+  if not has_function_privilege('clara_authenticated', 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)'::regprocedure, 'EXECUTE') then
+    raise exception '#977 tail T.4k: clara_authenticated LOST EXECUTE on clara.create_accounting_plan'
+      using errcode='CLR10';
+  end if;
+
   -- T.5 NON-REGRESSION, re-read: the two bodies the owner's ruling leaves alone are byte-for-byte
   -- what the prestate measured. The accrual core KEEPS its own existence-only resolution; the
   -- prepayment door needs no line of its own because it passes its reference through to
@@ -437,6 +647,6 @@ begin
     end if;
   end loop;
 
-  raise notice '#977 tail OK (slice 1): clara._authority_ref_refusal exists, stable, definer-owned by clara_fn_owner and ungranted; clara.sign_depreciation_authority reads it, no longer carries its own inline chat-lane existence test, names both reason tokens, and keeps its single pg_proc row, owner, definer flag, search_path and grants; clara._accrual_plan_core and clara.create_prepayment_schedule are byte-for-byte unmoved.';
+  raise notice '#977 tail OK: clara._authority_ref_refusal exists, is stable, definer-owned by clara_fn_owner and ungranted, and names BOTH reason tokens while reading the named task''s own kind; clara.sign_depreciation_authority and clara.create_accounting_plan BOTH read it, neither still carries its own inline chat-lane existence test, both branch on the new token, and each keeps its single pg_proc row, owner, definer flag, search_path and grants; the inline existence test now lives in exactly one clara function (_accrual_plan_core, which the owner''s ruling leaves alone) and exactly the two doors read the one definition; clara._accrual_plan_core and clara.create_prepayment_schedule are byte-for-byte unmoved.';
 end
 $p977_tail$;
