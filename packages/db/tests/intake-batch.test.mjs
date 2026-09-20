@@ -62,6 +62,32 @@ async function gate(t) {
   return true;
 }
 
+// #964 — the document-ingest capacity window's move to Asia/Kuala_Lumpur lives in its OWN
+// migration (0252), a separate frontier from 0229's above: a slice-frontier CI leg can be pinned
+// AT 0229, before 0252 lands, and the cell below must skip cleanly there rather than red on a
+// `get_intake_batch` capacity block that has not yet moved off the UTC day. Mirrors work-list
+// .test.mjs's `INTENT_KEY_STEM` / `gateIntentKey` pattern for the identical reason.
+const MYT_WINDOW_STEM = "document_ingest_window_myt$";
+let _mytReady = null;
+async function mytWindowReady() {
+  if (_mytReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [MYT_WINDOW_STEM]);
+      _mytReady = r.rows[0].n > 0;
+    } catch {
+      _mytReady = false;
+    }
+  }
+  return _mytReady;
+}
+async function gateMytWindow(t) {
+  if (await mytWindowReady()) return false;
+  markSkip();
+  t.skip(`#964 document-ingest MYT window absent (no ${MYT_WINDOW_STEM} migration applied)`);
+  return true;
+}
+
 let world = null;
 before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud.
@@ -267,32 +293,72 @@ test("p636.batch.ladder_by_kind — the same member count binds on DIFFERENT cei
   assert.equal(cap(200), 5, ">10MB PDF members: the PAGES ceiling binds at 5");
 });
 
-test("p636.batch.capacity_window_utc — the daily window is a UTC day, i.e. 08:00 Asia/Kuala_Lumpur", async (t) => {
+// #964 recut: this cell was `p636.batch.capacity_window_utc`, pinning a UTC-day window and
+// asserting nothing about what the window SHOULD be ("moving it to MYT is #635's call"). #964 is
+// that call. The cell is renamed so it no longer asserts UTC is correct, and its assertions now
+// pin the Asia/Kuala_Lumpur boundary #964 shipped — the SAME raw-predicate technique (pure SQL
+// timezone arithmetic over crafted instants, since `document_ingest_reservations.created_at` is
+// IMMUTABLE and nothing in this estate can move `now()` for a session), pointed at the new zone.
+// Unlike its predecessor this is NOT gated on 0252: the expression is true independent of which
+// body is live, which is exactly what makes a future move visible in a diff rather than silent
+// (0229's own words about this cell, restated). The MECHANISM proof — that the three production
+// bodies actually COMPUTE this expression — lives in document-ingest-window-myt.test.mjs, gated
+// on 0252's stem, never duplicated here.
+test("p964.window.capacity_window_myt — the daily window is an Asia/Kuala_Lumpur calendar day, reset at MYT midnight", async (t) => {
   if (await gate(t)) return;
-  // `clara.document_ingest_reservations.created_at` is IMMUTABLE (_tf_reservation_update raises
-  // CLR08), so the window is pinned by evaluating the reservation body's OWN predicate over
-  // crafted instants rather than by back-dating a row. The predicate IS the mechanism.
   const w = (await rootQuery(
-    `select (date_trunc('day', now() at time zone 'utc') at time zone 'utc') as ws,
-            ((date_trunc('day', now() at time zone 'utc') at time zone 'utc')
+    `select (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as ws,
+            ((date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')
                at time zone 'Asia/Kuala_Lumpur')::time::text as local_time`)).rows[0];
-  assert.equal(w.local_time, "08:00:00",
-    "the UTC-day boundary lands at 08:00 Malaysian local time — the card says 08:00, never 'midnight'");
-  const ws = w.ws.getTime(); const myt = ws + 16 * 3600 * 1000;
-  const r = await rootQuery(
-    `select (v.ts >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc')) as counted_today,
-            (date_trunc('day', v.ts at time zone 'utc') at time zone 'utc') as utc_window
+  assert.equal(w.local_time, "00:00:00",
+    "the MYT-day boundary lands at MYT MIDNIGHT — the card says 'resets at midnight', never 08:00");
+  const ws = w.ws.getTime();
+
+  // AC3 + the boundary itself: a pair straddling MYT MIDNIGHT falls in DIFFERENT windows.
+  const straddleMidnight = await rootQuery(
+    `select (v.ts >= (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')) as counted_today,
+            (date_trunc('day', v.ts at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as myt_window
        from unnest($1::timestamptz[]) as v(ts)`,
-    [[ws - 1000, ws + 1000, myt - 1000, myt + 1000].map((t2) => new Date(t2).toISOString())]);
-  const [beforeUtc, afterUtc, beforeMyt, afterMyt] = r.rows;
-  assert.notEqual(beforeUtc.utc_window.getTime(), afterUtc.utc_window.getTime(),
-    "two reservations straddling 00:00 UTC fall in DIFFERENT daily windows");
-  assert.equal(beforeUtc.counted_today, false);
-  assert.equal(afterUtc.counted_today, true);
-  assert.equal(beforeMyt.utc_window.getTime(), afterMyt.utc_window.getTime(),
-    "two reservations straddling 00:00 MYT fall in the SAME daily window — today's behaviour, pinned");
-  // It asserts nothing about what the window SHOULD be: moving it to MYT is #635's call, and this
-  // cell is what makes that move visible instead of silent.
+    [[ws - 1000, ws + 1000].map((t2) => new Date(t2).toISOString())]);
+  const [beforeMidnight, afterMidnight] = straddleMidnight.rows;
+  assert.notEqual(beforeMidnight.myt_window.getTime(), afterMidnight.myt_window.getTime(),
+    "two reservations straddling MYT MIDNIGHT fall in DIFFERENT daily windows");
+  assert.equal(beforeMidnight.counted_today, false);
+  assert.equal(afterMidnight.counted_today, true);
+
+  // AC2: 09:00 MYT and 23:00 MYT of the SAME MYT date count toward ONE quota.
+  const sameDay = await rootQuery(
+    `select (date_trunc('day', v.ts at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur') as myt_window
+       from unnest($1::timestamptz[]) as v(ts)`,
+    [[ws + 9 * 3600 * 1000, ws + 23 * 3600 * 1000].map((t2) => new Date(t2).toISOString())]);
+  assert.equal(sameDay.rows[0].myt_window.getTime(), sameDay.rows[1].myt_window.getTime(),
+    "09:00 MYT and 23:00 MYT of the same MYT date must count toward ONE quota");
+
+  // AC1: a reservation at 06:00 MYT counts against TODAY's MYT window — under the OLD 08:00-reset
+  // window it would still have belonged to YESTERDAY's window (06:00 MYT is before 08:00 MYT).
+  const sixAmMyt = await rootQuery(
+    `select (v.ts >= (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')) as counted_myt_today,
+            (v.ts >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc')) as counted_old_utc_today
+       from unnest($1::timestamptz[]) as v(ts)`,
+    [[new Date(ws + 6 * 3600 * 1000).toISOString()]]);
+  assert.equal(sixAmMyt.rows[0].counted_myt_today, true,
+    "06:00 MYT must count against TODAY's MYT window");
+  assert.equal(sixAmMyt.rows[0].counted_old_utc_today, false,
+    "06:00 MYT falls before the OLD 08:00-MYT UTC-day reset — the exact gap #964 closes");
+});
+
+// #964's other named acceptance criterion for this file: "the batch-board capacity descriptor
+// reports the MYT-midnight window, and the batch card shows it without a second hardcoded
+// string." Gated on 0252's OWN stem (never 0229's): a leg pinned at 0229 must skip cleanly here,
+// not red on a capacity block that has not yet moved off the UTC day.
+test("p964.window.capacity_descriptor_myt — get_intake_batch reports capacity as myt_day / 00:00, never utc_day / 08:00", async (t) => {
+  if (await gate(t)) return;
+  if (await gateMytWindow(t)) return;
+  const batch = await openBatch(ALICE());
+  const read = await getBatch(BOB(), batch.batch_id);
+  assert.deepEqual(read.capacity,
+    { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" },
+    "the capacity descriptor must report the MYT-midnight window, not the retired UTC-day one");
 });
 
 test("p636.batch.derived_key_author — a resumed fan-out MUST re-issue with the STORED actor", async (t) => {
@@ -314,6 +380,16 @@ test("p636.batch.derived_key_author — a resumed fan-out MUST re-issue with the
 
 test("p636.census.no_recut — the twelve pinned bodies are byte-identical after 0229", async (t) => {
   if (await gate(t)) return;
+  // #964 (migration 0252) deliberately recuts THREE of these twelve — the exact reservation
+  // helpers 0229's OWN header named as pinned-but-not-recut ("the three reservation bodies are
+  // untouched and pinned below"), moving them from a UTC day to an Asia/Kuala_Lumpur one. That
+  // claim was always scoped to 0229 itself ("byte-identical AFTER 0229", never "forever"), and
+  // 0229's header said so explicitly: "Moving the window to MYT is #635's ticket, not this one's."
+  // This cell now pins BOTH generations for those three names, selected by whether 0252 is live,
+  // so it stays a true regression watch in both the pre- and post-#964 world rather than a false
+  // red on a later ticket's IN-SCOPE, fully-verified recut (document-ingest-window-myt.test.mjs
+  // carries that recut's own prestate/reverse-substitution proof).
+  const mytLive = await mytWindowReady();
   const pins = [
     ["clara._tf_accounting_work_immutable()", "a1c4e0fc07dfe535433ee3061c54192ffeba640eae1375d8a2f529b3d1ff518e"],
     ["clara._assert_journal_source_refs(uuid,uuid,jsonb,boolean)", "f028c8ea70f7bcfde3cdd8ebaae045964ca763746010011a50d4c489bff232d2"],
@@ -322,9 +398,15 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
     ["clara._work_door_ctx(uuid,uuid,text,text,text,text)", "bd7bc3934fa919b2167b49f84b40f5205bcfcfc5207aaa31b94ce1c186ac2c7c"],
     ["clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)", "09784b31f65ee230d2cf2e25426d43e6d529f1a5476468d96c4ef486a5c92e9d"],
     ["clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)", "8f9e0b1944c8910bcdef049d250ca834b74a4aa33084b38d97acc868b4a697d7"],
-    ["clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)", "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734"],
-    ["clara._resize_document_reservation(uuid,uuid,integer)", "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf"],
-    ["clara._settle_document_reservation(uuid,uuid,integer)", "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6"],
+    ["clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)",
+      mytLive ? "32a42ca3de5c3f4de81971530430ceffe4f763eb9ed2b7e215941c8a94e70400"
+              : "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734"],
+    ["clara._resize_document_reservation(uuid,uuid,integer)",
+      mytLive ? "865f01a0c1094caf82efe9b9fec8b3bc4d611d1266be26058a42e9d8b60cc622"
+              : "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf"],
+    ["clara._settle_document_reservation(uuid,uuid,integer)",
+      mytLive ? "c96f43c0d5e4acec8871012044f3c4763f7af13b139b91ba7f3cede26f4b7d00"
+              : "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6"],
     ["clara._declared_page_ceiling(bigint,text)", "82bc5e67afd4ea074665a320f357092fb0e93af9221f10b489a50cec3e4b4ca6"],
     ["clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer)", "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a"],
   ];
@@ -332,7 +414,7 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, expected, `${sig} MOVED — 0229 recuts nothing`);
+    assert.equal(r.rows[0].sha, expected, `${sig} MOVED unexpectedly — 0229 recuts nothing, and only #964's named MYT-window change is tolerated`);
   }
 });
 
@@ -508,9 +590,15 @@ test("p636.batch.no_percentage — the envelope carries no denominator at any de
   assert.equal(pack.cancel_blocked, null, "an open batch has nothing to name");
   assert.deepEqual(Object.keys(pack.facets).sort(),
     ["admitted", "failed", "settled", "unassigned", "waiting"]);
+  // #964 (0252) moved the SHIPPED window from a UTC day to an Asia/Kuala_Lumpur one; this
+  // assertion is a collateral shape-check inside a "no denominator" battery, not the window's own
+  // pin (that is `p964.window.capacity_window_myt` above), so it tracks whichever generation is
+  // actually live rather than gating the whole cell on 0252.
   assert.deepEqual(pack.capacity,
-    { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
-    "the capacity block reports the SHIPPED window so the surface can say 08:00, never 'midnight'");
+    (await mytWindowReady())
+      ? { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" }
+      : { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
+    "the capacity block reports the SHIPPED window so the surface can say a real reset time, never 'midnight' as a made-up default");
   const src = await rootQuery(
     "select prosrc from pg_proc where oid = 'clara.get_intake_batch(uuid,integer)'::regprocedure");
   assert.equal(src.rows[0].prosrc.includes("'total'"), false,

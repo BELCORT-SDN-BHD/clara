@@ -690,7 +690,7 @@ One admitted source's membership of an intake batch, carrying up to three identi
 _Avoid_: Calling an unattributed source a Work; calling a processing task a child; a percentage; a total; a page length.
 
 **Member dependency**:
-The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at 08:00 `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
+The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at MYT midnight in `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
 _Avoid_: Treating a quota block as a failure; treating the declared value as the only source of "waiting".
 
 **Unassigned source**:
