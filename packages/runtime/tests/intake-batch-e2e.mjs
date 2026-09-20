@@ -49,16 +49,20 @@ import { tmpdir } from "node:os";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { startHeapBound, MiB } from "./heap-bound.mjs";
+import { DB_NAME_SHAPE, allowedDbPattern, assertLocalDbGate } from "./local-db-gate.mjs";
 
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|intake_ci|\d{3})(_world)?$/;
-if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("intake-batch-e2e is hard-gated to loopback + PGDATABASE in {clara_rt_test,clara_intake_ci,clara_<ddd>}");
-}
-if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|intake_ci|\d{3})(?:_world)?(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("intake-batch-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + the same throwaway database");
-}
+// Fail-closed local gate (#1018: shared with every other standalone World e2e driver). The
+// trailing `_world` shape is intake-admission-e2e's `clara_<ddd>` PLUS the world-suffixed variant
+// this leg's own precedent already used — the suffix applies after WHICHEVER of the three names
+// matched, not only after the per-ticket digits.
+assertLocalDbGate({
+  label: "intake-batch-e2e",
+  pattern: allowedDbPattern(
+    `${DB_NAME_SHAPE.RT_TEST}|${DB_NAME_SHAPE.INTAKE_CI}|${DB_NAME_SHAPE.PER_TICKET}`,
+    { outerOptionalSuffix: "_world" },
+  ),
+  checkDsnString: true,
+});
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";
