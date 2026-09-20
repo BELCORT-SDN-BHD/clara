@@ -1382,6 +1382,24 @@ path to `awaiting_capacity`: CLR18 only, actor from the upload sidecar's `upload
 route carries a capability token and no principal), and its own refusal swallowed into a log line
 so the route's honest 429 never becomes a 500.
 
+**The at-CREATION refusal — #965 (migration 0254).** A ceiling refusal at `create_document_intake`
+is no longer an exception: the door COMMITS the refused intake at `failed`/`limit` and RETURNS
+`refused: true` with its ceiling (`documents`/`pages`), firm, filename, moment and the database's
+own sentence. `beginDocumentIntake` hands that outcome UP rather than throwing — it mints no upload
+capability and writes NO sidecar, so `recoverPendingDocumentIntakes` never re-drives a refused
+intake — and the ONE place it becomes the uploader's answer is `POST /api/intake/documents`, via
+`intakeLimitRefusal()`, which `mapIntakeError` maps to exactly the `429 {error:"limit",
+message:"intake limit reached"}` the raised CLR18 produced before (pinned by
+`p965.runtime.uploader_answer_unchanged`). In a BATCH, `beginIntakeInBatch` must not roll back —
+the record is the point — so `commitRefusedMember` attaches the refused intake, declares
+`awaiting_capacity` through the governed `set_intake_batch_member_dependency` door with that same
+verbatim reason, and COMMITS. Both door calls sit under SAVEPOINTs: they answer typed on a refusal,
+but the failed statement has already aborted the transaction and `commit` on an aborted transaction
+is a ROLLBACK, which would take the refusal record with it. A batch that closed between the upload
+and the refusal therefore costs the membership (`member_id`/`dependency` come back null) and never
+the record. `mapIntakeError`'s CLR18 arm is untouched — the post-custody resize refusal above still
+raises and still maps there.
+
 **The World leg.** `tests/intake-batch-e2e.mjs` is standalone (not collected by `node --test`) and
 needs the world bootstrapped first (`pnpm --filter @clara/runtime exec bootstrap`). Its N is
 MEASURED, not quoted: 100 ≤1MB PDFs is exactly what a fresh firm admits in one UTC day. It records,

@@ -1371,6 +1371,30 @@ another; `get_intake_batch`'s `capacity` block reports `window: 'myt_day'`,
 unchanged. See `document-ingest-window-myt.test.mjs` for the mechanism proof (0234's own
 anchored-splice / reverse-substitution discipline, applied to a small internal-function recut with
 no time-travelling public door to observe through).
+
+**A file the ceiling refuses at CREATION now leaves a record — #965 (migration 0254).** Until it,
+`create_document_intake` inserted the intake row and then reserved in the SAME transaction, so a
+CLR18 refusal rolled the row back and the file it named disappeared: the uploader saw one 429 and
+nothing survived it. 0254 wraps the ONE `_reserve_document_ingest` call in a plpgsql block whose
+`exception when sqlstate 'CLR18'` arm moves the already-inserted row (inserted ABOVE the block, so
+the implicit subtransaction cannot reach it) to the lane's EXISTING `failed` status with its
+EXISTING `limit` failure reason, and RETURNS a refusal outcome — `refused: true`, which ceiling
+(`documents` / `pages`, read off the reserve helper's own two sentences with `get stacked
+diagnostics`), the firm, the filename, the moment, and the database's sentence verbatim — through
+the same `_finish_op` receipt every other answer goes through. The refusal reaches the append-only
+`audit_log` through the SAME `clara._audit` call the admission uses. No new status, no new failure
+reason, no new column, no new table and no new granted name; the ACCEPTED path executes the
+identical statements in the identical order, gaining only the block's implicit savepoint.
+`get_intake_batch` needed no edit at all: its `waiting` facet already counts a member whose intake
+carries `failure_code='limit'` and its `failed` facet already excludes one (D4 above). What 0229's
+BELT cannot do is declare the wait — arm (b) fires on an UPDATE moving `failure_code` on an intake
+that already HAS a member, and a file refused at creation has none yet — so the runtime attaches
+the refused intake and declares `awaiting_capacity` through the governed
+`set_intake_batch_member_dependency` door (`beginIntakeInBatch` → `commitRefusedMember`,
+`packages/runtime/lib/intake-batches.mjs`), under savepoints, so a closed batch costs the
+membership and never the record. See `intake-refusal-record.test.mjs` for the door proof and
+`packages/runtime/tests/intake-refusal-unit.test.mjs` for the caller's.
+
 ## #660 — the client home's money band (0232)
 
 TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
