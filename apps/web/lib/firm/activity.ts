@@ -28,9 +28,11 @@
 //     round-trip it, never decode it.
 //
 // WHY THIS DOES NOT USE getRows/lib/read.ts. Unlike a plain RLS-scoped table read, this feed's
-// ORDER and CURSOR are part of the contract (the same reasoning lib/firm/timeline.ts's own header
-// gives for `list_firm_timeline`): a caller that composed its own order/limit over the union could
-// page incorrectly without ever being wrong about one row. `callDoor` is the transport, exactly as
+// ORDER and CURSOR are part of the contract: a caller that composed its own order/limit over the
+// union could page incorrectly without ever being wrong about one row. (This sentence used to cite
+// `lib/firm/timeline.ts`'s header for the same reasoning; #998 retired that wrapper and
+// `clara.list_firm_timeline` with it — migration 0261 — so the reason is stated here rather than
+// pointed at a file that no longer exists.) `callDoor` is the transport, exactly as
 // a read-flavoured RPC always rides it (AGENTS.md).
 //
 // THE OBJECT LINK BUILDERS ARE HONEST ABOUT WHAT THEY CAN NAME, and since #719 what they can name
@@ -252,8 +254,9 @@ export type ActivityFilters = {
   until?: string | null;
 };
 
-/** The door's own page ceiling (0181: "p_limit clamped 1..100" — TIGHTER than
- *  `list_firm_timeline`'s 200, because this door does three reads and a merge-sort per page). */
+/** The door's own page ceiling (0181: "p_limit clamped 1..100" — tighter than the 200 the
+ *  retired `clara.list_firm_timeline` allowed (#998, 0261), because this door does three reads
+ *  and a merge-sort per page). */
 export const ACTIVITY_MAX_LIMIT = 100;
 export const ACTIVITY_DEFAULT_LIMIT = 25;
 

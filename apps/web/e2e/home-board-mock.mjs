@@ -289,9 +289,10 @@ const EMPTY_CASH_PROPOSAL = {
 /**
  * Answer one request, or return false to let `serve-built.mjs` fall through to its 404.
  *
- * `list_firm_timeline` is DELIBERATELY NOT HANDLED. This mock exercises the compatibility arm
- * for a database that predates migration 0174, so Firm Home renders its "not available yet"
- * note for the resulting 404. Timeline-specific walks supply their own handler.
+ * NOTHING IS ANSWERED FOR `list_firm_timeline`, and there is no longer anything to answer:
+ * #659 swapped Firm Home's "Recent activity" onto `clara.list_activity` and deleted the
+ * "not available yet" compatibility arm this note used to describe, and #998 (migration 0261)
+ * dropped the function and its wrapper outright. `clara.list_activity` IS handled below.
  */
 export async function handleHomeBoardSupabase(request, response, path, url, sendJson, cors) {
   // ID-SCOPED, and it falls through for every id but its own — including the UNFILTERED
