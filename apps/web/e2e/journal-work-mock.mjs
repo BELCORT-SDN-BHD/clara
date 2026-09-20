@@ -121,6 +121,11 @@ export const JOURNAL_WORK = {
   egressRefusedWorkId: "62309003-6230-4623-8623-623062309003",
   egressRefusedTaskId: "72309003-7230-4723-8723-723072309003",
   egressRefusedRunId: "wrun_6230900362309003",
+  // #848 — `clara.reactivate_client_egress_purpose`'s (migration 0211) SUCCESS shape, the same
+  // one `clara.activate_client_egress_purpose` (0020) returns and this lane's mock echoes back
+  // when `state.egressReactivateAnswer === "active"` (the default).
+  egressActivationId: "82309003-8230-4823-8823-823082309003",
+  egressConsentId: "92309003-9230-4923-8923-923092309003",
   /** The control endpoint, as the BROWSER addresses it: the same-origin proxy
    *  maps `/api/runtime/<p>` onto the runtime's `/api/<p>`. */
   controlPath: "/api/runtime/e2e-journal-work/control",
@@ -289,6 +294,16 @@ const state = {
   /** Every op key a cancel was sent with, so a cell can prove the retry of an UNOBSERVED attempt
    *  reuses it rather than asking the database a second question. */
   cancelKeys: [],
+  /** #848 — WHICH answer `reactivate_client_egress_purpose` gives next: "active" (the default,
+   *  migration 0211's own success shape), "denied" (CLR04, the owner floor — a browser cannot
+   *  demote its own session, so this is armed rather than driven by a second sign-in), "no_consent"
+   *  or "nothing_to_reactivate" (CLR28, the door's own two typed refusals). Armed per cell; `reset`
+   *  is the way back, exactly as every other armed arm in this lane works. */
+  egressReactivateAnswer: "active",
+  /** Every op key `reactivate_client_egress_purpose` was sent with, so a cell can prove a resubmit
+   *  after a dropped answer reuses it rather than minting a second — the same lost-response shape
+   *  `cancelKeys` above proves for cancel. */
+  egressReactivateOpKeys: [],
   /** #630 (fix round) — A CHAT TURN THIS TAB DID NOT POST, found already RUNNING. It is the state
    *  a reload lands in, and the one the B7 rail's Stop control has to render for: the browser has
    *  no `sendStatus` of its own for a turn it did not start, so the only thing that can say "there
@@ -390,6 +405,8 @@ function seed() {
   // are armed per cell because they model races the browser cannot produce for itself.
   state.cancelAnswer = "act";
   state.cancelKeys.length = 0;
+  state.egressReactivateAnswer = "active";
+  state.egressReactivateOpKeys.length = 0;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -957,6 +974,14 @@ function control(body) {
     state.cancelAnswer = String(body.mode ?? "act");
     return { cancelAnswer: state.cancelAnswer };
   }
+  // #848 — WHICH of `reactivate_client_egress_purpose`'s four answers the next press gets: the
+  // owner floor (CLR04), the door's two typed refusals (CLR28 no_consent / nothing_to_reactivate)
+  // or the success shape (the default). Armed per cell for the same reason `cancelAnswer` above
+  // is — a browser cannot demote its own session, so a below-owner press has to be simulated.
+  if (body.op === "egress_reactivate_answer") {
+    state.egressReactivateAnswer = String(body.mode ?? "active");
+    return { egressReactivateAnswer: state.egressReactivateAnswer };
+  }
   // …and the SETTLE that follows a `stopping` Work once the boundary is known. Driven by hand so
   // the convergence a walk polls for is a state change it asked for, never a race against a timer.
   if (body.op === "settle_stopping") {
@@ -996,6 +1021,11 @@ function control(body) {
   }
   if (body.op === "cancel_keys") {
     return { keys: state.cancelKeys };
+  }
+  // #848 — the same read-back `cancel_keys` above gives cancel, for `reactivate_client_egress_
+  // purpose`'s own op key: a walk cell can prove exactly one press reached the door, by a real key.
+  if (body.op === "egress_reactivate_keys") {
+    return { keys: state.egressReactivateOpKeys };
   }
   if (body.op === "bump_revision") {
     const entry = state.entries.get(String(body.entryId ?? ""));
@@ -1426,6 +1456,63 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
       return true;
     }
     sendJson(response, 200, state.traces.get(workId) ?? [], cors);
+    return true;
+  }
+
+  // #848 — THE OWNER'S WAY BACK ON (migration 0211). `EgressReactivateAction` presses this from
+  // the `egress_not_authorized` face `op: "egress_refused"` (above) puts on screen. SCOPED to
+  // this lane's own client and falls through otherwise — same discipline every handler in this
+  // file follows. `state.egressReactivateAnswer` (armed by `op: "egress_reactivate_answer"`) picks
+  // which of the door's four real answers this press gets:
+  //   "active"                — migration 0020's own success shape, verbatim field names.
+  //   "denied"                — CLR04, `_human_ctx`'s exact message: the owner floor.
+  //   "no_consent"            — CLR28, 0211's exact message: nothing live to re-activate over.
+  //   "nothing_to_reactivate" — CLR28, 0211's exact message: nothing was ever deactivated.
+  if (request.method === "POST" && path === "/rest/v1/rpc/reactivate_client_egress_purpose") {
+    const body = await readJson(request);
+    if (body?.p_client !== ours) return false;
+    if (typeof body?.p_op_key !== "string" || body.p_op_key.trim() === "") {
+      sendJson(response, 400, { code: "CLR10", message: "op_key is required", details: null, hint: null }, cors);
+      return true;
+    }
+    if (body?.p_purpose !== "accounting_work") {
+      sendJson(response, 400, {
+        code: "CLR10",
+        message: "only the DERIVED egress purpose is re-activated through this door",
+        details: JSON.stringify({ reason: "purpose_not_reactivatable", reactivatable: "accounting_work" }),
+        hint: null,
+      }, cors);
+      return true;
+    }
+    state.egressReactivateOpKeys.push(body.p_op_key);
+    if (state.egressReactivateAnswer === "denied") {
+      sendJson(response, 400, { code: "CLR04", message: "insufficient role", details: null, hint: null }, cors);
+      return true;
+    }
+    if (state.egressReactivateAnswer === "no_consent") {
+      sendJson(response, 400, {
+        code: "CLR28",
+        message: "no live typed egress consent for this client and purpose",
+        details: JSON.stringify({ reason: "no_consent" }),
+        hint: null,
+      }, cors);
+      return true;
+    }
+    if (state.egressReactivateAnswer === "nothing_to_reactivate") {
+      sendJson(response, 400, {
+        code: "CLR28",
+        message: "nothing was deactivated for this client and purpose",
+        details: JSON.stringify({ reason: "nothing_to_reactivate" }),
+        hint: null,
+      }, cors);
+      return true;
+    }
+    sendJson(response, 200, {
+      activation_id: JOURNAL_WORK.egressActivationId,
+      consent_id: JOURNAL_WORK.egressConsentId,
+      purpose: "accounting_work",
+      status: "active",
+    }, cors);
     return true;
   }
 

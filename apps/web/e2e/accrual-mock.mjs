@@ -22,6 +22,8 @@
 //   2. It records every op key it was sent, so the walk can prove that a resubmit of the SAME
 //      decision carries the SAME key. That is the whole of the lost-response story and no canned
 //      answer can show it.
+import { readCachedJson } from "./mock-dispatch.mjs";
+
 
 export const ACC = {
   firmId: "65065065-6500-4650-8650-650650650650",
@@ -44,9 +46,9 @@ export const ACC = {
   unpostedPurpose: "Quarterly audit fee accrual",
 };
 
-/** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readJson`'s own call
- *  site guards on, so a verb this lane does not own never has its request stream drained (the #632
- *  finding-10 root cause, stated in full in `bank-close-registers-mock.mjs`).
+/** The ONLY RPC verbs this lane's dispatch chain recognises — the allow-list `readCachedJson`'s own
+ *  call site guards on, so a verb this lane does not own never has its request stream drained (the
+ *  #632 finding-10 root cause, stated in full in `bank-close-registers-mock.mjs`).
  *
  *  `list_spoken_for_documents` IS SHARED with `periodic-adjustment-mock.mjs` and is declared as
  *  such in `e2e-fixture-ownership.test.ts`: both lanes mount the SAME `EvidenceChooser`, which
@@ -71,17 +73,6 @@ export function resetAccruals() {
  *  asserts that a resubmit of the same decision repeats the key rather than minting a second. */
 export function accrualOpKeys() {
   return [...state.opKeys];
-}
-
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
 }
 
 const CLIENT = () => ({
@@ -406,7 +397,7 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
   if (!ACCRUAL_RPC_VERBS.has(verb)) return false;
-  const body = await readJson(request);
+  const body = await readCachedJson(request);
 
   if (verb === "list_spoken_for_documents") {
     if (body.p_client !== ACC.clientId && body.p_client !== ACC.otherClientId) return false;
