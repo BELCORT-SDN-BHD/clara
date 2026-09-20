@@ -926,7 +926,7 @@ test("two forms on one page do not share a control id — Needs-you expands more
 // person that the source they were answering about was corrected, or that a replacement Work is
 // already running. Driven through the exported reducer the rendered card itself calls (line 381),
 // never through a copy of the switch.
-test("#885 a SUPERSEDED convergence gets its own sentence, and a plain cancellation keeps its own", () => {
+test("885 a SUPERSEDED convergence gets its own sentence, and a plain cancellation keeps its own", () => {
   const cancelled = record({ status: "cancelled", work_status: "cancelled" });
   const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
     ({ kind: "converge", reason, current, message: "refused" });
