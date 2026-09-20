@@ -56,6 +56,7 @@ import { AddClientControl } from "../add-client-control";
 import { DataState, ErrorMessage } from "../data-state";
 import { SweepStatusPanel } from "../sweep-status-panel";
 import { ClaraWorkingTile } from "./clara-working-tile";
+import { FirmLegalStandingTile } from "./firm-legal-standing-tile";
 import { FirmPortfolioSection } from "./firm-portfolio-section";
 import { FirmRecentActivity } from "./firm-recent-activity";
 import { FirmSetupTile } from "./firm-setup-tile";
@@ -225,6 +226,13 @@ export function FirmHomeBoard() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-6">
+            {/* #1009 — THE LEGAL-STANDING PROMPT, ahead of "Finish firm setup" in this column.
+                Both are the same shape of thing (a firm-altitude fact with its own dedicated
+                read, gating nothing), and this one is ordered first: an agreement that stops
+                being current is a platform-wide compliance fact, ahead of a firm's own onboarding
+                progress. It renders NOTHING while standing is current — see its own header. */}
+            <FirmLegalStandingTile />
+
             {/* #648 (journey A5): AC4's authorised next step. It renders for admin+ only, and only
                 while required firm facts remain; it GATES NOTHING — see firm-setup-tile.tsx. */}
             <FirmSetupTile />

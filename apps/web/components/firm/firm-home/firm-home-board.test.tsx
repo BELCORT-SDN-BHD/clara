@@ -71,6 +71,29 @@ const MEMBERS = [{
   created_at: "2026-01-01T00:00:00Z", removed_at: null,
 }];
 
+// #1009 — the board's fourth read, `clara.get_firm_legal_standing`. LIVE by default, exactly like
+// `serve-built.mjs`'s own generic default for this door: every OTHER cell in this file is about a
+// different read, and a fabricated failure here would paint every one of them with a banner they
+// are not about. The one cell about this read overrides it below.
+const LEGAL_STANDING_LIVE = {
+  documents: [
+    { kind: "terms", version: 1, status: "published", title: "Terms of Service (Clara beta)",
+      effective_from: "2026-09-12T16:00:00Z", published_at: "2026-09-18T13:46:54Z",
+      firm_accepted: true, accepted_at: "2026-09-18T14:00:00Z",
+      accepted_by: "11111111-1111-4111-8111-111111111111", accepted_by_name: "Tao",
+      my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00Z" },
+    { kind: "dpa", version: 1, status: "published", title: "Data processing agreement",
+      effective_from: "2026-08-30T16:00:00Z", published_at: "2026-09-18T13:46:54Z",
+      firm_accepted: true, accepted_at: "2026-09-18T14:00:00Z",
+      accepted_by: "11111111-1111-4111-8111-111111111111", accepted_by_name: "Tao",
+      my_accepted_version: 1, my_accepted_at: "2026-09-18T14:00:00Z" },
+  ],
+  standing_live: true,
+  can_accept_for_firm: true,
+  masked: false,
+  enforcement_mode: "prompt",
+};
+
 // #659 — the portfolio pack. TWO clients, one of them archived, so the board's own disclosure and
 // its count links are exercised by the happy path rather than only by the portfolio's own cells.
 const PORTFOLIO = {
@@ -138,6 +161,7 @@ function wire(overrides: Record<string, () => Response> = {}): typeof fetch {
     if (url.includes("/rpc/list_activity")) return jsonResponse(ACTIVITY);
     if (url.includes("/rpc/get_firm_portfolio_pack")) return jsonResponse(PORTFOLIO);
     if (url.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
+    if (url.includes("/rpc/get_firm_legal_standing")) return jsonResponse(LEGAL_STANDING_LIVE);
     throw new Error(`unexpected fetch: ${url}`);
   };
 }
@@ -387,6 +411,45 @@ test("Firm Home (ticket 995): a client status outside active/onboarding/archived
         // Three clients total, including the one whose status the CHECK constraint does not
         // admit today — the count a caller sees must include it, never silently drop it.
         assert.match(h.text(), /Owner · 3 clients/);
+      } finally { await h.unmount(); }
+    },
+  );
+});
+
+test("Firm Home (ticket 1009): a current legal standing keeps the prompt off the board", async () => {
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      assert.doesNotMatch(h.text(), /Legal standing/,
+        "the default fixture's standing is live, so the prompt has nothing to ask");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("Firm Home (ticket 1009): a non-current standing surfaces the prompt beside Finish firm setup, naming the agreement and linking the owner to the accept control", async () => {
+  await withMockedEnv(
+    wire({
+      "/rpc/get_firm_legal_standing": () => jsonResponse({
+        ...LEGAL_STANDING_LIVE,
+        documents: [
+          { ...LEGAL_STANDING_LIVE.documents[0], version: 2, firm_accepted: false, accepted_at: null, accepted_by: null, accepted_by_name: null },
+          LEGAL_STANDING_LIVE.documents[1],
+        ],
+        standing_live: false,
+      }),
+    }),
+    async () => {
+      const h = await mount();
+      try {
+        const text = h.text();
+        assert.match(text, /Legal standing/, "the prompt's own heading is on the board");
+        assert.match(text, /Terms of Service.*version 2/, "the outstanding agreement, named with its version");
+        assert.match(text, /does not stop Clara working/i, "the default fixture's mode is prompt, so the beta copy renders");
+        const link = h.find((n) => (n as { tagName?: string }).tagName === "A"
+          && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href")) === "/settings/firm");
+        assert.ok(link, "and the link lands on the existing accept control");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally { await h.unmount(); }
     },
   );
