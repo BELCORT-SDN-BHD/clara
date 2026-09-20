@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
 import { committedPlan, fyeDayCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 5;
 let live = false;
 let executed = 0;
 
@@ -63,6 +63,16 @@ function capture(sub, o) {
     JSON.stringify(o.source ?? {}),
   ]).then((r) => r.rows[0].r);
 }
+
+const setFyEnd = (sub, client, month, day, opKey = opk("p898_fy")) =>
+  humanQuery(sub,
+    "select clara.set_client_fy_end(p_client => $1, p_month => $2, p_day => $3, p_op_key => $4) as r",
+    [client, month, day, opKey]).then((r) => r.rows[0].r);
+
+const promote = (sub, plan, opKey = opk("p898_pr")) =>
+  humanQuery(sub,
+    "select clara.promote_plan_answers_to_knowledge(p_plan => $1, p_op_key => $2) as r",
+    [plan, opKey]).then((r) => r.rows[0].r);
 
 cell("fd.01 the catalogue carries financial_year_end_day, typed/scoped/floored the SAME WAY financial_year_end_month is", async () => {
   const r = await rootQuery(
@@ -109,4 +119,61 @@ cell("fd.03 the map carries exactly one row, fye_day -> financial_year_end_day",
     `select item_key, knowledge_key from clara.knowledge_plan_item_map where item_key = 'fye_day'`);
   assert.equal(r.rowCount, 1, "fye_day must map exactly once");
   assert.equal(r.rows[0].knowledge_key, "financial_year_end_day");
+});
+
+const reasonOf = (err) => {
+  try { return JSON.parse(err.detail ?? "{}").reason ?? null; } catch { return null; }
+};
+
+cell("fd.04 a firm-scope capture of financial_year_end_day is refused with financial_year_end_month's OWN typed reason -- no new code, D8's existing wall", async () => {
+  const w = await knowledgeWorld("fd4");
+  const dayErr = await assertRaises("CLR10", () => capture(w.owner, {
+    key: "financial_year_end_day", scope: "firm", client: null, value: 15,
+    basis: "the firm's standing position on financial_year_end_day",
+  }), "capture_knowledge(firm, financial_year_end_day)");
+  const monthErr = await assertRaises("CLR10", () => capture(w.owner, {
+    key: "financial_year_end_month", scope: "firm", client: null, value: 6,
+    basis: "the firm's standing position on financial_year_end_month",
+  }), "capture_knowledge(firm, financial_year_end_month)");
+  assert.equal(reasonOf(dayErr), "knowledge_scope_not_firm_defaultable");
+  assert.equal(reasonOf(dayErr), reasonOf(monthErr),
+    "the day key must be refused for the EXACT SAME reason the month key already is");
+  assert.equal(
+    await rootQuery(
+      "select count(*)::int as n from clara.knowledge_records where knowledge_key = 'financial_year_end_day' and scope_kind = 'firm'",
+    ).then((r) => r.rows[0].n),
+    0, "no firm-scope row may have landed");
+});
+
+cell("fd.05 a committed onboarding plan's day answer promotes to a knowledge value EQUAL to the client row's own fy_end_day", async () => {
+  const w = await knowledgeWorld("fd5");
+  const set = await setFyEnd(w.bookkeeper, w.clientA, 6, 20);
+  assert.equal(set.fy_end_month, 6);
+  assert.equal(set.fy_end_day, 20);
+
+  const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
+    answers: {
+      fye: { value: 6, answeredBy: w.admin },
+      fye_day: { value: 20, answeredBy: w.admin },
+    } });
+  const r = await promote(w.admin, plan);
+  assert.equal(r.skipped.length, 0);
+  assert.equal(r.withheld.length, 0, JSON.stringify(r.withheld));
+  assert.deepEqual(
+    Object.fromEntries(r.promoted.map((p) => [p.item_key, p.knowledge_key])),
+    { fye: "financial_year_end_month", fye_day: "financial_year_end_day" });
+
+  const client = await rootQuery(
+    "select fy_end_month, fy_end_day from clara.clients where id = $1", [w.clientA]);
+  const knowledge = await rootQuery(
+    `select knowledge_key, value from clara.knowledge_records
+       where client_id = $1 and knowledge_key in ('financial_year_end_month','financial_year_end_day')
+       order by knowledge_key`, [w.clientA]);
+  const byKey = Object.fromEntries(knowledge.rows.map((row) => [row.knowledge_key, row.value]));
+  assert.equal(client.rows[0].fy_end_month, 6);
+  assert.equal(client.rows[0].fy_end_day, 20);
+  assert.equal(byKey.financial_year_end_month, client.rows[0].fy_end_month,
+    "the promoted month must equal the client row's own month");
+  assert.equal(byKey.financial_year_end_day, client.rows[0].fy_end_day,
+    "the promoted day must equal the client row's own day (AC4)");
 });

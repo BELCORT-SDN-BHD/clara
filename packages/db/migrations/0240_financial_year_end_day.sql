@@ -94,14 +94,19 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- TWO ACCEPTABLE LIVE STATES, and only two: the PRISTINE pre-splice body (§B is about to run
+  -- it for the first time) or the EXACT post-splice body this file's own §B produces (a redo of
+  -- this unedited file, a no-op -- §B checks for its own marker and skips the splice itself).
+  -- ANY THIRD body is neither, and is refused rather than re-spliced.
   select encode(sha256(prosrc::bytea), 'hex') into v_prosrc_sha
     from pg_proc where oid = 'clara._knowledge_assert_value(text,jsonb)'::regprocedure;
-  if v_prosrc_sha is distinct from '0b0ac71c31ad26ec86d5bb6b2ed4e7bdbabcdf1267692bc21a9d898575b92949' then
-    raise exception '#898 prestate: clara._knowledge_assert_value carries prosrc sha256 %, not the pin this splice was authored against -- re-measure and re-author §B', v_prosrc_sha
+  if v_prosrc_sha not in ('0b0ac71c31ad26ec86d5bb6b2ed4e7bdbabcdf1267692bc21a9d898575b92949',
+                          '84fca940b4d520dc6d4291cd629e526507d31595103badc10c4382872d1b90d5') then
+    raise exception '#898 prestate: clara._knowledge_assert_value carries prosrc sha256 %, neither the pre- nor the post-splice pin this file was authored against -- re-measure and re-author §B', v_prosrc_sha
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#898 prestate: clean -- financial_year_end_day and fye_day are both absent, financial_year_end_month carries the (assertion, number, client, false, bookkeeper) shape this file types the day key from, the day key is not firm-eligible, and clara._knowledge_assert_value carries the exact prosrc this file is about to splice.';
+  raise notice '#898 prestate: clean -- financial_year_end_day and fye_day are both absent-or-already-landed (idempotent under #957 REDO), financial_year_end_month carries the (assertion, number, client, false, bookkeeper) shape this file types the day key from, the day key is not firm-eligible, and clara._knowledge_assert_value carries either the pre- or the post-splice pin.';
 end
 $prestate$;
 
@@ -166,6 +171,13 @@ declare v_def text; v_anchor text; v_repl text; v_count int; v_next text;
 begin
   select pg_get_functiondef('clara._knowledge_assert_value(text,jsonb)'::regprocedure) into v_def;
 
+  -- IDEMPOTENT UNDER #957 REDO: §0 already proved the live body is either pristine or already
+  -- carries this exact splice. If it already carries the marker, there is nothing left to do --
+  -- re-running the replace below against an already-spliced body would duplicate the arm.
+  if position('range:day_1_31' in v_def) > 0 then
+    raise notice '#898 splice: clara._knowledge_assert_value already carries range:day_1_31 -- redo no-op';
+  else
+
   -- THE INSERTION POINT: immediately before the `shape_only` arm, so the new arm reads exactly
   -- like `range:month_1_12`'s neighbour rather than like an afterthought bolted onto the `else`.
   v_anchor := $anchor$  elsif k.validated_against = 'shape_only' then$anchor$;
@@ -193,6 +205,7 @@ begin
   v_next := replace(v_def, v_anchor, v_repl);
   execute v_next;
   raise notice '#898 splice: clara._knowledge_assert_value recut -- range:day_1_31 admits a whole number 1-31, every prior label''s arm untouched';
+  end if;
 end
 $splice$;
 
@@ -252,9 +265,9 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- THE SPLICE LANDED, and it landed exactly once. `_next` was built from a fresh
-  -- `pg_get_functiondef` read, so a second application of this migration text (were it ever
-  -- attempted) would find the anchor duplicated -- fail-closed, checked directly.
+  -- THE SPLICE LANDED, and it landed exactly once. Its source text was a fresh read of the LIVE
+  -- catalog definition, so a second application of this migration text (were it ever attempted)
+  -- would find the anchor duplicated -- fail-closed, checked directly.
   select encode(sha256(prosrc::bytea), 'hex'), prosrc, prosecdef, proconfig
     into v_prosrc_sha, v_prosrc, v_secdef, v_config
     from pg_proc where oid = 'clara._knowledge_assert_value(text,jsonb)'::regprocedure;

@@ -866,11 +866,12 @@ overrides the firm row carrying that condition and leaves an unconditional firm 
   `accounting_basis` (owner ruling D8). `clara._tf_knowledge_firm_eligibility`, a BEFORE INSERT
   trigger on `clara.knowledge_records`, refuses any other key at firm scope with CLR10
   `knowledge_scope_not_firm_defaultable` — unless the catalog types it a `preference` or a
-  `policy`, the two kinds a firm can hold on its own behalf. On the 13-key catalog that admits four
-  keys in all (the three seeds plus `coa_seed_decision`) and refuses nine, `entity_type`, `msic`,
-  `sst_regime` and `financial_year_end_month` among them: a client-identity fact is never a firm
-  default. `knowledge_keys.scope_default` is deliberately NOT the mechanism — that table is
-  append-only on UPDATE, so its already-seeded rows can never be re-defaulted.
+  `policy`, the two kinds a firm can hold on its own behalf. On the 14-key catalog
+  (`0240_financial_year_end_day.sql` added the fourteenth) that admits four keys in all (the three
+  seeds plus `coa_seed_decision`) and refuses ten, `entity_type`, `msic`, `sst_regime`,
+  `financial_year_end_month` and `financial_year_end_day` among them: a client-identity fact is
+  never a firm default. `knowledge_keys.scope_default` is deliberately NOT the mechanism — that
+  table is append-only on UPDATE, so its already-seeded rows can never be re-defaulted.
 - **What a firm default may cite** — `clara._tf_knowledge_firm_evidence`, the second BEFORE INSERT
   trigger, refuses a firm-scope record pinning a document that carries **any** live
   `clara.document_filings` row (CLR10 `firm_scope_client_evidence`) and a firm-scope record pinning
