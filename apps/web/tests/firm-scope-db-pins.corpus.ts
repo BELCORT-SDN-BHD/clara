@@ -198,4 +198,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25",
     },
   ],
+  // #898 [0240] — the financial year-end DAY, appended at the sorted position. Same splice family
+  // as 0146/0177/0191/0201/0226: one pg_get_functiondef recut of ONE named FUNCTION, read at its
+  // exact signature.
+  [
+    "0240_financial_year_end_day.sql",
+    {
+      reason:
+        "Reviewed: the ONLY dynamic SQL in 0240 is a single do-block that recuts ONE named function, clara._knowledge_assert_value(text,jsonb), harvested from the LIVE catalog with pg_get_functiondef at its exact regprocedure literal spelled in this file and re-installed with ONE counted anchor (the `shape_only` arm) replaced by the new `range:day_1_31` arm in front of it. That function RETURNS VOID and its body contains no CREATE VIEW of any spelling (measured on the live catalog, not argued), and the file itself contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The block counts its anchor and refuses unless it occurs EXACTLY once, and it is a guarded no-op under the #957 redo path when the body already carries the marker, so a redo cannot duplicate the arm. §0 pins the pre-image prosrc sha256 the splice assumes, and §Z re-reads the COMMITTED body to prove the prestate sha is gone, that `range:day_1_31` occurs exactly once, that every prior label's arm survived at its own original occurrence count, and that SECURITY DEFINER, the pinned search_path and the ACL (revoked from PUBLIC, granted to no application role) are byte-identical to prestate. Every other object this migration creates (one clara.knowledge_keys row, one clara.knowledge_plan_item_map row and their tail censuses) is static DML the lexer inspects directly.",
+      sha256: "c75d8d8e388452174af4227c2773fc4a65b69245fefc6a1fbdf4e43529bcd67d",
+    },
+  ],
 ]);
