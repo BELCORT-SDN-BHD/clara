@@ -69,6 +69,7 @@ components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
 components/clara/composer-field-wiring.test.tsx
 components/clara/composer-keyboard.test.tsx
+components/clara/interview-draft-persistence.test.tsx
 components/clara/interview-run-a11y.test.tsx
 components/clara/interview-run-field-composition.test.tsx
 components/clara/interview-run-keyboard.test.tsx
@@ -112,8 +113,11 @@ components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/correction-impact-sheet.test.tsx
+components/documents/correction-wizard.test.tsx
 components/documents/document-detail-live-refresh.test.tsx
 components/documents/document-facts-table.test.tsx
+components/documents/document-kind-control.test.tsx
+components/documents/document-kind-dialog.test.tsx
 components/documents/document-kind-labels.test.tsx
 components/documents/document-metadata-viewer-gate.test.tsx
 components/documents/document-page-overlay.test.tsx
@@ -162,6 +166,7 @@ components/firm-setup/firm-setup-checklist.test.tsx
 components/firm-setup/firm-setup-keyboard.test.tsx
 components/firm/activity/activity-event-sheet.test.tsx
 components/firm/activity/activity-feed.test.tsx
+components/firm/activity/activity-filters.test.tsx
 components/firm/activity/activity-row.test.tsx
 components/firm/activity/use-activity-feed.test.ts
 components/firm/add-client-candidates.test.tsx
@@ -285,6 +290,7 @@ components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
 components/ui/pagination.test.tsx
+components/ui/select.test.tsx
 components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/egress-reactivate-action.test.tsx
@@ -517,6 +523,7 @@ tests/response-state.test.ts
 tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
+tests/select-value-label-census.test.ts
 tests/server-boundary.test.ts
 tests/source-oracle.test.ts
 tests/sql-oracle.test.ts

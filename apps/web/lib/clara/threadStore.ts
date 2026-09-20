@@ -540,6 +540,34 @@ export const claraThreadStore = {
     return true;
   },
 
+  /** #956 — abort EVERY registered stream read, whichever task or mount opened it, and forget
+   *  every handle. Not reached by any production surface today (a live tab keeps a task's read
+   *  running across an ordinary sign-out, by design — closing the rail does not stop a reply, and
+   *  neither does anything else short of the stop control or the task finishing on its own); this
+   *  exists as the store's own hard-reset primitive for whoever next needs "stop reading
+   *  everything" (a future sign-out flow, a test suite's teardown) rather than have them reach
+   *  into `streamAborts` from outside.
+   *
+   *  THE TEST SUITE'S OWN REASON, and why this belongs on the store rather than staying private
+   *  to one test file: `runClaraTaskStream`'s reattach loop backs off for up to ~30s of REAL time
+   *  between attempts (`stream.ts`'s `DEFAULT_RECONNECT_POLICY`), and a cell whose task stream
+   *  ends ungracefully (this file's own `withRunFetch` stub always does) schedules one of those
+   *  sleeps whether or not the cell itself ever calls `abortStream` for its own task. Only two or
+   *  three cells in `use-clara-thread-stop.test.ts` did; every other one left its task's loop
+   *  asleep in the background when the test function returned, still holding a live
+   *  `AbortController` this store can reach — a real, pending macrotask that Node's test runner
+   *  does not wait for and does not know to cancel between tests, free to fire its `/stream`
+   *  fetch into whichever LATER cell's mock happens to be installed the moment it wakes (measured:
+   *  a whole-suite-only flake in the "already finished does not re-attach" cell, RIG.md and #956).
+   *  `stream.ts`'s `abortableSleep` (the OTHER half of this fix) makes an abort here interrupt that
+   *  sleep immediately instead of merely being noticed after it elapses; a test file's own
+   *  `afterEach` calling this closes the loop: nothing a cell forgot to retire can survive past
+   *  that cell's own boundary. */
+  abortAllStreams(): void {
+    for (const controller of streamAborts.values()) controller.abort();
+    streamAborts.clear();
+  },
+
   /** #614 A7 — ALSO forgets this threadId's draft, in every altitude it might be
    *  filed under (see `drafts`'s own header for why the key is nested by
    *  altitude at all). A wholesale "forget this thread" that left a draft

@@ -90,7 +90,13 @@ export function KnowledgeFirmPanel() {
           </span>
           <Select value={kind} onValueChange={(v) => setKind(v ?? ALL)}>
             <SelectTrigger aria-label={t("filterLabel")}>
-              <SelectValue placeholder={t("filterAll")} />
+              <SelectValue
+                placeholder={t("filterAll")}
+                items={[
+                  { value: ALL, label: t("filterAll") },
+                  ...KINDS.map((k) => ({ value: k, label: tKind(`kind.${k}` as "kind.assertion") })),
+                ]}
+              />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>{t("filterAll")}</SelectItem>

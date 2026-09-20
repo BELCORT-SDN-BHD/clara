@@ -260,3 +260,20 @@ test("kf.05 the four existing faces are UNMOVED — empty, filtered-to-nothing, 
     },
   );
 });
+
+test("[1005]: the category filter trigger shows 'All categories' on first render, never the raw 'all' sentinel", async () => {
+  await withMockedEnv(mockRegister([record()]), async () => {
+    const h = await renderComponent(PanelApp());
+    try {
+      // The popup is never opened — this is the FIRST render's own text.
+      for (let i = 0; i < 6; i++) await h.settle();
+      const text = h.text();
+      assert.match(text, /All categories/, "the ALL sentinel's label must render");
+      // Case-SENSITIVE: the raw sentinel is the lowercase literal "all" (`const ALL = "all"`);
+      // "All categories" (capital A) must not be mistaken for it.
+      assert.doesNotMatch(text, /\ball\b/, "the raw 'all' sentinel value must never render as trigger text");
+    } finally {
+      await h.unmount();
+    }
+  });
+});

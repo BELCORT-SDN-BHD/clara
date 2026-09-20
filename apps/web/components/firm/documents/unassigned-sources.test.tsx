@@ -24,7 +24,7 @@ import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks
 import { renderComponent, textOf } from "../../../test/hookHarness";
 import { enableDomInspection } from "../../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../../lib/session-accessor";
-import { UnassignedSources } from "./unassigned-sources";
+import { UnassignedSources, SourceRow, type UnassignedRow } from "./unassigned-sources";
 import messages from "../../../messages/en.json";
 
 enableDomInspection();
@@ -190,4 +190,37 @@ test("[633] AC5: an unclassified source is ACTIONABLE here too — the same set_
       "the named unclassified state must carry its act on this surface too",
     );
   });
+});
+
+// fix-round SPEC-1005-1/ADV-9 — `UnassignedSources` above takes NO props at all, so there is no
+// seam to preset `SourceRow`'s internal client-Select state through the full leaf. `SourceRow` is
+// exported for exactly this: mount it alone, with `initialClientId` already SELECTED, and read the
+// trigger's text on first render — no popup, no fetch mocking, no router context (it uses none).
+test("[1005]: SourceRow's client-attribution trigger shows the client's NAME on first render, never its row id", async () => {
+  const row: UnassignedRow = { ...SOURCE };
+  const clients = [{ id: CLIENT, name: "Rome Properties", status: "active", created_at: "2026-01-01T00:00:00.000Z" }];
+  const h = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      children: createElement(SourceRow, {
+        row,
+        clients,
+        busy: false,
+        asked: false,
+        capabilityIndex: null,
+        initialClientId: CLIENT,
+        onFile: async () => true,
+        act: async (fn: () => Promise<void>) => { await fn(); return true; },
+      }),
+    }),
+  );
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /Rome Properties/, "the trigger must show the client's name");
+    assert.doesNotMatch(text, new RegExp(CLIENT), "the client row id must never render as trigger text");
+  } finally {
+    await h.unmount();
+  }
 });

@@ -35,6 +35,31 @@ const session: SessionTokenAccessor = { getAccessToken: async () => "tok" };
 // the onboarding-checklist trio (16cb8c85).
 const SETTLE_PASSES = 200;
 
+// #956 — THE CROSS-CELL STREAM LEAK, closed at its root. `withRunFetch`'s stub `/stream` response
+// below is an empty 200: every cell that hydrates a "running" task opens a real
+// `runClaraTaskStream` reattach loop that ends ungracefully and schedules a REAL ~1s (or longer)
+// backoff sleep — whether or not that cell itself ever calls `claraThreadStore.abortStream` for
+// its own task. Only a few cells did. Every other one left its task's loop asleep in the
+// background when its test function returned: a live, pending `setTimeout` this test runner does
+// not know to cancel between tests, free to fire a `/stream` fetch into whichever LATER cell's
+// `withRunFetch` mock happens to be installed the moment it wakes — always the SAME symptom
+// (`net.streams.length` off by however many stray reattaches landed in that cell's own window),
+// never the same cell twice, because it depends on real wall-clock timing under whatever else is
+// competing for the CPU. Measured: 1 failure in 25 isolated runs of this file even after
+// `stream.ts`'s `abortableSleep` fix alone (that fix makes an abort CANCEL a pending sleep
+// immediately instead of merely being noticed after it elapses — necessary, not sufficient, when
+// most cells never call `abortStream` in the first place).
+//
+// `claraThreadStore.abortAllStreams()` (added alongside this) aborts every task's read this store
+// still holds a handle for. Run after EVERY cell, it closes the loop completely: combined with the
+// production fix, nothing a cell forgot to retire can survive past that cell's own boundary,
+// regardless of which cell forgot. `renderHook`'s own `h.unmount()` deliberately does not do this
+// itself (closing the rail must not stop a live reply — see this file's own header) — this hook is
+// the SUITE's isolation, not a change to what the hook does.
+test.afterEach(() => {
+  claraThreadStore.abortAllStreams();
+});
+
 /** No condition to wait for here — proving something did NOT happen (a clock that must stay
  *  retired, a phase that must not move) has nothing to poll for, so this spends a FIXED number of
  *  real settle hops instead: unlike `settleUntil`, it never returns early just because the

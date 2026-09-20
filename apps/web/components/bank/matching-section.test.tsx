@@ -258,3 +258,37 @@ test("BLOCKER-2: an unmatch_bank_match refusal renders visibly in the unmatch fo
     },
   );
 });
+
+test("[1005]: the account and period triggers show their LABELS on first render, never the account row id or the __all sentinel", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([STATEMENT]);
+      if (url.includes("/rpc/get_bank_line_matching_context")) return jsonResponse(null);
+      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([]);
+      if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      // The popup is never opened in this test — this is genuinely the FIRST render.
+      const h = await mountAndSettle();
+      try {
+        // The account trigger: a composed label built from three fields, not the row id.
+        assert.match(
+          h.text(),
+          /Maybank 1044 · 170-C38/,
+          "the account trigger must show the composed bank/account/coa label",
+        );
+        assert.doesNotMatch(h.text(), /\bacc1\b/, "the account trigger must never show the row id");
+
+        // The period trigger: no statement selected yet, so it defaults to the "__all"
+        // sentinel — which must render as its OWN label, never the literal sentinel.
+        assert.match(h.text(), /All live periods/, "the period trigger must show the __all sentinel's label");
+        assert.doesNotMatch(h.text(), /__all\b/, "the period trigger must never show the raw __all sentinel");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});

@@ -36,7 +36,7 @@ import { CLASSIFIABLE_DOCUMENT_KINDS } from "./document-kind-control";
 import { renderKindLabel } from "@/lib/documents/kind-label";
 
 export function DocumentKindDialog({
-  documentId, currentKind, busy, act, refusal, onChanged,
+  documentId, currentKind, busy, act, refusal, onChanged, initialKind,
 }: {
   documentId: string;
   /** The kind as the document carries it TODAY — shown inside the dialog so the decision is made
@@ -51,9 +51,14 @@ export function DocumentKindDialog({
    *  the human to change, rather than behind the modal backdrop. */
   refusal?: DialogRefusal;
   onChanged?: () => void;
+  /** fix-round SPEC-1005-1 — no production caller sets this; it exists so a test can mount this
+   *  dialog with the kind Select already SELECTED and assert its trigger's text on first render,
+   *  the way every other #1005 call site's own cell does, without a popup-opening seam this
+   *  repo's test harness does not have. */
+  initialKind?: string;
 }) {
   const t = useTranslations("ClientDocuments");
-  const [kind, setKind] = useState("");
+  const [kind, setKind] = useState(initialKind ?? "");
   const [reason, setReason] = useState("");
 
   return (
@@ -85,7 +90,10 @@ export function DocumentKindDialog({
         </p>
         <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
           <SelectTrigger aria-label={t("kindHeading")} size="sm">
-            <SelectValue placeholder={t("kindPlaceholder")} />
+            <SelectValue
+              placeholder={t("kindPlaceholder")}
+              items={DOCUMENT_KINDS.map((k) => ({ value: k, label: renderKindLabel(k, t) }))}
+            />
           </SelectTrigger>
           <SelectContent>
             {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB enum,
