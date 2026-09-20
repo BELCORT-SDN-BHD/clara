@@ -69,19 +69,6 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
   const t = useTranslations("FirmAdminCompliance.needsYou");
   const [disposition, setDisposition] = useState<WatchDisposition | null>(null);
   const [unreadable, setUnreadable] = useState(false);
-  // AN ATTRIBUTABLE ACTOR, NOT A uuid (fix round 1, finding A7). AC6 asks the receipt to be
-  // attributable, and `clara.compliance_watch_events.actor` is `text` holding a user id
-  // (0016:359-370, stamped `c.actor::text` at :1081-1091) — so the card printed
-  // "Acknowledged by 8a7b6c5d-0000-…" and a professional read a machine word where a colleague's
-  // name belongs. This resolves it through the SAME `clara.firm_members_visible` roster the
-  // activity band already uses, via the SAME shared cell (`MemberName`), so the fallback for an
-  // unresolvable id is written once and cannot drift between the two surfaces: the shortened id in
-  // the product's own monospace id treatment — never a guessed name, never a blank.
-  //
-  // The agent branch inside `MemberName` is unreachable from here by construction: all three
-  // compliance doors refuse an agent identity with CLR03 before any write
-  // (`p659.watch.agent_refused`), so no event on this trail can carry one.
-  const memberNames = useMemberNames(sessionTokenAccessor);
 
   const read = useCallback(async () => {
     try {
@@ -126,6 +113,18 @@ export function WatchDispositionLine({
   resolvedEvidence: string | null;
 }) {
   const t = useTranslations("FirmAdminCompliance.needsYou");
+  // AN ATTRIBUTABLE ACTOR, NOT A uuid (fix round 1, finding A7). AC6 asks the receipt to be
+  // attributable, and `clara.compliance_watch_events.actor` is `text` holding a user id
+  // (0016:359-370, stamped `c.actor::text` at :1081-1091) — so the card printed
+  // "Acknowledged by 8a7b6c5d-0000-…" and a professional read a machine word where a colleague's
+  // name belongs. This resolves it through the SAME `clara.firm_members_visible` roster the
+  // activity band already uses, via the SAME shared cell (`MemberName`), so the fallback for an
+  // unresolvable id is written once and cannot drift between the two surfaces: the shortened id in
+  // the product's own monospace id treatment — never a guessed name, never a blank.
+  //
+  // The agent branch inside `MemberName` is unreachable from here by construction: all three
+  // compliance doors refuse an agent identity with CLR03 before any write
+  // (`p659.watch.agent_refused`), so no event on this trail can carry one.
   const memberNames = useMemberNames(sessionTokenAccessor);
 
   const at = act.createdAt === null ? "" : businessDateTime(act.createdAt);

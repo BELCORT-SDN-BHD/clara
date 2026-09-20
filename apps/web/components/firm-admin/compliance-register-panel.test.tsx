@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { ComplianceRegisterPanel } from "./compliance-register-panel";
@@ -146,7 +146,7 @@ async function mount() {
 
 // ===========================================================================================
 
-test("#996 AC1: a watch with a recorded acknowledgement shows its disposition on the register row", async () => {
+test("Ticket 996 AC1: a watch with a recorded acknowledgement shows its disposition on the register row", async () => {
   const { impl } = mockFetchFactory({ scopedRows: { c1: [watchRow("w1")] }, disposition: ACKNOWLEDGED, roster: ROSTER });
   await withMockedEnv(impl, async () => {
     const h = await mount();
@@ -159,7 +159,7 @@ test("#996 AC1: a watch with a recorded acknowledgement shows its disposition on
   });
 });
 
-test("#996 AC2a: a watch whose id the scoped queue read never returns leaves the row unchanged", async () => {
+test("Ticket 996 AC2a: a watch whose id the scoped queue read never returns leaves the row unchanged", async () => {
   const { impl } = mockFetchFactory({ scopedRows: {} });
   await withMockedEnv(impl, async () => {
     const h = await mount();
@@ -171,7 +171,7 @@ test("#996 AC2a: a watch whose id the scoped queue read never returns leaves the
   });
 });
 
-test("#996 AC2b: a resolvable watch with nothing recorded yet leaves the row unchanged (no 'nothing recorded' filler either)", async () => {
+test("Ticket 996 AC2b: a resolvable watch with nothing recorded yet leaves the row unchanged (no 'nothing recorded' filler either)", async () => {
   const { impl } = mockFetchFactory({ scopedRows: { c1: [watchRow("w1")] }, disposition: NOT_ACKNOWLEDGED });
   await withMockedEnv(impl, async () => {
     const h = await mount();
@@ -184,7 +184,7 @@ test("#996 AC2b: a resolvable watch with nothing recorded yet leaves the row unc
   });
 });
 
-test("#996 AC3: a caller below the bookkeeper floor sees the register plus a stated reason, never an error banner or a blank", async () => {
+test("Ticket 996 AC3: a caller below the bookkeeper floor sees the register plus a stated reason, never an error banner or a blank", async () => {
   const { impl } = mockFetchFactory({ scopedRows: { c1: [watchRow("w1")] }, disposition: { code: "CLR04", message: "insufficient role" } });
   await withMockedEnv(impl, async () => {
     const h = await mount();
