@@ -78,6 +78,15 @@ four-name pin (0037) stated as stale, and the AC3 non-regression pins (`prosrc` 
 comment. Its gate is `subledger-hook-caller-roster-preintegration-gate.mjs`; a focused run leaves
 `CLARA_ALLOW_MISSING_SUBLEDGER_HOOK_ROSTER` unset and must count zero skips.
 
+`journal-basis-zero-total-unreachable.test.mjs` calls `clara._assert_journal_basis` directly
+(0237, #906): its catalog comment names the `nonzero_total` arm unreachable and names both
+guarding arms (`at_least_two`, `exactly_one_side`), the AC2 non-regression pins (`prosrc` sha,
+owner, `SECURITY DEFINER` flag, owner-only ACL) prove 0237 changed nothing but the comment, and two
+direct calls prove an all-zero basis lands on `exactly_one_side` while an all-credit
+(zero-debit-total) basis lands on `balanced` — never on `nonzero_total` either way. Its gate is
+`journal-basis-zero-total-unreachable-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_JOURNAL_BASIS_ZERO_TOTAL_ARM` unset and must count zero skips.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator
