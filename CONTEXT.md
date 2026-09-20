@@ -26,6 +26,11 @@ A reply that changes the admitted basis does not edit that work; it becomes a ne
 _Avoid_: Edit, amend, correction as synonyms — a correction acts on a posted outcome, a restatement replaces an instruction that never posted.
 <!-- #721 -->
 
+**Source-corrected work**:
+Work that a *source revision* retired. When a human corrects what a document says, every work of that firm still waiting on a question about that document — and holding no committed receipt — is restated: cancelled with the reason *source corrected* and superseded by a fresh work on the same admitted basis, which re-runs against the corrected reading. The retired question can no longer be answered; the answer door refuses it as *superseded* and names the successor.
+_Avoid_: Re-evaluation, re-assessment as synonyms — those act on recorded experience or on a posted outcome and are parked; this one retires an instruction that never posted.
+<!-- #885 -->
+
 **Accounting plan**:
 An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
 follows, the calendar days that schedule produces in a named timezone, the window its authority

@@ -2306,6 +2306,29 @@ export const DOCUMENT_SOURCE_REVISION_0217_COHORT = [
 export const DOCUMENT_SOURCE_REVISION_0217_TABLES = ["document_fact_revisions"];
 // #646 END
 
+// #885 [0268, a source correction cancels and re-admits the Work parked on a question about the
+// corrected document] — its OWN cohort, one frontier above 0217's, for the same "wholly present or
+// wholly absent" reason that roster carries: folding these names into 0217's would red every
+// database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim. All three bodies are reachable
+//   ONLY from inside `clara.revise_document_fact`, which is itself the one human door; a grant on
+//   any of them would be a second, unwalled way into the Work lane from the document lane. Listed
+//   here so an accidental grant FAILS instead of passing quietly, and so a half-applied 0268 is
+//   reported as one rather than as a silently narrower rule.
+//
+//   NOT LISTED, deliberately: `clara.revise_document_fact` and `clara.answer_work_question`. 0268
+//   recuts both BODIES and touches neither NAME, signature nor grant — the first is already on
+//   DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS and the second on WORK_QUESTIONS_0180_HUMAN_FNS — and a
+//   second listing of a name that exists at an EARLIER frontier would make this cohort resolve on
+//   databases 0268 has not touched, which is exactly the partial-cohort condition the gate exists
+//   to catch (#721's own block states the same rule for the same reason).
+const WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS = [
+  "_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
+];
+export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS];
+// #885 END
+
 // #648 [0218, firm setup] — the FIRM's own onboarding plan gains human doors. Its OWN cohort for
 // the same "wholly present or wholly absent" reason 0192's carries: folding these names into an
 // older roster would red every database between the two frontiers, and `cohortFailures()` fails a
@@ -3382,6 +3405,13 @@ export async function grantMatrixFailures() {
   if (sourceRevisionLive.length !== 0) {
     failures.push(...cohortFailures("#646 0217 document source-revision lane", DOCUMENT_SOURCE_REVISION_0217_COHORT, liveNames));
   }
+  // #885 [0268] — the source-correction supersession closure. Bimodal for 0217's reason: wholly
+  // present once 0268 applies, wholly absent before it.
+  const sourceCorrectionLive = WORK_SOURCE_CORRECTION_0268_COHORT.filter((n) => liveNames.has(n));
+  if (sourceCorrectionLive.length !== 0) {
+    failures.push(...cohortFailures("#885 0268 source-correction supersession closure", WORK_SOURCE_CORRECTION_0268_COHORT, liveNames));
+  }
+  // #885 END
   // #718 END
   // #776
   failures.push(...cohortFailures("#776 0206 operator applicant-name read",

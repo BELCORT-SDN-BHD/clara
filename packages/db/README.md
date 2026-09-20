@@ -846,7 +846,67 @@ posted-effect work should decide, not this ticket.
 0217 also recuts `clara.set_document_kind` — signature unchanged — so a kind change records the
 same observation and its own `'kind'` revision row. **D1 write-quiesce is owed** for that recut
 (see the Deploy contract above). #646 mints no `clara.accounting_work` row and widens no purpose
-CHECK; the posted-effect integration is #676.
+CHECK; the posted-effect integration is #676. What a correction does to the Work *waiting* on the
+document is migration 0268's, below.
+
+### A source correction retires the Work waiting on it (#885, migration 0268)
+
+Owner ruling, 2026-09-17 and re-confirmed 2026-09-20: **a person must never be able to answer a
+question asked against a reading that has been corrected.** 0268 makes that structural rather than
+advisory. #658's `WorkKnowledgeDriftBanner` does not discharge it — it is keyed on
+`clara.knowledge_records.knowledge_version`, and a fact revision writes nothing there (0217:53), so
+on this very case it never appears, and it only warns.
+
+`clara.revise_document_fact` now cancels and re-admits, **inside its own transaction** (the ruling's
+recorded preference, so no frozen document-ingest closure is touched and there is no window in which
+the corrected document and the still-answerable question coexist):
+
+| Object | What it is |
+|---|---|
+| `clara._source_corrected_work(uuid,uuid)` | The ONE rule: a Work of this firm that still has a PENDING question, names this document in its own `source_refs`, holds NO committed receipt, and is in `queued` / `running` / `awaiting_input`. The write-side twin of `list_source_dependents`' `work_questions` arm, narrowed by the last two terms. Ungranted. |
+| `clara._lock_source_corrected_work(uuid,uuid)` | Takes the `accounting_work → agent_tasks → agent_interruptions` rungs for that set and returns exactly the ids it locked. Ungranted. |
+| `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and calls `clara.restate_accounting_work` once per Work. Ungranted. |
+
+**The four supersession writes are not re-spelled.** `clara.restate_accounting_work` (0200 §E)
+already admits the successor, stamps `supersedes`, stamps `superseded_by` on the old Work and
+cancels it through `clara.cancel_accounting_work` — which appends the single `work.cancelled` domain
+event whose payload carries `outcome = 'superseded'` and the successor's id, the link the activity
+feed renders (#840). 0268 registers **no** new event type and **no** taxonomy row.
+
+**The successor carries the same admitted basis, `basis_origin` and `source_refs`, verbatim.** The
+instruction did not change, the document did; the new Work is admitted `queued` and its run reads the
+corrected reading from the top. The REASON is durable in two places: the successor's `intent_key` and
+the restatement's op key both read `source_corrected:<revision id>:<old work id>`, on
+`clara.accounting_work` and `clara.op_receipts` respectively — plus the `superseded_work` array 0268
+adds to the revision's receipt and audit row.
+
+**The lock order is why `clara.documents` is no longer this door's first lock.** The declared global
+order is `accounting_plans → accounting_work → agent_tasks → agent_interruptions` (0193:248). The
+journal lane already takes `clara.documents` *while holding* the `accounting_work` rung —
+`clara._lock_document_binding` (0197:329) fires from BEFORE ROW triggers on `clara.journal_entries`
+and `clara.entry_evidence_links`. A correcting transaction that took `clara.documents` first and then
+reached for a Work row would be the opposite direction of that same edge, i.e. an ABBA deadlock
+against any posting transaction. So `clara.revise_document_fact` takes the Work rungs first, through
+the lock helper, and 0217's own document lock — unmoved, not one line changed — now sits below them.
+0268's tail asserts that order positionally in the committed body text.
+
+**If a replacement cannot be admitted, the whole correction refuses.** `restate_accounting_work`'s
+own typed refusals (a non-journal purpose, a document already backing a posted entry, an inactive
+client) propagate; nothing half-done commits. A correction that cancelled a Work and could not
+replace it would leave a professional with neither the old question nor a new one.
+
+**`clara.answer_work_question` gains one word, not an arm.** Its existing CLR13 status refusal reads
+`detail.reason = 'superseded'` — instead of `cancelled` — when the question was closed by the cancel
+cascade *and* the Work carries `superseded_by`, and `detail.current.superseded_by` names the
+successor. Every other status keeps the exact word 0180 gave it, `already_answered` still wins, and a
+plain cancel (no successor) still answers `cancelled`. A #721 restatement reaches the same new word,
+which is correct: the reason the question was retired is the same in both cases.
+
+**D1 write-quiesce is owed** for both recut bodies (`clara.revise_document_fact`,
+`clara.answer_work_question`) — see the Deploy contract above. Not covered by 0268, deliberately:
+re-evaluating a *posted* result (#676) and re-assessing recorded experience (`docs/PRD.md:123`,
+#658/#663) both stay parked, and `clara.list_source_dependents` is NOT recut — its job is to show a
+human everything standing on the document, including the rows this rule leaves alone.
 
 ## Knowledge scope, firm defaults and exceptions
 
