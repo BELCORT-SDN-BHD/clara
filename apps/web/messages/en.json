@@ -550,7 +550,9 @@
     "seed": {
       "action": "Start firm setup",
       "working": "Preparing…",
-      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again."
+      "help": "This adds only the questions that are missing. An answer already on this firm's plan is kept exactly as it was and is never asked again.",
+      "again": "Update the checklist",
+      "againHelp": "An answer you have already given makes another question apply to this firm. This adds only what is missing; everything already recorded is kept."
     },
     "commit": {
       "heading": "Finish setup",
@@ -572,7 +574,15 @@
       "accounting": {
         "heading": "Accounting policy",
         "purpose": "How the firm's own accounts are prepared. Three of these are recorded as firm defaults in the Knowledge register."
+      },
+      "tips": {
+        "heading": "A few things worth knowing",
+        "purpose": "Optional reading, never a requirement. Reading or skipping one just gets it out of the way."
       }
+    },
+    "tip": {
+      "gotIt": "Got it",
+      "later": "Later"
     },
     "item": {
       "required": "Required",
@@ -581,6 +591,7 @@
       "change": "Change this answer",
       "answerNow": "Answer this now",
       "correctOnRegister": "This fact is on the Knowledge register. Correct or withdraw it under \u201cFacts confirmed in setup\u201d below.",
+      "notApplicable": "Not applicable",
       "skip": "Not now",
       "skippedBecause": "Skipped — {reason}",
       "recordedBy": "Recorded by {who}",

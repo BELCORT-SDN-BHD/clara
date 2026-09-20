@@ -696,8 +696,8 @@ and a frontier that landed are different claims, and only the ledger states the 
 
 ### Firm setup (0218, journey A5)
 
-The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0218. All five
-names are `clara_authenticated`-only, owned by `clara_fn_owner`, `SECURITY DEFINER` with
+The firm's own `scope_kind='firm'` onboarding plan gained its first human doors at 0218. All six
+names (five from 0218, plus `dismiss_firm_setup_tip` from #935/0259 below) are `clara_authenticated`-only, owned by `clara_fn_owner`, `SECURITY DEFINER` with
 `search_path` and `plan_cache_mode` pinned, and floored at **admin** inside their own bodies; no
 runtime, agent or wake role holds EXECUTE on any of them, and `clara.firm_setup_keys` grants SELECT
 to `clara_authenticated` alone.
@@ -709,13 +709,112 @@ to `clara_authenticated` alone.
 | `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is NOT `required_for_commit`, parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item and an already-answered one. |
 | `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every **catalogue** row that is `required_for_commit` is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
 | `clara.get_firm_setup()` | admin | The journey's ONE production-facing read: plan identity and CAS token, every catalogue row with its plan state, the required-answered/required-total counter, the outstanding required keys, and the confirmed firm-scope facts with scope, source, actor and an authority verdict taken from the author's CURRENT membership rank. |
+| `clara.dismiss_firm_setup_tip(p_plan, p_item_key, p_action)` | admin, then `min_role` | #935 — the ONLY door that may settle an `item_kind='education'` row (`p_action` is `'acknowledged'` or `'deferred'`). No `p_op_key`, no `p_expected_revision`: it writes no audit row, emits no domain event, never rotates the plan's CAS token, and is idempotent by construction (a repeat call on an already-settled tip echoes its actual state rather than re-writing or erroring). Refuses a non-education item by name (`CLR10 firm_setup_item_not_a_tip`). |
 
 `clara.update_onboarding_plan` stays byte-identical and `clara_runtime`-only; `clara.commit_client_onboarding`
 still forces a client; `clara.promote_plan_answers_to_knowledge` is deliberately not used (its
-promotion loop joins one global `item_key` namespace with no scope discriminator). 0218 also adds
+promotion loop joins one global `item_key` namespace with no scope discriminator). 0218 also added
 `uq_onboarding_plans_one_open_firm` — a partial unique index on `(firm_id) where state='open' and
-scope_kind='firm'`, which is what makes `clara.claim_paid_firm`'s bare `select … into` replay arm
-single-row rather than silently first-row.
+scope_kind='firm'`, which was what made `clara.claim_paid_firm`'s bare `select … into` replay arm
+single-row rather than silently first-row, for as long as no firm ever held a SECOND firm-scope
+plan in any other state.
+
+**#894 (0255, hardened further)** replaced that index with `uq_onboarding_plans_one_firm` —
+same column, `(firm_id)`, predicated on `scope_kind='firm'` ALONE, with no `state` term at all.
+A second firm-scope plan for the same firm is now refused in EVERY state (open, committed or
+cancelled), not merely a second open one, so `claim_paid_firm`'s replay arm is single-row
+structurally rather than only because `clara._create_firm_core` is the sole writer and nothing
+today closes a firm plan. `clara.claim_paid_firm` itself is untouched — pinned pre- and
+post-image by `sha256(prosrc)` in 0255's own prestate/tail — and 0017's client-scope sibling
+index, `uq_onboarding_plans_one_open` on `(firm_id, client_id)`, is untouched too.
+
+**#895 (0256, three defects `#648`'s own fix round found and left)** recuts `seed_firm_setup_plan`
+and `get_firm_setup` in full (`create or replace function`, both pre-images pinned by
+`sha256(prosrc)`), fixing three gaps each previously masked by a web-side guard or an unreachable
+path: (1) a reconciliation that inserts nothing no longer rotates the plan's CAS token, advances
+`revision_n` or appends a revision snapshot — the audit row and `firm_setup.seeded` event still
+fire, carrying `seeded=0`, so the no-op act stays a receipted fact; (2) `get_firm_setup`'s
+`counter.required_total` is now gated on `p.id is not null`, exactly as `required_answered`
+already was, so a firm with NO firm-scope plan reads `counter={0,0}` rather than the catalogue's
+constant required-row count borrowed as if it were this firm's own progress; (3) the
+`confirmed_facts` projection gained the `r.state = 'live'` filter the per-item join two blocks
+above already carried, so a WITHDRAWN firm default — `clara.withdraw_knowledge` leaves
+`superseded_at` NULL, exactly as a LIVE row does, per `ck_knowledge_records_state` — no longer
+lingers in `confirmed_facts` forever. `required_outstanding` is a stated residual: it lists every
+required catalogue key for a plan-less firm too, and #895's Agent Brief named only the counter and
+the unseeded count, so it is untouched here. Neither door's ACL, floor or signature moved.
+
+**#891 (0257, applicability predicates)** lets the catalogue skip an item that does not apply to
+this firm, without editing any of the twelve shipped `clara.firm_setup_keys` rows. The new,
+ungranted `clara._firm_setup_applicability(p_plan, p_item_key)` mirrors exactly two predicates from
+the pre-admission interview — `mpers_eligibility` applies only where `entity_type = 'sdn_bhd'`;
+`tin` applies unless `turnover = '<RM1M'` — reading the SAME plan's own answer to that dependency,
+live, on every call: `'applicable'`, `'inapplicable'`, or `'undetermined'` while the dependency is
+still unanswered. `seed_firm_setup_plan`'s reconciliation now inserts a catalogue row only while it
+reads `'applicable'`; an inapplicable or undetermined one is simply never seeded, and a LATER
+reconciliation picks it up once its dependency is answered. `get_firm_setup` carries a live
+`applicability` field on every item; an item answered before it became inapplicable keeps that
+answer untouched and is simply reported inapplicable beside it.
+
+0257's first cut ALSO widened `items[].required` and both sides of `counter` to count a seeded,
+applicable `mpers_eligibility`/`tin`. The lane's code review withdrew that widening and
+**0259 SS G** (the fix round; see #935 below) recut the read so there is ONE notion of required
+across the estate: the catalogue's own `required_for_commit` column, which is what
+`clara.commit_firm_setup` gates on, what `required_outstanding` names, what both counter sides
+count and what `items[].required` reports. `required_total - required_answered` is therefore by
+construction the length of `required_outstanding`, and an inapplicable item is excluded from both
+sides because neither conditional row is `required_for_commit` at all. Making the counter's
+honesty a real gate — i.e. deciding that a seeded, applicable TIN should block a commit — remains
+the follow-up ticket 0257's own header proposed; it is one decision about the gate, not two
+half-decisions about the counter.
+
+**#934 (0258, user-facing catalogue notes and a retire column)** replaces the twelve engineer
+provenance notes (file names, line numbers) a firm admin used to see under each question with one
+owner-approved, accountant-readable sentence. `clara.firm_setup_keys` gains two nullable columns —
+`user_note` (the accountant sentence) and `retired_at` — added by plain `alter table`, never a
+`create table`; the twelve shipped rows' PRE-EXISTING columns (`note`, `question`, everything else)
+are untouched, pinned by a comprehensive row hash in the migration's own prestate and re-measured
+byte-identical at its tail. Populating `user_note` for twelve ALREADY-EXISTING rows needs one
+backfill `update`, run with the table's append-only trigger (0218 SS A) deliberately disabled for
+that one statement and re-enabled immediately, inside the runner's own per-migration transaction --
+the `0176_counterparty_alias_kind_scope.sql` SS 3 house shape, applied here for the first time to
+`firm_setup_keys`. `clara.get_firm_setup` is recut (`create or replace function`, pre-image pinned)
+to PREFER `user_note` over `note` (`coalesce(k.user_note, k.note)` -- a precedence rule, not a hard
+replacement, so a future catalogue row with no accountant sentence yet still renders its engineer
+note rather than nothing) and to OMIT a retired row from every surface it computes over the
+catalogue: `items[]`, `catalogue_total`, `required_outstanding`, and both sides of `counter`. This
+file retires nothing -- every `retired_at` it ever writes is null -- so "omit retired rows" is
+proved BEHAVIOURALLY by `firm-setup-user-notes.test.mjs` against a synthetic row planted and removed
+by the same disable-trigger idiom, never against one of the twelve. `clara.seed_firm_setup_plan` is
+untouched (pinned pre-image, re-measured byte-identical at the tail): whether a retired row should
+still be reconciled into a plan is a NAMED RESIDUAL for whichever later ticket first actually
+retires something, exactly the shape #891 (0257) left for `commit_firm_setup`'s own gate. **#935**
+(the sibling education-tips ticket) depends on this file's retire column and lands after it in the
+same lane.
+
+**#935 (0259, three optional education tips)** adds `item_kind='education'` rows to
+`clara.firm_setup_keys` (`tip_invite_colleagues`, `tip_knowledge_page`,
+`tip_start_from_conversation`; `required_for_commit=false`, group `tips`, no `knowledge_key`) by a
+plain `insert` — brand-new rows, so the append-only trigger is never touched, unlike #934's
+backfill of twelve EXISTING ones. `clara.onboarding_plan_items.item_kind`'s CHECK is widened to
+admit `education` too, so `seed_firm_setup_plan`'s reconciliation carries the catalogue's own kind
+straight through instead of folding it onto `todo` (0218's own reason for that fold — "a fourth
+value would be a CHECK violation" — no longer holds once this file lands). `commit_firm_setup` is untouched (pinned pre-image,
+re-measured byte-identical at the tail): every counter/outstanding/gate arm reads
+`required_for_commit` alone, so a tip — never required — can neither inflate a counter nor block a
+commit, for free, from the catalogue data alone. `get_firm_setup` was untouched by this file's
+FIRST cut, for the same reason; the lane's code review then found three defects in that read —
+the withdrawn effectively-required widening (#891 above), the counter disagreeing with
+`required_outstanding`, and a `confirmed_facts` join that had missed #934's retirement filter —
+which all land on the one door, so **SS G** of this same file (re-applied through #957's
+`CLARA_MIGRATION_REDO`, rather than claiming a sixth migration number no lane reserved) recuts it:
+one notion of required, and seven `retired_at is null` filters instead of six. `answer_firm_setup_item` and
+`defer_firm_setup_item` are each recut with one new guard refusing an `education` row by name
+(`CLR10 firm_setup_item_is_a_tip`) — a gap this file closes rather than one the Agent Brief named,
+because until this file no `education` row existed to expose it: without the guard, either generic
+door would happily record an AUDITED "accounting item" against a tip, which is exactly the
+invariant the ticket's two hard properties forbid. The new door itself,
+`clara.dismiss_firm_setup_tip`, is the table above's own row.
 
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on

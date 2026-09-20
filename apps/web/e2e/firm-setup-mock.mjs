@@ -50,61 +50,93 @@ export const FIRM_SETUP_RPC_VERBS = new Set([
   "answer_firm_setup_item",
   "defer_firm_setup_item",
   "commit_firm_setup",
+  "dismiss_firm_setup_tip",
 ]);
+
+/** #935 — the two education tips this fixture carries, one per dismissal action ("Later" and
+ *  "Got it"), so the walk covers AC4's "reading and skipping a tip" rather than skipping alone
+ *  (review L06-SPEC-07). Exported so the spec cannot misspell them. */
+export const TIP_KEY = "tip_invite_colleagues";
+export const TIP_KEY_READ = "tip_knowledge_page";
 
 function armed(request) {
   return (request.headers.cookie ?? "").includes(`${FIRM_SETUP_COOKIE}=`);
 }
 
 /**
- * THE CATALOGUE, as `clara.get_firm_setup` emits it — six rows over three groups, so the walk
- * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, and a fact
- * that reaches the knowledge register. The shapes and option lists are the ones 0218 seeds from
- * `clara.knowledge_keys.allowed_values`; nothing here invents a vocabulary.
+ * THE CATALOGUE, as `clara.get_firm_setup` emits it — eight rows over four groups, so the walk
+ * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, a fact that
+ * reaches the knowledge register, and (#935) an education tip in its own group. The shapes and
+ * option lists are the ones 0218 seeds from `clara.knowledge_keys.allowed_values`; nothing here
+ * invents a vocabulary.
+ *
+ * #934 — every `note` below is the owner-approved ACCOUNTANT sentence
+ * (0258_firm_setup_user_notes.sql), never the engineer's own provenance text: `get_firm_setup`
+ * itself now prefers that sentence, so a fixture modelling the real door's response must too.
  */
 const CATALOGUE = [
   {
     item_key: "legal_name", kind: "must_ask", group_key: "identity",
     question: "What is the firm's registered legal name?",
-    note: "FIRM_SEGMENTS_V2 legal_name. Recorded on the setup plan with its author.",
+    note: "Enter the name exactly as on the SSM certificate. It appears on every report and letter Clara produces for the firm.",
     required: true, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 10, knowledge_key: null,
   },
   {
     item_key: "address", kind: "must_ask", group_key: "identity",
     question: "What is the firm's registered address?",
-    note: "FIRM_SEGMENTS_V2 address. Recorded on the setup plan with its author.",
+    note: "The registered address as filed with SSM, not the office you work from.",
     required: true, min_role: "admin", answer_shape: "long_text", answer_options: [], answer_field: null,
     sort_order: 20, knowledge_key: null,
   },
   {
     item_key: "mia", kind: "capture", group_key: "identity",
     question: "What is the firm's MIA registration number?",
-    note: "FIRM_SEGMENTS_V2 mia — optional and skippable in the interview, and optional here.",
+    note: "Optional. The firm's MIA registration number, if it has one; skip with a reason if none.",
     required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 30, knowledge_key: null,
   },
   {
     item_key: "fye", kind: "must_ask", group_key: "tax",
     question: "Which month is the firm's financial year-end?",
-    note: "FIRM_SEGMENTS_V2 fye — a whole month 1-12, the interview's own validateFye shape.",
+    note: "The month the firm's own financial year ends, 1 to 12. Clients keep their own year-end on their client record.",
     required: true, min_role: "admin", answer_shape: "month", answer_options: [], answer_field: null,
     sort_order: 40, knowledge_key: null,
   },
   {
     item_key: "tin", kind: "capture", group_key: "tax",
     question: "What is the firm's MyInvois TIN?",
-    note: "FIRM_SEGMENTS_V2 tin — not required for commit here, and skippable with a stated reason.",
+    note: "The firm's MyInvois TIN. Required when annual turnover is RM1 million or more; otherwise skip with a reason.",
     required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 45, knowledge_key: null,
   },
   {
     item_key: "currency", kind: "capture", group_key: "accounting",
     question: "What is the firm's default currency?",
-    note: "FIRM_SEGMENTS_V2 currency. Firm-defaultable (D8): answering it records a firm-scope knowledge record.",
+    note: "The currency the firm keeps its own books in, as a three-letter code. Client books carry their own currency.",
     required: false, min_role: "admin", answer_shape: "choice",
     answer_options: ["MYR", "USD", "SGD", "EUR", "GBP", "OTHER"], answer_field: null,
     sort_order: 50, knowledge_key: "default_currency",
+  },
+  // #935 — TWO education tips, so the walk meets a row with `kind: "education"` for each of the
+  // two actions it offers: "Later" on the first, "Got it" on the second (AC4 asks the walk to
+  // cover READING and skipping, and the first cut pressed only "Later" — review L06-SPEC-07).
+  // A title, a body, no answer shape any code path reads, and their own group. The real catalogue
+  // seeds three; the door itself is proven against a real Postgres in
+  // packages/db/tests/firm-setup-education-tips.test.mjs.
+  {
+    item_key: TIP_KEY, kind: "education", group_key: "tips",
+    question: "Invite your colleagues",
+    note: "Settings → Members sends an invitation by email; a bookkeeper sees client work, an admin also manages members and firm setup.",
+    required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
+    sort_order: 130, knowledge_key: null,
+  },
+  {
+    item_key: TIP_KEY_READ, kind: "education", group_key: "tips",
+    question: "Where Clara keeps what it knows",
+    note: "Every client has a Knowledge page: facts, aliases, preferences and policies with their source; correct or withdraw anything there, and Clara reads it before every task.",
+    required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
+    sort_order: 140, knowledge_key: null,
   },
 ];
 
@@ -298,6 +330,22 @@ export async function handleFirmSetupSupabase(request, response, path, url, send
       plan_id: FS.planId, revision_token: state.revision, revision_n: state.revisionN,
       item_key: body.p_item_key, state: "deferred", deferred_reason: body.p_reason,
     }), cors);
+    return true;
+  }
+
+  if (verb === "dismiss_firm_setup_tip") {
+    if (!armed(request)) return false;
+    const body = await readCachedJson(request);
+    if (body.p_plan !== FS.planId) return false;
+    // #935 — deliberately NOT `reserve`/`finish`: the real door takes no op_key at all (its whole
+    // point is to ride neither the idempotency ledger nor the plan's CAS token), and it never
+    // rotates `state.revision` — a tip's settlement never competes with an accounting answer for
+    // the same optimistic-concurrency slot (0259_firm_setup_education_tips.sql's own header).
+    const action = body.p_action === "deferred" ? "deferred" : "answered";
+    state.answers.set(body.p_item_key, { state: action, answer: { tip_action: body.p_action } });
+    sendJson(response, 200, {
+      plan_id: FS.planId, item_key: body.p_item_key, state: action, tip_action: body.p_action,
+    }, cors);
     return true;
   }
 

@@ -2763,6 +2763,23 @@ const AUDIT_ACTOR_ROLE_0243_UNGRANTED_FNS = ["_tf_audit_actor_role"];
 export const AUDIT_ACTOR_ROLE_0243_COHORT = [...AUDIT_ACTOR_ROLE_0243_UNGRANTED_FNS];
 // #912 END
 
+// #935 [0259, firm setup 2/2] — its own cohort for the same "wholly present or wholly absent"
+// reason 0218's/0257's/0258's carry: folding this name into an older roster would red every
+// database between the two frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   THE ONE NEW GRANTED NAME: `dismiss_firm_setup_tip`, the narrow door that acknowledges or skips
+//   an education tip — clara_authenticated ONLY, admin-floored in its own body through
+//   `clara._human_ctx` and then re-floored against the catalogue row's own `min_role`, exactly the
+//   0218 §E posture. clara_runtime, clara_agent_ro and both wake roles gain ZERO — the same
+//   `_human_ctx`-gated-verb-on-a-JWT-less-role "dark grant" reason 0192 §H and 0218 §G already
+//   state, and 0259's own tail asserts the same emptiness in-migration. `answer_firm_setup_item`
+//   and `defer_firm_setup_item` are RECUT (a new education guard) but mint no new name and keep
+//   their existing FIRM_SETUP_0218_HUMAN_FNS membership above — their grants did not move
+//   (`create or replace` preserves the ACL, and 0259's own tail asserts it byte-for-byte).
+const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
+export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
+// #935 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3013,6 +3030,9 @@ export const ALLOWED = {
     // agent read roles and all four wake lanes gain ZERO, and the ungranted predicate
     // clara._legal_enforcement_mode holds no role at all.
     ...LEGAL_ENFORCEMENT_0234_HUMAN_FNS,
+    // #935 [0259] the education-tip dismissal door — see the block above. clara_authenticated
+    // ONLY; clara_runtime, both agent read roles and all four wake lanes gain ZERO.
+    ...FIRM_SETUP_TIP_0259_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3648,6 +3668,7 @@ export async function grantMatrixFailures() {
     );
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
+  failures.push(...cohortFailures("#935 0259 firm setup education tip dismissal", FIRM_SETUP_TIP_0259_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));

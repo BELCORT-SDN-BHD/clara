@@ -18,6 +18,12 @@ export type FirmSetupAnswerShape = "text" | "long_text" | "choice" | "month" | "
  *  exactly what the reconciling seed fixes. It is a real state of this surface, never a null. */
 export type FirmSetupItemState = "unseeded" | "pending" | "answered" | "resolved" | "deferred";
 
+/** #891 — whether this item is asked of THIS firm at all, derived live from an earlier answer on
+ *  the same plan (never stored): `applicable`, `inapplicable`, or `undetermined` while the item it
+ *  depends on is itself unanswered. Ten of the twelve catalogue rows read `applicable` always;
+ *  `mpers_eligibility` (entity_type) and `tin` (turnover) are the only two with a real predicate. */
+export type FirmSetupApplicability = "applicable" | "inapplicable" | "undetermined";
+
 export type FirmSetupPlanState = "open" | "committed" | "cancelled";
 
 /** The catalogue row joined to this firm's plan item. */
@@ -28,9 +34,16 @@ export type FirmSetupItem = {
   /** Which Card this fact belongs under. A bounded RELATED SET is exactly one group's pending items. */
   group_key: string;
   question: string;
-  /** The catalogue's own note: why the row exists, what the interview asked verbatim, and every
-   *  honest boundary (an unverified registration format, a conditional statutory screen). */
+  /** #934 — one accountant-readable sentence: what the answer is used for and Clara's stated
+   *  boundary, never an accounting conclusion. `clara.get_firm_setup()` PREFERS the catalogue's
+   *  `user_note` here (0258_firm_setup_user_notes.sql); the engineer's own provenance note (file
+   *  names, line numbers) that rendered here before #934 is no longer what this surface shows. */
   note: string;
+  /** The catalogue's own `required_for_commit` flag, and nothing else: what the Finish gate
+   *  honours, so the Required/Optional badge and the skip control can be driven by it directly.
+   *  #891's conditional rows (`mpers_eligibility`, `tin`) are `false` here however applicable
+   *  they are to this firm — whether that SHOULD gate a commit is an open product question, not
+   *  something this flag may answer on its own (0259 SS G, "ONE NOTION OF REQUIRED"). */
   required: boolean;
   min_role: string;
   answer_shape: FirmSetupAnswerShape;
@@ -51,6 +64,9 @@ export type FirmSetupItem = {
   knowledge_key: string | null;
   /** The knowledge record this item produced, once it has been answered. */
   knowledge_record_id: string | null;
+  /** #891 — see `FirmSetupApplicability`. Absent on an older fixture reads as `undefined`, which
+   *  `isHiddenByApplicability`/`isNowInapplicable` below both treat as "applicable". */
+  applicability?: FirmSetupApplicability;
 };
 
 /** One confirmed firm profile fact: a `clara.knowledge_records` row in the SAME canonical register
@@ -102,13 +118,27 @@ export type FirmSetupEnvelope = {
   revision_n: number | null;
   state: FirmSetupPlanState | null;
   committed_at: string | null;
-  /** TRUE once every catalogue row has a plan item. */
+  /** TRUE once every catalogue row this firm can still be asked has a plan item. Since #891 that
+   *  is NOT the same as "the checklist has been started": a conditional row counts as unseeded
+   *  until the answer its predicate reads exists, so `seeded` is false from the first reconcile
+   *  until `entity_type` and `turnover` are both settled. The checklist derives "started" from
+   *  `items[]` instead, and uses `seeded` only to decide whether the reconcile control is
+   *  offered. */
   seeded: boolean;
+  /** How many rows the CATALOGUE holds — which since #935 includes education tips, so it is NOT a
+   *  count of facts this firm has to state. A surface that wants facts counts `items[]` excluding
+   *  `isEducationTip`; see the not-started banner in `firm-setup-checklist.tsx`. */
   catalogue_total: number;
-  /** MEASURED, in the database, over the catalogue's own required set. Never a percentage, never a
-   *  sum over facets that may overlap (#650 AC2), and never #636's cross-batch aggregate. */
+  /** MEASURED, in the database, over the catalogue's own `required_for_commit` set — the SAME set
+   *  `required_outstanding` names and `clara.commit_firm_setup` gates on, so
+   *  `required_total - required_answered` always equals `required_outstanding.length` for a firm
+   *  that holds a plan. Never a percentage, never a sum over facets that may overlap (#650 AC2),
+   *  and never #636's cross-batch aggregate. */
   counter: { required_answered: number; required_total: number };
   items: FirmSetupItem[];
+  /** The required keys still unsettled, NAMED. This is exactly what `clara.commit_firm_setup`
+   *  would refuse over, which is why the Finish control and the sentence beside it are both
+   *  driven by it and can never contradict each other. */
   required_outstanding: string[];
   confirmed_facts: FirmSetupFact[];
 };
@@ -141,9 +171,37 @@ export function firmSetupGroups(env: FirmSetupEnvelope): { key: string; items: F
   return order.map((key) => ({ key, items: byGroup.get(key) ?? [] }));
 }
 
+/**
+ * #891 — an item this surface must never render a question or an answer form for, because nothing
+ * has ever been recorded against it and its predicate says it either cannot yet be determined or
+ * already reads NO. An item that WAS answered before it became inapplicable is never hidden — its
+ * answer survives, and it renders through `isNowInapplicable` below instead (AC4).
+ */
+export function isHiddenByApplicability(item: FirmSetupItem): boolean {
+  if (item.state !== "unseeded") return false;
+  return item.applicability === "undetermined" || item.applicability === "inapplicable";
+}
+
+/** #891 — an item that DOES carry a plan item (seeded, possibly answered) but whose dependency now
+ *  reads it inapplicable. Its own `state`/`answer` are untouched; only this reads differently. */
+export function isNowInapplicable(item: FirmSetupItem): boolean {
+  return item.state !== "unseeded" && item.applicability === "inapplicable";
+}
+
 /** An item still waiting for a decision. `unseeded` is not answerable until the seed has run. */
 export function isPending(item: FirmSetupItem): boolean {
   return item.state === "pending";
+}
+
+/**
+ * #935 — an OPTIONAL EDUCATION TIP: a title, a body, "Got it" and "Later", never an answer form.
+ * It never counts toward the required total, never blocks completion, and once acted on it
+ * disappears from this surface entirely rather than staying visible with a "Recorded"/"Skipped"
+ * badge the way an accounting fact does — a tip carries no lasting value once read, and nagging a
+ * dismissed one would be the opposite of what "read-or-later" promises.
+ */
+export function isEducationTip(item: FirmSetupItem): boolean {
+  return item.kind === "education";
 }
 
 /** An item that has been decided: answered, resolved, or deliberately skipped. */
@@ -166,6 +224,10 @@ export function isSettled(item: FirmSetupItem): boolean {
  */
 export function isAnswerable(item: FirmSetupItem): boolean {
   if (item.state === "unseeded") return false;
+  // #891 — an item this firm has answered before but that now reads inapplicable keeps its answer
+  // on screen, with no form: correcting it belongs to whatever made it applicable again (answering
+  // the dependency the other way), never to this item's own control.
+  if (isNowInapplicable(item)) return false;
   if (item.state === "pending") return true;
   return item.knowledge_record_id === null;
 }

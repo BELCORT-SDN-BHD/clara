@@ -32,12 +32,16 @@ let executed = 0;
 
 /** True iff 0218's whole cohort is applied. A PARTIAL cohort throws — "wholly present or wholly
  *  absent" is the estate's rule (rig-meta.mjs cohortFailures), and a half-applied firm setup lane
- *  must be visible as a defect rather than skipped as an old frontier. */
+ *  must be visible as a defect rather than skipped as an old frontier.
+ *
+ *  #894 (0255_onboarding_plan_firm_uniqueness.sql) RENAMED `uq_onboarding_plans_one_open_firm`
+ *  to `uq_onboarding_plans_one_firm` and widened its predicate to `scope_kind='firm'` alone (no
+ *  `state` term) — the probe below reads the NEW name; the old one is gone by 0255's own tail. */
 async function firmSetupCohortApplied() {
   const r = await rootQuery(
     `select
        to_regclass('clara.firm_setup_keys')                                    is not null as catalogue,
-       to_regclass('clara.uq_onboarding_plans_one_open_firm')                  is not null as one_open_index,
+       to_regclass('clara.uq_onboarding_plans_one_firm')                       is not null as one_firm_index,
        to_regprocedure('clara.seed_firm_setup_plan(text)')                     is not null as seed_door,
        to_regprocedure('clara.answer_firm_setup_item(uuid,uuid,text,jsonb,text)') is not null as answer_door,
        to_regprocedure('clara.defer_firm_setup_item(uuid,uuid,text,text,text)')   is not null as defer_door,
@@ -239,8 +243,13 @@ cell("p648.seed.reconcile a plan already carrying firmInterview_v3 items is reco
   const receipt = await seed(w.admin);
   assert.equal(receipt.plan_id, w.plan);
   // RED BEFORE THE DOOR EXISTED: a blind insert raises 23505 on uq_onboarding_plan_items_key.
-  assert.equal(receipt.catalogue_total, 12);
-  assert.equal(receipt.seeded, 9, "the seed inserted something other than the nine MISSING catalogue rows");
+  // #935: fifteen now -- the original twelve plus the three education tips.
+  assert.equal(receipt.catalogue_total, 15);
+  // #891: of the nine catalogue rows still missing (legal_name/ssm/mia are already planted),
+  // mpers_eligibility and tin are UNDETERMINED here -- entity_type and turnover are neither of
+  // them among the planted v3 items -- so neither is seeded yet; seven are, plus #935's three
+  // tips, which carry no predicate at all and always seed: ten.
+  assert.equal(receipt.seeded, 10, "the seed inserted something other than the seven MISSING, determinable catalogue rows plus the three tips");
 
   for (const key of ["legal_name", "ssm", "mia"]) {
     const after = await itemRow(w.plan, key);
@@ -283,15 +292,18 @@ cell("p648.seed.empty a claimed firm's empty plan gains exactly the catalogue, a
 
   const key = opk("fsseed");
   const first = await seed(w.admin, { opKey: key });
-  assert.equal(first.seeded, 12);
-  assert.equal(first.catalogue_total, 12);
+  // #891: entity_type and turnover are both unanswered on this brand-new plan, so
+  // mpers_eligibility and tin are both UNDETERMINED and stay unseeded; the other ten rows seed.
+  // #935: plus the three education tips, which carry no predicate at all: thirteen.
+  assert.equal(first.seeded, 13);
+  assert.equal(first.catalogue_total, 15);
 
   const rows = await rootQuery(
     `select i.item_key, i.state, i.required_for_commit, i.item_kind, k.required_for_commit as cat_required
        from clara.onboarding_plan_items i
        join clara.firm_setup_keys k on k.item_key = i.item_key
       where i.plan_id = $1 order by k.sort_order`, [w.plan]);
-  assert.equal(rows.rows.length, 12);
+  assert.equal(rows.rows.length, 13);
   for (const r of rows.rows) {
     assert.equal(r.state, "pending", `${r.item_key} was seeded in state ${r.state}`);
     assert.equal(r.required_for_commit, r.cat_required, `${r.item_key} lost its catalogue required flag`);
@@ -320,7 +332,9 @@ cell("p648.seed.excludes the catalogue carries neither bookkeeper_email (#625) n
     "legal_name", "ssm", "entity_type", "address", "mia",
     "turnover", "tin", "fye",
     "mpers_eligibility", "framework", "accounting_basis", "currency",
-  ], "the catalogue is not FIRM_SEGMENTS_V2 minus the two exclusions");
+    // #935: the three education tips, appended after the twelve FIRM_SEGMENTS_V2 rows.
+    "tip_invite_colleagues", "tip_knowledge_page", "tip_start_from_conversation",
+  ], "the catalogue is not FIRM_SEGMENTS_V2 minus the two exclusions, plus #935's three tips");
   assert.ok(!keys.includes("bookkeeper_email"), "bookkeeper_email is member provisioning (#625)");
   assert.ok(!keys.includes("first_client_onboarding"), "first_client_onboarding is #649's journey");
   // D8: exactly three rows are firm-defaultable.
@@ -689,10 +703,21 @@ cell("p648.capture.ineligible the other nine items write NO knowledge record and
   const ineligible = ["legal_name", "ssm", "entity_type", "address", "mia", "turnover", "tin", "fye", "mpers_eligibility"];
   assert.equal(ineligible.length, 9);
   for (const key of ineligible) {
+    if (key === "tin" || key === "mpers_eligibility") {
+      // #891: both depend on an earlier answer in THIS SAME loop (turnover for tin, entity_type
+      // for mpers_eligibility, both already answered by this point in the array's order); a
+      // reconciliation call after that dependency is answered is what makes either one seedable.
+      await seed(w.admin, { opKey: opk(`fsreseed_${key}`) });
+      env = await readSetup(w.admin);
+    }
     const item = env.items.find((i) => i.item_key === key);
     assert.equal(item.knowledge_key, null, `${key} carries a knowledge_key -- D8/D10 keep it a plan item`);
     const receipt = await answer(w.admin, {
-      plan: w.plan, revision: env.revision_token, itemKey: key, answer: sampleAnswer(item),
+      plan: w.plan, revision: env.revision_token, itemKey: key,
+      // #891: turnover's own sampleAnswer (its first option, "<RM1M") would make TIN exempt --
+      // permanently inapplicable, never seeded -- which would refuse this very loop's own later
+      // attempt to answer it. RM1M-5M keeps TIN applicable so this cell can still exercise it.
+      answer: key === "turnover" ? "RM1M-5M" : sampleAnswer(item),
     });
     assert.equal(receipt.knowledge, null, `${key} captured a knowledge record`);
     env = await readSetup(w.admin);
@@ -876,22 +901,26 @@ cell("p648.acl.census every 0218 name is clara_authenticated-only; no runtime, a
   assert.equal(uop.rows[0].acl, "clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner");
 });
 
-cell("p648.plans.one_open the partial unique index refuses a second OPEN firm plan", async () => {
+cell("p648.plans.one_firm the partial unique index refuses a second firm plan (#894 widened it past OPEN-only)", async () => {
   const w = await firmSetupWorld("t14");
+  // #894 (0255_onboarding_plan_firm_uniqueness.sql) RENAMED this index and dropped the `state`
+  // term from its predicate entirely — a full any-state regression (including a CLOSED first
+  // plan) lives in its own dedicated file, tests/onboarding-plan-firm-uniqueness.test.mjs. This
+  // cell keeps proving the ORIGINAL OPEN-vs-OPEN case that motivated 0218, under the new name.
   const def = await rootQuery(
-    "select pg_get_indexdef(i.indexrelid) as d from pg_index i where i.indexrelid = 'clara.uq_onboarding_plans_one_open_firm'::regclass");
+    "select pg_get_indexdef(i.indexrelid) as d from pg_index i where i.indexrelid = 'clara.uq_onboarding_plans_one_firm'::regclass");
   assert.match(def.rows[0].d, /CREATE UNIQUE INDEX/);
   assert.match(def.rows[0].d, /\(firm_id\)/);
-  assert.match(def.rows[0].d, /WHERE \(\(state = 'open'::text\) AND \(scope_kind = 'firm'::text\)\)/);
+  assert.match(def.rows[0].d, /WHERE \(scope_kind = 'firm'::text\)/);
 
   // A second open firm plan — exactly what `clara.claim_paid_firm`'s bare `select ... into`
-  // (0186:1555-1557) would otherwise resolve arbitrarily — is now a loud unique violation.
+  // (0186:1555-1557) would otherwise resolve arbitrarily — is a loud unique violation.
   const err = await rootQuery(
     `insert into clara.onboarding_plans(firm_id, scope_kind, review_maker, reviewed_at, contributors)
      values ($1,'firm',$2, now(), array[$2]::uuid[])`, [w.firm, w.owner]).catch((e) => e);
   assert.ok(err instanceof Error, "a second OPEN firm plan was admitted");
   assert.equal(err.code, "23505");
-  assert.equal(err.constraint, "uq_onboarding_plans_one_open_firm");
+  assert.equal(err.constraint, "uq_onboarding_plans_one_firm");
 
   // …while a CLIENT plan on the same firm is untouched by it (0017's index still governs those).
   const ok = await rootQuery(

@@ -337,13 +337,91 @@ maker-checker distinctness, so a one-member firm cannot produce the foreign fixt
 contrasts against.
 
 `firm-setup.test.mjs` (#648, journey A5) needs the 0218 cohort — `clara.firm_setup_keys`, the four
-firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_open_firm`. A focused run
-against a chain below that frontier FAILS by name; the package run preloads
+firm setup doors, `clara.get_firm_setup()` and `uq_onboarding_plans_one_firm` (RENAMED from
+`uq_onboarding_plans_one_open_firm` by #894, `0255_onboarding_plan_firm_uniqueness.sql` — see
+below). A focused run against a chain below that frontier FAILS by name; the package run preloads
 `firm-setup-preintegration-gate.mjs`, which turns the same absence into a loud skip. Its world is
 planted through the root connection because the subject is the setup doors rather than firm
 creation, but every assertion under test runs through a least-privileged persona (`humanQuery`) —
 the one deliberate root write is the `ck_onboarding_plan_items_answer` mechanism probe in
-`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent).
+`p648.defer.reason`, whose subject is the CHECK itself and which no door owns. Two of its cells exist to pin what the WEB surface is allowed to assume about the doors rather than to test a new body: `p648.answer.correct` (answering again is the correction path, and a live firm default is corrected on the knowledge register instead) and `p648.opkey.attempt` (one op key names one request, so an op key derived from the answer VALUE can never be re-sent). Its cell `p648.plans.one_firm` proves only the ORIGINAL open-vs-open case that motivated 0218, now under the new name — the full any-state regression, including a CLOSED first plan, lives in `onboarding-plan-firm-uniqueness.test.mjs` below.
+
+## Onboarding plan firm uniqueness (#894, `0255_onboarding_plan_firm_uniqueness.sql`)
+
+`onboarding-plan-firm-uniqueness.test.mjs` is frontier-gated on its own stable stem
+(`onboarding_plan_firm_uniqueness$`), the `legal_acceptance$` / `checkout_convergence$` idiom, and
+preloads `onboarding-plan-firm-uniqueness-preintegration-gate.mjs` in the package run. It proves
+the widened index — `uq_onboarding_plans_one_firm`, partial UNIQUE on `(firm_id)` where
+`scope_kind='firm'` alone, no `state` term — three ways: the committed definition read off
+`pg_index` (root, by construction: it probes the catalog directly), a second firm-scope plan
+refused for the same firm in ANY state including when the FIRST is already CLOSED (cancelled;
+again root, since no door ever closes a firm plan), and `clara.claim_paid_firm`'s replay arm still
+answering the ORIGINAL `firm_id`/`plan_id` once a real firm is claimed through the live checkout
+doors — that one driven end-to-end through `checkout-convergence-fixtures.mjs`'s own
+`liveCheckout` / `deliver` / `claimPaidFirm`, the same helpers `checkout-convergence.test.mjs`
+drives, so this file adds no second implementation of that world.
+
+## Firm setup polish (#895, `0256_firm_setup_polish.sql`)
+
+`firm-setup-polish.test.mjs` is frontier-gated on its own stable stem (`firm_setup_polish$`), the
+`onboarding_plan_firm_uniqueness$` idiom, and preloads `firm-setup-polish-preintegration-gate.mjs`
+in the package run. Three cells, one per recut defect: `p895.seed.noop` seeds a fully-empty plan
+(bumps, seeded=10 as of #891 below — `mpers_eligibility`/`tin` are UNDETERMINED on a plan whose
+`entity_type`/`turnover` are still unanswered, so neither of the twelve is seeded yet), then seeds
+again under a DIFFERENT op_key once every DETERMINABLE catalogue row is already present (adds
+nothing) and asserts the plan's `revision_token`/`revision_n`/revision-history count
+are BYTE-UNCHANGED by the no-op call while `clara.audit_log` and `clara.domain_events` still gained
+a row each (seeded=0); `p895.read.honest_no_plan` plants a firm with NO firm-scope plan at all
+(root, by construction — no door ever creates one on its own) and asserts `get_firm_setup()` reads
+`counter={required_answered:0,required_total:0}` rather than the catalogue's constant borrowed as
+if it were progress; `p895.facts.state_filter` answers one firm-defaultable key and withdraws it,
+answers a second and CORRECTS it, and asserts `confirmed_facts` excludes the withdrawn revision and
+the pre-correction (superseded) revision while including only the corrected (live) one — cross-
+checked directly against `clara.knowledge_records` by `id`/`state`/`superseded_at`, independent of
+the door's own answer. `record_id` (the STABLE thread identity `clara._knowledge_row_json` exposes)
+is shared by every revision of one fact; `revision_id` (`clara.knowledge_records.id`) is what a
+capture, a correction and a withdrawal each mint fresh — the cells assert on `revision_id`, never on
+`record_id`, for exactly that reason. All three cells were run against the recut migration's OWN
+pre-image (the pre-#895 `create or replace function` text, applied by hand outside the migration
+ledger) and failed for the reason the header names, then re-run green after restoring the exact
+post-#895 bodies — the vacuity control, since #895's whole deliverable is three SQL-level fixes with
+no new relation or grant to independently anchor a cell to.
+
+## Firm setup applicability (#891, `0257_firm_setup_applicability.sql`)
+
+`firm-setup-applicability.test.mjs` is frontier-gated on its own stable stem
+(`firm_setup_applicability$`), the `firm_setup_polish$` idiom, and preloads
+`firm-setup-applicability-preintegration-gate.mjs` in the package run. Four cells, one per
+acceptance criterion, all through `humanQuery`: `p891.mpers.entity_type` seeds a Sdn Bhd and a
+sole proprietorship through the doors and shows the eligibility item seeded (`pending`) for the
+first and permanently unseeded for the second, even after a later reconciliation; `p891.tin.
+turnover` does the same for the TIN item against the turnover answer, including the unanswered
+(`'undetermined'`) case before either firm states a turnover band; `p891.counter.excludes` answers
+turnover above the exemption threshold, reconciles (TIN joins `counter.required_total` at 9,
+unanswered), answers TIN (joins `required_answered` too), then RE-answers turnover back under the
+threshold and shows TIN drop out of BOTH sides of the counter on the very next read while its own
+recorded answer is untouched — the regression this file's own migration header measured and
+guarded against (`p648.commit.outstanding`'s `required_total=8` invariant, which answers
+`entity_type` as `'sdn_bhd'` without ever re-seeding, stays true only because a conditional item's
+counter contribution requires it to be ACTUALLY SEEDED, not merely live-applicable); `p891.answer.
+survives` answers `mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type`
+away and shows the item's own `state`/`answer` untouched while its reported `applicability` and
+`required` flip live. All four cells were run against a deliberately broken variant of the
+migration (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
+guards reverted, applied via the `CLARA_MIGRATION_REDO` mechanism on this lane's own rig) and failed
+for the reasons this file's own assertions name, then re-run green after restoring the migration
+byte-for-byte — the vacuity control.
+
+`firm-setup.test.mjs` (#648) and `firm-setup-polish.test.mjs` (#895) both needed narrow, direct
+consequences of #891's seed-time change fixed alongside it: `p648.seed.reconcile` /
+`p648.seed.empty` / `p895.seed.noop`'s literal seeded-row counts (9→7, 12→10, 12→10 respectively —
+`mpers_eligibility`/`tin` are UNDETERMINED on a freshly-seeded plan and are no longer among the rows
+a first reconciliation inserts), and `p648.capture.ineligible`'s loop — which answers `entity_type`
+and `turnover` as part of proving the OTHER nine items capture no knowledge record — now
+reconciles again immediately after each dependency answer (so `tin`/`mpers_eligibility` are
+actually seedable before the loop tries to answer them) and answers `turnover` with `'RM1M-5M'`
+rather than its own `sampleAnswer` helper's first option (`'<RM1M'`, which would make TIN
+permanently exempt and refuse this very loop's later attempt to answer it).
 
 ## Firm knowledge defaults (#654, `0220_firm_knowledge_defaults.sql`)
 
