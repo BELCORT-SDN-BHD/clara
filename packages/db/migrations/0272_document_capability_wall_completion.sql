@@ -109,7 +109,6 @@ begin
     '_tf_document_capabilities_version_monotone()=170df87b15ca9eafa40e0dfa2e09423d145de89e0ed55b3c44247ec68b9e9c56',
     '_tf_document_capabilities_version_high_water()=b40906871b7e7e43bff50799c187d7ae38d13d30f61f7a1ab99547d6de8618c9',
     '_tf_document_capabilities_high_water_record()=839c51fb125268bf17bd2fd35ed4d4583cae4d251aad6724a241fc78429de40d',
-    '_tf_document_capability_high_water_monotone()=196780f9528d1d74cbef0bbc400024974ebd9828106c1b0fc8f7026652888f27',
     '_tf_document_capabilities_version_uniform()=d21b6837207cb438ab13caf279ef3d52a69066c480e20807f5be3ae7895ef776'] loop
     if to_regprocedure('clara.' || split_part(v_def, '=', 1)) is null then
       raise exception '#846 fix prestate: clara.% is absent -- 0207/0244 must apply first', split_part(v_def, '=', 1)
@@ -122,6 +121,23 @@ begin
         using errcode = 'CLR10';
     end if;
   end loop;
+
+  -- (b2) THE ONE BODY THIS FILE RECUTS (§B.3). Its pin is TWO-VALUED by construction, which is
+  -- what redo-safety means for a `create or replace`: 0244's pre-image on a FIRST apply, this
+  -- file's own post-image on a REDO. Both measured on the lane database, never transcribed, and
+  -- anything else is drift.
+  if to_regprocedure('clara._tf_document_capability_high_water_monotone()') is null then
+    raise exception '#846 fix prestate: clara._tf_document_capability_high_water_monotone is absent -- 0244 must apply first'
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._tf_document_capability_high_water_monotone()'::regprocedure;
+  if v_sha not in (
+      '196780f9528d1d74cbef0bbc400024974ebd9828106c1b0fc8f7026652888f27',   -- 0244's pre-image
+      '62e83a3b249ca1d0186041ac36c6f77615f3631b04d96eb57fc16f010974ec8c') then                                          -- 0272's own post-image
+    raise exception '#846 fix prestate: clara._tf_document_capability_high_water_monotone body is neither 0244''s pre-image nor this file''s post-image (sha %)', v_sha
+      using errcode = 'CLR10';
+  end if;
 
   -- (c) THE ESTATE'S SINGLE TRUNCATE GUARD, the body §B.1 arms rather than re-spelling. Pinned
   -- the same way: a recut body would mean the refusal this file installs is no longer the one it
@@ -239,6 +255,73 @@ create trigger t_document_capabilities_version_high_water_rekey
 reset role;
 
 -- =====================================================================================
+-- §B.3  ROUTE 3 — `recorded_at`. 0244 comments the column "Moves only upward with
+-- registry_version" and walls the key, `first_seen_at` and the version, but `recorded_at` is not
+-- in the case expression at all. Measured: rewritten to 1999-01-01 with no refusal. The mark's
+-- INTEGRITY does not depend on it — that is why this is the small one of the three — but a
+-- column comment is a checkable claim, and an estate whose comments are only sometimes backed by
+-- a wall teaches the next reader to check every one of them by hand.
+--
+-- STRICTLY `<`, and no concurrency hazard. The writer stamps `recorded_at = now()`, which is
+-- transaction-start time and therefore CONSTANT inside one transaction, so a transaction that
+-- raises the same mark twice writes the same instant and is admitted (equal is not less). Two
+-- transactions cannot race here: any two writers of this ledger are republishing the registry,
+-- and the deferred uniformity wall (0244 §B.4) already refuses the second of them.
+--
+-- The rest of the body is byte-for-byte 0244's: same code, same detail shape, same DELETE arm,
+-- same ordering of the case arms with the new one LAST, so an update that moves both the version
+-- and recorded_at backwards still reports `registry_version` — the more serious fact — first.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._tf_document_capability_high_water_monotone() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_what text;
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'a capability registry_version high-water mark is never deleted (% x %: %)',
+      old.format, old.document_kind, old.registry_version
+      using errcode = 'CLR08',
+        detail = jsonb_build_object(
+          'reason', 'registry_version_high_water_append_only',
+          'column', 'registry_version',
+          'operation', 'DELETE',
+          'format', old.format,
+          'document_kind', old.document_kind,
+          'from', old.registry_version,
+          'to', null)::text;
+  end if;
+
+  v_what := case
+    when new.format <> old.format or new.document_kind <> old.document_kind then 'key'
+    when new.first_seen_at <> old.first_seen_at then 'first_seen_at'
+    when new.registry_version < old.registry_version then 'registry_version'
+    when new.recorded_at < old.recorded_at then 'recorded_at'
+    else null end;
+
+  if v_what is not null then
+    raise exception 'a capability registry_version high-water mark only ever rises (% x %: % changed, % -> %)',
+      old.format, old.document_kind, v_what, old.registry_version, new.registry_version
+      using errcode = 'CLR08',
+        detail = jsonb_build_object(
+          'reason', 'registry_version_high_water_append_only',
+          'column', v_what,
+          'operation', 'UPDATE',
+          'format', old.format,
+          'document_kind', old.document_kind,
+          'from', old.registry_version,
+          'to', new.registry_version)::text;
+  end if;
+  return new;
+end
+$fn$;
+revoke all on function clara._tf_document_capability_high_water_monotone() from public;
+comment on function clara._tf_document_capability_high_water_monotone() is
+  'BEFORE UPDATE OR DELETE row wall on clara.document_capability_version_high_water (#846): the mark is append-only. A DELETE is refused outright, and an UPDATE is refused when it lowers registry_version, re-keys the row, moves first_seen_at or moves recorded_at BACKWARDS (0272 -- 0244 commented that last column as only ever moving upward without walling it); a RAISE is admitted, because that is the writer''s ordinary act. Raises CLR08 with detail.reason = registry_version_high_water_append_only plus the operation and the column that moved. Without this wall the INSERT-side wall would have a door beside it: delete the mark, re-insert low. TRUNCATE is refused separately, by t_document_capability_high_water_no_truncate (0272), because no row trigger fires on TRUNCATE.';
+
+reset role;
+
+-- =====================================================================================
 -- §D  TAIL. The wall is present, it is at the right timing, and it actually refuses.
 -- =====================================================================================
 do $w846fix_tail$
@@ -246,6 +329,16 @@ declare
   v_n int; v_def text; v_marks int; v_detail text; v_reason jsonb; v_published int;
   r clara.document_capabilities%rowtype;
 begin
+  -- (0) THE ONE RECUT BODY LANDED, at the post-image this file's own prestate names on a redo.
+  -- A `create or replace` that silently did nothing would pass every behavioural probe below on
+  -- a database that already carried an earlier cut.
+  if encode(sha256(convert_to((select p.prosrc from pg_proc p
+       where p.oid = 'clara._tf_document_capability_high_water_monotone()'::regprocedure), 'UTF8')), 'hex')
+     <> '62e83a3b249ca1d0186041ac36c6f77615f3631b04d96eb57fc16f010974ec8c' then
+    raise exception '#846 fix tail: clara._tf_document_capability_high_water_monotone is not at this file''s post-image'
+      using errcode = 'CLR10';
+  end if;
+
   -- (1) THE TRIGGER, at the ONE timing that sees a TRUNCATE.
   select pg_get_triggerdef(t.oid) into v_def from pg_trigger t
    where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
@@ -373,6 +466,30 @@ begin
   exception when sqlstate 'ZA275' then null;
   end;
 
+  -- (5c) `recorded_at` NOW HAS A WALL BEHIND ITS COMMENT, and a forward stamp still passes.
+  begin
+    begin
+      update clara.document_capability_version_high_water
+         set recorded_at = timestamptz '1999-01-01 00:00:00+00'
+       where format = 'pdf' and document_kind = 'invoice';
+      raise exception '#846 fix tail: recorded_at was rewritten BACKWARDS -- the column comment is still a claim nothing backs'
+        using errcode = 'CLR10';
+    exception when sqlstate 'CLR08' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_reason := nullif(v_detail, '')::jsonb;
+      if coalesce(v_reason ->> 'reason', '') <> 'registry_version_high_water_append_only'
+         or coalesce(v_reason ->> 'column', '') <> 'recorded_at' then
+        raise exception '#846 fix tail: the backwards-recorded_at refusal does not name the column (detail %)', coalesce(v_detail, '<null>')
+          using errcode = 'CLR10';
+      end if;
+    end;
+    update clara.document_capability_version_high_water
+       set registry_version = registry_version + 1, recorded_at = recorded_at + interval '1 second'
+     where format = 'pdf' and document_kind = 'invoice';
+    raise exception '#846 fix recorded_at probe rollback' using errcode = 'ZA276';
+  exception when sqlstate 'ZA276' then null;
+  end;
+
   -- (6) THE PROBES LEFT NOTHING BEHIND, in either table.
   select count(*)::int into v_n from clara.document_capability_version_high_water;
   if v_n <> v_marks then
@@ -388,7 +505,7 @@ begin
     raise exception '#846 fix tail: a probe leaked -- % mark(s) sit off the published version', v_n using errcode = 'CLR10';
   end if;
 
-  raise notice '#846 fix tail: OK -- clara.document_capability_version_high_water refuses TRUNCATE with CLR08 through 0003''s clara._tf_no_truncate, and clara._tf_document_capabilities_version_high_water (body byte-unchanged at its pinned pre-image) is now armed a SECOND time as t_document_capabilities_version_high_water_rekey, a BEFORE UPDATE trigger gated on a change of (format, document_kind), so a re-key onto a published pair is refused with CLR08 / detail.reason = registry_version_high_water naming the DESTINATION key. All proven behaviourally against the live tables (% marks, registry at version %) and rolled back whole; the whole-registry raise is still admitted and an in-place lowering still refuses under 0207''s registry_version_monotone.',
+  raise notice '#846 fix tail: OK -- clara.document_capability_version_high_water refuses TRUNCATE with CLR08 through 0003''s clara._tf_no_truncate, and clara._tf_document_capabilities_version_high_water (body byte-unchanged at its pinned pre-image) is now armed a SECOND time as t_document_capabilities_version_high_water_rekey, a BEFORE UPDATE trigger gated on a change of (format, document_kind), so a re-key onto a published pair is refused with CLR08 / detail.reason = registry_version_high_water naming the DESTINATION key. clara._tf_document_capability_high_water_monotone is recut to refuse a BACKWARDS recorded_at as well, under the same reason and naming the column. All proven behaviourally against the live tables (% marks, registry at version %) and rolled back whole; the whole-registry raise is still admitted, a forward recorded_at stamp is still admitted, and an in-place lowering still refuses under 0207''s registry_version_monotone.',
     v_marks, v_published;
 end
 $w846fix_tail$;

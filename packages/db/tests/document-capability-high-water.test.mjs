@@ -48,7 +48,7 @@ const CAPABILITY_COLUMNS =
 /** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
  *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
  *  absence. */
-const EXPECTED_CELLS = 9;
+const EXPECTED_CELLS = 10;
 
 let live = false;
 let executed = 0;
@@ -303,6 +303,41 @@ cell("a RE-KEYING update cannot republish a pair below its mark: the wall reads 
   assert.equal(detail.to, seen.published - 1);
   assert.equal(seen.republished, null,
     "the refused re-key left the retired pair retired: nothing was republished under it");
+});
+
+cell("recorded_at only ever moves forward: the column comment is a claim the wall backs", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const mark = (await c.query(
+      `select registry_version, recorded_at from clara.document_capability_version_high_water ${PDF_INVOICE}`))
+      .rows[0];
+
+    await c.query("savepoint probe_backwards");
+    const err = await caught(() => c.query(
+      `update clara.document_capability_version_high_water set recorded_at = $1 ${PDF_INVOICE}`,
+      ["1999-01-01T00:00:00Z"]));
+    await c.query("rollback to savepoint probe_backwards");
+
+    // FORWARD is the writer's own ordinary act — clara._tf_document_capabilities_high_water_record
+    // stamps `recorded_at = now()` on every raise — and must stay admitted, or the mark could
+    // never follow a republication.
+    const forward = (await c.query(
+      `update clara.document_capability_version_high_water
+          set registry_version = $1, recorded_at = $2 ${PDF_INVOICE} returning recorded_at`,
+      [mark.registry_version + 1, new Date(mark.recorded_at.getTime() + 1000)])).rows[0].recorded_at;
+
+    return { err, was: mark.recorded_at, forward };
+  });
+
+  assert.ok(seen.err,
+    "recorded_at was rewritten BACKWARDS — 0244 comments the column 'Moves only upward with "
+    + "registry_version', and until this wall nothing made that true");
+  assert.equal(seen.err.code, CLR08, `expected ${CLR08} for the backwards write, got ${seen.err.code}`);
+  const detail = JSON.parse(seen.err.detail ?? "{}");
+  assert.equal(detail.reason, "registry_version_high_water_append_only",
+    "a backwards recorded_at is the mark's own append-only wall speaking, not a new refusal family");
+  assert.equal(detail.column, "recorded_at", "the refusal names the column that moved");
+  assert.equal(detail.operation, "UPDATE");
+  assert.ok(seen.forward.getTime() > seen.was.getTime(), "a FORWARD recorded_at must still be admitted");
 });
 
 // ---------------------------------------------------------------------------------------------
