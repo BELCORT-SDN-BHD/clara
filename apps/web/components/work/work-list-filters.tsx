@@ -57,8 +57,15 @@ import {
  *  could not name two of the three values the column admits. DECISIONS §1.7 gives this vocabulary
  *  one owner so all four surfaces are corrected together. A staff expense claim is deliberately NOT
  *  a fourth value: it is admitted as `journal_entry` and identified through
- *  `clara.get_work_claim_origin` (migration 0221's header says why). */
-const KNOWN_PURPOSES = ["journal_entry", "periodic_stock_adjustment", "payroll_obligation"] as const;
+ *  `clara.get_work_claim_origin` (migration 0221's header says why).
+ *
+ *  #984 · THE FOURTH VALUE. Migration 0239 admits `opening_balance` — approving an opening seed or
+ *  an opening correction mints one Work and one operation receipt for the batch — so the filter
+ *  can name it. Unlike the claim lane above, this IS a purpose the column's CHECK carries, which
+ *  is the test for belonging in this list. */
+const KNOWN_PURPOSES = [
+  "journal_entry", "periodic_stock_adjustment", "payroll_obligation", "opening_balance",
+] as const;
 
 const ALL = "__all__";
 

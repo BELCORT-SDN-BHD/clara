@@ -600,6 +600,16 @@ export function WorkDetailView({
         <p className="max-w-prose text-sm text-muted-foreground">{t("basisNote")}</p>
         {work.basis === null ? (
           <p className="text-sm text-muted-foreground">{t("basisUnreadable")}</p>
+        ) : !Array.isArray(work.basis.lines) ? (
+          /* #984 — A BASIS THAT IS NOT A SET OF JOURNAL LINES. `accounting_work.basis` is jsonb and
+             NOT NULL, and since migration 0239 one purpose fills it with something else: an
+             `opening_balance` Work records an approved opening batch, whose entries were posted by
+             `clara._approve_opening_entry` BEFORE the Work row was written, so there are no lines to
+             admit and no posting date or memo to show. Rendering the journal table against that
+             threw on `basis.lines.map`. The page says what is true and shows nothing it does not
+             have, rather than a table of blanks or a lie about the basis being unreadable — it read
+             perfectly well, it is simply not journal lines. */
+          <p className="text-sm text-muted-foreground">{t("basisNoLines")}</p>
         ) : (
           <WorkBasisTable basis={work.basis} names={names} />
         )}

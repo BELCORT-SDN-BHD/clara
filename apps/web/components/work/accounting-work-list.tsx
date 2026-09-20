@@ -122,7 +122,15 @@ export type WorkListScope = { kind: "firm" } | { kind: "client"; clientId: strin
 // cannot post), and what makes it a CLAIM is read from `clara.get_work_claim_origin` — the Work
 // detail asks that door by name. Adding a token here would be inventing a purpose the estate does
 // not have.
-const KNOWN_PURPOSE_LABELS = new Set(["journal_entry", "periodic_stock_adjustment", "payroll_obligation"]);
+//
+// #984 · AND A FOURTH VALUE, WHICH IS THE FIRST THAT NO MODEL SERVES. Migration 0239 admits
+// `opening_balance`: approving an opening seed or an opening correction now mints one Work and one
+// operation receipt for the batch (the owner's ruling of 2026-09-20 on #984, reversing that
+// ticket's own Option B). It is a real purpose in the column's CHECK, unlike the claim lane above,
+// so it belongs here — a firm that could not see its own opening on this list was the defect.
+const KNOWN_PURPOSE_LABELS = new Set([
+  "journal_entry", "periodic_stock_adjustment", "payroll_obligation", "opening_balance",
+]);
 const KNOWN_ORIGIN_LABELS = new Set(["user_direct", "clara_interpreted"]);
 
 export function AccountingWorkList({

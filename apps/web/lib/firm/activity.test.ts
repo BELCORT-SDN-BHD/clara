@@ -425,3 +425,17 @@ test("describeActivity: an operation_receipt row prefers `purpose` over `event_t
   const unregistered = { source: "operation_receipt" as const, description: null, event_type: "some_future_purpose", id: "r2" };
   assert.equal(describeActivity(unregistered, tActivity, tReceipt), "some_future_purpose", "an unregistered purpose renders itself, not a guess");
 });
+
+// #984 — the fourth purpose. Migration 0239 gives an approved opening batch a real
+// `clara.accounting_work` row and a real `clara.operation_receipts` row, so the firm Activity feed
+// now carries a row this build must have a SENTENCE for: without one it would render the database's
+// own `opening_balance` token to a person, which is the fallback for values this build has not
+// learned, not the answer for one it ships.
+test("describeActivity: an opening-balance operation_receipt gets its own registered sentence, from either field", () => {
+  const listRow = { source: "operation_receipt" as const, description: null, event_type: "opening_balance", id: "r3" };
+  assert.equal(describeActivity(listRow, tActivity, tReceipt), "Activity.workPurposes.opening_balance");
+
+  const detailRow = { ...listRow, event_type: null, purpose: "opening_balance" };
+  assert.equal(describeActivity(detailRow, tActivity, tReceipt), "Activity.workPurposes.opening_balance",
+    "the detail door's own `purpose` field reaches the same sentence");
+});

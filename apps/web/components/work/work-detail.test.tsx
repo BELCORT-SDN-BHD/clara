@@ -1975,3 +1975,39 @@ test("p636.work_detail.batch_row — a Work in no batch shows no row, and a FAIL
     "the page never says a Work is NOT in a batch — it only says it IS in one");
   await h.unmount();
 });
+
+// #984 — AN OPENING-BALANCE WORK ON THIS PAGE. Migration 0239 admits a fourth purpose and the
+// opening doors now mint a Work for every approved batch. The shape is unlike the other three in
+// two ways this page has to survive: its `basis` carries NO lines (the entries were approved by
+// `clara._approve_opening_entry` before the Work existed) and it names no run. The page must show
+// the human label rather than the database's token, and must not fall over on either absence.
+test("p984.work_detail.opening_purpose — an opening-balance Work shows its human label and survives a basis with no lines and no run", async () => {
+  const h = await renderComponent(App({
+    load: async () => data({
+      work: workRow({
+        purpose: "opening_balance",
+        status: "completed",
+        logical_op_id: `work:${WORK}:opening_balance:1`,
+        intent_key: "opening:seed:11111111-1111-4111-8111-111111111111:1",
+        current_task_id: null,
+        basis: {
+          kind: "opening_balance",
+          batch: "seed",
+          seed_id: "11111111-1111-4111-8111-111111111111",
+          batch_n: 1,
+          entry_count: 3,
+          entries: [],
+          tie_document_id: "22222222-2222-4222-8222-222222222222",
+        } as never,
+        result: { seed_id: "11111111-1111-4111-8111-111111111111", batch_n: 1, entry_count: 3, entries: [] } as never,
+      }),
+      entry: null,
+    }),
+  }));
+  for (let i = 0; i < 4; i += 1) await h.settle();
+  const text = (h.container as { textContent: string | null }).textContent ?? "";
+  assert.match(text, /Opening balances/, "the purpose renders as a human label");
+  assert.doesNotMatch(text, /opening_balance/,
+    "…and the database's own token is never shown to a person on this page");
+  await h.unmount();
+});
