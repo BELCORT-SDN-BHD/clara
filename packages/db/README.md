@@ -865,31 +865,55 @@ the corrected document and the still-answerable question coexist):
 |---|---|
 | `clara._source_corrected_work(uuid,uuid)` | The ONE rule: a Work of this firm that still has a PENDING question, names this document in its own `source_refs`, holds NO committed receipt, and is in `queued` / `running` / `awaiting_input`. The write-side twin of `list_source_dependents`' `work_questions` arm, narrowed by the last two terms. Ungranted. |
 | `clara._lock_source_corrected_work(uuid,uuid)` | Takes the `accounting_work → agent_tasks → agent_interruptions` rungs for that set and returns exactly the ids it locked. Ungranted. |
-| `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and retires each Work — through `clara.restate_accounting_work` when a successor may be admitted, through `clara.cancel_accounting_work` alone when it may not. Ungranted. |
+| `clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)` | Re-asks the rule under those locks and retires each Work through `clara.cancel_accounting_work`, admitting **no** successor on any arm. Ungranted. |
+| `clara._question_source_corrected(uuid)` | WHEN the source a question stands on was last corrected, if it was corrected **after** the question was asked — the instant, or NULL. Same firm and `source_refs` terms as the rule above. Ungranted. |
 
-**The four supersession writes are not re-spelled.** `clara.restate_accounting_work` (0200 §E)
-already admits the successor, stamps `supersedes`, stamps `superseded_by` on the old Work and
-cancels it through `clara.cancel_accounting_work` — which appends the single `work.cancelled` domain
-event whose payload carries `outcome = 'superseded'` and the successor's id, the link the activity
-feed renders (#840). 0268 registers **no** new event type and **no** taxonomy row.
+**The retirement rides 0199's own door.** `clara.cancel_accounting_work` appends the single
+`work.cancelled` domain event; 0268 registers **no** new event type and **no** taxonomy row, and
+mints no `supersedes` / `superseded_by` of its own.
 
-**Every affected Work is retired. A successor is admitted only when the instruction survived the
-correction.** A `user_direct` basis is what a human asked for: correcting what the document *says*
-does not change it, so the successor carries that basis, its `basis_origin` and its `source_refs`
-verbatim, is admitted `queued`, and its run reads the corrected reading from the top. A
-`clara_interpreted` basis was DERIVED from the reading that just moved, and re-admitting it verbatim
-would be an instruction that is now false — `clara._record_journal_entry_core` compares a posted basis
-against the Work's `basis_digest` (fixed at admission) and nothing in the estate compares a posted
-amount against the document's facts, so such a successor could post ONLY the pre-correction figure,
-against the corrected document, and be accepted. That Work is therefore cancelled and **not**
-replaced, and the receipt says so (`replaced: false`, `not_replaced_reason: "interpreted_basis"`).
-The split is the estate's own: 0184's BASIS GATE in `clara.take_over_accounting_work` already treats
-`user_direct` as carryable and anything else as needing a human's confirmation.
+**Every affected Work is retired, and NOTHING is re-admitted in its place.** The first cut
+re-admitted a successor when `basis_origin = 'user_direct'`, on the argument that a human's
+instruction survives a correction of the document it was read from. Measured end to end on the
+lane rig, that argument costs the ruling its second half: the successor's `basis_digest` is
+byte-identical to the retired Work's (it is fixed at admission), `clara._record_journal_entry_core`
+compares a posted basis against it, and nothing in the estate compares a posted AMOUNT against the
+document's facts — so posting the CORRECTED figure under the successor is refused CLR10
+`basis_mismatch` while posting the RETIRED one is ACCEPTED and evidence-linked to the corrected
+document. A person who typed the figure printed on the invoice typed the reading that has just
+moved. So no basis kind is carried forward: every affected Work is cancelled, `replaced` is always
+`false`, `new_work_id` is always null, and the receipt says WHY in one of two words —
+`interpreted_basis` (the figures were derived from the value that changed) or
+`basis_predates_correction` (a person stated them before it changed). Both mean *state it again*,
+through #721's own restatement door. `packages/db/tests/work-source-correction-supersede.test.mjs`
+`w885.no_stale_post` pins the property as an absence: after a correction from RM 640.00 to
+RM 999.00, no Work the door touched or created can put a 64000-cent line on the books against that
+document.
 
-The REASON is durable on the cancellation's own op key — and, when a successor exists, on its
-`intent_key` too — both reading `source_corrected:<revision id>:<old work id>`, on
-`clara.op_receipts` and `clara.accounting_work` respectively, plus the `superseded_work` array 0268
-adds to the revision's receipt and audit row. It is a *derived key*, not a first-class cancellation
+**A question whose source was corrected is not answerable — even where the Work is carved out.**
+The retirement rule deliberately does not touch a Work holding a committed receipt (#676's
+territory), and before this round a person could still answer that Work's pending question after
+the document's reading had moved — measured ACCEPTED. `clara.answer_work_question` now asks
+`clara._question_source_corrected(question)` and refuses CLR13 `source_corrected` whenever the
+source moved after the question was asked, carrying the instant on `detail.current
+.source_corrected_at`; the same word replaces `cancelled` for a question the retirement closed, so
+the refusal says what changed rather than only that something did. The Work itself is still
+untouched: it is the ANSWER that is refused. `clara._work_question_record` projects
+`source_corrected_at` beside 0180's own keys so B3/B4/B6 render the sentence instead of an answer
+form.
+
+**What is NOT delivered here, and who owes it.** "Re-admitted ON THE CORRECTED FACTS" needs
+somebody to re-read the corrected document and propose a basis from it. `journalBasisSchema`
+(`packages/runtime/workflows/claraWork.v1.tools.ts`) is posting date, memo, currency and lines of
+integer cents with NO back-link from a line to a document field path, so mapping a corrected
+`invoice.total` onto debit and credit lines is an interpretation act, not a projection — it cannot
+be constructed in SQL. That step belongs to the wave-4 shared cut (`claraWork_v6` /
+`chatTurn_v22`); until it lands, the honest mechanism is the one above: retire, tell the person,
+and let them restate.
+
+The REASON is durable on the cancellation's own op key, `source_corrected:<revision id>:<old work
+id>` on `clara.op_receipts`, plus the `superseded_work` array 0268 adds to the revision's receipt
+and audit row. It is a *derived key*, not a first-class cancellation
 reason: `clara.cancel_accounting_work(uuid,uuid,text)` takes no reason argument and its
 `work.cancelled` payload carries none, so a feed row recovers the cause by reading that key. Giving
 the cancellation a reason column or event key is a recut of 0199's door and belongs to the ticket
@@ -905,20 +929,23 @@ against any posting transaction. So `clara.revise_document_fact` takes the Work 
 the lock helper, and 0217's own document lock — unmoved, not one line changed — now sits below them.
 0268's tail asserts that order positionally in the committed body text.
 
-**If a replacement cannot be admitted, the Work is still retired and the correction still commits.**
-`restate_accounting_work` raises typed refusals that are about a *Work* rather than about the
-document: a non-journal purpose, a document that already backs a posted entry **of some other
-Work**, a client gone inactive. Letting those propagate made a human door hostage to a Work the human
-was not acting on — measured on the lane rig: a sibling Work's posting refused a bookkeeper's
-correction outright with CLR13 `source_already_posted`, naming an entry they never touched. Only
-`CLR10`/`CLR13` are caught that way, the reason is carried to the receipt
-(`not_replaced_reason`), and the Work is cancelled through 0199's door regardless. An authority
-refusal (`CLR04`) is never downgraded and still stops the call.
+**A bookkeeper's correction is never refused because of a Work they were not acting on.** The first
+cut called `restate_accounting_work`, whose typed refusals are about a *Work* rather than about the
+document — a non-journal purpose, a document that already backs a posted entry **of some other
+Work**, a client gone inactive — and let them propagate, which made a human door hostage to a Work
+the human was not acting on. Measured on the lane rig: a sibling Work's posting refused a bookkeeper's
+correction outright with CLR13 `source_already_posted`, naming an entry they never touched. The
+second cut removed the call altogether — no arm re-admits, so no refusal from that door can reach
+this one — and the property is now structural rather than caught: nothing in this path can raise a
+refusal about a sibling Work.
 
-**`clara.answer_work_question` gains one word, not an arm.** Its existing CLR13 status refusal reads
-`detail.reason = 'superseded'` — instead of `cancelled` — when the question was closed by the cancel
-cascade *and* the Work carries `superseded_by`, and `detail.current.superseded_by` names the
-successor. Every other status keeps the exact word 0180 gave it, `already_answered` still wins, and a
+**`clara.answer_work_question` gains two words and one arm.** Its existing CLR13 status refusal
+reads `detail.reason = 'source_corrected'` when the source moved after the question was asked, and
+`'superseded'` — instead of `cancelled` — when the question was closed by the cancel cascade *and*
+the Work carries `superseded_by` (a #721 restatement; a source correction no longer writes one), with
+`detail.current.superseded_by` naming the successor. The ARM is the new one: a question that is still
+PENDING is refused outright when its source was corrected, which is the only way #676's
+committed-receipt carve-out and the ruling's absolute sentence can both hold. Every other status keeps the exact word 0180 gave it, `already_answered` still wins, and a
 plain cancel (no successor) still answers `cancelled`. A #721 restatement reaches the same new word,
 which is correct: the reason the question was retired is the same in both cases.
 

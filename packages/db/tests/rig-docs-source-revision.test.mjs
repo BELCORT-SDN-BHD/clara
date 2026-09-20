@@ -874,26 +874,32 @@ cell("p646.question.version: a changed source and an open Work question — meas
     // #885's HORN — the owner's ruling, on a chain that carries migration 0268.
     noteLane(
       `p646.question.version MEASURED (#885 lane live): the question is ${rowAfter.status} at version `
-      + `${rowAfter.question_version}, its Work is ${rowAfter.work_status} superseded by `
-      + `${String(rowAfter.superseded_by).slice(0, 12)}; answering at the pre-revision version `
+      + `${rowAfter.question_version}, its Work is ${rowAfter.work_status} with superseded_by `
+      + `${String(rowAfter.superseded_by)}; answering at the pre-revision version `
       + `${answered === null ? "SUCCEEDED (no refusal)" : `refused ${answered.code}/${reasonOf(answered)}`}.`);
 
     assert.equal(revision.superseded_work.length, 1,
       "the revision receipt names the ONE Work its correction retired");
     assert.equal(revision.superseded_work[0].work_id, admitted.work_id);
     assert.equal(revision.superseded_work[0].reason, "source_corrected");
-    assert.equal(revision.superseded_work[0].replaced, true,
-      "this fixture's basis is the human's own (user_direct), so a successor IS admitted");
-    assert.equal(rowAfter.superseded_by, revision.superseded_work[0].new_work_id,
-      "the Work points at the successor, which carries the SAME admitted instruction and re-reads "
-      + "the corrected document (a DERIVED basis is not carried at all -- see w885.interpreted.not_carried)");
+    // SECOND FIX ROUND (recheck L09-RC-02): this fixture's basis is the human's OWN
+    // (user_direct) and it is STILL not re-admitted. "Re-admitted on the corrected facts" needs
+    // somebody to re-read the corrected document; nothing below the runtime can, so the door
+    // retires the Work and a person restates it. See w885.no_stale_post for the end-to-end
+    // measurement that no pre-correction figure can reach the ledger afterwards.
+    assert.equal(revision.superseded_work[0].replaced, false,
+      "no arm re-admits: a basis nobody re-derived from the corrected document is not the corrected facts");
+    assert.equal(revision.superseded_work[0].new_work_id, null, "…so there is no successor id");
+    assert.equal(revision.superseded_work[0].not_replaced_reason, "basis_predates_correction",
+      "…and the receipt says WHY, in the words a person is owed");
+    assert.equal(rowAfter.superseded_by, null, "the retired Work points at nothing");
     assert.equal(rowAfter.status, "cancelled", "…and its question is closed");
     assert.ok(answered, "ANSWERING AT THE PRE-REVISION VERSION IS REFUSED — the ruling, measured");
     assert.equal(answered.code, "CLR13", "…as a convergence");
-    assert.equal(reasonOf(answered), "superseded",
-      "…named `superseded`, the word a surface renders as \"the source changed\"");
-    assert.equal(detailOf(answered).current.superseded_by, revision.superseded_work[0].new_work_id,
-      "…and the refusal names the Work that replaced this one");
+    assert.equal(reasonOf(answered), "source_corrected",
+      "…named `source_corrected`: the reading this question stands on was corrected");
+    assert.ok(detailOf(answered).current.source_corrected_at,
+      "…and the refusal carries WHEN, so the sentence can be about the document");
   } else {
     // THE MEASURED FALLBACK, unchanged: a chain between 0217 and 0268 has #646's own behaviour.
     noteLane(

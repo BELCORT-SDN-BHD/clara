@@ -37,7 +37,7 @@ import {
 import { timelineEvents } from "./work-cancel-fixtures.mjs";
 
 const STEM = "work_source_correction_supersede$";
-const EXPECTED_CELLS = 8;
+const EXPECTED_CELLS = 9;
 
 let live = false;
 let world = null;
@@ -163,7 +163,7 @@ async function workParkedOnDocument({ client, document, b = null, origin = "user
 // =============================================================================================
 // w885.supersede.cancels — THE RULING, END TO END.
 // =============================================================================================
-cell("w885.supersede.cancels: correcting a fact a parked question cites cancels that Work with source_corrected and admits a successor on the same basis", async () => {
+cell("w885.supersede.cancels: correcting a fact a parked question cites retires that Work with source_corrected, admits no successor, and closes the question", async () => {
   const s = await invoiceWithFacts({ client: A1(), totalCents: 99000, tag: "supersede" });
   const parked = await workParkedOnDocument({ client: A1(), document: s.documentId });
   const before = await workRow(parked.work_id);
@@ -182,40 +182,42 @@ cell("w885.supersede.cancels: correcting a fact a parked question cites cancels 
   const entry = receipt.superseded_work[0];
   assert.equal(entry.work_id, parked.work_id, "…named by id");
   assert.equal(entry.reason, "source_corrected", "…with the correction as its reason");
-  assert.ok(entry.new_work_id && entry.new_work_id !== parked.work_id,
-    "…and a successor that is a DIFFERENT Work");
+  // SECOND FIX ROUND (recheck L09-RC-02): this fixture's basis is the human's OWN (user_direct)
+  // and it is STILL not re-admitted. A person who typed the figure printed on the invoice typed
+  // the reading that has just moved, so no basis kind survives a correction of the document it
+  // stands on — see w885.no_stale_post for the end-to-end measurement.
+  assert.equal(entry.replaced, false, "…and NO successor: nothing carries a pre-correction figure");
+  assert.equal(entry.new_work_id, null, "…said by id, not only by flag");
+  assert.equal(entry.not_replaced_reason, "basis_predates_correction",
+    "…with the reason a person is owed: this instruction was stated before the correction");
 
   // 2 · THE COMMITTED ROWS, re-read rather than trusted.
   const oldRow = await workRow(parked.work_id);
-  assert.equal(oldRow.superseded_by, entry.new_work_id, "the old Work points at its successor");
+  assert.equal(oldRow.superseded_by, null, "the retired Work points at nothing — there is nothing to point at");
   assert.ok(["stopping", "cancelled"].includes(oldRow.status),
     `the old Work is going away (status ${oldRow.status})`);
-  const newRow = await workRow(entry.new_work_id);
-  assert.equal(newRow.supersedes, parked.work_id, "the successor points back");
-  assert.equal(newRow.status, "queued", "the successor is admitted and waiting to run");
-  assert.deepEqual(newRow.basis, oldRow.basis,
-    "the ADMITTED BASIS is carried forward verbatim — the instruction did not change, the document did");
-  assert.deepEqual(newRow.source_refs, oldRow.source_refs, "…and so is the evidence it stands on");
-  assert.equal(newRow.client_id, oldRow.client_id);
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where supersedes = $1", [parked.work_id])).rows[0].n,
+  0, "…and nothing was admitted claiming to supersede it");
 
   // 3 · THE QUESTION IS CLOSED. Nothing can be answered against the reading that moved.
   const q = await interruptionRow(parked.questionId);
   assert.equal(q.status, "cancelled", "the pending question is closed by the cancel cascade");
 
-  noteLane(`w885.supersede.cancels: work ${String(parked.work_id).slice(0, 8)} -> ${String(entry.new_work_id).slice(0, 8)}, old status ${oldRow.status}`);
+  noteLane(`w885.supersede.cancels: work ${String(parked.work_id).slice(0, 8)} retired (replaced=${entry.replaced}, ${entry.not_replaced_reason}), old status ${oldRow.status}`);
 });
 
 // =============================================================================================
 // w885.answer.superseded — THE HALF A PERSON ACTUALLY MEETS, and the narrowness that protects it.
 // =============================================================================================
-cell("w885.answer.superseded: answering the retired question refuses CLR13 superseded and names the successor, while an ordinary cancel still refuses cancelled", async () => {
+cell("w885.answer.superseded: answering the retired question refuses CLR13 source_corrected, while an ordinary cancel still refuses cancelled", async () => {
   // A · THE CORRECTION'S OWN REFUSAL.
   const s = await invoiceWithFacts({ client: A1(), totalCents: 77000, tag: "answer" });
   const parked = await workParkedOnDocument({ client: A1(), document: s.documentId });
   const receipt = await reviseFact(KEEPER(), {
     document: s.documentId, fieldPath: "invoice.total", value: "RM 820.00", observedVersion: 1,
   });
-  const successor = receipt.superseded_work[0].new_work_id;
+  assert.equal(receipt.superseded_work[0].replaced, false, "mandatory setup: nothing replaced it");
 
   const err = await caught(() => answerWorkQuestion(KEEPER(), {
     question: parked.questionId, version: 1, answer: twoFieldAnswer(),
@@ -223,10 +225,14 @@ cell("w885.answer.superseded: answering the retired question refuses CLR13 super
   assert.ok(err, "answering a question asked against the corrected reading is REFUSED");
   assert.equal(err.code, "CLR13", "…as a convergence, the code every question refusal already uses");
   const d = detailOf(err);
-  assert.equal(d.reason, "superseded",
-    "…named SUPERSEDED, not `cancelled`: the question was retired because its Work was replaced");
-  assert.equal(d.current.superseded_by, successor,
-    "…and the refusal names the Work that replaced it, so a surface has somewhere to send the person");
+  // SECOND FIX ROUND: the word is SOURCE_CORRECTED, not `cancelled` and not `superseded`. There
+  // is no successor to name any more, so the only useful thing the refusal can say is WHAT
+  // CHANGED — and that is also the thing the person has to act on.
+  assert.equal(d.reason, "source_corrected",
+    "…named SOURCE_CORRECTED: the reading this question stands on was corrected");
+  assert.ok(d.current.source_corrected_at,
+    "…and the refusal carries WHEN it was corrected, so a sentence can be about the document");
+  assert.equal(d.current.superseded_by, null, "…with no successor, because none was admitted");
   assert.equal(d.current.work_id, parked.work_id, "…beside the Work it is about");
   assert.equal(d.current.status, "cancelled", "…whose question row really is closed");
 
@@ -241,10 +247,12 @@ cell("w885.answer.superseded: answering the retired question refuses CLR13 super
   assert.equal(err2.code, "CLR13");
   const d2 = detailOf(err2);
   assert.equal(d2.reason, "cancelled",
-    "a cancel with NO successor still answers `cancelled` — the new word is not a rename");
+    "a cancel with NO source correction still answers `cancelled` — the new word is not a rename");
   assert.equal(d2.current.superseded_by, null, "…and there is no successor to name");
+  assert.equal(d2.current.source_corrected_at, null,
+    "…and nothing about this Work's own source moved after its question was asked");
 
-  noteLane(`w885.answer.superseded: refusal ${d.reason} -> ${String(d.current.superseded_by).slice(0, 8)}; plain cancel refusal ${d2.reason}`);
+  noteLane(`w885.answer.superseded: refusal ${d.reason} at ${d.current.source_corrected_at}; plain cancel refusal ${d2.reason}`);
 });
 
 // =============================================================================================
@@ -315,6 +323,112 @@ cell("w885.posted.untouched: a Work that already holds a committed receipt is le
   // leave the Work alone, and that is NOT what the brief asks for.
   assert.ok(receipt.revision_id, "the correction itself was recorded");
   assert.equal(receipt.facts_version, 2, "…and the document's reading really moved");
+
+  // SECOND FIX ROUND (recheck finding L09-RC-03). THE WORK IS LEFT ALONE; THE QUESTION IS NOT
+  // ANSWERABLE. The brief carves a posted Work out of the CANCELLATION and the ruling forbids
+  // anyone answering a question asked against a corrected reading; both can be true at once, and
+  // before this round only the first was. MEASURED before the fix: clara.answer_work_question
+  // returned {status:'answered'} against a document whose reading had just moved.
+  const stale = await caught(() => answerWorkQuestion(KEEPER(), {
+    question: parked.questionId, version: 1, answer: twoFieldAnswer(),
+  }));
+  assert.ok(stale, "the question about the corrected document is NOT answerable");
+  assert.equal(stale.code, "CLR13", "…refused as a convergence, the code every question refusal uses");
+  const sd = detailOf(stale);
+  assert.equal(sd.reason, "source_corrected",
+    "…and the refusal SAYS the source was corrected, rather than a word about the Work's state");
+  assert.equal(sd.current.work_id, parked.work_id, "…beside the Work it is about");
+  assert.equal((await interruptionRow(parked.questionId)).status, "pending",
+    "the question is still PENDING — nothing was cancelled; it is the ANSWER that is refused");
+  assert.equal((await workRow(parked.work_id)).status, rowBefore.status,
+    "…and the posted Work itself is still untouched, which is the carve-out");
+});
+
+// =============================================================================================
+// w885.no_stale_post — THE RULING'S SECOND HALF, MEASURED AS AN ABSENCE.
+//
+// "Re-admitted ON THE CORRECTED FACTS" has exactly one honest reading at the SQL seam: a basis
+// nobody has re-derived from the corrected document is not the corrected facts, whoever first
+// stated it. The first fix round applied that to a `clara_interpreted` basis and let a
+// `user_direct` one through, and the recheck MEASURED the consequence end to end (L09-RC-02):
+// the successor's basis_digest was byte-identical to the retired Work's, posting the CORRECTED
+// RM 999.00 under it was refused CLR10 basis_mismatch, and posting the RETIRED RM 640.00 was
+// ACCEPTED and evidence-linked to the corrected document.
+//
+// A human's stated figure is not exempt: this fixture's 64000 cents is exactly the figure printed
+// on the document before the correction, and a person who typed it typed what they read. So no
+// arm re-admits, and this cell states the property as an ABSENCE over every Work the door TOUCHED
+// or CREATED rather than over the one it happened to name — the only form that cannot be
+// satisfied by moving the stale figure somewhere else.
+//
+// BOTH FIGURES ARE LITERALS FROM THE FIXTURE DOCUMENT: RM 640.00 before the correction, RM 999.00
+// after it, neither recomputed the way the code computes it.
+// =============================================================================================
+cell("w885.no_stale_post: after a correction NO Work the door touched or created can post the pre-correction figure", async () => {
+  const BEFORE_CENTS = 64000;          // RM 640.00, what the document said
+  const AFTER_CENTS = 99900;           // RM 999.00, what it says now
+  const s = await invoiceWithFacts({ client: A1(), totalCents: BEFORE_CENTS, tag: "nostale" });
+  const b = basis({ cents: BEFORE_CENTS });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId, b, origin: "user_direct" });
+  const before = await workRow(parked.work_id);
+  assert.equal(before.basis_origin, "user_direct",
+    "mandatory setup: the arm the first fix round left open — a human's OWN stated instruction");
+  assert.equal(before.basis.lines[0].debit_cents, BEFORE_CENTS,
+    "mandatory setup: the admitted basis carries the figure the document printed");
+
+  // The instant the correction starts, so the absence below names rows THIS correction could
+  // have admitted rather than every row on a rig that is never reset (a sibling cell posts the
+  // same fixture cents).
+  const since = (await rootQuery("select now() as t")).rows[0].t;
+  const receipt = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: "RM 999.00", observedVersion: 1,
+  });
+  assert.equal(receipt.facts_version, 2, "the human's correction still commits — that is never traded away");
+  assert.equal(receipt.superseded_work.length, 1, "…and it names the one Work it retired");
+  const entry = receipt.superseded_work[0];
+  assert.equal(entry.work_id, parked.work_id);
+  assert.equal(entry.replaced, false, "NO successor: nothing carries a figure nobody re-derived");
+  assert.equal(entry.new_work_id, null, "…and the receipt says so by id, not only by flag");
+  assert.equal(entry.not_replaced_reason, "basis_predates_correction",
+    "…with the reason a person is owed: this instruction was stated before the correction");
+
+  // THE ABSENCE, over every Work this correction could have left behind.
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where supersedes = $1", [parked.work_id])).rows[0].n,
+  0, "no successor row points back at the retired Work");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where client_id = $1 and basis_digest = $2 and created_at >= $3",
+    [A1(), before.basis_digest, since])).rows[0].n,
+  0, "…and the correction admitted NO Work carrying the retired figure");
+
+  // …AND NOT ONE OF THEM CAN POST THE STALE FIGURE. Driven, not inferred: the retired Work is the
+  // only one the door touched, and the wake door refuses it.
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: KEEPER(), client: A1() });
+  const refused = await caught(() => wakeRecordJournalEntry(cred.secret, {
+    client: A1(), work: parked.work_id, logicalOpId: parked.logical_op_id, basis: b,
+  }));
+  assert.ok(refused, "posting the pre-correction figure under the retired Work is refused");
+
+  // THE LEDGER ITSELF, which is what the ruling is ultimately about: nothing of the pre-correction
+  // figure is on the books against this document.
+  const posted = await rootQuery(
+    "select count(*)::int as n from clara.journal_lines jl"
+    + " join clara.entry_evidence_links el on el.entry_id = jl.entry_id"
+    + " where el.document_id = $1 and (jl.debit_cents = $2 or jl.credit_cents = $2)",
+    [s.documentId, BEFORE_CENTS]);
+  assert.equal(posted.rows[0].n, 0,
+    "NO journal line of the pre-correction figure is evidence-linked to the corrected document");
+  const liveRead = await rootQuery(
+    "select rg.monetary_cents from clara.document_regions rg"
+    + " join clara.document_extractions de on de.id = rg.extraction_id"
+    + " where de.document_id = $1 and rg.field_path = 'invoice.total'"
+    + " and de.superseded_by is null and de.status = 'done'"
+    + " order by de.version_n desc limit 1", [s.documentId]);
+  assert.equal(Number(liveRead.rows[0].monetary_cents), AFTER_CENTS,
+    "…while the document's own live reading really is the corrected figure");
+
+  noteLane("w885.no_stale_post: retired " + String(parked.work_id).slice(0, 8)
+    + ", replaced=" + entry.replaced + ", reason " + entry.not_replaced_reason);
 });
 
 // =============================================================================================
@@ -366,7 +480,7 @@ cell("w885.terminal_residue.ignored: a pending question left on a TERMINAL Work 
 // =============================================================================================
 // w885.feed.successor — THE CANCELLATION IS ON THE FEED, WITH ITS SUCCESSOR LINK (#840).
 // =============================================================================================
-cell("w885.feed.successor: the correction's cancellation appears on the Activity feed as one superseded row deep-linked to the Work, after the correction that caused it", async () => {
+cell("w885.feed.successor: the correction's cancellation appears on the Activity feed as exactly one row deep-linked to the Work, after the correction that caused it", async () => {
   const s = await invoiceWithFacts({ client: A1(), totalCents: 88000, tag: "feed" });
   const parked = await workParkedOnDocument({ client: A1(), document: s.documentId });
   const before = await timelineEvents(FIRM_A(), "work.cancelled");
@@ -374,16 +488,25 @@ cell("w885.feed.successor: the correction's cancellation appears on the Activity
   const receipt = await reviseFact(KEEPER(), {
     document: s.documentId, fieldPath: "invoice.total", value: "RM 899.00", observedVersion: 1,
   });
-  const successor = receipt.superseded_work[0].new_work_id;
+  assert.equal(receipt.superseded_work[0].replaced, false,
+    "mandatory setup: the correction retires and admits nothing (second fix round)");
 
-  // 1 · EXACTLY ONE EVENT, and it carries the link 0199 built the payload for.
+  // 1 · EXACTLY ONE EVENT, and it carries what 0199 built the payload for.
   const after = await timelineEvents(FIRM_A(), "work.cancelled");
   const mine = after.filter((e) => e.payload?.work === parked.work_id);
   assert.equal(mine.length, 1, "exactly one work.cancelled event for the retired Work");
   assert.equal(after.length, before.length + 1, "…and exactly one new row in the firm");
-  assert.equal(mine[0].payload.outcome, "superseded",
-    "…whose outcome is SUPERSEDED, not a bare cancellation");
-  assert.equal(mine[0].payload.superseded_by, successor, "…naming the Work that replaced it");
+  // SECOND FIX ROUND: the outcome is 0199's own `cancelled` and there is no successor to name,
+  // because the correcting door no longer admits one. WHY it was retired is on the cancellation's
+  // op key (source_corrected:<revision>:<work>) and on the correction's receipt and audit row —
+  // a derived key, not a first-class reason, which is the remainder this lane records.
+  assert.equal(mine[0].payload.outcome, "cancelled",
+    "…whose outcome is 0199's own word: nothing superseded this Work");
+  assert.equal(mine[0].payload.superseded_by, null, "…and there is no successor to name");
+  const key = (await rootQuery(
+    "select op_key from clara.op_receipts where firm_id = $1 and op_key like $2",
+    [FIRM_A(), 'source_corrected:' + receipt.revision_id + ':' + parked.work_id])).rows;
+  assert.equal(key.length, 1, "…while the cancellation's own op key records the correction that caused it");
   assert.equal(mine[0].payload.from_status, "awaiting_input",
     "…and the status the correction FOUND: the Work was waiting on the question");
   assert.equal(mine[0].actor, KEEPER(), "…attributed to the human who made the correction");
@@ -521,8 +644,12 @@ cell("w885.sibling_posted.commits: a SIBLING Work's posted entry no longer refus
   assert.equal(entry.work_id, parked.work_id);
   assert.equal(entry.replaced, false, "…not replaced");
   assert.equal(entry.new_work_id, null);
-  assert.equal(entry.not_replaced_reason, "source_already_posted",
-    "…and the reason is the restatement door's OWN typed refusal, carried through rather than swallowed");
+  // SECOND FIX ROUND: the restatement door is not consulted at all any more, so the reason is
+  // the basis one. The PROPERTY this cell protects is unchanged and now structural: a sibling's
+  // posted entry cannot refuse a bookkeeper's correction, because nothing in this path can raise
+  // that refusal.
+  assert.equal(entry.not_replaced_reason, "basis_predates_correction",
+    "…and the reason is about THIS Work's basis, never about a sibling's posting");
   const oldRow = await workRow(parked.work_id);
   assert.ok(["stopping", "cancelled"].includes(oldRow.status), "the parked Work is going away, status " + oldRow.status);
   assert.equal((await interruptionRow(parked.questionId)).status, "cancelled",

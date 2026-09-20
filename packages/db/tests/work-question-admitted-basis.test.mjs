@@ -25,9 +25,15 @@ import {
 
 const MIGRATION = "0265_work_question_admitted_basis.sql";
 const STEM = "work_question_admitted_basis$";
+// #885 [0268] recuts this SAME record once more, adding `source_corrected_at` (whether the
+// reading this question stands on has been corrected since it was asked). That is a SECOND
+// frontier above this file's own, so the key-set pin below asserts 0180's twenty-four plus
+// `basis` BELOW it and plus `source_corrected_at` as well ABOVE it -- both exact, neither a skip.
+const SUPERSEDE_STEM = "work_source_correction_supersede$";
 
 let world = null;
 let ready = false;
+let corrected = false;   // #885/0268 applied: the record carries source_corrected_at too
 
 before(async () => {
   const at = await rootQuery(
@@ -44,6 +50,8 @@ before(async () => {
     return;
   }
   ready = true;
+  corrected = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [SUPERSEDE_STEM])).rows[0].n > 0;
   world = await buildWorkWorld();
 });
 
@@ -85,17 +93,22 @@ test("w839.basis.pending get_work_question carries the admitted basis, verbatim,
     "w839.basis.pending: the digest pair is untouched by the new key");
   assert.ok(rec.expires_at && rec.created_at);
 
-  // THE EXACT KEY SET. Twenty-one keys now — 0180's twenty plus `basis` — never a twenty-second.
+  // THE EXACT KEY SET — 0180's own plus `basis`, and, above the #885 frontier, plus
+  // `source_corrected_at`. Exact on both chains: a key nobody declared is still a finding.
+  const KEYS_0265 = [
+    "answer", "answered_at", "answered_by", "answered_role", "basis", "basis_digest",
+    "client_id", "context", "created_at", "delivery_attempts", "delivery_state",
+    "expires_at", "fields", "firm_id", "question", "question_id", "question_version",
+    "reason", "source_ref", "status", "task_id", "work_basis_digest", "work_id", "work_status",
+  ];
   assert.deepEqual(
     [...Object.keys(rec)].sort(),
-    [
-      "answer", "answered_at", "answered_by", "answered_role", "basis", "basis_digest",
-      "client_id", "context", "created_at", "delivery_attempts", "delivery_state",
-      "expires_at", "fields", "firm_id", "question", "question_id", "question_version",
-      "reason", "source_ref", "status", "task_id", "work_basis_digest", "work_id", "work_status",
-    ].sort(),
-    "w839.basis.pending: the record carries exactly 0180's fields plus one new `basis` key",
+    (corrected ? [...KEYS_0265, "source_corrected_at"] : KEYS_0265).sort(),
+    "w839.basis.pending: the record carries exactly 0180's fields, plus `basis`, plus "
+    + "`source_corrected_at` once #885/0268 is applied",
   );
+  assert.equal(corrected ? rec.source_corrected_at : null, null,
+    "…and on a question whose source has NOT been corrected since it was asked, that key is null");
 });
 
 test("w839.basis.settled the answered record still carries the SAME admitted basis", async (t) => {

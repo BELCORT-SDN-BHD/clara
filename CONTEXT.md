@@ -27,8 +27,8 @@ _Avoid_: Edit, amend, correction as synonyms — a correction acts on a posted o
 <!-- #721 -->
 
 **Source-corrected work**:
-Work that a *source revision* retired. When a human corrects what a document says, every work of that firm still waiting on a question about that document — and holding no committed receipt — is restated: cancelled with the reason *source corrected* and superseded by a fresh work on the same admitted basis, which re-runs against the corrected reading. The retired question can no longer be answered; the answer door refuses it as *superseded* and names the successor.
-_Avoid_: Re-evaluation, re-assessment as synonyms — those act on recorded experience or on a posted outcome and are parked; this one retires an instruction that never posted.
+Work that a *source revision* retired. When a human corrects what a document says, every work of that firm still waiting on a question about that document — and holding no committed receipt — is cancelled inside the correcting transaction, with the reason *source corrected* carried on the correction's own receipt and on the cancellation's key. NOTHING IS RE-ADMITTED IN ITS PLACE: a basis nobody has re-derived from the corrected document is not the corrected facts, whoever first stated it, so the instruction has to be given again — a *restated work*, by a person, on the corrected reading. The retired work therefore points at no successor. Its question can no longer be answered, and neither can a question about the corrected document on a work the rule deliberately left alone (one holding a committed receipt): the answer door refuses both as *source corrected* and says when the source moved.
+_Avoid_: Re-evaluation, re-assessment as synonyms — those act on recorded experience or on a posted outcome and are parked; this one retires an instruction that never posted. Calling it a supersession: *superseded by* is what a restatement (a person's own act) writes, and a source correction writes none.
 <!-- #885 -->
 
 **Accounting plan**:
