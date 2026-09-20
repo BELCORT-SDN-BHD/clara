@@ -59,6 +59,26 @@ risk is high) → fix → recheck → integration branch (merges in lane order, 
 fresh cluster when a migration exists) → PR → `ci` → merge → hosted release → hosted-evidence
 comment and close on every ticket.
 
+## Wave 3 lanes (planned 2026-09-20 from the scan of the integrated wave-2 head)
+
+42 tickets, reserved migration numbers `0273` to `0291`. Grouped so that no function body is written in one lane and written or likely pinned in another (the wave-2 lesson: a prestate pins neighbour bodies too).
+
+| lane | worktree | theme | tickets (reserved migration) | adversarial lens |
+|---|---|---|---|---|
+| 01 | `clara-wt/635` | counterparties | #890 (none) #921 (0273) | no |
+| 02 | `clara-wt/636` | trade invoice integrity | #982 (0274) #1007 (0275) | yes |
+| 03 | `clara-wt/642` | cash presentation and governance | #958 (none) #1001 (none) #1002 (0276) | no |
+| 04 | `clara-wt/651` | fixed assets | #932 (0277) #882 (0278) #975 (0279) #978 (none) | yes |
+| 05 | `clara-wt/655` | plans core | #908 (0280) #909 (0281) #927 (0282) #928 (none) #929 (0283) | yes |
+| 06 | `clara-wt/656` | plans and journals reads | #936 (0284) #919 (0285) #986 (0286) | yes |
+| 07 | `clara-wt/657` | client and document governance | #899 (0287) #1012 (0288) #889 (0289, narrowed on the ticket) | yes |
+| 08 | `clara-wt/658` | small fixes | #857 (0290, the CHECK half) #990 (0291) #1019 (none) #1020 (none) | no |
+| 09 | `clara-wt/659` | shadcn and browser test infrastructure | #970 #989 #864 #997 #1017 (none) | no |
+| 10 | `clara-wt/660` | runtime and CI test infrastructure | #1015 #1016 #1018 #1023 #1028 (none) | no |
+| 11 | `clara-wt/int` (no database) | web tests and the Clara rail defect | #1024 #897 #1021 #1022 (none) | no |
+
+Held out: #871 (owner decision between a server-only database door and a service-key exception), #1000 (its whole scope needs the successor cut: wave 4), #944 (a blueprint statement: lands with #945 in wave 4).
+
 ## Wave 2 lanes (planned 2026-09-20, numbers reserved before the wave starts)
 
 42 tickets, 37 reserved migration numbers `0235` to `0271`, assigned in lane order then ticket order. A

@@ -83,3 +83,13 @@ out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files)
   unrelated histories") and `main` read 804 commits instead of 1779. All parents were still in the
   object store, so removing the file restored the history; a `git gc` in that state could have
   deleted it. To mimic the runner's checkout, clone into a SEPARATE directory.
+
+## Addendum for wave 3 (2026-09-20)
+
+- Every lane cluster was dropped and recreated, and every lane database was migrated from scratch
+  0001 to 0272 (267 files) and seeded, from the integrated wave-2 head. Lane branches are
+  `riders/w3-lane<k>`, cut from that head (the prompt names the commit).
+- Lane 11 works in `C:\Users\zhant\Desktop\clara-wt\int` and has NO database of its own: it is a
+  web-only lane (Playwright triple 3600 / 3601 / 3602). A lane-11 ticket that turns out to need a
+  database stops and says so.
+- Reserved migration numbers for wave 3 start at `0273`; your prompt names yours.
