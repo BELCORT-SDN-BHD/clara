@@ -118,10 +118,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
-import { buildPreviousVersionImage, removeScratchTree } from "./scratch-image.mjs";
+import { buildPreviousVersionImage, OVERLAP_MIN_CORES, removeScratchTree, shouldOverlapSecondBuild } from "./scratch-image.mjs";
 import { RUNTIME_SOURCE_ROOTS, assertBuiltBundleFresh } from "./built-bundle-gate.mjs";
 import {
   bodyIdentifierOf,
@@ -571,10 +572,27 @@ async function main() {
   // fails in the background still fails the drill, through the same error-dump-and-rethrow path
   // every other failure in this file takes, and Node never prints a spurious "unhandled rejection"
   // for a rejection this file always intended to read.
-  const chatBuildPromise = chatSupported
+  //
+  // #850 fix round 2 (L06-SPEC-R2-03) — THE GUARD IS A DECISION, NOT A COMMENT. This process's own
+  // reported core count decides whether the overlap runs at all: `shouldOverlapSecondBuild`
+  // (scratch-image.mjs) refuses below `OVERLAP_MIN_CORES`, matching the reviewer's own contention
+  // measurement (an overlapped build starved to 7x its idle time, and FAILED once on a pollTask
+  // timeout, under just one concurrent `pnpm typecheck`) on the 2-4-core class GitHub-hosted
+  // runners actually report. Below the threshold, `chatBuildPromise` stays `null` and the chatTurn
+  // section below builds it there instead — sequentially, after claraWork's own leg has finished,
+  // exactly the pre-#850 shape, safe but without the overlap's wall-clock win.
+  const canOverlap = shouldOverlapSecondBuild(availableParallelism());
+  const chatBuildPromise = chatSupported && canOverlap
     ? buildPreviousVersionImage({ name: "previous-chat", className: "chatTurn", log: (m) => console.log(m) })
     : null;
   if (chatBuildPromise) chatBuildPromise.catch(() => {});
+  if (chatSupported && !canOverlap) {
+    console.log(
+      `[tb-e2e] #850: availableParallelism()=${availableParallelism()} is below the overlap threshold `
+        + `(${OVERLAP_MIN_CORES}) — building the chatTurn scratch image SEQUENTIALLY, after the `
+        + `claraWork leg, per L06-SPEC-R2-03's contention finding`,
+    );
+  }
   // THE BUNDLE IDS ARE DERIVED TOO (wave-3, the first real re-run of this drill). The pair above
   // was always derived, but three `"clara-work/v1"` / two `"clara-work/v2"` LITERALS survived in
   // the assertions below, and the file's own header claimed the whole drill needed no edit at a
@@ -1036,7 +1054,13 @@ async function main() {
         // took longer than this scratch build, this await resolves immediately against an
         // already-finished image, and the SECOND `nitro build` is paid concurrently with the
         // claraWork leg's wall clock instead of after it.
-        const builtChat = await chatBuildPromise;
+        //
+        // #850 fix round 2 (L06-SPEC-R2-03) — OR BUILDING RIGHT HERE: `chatBuildPromise` is `null`
+        // when `canOverlap` was false (thin core budget), so this is where the pre-#850 sequential
+        // build actually happens — after claraWork's own leg, never overlapped with it.
+        const builtChat = chatBuildPromise
+          ? await chatBuildPromise
+          : await buildPreviousVersionImage({ name: "previous-chat", className: "chatTurn", log: (m) => console.log(m) });
         const pairC = builtChat.pair;
         console.log(
           `[tb-e2e] chatTurn pair derived from registry.ts: ${pairC.previous} (build A2) -> ${pairC.pinned} (build B)`

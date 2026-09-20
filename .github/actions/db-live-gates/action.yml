@@ -392,59 +392,39 @@ runs:
         # #850 — THE 78.0s / 124s FIGURES BELOW PREDATE #794's SECOND LEG, so they understate the
         # step's cost as it stands today: #794 added a chatTurn leg that stages and builds a SECOND
         # scratch image (<repo>/.scratch/two-build/previous-chat) the same way, to prove the same
-        # cutover law on the lane that has no Work row to resume through. Verified at `65fde7f3`
-        # (#850's own triage) that each scratch build differs from this tree's own build by only a
-        # registry.ts rewrite and one deleted body file, so a second leg means a second full
+        # cutover law on the lane that has no Work row to resume through — a second full
         # stage-and-build, paid in full, IN ADDITION to the figures below.
         #
-        # #850's FIX: the chatTurn scratch build is now started in the BACKGROUND the moment the
-        # claraWork scratch build finishes (tests/two-build-cutover-e2e.mjs, `chatBuildPromise`),
-        # overlapped with the claraWork leg's own exercise — spawn, admit, stop, spawn again,
-        # resume, preflight — which is HTTP/DB-bound, not CPU-bound, for its own wall clock. The
-        # chatTurn leg then AWAITS that already-in-flight build instead of starting it fresh, so the
-        # step pays for two scratch builds' COMPUTE but, on any run where the claraWork leg's own
-        # exercise takes longer than one scratch build, close to only ONE scratch build's WALL
-        # CLOCK. Neither leg's proof moved: each scratch image is still staged, rewritten and built
-        # exactly as before, and each is still independently scanned against build B's roster for
-        # the "differs by exactly one body" invariant (tests/two-build-cutover-e2e.mjs `bodiesA` /
-        # `bodiesA2`) before anything is spawned.
-        #
-        # THE RISK THIS TRADE CARRIES (fix round 1, L06-850-C): the local numbers below are ALL
-        # from a 24-core rig, where a background nitro build is close to free — which is why the
-        # mechanism looks clean here. GitHub-hosted runners have 2-4 cores, where the background
-        # build competes directly with the claraWork leg's own two spawned runtime images and its
-        # timing-sensitive polls (`FETCH_TIMEOUT_MS = 15000`, two-build-cutover-e2e.mjs:163). The
-        # lane's own review measured this directly (docs/plan/active/riders-2026-09-20/reports/
-        # wave1-lane06-review-spec.json, finding L06-850-C): host idle, the overlapped build took
-        # 5.1s; with one concurrent `pnpm typecheck` running it took 36.9s — 7x — and that run
-        # FAILED with a `pollTask` timeout inside the claraWork leg. This overlap trades CPU
-        # concurrency for wall clock, and that trade is UNMEASURED on a 2-4 core runner. Read the
-        # first CI run of this step for BOTH the step's own wall clock AND any new pollTask timeout
-        # in the claraWork leg — a timeout there, not just a slow step, is this trade's failure
-        # mode. No guard is added here; a cheap one, if the orchestrator wants it, is starting the
-        # background build only when `os.availableParallelism()` is comfortably above the number of
-        # images the leg spawns — left as an explicit decision because GitHub-hosted runners are
-        # exactly the low-parallelism case where such a guard would disable the fix on the platform
-        # it targets.
+        # THE FIX, AND THE GUARD ON IT (tests/scratch-image.mjs `shouldOverlapSecondBuild`,
+        # `OVERLAP_MIN_CORES = 4`): the chatTurn scratch build starts in the BACKGROUND the moment
+        # the claraWork scratch build finishes, overlapped with the claraWork leg's own HTTP/DB-bound
+        # exercise (spawn, admit, stop, spawn again, resume, preflight) — but ONLY when
+        # `os.availableParallelism()` is at or above that threshold. Below it, the chatTurn build
+        # runs SEQUENTIALLY, after the claraWork leg finishes, exactly as it did before this ticket —
+        # slower, but never competing with that leg's own two spawned runtime images and its
+        # timing-sensitive polls (`FETCH_TIMEOUT_MS = 15000`, two-build-cutover-e2e.mjs:163) for a
+        # core neither can spare. The threshold exists because a contention test on this lane's own
+        # 24-core rig — one concurrent `pnpm typecheck`, standing in for a thin core budget — measured
+        # the OVERLAPPED build going from an idle 5.1s to 36.9s (7x) and once FAILING on a `pollTask`
+        # timeout inside the claraWork leg: the trade loses, not wins, once cores are scarce.
+        # GitHub-hosted standard runners report 2 cores, below the threshold, so this step is
+        # expected to take the SEQUENTIAL path there until measured otherwise — read the first CI
+        # run's own log line (`[tb-e2e] #850: availableParallelism()=…`) for which path it took, and
+        # the step's own wall clock either way. Neither leg's own proof moved: each scratch image is
+        # still staged, rewritten and built exactly as before, and each is still independently
+        # scanned against build B's roster for the "differs by exactly one body" invariant
+        # (tests/two-build-cutover-e2e.mjs `bodiesA` / `bodiesA2`) before anything is spawned.
         #
         # MEASURED LOCALLY (Windows host, packages/runtime/tests/two-build-cutover-e2e.mjs run
-        # standalone against a bootstrapped clara_rt_test, RELAY_TEST_MODE=1 — this lane's own rig
-        # has no CI runner access, so this is NOT the CI figure the two paragraphs above call for):
-        # sequential (pre-#850) 36.6s–42.5s whole-file wall clock across two runs, each scratch
-        # build 5.0s–6.2s; overlapped (post-#850) 32.3s–34.8s across two runs, same two scratch
-        # builds, same assertions, all passing. The ~5s freed per run is this rig's own single
-        # scratch-build cost, hidden behind the claraWork leg's own exercise rather than paid again
-        # after it — the qualitative effect AC3 asks for. NO CI SCRATCH-BUILD COST HAS EVER BEEN
-        # RECORDED (fix round 1, L06-850-A: the 78.0s/124s pair below is a WINDOWS-HOST measurement
-        # from the #637 fix round, not a CI one — this paragraph previously mislabeled it as "the
-        # 78.0s CI measurement", contradicted by the very next paragraph's own "Windows-host
-        # measurements"). So neither the absolute seconds nor a ratio against this rig's 5-6s can be
-        # reasoned about yet: this rig's own number is over an order of magnitude faster than the
-        # Windows-host figure below, but that comparison is two WINDOWS HOSTS, not this rig vs CI.
-        # The next CI run of this step is what proves the CI wall clock (both legs) that AC1 asks
-        # for; update this comment with that run's numbers once it exists — a genuine CI figure,
-        # not a relabeled Windows one, the way the #637 fix-round review superseded its own
-        # 82.6s/3m25s with a re-measurement of the SAME kind.
+        # standalone against a bootstrapped clara_rt_test, RELAY_TEST_MODE=1 — this rig has no CI
+        # runner access, so this is NOT the CI figure AC1 asks for): sequential (pre-#850)
+        # 36.6s–42.5s whole-file wall clock across two runs, each scratch build 5.0s–6.2s; overlapped
+        # (post-#850, on THIS 24-core rig, where the guard allows it) 32.3s–34.8s across two runs,
+        # same two scratch builds, same assertions, all passing. AC1 (the step's own before/after
+        # wall clock, measured on CI) REMAINS UNMET: the 78.0s/124s pair below is a Windows-host
+        # measurement from the #637 fix round, not a CI one, and no CI figure for this step — taking
+        # either path — has ever been recorded. Update this comment with the first CI run's own
+        # numbers once they exist.
         #
         # 78.0s for the scratch build and 124s for the whole file — Windows-host measurements,
         # re-measured at the #637 fix-round closure review (superseding this comment's earlier
