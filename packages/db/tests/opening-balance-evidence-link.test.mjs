@@ -261,8 +261,8 @@ test("obw.siblings_ok a multi-item seed on ONE tie document still approves every
 // (0213), which takes `clara._lock_document_binding` FIRST regardless of which approver's UPDATE
 // tripped it. So YES: the correction door shares the exact lock path the seed door does, and the
 // double-posting hole L04B-SPEC-01 measures on the seed door is architecturally reachable from the
-// correction door too — untested here, and worth naming explicitly in the residual issue this
-// ticket's report asks the integrator to file (L04B-SPEC-01's required_fix).
+// correction door too — untested here, and named explicitly in GitHub issue #1014
+// (L04B-SPEC-01's required_fix), the residual this ticket's report asked the integrator to file.
 
 /** Asserts the loser's refusal against `expectedShape`, one of the two shapes #854's brief
  *  names: `"CLR13"` (the wall's own `source_already_posted`, a statement-time refusal, same as

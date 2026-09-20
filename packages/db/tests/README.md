@@ -208,12 +208,13 @@ scope, since fixing it needs either a new migration (a wave-1 lane may not cut o
 `clara._lock_document_binding`/`clara.approve_opening_seed`, both named out of scope in the ticket.
 `obw.race.evidence_then_opening` asserts the CURRENT (double-posting) outcome as a regression
 sentinel; a future repair updates that one assertion, deliberately, rather than the test going red
-by surprise. **Not filed as a GitHub issue** (L04-S05: this correction — the fix-round worker that
-resolved this document may not write to GitHub either): recorded as a follow-up in
+by surprise. **Filed as GitHub issue #1014** ("Opening-balance evidence wall: a concurrent evidence
+attachment and opening approval can both commit", state OPEN, labels `bug` + `ready-for-agent`):
+recorded as a follow-up in
 `docs/plan/active/riders-2026-09-20/reports/wave1-lane04-final.md` and
 `docs/plan/active/riders-2026-09-20/reports/wave1-lane04-fixround-1.md`; repro is
-`obw.race.evidence_then_opening` verbatim. Whoever integrates this branch should file the issue
-before merge and replace this sentence with its number.
+`obw.race.evidence_then_opening` verbatim, and the issue body also names the correction door's
+shared exposure (L04B-SPEC-07, below).
 
 **AC2's "exactly one", reinterpreted (L04B-SPEC-04):** the brief's literal wording is "asserts
 exactly one". Neither race cell pins a bare `1` — `obw.race.opening_then_evidence` asserts
