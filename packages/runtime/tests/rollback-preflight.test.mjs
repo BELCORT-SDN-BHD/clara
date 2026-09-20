@@ -179,6 +179,38 @@ const retireDocumentTask = (id) =>
     [id],
   );
 
+/**
+ * #1015 — seed `n` UNRELATED, live `clara.document_processing_tasks` rows, each its OWN firm and
+ * (cycled) lane, none of them a document the caller under test will ever name. This is the exact
+ * noise the ticket reproduces: rows a task-id/work-id scope has no way to correspond to, because
+ * `clara.document_processing_tasks` carries no `work_id`/`task_id` column at all — the two tables
+ * share no key a scope could join on. Returns the planted ids for `retireNoiseDocumentTasks`.
+ */
+async function plantNoiseDocumentTasks(n) {
+  const lanes = ["ocr", "invoice_facts", "statement_facts", "llm_witness", "structured_parse"];
+  const ids = [];
+  for (let i = 0; i < n; i += 1) {
+    const { owner, firm } = await rig.buildFirm(`pf-1015-noise-${i}`);
+    const sha = rig.sha(`pf-1015-noise-${i}-${randomUUID()}`);
+    const document = (
+      await rig.rootQuery("select clara._seed_verified_document($1,$2,$3,$4,$5,$6,$7,$8,1) as r", [
+        firm, null, sha, `pf-1015-noise-${i}.pdf`, "application/pdf", 2048, `firms/${firm}/docs/${sha}.pdf`, owner,
+      ])
+    ).rows[0].r.document_id;
+    const taskId = (
+      await rig.rootQuery(
+        `insert into clara.document_processing_tasks (firm_id, document_id, engine_id, version_n, lane, status)
+         values ($1,$2,'clara-fixture:v1',1,$3,'queued') returning id`,
+        [firm, document, lanes[i % lanes.length]],
+      )
+    ).rows[0].id;
+    ids.push(taskId);
+  }
+  return ids;
+}
+
+const retireNoiseDocumentTasks = (ids) => Promise.all(ids.map((id) => retireDocumentTask(id)));
+
 // ---------------------------------------------------------------------------
 // Pure derivations — no database needed, and they are what everything else rests on.
 // ---------------------------------------------------------------------------
@@ -543,6 +575,57 @@ test("637.pf: B3 — two sources sharing one task_kind count the task ONCE, and 
     assert.equal(allowed.scoped.verdict, "allowed");
   } finally {
     await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [taskId]);
+  }
+});
+
+test("637.pf: #1015 — a census scoped by task ids ignores unrelated document-processing tasks in other lanes and firms", { skip: SKIP }, async () => {
+  // THE DEFECT, reproduced deterministically. `clara.document_processing_tasks` carries no
+  // work_id/task_id column at all, so a caller scoping the agent-task half by `taskIds` has no
+  // correspondence the document half could filter by. Before the fix, an absent `documentTaskIds`
+  // meant "no filter" for that half — so it returned EVERY live row in the table, from ANY firm,
+  // ANY lane, whatever the caller actually scoped by.
+  const receipt = await admitUnboundWork("pf-1015-scope");
+  const noise = await plantNoiseDocumentTasks(3);
+  try {
+    const out = await censusUnboundTasks(query, { taskIds: [receipt.task_id] });
+    assert.equal(
+      out.tasks.length, 1,
+      `a task-id scope must not pull in unrelated document-processing tasks; got ${JSON.stringify(out.tasks)}`,
+    );
+    assert.equal(out.tasks[0].table, "clara.agent_tasks");
+    assert.equal(out.tasks[0].id, receipt.task_id, "the ONE row is the caller's own scoped task, not a noise row");
+    assert.equal(out.measured, true, "…and it still says it LOOKED — B1's lesson holds for the narrowed half too");
+
+    // The same shape for a WORK-shaped scope: `accounting_work`'s task is reached by work id, and
+    // the document half is exactly as unrelated to a work id as it is to a task id.
+    const byWork = await censusUnboundTasks(query, { workIds: [receipt.work_id] });
+    assert.equal(byWork.tasks.length, 1, `a work-id scope must not pull in unrelated document-processing tasks; got ${JSON.stringify(byWork.tasks)}`);
+    assert.equal(byWork.tasks[0].id, receipt.task_id);
+  } finally {
+    await cancelTask(receipt.task_id);
+    await retireNoiseDocumentTasks(noise);
+  }
+});
+
+test("637.pf: #1015 — an explicit ask for the FULL document picture (documentTaskIds: null) is honoured even alongside a task-id scope", { skip: SKIP }, async () => {
+  // THE OTHER HALF OF THE CONTRACT. "No document scope requested" (the key absent, the cell above)
+  // and "explicitly requesting the unscoped full census" (the key present, even as `null`) must be
+  // DISTINGUISHABLE and must behave differently — the Agent Brief's own words. A caller that wants
+  // the whole document-processing picture alongside an unrelated task-id scope can still ask for it,
+  // by naming the key at all.
+  const noise = await plantNoiseDocumentTasks(2);
+  try {
+    const out = await censusUnboundTasks(query, { taskIds: [randomUUID()], documentTaskIds: null });
+    assert.equal(out.tasks.length, noise.length, `an explicit documentTaskIds key (even null) asks for the FULL picture; got ${JSON.stringify(out.tasks)}`);
+    for (const id of noise) {
+      assert.ok(out.tasks.some((t) => t.id === id), `noise row ${id} must be present when the document scope was explicitly asked for in full`);
+    }
+    // …and a fully OPEN call (no scope at all) is the same ask, made the other way — the shape
+    // preflight()'s own GLOBAL census already relies on, unaffected by this fix.
+    const open = await censusUnboundTasks(query, {});
+    assert.ok(noise.every((id) => open.tasks.some((t) => t.id === id)), "an unscoped call still sees the full document picture");
+  } finally {
+    await retireNoiseDocumentTasks(noise);
   }
 });
 

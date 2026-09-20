@@ -402,6 +402,12 @@ export async function censusUnboundTasks(query, scope = {}) {
     });
   }
 
+  // #1015 — no filter is NOT the same question as no correspondence. `clara.document_processing_
+  // tasks` carries no work_id/task_id column at all, so a caller who scoped the AGENT half by
+  // taskIds/workIds has given the document half nothing it could legitimately match against —
+  // the honest answer for that half is NONE, not EVERYTHING.
+  const agentScoped = scope.workIds != null || scope.taskIds != null;
+  const documentTaskIds = scope.documentTaskIds ?? (agentScoped ? [] : null);
   const docs = await query(
     `select id, lane, status
        from clara.document_processing_tasks
@@ -409,7 +415,7 @@ export async function censusUnboundTasks(query, scope = {}) {
         and workflow_run_id is null
         and ($2::uuid[] is null or id = any($2::uuid[]))
       order by created_at`,
-    [[...LIVE_DOCUMENT_TASK_STATUSES], scope.documentTaskIds ?? null],
+    [[...LIVE_DOCUMENT_TASK_STATUSES], documentTaskIds],
   );
   for (const row of docs.rows) {
     const resolved = resolveDocumentLaneClass(String(row.lane));
