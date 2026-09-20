@@ -144,6 +144,20 @@ before(async () => {
       + "expected here.",
     );
   }
+  // â€¦AND THE SAME RULE FOR #968's OWN FRONTIER (fix round, L05-SPEC-03 / ADV-W2L05-04). The
+  // per-cell `gateReissue` below is the slice-frontier SKIP, which is right for a sweep and wrong
+  // for acceptance: without this hook, a chain missing 0253 reported four green skips and nothing
+  // anywhere failed, so #968's whole evidence base could disappear silently at integration. The
+  // stem's own gate module (tests/batch-cancel-reissue-preintegration-gate.mjs) sets the escape,
+  // exactly as 0252's and 0254's do for theirs.
+  if (!(await reissueReady()) && process.env.CLARA_ALLOW_MISSING_BATCH_CANCEL_REISSUE !== "1") {
+    throw new Error(
+      `#968: no migration matching /${REISSUE_STEM}/ is applied to this database, and `
+      + "CLARA_ALLOW_MISSING_BATCH_CANCEL_REISSUE is not set. Apply "
+      + "0253_batch_cancel_reissue.sql, or preload "
+      + "tests/batch-cancel-reissue-preintegration-gate.mjs if a chain below it is expected here.",
+    );
+  }
   world = await buildWorkWorld();
 });
 after(async () => {
@@ -1317,6 +1331,16 @@ test("p968.reissue.blocked_canceller_active_at_another_firm_is_still_replaced â€
     assert.equal(reissued.cancel_op_key, newKey);
     assert.equal((await getBatch(ALICE(), batch.batch_id)).cancel_blocked, null,
       "the block clears, so the two surfaces agree about the same batch");
+
+    // LEAVE THE WORLD SETTLED. `p636.batch.sweep_settles` reads the sweep's 20-row worklist,
+    // ordered by cancel_requested_at, and this file's world is SHARED and long-lived: a cell that
+    // walks away from a permanently-`cancelling` parent taxes that worklist on every future run.
+    // This one finishes what it started, through the same doors the belt would use.
+    for (const child of reissued.children) {
+      await cancelWork(child.work_id, reissued.cancel_requested_by,
+        `${reissued.cancel_op_key}:${child.work_id}`);
+    }
+    await settleWorkRun({ task: m.task_id, outcome: "cancelled" });
   } finally {
     await rootQuery("delete from clara.firm_memberships where user_id=$1 and firm_id=$2",
       [BOB(), world.firms.B]);
