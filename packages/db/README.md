@@ -959,6 +959,21 @@ and no wake lane holds EXECUTE on any of the three pack-shaped reads, with #783 
 failure message. "One register, one pack, one answer" is proven BEHAVIOURALLY instead, by
 `p658.retrieve.shadow_parity` across two personas.
 
+**#991 restates that rule as a CLASS, with its own census.** The owner's ruling (2026-09-20, issue
+#991) reads #783 as covering every *assembled pack-shaped knowledge read* — not only the three
+functions it happened to name. `tests/pack-shaped-knowledge-read-census.test.mjs` holds the class as
+DATA (`PACK_SHAPED_KNOWLEDGE_READS`, seeded with `get_knowledge_pack`, `retrieve_knowledge`,
+`read_knowledge_record_for` and `read_knowledge_history_for`) and walks it against every `clara%`
+role the LIVE catalog reports — not a hand list of eight — so a fifth pack-shaped read is a new
+array entry, never a new assertion, and a role born in a migration written after #991 is caught the
+same as one of the original eight. `get_context_pack` stays outside the class on purpose: it is
+granted to `clara_authenticated` and `clara_agent_ro` by design (0005:1137) because it is a
+different door's assembled read, not a knowledge pack, and the file's own CONTROL cell (`pkc.4`)
+proves that exclusion is curation — run through the identical detector, `get_context_pack`'s grants
+DO trip it — rather than the detector missing it. The blueprint wording for the rule itself
+(`.out-of-scope/human-read-of-knowledge-pack.md`, referenced above) is left as #783's; #991's
+acceptance keeps that drift under #683, moved only in a Wayfinder or to-spec pass.
+
 **The seventh door does not breach that, and its own header says why.**
 `list_work_knowledge_reads_for_record` IS granted to `clara_authenticated` because it returns READ
 METADATA — which Work, at which `knowledge_version` and `as_of`, under which `purpose`, with which
