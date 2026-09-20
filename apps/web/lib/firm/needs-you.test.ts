@@ -50,6 +50,7 @@ function row(overrides: Partial<ReviewQueueRow> = {}): ReviewQueueRow {
     client_name: null,
     batch_ids: null,
     open_proposal_count: null,
+    authority_id: null,
     ...overrides,
   };
 }

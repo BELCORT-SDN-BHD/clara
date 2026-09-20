@@ -25,6 +25,9 @@ test("each row kind opens the tab that owns its verbs", () => {
   assert.equal(needsYouRowHref(row("lint_finding")), `/clients/${CLIENT}/journals`);
   assert.equal(needsYouRowHref(row("fixed_asset_incomplete")), `/clients/${CLIENT}/registers`);
   assert.equal(needsYouRowHref(row("staff_advance_incomplete")), `/clients/${CLIENT}/registers`);
+  // #974: a proposed depreciation authority is signed or withdrawn on the SAME register tab
+  // fixed_asset_incomplete/staff_advance_incomplete already open.
+  assert.equal(needsYouRowHref(row("depreciation_authority_pending")), `/clients/${CLIENT}/registers`);
 });
 
 test("a row with no owning tab keeps the workspace root, and SAYS it is the root", () => {

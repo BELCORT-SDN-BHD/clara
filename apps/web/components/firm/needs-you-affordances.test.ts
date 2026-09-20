@@ -90,3 +90,12 @@ test("getNeedsYouAffordance('draft') returns null (a KNOWN kind with no inline a
   assert.equal(getNeedsYouAffordance("draft"), null);
   assert.notEqual(getNeedsYouAffordance("draft"), undefined);
 });
+
+// #974 (0260, riders wave 2 lane 07): the eleventh row_kind, by name — the same F8
+// discipline as every case above. Same posture as `draft`: a KNOWN kind with NO inline act
+// (sign/withdraw stay admin+ acts on the FA register's DepreciationAuthorityPanel), never
+// undefined.
+test("getNeedsYouAffordance('depreciation_authority_pending') returns null (a KNOWN kind with no inline act), never undefined", () => {
+  assert.equal(getNeedsYouAffordance("depreciation_authority_pending"), null);
+  assert.notEqual(getNeedsYouAffordance("depreciation_authority_pending"), undefined);
+});

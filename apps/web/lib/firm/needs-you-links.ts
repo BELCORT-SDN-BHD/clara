@@ -84,6 +84,10 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // stays the register tab and `needsYouRowHref` narrows it to the detail below.
   fixed_asset_incomplete: "/registers",
   staff_advance_incomplete: "/registers",
+  // #974 (0260): a proposed depreciation authority is signed or withdrawn on the fixed
+  // assets register tab, where DepreciationAuthorityPanel already lives beside the asset
+  // table (#651's own map: fa-depreciation-runs-panel.tsx sits under it).
+  depreciation_authority_pending: "/registers",
 });
 
 /**

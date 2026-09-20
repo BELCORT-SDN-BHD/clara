@@ -233,6 +233,7 @@
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
       "seeding_proposal": "Seeding proposals awaiting review",
       "work_question": "Clara is waiting on an answer",
+      "depreciation_authority_pending": "Depreciation authority awaiting signature",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
@@ -244,7 +245,8 @@
       "compliance_watch": "Open the tax tab",
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
-      "staff_advance_incomplete": "Open the registers tab"
+      "staff_advance_incomplete": "Open the registers tab",
+      "depreciation_authority_pending": "Open the registers tab"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",

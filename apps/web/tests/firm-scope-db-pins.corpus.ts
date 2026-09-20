@@ -198,4 +198,14 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "ed995a59f88e4369dc02c654ea1ebb2dcdfc7f7e3bec4dedbdd802acb4ccec25",
     },
   ],
+  // #974 [0260] (riders wave 2, lane 07) — the eleventh Needs-you row kind, the same
+  // 0146/0168/0180 splice family: ONE pg_get_functiondef splice of the SAME queue function.
+  [
+    "0260_depreciation_authority_pending_rowkind.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with one added CTE (authority_rows), one union arm and one row-json builder gate (authority_id, the asset_id/advance_id case-when idiom). The block emits no view definition at all, so neither P4 scope view can be a target, and its own postcheck re-derives every one of the ten pre-existing row-kind markers at their prestate counts. Same family as 0146's, 0168's and 0180's splices of the same queue function. The file's separate tail (a second do-block) runs a behavioural probe through the real propose/retire doors inside a forced-rollback subtransaction — no dynamic SQL of its own, just direct calls to already-reviewed functions.",
+      sha256: "d84659c80b4aee33f46038660ee97e2f322a7e6861cdc5874ebfb79507cde81f",
+    },
+  ],
 ]);

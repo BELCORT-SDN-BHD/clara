@@ -113,6 +113,13 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // Work is parked on. The affordance EXPANDS the same form the Work detail and
     // the Clara rail render — see ./work-question-affordance.tsx's own header.
     work_question: WorkQuestionAffordance,
+    // #974 (0260, riders wave 2 lane 07): NO inline act, same posture as `draft` above —
+    // sign/withdraw are admin+ acts (clara.sign_depreciation_authority /
+    // clara.retire_depreciation_authority) on the fixed assets register's
+    // DepreciationAuthorityPanel; this ticket's own out-of-scope line rules out touching
+    // how an authority is proposed, signed or withdrawn. needs-you-links.ts's row link (to
+    // `/registers`) is the whole affordance.
+    depreciation_authority_pending: null,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 
