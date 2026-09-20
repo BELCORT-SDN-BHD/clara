@@ -24,6 +24,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beginDocumentIntake, intakeLimitRefusal, mapIntakeError } from "../lib/intake.mjs";
+import { beginIntakeInBatch } from "../lib/intake-batches.mjs";
 import { readIntakeMeta } from "../lib/spool.mjs";
 
 const ADMITTED_INTAKE = "11111111-1111-4111-8111-111111111111";
@@ -131,4 +132,111 @@ test("p965.runtime.uploader_answer_unchanged — the refusal's wire answer is by
     "status, code and message are all unchanged — the person uploading cannot tell the two apart");
   assert.deepEqual(after, { status: 429, code: "limit", message: "intake limit reached" },
     "…and that answer is still the shipped 429 `intake limit reached`");
+});
+
+// ---------------------------------------------------------------------------------------------
+// THE BATCH CALLER. The Agent Brief's third key interface: "The batch-member capacity belt does
+// not pick this up for free: it observes a failure-reason transition on an intake that ALREADY
+// exists, so a record BORN refused does not move it. If the refused file was uploaded into an open
+// batch, the member's capacity wait must land through the governed member-dependency path."
+//
+// It does, and it has to, for a second reason the belt cannot help with either: `beginIntakeInBatch`
+// opens an EXPLICIT transaction so the begin and the attach commit together, and the pre-#965 code
+// answered every failure with `rollback` — which would now throw away the very record this ticket
+// exists to keep.
+// ---------------------------------------------------------------------------------------------
+
+const BATCH = "66666666-6666-4666-8666-666666666666";
+const MEMBER = "77777777-7777-4777-8777-777777777777";
+
+/** A pg error exactly as node-postgres shapes one: SQLSTATE on `.code`, detail as a JSON STRING. */
+function pgError(code, message, detail = null) {
+  const err = new Error(message);
+  err.code = code;
+  if (detail) err.detail = JSON.stringify(detail);
+  return err;
+}
+
+/** A stub connection recording the STATEMENT HEADS it sees, answering each door from `answer`. */
+function txnClient(answer) {
+  const sqls = [];
+  return {
+    sqls,
+    query: async (sql) => {
+      const text = String(sql);
+      sqls.push(text.startsWith("select clara.") ? text.slice(13).split("(")[0] : text.trim());
+      return { rows: [{ result: answer(text) }] };
+    },
+  };
+}
+
+const refusedBegin = async () => Object.freeze({
+  refused: true, intake_id: REFUSED_INTAKE, status: "failed", failure_code: "limit",
+  ceiling: "documents", firm_id: FIRM, filename: "p965.pdf",
+  refused_at: "2026-09-20T04:00:00.000Z", reason: "document daily limit reached (docs)",
+});
+
+test("p965.runtime.refused_in_batch_is_a_waiting_member — the record COMMITS and the wait lands through the governed door", async () => {
+  const cleaned = [];
+  const client = txnClient((sql) => {
+    if (sql.includes("attach_intake_to_batch")) return { member_id: MEMBER, batch_id: BATCH };
+    if (sql.includes("set_intake_batch_member_dependency")) {
+      return { member_id: MEMBER, dependency: "awaiting_capacity" };
+    }
+    return {};
+  });
+
+  const out = await beginIntakeInBatch({
+    client,
+    principal: { sub: ALICE, firmId: FIRM },
+    input: INPUT,
+    batchId: BATCH,
+    opKey: "k",
+    begin: refusedBegin,
+    cleanup: async (id) => { cleaned.push(id); },
+  });
+
+  assert.equal(out.refused, true, "the refusal is handed up as an OUTCOME, exactly as the non-batch path does");
+  assert.equal(out.intake_id, REFUSED_INTAKE);
+  assert.equal(out.batch_id, BATCH);
+  assert.equal(out.member_id, MEMBER, "a refused file IS a member — the batch read never shows a silent absence");
+  assert.equal(out.dependency, "awaiting_capacity", "…and its wait is explicit");
+
+  assert.ok(client.sqls.includes("commit"), "the committed refusal record SURVIVES — this is the whole ticket");
+  assert.ok(!client.sqls.includes("rollback"),
+    "…and is never rolled back, which is what the pre-#965 code did with every failure");
+  assert.ok(client.sqls.includes("attach_intake_to_batch"), "the member is created through the governed attach door");
+  assert.ok(client.sqls.includes("set_intake_batch_member_dependency"),
+    "…and the capacity wait lands through the GOVERNED member-dependency door, never by touching the row");
+  assert.deepEqual(cleaned, [],
+    "no sidecar was written for a refused begin, so there is none to drop");
+});
+
+test("p965.runtime.refused_in_batch_keeps_the_record_when_the_batch_refuses — a closed batch loses the member, never the record", async () => {
+  const client = txnClient((sql) => {
+    if (sql.includes("attach_intake_to_batch")) {
+      throw pgError("CLR13", "this intake batch is no longer open", { reason: "batch_not_open", state: "cancelling" });
+    }
+    return {};
+  });
+
+  const out = await beginIntakeInBatch({
+    client,
+    principal: { sub: ALICE, firmId: FIRM },
+    input: INPUT,
+    batchId: BATCH,
+    opKey: "k",
+    begin: refusedBegin,
+  });
+
+  assert.equal(out.refused, true);
+  assert.equal(out.member_id, null, "the refused file joined no batch…");
+  assert.equal(out.dependency, null, "…so there is no member to declare a dependency on");
+  assert.ok(client.sqls.some((s) => s.startsWith("savepoint")),
+    "a SAVEPOINT guards the attach — a refused door call aborts the transaction, and `commit` on an "
+    + "aborted transaction is a ROLLBACK that would take the refusal record with it");
+  assert.ok(client.sqls.some((s) => s.startsWith("rollback to savepoint")),
+    "…and the abort is unwound to it, never past it");
+  assert.ok(client.sqls.includes("commit"), "the refusal record is still COMMITTED");
+  assert.ok(!client.sqls.includes("rollback"), "…never rolled back");
 });
