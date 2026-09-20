@@ -382,6 +382,7 @@ lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/firm/activity.test.ts
 lib/firm/capabilities.test.ts
+lib/firm/capacity-doors.test.ts
 lib/firm/commercial-format.test.ts
 lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
