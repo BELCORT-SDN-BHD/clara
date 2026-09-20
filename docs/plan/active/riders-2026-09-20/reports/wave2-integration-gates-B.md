@@ -193,5 +193,158 @@ remaining entries are all git-ignored: `apps/web/.next/**` (build output), `apps
   `document-detail-live-refresh.test.tsx` — flagged as a candidate follow-up, not applied (behavior-
   adjacent test change, outside this gate's minimal-fix mandate for a (b)-classified red).
 
-Final worktree head: `0968b5287e82657dbb818dce1437d24c43038a17`. Working tree clean (only
-git-ignored build/e2e artefacts present).
+Final worktree head (before lane 09): `0968b5287e82657dbb818dce1437d24c43038a17`. Working tree clean
+(only git-ignored build/e2e artefacts present).
+
+---
+
+## With lane 09
+
+Coordinator instruction: lane 09 landed (`merge: riders wave 2 lane 09`, tickets #839, #880, #885,
+#905 — the Work list, the Work question card/panel, the Clara rail's restate control, the revision
+dialog's refusals, the home board's recent-success drilldown; also edited the shared
+`test/hookHarness.ts`), on top of a `main`-merge and a docs commit. The merger hand-resolved one
+two-intent collision in `apps/web/components/work/accounting-work-list.tsx` (lane 09's claim-label
+paragraph plus lane 01's `opening_balance` purpose label). Re-ran: the whole unit suite, plus the
+browser walks lane 09 touched or whose surfaces it changed.
+
+**New head at start of this pass: `d3aaecdb86b6756162fb02971b536a8864030c2a`.**
+**Final head: unchanged by me — `e0cc00aa2b709418d83207a2a9dcd3fc7306e4a2`**, which is gate worker
+A's own concurrent `fix(integration): #659's no-recut census follows #905's signature swap`
+(`packages/db` only, confirmed via `git show --stat`/`--name-only`: zero `apps/web` files touched).
+I made **no commits** this pass — both reds found were pre-existing/known, not integration collisions
+or lane-09 defects.
+
+### Collision resolution check — `accounting-work-list.tsx`
+
+Read `KNOWN_PURPOSE_LABELS` (line 135): `{journal_entry, periodic_stock_adjustment,
+payroll_obligation, opening_balance}` — lane 01's `opening_balance` (#984) sits alongside lane 09's
+other three, and `workRowKindLabel` (line 170) checks `workRowClaimLabel` (lane 09's #880 claim
+label) FIRST, falling through to `KNOWN_PURPOSE_LABELS` only when there is no claim — the two
+lanes' intents compose rather than collide. `messages/en.json` has both `claimLabel` (line 2224) and
+all four `purposeLabels.*` keys including `opening_balance: "Opening balances"` (line 2274).
+`components/work/accounting-work-list.test.tsx` covers `workRowKindLabel` for a claim row, a plain
+row with a known purpose, an unknown purpose (verbatim fallback), a null-claimant claim, and a
+malformed wire answer that omits `claim_id` entirely (the L09-ADV-07 regression guard) — this file's
+own slice of the whole-suite run below is green. The merge resolution reads correct; no fix needed.
+
+### Step 1 (repeat) — the whole `apps/web` unit suite, lane 09 included
+
+Command: `node scripts/run-tests.mjs` from `apps/web`.
+
+**Run** — 2026-09-20T14:21:39Z → 14:22:53Z, **74s**, exit 0 (**GREEN**).
+`tests 4846, suites 138, pass 4844, fail 0, skipped 2`.
+
+All green, including `accounting-work-list.test.tsx` and every other lane-09-touched unit file
+(`document-facts-table.test.tsx`, `document-revision-dialog.test.tsx`, `client-work-attention.test.tsx`,
+`work-cards.test.tsx`, `use-work-list.ts`'s callers, `work-question-form.test.tsx`,
+`work-question-panel.test.tsx`, `work-restate.test.tsx`, `client-work-pack.test.ts`,
+`work-list-url-state.test.ts`, `work-list.test.ts`). Notably, this run did **not** reproduce the
+earlier (pre-lane-09) `documents-workbench-refresh.test.tsx` timing flake — consistent with that
+cell's own classification above (a real-timer race, not deterministic).
+
+### Step 2 — the targeted browser walks
+
+Scope, as instructed: `work-question-walk`, `home-board-walk` (also the one `.spec.ts` lane 09
+itself edited — `git diff --name-only 0968b5287...HEAD -- apps/web/e2e` showed only
+`home-board-walk.spec.ts`), the Work list walk (`work-list-walk.spec.ts`, found via
+`grep -rl "AccountingWorkList\|workRowKindLabel\|workRowClaimLabel" e2e/*.spec.ts` — no e2e spec
+imports the component directly, so identified from `e2e/README.md`'s own coverage map: "#641's B3
+durable Work list on BOTH `/work` and `/clients/:id/work`"), `work-cancel-walk` (known B7 red
+#1024), `document-correction-walk` (known axe red #1017). No other e2e file was added or edited by
+lane 09.
+
+Command: `CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3620 CLARA_E2E_NEXT_PORT=3621
+CLARA_E2E_RUNTIME_PORT=3622 pnpm --filter @clara/web e2e -- work-question-walk home-board-walk
+work-list-walk work-cancel-walk document-correction-walk`, from the worktree root (one build, five
+specs together).
+
+**Run** — 2026-09-20T14:23:06Z → 14:27:15Z, **4m9s**, exit 1. **85 tests, 1 worker, 2 failed, 83
+passed (3.8m Playwright-reported).** `work-question-walk`, `home-board-walk`, and `work-list-walk`
+all passed **clean, zero reds**, including every cell touching the merged
+`accounting-work-list.tsx`/`use-work-list.ts`/`work-list.ts`/`work-list-url-state.ts` surface.
+
+**Red 1 — `work-cancel-walk.spec.ts:352`, "B7: a REFUSED stop says the reply is still running…"**
+Identical signature to the task brief's named #1024: `locator('[data-clara-rail]').getByRole('button',
+{ name: 'Stop reply' })` not visible within the default 5000ms timeout, same line 382. Re-run alone
+twice (`--no-build work-cancel-walk`): attempt 1 — 14:31:47Z→14:32:52Z, **1 failed / 9 passed**
+(1.1m), same failure; attempt 2 — 14:32:59Z→14:34:05Z, **1 failed / 9 passed** (1.1m), same failure.
+Ownership check: `git diff --name-only 0968b5287..HEAD -- apps/web | grep -iE "clara|stream|stop|rail"`
+returns nothing — lane 09 touched none of the Clara rail/stream/stop-reply files (`ClaraThreadView.tsx`,
+`lib/clara/stream.ts`, `lib/clara/useClaraThread.ts`). **Classification: (b), the same known
+pre-existing #1024 race, unrelated to lane 09.** No fix applied.
+
+**Red 2 — `document-correction-walk.spec.ts:386`, the axe contrast cell (same cell as #1017
+above).** In this 5-spec combined run it failed on the **"facts" tab with 4 nodes** rather than the
+usual 2: the familiar #1017 pair (the selected filed-document row, `bgColor #f5f6f4`/`fgColor
+#6c7575`, 4.36) **plus two new nodes** from `document-facts-table.tsx`'s raw-field-path sub-label
+(`<span class="block text-xs font-normal text-muted-foreground">`, showing `invoice.total` and
+`invoice.vendor_name`), `bgColor #ffffff`/`fgColor #727a7a`, **4.39** vs the 4.5:1 floor — same
+"marginal muted-foreground text-xs" family of token as #1017, one hair under threshold.
+
+Investigated whether this is a new lane-09 defect: `git diff 0968b5287..HEAD -- .../document-facts-
+table.tsx` shows lane 09's #885 changes are a new `SourceRevisionWorkEffect` banner, a `useState`,
+and a wrapping `<div>` around the existing `<DataTableCard>` — **the raw-path span itself (line 193,
+`region.field_path !== null && region.field_path !== label`) and its className are untouched**, and
+`factLabel()`'s known-field mapping (line 58-70, `invoice.total`/`invoice.vendor_name` both mapped
+since before this wave) is also untouched. Re-ran the spec alone twice to test determinism:
+attempt 1 — 14:29:50Z→14:30:26Z, **15/15 pass, fully clean** (34.4s); attempt 2 —
+14:30:32Z→14:31:11Z, **1 failed / 14 passed** (37.8s), back to the classic **2-node** shape on the
+**"accounting" tab** (`4.36`, the row only — no facts-table nodes this time).
+
+Three different outcomes across three observations (0 nodes, 2 nodes/accounting, 4 nodes/facts) on
+byte-identical code is the signature of a timing-sensitive scan racing un-settled paint state — the
+cell has no `settleForScan()` call before its `AxeBuilder().analyze()`, exactly as diagnosed for
+#1017 in wave 1's own report. **Classification: (b), the same #1017 family of pre-existing,
+load-sensitive axe red — not a lane-09 regression** (the code lane 09 changed is provably inert for
+the specific span that intermittently adds two extra nodes). Lane 09's structural change (one extra
+stateful component + wrapper div) plausibly shifts render/settle timing enough to change *which*
+un-settled elements a given run's scan happens to catch, but it does not own the underlying
+marginal-contrast token or the missing test guard, and per this task's explicit instruction #1017 is
+not to be fixed here. No fix applied. Worth flagging to #1017's owner: this run is the first evidence
+that the same missing-`settleForScan` defect can expose MORE than the row alone under the right
+timing, which may be useful context for that ticket's eventual fix, but is not new work for this
+gate.
+
+### Step 3 — no (c)/(d) reds found with lane 09 either
+
+Both reds are pre-existing and unrelated to lane 09 (confirmed by diff inspection in both cases). No
+integration collision and no lane-09 defect found. Nothing fixed, nothing committed by me.
+
+### Step 4 (repeat) — typecheck, lint, clean tree
+
+`pnpm --filter @clara/web typecheck` — 2026-09-20T14:34:20Z → 14:34:24Z, **~4s**, exit 0, no
+diagnostics.
+
+`CI=true GITHUB_ACTIONS=true pnpm lint` (root) — 14:34:28Z → 14:35:10Z, **42s**, exit 0, clean
+(same chain as before: apps/web's token-contrast/test-manifest/message-keys/ui-add-guard selftests
+all PASS, `packages/reporting-render`'s `eslint .` silent).
+
+`git status --porcelain=v1 -uall` — clean, no output, both immediately after lane 09 landed and
+again after gate worker A's concurrent `packages/db`-only commit moved the shared worktree's HEAD to
+`e0cc00aa2b709418d83207a2a9dcd3fc7306e4a2` mid-gate (confirmed that commit touches zero `apps/web`
+files, so none of the results above are stale).
+
+### Net result — with lane 09
+
+- **No commit by me.** Head moved only because of gate worker A's own concurrent, `apps/web`-disjoint
+  `packages/db` fix; my own apps/web-scoped results are unaffected by it.
+- Unit suite: 4846 tests, **0 failures** — fully green, including the resolved
+  `accounting-work-list.tsx` collision and every lane-09-touched file.
+- Targeted browser walks: 85 tests, 2 reds, both re-run alone twice and both classified **(b)**
+  pre-existing/known (`work-cancel-walk` #1024, `document-correction-walk` #1017's own token
+  family) — neither owned by lane 09, confirmed by diff inspection in both cases.
+- `work-question-walk`, `home-board-walk`, and `work-list-walk` — the three walks most directly
+  covering lane 09's own surfaces — all passed clean.
+- Typecheck and lint both green as the runner sees them.
+- Working tree clean apart from git-ignored artefacts, both before and after gate worker A's
+  concurrent commit.
+- **Unverified / left for a human:** whether `document-correction-walk.spec.ts:386` reliably shows
+  0, 2, or 4 nodes on a quiet host with no other suite running (I observed all three shapes across
+  four total runs this session and the prior one); and whether lane 09's new
+  `SourceRevisionWorkEffect` render measurably changes this cell's timing margin versus before lane
+  09 (plausible from the render-shape diff, not instrumented/measured directly).
+
+Final worktree head (as left by gate worker A's concurrent, apps/web-disjoint commit):
+`e0cc00aa2b709418d83207a2a9dcd3fc7306e4a2`. Working tree clean (only git-ignored build/e2e artefacts
+present).

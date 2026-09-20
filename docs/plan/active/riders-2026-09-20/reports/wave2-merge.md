@@ -298,8 +298,211 @@ left with a conflict marker. Two things are worth carrying forward, neither caus
 1. **Lane 09 (`riders/w2-lane09`, 0265-0268, #839/#880/#885/#905) is not in this branch.** Its
    numbers are free and its merge will be additive in the same shapes: the gate chain, `rig-meta`'s
    cohort list, the db README tail and the barrier map.
+   *(Closed later in this record — see **Lane 09** below. It landed as `d3aaecdb8`, and the four
+   shapes were exactly those, taken as an INSERTION between 0264 and 0269 rather than an append.)*
 2. **Pre-existing prose drift in `packages/db/tests/README.md` line 23** — "Run it focused with the
    29 `--import ./tests/*-preintegration-gate.mjs` flags". The chain had 50 entries at the branch
    point and has 80 now, so the number was already wrong before this wave. It is prose, not a pin:
    no census or selftest reads it, and `preintegration-gate-chain.test.mjs` pins the chain as a set
    rather than by length. Left alone, because the merge did not break it.
+
+---
+
+# Lane 09 — landed later, on a branch that had moved
+
+Lane 09 was not ready when the nine other lanes were merged. It is now in. Between the two
+sessions the branch moved under me, and I read that state before touching anything:
+
+* **gate worker A's seven `fix(integration)` commits** (`c51172a27` … `0968b5287`) — one migration
+  edit (0270's prestate pins re-measured because 0252 recuts four bodies it pins) and six
+  test-census re-measures. Its record is
+  `docs/plan/active/riders-2026-09-20/reports/wave2-integration-gates-A.md`.
+* **`0546ec1e6`, a merge of `main`** (riders wave 1 as merged, with the #1026/#1027 CI gate fixes,
+  including the new launcher `scripts/ci/world-gate.mjs`), then **`8bd961d5a`**, a docs commit.
+
+Merge base for lane 09 was still `23cfad947` — the same wave-2 branch point every other lane used —
+so this merge saw the whole wave plus gate A's work on one side and one lane on the other.
+
+**Merge commit: `d3aaecdb8` — "merge: riders wave 2 lane 09". Head after it:
+`d3aaecdb86b6756162fb02971b536a8864030c2a`.** No fix commit was needed; the merge broke nothing
+that typecheck or lint could see.
+
+Lane 09's four migrations sit BETWEEN 0264 and 0269, so every shared ordered list took an
+**insertion** rather than an append — the one structural difference from the other nine lanes.
+
+## Conflicts and how each was resolved
+
+| file | how |
+|---|---|
+| `packages/db/package.json` | gate chain: union, lane 09's four gates INSERTED between 0264's and 0269's |
+| `packages/db/README.md` | both sides kept whole, tail re-sorted into migration order |
+| `apps/web/components/work/accounting-work-list.tsx` | both sides rewrote the same paragraph with different, compatible intents — both kept |
+| `apps/web/components/documents/document-kind-dialog.tsx` | the KNOWN DUPLICATE; ours kept, exactly one copy in the tree |
+
+* **`packages/db/package.json`** — the pre-integration gate chain. The four lane-09 gates
+  (`work-question-admitted-basis` 0265, `work-list-claim-label` 0266, `work-list-receipt-window`
+  0267, `work-source-correction-supersede` 0268 — each number read off the gate module's own
+  header) were inserted **before** `invite-issuer-lapsed-preintegration-gate.mjs` (0269), not
+  appended after 0271's. **80 + 4 = 84 tokens, each exactly once; 84 gate modules on disk; none
+  un-preloaded.**
+
+* **`packages/db/README.md`** — both sides' sections kept whole, then the file's chronological tail
+  put back into its own ordering rule:
+
+  ```
+  BEFORE: … 244 245 246 270 271 272 265 266 267
+  AFTER : … 244 245 246 265 266 267 270 271 272
+  ```
+
+  Every section moved WHOLE; the line multiset is identical before and after the reorder. (Lane 09
+  documents 0265, 0266 and 0267 here; 0268 has no section of its own in this README.)
+
+* **`apps/web/components/work/accounting-work-list.tsx`** — the only conflict in the whole wave
+  where both sides changed the same lines with *different* intents, both clear and compatible:
+  - **lane 09 (#880, 0266)** rewrote the shared "a staff expense claim is not a fourth value here"
+    paragraph: the list door's own projection now carries `claim_id`/`claimant_label`, so this
+    surface no longer has to ask `clara.get_work_claim_origin` by name;
+  - **lane 01 (#984, 0239)** left that paragraph untouched and ADDED a paragraph plus a fourth
+    member of `KNOWN_PURPOSE_LABELS`, `"opening_balance"`, which really is a value of the column's
+    CHECK.
+
+  Kept, in this order: lane 09's rewritten paragraph (it supersedes the sentence both sides started
+  from), then lane 01's #984 paragraph, then the **four**-value Set. They read as one argument —
+  lane 01's own text already says "unlike the claim lane above", which is exactly lane 09's
+  paragraph. Nothing dropped, no two sentences merged into one.
+
+* **`apps/web/components/documents/document-kind-dialog.tsx` — the KNOWN DUPLICATE.** Lane 09
+  carries `9df3f0df5` ("unblock the build — SelectValue's kind roster used the wrong constant"),
+  the same one-line `DOCUMENT_KINDS` to `CLASSIFIABLE_DOCUMENT_KINDS` repair that lanes 01, 03, 06,
+  08 and 10 each made independently. **The copy kept is the one lane 01 landed in `4c02305b0`**;
+  the line itself merged silently because the text is identical, and the conflicted hunk was only
+  the comment, where lane 09 added nothing, so lane 08's comment stands. There is exactly **one**
+  `CLASSIFIABLE_DOCUMENT_KINDS.map(...)` on the `SelectValue` `items` prop
+  (`document-kind-dialog.tsx:107`), and `9df3f0df5` contributes no second copy.
+
+## Auto-merges checked rather than trusted
+
+* **`packages/db/tests/rig-meta.mjs`** — no conflict. Lane 09 put its #885 0268 cohort (five
+  ungranted names: `_source_corrected_work`, `_lock_source_corrected_work`,
+  `_supersede_source_corrected_work`, `_question_source_corrected`, `_fact_value_changed`) beside
+  0217's document source-revision lane, its stated subject, rather than at the tail where lanes
+  01-03, 06 and 10 put theirs. Present once, module loads, **105 exports** (gate A measured 104
+  before this merge).
+* **`apps/web/messages/en.json`** — 5909 base keys + 59 (branch) + 6 (lane 09) − 5 retired across
+  the wave = **5969**. No key was added by both sides, no value overwritten, no retired key
+  resurrected.
+* **`apps/web/test/manifest.txt`** — **502** path lines, plain-string sorted, no duplicate, header
+  untouched.
+* **`apps/web/tests/firm-scope-db-pins.corpus.ts`** — lane 09 added no barrier entry, so the union
+  is the 22 already there. Its census was re-run anyway (below) and passes with 0265-0268 present,
+  which is the evidence that none of the four carries unreviewed dynamic SQL.
+* `CONTEXT.md`, `apps/web/e2e/home-board-walk.spec.ts`,
+  `apps/web/components/work/accounting-work-list.test.tsx` — every line each side added is present.
+
+## Checks after the merge
+
+| check | result |
+|---|---|
+| JSON-parse `packages/db/package.json` | parses |
+| conflict markers, whole tree | none |
+| `git diff --check` | clean |
+| `node scripts/check-frozen-workflows.mjs` | **OK** — 312 frozen files append-only vs `origin/main`, 55 `"use workflow"` modules frozen+registered, 3 retired entries; **no manifest diff** |
+| `node scripts/ci/world-gate.selftest.mjs` | **OK** — every cell PASS, including the wiring guard ("EVERY node invocation of a `tests/` entry point in `db-live-gates` goes through this launcher") and its inverse control |
+| `pnpm typecheck` | **PASS** — `apps/web` Done, `packages/runtime` Done |
+| `CI=true GITHUB_ACTIONS=true pnpm lint` | **PASS**, exit 0 |
+| `node --test tests/preintegration-gate-chain.test.mjs` (`packages/db`) | **5/5 pass** — 84 gates on disk, 84 preloaded, no dangling token, no duplicate |
+| `node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-db-pins.test.ts` (`apps/web`) | **22/22 pass** |
+
+Database and browser suites were not run, by instruction. **No migration pin was touched** — gate
+worker A re-runs the chain next and owns pin corrections.
+
+## The roster is now COMPLETE
+
+`packages/db/migrations`: **267 files** (229 at the branch point, +38).
+
+```
+0235 0236 0237 0238 0239 0240 0241 0242 0243 0244 0245 0246 0247 0248 0249 0250
+0251 0252 0253 0254 0255 0256 0257 0258 0259 0260 0261 0262 0263 0264 0265 0266
+0267 0268 0269 0270 0271 0272
+```
+
+Missing in 0235…0272: **none**. Duplicate 4-digit prefix anywhere in the directory: **none**. The
+0265-0268 gap this record opened with is closed by lane 09 (#839 0265, #880 0266, #905 0267,
+#885 0268).
+
+## For gate worker A — the cross-pin list it asked for
+
+Read out of the four migration files themselves (`create or replace function clara.<name>`, every
+quoted `clara.<name>(args)` signature literal, every `pg_get_functiondef` splice target, with
+`--` comments stripped so prose is never counted as a pin):
+
+| migration | WRITES (recuts or creates) | PINS / reads back only |
+|---|---|---|
+| 0265 (#839) | `_work_question_record` | `get_work_question`, `get_work_pending_question` |
+| 0266 (#880) | `list_accounting_work` (9-arg), `get_accounting_work_row` | — |
+| 0267 (#905) | `list_accounting_work` — **DROPS the 9-arg signature and creates an 11-arg one** | `get_accounting_work_row` |
+| 0268 (#885) | `_source_corrected_work`, `_fact_value_changed`, `_question_source_corrected`, `_lock_source_corrected_work`, `_supersede_source_corrected_work`, `revise_document_fact`, `answer_work_question`, `_work_question_record` | `restate_accounting_work`, `cancel_accounting_work`, `_work_committed_receipt`, `list_source_dependents` |
+
+**Migration-to-migration: the intersection is EMPTY.**
+
+* No body lane 09 writes is pinned or written by **0269, 0270, 0271 or 0272**. For the record: 0269
+  writes `preview_invite` and pins `accept_invite`; 0270 writes `_firm_document_limit_ceiling` and
+  `set_firm_document_limits` and pins the nine gate A already re-measured; 0271 pins
+  `create_account_set_v1`, `_agent_create_account_set_core`, `wake_create_account_set`; 0272 writes
+  `_tf_document_capability_high_water_monotone` and pins `_tf_no_truncate` and
+  `_tf_document_capabilities_version_high_water`. None of those names appears in lane 09's table.
+* No body lane 09 **pins** is written by a lower wave migration (0235-0264) — which matters,
+  because 0265's prestate pins were measured on a chain at **0234** (the lane's own rig,
+  `clara_l09`, 0001→0234) and 0268's at 0001→0267, i.e. on chains that never carried 0235-0264. On
+  this evidence those pins should survive the merged chain order.
+* The only names shared with other wave migrations are estate-wide helpers that a body-text census
+  NAMES rather than sha-pins — `role_rank`, `jwt_sub`, `jwt_firm`, `actor_role_rank` (0267 against
+  0259/0262/0263/0264/0269/0270). Nobody writes them, so they are not a hazard.
+
+**Test-side: ONE pin is very likely to fail, and it is one gate A has already touched once.**
+
+`packages/db/tests/firm-portfolio-pack.test.mjs`, cell **`p659.portfolio.no_recut`** (line 744 for
+the sha map, line 765 for the `prosecdef` read) pins
+
+```
+clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)
+```
+
+by `sha256(prosrc)` **and** by casting that exact nine-argument signature to `::regprocedure`. With
+lane 09 in the chain:
+
+1. **0266 recuts that body** — the sha moves; and
+2. **0267 runs `drop function if exists` on the nine-arg signature** and creates an eleven-arg one
+   (the two new parameters default to null, so ordinary calls of up to nine arguments still
+   resolve). The `::regprocedure` cast therefore no longer resolves at all: expect
+   `function clara.list_accounting_work(...) does not exist` — an **error**, not a sha mismatch,
+   which reads differently in the log.
+
+This is the same cell gate A widened in `633c5c016` for 0260's and 0264's recuts, where it recorded
+`list_accounting_work` as "unmoved". That line of its record is now stale. The cell's other four
+pins (`list_review_queue`, `get_client_work_pack`, `_work_run_attempts`, `list_activity`) are
+untouched by lane 09.
+
+Migrations **0189, 0203 and 0231** also name the nine-arg signature, but all three are BELOW
+0266/0267 in chain order and see the nine-arg body when they run, so they are not at risk.
+
+Two things gate A warned about that lane 09 does **not** trip, checked rather than assumed:
+
+* **the S5.25 clock rosters** — none of lane 09's five new bodies carries a clock token; the only
+  `now()` / `clock_timestamp()` in the four files are inside the `answer_work_question` recut, and
+  that name is **already** on arm (D)'s roster in `x42-s5-helpers.mjs:952`. No widening owed.
+* **the `pages_per_day` census (gate 7)** — lane 09 names none of its bodies.
+
+No test outside `firm-portfolio-pack.test.mjs` pins any of lane 09's recut signatures by
+`::regprocedure` or by sha (checked for `_work_question_record`, `list_accounting_work`,
+`get_accounting_work_row`, `revise_document_fact` and `answer_work_question` across
+`packages/db/tests`, `packages/runtime/tests` and `apps/web/tests`); the other files that mention
+them **call** the doors rather than pin them.
+
+## Still owed
+
+* The chain re-run, and any pin correction it implies, is gate worker A's — untouched here by
+  instruction.
+* The pre-existing prose drift at `packages/db/tests/README.md:23` ("the 29 `--import` flags") is
+  now further out of date: the chain has **84**. Still prose, not a pin; still not something this
+  merge broke.

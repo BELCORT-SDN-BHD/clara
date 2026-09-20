@@ -747,3 +747,176 @@ nothing was re-measured there.
   null on an ordinary cancellation).
 - **`document-correction-walk`'s axe contrast red** (first round §8) was not re-run this round; that
   surface's only change here is copy inside a banner that renders nothing when nothing was retired.
+
+---
+
+# Third fix round (#885) — the broken from-scratch apply, and two truths the surfaces owed
+
+- **New head** `c5c408455bc09f3efc21cb37e13229b5a2e5d1eb` · three commits on top of `3fd0e876f`
+- **Input** `wave2-lane09-recheck-2.json` (REJECT on one blocker; the round's three substantive
+  claims were all confirmed by driving the real doors)
+- **Rig** unchanged. 0268's ledger checksum after this round: `93703b0eaa233e28…`, equal to the file.
+
+| commit | what it closes |
+|---|---|
+| `c25d5cc9e` `fix(db): #885 the third prestate pin is measured against 0265, and a keystroke is not a correction` | L09-RC2-01 (blocker), L09-RC2-02, the db half of L09-RC2-03 |
+| `5c3f82bb8` `fix(web): #885 the source-corrected sentence names an exit that works, and the rail stops offering one that does not` | L09-RC2-03 |
+| `c5c408455` `fix(web): #885 spell a ticket reference without a hash in the new cell's message` | the lint gate, run before the report rather than after it |
+
+## 1 · BLOCKER — the pin, and the branch a redo can never reach
+
+**Reproduced before touching anything.** Rewinding the catalog to 0265's own
+`create or replace function clara._work_question_record` statement, inside a transaction that was
+then rolled back, measures `sha256(prosrc)` = **`f4b62dd26d7e0acf…`**. The literal the second round
+shipped was `e3866088…`, which matches neither that, nor `pg_get_functiondef` (the reviewer measured
+`e614ac6a…`), nor any spelling either of us could construct: it is simply wrong. With the catalog in
+that state — exactly what a from-scratch chain reaches before 0268 — 0268's own §0 raised CLR10 and
+stopped the chain.
+
+**Why three redo runs saw nothing, stated as a rule rather than an excuse.** A marker-tolerant pin
+is `sha ≠ <literal> AND marker absent → refuse`. Once the live body carries the marker the sha
+branch is short-circuited, and after the first redo the body always carries it. **`CLARA_MIGRATION_REDO`
+can never exercise the sha branch of a marker-tolerant pin**, so the literal has to be measured
+against the body the CREATING migration produces, not against whatever the rig happens to hold.
+
+**The fix**: the literal is now `f4b62dd2…` in all three places it appears (the pin, its message and
+§T's "did the recut actually commit" check), and the comment records how it was measured instead of
+claiming a rig measurement.
+
+**The proof, on the path that was broken.** One rolled-back transaction, driven by a script that
+rebuilds the pre-0268 state from the migrations that create each body and then runs 0268 itself:
+
+```
+OK    rewound _work_question_record from 0265 -> f4b62dd26d7e0acf (== the pin)
+OK    rewound answer_work_question   from 0200 -> 15a82c080d102e61 (== the pin)
+OK    rewound revise_document_fact   from 0217 -> b89a01ba9b5f0294 (== the pin)
+--- the catalog is now exactly the state a from-scratch chain reaches before 0268 ---
+OK    0268 §0 PRESTATE passed on the FIRST-APPLY path (no marker anywhere)
+OK    the WHOLE 0268 file applied on the first-apply path (prestate + body + §T)
+rollback control: all three live bodies UNMOVED
+```
+
+Each rewind is verified against its own pinned literal *before* the prestate runs, so "this is the
+real pre-0268 state" is a measurement rather than an assumption; the run above is against the FINAL
+file, after every other change in this round. (A true 0001 → 0268 chain still belongs to the
+integrator's disposable cluster: migration 0154 pins the cluster-wide role count and RIG.md forbids
+a second from-scratch chain here.)
+
+### The pin audit, for every bimodal or marker-tolerant branch in 0265 → 0268
+
+| migration | pin / branch | what the lane database exercises today | how the other branch was exercised |
+|---|---|---|---|
+| 0265 | three plain `sha256(prosrc)` pins (`_work_question_record` ← 0180's body `cb57a131…`, `get_work_question` `19e4e418…`, `get_work_pending_question` `8a196db9…`) | **single-mode**; ran for real at apply | none exists — a redo of 0265 would refuse, by design |
+| 0266 | presence guards ("the live body must NOT already carry `claim_id`/`claimant_label`") | **single-mode**; ran for real at apply | none exists — a redo would refuse, by design |
+| 0267 | **bimodal** on the overload: nine-argument door → first-apply; eleven-argument → redo | the eleven-argument door is what exists today, i.e. the **redo** branch | the first-apply branch ran for real at apply (it is how the eleven-argument door came to exist); the redo branch re-run here by executing 0267's §0 verbatim in a rolled-back transaction → passes |
+| 0268 | **marker-tolerant** ×3 (`revise_document_fact` `b89a01ba…`, `answer_work_question` `15a82c08…`, `_work_question_record` `f4b62dd2…`) | the **marker** branch, on every redo | the sha (first-apply) branch: the rewind proof above, all three at once. The first two also passed it for real at 0268's first apply, when no `#885` marker existed |
+| 0268 §T | the record's key count was bimodal on "no work-bearing interruption exists", and tolerated it **silently** | the counting branch | **removed**: the empty case now raises a NOTICE saying the count was not measured live, and the key-by-key text assertions carry the claim on their own. An unexercised silent branch is the shape that hid this blocker |
+
+## 2 · MINOR — a keystroke is not a correction
+
+**Measured before the fix:** re-typing the value already on the document was ACCEPTED, advanced
+`facts_version`, wrote a revision row whose `prior_value` and `new_value` are identical, retired
+every parked Work standing on that document, and made a carved-out question **permanently**
+unanswerable (`max(recorded_at)` can never fall back below the question's `created_at`).
+
+**What "unchanged" means at the seam, and it is the STORED value rather than the keystrokes:** the
+normalised **cents** when both sides carry them — so `RM 880.00` typed over `880.00` is the same
+fact, differently spelled — otherwise the **trimmed text**. A fact the reader never persisted has no
+prior value at all, and anything is a change against nothing.
+
+**One notion, two callers, so they cannot disagree.** `clara._fact_value_changed(jsonb,jsonb)` is
+ungranted like its siblings, and:
+
+- `clara.revise_document_fact` refuses CLR10 `value_unchanged` **before anything is written** — no
+  extraction, no revision row, no `facts_version`, no retirement, no question killed;
+- `clara._question_source_corrected` reads revision rows **through the same helper**, so a no-op row
+  written before this guard existed cannot make a question read as source-corrected either.
+
+**Cell** `w885.noop.refused`, seen red first (the no-op was accepted): the same text refused, the
+same figure respelled refused, zero revision rows written, the parked Work untouched, its question
+still `pending`, `source_corrected_at` still null, **the question answered normally**, and the
+control that a genuine correction of the same field still commits to `facts_version 2`.
+
+**One existing cell had to change, and that is worth naming:** `p646.replay.one_receipt`'s
+concurrency leg revised `invoice.currency` to the value the fixture already carried. Two no-ops are
+now refused *before* they reach the document row lock, which would prove nothing about concurrency,
+so that leg makes a real change (`MYR` → `SGD`) and still asserts one winner and one CLR19 loser.
+
+## 3 · MINOR — the sentence and the controls now agree with the doors
+
+**Measured:** on the #676 carve-out (a Work holding a committed receipt, left alone by the
+retirement rule), `clara.restate_accounting_work` refuses CLR13 `not_restatable` — a Work that has
+posted reads as completed — while Cancel Work (`clara.cancel_agent_task`) is accepted and closes the
+question. The sentence told that person to give the instruction again, and the rail offered
+"Restate as a new instruction": a control that can only ever be refused, which is the exact rule
+L09-ADV-06 was fixed under one rank down.
+
+**The fix keys on a fact, not an inference.** `clara._work_question_record` projects `work_posted`
+(`clara._work_committed_receipt(w.id) is not null`), and:
+
+| arm | sentence | controls |
+|---|---|---|
+| retired Work (question cancelled) | `convergeSourceCorrected` — "…the instruction has to be given again on the corrected document" | restate is the way back (#721's door admits it) |
+| #676 carve-out (question pending, `work_posted`) | `convergeSourceCorrectedPosted` — "…This Work has already posted an entry, so it cannot be restated — use Cancel Work to stop it, and start a new one on the corrected document if it is still needed." | `offersRestateFor` **withholds** restate; Cancel Work is the control the card already carries |
+
+**The no-refusal path now mirrors the door** instead of guessing: the door says `source_corrected`
+for a question the retirement cancelled and refuses a PENDING one on the same ground, so the surface
+reads the record's instant on exactly those two statuses. An ALREADY ANSWERED question keeps its own
+sentence — a later correction does not rewrite what happened — and an EXPIRED one keeps 0180's word.
+
+**Cells, one per arm, rendered:** `885 the source-corrected sentence names the exit that actually
+works on each arm` maps *and renders* both arms (red first: the retired arm rendered
+`convergeCancelled`, the posted arm had no sentence of its own); `885 offersRestateFor withholds the
+control on a Work that has already posted`; and `885 the rail withholds restate on a Work that has
+already posted`, which drives the REAL card at bookkeeper rank off the Work's own detail route, with
+a positive control that the question door was read. Vacuity control: with the new conjunct removed
+that last cell fails *"Missing expected rejection"*; subject restored byte for byte.
+
+## 4 · L09-RC2-04 — unchanged
+
+`9df3f0df5` is still on the branch, still lane 03's hunk too. **Integrator: keep exactly one copy.**
+No lane action, as instructed.
+
+## 5 · Redo record (#957), third round
+
+| act | outcome |
+|---|---|
+| redo of 0268 (pin + no-op guard + `work_posted` + §T) | applied, checksum **`93703b0eaa233e2861f741e38f9b55f077b2cbdc6bff43e0063faf58ac81b3ef`**, equal to the file on disk (verified against `clara.schema_migrations` after the last commit) |
+| first-apply proof | the rolled-back rewind above, re-run against the final file |
+| 0267's redo branch | exercised in a rolled-back transaction (see the audit table) |
+
+No other migration was edited, so no redo-from-the-top was needed. The 0268 cohort in
+`packages/db/tests/rig-meta.mjs` gains `_fact_value_changed` (fifth ungranted name), and the
+battery's half-applied check counts five routines.
+
+## 6 · Gates, third round
+
+| gate | result |
+|---|---|
+| db, full 54-module gate chain on `clara_l09`: `work-question-admitted-basis` + `work-question-reads` + `work-list` + `client-work-pack` + `work-source-correction-supersede` + `rig-docs-source-revision` + `preintegration-gate-chain` + `web-reads` + `operation-census` + `rig-isolation` | **131 tests, 130 pass, 0 fail, 1 skipped** (rig-isolation T19, which needs `CLARA_RIG_ALLOW_RESET`) |
+| `work-source-correction-supersede.test.mjs` (`EXPECTED_CELLS` 9 → 10) | every cell executed, green |
+| web: `work-question-form` + `work-question-panel` + `work-cards` | **49/49** and **17/17** |
+| WHOLE `apps/web` unit suite, after every change | **4776 tests, 4774 pass, 0 fail, 2 skipped**, exit 0 |
+| `pnpm typecheck` | **green**, exit 0 |
+| `pnpm lint` | **green**, exit 0 — after the one-word fix in `c5c408455`; the first run found a `#721` inside a test message, which the raw-colour selector cannot tell from a hex literal (ticket 994's own note) |
+| `CI=true GITHUB_ACTIONS=true pnpm lint` | unchanged: the freeze-lint `--retire`-under-CI case, byte-identical to the wave-1 base here, reported fixed on the integration branch (`f6d828b2c`) |
+
+No browser walk was run this round: the two surfaces touched are covered by
+`work-question-walk` (green last round, and the form's phase logic is exercised by the new rendered
+cells) and the facts-table banner, which is unchanged here.
+
+## 7 · Anything unverified, third round
+
+- **The true 0001 → 0268 chain** is still the integrator's, on a disposable cluster. What is proven
+  here is the state-and-file equivalent: the exact pre-0268 catalog, 0268's own prestate on its
+  first-apply branch, and the whole file applying from there.
+- **`_fact_value_changed`'s text arm** is exercised only through `invoice.currency` in
+  `p646.replay.one_receipt` (a real change) — no cell drives a non-monetary NO-OP, because every
+  revisable invoice field in the fixtures carries cents. The cents arm is driven both ways.
+- **A no-op revision on a document with no prior region** (the fact the reader never persisted) is
+  admitted by construction and has no cell; the guard's `v_prior_value is not null` term is what
+  makes that explicit.
+- **The `work_posted` projection is a point read**: it says whether the Work holds a committed
+  receipt *now*, so a receipt committed between the record read and the person's press would leave
+  the older, wrong sentence on screen until the next poll. The door is still the wall — restate
+  refuses either way.

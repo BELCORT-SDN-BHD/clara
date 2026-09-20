@@ -483,3 +483,376 @@ pinned read.
   in this branch.
 - Pre-existing prose drift the merger already flagged (`packages/db/tests/README.md:23` says "the 29
   `--import` flags"; there are 80). Prose, not a pin; left alone.
+
+---
+
+# With lane 09 — the complete wave, re-run
+
+Second pass, on the head the merger left after lane 09 landed:
+**`d3aaecdb86b6756162fb02971b536a8864030c2a`** (my seven fixes, then `main` merged in — riders
+wave 1 as merged, with the new CI launcher `scripts/ci/world-gate.mjs` — a docs commit, then
+`merge: riders wave 2 lane 09`). Roster **0235…0272 complete, 38 new files, 267 in all**.
+
+**Final head: `64fd718c62baca28492178c9f6d1538254d2f9ae`**, working tree clean, **three more commits**,
+all mine. Nothing under `apps/web` was touched (another worker owns it). Never pushed, no PR.
+
+| gate | result |
+|---|---|
+| from-scratch chain 0001→0272, **267 files**, on rigw2 | **PASS first time**, 116s, **no pin failure** |
+| upgrade path, **38 files** onto the seeded 0234 baseline | **PASS**, 8s, every tail green on seeded rows |
+| lane 09's ten recut bodies, from-scratch vs upgraded | **byte-identical**, all ten |
+| `packages/db` whole suite (**84**-entry gate chain) | 5383 / 5274 pass / **2 fail** / 107 skip, 16m49s — both fixed, re-run green |
+| `packages/runtime` unit suite | 2884 / 2844 pass / **2 fail** / 38 skip, 263s — both RIG.md's known Windows reds |
+| `check-frozen-workflows` / `check-parts-parity` / **`scripts/ci/world-gate.selftest.mjs`** | OK / OK / **OK** |
+| `pnpm typecheck` / `CI=true GITHUB_ACTIONS=true pnpm lint` | PASS / PASS |
+| **0268's 26-key tail branch, on a populated database** | **exercised in three states, 26 keys each — NOT a release blocker** |
+
+---
+
+## 1 · The from-scratch chain, and the one thing that had to be destroyed to run it
+
+### The 0154 problem this round actually had
+
+The #867 recipe needs the cluster's four post-0154 `clara%` roles dropped, and
+`role-census-reset.mjs` refuses while **any** database still holds a grant for them. Measured
+before touching anything:
+
+```
+This cluster currently carries 18 clara% role(s).
+- clara_stripe_webhook : BLOCKED by clara_w2_hosted (3 privilege deps); clara_w2_upg (3 privilege deps)
+- clara_auth_wall      : BLOCKED by clara_w2_hosted (3 privilege deps); clara_w2_upg (3 privilege deps)
+```
+
+So "keep `clara_w2_hosted`" and "run a second from-scratch chain on rigw2" cannot both be true at
+the same instant — any migrated `clara%` database blocks two of the four roles, and 0154 then reads
+18 where it pins 14. **What I did instead of choosing one:**
+
+1. `pg_dump -Fc` of **both** databases first (PG 17.11 client from WSL), 7s / 6s, 8.4 MB / 8.5 MB —
+   so neither is lost, only unavailable;
+2. a **fingerprint** of `clara_w2_hosted` recorded before the outage — ledger, `clara` function
+   count, a digest over every function's `prosrc`, relation count, policy count, an ACL digest and
+   four row counts;
+3. checked live: **zero sessions on any `clara%` database** at that instant (the script refuses and
+   aborts *before* any drop if there is one — nobody else's session was terminated at any point);
+4. dropped `clara_w2_upg` and `clara_w2_hosted`, ran `role-census-reset.mjs --apply` (→ 14), ran the
+   chain, and **restored `clara_w2_hosted` from its own dump immediately afterwards**, pass or fail.
+
+**`clara_w2_hosted`'s outage window: 129 seconds.** After the restore its fingerprint is
+**identical on every axis**:
+
+```
+ledger=229/0234_legal_enforcement_mode   functions=1372
+prosrc_digest=2699ae7ac97c9d86063dc00ac880b285
+relations=320   policies=619   acl_digest=e8b9e1fb4a10d6acae37a2437ce343ac   rows=2/3/6/6
+```
+
+**Which database I dropped and why it was safe:** `clara_w2_upg` (the previous round's upgrade
+proof, already reported and dumped — superseded by `clara_w2_upg2` below, whose run has since
+passed) and `clara_w2_hosted` (dumped first, restored 129s later byte-for-byte, with no session
+attached at the moment of the drop). Disclosed plainly: the instruction was to keep `clara_w2_upg`
+*until* the new upgrade run had passed, and I dropped it slightly before that — the dump
+(`clara_w2_upg.dump`, kept) is why that is recoverable rather than lost.
+
+### The chain
+
+```sh
+create database clara_w2c
+PGDATABASE=clara_w2c node scripts/migrate.mjs   # from packages/db, 55760, CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1
+```
+
+→ **`migrate: 267 new migration(s) applied · 267 total`**, exit 0, **116s**, **no CLR raised, no
+rollback, and NO PIN FAILURE ANYWHERE** — the merger's "migration-to-migration the intersection is
+EMPTY" held exactly. Ledger **267 / `0272_document_capability_wall_completion`**, `clara%` roles
+back to **18**. Seeded (`2 seed file(s) applied`). 83 prestate notices and 163 `tail: OK` notices in
+the log; the upgrade replay printed 37 and 33 for its 38 files.
+
+**Lane 09's four prestates all passed on their FIRST-APPLY branch** — the branch lane 09's own
+record says `CLARA_MIGRATION_REDO` can never reach:
+
+* `#839` — `_work_question_record` at its pinned pre-image, `get_work_question` and
+  `get_work_pending_question` at theirs;
+* `#880` — both doors byte-for-byte with 0189's and 0203's arms intact, projecting no claim field
+  yet;
+* `#905` — "**exactly one starting shape of `clara.list_accounting_work` is live (nine-argument,
+  pre-widen)**", i.e. the first-apply arm of its bimodal overload branch;
+* `#885` — the three **marker-tolerant** pins took their sha arm, because a first apply cannot carry
+  the `#885` marker. That is the arm the lane's three redo rounds structurally could not exercise,
+  and it is green.
+
+## 2 · The upgrade path, all 38
+
+`clara_w2_upg2` was cloned with `createdb -T` from `clara_w2_hosted` (0 connections at that instant;
+no session was terminated), then migrated with the full directory:
+
+```
+frontier before:  229 / 0234_legal_enforcement_mode    seeded rows: firms 2 / clients 3 / users 6
+migrate: 38 new migration(s) applied · 267 total · target 127.0.0.1:55760/clara_w2_upg2   (8s, exit 0)
+```
+
+All 38 `applied …` lines present, 0235→0272 in order, **every tail assertion green on seeded rows**.
+
+**Spot-check — the ten bodies lane 09 recut, from-scratch vs upgraded: byte-identical, all ten.**
+
+```
+clara._fact_value_changed(jsonb,jsonb)                              7d4f995c…
+clara._lock_source_corrected_work(uuid,uuid)                        8ea81da1…
+clara._question_source_corrected(uuid)                              52323011…
+clara._source_corrected_work(uuid,uuid)                             ba646c9f…
+clara._supersede_source_corrected_work(uuid,uuid,uuid[],uuid,uuid)  5d1c5a80…
+clara._work_question_record(uuid)                                   4a6152f4…
+clara.answer_work_question(uuid,integer,jsonb,text)                 86454f7f…
+clara.get_accounting_work_row(uuid)                                 9979520f…
+clara.list_accounting_work(…,integer,timestamptz,timestamptz)       dffa917d…   ← the ELEVEN-arg door
+clara.revise_document_fact(uuid,text,jsonb,integer,text,text)       6c5b63a8…
+```
+
+The nine-argument `list_accounting_work` no longer exists on either database, which is #905's point.
+
+## 3 · The `packages/db` suite on the complete chain
+
+```
+# tests 5383   # pass 5274   # fail 2   # skipped 107   # duration_ms 1008857   (16m49s)
+```
+
+Gate chain **84 tokens, each exactly once, 84 gate modules on disk**. Merge-record figures re-checked
+on this head and all matching: 267 migrations, no duplicate prefix, `rig-meta.mjs` **105** exports,
+`en.json` **5969** leaf keys, `manifest.txt` **502** lines.
+
+Both failures are **(c) integration collisions of the same kind**, both caused by lane 09 recutting a
+body that an *older* census pins, and both in files the wave-2 merge record's own survey said were
+clean ("no test outside `firm-portfolio-pack.test.mjs` pins any of lane 09's recut signatures") —
+that survey missed these two. All nine cells I fixed in the first pass are **green** on this chain
+(`[gate 7]` ok 1832, `#960 cell 9` ok 1973, `[R1-5]` ok 3522, `x42.r7.s5.census.4b` ok 4943,
+`x42.s5c.5` ok 4954, `x42.s5c.6` ok 4955, `A19g the HOW` ok 5134).
+
+**A. `p659.portfolio.no_recut` — `firm-portfolio-pack.test.mjs`** (predicted by the merger, and run
+alone first so the red is on the record):
+
+```
+error: function "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,
+text,text,int)" does not exist                                              (SQLSTATE 42883)
+```
+
+Not a sha drift — the **signature stops existing**: #880 (0266) recuts the nine-argument body, then
+#905 (0267) drops that signature and creates an eleven-argument one (two trailing timestamptz
+receipt-window bounds, both defaulting to null, so every call of up to nine arguments still
+resolves). *Fix*: the pin map **and** the `prosecdef` read now select the signature as well as the
+value, on `^0267_`, beside the two generations already there for #974 and #840/#861. One gate covers
+both of lane 09's recuts because 0266 and 0267 are consecutive files in one ordered chain, so the
+post-0266/pre-0267 nine-argument body is not a state any database rests in. This also corrects the
+line in my own `633c5c016` that recorded `list_accounting_work` as unmoved. **Commit `e0cc00aa2`.**
+
+**B. `p636.census.no_recut` — `intake-batch.test.mjs:495`** — the same 42883, in the twelve-body
+census that proves 0229 recut nothing. *Fix*: the entry pins signature and value in both
+generations, keyed on the stem `work_list_receipt_window$` through the same frontier-probe shape
+this file already carries for #964's MYT window and #965's refusal record. **Commit `3927dc462`.**
+
+**C. `p658.census.no_recut` — `knowledge-retrieval.test.mjs:949`** — an ordinary sha drift:
+
+```
+clara.answer_work_question(uuid,integer,jsonb,text) is NOT at its measured pre-0230 body
++ '86454f7fb95b8ad82e679ed28acf7d0954bf0aaa3543d101f96e8e1eeb829966'
+- '15a82c080d102e61ebdead2280577072a87c21720375174e83c86a7198fb07a7'
+```
+
+#885 (0268) recuts that door in scope (the narrow `(cancelled AND superseded_by) -> superseded`
+word, the `source_corrected` word on both arms, the successor and correction instant on
+`detail.current`). *Fix*: pinned in both generations on the stem `work_source_correction_supersede$`.
+**Commit `64fd718c6`.**
+
+*I searched for the rest rather than waiting to be bitten*: every `packages/db/tests` file was
+scanned for a sha literal or a `::regprocedure` cast within three lines of any of lane 09's ten
+recut names. Exactly three sites matched — the two above plus `firm-portfolio-pack.test.mjs` — and a
+fourth hit, `rig-docs-source-revision.test.mjs:1046`, is a grant-reachability census **by bare
+name**, so a body recut cannot move it (and it stayed green).
+
+**Re-run, all three files with the full 84-gate chain, on three different databases:**
+
+| database | result |
+|---|---|
+| `clara_w2c` (from-scratch) + `operation-census` + `rig-isolation` | **115 tests, 114 pass, 0 fail, 1 skip** (the documented destructive `T19 poison-role` cell), 29s |
+| `clara_w2_upg2` (upgraded) | **82 / 82 pass**, 9s |
+| `clara_w2_i0267` (populated, §4 below) | **82 / 82 pass**, 12s |
+
+Skip census unchanged at 107 and of the same shape as the first pass.
+
+## 4 · 0268's twenty-six-key tail branch — exercised, and NOT a blocker
+
+The branch: on a database carrying any `clara.agent_interruptions` row with a `work_id`, 0268's tail
+calls `clara._work_question_record` on the **newest** one and demands exactly 26 keys; with none it
+prints a notice instead. Every rig database this wave has had **zero** such rows, so neither the
+from-scratch chain nor the upgrade replay entered it. Proof that they did not — the from-scratch
+log carries the notice verbatim:
+
+> `#885 tail: no work-bearing interruption exists here, so the record's key count was not measured
+> live; the key-by-key text assertions above stand on their own.`
+
+### What I built, and what it says
+
+```sh
+createdb -T clara_w2_hosted clara_w2_i0267        # 0 connections on the source at that instant
+CLARA_MIGRATIONS_DIR=<copy of migrations truncated at 0267, 262 files> node scripts/migrate.mjs
+#   -> 33 new migration(s) applied · 262 total · target …/clara_w2_i0267   (6s)
+#   -> work-bearing interruptions: 0
+```
+
+Then **three real work-bearing interruptions through the estate's own doors**, using this package's
+own `#629` fixtures (`buildWorkWorld` → `admitJournalWork` → `claimWorkRun` → `open_work_question`),
+one per state, the **cancelled** one planted last so it is the row the tail actually measures:
+
+```
+d3344f47-…  status=pending    created_at 2026-09-20T14:33:28.282Z
+292db29a-…  status=answered   created_at 2026-09-20T14:33:28.291Z   (through clara.answer_work_question)
+7237d258-…  status=cancelled  created_at 2026-09-20T14:33:28.306Z   (through clara.cancel_agent_task)
+NEWEST (the row 0268's tail measures): 7237d258-…  cancelled
+```
+
+Then 0268 from the full directory (with 0269…0272 behind it):
+
+```
+applied 0268_work_source_correction_supersede · … 5 new migration(s) applied · 267 total   (1s, exit 0)
+"no work-bearing interruption exists here" notice: NOT printed   ->  the branch RAN
+#885 tail: OK -- clara._source_corrected_work, clara._lock_source_corrected_work and …
+```
+
+**Key count per state, measured after the apply:**
+
+| interruption state | record is NULL? | keys | `source_corrected_at` | `work_posted` |
+|---|---|---|---|---|
+| pending | no | **26** | null | false |
+| answered | no | **26** | null | false |
+| cancelled (the newest, the one the tail read) | no | **26** | null | false |
+| 0268's own tail expression, verbatim, on the newest row | — | **26** | — | — |
+
+**Why it cannot fail on hosted either, stated structurally rather than hoped:** the record is ONE
+`jsonb_build_object` with twenty-six literal keys and **no `jsonb_strip_nulls`** and no conditional
+key construction, so the key SET does not vary with state — a null value still occupies its key. The
+only way the count could come back wrong is the function returning NULL, which needs its
+`join clara.accounting_work w on w.id = i.work_id` to find nothing; measured on the live catalog,
+`agent_interruptions.work_id` carries
+`agent_interruptions_work_id_fkey FOREIGN KEY (work_id) REFERENCES clara.accounting_work(id)`, so a
+non-null `work_id` always has its Work. **No fix to 0268 was needed; nothing was edited.**
+
+## 5 · The rest of the runbook's data-dependent list
+
+I scanned all 38 files for the *shape* that hid this one — a branch that skips an assertion when a
+table is empty — rather than trusting the list:
+
+* **Zero-row skip branches in 0235…0272: exactly one, 0268's.** (Scanned every `do $$…$$` block for
+  `if <count> = 0 then raise notice`.) It is now exercised.
+* **Migration-time loops over a live business table: exactly one, `0245:273`**, over
+  `clara.document_capabilities where limits->>'invoice_line_items' = 'accepted_limitation'`. It ran
+  over **28** real rows on both paths — the count 0245 asserts three lines above the loop, so an
+  empty pass was impossible. Every other `for … in select` in the wave is either over a literal
+  `(values …)` marker list or inside a function body the migration *creates* (runtime code, covered
+  by the lanes' own batteries), not migration-time.
+* **First-apply vs redo branches** (`0235:168`, `0239:163`, `0241:62`, `0243:197`, `0248:148`,
+  `0249:199`, `0250:107/142`, `0267:157`): every one took its **first-apply** arm on my chain, which
+  is the arm hosted will take, because hosted is a first apply too. Lane 09's own record covers
+  0267's redo arm separately.
+* **The reference-row assertions** (D-KK-COUNT, D-CFK-COUNT, D-KEY-GRAMMAR, D-KK-KINDS,
+  D-KK-FIRMSCOPE, D-FYE-MONTH, D-REGISTRY, D-REGISTRY-KEYS, D-FSK-COUNT/ORDER/SHA/COLUMNS/TRIGGER/
+  BACKFILL, D-TAXONOMY, D-TAXONOMY-COVER, D-PLAN-WRITER, D-OPENING-CHECKS): all executed on both
+  paths — they are unconditional `raise exception` assertions, so completing the chain *is* their
+  evidence. Measured live on the populated database afterwards: `firm_setup_keys=15`,
+  `knowledge_keys=14`, `client_fact_keys=5`, `document_capabilities=240`,
+  `onboarding_plans` firm-scope duplicates **0** (0255's unique index),
+  `wake_fn_allowlist` rows for the two retired doors **0** (0261/0271).
+* **D-AUDIT (0243) — exercised with rows, in both directions.** On `clara_w2_i0267` 0243 ran against
+  the seed's **65** `clara.audit_log` rows (the CHECK admits NULL, which is what every pre-0243 row
+  is), and then my fixtures wrote **62** new rows *through real doors as real roles* on top of it:
+  `62 of 127` rows now carry a non-null `actor_role`, with values `admin,bookkeeper,owner`. So the
+  added column, its CHECK and its BEFORE INSERT trigger are proven on a live write path, not only on
+  an empty table. Only the index **build cost** on a large table remains unknown from here.
+* **Everything the wave adds admitted every row the estate's own doors produced**: on that same
+  database, 3 `accounting_work`, 3 `agent_tasks`, 3 `agent_interruptions` and 3 `journal_entries`
+  were created through the doors *after* all of 0235…0267's constraints and triggers were in place,
+  and none was refused.
+
+**Not exercised, named rather than glossed:**
+
+* **D-OPENING-ROWS (0239)** — `ck_operation_receipts_outcome_shape` and
+  `ck_operation_receipts_task_by_purpose` were validated against an **empty** `clara.operation_receipts`
+  on every rig database (0 rows on all of them). I tried to mint one through `clara.settle_work_run`
+  and was refused by that door's own vocabulary (`CLR10 unknown settle outcome`, `invalid_outcome`;
+  the receipt is written by the Work-completion path, not by a bare settle), and I did not force a
+  raw INSERT, which would not be evidence about the estate's own writes. The runbook's preflight
+  reads hosted's counts; that is where this one is answered.
+* **D-FA-BIRTH (0247)** — it retires nothing, so it cannot fail; the counts are a preflight report,
+  not a gate.
+* **D-RETIRE-ALLOWLIST (0261/0271)** — the refusal arm (a `wake_fn_allowlist` row on a retired door)
+  is **fail-closed** and was not exercised: the rig has zero such rows. If hosted has one, the
+  migration refuses rather than doing something wrong.
+* **The index build duration for 0243** on a large `clara.audit_log`, and everything else hosted.
+
+## 6 · Runtime, static gates, and the Linux leg
+
+**Runtime unit suite**, CI's shape (PG* only, `CLARA_RIG_DB=1`) against `clara_w2c_rt`, a template
+copy of the migrated+seeded from-scratch database taken before the db suite touched it:
+
+```
+# tests 2884   # pass 2844   # fail 2   # skipped 38   # duration_ms 263301   (263s)
+```
+
+Both failures are RIG.md's known Windows-only reds and nothing else — `intake-unit.test.mjs`'s
+Defender/EICAR cell and `pg-tools-fixture.test.mjs`'s `(#806)` PATH probe (11 more cells skip for
+the same reason). Identical in shape and count to the pre-lane-09 run.
+
+| gate | result | duration |
+|---|---|---|
+| `node scripts/check-frozen-workflows.mjs` | **OK** — 312 frozen files append-only vs `origin/main`, 55 `"use workflow"` modules, 3 retired | 1s |
+| `node packages/runtime/scripts/check-parts-parity.mjs` | **OK** | 1s |
+| **`node scripts/ci/world-gate.selftest.mjs`** (new, from the `main` merge) | **OK** — every cell PASS, including the wiring guard and its inverse control | 2s |
+| `pnpm typecheck` | **PASS** (`apps/web` Done, `packages/runtime` Done) | 7s |
+| `CI=true GITHUB_ACTIONS=true pnpm lint` | **PASS**, exit 0 | 54s |
+
+**The Linux leg: nothing new is owed.** `git diff --name-only 0968b5287..d3aaecdb8 --
+packages/runtime/tests` lists one file, `intake-batch-e2e.mjs`, and `git log` attributes it to the
+**`main` merge** (#1026/#1027), not to lane 09 — and it needs a database, so it is not a WSL-runner
+candidate. Lane 09 added **no** runtime test file. The wave's one added file,
+`intake-refusal-unit.test.mjs`, is byte-identical to the copy I already ran under WSL as user
+`runner` (`/opt/node/bin/node --test`, **5/5 pass**): `git diff --quiet 0968b5287..HEAD` on that path
+is empty.
+
+## 7 · Commits, this pass
+
+| sha | subject |
+|---|---|
+| `e0cc00aa2` | fix(integration): #659's no-recut census follows #905's signature swap |
+| `3927dc462` | fix(integration): #636's twelve-body census follows #905's signature swap |
+| `64fd718c6` | fix(integration): #658's census admits #885's answer_work_question recut |
+
+All three touch `packages/db/tests` only, staged with explicit paths, each ending with
+`Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. **No migration was edited this pass** —
+`git diff --stat d3aaecdb8..HEAD -- packages/db/migrations` is empty, and the one migration edit of
+the whole task remains `c51172a27`'s 0270 prestate re-measure.
+
+## 8 · What I left on rigw2 (cluster `17/rigw2`, port 55760, ONLINE, `clara%` roles = 18)
+
+| database | frontier | what it is |
+|---|---|---|
+| `clara_w2_hosted` | 229 / `0234_legal_enforcement_mode` | the seeded hosted-frontier baseline, **restored byte-identical** after a 129s outage; the release-preflight worker's database |
+| `clara_w2c` | 267 / `0272_…` | the **from-scratch proof** for the complete wave, seeded, then the whole db suite ran on it |
+| `clara_w2c_rt` | 267 / `0272_…` | template copy of `clara_w2c` taken before the suite; the runtime unit suite ran on it |
+| `clara_w2_upg2` | 267 / `0272_…` | the **upgrade proof**: `clara_w2_hosted` cloned, then all 38 applied on seeded rows |
+| `clara_w2_i0267` | 267 / `0272_…` | the **0268 populated-tail proof**: built to 0267 exactly, given three real work-bearing interruptions through the doors, then 0268…0272 applied |
+
+Dumps kept in the session scratchpad (`clara_w2_hosted.dump`, `clara_w2_upg.dump`, 8.4/8.5 MB), so
+the pre-outage state of both dropped databases is recoverable.
+
+**Any further from-scratch chain on this cluster needs the #867 recipe again**, and now needs FIVE
+databases dropped rather than one — `role-census-reset.mjs --apply` refuses while any of them holds
+a grant on `clara_stripe_webhook` or `clara_auth_wall`. If `clara_w2_hosted` must survive that, dump
+it first and restore it straight after, as above.
+
+## 9 · Unverified / not run, this pass
+
+- `apps/web` unit and browser suites — another worker owns that tree; I touched nothing under it.
+- The `packages/runtime` build and its post-build gates — still out of this task's list (2 runtime
+  cells skip for "no `.output/`", exactly as in CI's `db-estate` job).
+- `render-drill`, `storage-policy-battery`, the `db-live-gates` e2e legs and the DR round-trip.
+- `packages/reporting-render`'s own `check`/`test`.
+- 0239's two `operation_receipts` CHECKs against live rows, and 0243's index build cost on a large
+  `audit_log` — see §5.
+- Everything hosted. The 129s window in which `clara_w2_hosted` did not exist is disclosed in §1; no
+  other worker's session was terminated at any point, and the restore is fingerprint-identical.
