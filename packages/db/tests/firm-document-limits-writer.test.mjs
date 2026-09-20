@@ -21,7 +21,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, endPool } from "./rig-fixtures.mjs";
-import { CAPS, FIRST_INSERT, firmScene, setLimits, storedRow } from "./firm-document-limits-writer-fixtures.mjs";
+import { auditRows, CAPS, FIRST_INSERT, firmScene, setLimits, storedRow } from "./firm-document-limits-writer-fixtures.mjs";
 
 /** The migration's STABLE STEM, probed against clara.schema_migrations — never a file listing,
  *  and never a migration NUMBER (numbers are claimed at merge). */
@@ -29,7 +29,7 @@ const STEM = "firm_document_limits_writer$";
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 1;
+const EXPECTED_CELLS = 3;
 
 before(async () => {
   try {
@@ -92,5 +92,73 @@ test("#960 cell 1 · a first write names one cap and the receipt states all four
     assert.equal(row[cap], receipt.caps[cap], `${cap}: the stored row and the receipt agree`);
   }
   assert.equal(row.updated_by, scene.owner, "the row carries the acting owner");
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 2 — A WRITE NAMING ONE CAP LEAVES THE OTHER THREE AT THEIR STORED VALUES, and the
+// receipt says which cap actually moved and what it moved FROM.
+//
+// The baseline here shares no value with the relation's first-insert values (100/1000/2/2), so
+// "the other three were preserved" can never be mistaken for "the other three were reset to a
+// default that happened to match" — the discipline firm-document-limits.test.mjs's own BASE
+// constant established for 0196's trigger, re-used here one level up at the door.
+// ===========================================================================
+test("#960 cell 2 · a second write moves one cap, preserves three, and reports both sides", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("preserve");
+  const base = { docs_per_day: 11, pages_per_day: 22, ocr_concurrency: 3, llm_witness_concurrency: 4 };
+  await setLimits(scene.owner, base);
+
+  const receipt = await setLimits(scene.owner, { pages_per_day: 77 });
+
+  assert.deepEqual(receipt.caps, { ...base, pages_per_day: 77 },
+    "only the named cap moved; the other three kept their stored values");
+  assert.deepEqual(receipt.previous, base,
+    "the receipt states what every cap was before this call");
+  assert.deepEqual(receipt.changed, ["pages_per_day"],
+    "the receipt names exactly the caps that actually moved");
+
+  const row = await storedRow(scene.firm);
+  for (const cap of CAPS) {
+    assert.equal(row[cap], receipt.caps[cap], `${cap}: the stored row and the receipt agree`);
+  }
+  executed += 1;
+});
+
+// ===========================================================================
+// CELL 3 — THE AUDIT ENTRY IS USAGE-BILLING EVIDENCE, so it is complete and attributable: the
+// actor, the firm, and the BEFORE and AFTER value of every cap that changed.
+//
+// The owner's ruling says so in as many words — "every change must be receipted and audited as
+// usage-billing evidence" — which is why this cell asserts a SHAPE (`changes` keyed by cap, each
+// with old and new) rather than merely that a row exists. An audit that records only the new
+// value cannot answer "what was it before this call", which is the question a bill disputes.
+//
+// THE ADMIN, NOT THE OWNER, drives this cell: the ruling admits both ranks, and an audit row
+// that attributed a change to the firm's owner because the owner happens to be the firm's
+// creator would be attributing it to the wrong person.
+// ===========================================================================
+test("#960 cell 3 · the audit row names the actor, the firm, and both sides of every changed cap", async (t) => {
+  if (gate(t)) return;
+  const scene = await firmScene("audit", ["admin"]);
+  const admin = scene.members.admin;
+  await setLimits(admin, { docs_per_day: 11, pages_per_day: 22, ocr_concurrency: 3, llm_witness_concurrency: 4 });
+
+  await setLimits(admin, { pages_per_day: 77, ocr_concurrency: 3, llm_witness_concurrency: 9 });
+
+  const rows = await auditRows(scene.firm);
+  assert.equal(rows.length, 2, "one audit row per accepted write");
+  const latest = rows[0];
+  assert.equal(latest.firm_id, scene.firm, "the audit row names the firm");
+  assert.equal(latest.actor, admin, "the audit row names the ACTOR, not the firm's owner");
+  assert.equal(latest.outcome, "ok");
+  assert.deepEqual(latest.args.changes, {
+    pages_per_day: { old: 22, new: 77 },
+    llm_witness_concurrency: { old: 4, new: 9 },
+  }, "both sides of every cap that moved, and nothing for the cap re-named at its own value");
+  assert.deepEqual(latest.args.caps, {
+    docs_per_day: 11, pages_per_day: 77, ocr_concurrency: 3, llm_witness_concurrency: 9,
+  }, "the resulting four caps ride the audit row too");
   executed += 1;
 });

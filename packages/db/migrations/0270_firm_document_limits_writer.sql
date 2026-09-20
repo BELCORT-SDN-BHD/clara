@@ -2,7 +2,7 @@
 -- ADMIN SETS ITS FOUR DOCUMENT-PROCESSING CAPS.
 -- =====================================================================================
 -- Spec of record: ticket #960's Agent Brief, ready-for-agent after the owner's ruling below.
--- (round 1 — the door exists; the receipt states every resulting cap)
+-- (round 3 — the audit row carries both sides of every changed cap)
 -- =====================================================================================
 
 do $w960_pre$
@@ -52,7 +52,12 @@ create or replace function clara.set_firm_document_limits(
 declare
   c record;
   v_dedupe jsonb;
+  v_old clara.firm_document_limits%rowtype;
   v_new clara.firm_document_limits%rowtype;
+  v_changed text[] := array[]::text[];
+  v_previous jsonb;
+  v_changes jsonb := '{}'::jsonb;
+  v_cap text;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if nullif(btrim(coalesce(p_op_key,'')),'') is null then
@@ -66,6 +71,18 @@ begin
       'actor', c.actor)));
   if v_dedupe is not null then return v_dedupe; end if;
 
+  -- ONE ADVISORY KEY OF ITS OWN, in the single-bigint space (0234's own idiom), so the
+  -- read-then-write below cannot interleave with a second admin's. WITHOUT it two admins both
+  -- read the SAME `previous` before either writes, and both receipts claim the same before-value
+  -- -- 100->250 and 100->400, with a final value of 400. No serial order of those two calls is
+  -- consistent with both receipts, and these receipts are usage-billing evidence.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('clara.firm-document-limits:' || c.firm::text, 0));
+
+  -- THE BEFORE-IMAGE. NULL on a firm that has never had a row: "no cap was stored" is a
+  -- different fact from "the cap was zero", and the receipt says which.
+  select * into v_old from clara.firm_document_limits where firm_id = c.firm for update;
+
   -- THE WRITE RIDES 0196's COLUMN-PRESERVING TRIGGER: a NULL argument is "leave this cap alone",
   -- and on a first insert the trigger supplies the relation's own first-insert values.
   insert into clara.firm_document_limits(firm_id, docs_per_day, pages_per_day, ocr_concurrency,
@@ -74,8 +91,36 @@ begin
       p_llm_witness_concurrency, c.actor);
   select * into v_new from clara.firm_document_limits where firm_id = c.firm;
 
+  -- WHAT ACTUALLY MOVED, decided by comparing the two images rather than by trusting the
+  -- ARGUMENTS: a caller that names a cap at the value it already holds changed nothing, and
+  -- saying otherwise would misstate the evidence.
+  if v_new.docs_per_day is distinct from v_old.docs_per_day then
+    v_changed := v_changed || 'docs_per_day'::text; end if;
+  if v_new.pages_per_day is distinct from v_old.pages_per_day then
+    v_changed := v_changed || 'pages_per_day'::text; end if;
+  if v_new.ocr_concurrency is distinct from v_old.ocr_concurrency then
+    v_changed := v_changed || 'ocr_concurrency'::text; end if;
+  if v_new.llm_witness_concurrency is distinct from v_old.llm_witness_concurrency then
+    v_changed := v_changed || 'llm_witness_concurrency'::text; end if;
+  v_previous := jsonb_build_object(
+    'docs_per_day', v_old.docs_per_day, 'pages_per_day', v_old.pages_per_day,
+    'ocr_concurrency', v_old.ocr_concurrency,
+    'llm_witness_concurrency', v_old.llm_witness_concurrency);
+
+  -- BOTH SIDES OF EVERY CAP THAT MOVED, built from the two images the same way the list above
+  -- is. A cap that did not move is ABSENT rather than present with old = new: an audit row that
+  -- listed every cap on every call would make "what did this person actually change" a thing a
+  -- reader has to work out, and this row is billing evidence.
+  foreach v_cap in array v_changed loop
+    v_changes := v_changes || jsonb_build_object(v_cap, jsonb_build_object(
+      'old', v_previous -> v_cap,
+      'new', to_jsonb(v_new) -> v_cap));
+  end loop;
+
   perform clara._audit(c.firm, c.actor, null, null, 'set_firm_document_limits', null,
     jsonb_build_object('firm_id', c.firm, 'op_key', p_op_key,
+      'changes', v_changes,
+      'previous', v_previous,
       'caps', jsonb_build_object(
         'docs_per_day', v_new.docs_per_day, 'pages_per_day', v_new.pages_per_day,
         'ocr_concurrency', v_new.ocr_concurrency,
@@ -88,6 +133,9 @@ begin
       'docs_per_day', v_new.docs_per_day, 'pages_per_day', v_new.pages_per_day,
       'ocr_concurrency', v_new.ocr_concurrency,
       'llm_witness_concurrency', v_new.llm_witness_concurrency),
+    'previous', v_previous,
+    'changed', to_jsonb(v_changed),
+    'created', v_old.firm_id is null,
     'updated_at', v_new.updated_at));
 end $$;
 
