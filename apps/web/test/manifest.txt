@@ -133,6 +133,7 @@ components/documents/intake-batch-a11y.test.tsx
 components/documents/intake-batch-cancel.test.tsx
 components/documents/intake-batch-card.test.tsx
 components/documents/intake-batch-keyboard.test.tsx
+components/documents/intake-receipts.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
