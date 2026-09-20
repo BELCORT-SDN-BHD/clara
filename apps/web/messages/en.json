@@ -253,7 +253,7 @@
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
       "staff_advance_incomplete": "Open the registers tab",
-      "depreciation_authority_pending": "Open the registers tab"
+      "depreciation_authority_pending": "Open the fixed assets register"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",

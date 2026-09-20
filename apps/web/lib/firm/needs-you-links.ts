@@ -19,6 +19,14 @@
 //     a batch-level row (`seeding_proposal` is one row per CLIENT, not per object) rather
 //     than a guess at a tab it does not belong to.
 //
+// ONE `?tab=` DESTINATION, AND IT IS NOT A DEEP LINK INTO AN OBJECT (#974's fix round). The
+// registers workbench serves SIX views off one path and defaults to `aging` when `?tab=` is
+// absent, so for a row whose verbs live on a NON-default view the bare path is the wrong place,
+// not merely a vaguer one. `CLIENT_ROUTES` already names those views (`ACCOUNTING_ITEMS` carries
+// the `tab` for each), so this is still "the tab that exists is the tab that is offered" — the
+// view is simply named instead of defaulted. It says nothing about selecting a ROW, which is what
+// the next paragraph still refuses.
+//
 // NO DEEP FRAGMENT, DELIBERATELY. The rows carry `entry_id`/`document_id`/`filing_id` and it
 // is tempting to append `#entry-<id>`. Not one of the workbench tabs renders an anchor or
 // reads a hash today (measured: zero `useSearchParams`-driven selection and zero
@@ -43,7 +51,7 @@
 // and reds the day that column appears.
 
 import type { ReviewQueueRow } from "@/lib/journals/types";
-import { fixedAssetHref } from "@/lib/navigation/tree";
+import { fixedAssetHref, type RegisterTab } from "@/lib/navigation/tree";
 
 /** The client-workspace tab each row kind belongs to, as a path SUFFIX under
  *  `/clients/<clientId>`. `""` is the workspace root — the honest destination for a row that
@@ -59,6 +67,9 @@ import { fixedAssetHref } from "@/lib/navigation/tree";
 // and `toString` through the real inbox because of it); this is that discipline, not a new
 // one. `Object.create(null)` removes the chain rather than filtering it, so there is no
 // predicate here to get wrong.
+/** The registers-workbench view that mounts `DepreciationAuthorityPanel` (#974). */
+const FIXED_ASSETS_TAB: RegisterTab = "fixedAssets";
+
 const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   // A draft journal entry is approved/revised/withdrawn on the journals workbench.
   draft: "/journals",
@@ -84,10 +95,17 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // stays the register tab and `needsYouRowHref` narrows it to the detail below.
   fixed_asset_incomplete: "/registers",
   staff_advance_incomplete: "/registers",
-  // #974 (0260): a proposed depreciation authority is signed or withdrawn on the fixed
-  // assets register tab, where DepreciationAuthorityPanel already lives beside the asset
-  // table (#651's own map: fa-depreciation-runs-panel.tsx sits under it).
-  depreciation_authority_pending: "/registers",
+  // #974 (0260) — THE ONE `?tab=` DESTINATION THIS MAP NAMES, and it is named rather than
+  // defaulted for two reasons, not one. (a) A bare `/registers` is the AGING view
+  // (`REGISTERS_DEFAULT_TAB`, lib/navigation/tree.ts), and the sign/withdraw controls this row
+  // exists to dispatch to are `DepreciationAuthorityPanel`, mounted inside
+  // `components/registers/fixed-assets-register.tsx` — the `?tab=fixedAssets` view. Sending the
+  // row to the default view would land a professional one tab away from the only act the row
+  // names. (b) #974's AC1 asks for an affordance "distinct from every other kind's"; the two
+  // register kinds beside it already take the bare path, so sharing it would fail that line.
+  // The tab is typed against `RegisterTab` rather than spelled inline, so renaming a workbench
+  // view is a TYPECHECK failure here instead of a link that silently falls back to aging.
+  depreciation_authority_pending: `/registers?tab=${FIXED_ASSETS_TAB}`,
 });
 
 /**

@@ -25,9 +25,11 @@ test("each row kind opens the tab that owns its verbs", () => {
   assert.equal(needsYouRowHref(row("lint_finding")), `/clients/${CLIENT}/journals`);
   assert.equal(needsYouRowHref(row("fixed_asset_incomplete")), `/clients/${CLIENT}/registers`);
   assert.equal(needsYouRowHref(row("staff_advance_incomplete")), `/clients/${CLIENT}/registers`);
-  // #974: a proposed depreciation authority is signed or withdrawn on the SAME register tab
-  // fixed_asset_incomplete/staff_advance_incomplete already open.
-  assert.equal(needsYouRowHref(row("depreciation_authority_pending")), `/clients/${CLIENT}/registers`);
+  // #974 (corrected in the code-review fix round): a proposed depreciation authority is signed or
+  // withdrawn on `DepreciationAuthorityPanel`, which the FIXED ASSETS view of the register mounts
+  // — not the bare path, which is the aging view. Its own cell at the foot of this file measures
+  // both halves of AC1's "distinct from every other kind's".
+  assert.equal(needsYouRowHref(row("depreciation_authority_pending")), `/clients/${CLIENT}/registers?tab=fixedAssets`);
 });
 
 test("a row with no owning tab keeps the workspace root, and SAYS it is the root", () => {
@@ -126,17 +128,81 @@ test("every emitted href is a path CLIENT_ROUTES actually serves", () => {
   // still caught, which is the defect it was minted for.
   const pathOf = (href: string) => href.split(/[?#]/, 1)[0]!;
   const served = new Set(CLIENT_ROUTES.map((route) => pathOf(route.href(CLIENT))));
+  // #974's fix round — THE STRICTER HALF, and the reason it is here. The paragraph above always
+  // promised "any `?tab=` dropped from BOTH sides"; the code dropped it from the registry side
+  // only, which was invisible while no row kind emitted a query and became a false red the moment
+  // one did. Dropping it from both sides alone would be a LOOSENING, so the exact hrefs
+  // `CLIENT_ROUTES` emits are kept as a second set: a row that names a VIEW must name one the
+  // navigation registry itself names, so `?tab=fixedAsssets` is a red rather than a silent
+  // fallback to the workbench's default (aging) view.
+  const servedExactly = new Set(CLIENT_ROUTES.map((route) => route.href(CLIENT)));
   for (const kind of REVIEW_QUEUE_ROW_KINDS) {
     const href = needsYouRowHref(row(kind));
     assert.ok(href, `${kind} resolves to a path`);
     assert.ok(
-      served.has(href),
+      served.has(pathOf(href)),
       `${kind} -> ${href} must be a real client-workspace route (CLIENT_ROUTES is proven against the app/ tree by routes.test.ts)`,
     );
+    if (href !== pathOf(href)) {
+      assert.ok(
+        servedExactly.has(href),
+        `${kind} -> ${href} names a workbench VIEW, so it must be one CLIENT_ROUTES itself emits`,
+      );
+    }
   }
   // And the same both ways for the raw suffix set, so a tab RENAMED in routes.ts cannot leave
   // a stale suffix here that no row kind currently exercises.
   for (const suffix of owningTabSuffixes()) {
-    assert.ok(served.has(`/clients/${CLIENT}${suffix}`), `the suffix "${suffix}" names a live tab`);
+    const href = `/clients/${CLIENT}${suffix}`;
+    assert.ok(served.has(pathOf(href)), `the suffix "${suffix}" names a live tab`);
+    if (href !== pathOf(href)) {
+      assert.ok(servedExactly.has(href), `the suffix "${suffix}" names a view CLIENT_ROUTES emits`);
+    }
+  }
+});
+
+// --- #974 code-review fix round (SPEC-L07-01) -------------------------------------------------
+
+test("ticket 974 (SPEC-L07-01): the depreciation-authority row opens the FIXED ASSETS view, a destination no other kind shares", () => {
+  // AC1 asks for "its own affordance ... each distinct from every other kind's". A bare
+  // `/registers` was neither. It is also not where the authority is signed: the workbench's own
+  // default view with no `?tab=` is AGING (`REGISTERS_DEFAULT_TAB`, lib/navigation/tree.ts), while
+  // `DepreciationAuthorityPanel` — the sign/withdraw controls the row exists to dispatch to — is
+  // mounted inside `components/registers/fixed-assets-register.tsx`, the `?tab=fixedAssets` view.
+  // So the destination is named rather than defaulted, which makes it distinct AND correct.
+  const href = needsYouRowHref(row("depreciation_authority_pending"));
+  assert.equal(href, `/clients/${CLIENT}/registers?tab=fixedAssets`);
+  // THE AC's OWN WORDS, measured: no other row kind's destination is this one.
+  for (const kind of REVIEW_QUEUE_ROW_KINDS) {
+    if (kind === "depreciation_authority_pending") continue;
+    assert.notEqual(
+      needsYouRowHref(row(kind)),
+      href,
+      `${kind} must not share the depreciation-authority row's destination`,
+    );
+  }
+  // `fixed_asset_incomplete` carries an asset id in its own `id` column and narrows further; the
+  // new kind must not collide with that address either.
+  assert.notEqual(
+    needsYouRowHref({ ...row("fixed_asset_incomplete"), id: "99999999-9999-4999-8999-999999999999" }),
+    href,
+  );
+  assert.equal(hasOwningTab(row("depreciation_authority_pending")), true, "and the label says which view it opens");
+});
+
+test("ticket 974 (SPEC-L07-01): and the row SAYS where it lands — its own openTab phrase, shared with no other kind", async () => {
+  // `oldest-waiting-list.tsx` and `needs-you-row.tsx` both render `t(`openTab.${row.row_kind}`)`
+  // whenever `hasOwningTab` is true, so the destination's distinctness is only half the AC: a
+  // phrase byte-identical to the two register kinds' would still tell a professional that three
+  // different rows open the same place. The phrase names the VIEW the link actually opens.
+  const messages = (await import("../../messages/en.json", { with: { type: "json" } })).default as {
+    NeedsYou: { openTab: Record<string, string> };
+  };
+  const mine = messages.NeedsYou.openTab.depreciation_authority_pending;
+  assert.equal(typeof mine, "string");
+  assert.ok((mine ?? "").length > 0);
+  for (const [kind, phrase] of Object.entries(messages.NeedsYou.openTab)) {
+    if (kind === "depreciation_authority_pending") continue;
+    assert.notEqual(phrase, mine, `openTab.${kind} must not be the same promise as the new kind's`);
   }
 });

@@ -117,8 +117,9 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // sign/withdraw are admin+ acts (clara.sign_depreciation_authority /
     // clara.retire_depreciation_authority) on the fixed assets register's
     // DepreciationAuthorityPanel; this ticket's own out-of-scope line rules out touching
-    // how an authority is proposed, signed or withdrawn. needs-you-links.ts's row link (to
-    // `/registers`) is the whole affordance.
+    // how an authority is proposed, signed or withdrawn. needs-you-links.ts's row link is the
+    // whole affordance, and the fix round made it name the view that mounts those controls
+    // (`/registers?tab=fixedAssets`) rather than the workbench's default aging view.
     depreciation_authority_pending: null,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
