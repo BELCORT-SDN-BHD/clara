@@ -389,6 +389,7 @@ test("obw.race.evidence_then_opening #1014: the evidence attachment holds, the o
     "race.evidence_then_opening: the opening approval LOSES — it blocked on a document whose "
     + "binding another session had already taken, and the evidence wall exists so that exactly "
     + `one of the two can stand on it (${JSON.stringify(out.b)})`);
+  assertLoserRefusal(out.b, "race.evidence_then_opening", "CLR13");
 
   const standing = await postedEntriesOnDocument(s.doc.documentId);
   assert.equal(standing.length, 1,
@@ -405,4 +406,74 @@ test("obw.race.evidence_then_opening #1014: the evidence attachment holds, the o
   }
   assert.equal((await linksForDocument(s.doc.documentId)).length, 1,
     "race.evidence_then_opening: the winner's evidence link stands, live and alone");
+});
+
+test("obw.race.typed_refusal the loser of the repaired race is refused in the WALL'S OWN VOICE — CLR13 source_already_posted, never a raw 40001", async (t) => {
+  if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
+
+  // THE RACE, driven exactly as obw.race.evidence_then_opening drives it. That cell owns WHO
+  // wins; this one owns WHAT THE LOSER IS TOLD, which is a separate promise: a person meets this
+  // refusal in the opening approve dialog, and Postgres's own 40001 says nothing they can act on.
+  const raced = await stagedSeed("typed-eo");
+  const racedHost = await postedDocumentless(raced.client);
+  const racedRev = await planRevision(raced.plan);
+  const out = await humanHoldThenContend({
+    a: {
+      jwtSub: BOB(),
+      run: (c) => attachEntryEvidenceOn(c, { entry: racedHost.entry_id, document: raced.doc.documentId,
+        expectedRevision: racedHost.revision_token, opKey: opk("w1014-typed-attach") }),
+    },
+    b: {
+      jwtSub: HANA(), isolation: "serializable",
+      run: (c) => approveOpeningSeedOn(c, {
+        seed: raced.seed, planRevision: racedRev, tieSha256: raced.doc.sha256,
+        entryRevisions: raced.revMap, opKey: opk("w1014-typed-opening") }),
+    },
+  });
+  assert.equal(out.a.ok, true, `typed_refusal: the attachment holds (${JSON.stringify(out.a)})`);
+  assert.equal(out.provedBlocked, true,
+    `typed_refusal: the opening approval genuinely BLOCKED (${out.waitEventType}/${out.waitEvent})`);
+  assert.equal(out.b.ok, false, `typed_refusal: …and lost (${JSON.stringify(out.b)})`);
+
+  assert.notEqual(out.b.code, "40001",
+    `typed_refusal: NOT Postgres's own serialization failure — "could not serialize access due to `
+    + "concurrent update\" is the mechanism, not something a person can act on "
+    + `(${JSON.stringify(out.b)})`);
+  assert.equal(out.b.code, CLR.conflict, "typed_refusal: the estate's own conflict code");
+  assert.equal(out.b.detail.reason, EVIDENCE_REASON.sourceAlreadyPosted,
+    "typed_refusal: …with the token the sequential cells raise, not a new one minted for a race");
+  assert.equal(out.b.detail.document_id, raced.doc.documentId,
+    "typed_refusal: …naming the document that was refused");
+  assert.equal(out.b.detail.conflict, true, "typed_refusal: …flagged a conflict, as 0182's arms are");
+
+  // THE COMPARAND: the SAME refusal reached sequentially, where the wall can see the link it is
+  // refusing for. One spelling, raised from two places — the standard obw.same_spelling holds the
+  // opening arm to against the evidence lane's own.
+  const seq = await stagedSeed("typed-seq");
+  const seqHost = await postedDocumentless(seq.client);
+  await attachEntryEvidence(BOB(), { entry: seqHost.entry_id, document: seq.doc.documentId,
+    expectedRevision: seqHost.revision_token });
+  const sequential = await assertPair(CLR.conflict, EVIDENCE_REASON.sourceAlreadyPosted,
+    async () => approveOpeningSeed(HANA(), {
+      seed: seq.seed, planRevision: await planRevision(seq.plan), tieSha256: seq.doc.sha256,
+      entryRevisions: seq.revMap, opKey: opk("w1014-typed-seq") }),
+    "obw.race.typed_refusal.sequential");
+
+  assert.equal(out.b.message, sequential.err.message,
+    "typed_refusal: the raced refusal's message is byte-identical to the sequential one — a person "
+    + "reading it cannot tell which schedule produced it, and should not have to");
+  assert.deepEqual(Object.keys(out.b.detail).sort(), Object.keys(sequential.detail).sort(),
+    "typed_refusal: the same detail KEYS — no wire token grows for the concurrent arm");
+
+  // THE ONE HONEST DIFFERENCE, pinned so it stays deliberate: the sequential arm NAMES the entry
+  // standing on the document; the raced one cannot. The winner committed after this transaction's
+  // snapshot, and no read inside a SERIALIZABLE transaction can reach it — that is the isolation
+  // level, not a gap in the wall. The key is present and null rather than absent, which is what
+  // keeps the key-set assertion above true.
+  assert.equal(sequential.detail.entry_id, seqHost.entry_id,
+    "typed_refusal: sequentially the wall names the entry standing there");
+  assert.equal(out.b.detail.entry_id, null,
+    "typed_refusal: in the race it names the document and answers null for the entry, rather than "
+    + "inventing one it cannot see");
 });

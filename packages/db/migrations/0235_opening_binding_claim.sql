@@ -65,6 +65,22 @@
 --   by this file. What changes is only that a SERIALIZABLE session which blocked on a document
 --   another session was binding now LOSES instead of committing on a stale snapshot.
 --
+--   THE LOSER GETS THE WALL'S OWN REFUSAL, NEVER A RAW 40001. The upsert is wrapped in the one
+--   handler this file adds: `serialization_failure` becomes CLR13 with reason
+--   `source_already_posted`, the document and `conflict = true` — 0182's shape, the same token
+--   0197's and 0213's walls already raise, so no classifier and no wire token grows. The handler
+--   wraps THE UPSERT ALONE and not the `for update` above it, because a serialization failure on
+--   `clara.documents` would mean the DOCUMENT ROW changed (the legacy bytes/storage upgrade is
+--   its only writer), which is a different fact and must not be re-spelled as a binding conflict.
+--
+--   `detail.entry_id` IS NULL ON THIS ARM, AND THAT IS A LIMIT, NOT AN OVERSIGHT. Every other arm
+--   names the entry standing on the document because it can SEE it. The losing session here
+--   cannot: the winner committed after its snapshot, and no read inside a SERIALIZABLE
+--   transaction can reach it. The key is present and null rather than absent, so the detail's KEY
+--   SET is unchanged and `obw.same_spelling`'s comparison still holds. A caller that wants the
+--   name re-reads the document's links in a fresh transaction (#1014's report carries that as a
+--   successor contract).
+--
 --   NO NEW LOCK PAIR, NO NEW RUNG IN THE ESTATE'S LADDER. The claim is taken AFTER the document
 --   row and only ever for the SAME document, so a transaction that binds documents A then B takes
 --   A.doc, A.claim, B.doc, B.claim — the relative order of the two documents is the one
@@ -257,9 +273,6 @@ create trigger t_document_binding_claims_no_truncate before truncate on clara.do
 -- THE `for update` IS UNMOVED AND STILL FIRST, so the contention point both race cells measure
 -- (`wait_event_type = 'Lock'` on `clara.documents`) is the one they measured before. The claim
 -- follows it, for the SAME document, so no new lock pair enters the estate.
---
--- WHAT THE LOSER SEES IS NOT SETTLED HERE. The upsert raises Postgres's own serialization failure
--- and this slice lets it through untouched; giving it the walls' typed spelling is the next slice.
 -- =====================================================================================
 create or replace function clara._lock_document_binding(p_document uuid) returns void
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -269,9 +282,18 @@ begin
     return;
   end if;
   perform 1 from clara.documents d where d.id = p_document for update;
-  insert into clara.document_binding_claims as c (document_id) values (p_document)
-    on conflict (document_id) do update
-      set claim_seq = c.claim_seq + 1, claimed_at = now();
+  begin
+    insert into clara.document_binding_claims as c (document_id) values (p_document)
+      on conflict (document_id) do update
+        set claim_seq = c.claim_seq + 1, claimed_at = now();
+  exception when serialization_failure then
+    -- #1014 · THE ONE THING A SNAPSHOT-ISOLATED CALLER CAN LEARN about a binding that was taken
+    -- while it waited. 0182's token, 0197's and 0213's spelling; `entry_id` is null because the
+    -- winner committed after this transaction's snapshot and no read here can reach it.
+    raise exception 'that document already backs a posted journal entry'
+      using errcode='CLR13', detail=jsonb_build_object('reason','source_already_posted',
+        'document_id', p_document, 'entry_id', null, 'conflict', true)::text;
+  end;
 end $$;
 comment on function clara._lock_document_binding(uuid) is
   '#718 + #1014: the ONE binding both the document-coding lane and the accounting-work evidence '
@@ -279,8 +301,9 @@ comment on function clara._lock_document_binding(uuid) is
   'both lanes contend for), then an upsert of that document''s row in '
   'clara.document_binding_claims -- because a lock that is only taken and released forces no '
   're-evaluation on a SERIALIZABLE waiter, which is how an opening approval could block on a '
-  'concurrent evidence attachment and still commit (#854). Granted to nobody: it is reachable only '
-  'from the two binding-wall triggers.';
+  'concurrent evidence attachment and still commit (#854). The upsert''s serialization failure is '
+  're-raised as the walls'' own CLR13 source_already_posted, never a raw 40001. Granted to nobody: '
+  'it is reachable only from the two binding-wall triggers.';
 
 reset role;
 
@@ -361,6 +384,19 @@ begin
   if position('on conflict do nothing' in v_src) > 0 then
     raise exception '#1014 tail: the claim uses ON CONFLICT DO NOTHING, which takes no row lock against a VISIBLE conflicting row and leaves the race open from a document''s second binding onwards'
       using errcode='CLR10';
+  end if;
+  if position('serialization_failure' in v_src) = 0 or position('source_already_posted' in v_src) = 0
+     or position('CLR13' in v_src) = 0 then
+    raise exception '#1014 tail: the helper does not map a serialization failure onto the walls'' own CLR13 source_already_posted -- a raw 40001 would reach a person'
+      using errcode='CLR10';
+  end if;
+  if position('source_conflict' in v_src) > 0 then
+    raise exception '#1014 tail: the helper mints a second spelling for a refusal 0182 already names'
+      using errcode='CLR10';
+  end if;
+  v_n := (length(v_src) - length(replace(v_src, 'raise exception', ''))) / length('raise exception');
+  if v_n <> 1 then
+    raise exception '#1014 tail: the helper carries % raises, not 1', v_n using errcode='CLR10';
   end if;
 
   -- 3 · THE FOUR BODIES THIS FILE LEFT ALONE, unmoved by it.
@@ -456,6 +492,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#1014 tail: OK -- clara._lock_document_binding still takes clara.documents FOR UPDATE FIRST and now upserts clara.document_binding_claims for the same document, so a SERIALIZABLE session that blocked on a binding another session was taking loses on a real write conflict instead of committing on its pre-block snapshot. The claim relation is a clara_fn_owner table with RLS enabled and FORCED, one policy (the owner''s), a TRUNCATE guard, and no grant for PUBLIC or any application role: it answers no question and no door reads it. Both walls decide exactly as before -- clara._tf_source_binding_wall, clara._tf_evidence_link_binding_wall, clara._document_posting_entry and clara._approve_opening_entry are all re-read at their pinned shas, unmoved -- and both human-facing opening doors keep their bodies, owners, SECURITY DEFINER flags, pinned search_paths, 0171 SERIALIZABLE pins and their EXECUTE audience (clara_authenticated, and nobody else). Exactly two bodies in the database pin an isolation level and both are those doors, so the single refusal spelling this arm raises is the right one for every caller that can reach it.';
+  raise notice '#1014 tail: OK -- clara._lock_document_binding still takes clara.documents FOR UPDATE FIRST and now upserts clara.document_binding_claims for the same document, so a SERIALIZABLE session that blocked on a binding another session was taking loses on a real write conflict instead of committing on its pre-block snapshot; the upsert''s serialization failure is re-raised as the walls'' own CLR13 source_already_posted (document named, entry_id null -- the winner committed after this transaction''s snapshot), never a raw 40001, and the handler wraps the upsert ALONE so a change to the document ROW keeps its own spelling. The claim relation is a clara_fn_owner table with RLS enabled and FORCED, one policy (the owner''s), a TRUNCATE guard, and no grant for PUBLIC or any application role: it answers no question and no door reads it. Both walls decide exactly as before -- clara._tf_source_binding_wall, clara._tf_evidence_link_binding_wall, clara._document_posting_entry and clara._approve_opening_entry are all re-read at their pinned shas, unmoved -- and both human-facing opening doors keep their bodies, owners, SECURITY DEFINER flags, pinned search_paths, 0171 SERIALIZABLE pins and their EXECUTE audience (clara_authenticated, and nobody else). Exactly two bodies in the database pin an isolation level and both are those doors, so the single refusal spelling this arm raises is the right one for every caller that can reach it.';
 end
 $w1014_tail$;

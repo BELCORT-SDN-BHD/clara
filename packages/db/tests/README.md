@@ -209,10 +209,24 @@ accounts pointed at a reachable repair: a SERIALIZABLE transaction cannot READ w
 its snapshot at all, so "re-read the evidence links under the lock" was never available. What was
 available is a CONFLICT.
 
-**The gates.** `obw.race.evidence_then_opening` now asserts the repaired outcome: exactly one
-commit, the tie document carrying ONE posted entry, the refused batch still wholly draft. It is
-frontier-gated on the `opening_binding_claim$` stem (`gateBindingClaim`), so a leg pinned between
-0213 and 0235 skips cleanly; a FOCUSED run below 0235 fails loudly in the battery's `before` unless
+**What the loser is told.** The upsert's `serialization_failure` is caught in the helper and
+re-raised as the walls' own `CLR13` / `source_already_posted` — 0182's shape, naming the document
+and flagging the conflict — so a raw `40001 could not serialize access due to concurrent update`
+never reaches a person. The handler wraps THE UPSERT ALONE: a serialization failure on the
+`clara.documents` row itself would mean the document row changed (the legacy bytes/storage upgrade
+is its only writer), which is a different fact and keeps its own spelling. **`detail.entry_id` is
+null on this arm and that is a documented limit, not a gap:** the winner committed after the losing
+transaction's snapshot, and nothing inside a SERIALIZABLE transaction can read it. The key is
+present-and-null rather than absent, so the detail's KEY SET is unchanged. A caller that wants the
+standing entry's name re-reads the document's links in a fresh transaction.
+
+**The gates.** `obw.race.evidence_then_opening` asserts the repaired outcome (exactly one commit,
+the tie document carrying ONE posted entry, the refused batch still wholly draft, and the loser
+refused `CLR13`), and `obw.race.typed_refusal` pins what the loser sees against the SAME refusal
+reached sequentially — byte-identical message, same detail keys, and the one honest difference
+(`entry_id`) asserted explicitly in both directions. Both are frontier-gated on the
+`opening_binding_claim$` stem (`gateBindingClaim`), so a leg pinned between 0213 and 0235 skips
+cleanly; a FOCUSED run below 0235 fails loudly in the battery's `before` unless
 `opening-binding-claim-preintegration-gate.mjs` is preloaded.
 
 **AC2's "exactly one", reinterpreted (L04B-SPEC-04):** the brief's literal wording is "asserts
