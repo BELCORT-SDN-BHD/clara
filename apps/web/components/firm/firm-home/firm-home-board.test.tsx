@@ -332,7 +332,7 @@ test("Firm Home: the two-column grid reflows on a CONTAINER query, not a viewpor
   });
 });
 
-test("Firm Home (#995): the portfolio table is the ONE client-population summary — the older active/onboarding/archived tally is gone", async () => {
+test("Firm Home (ticket 995): the portfolio table is the ONE client-population summary — the older active/onboarding/archived tally is gone", async () => {
   await withMockedEnv(wire(), async () => {
     const h = await mount();
     try {
@@ -342,12 +342,12 @@ test("Firm Home (#995): the portfolio table is the ONE client-population summary
       // sentence would have read exactly this — its absence is the discriminator, not a guess at
       // wording.
       assert.doesNotMatch(h.text(), /1 active · 1 onboarding · 0 archived/,
-        "the older status tally must not render beside the portfolio — #995");
+        "the older status tally must not render beside the portfolio — ticket 995");
     } finally { await h.unmount(); }
   });
 });
 
-test("Firm Home (#995): a caller below the bookkeeper floor still sees a client count, from the header sentence the register read already feeds", async () => {
+test("Firm Home (ticket 995): a caller below the bookkeeper floor still sees a client count, from the header sentence the register read already feeds", async () => {
   const VIEWER = [{
     user_id: "u2", firm_id: "f1", firm_name: "BELCORT SDN BHD", role: "viewer",
     role_rank: 0, is_operator: false,
@@ -374,7 +374,7 @@ test("Firm Home (#995): a caller below the bookkeeper floor still sees a client 
   );
 });
 
-test("Firm Home (#995): a client status outside active/onboarding/archived is still counted in what a caller sees", async () => {
+test("Firm Home (ticket 995): a client status outside active/onboarding/archived is still counted in what a caller sees", async () => {
   const CLIENTS_WITH_OTHER = [
     ...CLIENTS,
     { id: "c3", name: "Odd Co", status: "suspended", created_at: "2026-03-01T00:00:00Z" },
