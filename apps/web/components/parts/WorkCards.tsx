@@ -57,6 +57,7 @@
 // transcript and paints nothing.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { CancelOutcome, CancelWorkDialog } from "@/components/work/work-cancel-dialog";
@@ -70,8 +71,7 @@ import { PartSummaryCard } from "./PartSummaryCard";
 import { usableId } from "./PartCardShell";
 import { workDetailHref } from "@/lib/navigation/tree";
 import { WorkQuestionForm } from "@/components/work/work-question-form";
-import { WorkQuestionPanel, offersRestateFor } from "@/components/work/work-question-panel";
-import { RestateWorkPanel } from "@/components/work/work-restate";
+import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
@@ -112,6 +112,30 @@ import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart
 /** #630 — the rail card's convergence interval. The same 3 s the Work detail page polls on
  *  (`lib/work/use-work-detail.ts`'s WORK_POLL_MS): one Work, two surfaces, one rhythm. */
 export const WORK_CARD_POLL_MS = 3_000;
+
+/**
+ * #839 (fix round, review finding L09-ADV-05) — IS THIS RAIL CARD BEING READ ON THE WORK'S OWN
+ * DETAIL PAGE?
+ *
+ * `RailMount` is rendered unconditionally for the whole `(firm)` group
+ * (`app/(firm)/layout.tsx`), and `app/(firm)/clients/[clientId]/work/[workId]/page.tsx` is inside
+ * it — so "this card is never mounted on the Work detail" was simply false about the app shell.
+ * On that route the Work detail already mounts its OWN `RestateWorkPanel`
+ * (`work-detail.tsx`), and a second one in the rail is exactly the duplicate AC3 forbids.
+ *
+ * PURE, AND EXPORTED, so a cell can drive it: `useParams()` is an App-Router context read that a
+ * node harness has no seam for, and this repo's own answer to that (`offersRestateFor`) is to put
+ * the decision in a function and test the function.
+ */
+export function onWorkDetailRoute(
+  params: Record<string, string | string[] | undefined> | null | undefined,
+  workId: string | null | undefined,
+): boolean {
+  if (typeof workId !== "string" || workId === "") return false;
+  const seg = params?.workId;
+  const route = typeof seg === "string" ? seg : Array.isArray(seg) ? seg[0] : null;
+  return typeof route === "string" && route === workId;
+}
 
 export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   const t = useTranslations("Clara.parts.workAccepted");
@@ -157,6 +181,13 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   const scope = useFirmScopeOrNull();
   const bookkeeperPlus = typeof scope?.role_rank === "number" && scope.role_rank >= roleRankOf("bookkeeper");
   const cancellable = bookkeeperPlus && work !== null && isCancellableWorkStatus(work.status);
+  // #839 — …AND THE SAME TWO GATES FOR RESTATE. `clara.restate_accounting_work` floors at
+  // bookkeeper through `clara._work_door_ctx` exactly as the cancel door does, so the rank rule
+  // stated above for Cancel Work applies verbatim; and the rail is mounted on the Work detail
+  // route too, where B3's own restate panel is already on screen (see `onWorkDetailRoute`).
+  const routeParams = useParams();
+  const onOwnWorkDetail = onWorkDetailRoute(routeParams as Record<string, string | string[] | undefined> | null, part.work_id);
+  const offerRestate = bookkeeperPlus && !onOwnWorkDetail;
   // …and the ANSWER lives on the card rather than inside the dialog, for the reason work-detail's
   // own copy of this state records: the trigger unmounts with the status change that produced it.
   const [cancelState, setCancelState] = useState<CancelWorkResult | null>(null);
@@ -191,9 +222,15 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
     >
       {/* #839 — `offerRestate`: the panel offers "Restate as a new instruction" beside its form
           once the shared record's `basis` (migration 0265) is present, matching the Work detail.
-          Safe to turn on unconditionally here — this card is never mounted on the Work detail
-          itself, so there is no second restate control to collide with. */}
-      {parked ? <WorkQuestionPanel workId={part.work_id} announce="none" offerRestate /> : null}
+          THIS CARD IS THE RAIL'S ONE OWNER OF THAT CONTROL: `work_accepted` is the durable part
+          (minted by the chat turn that admitted the Work, replayed on every later read of the
+          transcript), so it is present in the conversation that started the Work whether or not
+          the live-stream `work_question` card below is — and two cards offering the same control
+          for one Work in one transcript is the duplicate AC3 forbids. Withheld below the
+          bookkeeper floor, and on the Work's own detail route where B3 already offers it. */}
+      {parked ? (
+        <WorkQuestionPanel workId={part.work_id} announce="none" offerRestate={offerRestate} />
+      ) : null}
       {cancellable || decisionOpen ? (
         <CancelWorkDialog
           workId={part.work_id}
@@ -329,18 +366,15 @@ export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
           accounts={data.accounts}
         />
       ) : null}
-      {/* #839 — the same restate entry point `WorkAcceptedCard` offers above, reused here for the
-          live-stream card's own direct `WorkQuestionForm` mount (this card does not go through
-          `WorkQuestionPanel`, so the panel's own `offerRestate` cannot reach it). Gated on the
-          WORK's status, exactly as the Work detail's sibling mount is. */}
-      {data?.record && offersRestateFor(data.record, true) ? (
-        <RestateWorkPanel
-          work={{ id: data.record.work_id, basis: data.record.basis ?? null }}
-          clientId={part.client_id}
-          session={sessionTokenAccessor}
-          onRestated={reload}
-        />
-      ) : null}
+      {/* #839 — NO RESTATE CONTROL HERE, and the reason is AC3 ("no second restate door or
+          duplicate restate UI"), measured in the fix round (review findings L09-SPEC-03 and
+          L09-SPEC-10). This live-stream card and the DURABLE `work_accepted` card above render in
+          the SAME transcript for the SAME Work — this file's own header says why `work_accepted`
+          is the one that is always there — and both gates were true at exactly the same moment (a
+          Work parked on a pending question), so a parked Work showed two restate controls. This
+          mount also ignored the card's own `addressable` gate and would have built the
+          `/clients//work/<id>` link the card exists to refuse. One owner per Work per transcript,
+          and it is the durable card. */}
     </PartSummaryCard>
   );
 }
