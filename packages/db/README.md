@@ -1713,12 +1713,34 @@ over-claim — is added the same way, beside it, and PROVEN discriminating: the 
 (§C.4) sets up one honest row and one dishonest one inside a rolled-back probe, and the repeatable
 test file's own new cell reads the same shape live.
 
-**Web.** `CapabilityLevel` (`apps/web/lib/documents/document-state.ts`) and the readers keyed off
-it (`capability-tiers.tsx`'s tone map, `capabilityTier.*` in `en.json`) admit the fifth value and
-render it distinctly from `stored_only`; `resolveCapability`/`tierStateKey`
-(`capability-registry.ts`) already pass any level through generically and needed no change beyond
-the shared type. No reader anywhere branches on `business_operation === 'supported'` in a way that
-would silently fold the new level into an existing one.
+**What that costs, said plainly (a knowingly-accepted residual).** Because the rule lives in a
+test and not in a CHECK, **nothing refuses it at write time**. Measured on the lane database
+inside a rolled-back transaction: `update clara.document_capabilities set
+business_operation='proposal_only' where format='ofx' and document_kind='bank_statement'` — a row
+whose `typed_facts` is `unsupported` — was ACCEPTED, and `set constraints all immediate` passed it
+too. The only thing that fails is a later test run. This is accepted rather than closed because
+the pre-existing `supported`-over-unsupported-facts rule has always lived in exactly the same
+place, and splitting the pair across a CHECK and a test would make the weaker half look stronger.
+The cross-column CHECK `business_operation not in ('supported','proposal_only') or typed_facts =
+'supported'` validates clean against the live 240 rows today and is the shape a later ticket would
+add — together with pinning 0246's `SELECT INTO` by `conname`, since that CHECK would itself name
+`business_operation` and 0246's unordered `ilike` probe would then be a coin flip on a redo.
+
+**Web.** `BusinessOperationLevel` (`apps/web/lib/documents/document-state.ts`) is this axis's OWN
+union — the shared `CapabilityLevel` stays at the four values custody, byte extraction and typed
+facts still carry in their own CHECKs — and the readers keyed off it (`capability-tiers.tsx`'s
+tone map, now keyed by that closed set so the compiler enforces it; `capabilityTier.*` in
+`en.json`) render it distinctly from `stored_only`. `resolveCapability`/`tierStateKey`
+(`capability-registry.ts`) pass any level through generically.
+
+The DETAIL panel's own reader needed a real change, and did not get one in 0246's own round:
+`operationVerdict()` branched on the level exactly once (`=== 'unsupported'` → `not_applicable`)
+and sent `proposal_only` down the same ladder as `stored_only`, so the one surface a professional
+opens for a filed document rendered the two identically — "Not coded yet" for both, which are
+opposite facts. It now returns its own `awaiting_confirmation` verdict where the two levels really
+differ (nothing coded, nothing posted, no statement), with its own message key, its own tone and a
+sentence saying why nothing is booked; once a person has acted, a confirmed proposal reads `coded`
+or `posted` like any other entry.
 
 ## 0234 — the platform's legal enforcement mode (#1008)
 

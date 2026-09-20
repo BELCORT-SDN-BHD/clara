@@ -349,7 +349,7 @@ test("an OFX bank statement is honestly stored: extraction NOT ATTEMPTED, facts 
   });
 });
 
-test("a proposal_only pairing reads DIFFERENTLY from a store-only one on the operation row (#988)", async () => {
+test("a proposal_only pairing reads DIFFERENTLY from a store-only one on the operation row (ticket 988)", async () => {
   let storeOnly = "";
   await mount(PAYROLL, async (text) => { storeOnly = text(); });
   assert.match(storeOnly, /Not coded yet/,
@@ -360,7 +360,7 @@ test("a proposal_only pairing reads DIFFERENTLY from a store-only one on the ope
     assert.match(t, /Proposed, needs your confirmation/,
       "the fifth level gets its own word on the one row a professional opens for a filed document");
     assert.doesNotMatch(t, /Not coded yet/,
-      "…and it must NOT reuse the store-only sentence, which is #988's whole complaint: "
+      "…and it must NOT reuse the store-only sentence, which is ticket 988's whole complaint: "
       + "'Clara derives nothing' and 'Clara has a proposal for you' are opposite facts");
     assert.match(t, /never posts it on her own/,
       "the row says WHY nothing is coded, so the state word is not the only thing a reader gets");
