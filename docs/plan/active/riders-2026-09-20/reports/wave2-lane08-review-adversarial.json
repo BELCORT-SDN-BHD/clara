@@ -1,0 +1,94 @@
+{
+  "lane": "wave2-lane08",
+  "lens": "adversarial",
+  "branch": "riders/w2-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "base": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "database": "127.0.0.1:55748/clara_l08 (232 migrations, head 0264_activity_kind_ladder)",
+  "tickets": [840, 843, 861],
+  "verdict": "accept-with-fixes",
+  "summary": "Six attack surfaces held under live probing: tenant isolation on both recut doors (a second firm with 373 events of its own read zero foreign rows across all six kind filters), the refusal oracle (a foreign event id, a random uuid, a malformed id and an unknown source all answer a byte-identical CLR11 activity_event_not_found), the rank floors (an operator-firm viewer meets CLR04 on both doors, not an empty page; an operator-firm bookkeeper reads the act but cannot perform it), idempotency under replay with a different payload (CLR10 op_key_conflict, exactly one admission.capacity_set appended across three calls, the replay receipt byte-identical), the LIKE-wildcard trap (firm.% with the dot leaves firm_registration.* and firm_setup.* on the stated default, measured through the door), and the migrations' own prestates (three full create-or-replace recuts with sha-256 pins, no splice anchor anywhere, nothing that could mis-apply on a database with real rows). No accounting treatment is implicated by any of the three tickets. Six findings, none a blocker: the sharpest is a new lock coupling #843 introduces on the self-serve signup path, demonstrated with three real connections inside rolled-back transactions.",
+  "gates_rerun_by_this_reviewer": [
+    "packages/db tests/activity-feed.test.mjs, full 53-module gate chain: 41 pass / 0 fail / 0 skipped",
+    "packages/db tests/operator-support.test.mjs, full gate chain: 22 pass / 0 fail / 0 skipped",
+    "packages/db tests/rig-events-structure.test.mjs + s6-tasks + operation-census + rig-isolation (no reset flags): 56 tests, 55 pass / 0 fail / 1 skipped (T19 poison-role, needs CLARA_RIG_ALLOW_RESET)",
+    "apps/web lib/firm/activity.test.ts + activity-filters + activity-row + activity-event-sheet + firm-home-board: 70 pass / 0 fail / 0 skipped",
+    "pnpm typecheck (worktree root): apps/web Done, packages/runtime Done"
+  ],
+  "not_rerun": [
+    "pnpm --filter @clara/web e2e activity-feed-walk / home-board-walk — the walk runs against apps/web/e2e/activity-mock.mjs, a fabricated row set, so it carries a rendering claim the four web unit files above already carry; not independently re-run.",
+    "pnpm lint (reported exit 0 by the implementer; not re-run).",
+    "A from-scratch 0001->0264 chain — RIG.md forbids a second from-scratch chain on this cluster."
+  ],
+  "findings": [
+    {
+      "id": "ADV-L08-1",
+      "ticket": 843,
+      "severity": "minor",
+      "kind": "lock-order",
+      "title": "set_admission_capacity now waits for clara.firm_event_seq[operator] while holding the global admission-capacity advisory lock, so a peer operator act can stall a paid applicant's firm claim",
+      "evidence": "clara._append_event (live body, sha 7f7d63ee...) opens with `insert into clara.firm_event_seq (firm_id, n) values (p_firm, 1) on conflict (firm_id) do update set n = firm_event_seq.n + 1`, which holds a row lock on that firm's seq row for the rest of the transaction. #843 put one such call inside clara.set_admission_capacity AFTER its `pg_advisory_xact_lock(hashtextextended('clara.admission-capacity', 0))` (live body sha a0cb5ac6..., append at the statement between _audit and _finish_op). Before #843 the advisory lock's critical section held only the admission_capacity singleton UPDATE and a plain clara._audit INSERT (clara._audit is one `insert into clara.audit_log`, no shared row). Three peers take that same operator-firm seq row and take NO advisory lock: clara.reject_firm_registration (live body ba4f168a..., `_append_event(c.firm,'firm_registration.rejected',...)`), clara.approve_firm_registration, and — newly, from this same ticket — clara.resolve_stripe_event_problem (46bb3d5a...). clara.claim_paid_firm (the paid applicant's firm claim) takes the same advisory key and its own comment says it 'has no business queueing behind the estate's admission lock'. DEMONSTRATED with three real connections on clara_l08, all rolled back (scratchpad probe4.mjs, pids 372274/372275/372276): S1 held firm_event_seq[61ef3522-...]; S2 took the advisory lock and then blocked on that row ('settled within 1.2s? false'); S3's pg_try_advisory_xact_lock returned false, i.e. claim_paid_firm would queue. pg_stat_activity showed 1 backend waiting on a Lock. Releasing S1 unblocked S2. No cycle exists (both advisory-lock holders take the advisory lock first), so this is head-of-line blocking, not a deadlock; neither 0263's header nor the door's comment mentions it.",
+      "required_fix": "Either advance the operator firm's event sequence before taking the advisory lock (so the advisory-lock critical section contends with nothing but itself, as 0186 designed it), or state the new coupling explicitly in 0263's header and in clara.set_admission_capacity's own comment beside the advisory-lock line, so the next reader of clara.claim_paid_firm's 'no business queueing' comment is not misled."
+    },
+    {
+      "id": "ADV-L08-2",
+      "ticket": 843,
+      "severity": "minor",
+      "kind": "idempotency-and-census",
+      "title": "0263 registers both event types with `on conflict (name) do nothing` and its tail never asserts the description, so a colliding registration silently ships someone else's sentence onto the operator's timeline",
+      "evidence": "packages/db/migrations/0263_operator_support_timeline_events.sql:327-332 inserts both rows with `on conflict (name) do nothing`. §T's census asserts only `name = 'admission.capacity_set' and client_scoped = false` (count 1), the trigger_taxonomy routing at the active version, and the whole-catalog coverage anti-join — `description` appears exactly twice in the whole file and both are in that INSERT (grep -n description 0263_*.sql -> lines 78, 327). The description is not cosmetic: clara.firm_timeline_visible projects `t.description as event_description` from clara.event_types (pg_get_viewdef, measured), and clara.list_activity/get_activity_event return it as the row's `description` — it IS the sentence the operator reads. Measured live: 'An operator changed the estate''s admission capacity (clara.set_admission_capacity)'. The lane's own report names this hazard ('a colliding registration with a DIFFERENT description would be silently kept rather than refused — worth one glance at integration time') but ships no assertion for it.",
+      "required_fix": "Extend §T's two event-type censuses to pin the exact description text as well as the name and client_scoped flag, so a collision refuses the migration instead of being left to a human glance at integration time."
+    },
+    {
+      "id": "ADV-L08-3",
+      "ticket": 843,
+      "severity": "note",
+      "kind": "tenant-isolation",
+      "title": "The operator support acts are fenced by firm IDENTITY, not by operator status, so they survive the is_operator flag moving to another firm",
+      "evidence": "clara.firm_timeline_visible's only fence is `e.firm_id = clara.jwt_firm()` plus the bookkeeper rank floor (pg_get_viewdef, measured). clara.firms.is_operator is a mutable boolean under a singleton unique index (uq_firms_one_operator, referenced by rig-helpers.mjs's operator-claim helper), and the batteries themselves set and clear it. Measured on clara_l08: the estate currently has ZERO operator firms (`select count(*) from clara.firms where is_operator` = 0) while 111 admission.capacity_set rows sit on firms that are no longer operator, and a bookkeeper of one such firm reads one straight off clara.get_activity_event (probe3.mjs: kind=documents, description='An operator changed the estate''s admission capacity (clara.set_admission_capacity)', client=null). The lane theme is 'operator support acts must stay invisible to every other firm'; that holds only as long as the operator firm never changes. Negligible in production (one permanent operator firm) and arguably correct as history, but it is the one assumption os.20 does not state.",
+      "required_fix": "None required for this wave. Worth one sentence in CONTEXT.md's new 'Operator support act' term saying the record stays with the firm that was the operator when the act was taken, so a future operator handover is a known question rather than a surprise."
+    },
+    {
+      "id": "ADV-L08-4",
+      "ticket": 843,
+      "severity": "note",
+      "kind": "test-rigor",
+      "title": "os.20's cross-firm half asserts an absence against a page that is empty for unrelated reasons — no control proves the outsider's read returns anything at all",
+      "evidence": "packages/db/tests/operator-support.test.mjs os.20 creates the outsider with `insertUser` + `ordinaryFirm` immediately before reading, so the firm has no activity of its own; 'another firm's owner reads no <type> row' and 'no row is acted by the operator' are then asserted over a page that is empty. The cell carries an explicit control for the OPERATOR's own read ('THE CONTROL FIRST... without this line every assertion below could pass for the wrong reason') and none for the outsider's. The property itself does hold — I re-tested it against a firm carrying 373 domain events: as that firm's owner, clara.list_activity under each of kinds=['people'|'assets'|'counterparties'|'clients'|'firm'|'documents'] returned 50/4/10/55/2/100 rows, every row of the asked-for kind, and a root cross-check of every returned event id found ZERO rows belonging to another firm (probe1.mjs, P3). So this is a hole in the proof, not in the product.",
+      "required_fix": "Give os.20's outsider firm one activity row of its own and assert its page is non-empty before asserting the three absences, so the isolation half cannot pass on an empty read."
+    },
+    {
+      "id": "ADV-L08-5",
+      "ticket": 840,
+      "severity": "note",
+      "kind": "correctness",
+      "title": "The row and the detail Sheet disagree about a successor link with a null client_id: one hides the fact, the other states it without a link",
+      "evidence": "apps/web/components/firm/activity/activity-row.tsx guards `row.client_id && row.successor_work_id` (no link, and no trace of the successor, when client_id is null); apps/web/components/firm/activity/activity-event-sheet.tsx guards only `detail.successor_work_id` and then renders t('linksToSuccessor') as bare text when detail.client_id is null. Neither branch is reachable today: clara.accounting_work.client_id is NOT NULL (information_schema.columns, measured) and clara.cancel_accounting_work passes `w.client_id` positionally into _append_event, so every work.cancelled event carries a client — confirmed across all nine superseded rows on clara_l08, where the successor Work's firm AND client match the event's in every case. The disagreement is therefore dead code today, but it is two different answers to the same question sitting three files apart.",
+      "required_fix": "Pick one shape for the null-client case and use it on both surfaces — either both render the fact without a link, or both suppress it — and say in the comment that clara.accounting_work.client_id is NOT NULL so the branch is defensive."
+    },
+    {
+      "id": "ADV-L08-6",
+      "ticket": 861,
+      "severity": "note",
+      "kind": "migration-safety",
+      "title": "0264's redo path validates the live body by arm presence only, never by sha, so a redo can overwrite a body carrying this file's effect plus somebody else's edit",
+      "evidence": "packages/db/migrations/0264_activity_kind_ladder.sql §0.3 computes `v_applied_list := position('then ''people''' in v_src) <> 0` and pins the pre-image sha (186ab1af.../37319708...) ONLY when that discriminator is absent. On the redo path §0.4's thirteen `position(...)` arm probes are the whole check. A body that still carries all thirteen arms plus an unrelated edit would be silently replaced by CLARA_MIGRATION_REDO. This is a rig-only hazard — a migration applies once in integration, and the pre-image path is fully sha-pinned, which is what protects the integrated chain — and the file reasons about the tradeoff in its own comment ('a bare \"must equal the pre-image\" pin would make this file un-redoable; a bare \"already applied\" tolerance would let it overwrite a body it never read'). Recorded because the adversarial brief asks specifically about a migration that could silently mis-apply. Verified the pre-image path has teeth: the lane's report records a redo REFUSED with '#861 prestate: the live clara.list_activity is not 0262's body -- missing: stated-default' after a hand revert.",
+      "required_fix": "None required. If the shape is reused, consider pinning a post-state sha on the redo path as well (the file already measures one: 02a7f720.../54dfe97c...), so a redo refuses a body that is this file's output plus an edit."
+    }
+  ],
+  "attacks_that_found_nothing": [
+    "Tenant isolation on every new or recut door — clara.list_activity and clara.get_activity_event are SECURITY INVOKER over clara.firm_timeline_visible (fence `e.firm_id = clara.jwt_firm()`), and BOTH new correlated payload reads (work_id and the #840 successor_work_id) go to clara.domain_events with an explicit `de.firm_id = c.firm` on top of forced row security (relrowsecurity/relforcerowsecurity both true). Probed as a second firm's owner across six kind filters: 221 rows returned, zero belonging to another firm.",
+    "Rank floors — an operator-firm VIEWER (rank below bookkeeper) gets CLR04 'insufficient role' from BOTH doors, never an empty page; an operator-firm BOOKKEEPER can read the capacity act but gets CLR04 from clara.set_admission_capacity itself. The runtime role is not granted either door (rig-isolation T17/T17b/T18 green).",
+    "Existence oracle in a refusal — as another firm's owner, clara.get_activity_event answered the SAME 'CLR11 | activity event not found | {\"reason\": \"activity_event_not_found\"}' for a real foreign event id, a random uuid, the non-uuid string 'not-a-uuid' and an unknown source 'nope'. All four byte-identical.",
+    "Idempotency under replay with the same key and a different payload — inside a rolled-back transaction, clara.set_admission_capacity(11,'adv probe A',K) then (99,'adv probe B',K) refused CLR10 {\"reason\":\"op_key_conflict\"}; a third call with the original arguments returned a receipt byte-identical to the first; clara.domain_events' admission.capacity_set count for that firm went 1 -> 2 across all three calls, i.e. exactly one line. The append sits strictly between _reserve_op and _finish_op in both recut bodies (0263 §T asserts it positionally; os.21 proves it behaviourally, re-run green).",
+    "A race between two sessions — driven with three real connections (see ADV-L08-1). The reservation mechanism itself is unchanged by this lane: clara._reserve_op's hash binds (max_firms, reason, actor) on the capacity door and (problem, resolution, actor) on the resolve door, and clara.resolve_stripe_event_problem takes `for update` on the problem row, so a concurrent second resolution re-reads the updated row and meets CLR09.",
+    "The LIKE `_`-wildcard trap — `like 'firm.%'` is written with the dot in BOTH bodies. Measured through the door as a real firm's owner: kinds=['firm'] returns only firm.* rows (2), while kinds=['documents'] still carries firm_registration.*, firm_setup.*, admission.* and stripe_event.* among 25 families. A `firm_%` arm would have swallowed seven live types.",
+    "A splice anchor that could match twice or zero times — none of the three migrations splices. 0262, 0263 §2/§3 and 0264 §R all emit complete `create or replace function` bodies, each behind a sha-256 prestate pin on the live prosrc; 0264's §R is 0262's body verbatim plus three textual edits made before the file was written, not at apply time.",
+    "A migration that would fail or silently mis-apply on a database with real rows — the three files change only function bodies (create or replace over unchanged signatures, so owner/SECURITY/settings/ACL are preserved and re-asserted by each tail) plus two append-only clara.event_types rows and their taxonomy routing. No DDL on a data table, no backfill, nothing order-dependent on row content. The estate's coverage laws re-run green: rig-events-structure (14), s6-tasks (9), operation-census (10), rig-isolation (22/1 skip).",
+    "Integer cents and Asia/Kuala_Lumpur calendar days — not reached by this lane. No money column, no date arithmetic and no timezone conversion is added or moved; p_since/p_until keep their existing timestamptz half-open comparison and the browser's day grouping is untouched.",
+    "An accounting treatment contradicting a standard — none of #840, #843 or #861 names an accounting treatment. #840 links a retired Work to its restatement, #843 records two operator admission decisions, #861 relabels a read-time filter group. No ledger, no entry and no measurement basis is touched.",
+    "A cross-door ladder divergence — the two ladders are character-identical in the installed bodies (read out of pg_proc and compared), and af.39b drives one event of every one of the 137 registered event types through BOTH doors against an independent JS prefix table. Re-run: 41/41 green.",
+    "Roster/vocabulary drift between the door and the browser — the closed roster lives in exactly two places (clara.list_activity's p_kinds check and apps/web/lib/firm/activity.ts's ACTIVITY_KINDS); grep over apps and packages finds no third copy, and both function COMMENTs were updated to the eleven-value set. p_kinds edge shapes behave as before: '' and 'People' refuse CLR10 invalid_kind with the offending value echoed, [] returns an empty page, a duplicate is harmless, and a NULL array element is silently ignored (pre-existing 0181 behaviour, not introduced here).",
+    "A door-recut collision with another wave-2 lane — lane 07's 0261_retire_list_firm_timeline is the only other migration in the wave that touches this area, and it drops clara.list_firm_timeline while leaving clara.firm_timeline_visible and clara.list_activity untouched, so 0262's sha pin on 0202's body still holds on the integrated chain."
+  ]
+}

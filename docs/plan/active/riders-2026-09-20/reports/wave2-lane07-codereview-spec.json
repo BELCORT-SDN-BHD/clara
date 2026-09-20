@@ -1,0 +1,134 @@
+{
+  "axis": "spec",
+  "lane": "wave2-lane07",
+  "branch": "riders/w2-lane07",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": [
+    "c7b434584 db(depreciation): #974 splice list_review_queue for a depreciation_authority_pending row",
+    "d50857c08 web(firm): #974 wire depreciation_authority_pending into the Needs-you closed world",
+    "a980f8c4f web(firm): #995 retire Firm Home's status tally, keep the header's client count",
+    "cbbc594c2 test(web): #995 fix round — reword ticket references so the raw-colour lint selector doesn't trip",
+    "756cdc484 web(firm): #1009 Firm Home names an outstanding agreement and links the owner to accept it",
+    "ca4576b3c web(firm): #1009 the non-owner, failed-read and mode-copy faces of the legal prompt",
+    "53edba470 web(firm): #1009 mount the legal-standing prompt on Firm Home, beside Finish firm setup",
+    "37e33380a web(firm),test(e2e): #1009 browser walk for the owner path, and a props-typing fix",
+    "b2eb3f9fb db(activity): #998 migration 0261 retires clara.list_firm_timeline and its wrapper",
+    "ea890fd41 test(db): #998 web-reads-and-doors sheds list_firm_timeline's cohort flag and cells",
+    "8ef4596a3 test(db): #998 f-a7-pi's web-reads witness moves off the retired function"
+  ],
+  "spec_source": "GitHub issues #974, #995, #1009, #998 (bodies + owner-ruling comments dated 2026-09-20 on #974 and #995; #1009 and #998 carry no comments). Fetched via gh api repos/BELCORT-SDN-BHD/clara/issues/<n> and .../comments.",
+  "verdict": "accept-with-fixes",
+  "reruns_performed": [
+    "packages/db: node --test --test-concurrency=1 <51 preintegration gates> tests/depreciation-authority-pending-rowkind.test.mjs tests/web-reads-and-doors.test.mjs tests/f-a7-pi.test.mjs tests/operation-census.test.mjs -> 60 tests, 60 pass, 0 fail (clara_l07 @ 127.0.0.1:55747)",
+    "packages/db: same gate chain, tests/activity-feed.test.mjs -> 31 tests, 31 pass, 0 fail (this closes #998 AC3, which the ticket report left unverified)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/firm/firm-home/firm-home-board.test.tsx components/firm/firm-home/firm-legal-standing-tile.test.tsx lib/firm/needs-you-links.test.ts components/firm/needs-you-affordances.test.ts lib/firm/home-facts.test.ts lib/firm/needs-you.test.ts -> 70 tests, 70 pass, 0 fail",
+    "live catalog: clara.list_review_queue prosrc read off clara_l07 to confirm the counts CTE reads all_rows (so the new row does reach counts.needs_you) and that the authority_rows arm is installed",
+    "git show 23cfad947b...:apps/web/components/documents/document-kind-dialog.tsx -> the DOCUMENT_KINDS typecheck/build defect the three reports blame is genuinely present at the lane base"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-L07-01",
+      "ticket": 974,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#974 AC1's \"its own affordance ... each distinct from every other kind's\" is not met: the new kind reuses fixed_asset_incomplete / staff_advance_incomplete's destination verbatim",
+      "evidence": "Ticket line (Acceptance criteria, first box): \"A client with a proposed, unsigned authority produces exactly one queue row, with its own label and its own affordance opening to where the authority can be signed or withdrawn, each distinct from every other kind's.\" On the branch: apps/web/components/firm/needs-you-affordances.tsx:120 registers `depreciation_authority_pending: null` (NO affordance component at all); apps/web/lib/firm/needs-you-links.ts:88-91 maps it to \"/registers\", the same suffix `fixed_asset_incomplete` and `staff_advance_incomplete` already carry, and apps/web/messages/en.json NeedsYou.openTab gains `\"depreciation_authority_pending\": \"Open the registers tab\"`, byte-identical to the other two. The implementer's own new cell concedes it: apps/web/lib/firm/needs-you-links.test.ts:28-30 comments \"a proposed depreciation authority is signed or withdrawn on the SAME register tab fixed_asset_incomplete/staff_advance_incomplete already open\" and asserts the identical href. Note also that `fixed_asset_incomplete` narrows further (needsYouRowHref -> fixedAssetHref), so the new kind is strictly the least specific of the three. The label alone IS distinct (\"Depreciation authority awaiting signature\"), so only the affordance half of the AC fails. The ticket report (wave2-lane07-ticket974.md, AC1) cites `p974.row.distinct` as the evidence for this line; re-read, that cell (packages/db/tests/depreciation-authority-pending-rowkind.test.mjs:91-101) only proves two different clients' authority ids do not collide — it says nothing about affordance distinctness, so the AC is asserted rather than evidenced.",
+      "required_fix": "Either (a) make the affordance distinct — e.g. an inline affordance component for the kind, or a deeper destination/anchor that lands on DepreciationAuthorityPanel rather than the register tab root, with its own NeedsYou.openTab string; or (b) get an owner ruling that the shared register tab satisfies AC1 and record it on #974, then correct the report's cited evidence."
+    },
+    {
+      "id": "SPEC-L07-02",
+      "ticket": 998,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#998 AC1 (\"No reference to the function or the wrapper remains outside migration history\") leaves two references that now point at things this ticket deleted",
+      "evidence": "Ticket line: \"- [ ] No reference to the function or the wrapper remains outside migration history.\" The ticket's Context does carve out \"Two comments in unrelated modules mention it as background\", but after the drop those comments name artefacts that no longer exist: apps/web/lib/firm/activity.ts:31-32 still reads \"the same reasoning lib/firm/timeline.ts's own header gives for `list_firm_timeline`\" — `apps/web/lib/firm/timeline.ts` was DELETED by this ticket (confirmed: `ls apps/web/lib/firm/timeline.ts` -> No such file), so the pointer is dangling; and apps/web/e2e/home-board-mock.mjs:292-293 still documents \"`list_firm_timeline` is DELIBERATELY NOT HANDLED. This mock exercises the compatibility arm for a database that predates migration 0174, so Firm Home renders its 'not available yet' state\" — an arm #659 already removed and the function no longer exists to predate. Live code is clean (verified by grep over apps/web, packages/runtime, packages/db and by operation-census.test.mjs opcen.1/opcen.3 re-run green), so this is documentation rot introduced by the retirement, not a broken call site.",
+      "required_fix": "Reword apps/web/lib/firm/activity.ts:31-32 so it no longer points at a deleted file, and reword apps/web/e2e/home-board-mock.mjs:292-296 so it no longer describes a compatibility arm and a door that are both gone."
+    },
+    {
+      "id": "SPEC-L07-03",
+      "ticket": 995,
+      "severity": "minor",
+      "kind": "unasked-behaviour",
+      "title": "#995 removed Firm Home's only surface for a failed client-register read, which no ticket line asked for",
+      "evidence": "The brief's Desired behavior is scoped to the summary: \"The rendered status tally is removed. The portfolio table is Firm Home's one client-population summary for a bookkeeper or higher. A caller below that floor still sees a plain client count...\". Nothing asks for the register-read failure face to go. The retired `<section aria-labelledby=\"firm-home-clients\">` carried the DataState wrapper that rendered \"Something went wrong\" on `register.error`; with it gone, a failed register read now degrades silently to the header's role-only sentence. The change is visible in the pre-existing cell that had to be rewritten: apps/web/components/firm/firm-home/firm-home-board.test.tsx:327-336, where `assert.match(h.text(), /Something went wrong/, \"while the failed section shows its own failure\")` became `assert.match(h.text(), /BELCORT SDN BHDOwner/, \"the header falls back to role-only\")`. The ticket report acknowledges it only as a follow-up (\"a considered trade-off, not an oversight\"), not as an accepted scope change.",
+      "required_fix": "Either restore an explicit register-read failure surface on Firm Home (a one-line ErrorMessage where the section stood), or get the loss recorded as accepted on #995 rather than deferred to an unfiled follow-up."
+    },
+    {
+      "id": "SPEC-L07-04",
+      "ticket": 974,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#974's row is silently withheld for any client whose register status is not 'active', which AC1 does not carve out and no cell covers",
+      "evidence": "Ticket line: \"A client with a proposed, unsigned authority produces exactly one queue row\". The installed CTE narrows that: packages/db/migrations/0260_depreciation_authority_pending_rowkind.sql:219-222 (and the live prosrc read back off clara_l07) joins `clara.clients active_fda_client on active_fda_client.id=fda.client_id and active_fda_client.status='active'`, so an onboarding, archived or otherwise-statused client with a proposed authority produces ZERO rows — precisely the client whose depreciation lane the ticket says is blocked. The migration comment defends it as house consistency (\"The active-client guard mirrors eight of the other ten kinds (0017 R1-F5)\"), which is a reasonable reading, but the narrowing is nowhere in the ticket and packages/db/tests/depreciation-authority-pending-rowkind.test.mjs has no cell for a non-active client, so it is an unstated, untested restriction on the AC.",
+      "required_fix": "Add a cell pinning the chosen behaviour for a non-active client (whichever way it is ruled), and record the narrowing in the ticket report's AC1 evidence rather than only in the migration comment."
+    },
+    {
+      "id": "SPEC-L07-05",
+      "ticket": 1009,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#1009 AC1's \"its link lands on the accept control\" is only ever verified to the URL, never to the control",
+      "evidence": "Ticket line: \"- [ ] With one agreement unaccepted, an owner's Firm Home shows the prompt naming that agreement and version, and its link lands on the accept control.\" Both cells stop at the href/URL: apps/web/components/firm/firm-home/firm-legal-standing-tile.test.tsx:88 asserts `link.getAttribute(\"href\") === \"/settings/firm\"`, and apps/web/e2e/home-board-walk.spec.ts:1280-1281 clicks the link and asserts only `await expect(page).toHaveURL(/\\/settings\\/firm$/)` — the walk never asserts that the accept control (LegalStandingCard's accept affordance, apps/web/components/firm-admin/legal-standing-card.tsx via firm-settings-panel.tsx:221) is on the page it landed on. The destination is correct in fact (I confirmed apps/web/app/(firm)/settings/firm/page.tsx mounts FirmSettingsPanel which mounts LegalStandingCard), so this is an evidence gap rather than a wrong link — but the AC's own words are about the control, not the route.",
+      "required_fix": "Extend the browser walk by one assertion after the navigation: the accept control is visible on /settings/firm for that owner."
+    },
+    {
+      "id": "SPEC-L07-06",
+      "ticket": 1009,
+      "severity": "minor",
+      "kind": "unreproducible-evidence",
+      "title": "#1009's required browser walk cannot be run on the branch as committed; its reported green came from a build carrying an uncommitted local patch",
+      "evidence": "Ticket line: \"Unit tests cover the four states. A browser walk with a mocked standing read covers the owner path.\" The walk cell exists (apps/web/e2e/home-board-walk.spec.ts, p1009.home.legal_prompt). But the ticket report states plainly that `next build` refuses on this branch and that the walk's 1/1 and the file's 28/28 were obtained after \"TEMPORARILY added the one missing import (`import { DOCUMENT_KINDS } from \\\"@/lib/documents/types\\\";`) locally, uncommitted\", later reverted. I confirmed the blocking defect is real and predates the lane: `git show 23cfad947b...:apps/web/components/documents/document-kind-dialog.tsx` already imports only `CLASSIFIABLE_DOCUMENT_KINDS` while line 95 reads the undefined `DOCUMENT_KINDS`. So the AC's artefact is present and the failure is not this lane's fault, but the AC's evidence is not reproducible from the branch by the integrator until that defect is fixed.",
+      "required_fix": "Integrator: land the document-kind-dialog fix (or have a lane own it) and re-run `pnpm --filter @clara/web e2e home-board-walk` on a clean checkout before treating #1009's walk as proven."
+    },
+    {
+      "id": "SPEC-L07-07",
+      "ticket": 995,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "#995 AC2's client-count fallback holds only while the register read resolves, and no cell pins the below-floor caller's count when it does not",
+      "evidence": "Ticket line: \"- [ ] A caller below the bookkeeper floor still sees a client count on Firm Home, sourced from the register read the removed tally used.\" apps/web/components/firm/firm-home/firm-home-board.tsx:141-144 renders `t(\"roleOnly\")` — role, no count — whenever `register.loading || register.error`, so the fallback the ticket makes load-bearing is itself conditional. The new cell (firm-home-board.test.tsx, \"a caller below the bookkeeper floor still sees a client count...\") only exercises the resolved path (403 on the portfolio pack, 200 on /rest/v1/clients). Related to SPEC-L07-03; recorded separately because it is about the AC's coverage rather than the removed error face.",
+      "required_fix": "None required if the owner accepts a conditional fallback; otherwise pin the below-floor caller's behaviour on a failed register read with its own cell."
+    },
+    {
+      "id": "SPEC-L07-08",
+      "ticket": 974,
+      "severity": "note",
+      "kind": "closed-world-pin-missed",
+      "title": "The structural census's by-NAME row-kind roster still enumerates nine kinds; only the row-KEY roster moved",
+      "evidence": "Ticket line: \"Every place the closed row-kind vocabulary is pinned admits the new kind, and the membership predicate accepts it.\" packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs:354-360 (MED-3's \"floor\") still loops over exactly nine literals — draft, uncoded_filing, open_question, coding_task, compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete, seeding_proposal — so neither `work_question` (#629's own omission) nor `depreciation_authority_pending` is observed by name there; the cell's title still reads \"ALL NINE row_kinds\". The FULL_ROW_KEYS rosters in that file and in work-question-reads.test.mjs WERE updated for `authority_id`, and the migration's prestate/postcheck marker roster does carry all eleven literals (0260 lines 281-292, re-read on the installed function), so the closed world is genuinely pinned — this is the one roster that was left behind, following #629's precedent.",
+      "required_fix": "None mandatory. Worth a follow-up so MED-3's by-name floor stops under-claiming what it covers."
+    },
+    {
+      "id": "SPEC-L07-09",
+      "ticket": 998,
+      "severity": "note",
+      "kind": "evidence-gap-closed-in-review",
+      "title": "#998 AC3 was reported unverified; I ran it and it holds",
+      "evidence": "Ticket line: \"- [ ] `clara.list_activity` and every other reader of the view pass their existing tests unchanged.\" The ticket report says \"its own tests were not run as part of this ticket\" and lists it under \"Anything unverified\". packages/db/tests/activity-feed.test.mjs exists and is the door's own battery; I ran it on clara_l07 with the full 51-gate chain: 31 tests, 31 pass, 0 fail. wr.8 and wr.9 (the view's own cells) are untouched by the diff and passed in the same run of web-reads-and-doors.test.mjs (22/22). AC3 therefore holds on the branch.",
+      "required_fix": "None. Fold the result into the ticket report so the AC is no longer carried as unverified."
+    },
+    {
+      "id": "SPEC-L07-10",
+      "ticket": 974,
+      "severity": "note",
+      "kind": "report-inaccuracy",
+      "title": "The #974 report's gate-chain count is off by one",
+      "evidence": "wave2-lane07-ticket974.md, \"Gates, with counts\": \"`$GATES` = the 52 `--import` flags now in `package.json`'s `test` script\". The branch's packages/db/package.json carries 51 `--import ./tests/*-preintegration-gate.mjs` flags after this lane's addition (50 at base + depreciation-authority-pending-rowkind-preintegration-gate.mjs); counted directly off the file. No effect on the gate results — I re-ran with the real 51 and the four db files are 60/60 green — but the figure in the report is wrong.",
+      "required_fix": "Correct the number in the ticket report."
+    }
+  ],
+  "already_satisfied_or_stopped_claims_checked": [
+    "#1009 report: 'grep -rn get_firm_legal_standing apps/web/components/firm before my first commit found only legal-standing-card.tsx' — consistent with the diff: the tile is the only new consumer, and lib/firm/commercial-reads.ts (loadFirmLegalStanding, FirmLegalStanding, decodeLegalEnforcementMode, enforcementMode) is untouched by this branch, so the 'no new door, no new decoder' claim holds.",
+    "#1009 report: 'lib/firm/needs-you.ts was not opened, imported or edited by any commit' for #1009 — TRUE for #1009's four commits, but the FILE is edited on this branch by #974 (d50857c08), and #974 adds an eleventh Needs-you kind. #1009's AC5 ('No new Needs-you kind is added. The census cells that pin that vocabulary pass unchanged') therefore reads false against the lane's combined diff even though it is true of #1009 itself. Flagged for the integrator, not scored as a defect: #974 carries its own owner ruling to mint the kind.",
+    "#1009 report: 'serve-built.mjs's own CORE default (standing_live: true, enforcement_mode: prompt)' — verified at apps/web/e2e/serve-built.mjs:874-914; the default exists and is unchanged by this branch, so the 27 pre-existing walks in home-board-walk.spec.ts really do exercise the prompt-absent path.",
+    "#974 report: 'the row already counts toward counts.needs_you through the existing lane=needs_you filter' — verified against the INSTALLED function on clara_l07: the `counts` CTE reads `all_rows`, which now unions `authority_rows`, so counts.needs_you does include the new row. No new counts.* key was minted (the envelope still builds ready/needs_review/needs_you/open_drafts/open_questions/open_tasks/compliance_watches/lint_findings/work_questions).",
+    "#995 report: 'clientStatusTally total counts every row regardless of status' — verified at apps/web/lib/firm/home-facts.ts:76-85 (total = rows.length) and apps/web/lib/firm/reads.ts:103-109 (loadClientRegister applies no status filter), so AC3 holds.",
+    "#995 report: 'no change to /clients' — verified; and the portfolio section's own `<Link href=\"/clients\">` (firm-portfolio-section.tsx:385) sits in the SectionHeader action, outside the denied branch, so a below-floor caller does not lose Firm Home's route into the register when the tally section goes.",
+    "All three reports: 'pre-existing, unrelated DOCUMENT_KINDS typecheck/test/build failure' — verified at the lane base commit; not attributable to this lane."
+  ],
+  "summary": "Four tickets, eleven commits, all four built rather than found already satisfied — correctly: I checked each ticket's premise against the branch and each was live. Spec fidelity is high and the evidence trails are unusually specific. One acceptance criterion is genuinely unmet: #974's row gets a distinct LABEL but not a distinct AFFORDANCE — it opens /clients/<id>/registers under the string 'Open the registers tab', byte-identical to the two register kinds that already exist, with a null entry in the affordance registry, and the report's cited evidence for that line (p974.row.distinct) proves something else entirely. Beyond that: #998 leaves two comments pointing at a file and a code path it deleted; #995 silently retired Firm Home's only failed-register-read surface without a ticket line asking for it; #974 narrows AC1 to active clients only, unstated and untested; #1009's link AC is verified to the URL but never to the control, and its required browser walk is not reproducible on the branch as committed (a pre-existing, out-of-lane build blocker). I re-ran every cell carrying a load-bearing claim: 60/60 on the four db files, 31/31 on activity-feed (which closes #998 AC3, left unverified by its report), 70/70 on the six web files.",
+  "generated_at": "2026-09-20",
+  "reviewer": "code-review SPEC axis, wave 2 lane 07"
+}

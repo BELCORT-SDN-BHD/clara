@@ -1,0 +1,91 @@
+{
+  "axis": "standards",
+  "lane": "wave2-lane04",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_checked": "e81ad46b162f05fc049ecc2c2eac8069a3699926",
+  "tickets": [972, 973, 976, 977, 979],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (rules 1-10 and the wave-2 addendum)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (including the wave-2 addendum)",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (house migration law, grants table, \"Redo (#957)\")",
+    "packages/db/tests/README.md (per-ticket battery sections #972/#973/#976/#977/#979)",
+    "packages/db/tests/rig-meta.mjs (cohort precedent for 0227/0221/0222/0198/0212 and the three new ones)",
+    "gh issue view 972/973/976/977/979 --json title,body,comments,labels,state (owner rulings for #977 and #979; #972/#973/#976 have no comments, body is the whole spec)",
+    "reports/wave2-lane04-ticket972.md, ticket973.md, ticket976.md, ticket977.md, ticket979.md"
+  ],
+  "verification_performed": [
+    "git status / git log 23cfad94..HEAD --oneline and --stat in the lane worktree (C:\\Users\\zhant\\Desktop\\clara-wt\\651): clean, 14 commits, matches all five reports; git log --stat confirms vertical-slice TDD at the commit level for every ticket (migration+fixtures+test land together per slice, never a standalone batch of *.test.mjs files with no migration) -- no horizontal slicing found",
+    "Re-ran, with the FULL 55-import preintegration gate chain from packages/db against clara_l04 (127.0.0.1:55744): fa-birth-watermark.test.mjs + fa-depreciation-leg-fold.test.mjs + fa-particulars-completion-fold.test.mjs + authority-ref-human-instruction.test.mjs + fa-authority-retired-read.test.mjs together -> 21/21 pass, 0 fail (3+4+3+7+4, matches every individual report's own count)",
+    "Re-ran operation-census.test.mjs + rig-isolation.test.mjs with the same gate chain -> 33 tests, 32 pass, 1 skip (T19 poison-role, RIG.md-forbidden reset) -- matches all five reports",
+    "Read migration 0247_fa_birth_watermark.sql in full (369 lines): header states the defect and the fix in prose, prestate pins sha256(prosrc) for the recut body and four unmoved siblings measured off pg_proc (not transcribed from file text), redo-detection branch, `set role clara_fn_owner`/`reset role` around the recut, tail T.1-T.8 re-derives every claim from the catalog (watermark present exactly once, old join gone, four exclusions and the single conflict-targeted insert intact, owner/definer/search_path/no-grant, trigger unchanged, non-regression pins re-read) -- full compliance with the house migration law in WORK-ORDER rule 4's structural-cell carve-out",
+    "Confirmed via `grep -ni \"create table\\|force row level security\\|alter table.*add column\"` over all five new migrations: no output -- none of the five mints a new relation, so the 'new relations FORCE RLS with zero application-role DML' house rule does not apply to this lane's diff",
+    "Confirmed via `git diff 23cfad94...HEAD --stat -- packages/db/migrations`: only 0247/0248/0249/0250/0251 appear (all newly added) -- no applied migration edited",
+    "Confirmed via `git diff 23cfad94...HEAD --stat -- docs/PRD.md docs/ARCHITECTURE.md`: empty -- no blueprint edit",
+    "Confirmed `apps/web/messages/en.json` and `apps/web/test/manifest.txt` (shared files, WORK-ORDER rule 7) diffs are minimal, in-place additions at the sorted position -- no shared-file discipline violation",
+    "Confirmed `CONTEXT.md`'s new term 'Authorising instruction' (#977) follows the house term/_Avoid_ shape and is `<!-- #977 -->`-fenced like the #721 precedent",
+    "Re-ran `node scripts/check-wiki-dynamic-sql.mjs` directly: 1413 function definitions, 212 change-of-record patches, clean -- matches #977's/#979's reported counts and confirms #973's fix-round (the do-block comment-masking false positive) actually holds at HEAD",
+    "Confirmed `apps/web/components/documents/document-kind-dialog.tsx`'s last change (4b1376f40) is an ancestor of BASE via `git merge-base --is-ancestor` and that `git diff BASE..HEAD -- <that file>` is empty for the whole lane -- the inherited TS7006/TS2552 typecheck red all five reports name is genuinely pre-existing, not introduced by any lane-04 ticket",
+    "Independently re-ran the two x42 clock-roster cells (`tests/x42b2-r7-s5-clock.test.mjs`, `tests/x42b2-s5c-clock.test.mjs`) with the full gate chain on clara_l04: BOTH RED, and the diff is exactly one name -- `_tf_fa_acquisition_birth` present in the live roster (`actual`) but absent from the pinned round-8 M4 measurement (`expected`) -- confirming #977's report's own whole-suite finding, verbatim, rather than merely trusting it",
+    "Re-ran `CI=true GITHUB_ACTIONS=true pnpm lint` from the worktree root: fails on exactly the one selftest case #979's report names (`check-frozen-workflows.selftest.mjs`'s `--ruling` followed by another flag, refused under the CI-only `--retire` guard before reaching the ruling-parsing branch it probes) -- confirmed pre-existing and unrelated (last touched by #849, well before BASE, and outside every lane-04 file)",
+    "Read the new web test file (fa-authority-ceremony.test.tsx) and the new db test file most exercising the fold pattern (fa-depreciation-leg-fold.test.mjs) in full for TDD anti-patterns: expected values are independent hand-computed literals (never re-derived the way the code computes them), no mock of an internal collaborator, assertions run through public seams (a rendered component prop, or a persona door) except the two ungranted internal cores the tickets' own briefs name as \"Key interfaces\" and which have no persona-level door at all -- the brief-given-seam carve-out WORK-ORDER rule 4 states",
+    "Read the rig-meta.mjs diff in full: three new per-migration cohort blocks (0248/0249/0250) plus one explicit NO-COHORT record (0251), each following the file's own pre-existing idiom (FA_DEPRECIATION_0227_COHORT, ACCRUAL_ADJUSTMENTS_0222_COHORT, etc.) rather than introducing a new shape"
+  ],
+  "findings": [
+    {
+      "id": "S1",
+      "ticket": 972,
+      "severity": "major",
+      "category": "stale-structural-census",
+      "title": "0247's watermark join adds a clock read to a trigger body that a separate structural census still asserts is clock-free, leaving two x42 cells genuinely red on this branch",
+      "file": "packages/db/migrations/0247_fa_birth_watermark.sql",
+      "line": 214,
+      "hunk": "and coalesce(new.approved_at, now()) >= fp.enrolled_at",
+      "verdict": "CONFIRMED",
+      "failure_scenario": "packages/db/tests/x42-s5-helpers.mjs's FA_ACQUISITION_0216_CLOCK_NAMES roster states in prose that clara._tf_fa_acquisition_birth 'copies columns and takes its dates from the entry it fires for' and therefore carries no clock, and two tests (tests/x42b2-r7-s5-clock.test.mjs, tests/x42b2-s5c-clock.test.mjs) re-derive that roster from the live catalog and diff it against a pinned round-8 measurement. 0247's new join predicate calls now() (via coalesce(new.approved_at, now())), which is a clock read the roster's own text says this function does not have. Re-run independently on clara_l04 with the full gate chain: BOTH cells are red, and the actual-vs-expected diff is exactly the one name _tf_fa_acquisition_birth. This is a real, currently-failing pair of tests on the integration branch, caused by ticket #972's own migration -- not a Windows-only or CI-only red, and not fixed by any of the five lane-04 tickets.",
+      "required_fix": "Not owed by #972 itself (its own AC never mentions x42, and widening scope to fix another ticket's files is exactly what WORK-ORDER rule 5 forbids), and it IS disclosed: #977's report names it explicitly as follow-up #0 ('It is #972's file and #972's migration, so I left it alone -- but it is a lane red, not a Windows-only one, and the integrator will hit it'), with the one-line fix already identified (add _tf_fa_acquisition_birth to the bare-token roster and correct the comment in x42-s5-helpers.mjs). #979's report does not re-mention it. The integrator should either file this as its own ticket before merge or fold the one-line roster/comment fix into whichever ticket lands next, so the wave's own db suite is not carrying two known-red cells into integration without a tracking issue.",
+      "outcome": null
+    },
+    {
+      "id": "S2",
+      "ticket": 972,
+      "severity": "note",
+      "category": "test-coverage",
+      "title": "The CI-flagged lint variant RIG.md's wave-2 addendum asks for was run and disclosed only by the last ticket in the lane, not by the four that landed earlier",
+      "file": "docs/plan/active/riders-2026-09-20/RIG.md",
+      "line": 68,
+      "hunk": "Before you report, run the lint chain once more as the runner sees it: `CI=true GITHUB_ACTIONS=true pnpm lint`",
+      "verdict": "CONFIRMED",
+      "failure_scenario": "reports/wave2-lane04-ticket972.md, ticket973.md, ticket976.md and ticket977.md each report only plain `pnpm lint: exit 0` in their gates table, with no CI=true/GITHUB_ACTIONS=true run. ticket979.md is the one report in this lane that ran and disclosed the CI-flagged variant, correctly identifying the same pre-existing check-frozen-workflows.selftest.mjs failure a sibling lane's reviewer (wave2-lane01-codereview-standards.json, finding S2) independently found on a different lane's branch. Re-running it myself on clara_l04 at HEAD reproduces exactly that one failure and nothing else. Because it is the SAME pre-existing, wave-2-base residue on both lanes (not introduced by lane 04 and not tracked by either lane's own tickets), the gap is informational rather than a defect any single ticket owes a fix for.",
+      "required_fix": "No code fix owed by this lane. Worth a standing note for the integrator that scripts/check-frozen-workflows.selftest.mjs's CI-only red is now confirmed independently on two lanes (01 and 04) and should be tracked once, rather than re-discovered lane by lane.",
+      "outcome": null
+    },
+    {
+      "id": "S3",
+      "ticket": 977,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "Three near-identical single-name cohort blocks were added to rig-meta.mjs, one per migration, following the file's own pre-existing repeated idiom",
+      "file": "packages/db/tests/rig-meta.mjs",
+      "line": 1982,
+      "hunk": "const FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS = [\"_fa_depreciation_leg_pairing\"];\nexport const FA_DEPRECIATION_LEG_FOLD_0248_COHORT = [\n  ...FA_DEPRECIATION_LEG_FOLD_0248_UNGRANTED_FNS,\n];",
+      "verdict": "PLAUSIBLE",
+      "failure_scenario": "The same four-line shape (a one-element UNGRANTED_FNS const, a COHORT export spreading it, and a matching `if (liveNames...) failures.push(...cohortFailures(...))` block in grantMatrixFailures()) is repeated three times across #973/#976/#977's commits for a single new function name each time. In isolation this reads as Duplicated Code / a Repeated Switch a shared helper (e.g. a `singleFunctionCohort(name, label)` factory) could collapse. No live risk: this is not a diff-introduced pattern -- the same file already carries this exact idiom for FA_DEPRECIATION_0227_COHORT, ACCRUAL_ADJUSTMENTS_0222_COHORT, and a dozen others predating this lane, and each report explains, correctly, why folding a new bimodal name into an OLDER cohort would be wrong rather than merely redundant (cohortFailures() fails a partial cohort by design).",
+      "required_fix": "None required -- this is the repo's own established convention (a documented-by-precedent repo standard under WORK-ORDER rule 4, which overrides the baseline smell here), not a violation this lane introduced. Flagged only as a judgement call for a future, repo-wide refactor of rig-meta.mjs's cohort machinery, out of scope for any single ticket.",
+      "outcome": null
+    }
+  ],
+  "non_findings_considered_and_rejected": [
+    "Testing an internal collaborator directly: p973.core.pairs / p973.callers.recut (clara._fa_depreciation_leg_pairing), p976.core.shape/callers.recut (clara._fa_assert_particulars_completable) and #977's catalog census (clara._authority_ref_refusal) all touch a brand-new UNGRANTED internal core with no persona-level door onto it at all. Each ticket's own Agent Brief names the new internal routine as a 'Key interface' before any test was written (#973: 'A new internal aggregation routine ... taking the charge set both callers already compute'; #976: the shared wall function the brief asks for by role), which is the brief-given-seam carve-out WORK-ORDER rule 4 states ('No test at a seam the brief does not give you' implies a seam the brief DOES give is fair game), and matches the estate's own precedent for other ungranted FA cores (_fa_compute_charges, _fa_assert_period_open) already exercised the same way.",
+    "Horizontal slicing (a battery of red tests before any implementation): checked via `git log --stat` on every commit in 23cfad94..HEAD -- every fix(db)/test(db) commit pairs its migration file (or a migration edit via the #957 redo mode) with its test-file extension in the same commit, and #977's own report documents five explicit vertical slices with the red each one started from (p977.sign.machine_task_refused red before 0250 existed, etc.), never a standalone batch of new *.test.mjs files with no corresponding schema change.",
+    "Mocking something the repo controls: no test in this diff mocks a database function, a migration body, or an internal collaborator this repo owns. Every db test drives real Postgres sessions against clara_l04 through real persona doors (humanQuery at each door's own floor) or, for the two ungranted cores above, a direct root query against the catalog/the routine itself (there being no persona door to drive instead). The one new web test file (fa-authority-ceremony.test.tsx) renders the real component with a crafted prop -- no fetch mock, since the component is pure-props by design.",
+    "Tautological assertions: fa-depreciation-leg-fold.test.mjs's p973.behaviour.two_pairs and p973.core.pairs assert an independently hand-computed literal array of legs ([{900-D41,10000,0},{210-D41,0,10000},{901-D41,5000,0},{211-D41,0,5000}]), never a value re-derived the way the routine itself groups and sums; fa-authority-ceremony.test.tsx asserts against literal strings ('cadence review', 'u333333', 'Retired') supplied by the test's own fixture, never recomputed from the component.",
+    "An applied migration edited, a PRD/ARCHITECTURE edit, or a frozen-workflow/frozen-evaluator manifest diff: none found by direct `git diff --stat`/`grep`; `node scripts/check-frozen-workflows.mjs` (run by #977's own report, not independently re-run by me given the token budget) reported 312 frozen files verified with no manifest diff, consistent with a lane that touches no packages/runtime file.",
+    "A new relation without FORCE RLS or with application-role DML: does not apply -- confirmed by grep that none of the five migrations creates a table; all five are function-only recuts/mints."
+  ],
+  "summary": "Five tickets (#972, #973, #976, #977, #979), fourteen commits, five new migrations (0247-0251), all independently re-verified on the lane rig: every re-run test file (21 individual cells across fa-birth-watermark, fa-depreciation-leg-fold, fa-particulars-completion-fold, authority-ref-human-instruction and fa-authority-retired-read) passed exactly as each report claimed, and operation-census/rig-isolation passed with only the one RIG.md-documented reset-gated skip. Every migration follows house law in full: a redo-tolerant prestate measuring live sha256(prosrc)/ACL/constraint text off the catalog (never transcribed from file text), set role clara_fn_owner/reset role around every recut body, a tail that re-derives every claim from the catalog rather than trusting the prestate, a preintegration gate module registered at the sorted (migration-order) position in packages/db/package.json's test chain, and a rig-meta.mjs cohort entry (or an explicit, precedented NO-COHORT record for #979) for every new ungranted internal. No applied migration, PRD, ARCHITECTURE or frozen-workflow file was touched; no new relation was created, so the FORCE RLS house rule does not apply. TDD discipline holds at the commit level: vertical-slice by vertical-slice, with documented red-for-the-right-reason and genuinely-run vacuity controls in every report (including a real mistake caught mid-ticket in #973 -- two invisible runtime splices lost on the first hand-recut, caught by the regression suite and restored, and disclosed rather than hidden). Every seam tested is either a real human door driven as a real persona session or a brand-new ungranted internal core the ticket's own brief names as a Key interface with no persona door to reach it instead. One MAJOR finding, independently confirmed by re-running the cells myself: #972's migration adds a clock read to a trigger body a separate structural census (x42's bare-token roster) still asserts is clock-free, leaving two tests genuinely red on this branch -- disclosed by #977's report as an unfixed follow-up (correctly out of scope for both tickets) but not yet tracked as its own item, and worth the integrator's attention before merge. Two NOTE-level, non-blocking findings: an uneven CI-lint-variant disclosure across the lane's own reports that resolves to the same pre-existing residue a sibling lane already flagged; and a small, precedented Duplicated-Code judgement call in three new rig-meta.mjs cohort blocks that mirrors the file's own established convention rather than introducing a new one.",
+  "verdict": "accept-with-fixes"
+}

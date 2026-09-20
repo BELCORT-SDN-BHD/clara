@@ -1,0 +1,83 @@
+{
+  "axis": "standards",
+  "lane": 5,
+  "wave": 2,
+  "branch": "riders/w2-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_reviewed": "aa67d0ee84ec8142895f71cb05fa74fcad32891a",
+  "tickets": [964, 968, 965],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "AGENTS.md",
+    "CONTEXT.md",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md",
+    ".claude/skills/tdd/mocking.md",
+    "packages/db/README.md (diff)",
+    "packages/runtime/README.md (diff)",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane05-ticket964.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane05-ticket968.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane05-ticket965.md"
+  ],
+  "verification_performed": [
+    "Re-ran packages/db/tests/document-ingest-window-myt.test.mjs focused on clara_l05: 5/5 PASS, matching ticket #964's claim.",
+    "Re-ran packages/db/tests/intake-refusal-record.test.mjs focused on clara_l05: 4/4 PASS, matching ticket #965's claim.",
+    "Re-ran the four p968.reissue.* cells inside intake-batch.test.mjs on clara_l05: 4/4 PASS, matching ticket #968's claim.",
+    "Re-ran packages/runtime/tests/intake-refusal-unit.test.mjs: 5/5 PASS, matching ticket #965's claim.",
+    "Independently recomputed sha256(prosrc) reverse-substitution proofs for clara._reserve_document_ingest, clara.get_intake_batch and clara.cancel_intake_batch against the LIVE clara_l05 catalog (not the migration file's own arithmetic) and confirmed each reproduces the exact pinned pre-image hash claimed in 0252/0253 (074c9b18..., b23cbc01..., 18f5b8d5...).",
+    "Confirmed clara.create_document_intake's live prosrc hash on clara_l05 equals the 'after' pin ticket #965 records (813b886a...).",
+    "Ran node scripts/check-frozen-workflows.mjs: OK, no manifest diff.",
+    "Ran node packages/runtime/scripts/check-parts-parity.mjs: OK, no new emittable/part kind.",
+    "Ran node scripts/check-wiki-dynamic-sql.mjs directly: OK, 218 CoR patches scanned, 19 justified waivers listed, matching #965's final count.",
+    "Ran node scripts/check-wiki-dynamic-sql.selftest.mjs: all cases PASS, including the 19-key ratchet.",
+    "Confirmed via git diff --name-status that all three migration files are pure additions (no applied migration edited) and that docs/PRD.md / docs/ARCHITECTURE.md are untouched.",
+    "Confirmed packages/db/package.json's preintegration-gate --import chain grew 50 -> 52 (one entry each for 0252 and 0254; none for 0253), matching the '51 -> 52' claim in ticket #965's report once #964's own +1 is accounted for.",
+    "Grepped the repo for clara.create_document_intake call sites: exactly one production caller (packages/runtime/lib/intake.mjs), matching the report's enumerated-callers claim.",
+    "Confirmed packages/runtime/src/intakeRoutes.ts wires beginDocumentIntake as beginIntakeInBatch's begin callback on the same route, matching the 'two callers of one door' description."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": 968,
+      "severity": "note",
+      "category": "tdd-vertical-slicing",
+      "title": "A small group of test cells (2 genuinely red) landed in one commit before the implementation commit",
+      "evidence": "Commit 0e48dacf6 ('test(db): #968 add the batch-cancellation re-issue cells, red against the unconditional refusal') adds four cells to intake-batch.test.mjs in one commit; commit 720d8a55c (the migration) follows 20 seconds later. Per ticket #968's own report, two of the four (`p968.reissue.blocked_canceller_may_be_replaced`, `p968.reissue.excludes_already_committed_child`) were confirmed RED first; the other two (`active_canceller_still_refuses`, `terminal_batch_never_reissued`) were already green pre-migration (guard-rail/regression cells). Read literally, /tdd's rule flags 'a commit that adds a whole battery of red cells before any implementation' as the anti-pattern; here 2 red cells (not 1) land in a single commit ahead of the green commit.",
+      "required_fix": "No fix required. WORK-ORDER rule 4 explicitly permits 'Commit per green slice or per small group of slices,' and all four cells exercise ONE seam (`clara.cancel_intake_batch`'s one refusal branch) rather than an unrelated battery across many behaviours -- the documented repo standard overrides the stricter one-test-at-a-time reading here. Noted for calibration only."
+    },
+    {
+      "id": "F2",
+      "ticket": 964,
+      "severity": "note",
+      "category": "tdd-vertical-slicing",
+      "title": "The whole new migration and its whole new 5-cell test battery landed in a single commit",
+      "evidence": "Commit f049a0d7d ('feat(db): #964 move the document-ingest reservation window to Asia/Kuala_Lumpur') adds migration 0252 (424 lines) AND the new document-ingest-window-myt.test.mjs (221 lines, 5 cells) together. The report asserts red was confirmed manually before the commit ('the file's own before hook threw loudly'), but the git history itself shows no separate red commit.",
+      "required_fix": "No fix required. The migration is an atomic anchored-splice DDL unit that cannot usefully be committed half-applied, and the report's own prose documents the red-then-green sequence that was actually followed. Consistent with the 'small group of slices' allowance in WORK-ORDER rule 4."
+    },
+    {
+      "id": "F3",
+      "ticket": 968,
+      "severity": "note",
+      "category": "migration-house-shape",
+      "title": "0253_batch_cancel_reissue.sql ships with no dedicated --import preintegration-gate module",
+      "evidence": "packages/db/package.json's gate chain gains entries only for 0252 (document-ingest-window-myt-preintegration-gate.mjs) and 0254 (intake-refusal-record-preintegration-gate.mjs); 0253 has none. Ticket #968's own new cells instead use an in-file schema_migrations stem probe (`REISSUE_STEM = \"batch_cancel_reissue$\"`, `reissueReady()`/`gateReissue()` added directly to the already-participating intake-batch.test.mjs).",
+      "required_fix": "No fix required. This mirrors the EXACT pattern #964 itself uses in the very same file for its own p964.window.capacity_descriptor_myt cell (MYT_WINDOW_STEM/gateMytWindow) -- a new cell added to a file that already participates in the node --test glob and is already gated at the file level (intake-batches-preintegration-gate.mjs) needs only a per-cell frontier check, not a second --import module. Flagged only so a future reviewer does not mistake the omission for a gap without checking this precedent inside the same diff."
+    },
+    {
+      "id": "F4",
+      "ticket": 965,
+      "severity": "note",
+      "category": "test-quality",
+      "title": "Two new cells verify a door's contract by reading clara.audit_log directly rather than through a dedicated read door",
+      "evidence": "p965.refusal.record_names_the_docs_ceiling_firm_file_and_moment (packages/db/tests/intake-refusal-record.test.mjs) and p968.reissue.blocked_canceller_may_be_replaced (packages/db/tests/intake-batch.test.mjs) each run `select ... from clara.audit_log where ...` via rootQuery to assert the door wrote the expected audit rows. Read against /tdd's anti-pattern list alone ('verifying through external means instead of the interface'), this looks like a side-channel check of an internal collaborator.",
+      "required_fix": "No fix required. `clara.audit_log` is append-only and reading it directly to verify a door's own audit-writing contract is an extremely well-established, repo-wide convention (confirmed via grep across a21-adversarial.test.mjs, binding-proposal-pr-1.test.mjs, f-a2-excision.test.mjs, counterparty-alias-kind.test.mjs and others) for a first-class behaviour of an accounting system (auditability). Per the code-review skill's own rule that a documented repo standard overrides the smell/anti-pattern baseline, this is not flagged as a violation."
+    }
+  ],
+  "hard_violations": [],
+  "smells": [],
+  "test_quality_issues": [],
+  "summary": "All three tickets (#964, #968, #965) comply with the repo's documented migration house shape (header, prestate pins, anchored splices with occurrence checks, reverse-substitution proofs, tail assertions, redo-safety, ACL/owner/search_path preservation, no rig-meta cohort where none is needed, gate-chain entries in migration order) and with the /tdd seam and mocking rules, including correctly invoking the WORK-ORDER's own carve-out for structural cells (prosrc reads) where no public seam exists. Every load-bearing claim spot-checked -- prestate/postimage sha256 pins via independent reverse-substitution against the live clara_l05 catalog, five separate test-file re-runs, the wiki-dynamic-sql waiver count, check-frozen-workflows.mjs, check-parts-parity.mjs, and the preintegration-gate chain's entry count -- reproduced exactly as reported. No PRD/ARCHITECTURE edits, no applied migration edited, no frozen-manifest diff, no new relation (so FORCE RLS is not applicable). CONTEXT.md and module README updates follow the house term/_Avoid_ shape and are internally consistent with the code. Four note-level observations are recorded above for completeness; none is a hard violation, and each is either explicitly sanctioned by a documented WORK-ORDER rule or matches an established, repo-wide precedent within the same diff."
+}

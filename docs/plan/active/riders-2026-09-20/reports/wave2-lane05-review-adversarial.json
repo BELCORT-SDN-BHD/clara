@@ -1,0 +1,121 @@
+{
+  "lens": "adversarial",
+  "wave": 2,
+  "lane": "05",
+  "branch": "riders/w2-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "tickets": [964, 968, 965],
+  "database": "clara_l05 @ 127.0.0.1:55745 (PostgreSQL 17.11, 232 migrations, head 0254_intake_refusal_record)",
+  "verdict": "accept-with-fixes",
+  "summary": "Tenant isolation, rank floors, existence oracles, op-key idempotency and lock order on the two recut doors were attacked directly and held. Three defects survived verification. The worst is #968: the re-issue exception's membership test is not firm-scoped, and because cancel_intake_batch is SECURITY DEFINER while get_intake_batch is INVOKER under RLS, a canceller who LEAVES firm A and joins firm B (the canonical case, and the only one uq_membership_active_user permits) is reported blocked by the board and still refused by the door - the batch stays stuck for ever, which is the exact state #968 exists to end. The other two are user-facing: the batch card still tells the firm a quota-refused file 'never joins a batch' (it now does), and the capacity banner it now raises promises those files 'continue after the reset' when nothing in the estate will ever re-drive them. All proofs were run on the lane rig inside transactions that were rolled back; the worktree and the lane database are byte-unchanged afterwards.",
+  "findings": [
+    {
+      "id": "ADV-W2L05-01",
+      "ticket": 968,
+      "severity": "major",
+      "kind": "correctness / acceptance-criterion failure",
+      "title": "The re-issue exception's membership test is not firm-scoped, so a canceller who left for another firm keeps the batch blocked for ever",
+      "evidence": "packages/db/migrations/0253_batch_cancel_reissue.sql:140 splices into clara.cancel_intake_batch:\n  or exists (select 1 from clara.firm_memberships fm\n              where fm.user_id = b.cancel_requested_by\n                and fm.status = 'active'\n                and clara.role_rank(fm.role) >= clara.role_rank('bookkeeper'))\nThere is no `and fm.firm_id = v_firm`. MEASURED on clara_l05: clara.cancel_intake_batch is prosecdef=true owned by clara_fn_owner, and clara.firm_memberships carries relrowsecurity+relforcerowsecurity with policy p_firm_memberships_owner (roles {clara_fn_owner}, qual `true`) - so the door sees EVERY firm's memberships. clara.get_intake_batch is prosecdef=false and evaluates the byte-identical predicate under policy p_firm_memberships_human (roles {clara_authenticated}, qual `firm_id = clara.jwt_firm()`) - so the read sees only the caller's firm. The two therefore disagree.\n\nclara.firm_memberships carries `uq_membership_active_user` = CREATE UNIQUE INDEX ... ON (user_id) WHERE status='active', i.e. a user holds at most ONE active membership estate-wide. A bookkeeper who leaves firm A and joins firm B is exactly the shape the ticket names ('if that bookkeeper leaves ... the parent sits in stopping for ever').\n\nPROOF (node+pg, two runs, each inside BEGIN ... ROLLBACK on clara_l05; batch inserted at state='cancelling', cancel_requested_by=bob, then bob's Alara membership set to 'removed'):\n  CONTROL (bob has no other firm)  -> read cancel_blocked = 'canceller_not_active'; door (alice, fresh key) = ACCEPTED, state 'cancelled', cancel_requested_by=alice, cancel_op_key='adv-k2'\n  PROBE   (bob additionally inserted as an ACTIVE bookkeeper of Borneo Books & Co)\n                                   -> read cancel_blocked = 'canceller_not_active' (unchanged)\n                                   -> door (alice, fresh key) = CLR13 'this intake batch is already stopping under another decision', detail {\"state\":\"cancelling\",\"reason\":\"batch_already_cancelling\",\"cancel_op_key\":\"adv-k1\"}\nRe-run independently as case E of a second probe with the same result, and the board re-read after the refusal still says cancel_blocked='canceller_not_active'.\n\nThis breaks AC1 ('can be re-cancelled by a different, currently active bookkeeper'), AC5 ('the reported block clears once a re-issue is accepted') and the owner's 2026-09-20 ruling ('the exception is keyed on exactly the condition the batch read already reports'). The mismatch is one-directional - the door is strictly more restrictive than the read - so it is not an authority hole, but the remedy the ticket exists to add is unavailable in its headline scenario. The lane's own cells cannot see it: p968.reissue.blocked_canceller_may_be_replaced only sets bob's Alara membership to 'removed' and gives him no second firm.",
+      "required_fix": "In a NEW migration (0253 is applied; never edit it), re-splice the guard's exists() with `and fm.firm_id = v_firm` so the door evaluates the same firm-scoped predicate clara.get_intake_batch reports, and add a cell whose stored canceller holds an ACTIVE bookkeeper membership in a DIFFERENT firm - the read must say canceller_not_active and the door must ADMIT the re-issue."
+    },
+    {
+      "id": "ADV-W2L05-02",
+      "ticket": 965,
+      "severity": "major",
+      "kind": "user-facing copy contradicts shipped behaviour",
+      "title": "The batch card still tells the firm that a quota-refused file 'never joins a batch', which this ticket made false",
+      "evidence": "apps/web/messages/en.json:7001 -> IntakeBatch.residual.preIntakeRefusal = \"A file refused by the daily quota before it was accepted never joins a batch - look for it in the upload list above, which shows the database's own message and remedy.\" It is rendered UNCONDITIONALLY on every ready batch card at apps/web/components/documents/intake-batch-card.tsx:291, and the comment above it (lines 287-290) restates the retired fact ('a file refused by the daily ceiling BEFORE its intake exists never becomes a member').\n\nMEASURED on clara_l05 inside BEGIN ... ROLLBACK, driving the real doors as clara_runtime with firm_document_limits.docs_per_day=1: the second create_document_intake returned {refused:true, ceiling:'documents', failure_code:'limit', intake_id:...}; clara.attach_intake_to_batch then returned {attached:true, member_id:...}; clara.set_intake_batch_member_dependency returned {dependency:'awaiting_capacity'}; and clara.get_intake_batch read as the firm owner returned facets.waiting.count=1 with the row {intake_status:'failed', intake_failure_code:'limit', dependency:'awaiting_capacity', filename:'two.pdf'}. The refused file joins the batch and is shown on the very card that denies it.\n\nThe lane updated CONTEXT.md, packages/db/README.md and packages/runtime/README.md but not the shipped string, and apps/web/lib/documents/batch-url-state.test.ts:82 actively PINS the false sentence (assert.match(..., /never joins a batch/)), so the estate's own regression watch now protects the wrong claim.",
+      "required_fix": "Rewrite IntakeBatch.residual.preIntakeRefusal to state what 0254 + commitRefusedMember actually do (the refused file is committed at failed/limit, joins the batch as a capacity wait, and must be re-uploaded), update the card's comment, and recut the batch-url-state.test.ts assertion to pin the new sentence."
+    },
+    {
+      "id": "ADV-W2L05-03",
+      "ticket": 965,
+      "severity": "major",
+      "kind": "user-facing promise the record cannot keep",
+      "title": "The capacity banner this ticket now raises promises the refused file will 'continue after the reset'; nothing will ever re-drive it",
+      "evidence": "apps/web/messages/en.json:7038 -> IntakeBatch.capacity.body = \"The firm's daily document allowance resets at {at} {zone}. Sources blocked by the quota keep their place and continue after the reset.\" The banner renders when byDependency.awaiting_capacity > 0 OR byCapacityFailure > 0 (apps/web/components/documents/intake-batch-card.tsx:277-285).\n\nMEASURED on clara_l05 (same rolled-back probe as ADV-W2L05-02): the refused member sets BOTH triggers - waiting_basis = {by_dependency:{awaiting_capacity:1,...}, by_capacity_failure:1}. So an at-creation refusal now raises this banner.\n\nNothing resumes such a file:\n  * packages/runtime/lib/intake.mjs:217 returns refusedIntake(out) BEFORE writeIntakeMeta, so no sidecar exists; recoverPendingDocumentIntakes (intake.mjs:551-557) iterates sidecar entries only, so it never sees it - the lane's own comment at intake.mjs:215-216 says exactly this.\n  * No reservation was made (measured: 0 rows in clara.document_ingest_reservations for the refused intake), and no capability token was minted.\n  * Catalog search on clara_l05: the only bodies mentioning 'awaiting_capacity' are set_intake_batch_member_dependency, _tf_intake_batch_member_intake_stamp (whose arm (b) only SETS, never clears) and get_intake_batch; no sweep function matches failure_code + 'limit'. Nothing clears the dependency and nothing retries a limit-failed intake.\nThe member therefore sits in the batch's waiting facet for ever under a sentence promising automatic resumption. The lane's own CONTEXT.md addition says the opposite of the banner ('It is a record OF the refusal, not an admitted file: it holds no reservation, no capability and no bytes').",
+      "required_fix": "Either distinguish the at-creation refusal from the post-custody capacity wait on the surface (a separate dependency reason or a second banner line saying the file must be uploaded again after the reset), or state plainly in the capacity copy that a source refused BEFORE acceptance keeps its place on the board but must be re-uploaded. Add a card cell that renders a refused-at-creation member and asserts the copy does not promise resumption."
+    },
+    {
+      "id": "ADV-W2L05-04",
+      "ticket": 968,
+      "severity": "major",
+      "kind": "verification / a skip is not evidence",
+      "title": "#968 ships a migration with no preintegration gate and no loud-fail guard, so its four acceptance cells skip green on any chain missing 0253",
+      "evidence": "#964 and #965 each ship the house shape: packages/db/tests/document-ingest-window-myt-preintegration-gate.mjs and intake-refusal-record-preintegration-gate.mjs set CLARA_ALLOW_MISSING_* , their test files' before() hooks throw unless that variable is set, and both are wired into packages/db/package.json's gate chain in migration order. 0253_batch_cancel_reissue.sql has NO gate module, NO gate-chain entry and NO env var.\n\nThe four p968.reissue.* cells live in packages/db/tests/intake-batch.test.mjs and are gated by gateReissue(t) at lines 109-114, which calls markSkip() + t.skip() UNCONDITIONALLY whenever `schema_migrations ~ 'batch_cancel_reissue$'` finds nothing. That file's before() hook (line 139) guards only the 0229 stem via CLARA_ALLOW_MISSING_INTAKE_BATCHES. There is therefore NO invocation - focused or swept - in which #968's acceptance evidence fails loudly if 0253 is dropped, renamed or reordered at integration; the file simply reports four skips and goes green.\n\nThe wave's work order (docs/plan/active/riders-2026-09-20/WORK-ORDER.md, addendum 'Migrations') names 'a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order' as the house shape. (0252 and 0254 argue explicitly and correctly why they need no rig-meta cohort; 0253 makes the same argument for the cohort but is silent on the gate.)",
+      "required_fix": "Add tests/batch-cancel-reissue-preintegration-gate.mjs setting CLARA_ALLOW_MISSING_BATCH_CANCEL_REISSUE, wire it into packages/db/package.json's gate chain between the 0252 and 0254 entries, and make intake-batch.test.mjs's before() throw when the batch_cancel_reissue$ stem is absent and that variable is unset - the same shape the other two tickets use."
+    },
+    {
+      "id": "ADV-W2L05-05",
+      "ticket": 965,
+      "severity": "minor",
+      "kind": "migration coupling the spec rules out of scope",
+      "title": "0254 hard-fails unless #964's 0252 is already applied, a dependency both tickets declare out of scope",
+      "evidence": "packages/db/migrations/0254_intake_refusal_record.sql:267-275 (tail T4) raises CLR10 unless clara._reserve_document_ingest's prosrc contains `date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')`. #965's Agent Brief: 'Out of scope: Changing the ceiling values, the reservation check, or its time window (the UTC versus MYT window is its own ticket).' #964's brief likewise treats the window as its own ticket. If the integrator lands #965 without #964, or 0252 is held back after review, or the window later moves again on a branch where 0254 is replayed out of order, the chain aborts with a message that reads like prestate drift on a body #965 promised never to touch.",
+      "required_fix": "Narrow T4 to what #965 actually must not disturb - both CLR18 raise sentences - and drop the Asia/Kuala_Lumpur clause assertion, or state the ordering dependency explicitly in the file header and in the ticket report so the integrator cannot split the two."
+    },
+    {
+      "id": "ADV-W2L05-06",
+      "ticket": 965,
+      "severity": "minor",
+      "kind": "shared repo-wide lint file, stale self-description",
+      "title": "The dynamic-SQL allowlist's own load-bearing count says EIGHTEEN while the map holds NINETEEN, and its growth log omits #965/0254",
+      "evidence": "scripts/wiki-lint-checks.mjs:98 now reads 'EIGHTEEN ENTRIES as of 2026-09-20 (... #964/0252 four, #968/0253 the newest ...)' and the same block states 'the count above is load-bearing and must be kept current, never left to describe an earlier state of this list'. MEASURED by importing the module: DYNAMIC_SQL_ALLOWLIST.size = 19, the nineteenth being create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamp with time zone,text) added by this same lane for #965/0254. scripts/check-wiki-dynamic-sql.selftest.mjs's own recut prose correctly says 'Nineteen pinned keys total' and its expectedKeys array lists all nineteen, so the two files now contradict each other. Nothing enforces the prose count, which is why it passed: `node scripts/check-wiki-dynamic-sql.selftest.mjs` ends 'wiki-dynamic-sql selftest: OK'.",
+      "required_fix": "Correct the header to NINETEEN and add '#965/0254 one' to the growth log, naming #965 as the newest."
+    },
+    {
+      "id": "ADV-W2L05-07",
+      "ticket": 964,
+      "severity": "minor",
+      "kind": "migration on a database with real rows",
+      "title": "0252 silently recounts up to eight hours of existing reservations into today's quota at the moment it commits",
+      "evidence": "The boundary moves from UTC midnight (08:00 MYT) to MYT midnight, i.e. eight hours EARLIER. MEASURED on clara_l05 inside BEGIN ... ROLLBACK: with two back-dated reservations for one firm, the same count query returns myt_today=1 / utc_today=0 for a reservation stamped 02:00 MYT today - that row starts counting against today the instant 0252 commits. Driven through the real door with docs_per_day=2 it then admitted exactly one further file and refused the next with CLR18 'document daily limit reached (docs)', which under the retired window would both have been admitted.\n\nOn a hosted database with real rows a firm that was inside its ceiling one second earlier can be refused immediately after the deploy, while the card announces a reset moment (00:00) that has already passed for that day. The migration header's 'WHAT IT DOES NOT DO - NO default changes' does not name this, no tail assertion measures it, and the release note has nothing to say to a firm that hits it.",
+      "required_fix": "State the transition effect in the migration header and in the release as-run (apply outside 00:00-08:00 MYT, or accept that early-morning uploads are recounted once), so the first refusal after the deploy is explainable rather than a surprise."
+    },
+    {
+      "id": "ADV-W2L05-08",
+      "ticket": 968,
+      "severity": "note",
+      "kind": "behavioural side effect not named by the ticket",
+      "title": "The re-issue resets cancel_requested_at, sending the longest-stuck batch to the back of the sweep queue and overwriting the board's 'stopping since'",
+      "evidence": "The spliced elsif branch (0253:...\"set cancel_requested_by = p_actor, cancel_op_key = p_op_key, cancel_requested_at = now(), updated_at = now()\") re-stamps cancel_requested_at. clara.sweep_intake_batch_cancellations (read live from clara_l05) selects `from clara.intake_batches ib where ib.state='cancelling' order by ib.cancel_requested_at, ib.id limit p_limit for update skip locked` - so a batch that has been stuck longest is moved to the END of the sweep order the moment its remedy is applied, and under a saturated limit it is served last. clara.get_intake_batch also returns ib.cancel_requested_at, so the surface loses the original 'stopping since' moment; only clara.audit_log keeps it (AC4 is satisfied, but only in the audit trail).",
+      "required_fix": "Decide deliberately: either leave cancel_requested_at at the ORIGINAL decision's moment (re-pointing only cancel_requested_by / cancel_op_key), or state in the ticket report that the re-issue deliberately restarts the clock, and say what the board should show."
+    },
+    {
+      "id": "ADV-W2L05-09",
+      "ticket": 964,
+      "severity": "note",
+      "kind": "stale surface claim missed by the recut",
+      "title": "A web cell still names the retired 08:00 UTC-day wall in its title and its failure message",
+      "evidence": "apps/web/lib/documents/batch-url-state.test.ts:73 is titled 'the capacity copy says 08:00 and never midnight or tomorrow' and line 80 asserts with the message 'the daily window is a UTC day, which is 08:00 MYT - never midnight'. The sibling cells in apps/web/components/documents/intake-batch-card.test.tsx were recut to 00:00 by this lane; this one was not. The assertions themselves remain valid (the cell pins that the copy carries {at} rather than a constant), so it is a naming defect only - but #964's AC7 is explicitly about cells that no longer assert UTC is correct.",
+      "required_fix": "Rename the cell and rewrite its two failure messages to the Asia/Kuala_Lumpur day, in the same commit as the ADV-W2L05-02 copy fix."
+    }
+  ],
+  "attacks_run_with_no_defect_found": [
+    "Tenant isolation on the recut clara.cancel_intake_batch: another firm's owner (Borneo) re-issuing an Alara batch -> CLR11 'intake batch not found in your firm', detail {\"reason\":\"batch_not_found\"} - no existence oracle, identical to an invented uuid.",
+    "Rank floor on the recut door: an ACTIVE viewer of the batch's own firm -> CLR04 {\"reason\":\"insufficient_role\"}; the runtime SQL role is the transport, never the actor (the actor is an argument re-checked by clara._intake_batch_actor_ctx).",
+    "Role wall: clara_authenticated calling clara.cancel_intake_batch directly -> 42501 permission denied; ACL is {clara_fn_owner=X,clara_runtime=X} and 0253 left it byte-unchanged (tail T3).",
+    "Same identity re-keying its own decision: unreachable by construction - the ctx proves p_actor is an active bookkeeper+, and the exists() then sees that same active membership, so the guard raises. Confirmed by p968.reissue.active_canceller_still_refuses (re-run, pass).",
+    "Terminal rule: a 'cancelled' batch with an inactive canceller still refuses CLR13 (p968.reissue.terminal_batch_never_reissued, re-run, pass); the exception is gated on b.state='cancelling' and the tail proves exactly one batch_already_cancelling raise site survives.",
+    "Two real connections on one parent: connection A held `select * from clara.intake_batches where id=... for update`; connection B's clara.cancel_intake_batch call under `set local statement_timeout='2500ms'` was cancelled at 2501 ms (57014) - the recut door takes the parent row lock BEFORE evaluating the re-issue exception, so two concurrent decisions serialise and the loser re-reads the committed row. Both transactions rolled back.",
+    "Lock order: 0253 adds no lock; the new exists() is an unlocked read of clara.firm_memberships taken after the existing intake_batches FOR UPDATE. accounting_work -> agent_tasks -> agent_interruptions ordering in clara.cancel_accounting_work is untouched.",
+    "Child safety under re-issue (AC2): clara._intake_batch_live_children excludes any work with a committed operation receipt, and clara.cancel_accounting_work arm 4 ('already_stopping') returns without overwriting cancelled_by/cancelled_at; the derived child key is <cancel_op_key>:<work_id> and clara._work_door_ctx hashes {work, author}, so the new actor's key can never collide with the original's. p968.reissue.excludes_already_committed_child re-run, pass.",
+    "#965 idempotency under replay: same op key + same payload after a refusal returned the identical stored refusal receipt; same op key + DIFFERENT payload raised CLR10 'op_key reused with different args' from clara._reserve_op BEFORE the insert, leaving exactly ONE committed intake row for that key (measured).",
+    "#965 durability mechanism: the intake row is inserted BEFORE the plpgsql exception block, so the CLR18 arm's implicit subtransaction cannot reach it; measured, the refused row survives at status='failed'/failure_code='limit' with original_filename, declared_mime, declared_bytes and created_at intact, holds zero reservations, and clara._audit writes exactly one append-only row with args.refused=true.",
+    "#965 vocabulary: 'limit' is already in document_intakes_failure_code_check's nine-value list and ck_document_intakes_failure is satisfied; no new status, column or constraint. The refused row's (firm_id, op_key) uniqueness cannot block a retry because packages/runtime/lib/intake.mjs mints a fresh random op key per call.",
+    "#965 callers (AC6): the only production callers of beginDocumentIntake are the two branches of POST /api/intake/documents; both hand the refusal up and the route converts it once via intakeLimitRefusal() to 429 {error:'limit', message:'intake limit reached'}, byte-identical to mapIntakeError's CLR18 arm (intake.mjs:637), which is left in place for the post-custody refusals that still raise.",
+    "#964 behaviour through the real door: with docs_per_day=2 and one reservation back-dated to 02:00 MYT today (myt_today=1, utc_today=0), the door admitted exactly one more file and refused the next with CLR18 (docs) - the MYT window is genuinely in force, not merely present in prosrc. Rolled back.",
+    "#964 splice discipline: each of the four anchors is proven to occur exactly once before the splice and each body is proven by reverse substitution to reproduce its pinned sha256 pre-image; the tail re-reads all four ACLs, the five-rung page ladder and the 100/1000 defaults. clara._refund_document_reservation reads no window and was correctly left alone. p964.window.* and p636.census.no_recut re-run, pass.",
+    "Accounting treatment: this lane touches no ledger, no cents and no posting date; the x42-s5 roster entry correctly classes the three reservation helpers as a capacity window rather than a MONEY date."
+  ],
+  "gates_rerun_by_this_review": [
+    "packages/db: node --test --test-concurrency=1 <full 52-gate chain> tests/document-ingest-window-myt.test.mjs -> 5 pass / 0 fail / 0 skip",
+    "packages/db: node --test --test-concurrency=1 <full 52-gate chain> tests/intake-refusal-record.test.mjs -> 4 pass / 0 fail / 0 skip",
+    "packages/db: node --test --test-concurrency=1 <full 52-gate chain> tests/intake-batch.test.mjs -> 36 pass / 0 fail / 0 skip (includes the four p968.reissue.* cells)",
+    "packages/runtime: node --test tests/intake-refusal-unit.test.mjs -> 5 pass / 0 fail / 0 skip",
+    "repo root: node scripts/check-wiki-dynamic-sql.selftest.mjs -> OK"
+  ],
+  "rig_hygiene": "All probes ran through node+pg inside BEGIN ... ROLLBACK (or savepoints released/rolled back) on clara_l05. After the review: `git status --short` in the worktree is empty, clara.intake_batches still holds 260 rows, no clara.firm_document_limits row exists for Alara Advisory, and bob's Alara membership is still active. The scratch directory used for the probes was deleted."
+}

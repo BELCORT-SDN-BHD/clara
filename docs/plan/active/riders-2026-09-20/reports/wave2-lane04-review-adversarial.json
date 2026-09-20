@@ -1,0 +1,114 @@
+{
+  "lens": "adversarial",
+  "lane": "wave 2 / lane 04 (fixed assets)",
+  "branch": "riders/w2-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "database": "clara_l04 @ 127.0.0.1:55744 (234 migrations, max 0251_fa_authority_retired_read)",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head": "e81ad46b162f05fc049ecc2c2eac8069a3699926",
+  "tickets": [972, 973, 976, 977, 979],
+  "verdict": "accept-with-fixes",
+  "summary": "Two existing, untouched test cells are RED on this branch because of this lane's own migrations, and both reports call the same ground green. #979's 0251 reddens p651.authority.retire_unsigned; #972's 0247 reddens the two x42 arm-(D) clock-roster cells. Two further defects are proved by running: 0249 cannot re-apply under the #957 redo mode its own prestate advertises, and 0249 silently deleted an invariant 0227 states twice in its splice text. Everything I attacked on tenant isolation, the refusal oracle, leg ordering and recut fidelity held up.",
+  "findings": [
+    {
+      "id": "ADV-L04-1",
+      "ticket": 979,
+      "severity": "blocker",
+      "kind": "regression",
+      "title": "0251 reddens the existing cell p651.authority.retire_unsigned, and #979's report never re-ran the file",
+      "evidence": "packages/db/migrations/0251_fa_authority_retired_read.sql:173-177 adds the retired fallback, so a client whose only authority is retired now reads back an object instead of null. packages/db/tests/depreciation-history.test.mjs:487 asserts assert.equal(env.authority, null, ...) for exactly that client and is byte-identical to BASE (git diff 23cfad94...HEAD on that file is empty). Measured on clara_l04 at HEAD with the 55-import gate chain: node --test --test-concurrency=1 $GATES tests/depreciation-history.test.mjs -> 19 tests, 18 pass, 1 FAIL, 'not ok 11 - p651.authority.retire_unsigned', actual {authority_from:'2026-09-01', status:'retired', retired_reason:'p651 wrong cadence, withdrawn before signature', ...} vs expected null. wave2-lane04-ticket979.md's gate table lists only fa-authority-retired-read, operation-census and rig-isolation, and records AC5 ('existing callers ... unaffected') as done. wave2-lane04-ticket977.md's 19/19 green for this file was taken BEFORE 0251 existed.",
+      "required_fix": "Update p651.authority.retire_unsigned to the ruling's new contract (it must now assert the retired object, its reason, author and window floor) and rewrite its prose, which still cites lib/registers/depreciation.ts's superseded F6 note. Then re-run packages/db/tests/depreciation-history.test.mjs on the full gate chain and record the count in the #979 report."
+    },
+    {
+      "id": "ADV-L04-2",
+      "ticket": 972,
+      "severity": "blocker",
+      "kind": "regression",
+      "title": "0247 puts now() into _tf_fa_acquisition_birth without rostering it, reddening x42.r7.s5c.5 and x42.s5c.6",
+      "evidence": "packages/db/migrations/0247_fa_birth_watermark.sql:214 splices 'and coalesce(new.approved_at, now()) >= fp.enrolled_at' into clara._tf_fa_acquisition_birth. packages/db/tests/x42-s5-helpers.mjs:1161-1166 pins FA_ACQUISITION_0216_CLOCK_NAMES = ['_fa_complete_particulars_core'] and states in prose that the birth trigger 'copies columns and takes its dates from the entry it fires for' -- i.e. reads no clock. Measured at HEAD: node --test --test-concurrency=1 $GATES tests/x42b2-r7-s5-clock.test.mjs tests/x42b2-s5c-clock.test.mjs -> 4 tests, 2 pass, 2 FAIL (x42.r7.s5c.5, x42.s5c.6). The actual-vs-expected roster diff is exactly one name: _tf_fa_acquisition_birth. Both x42 test files and x42-s5-helpers.mjs are byte-identical to BASE, so this is the lane's own red, not an inherited or Windows-only one. Neither the #972 report nor the #973/#976 reports ran these files; only wave2-lane04-ticket977.md found them, as its 'follow-up 0', and left them.",
+      "required_fix": "Add _tf_fa_acquisition_birth to FA_ACQUISITION_0216_CLOCK_NAMES in packages/db/tests/x42-s5-helpers.mjs with the house per-name adjudication sentence (a timestamptz compared against fa_account_profiles.enrolled_at, never a date derived from the clock -- arm (D)'s exempt shape), and correct the 0216 prose at :1161-1166 that still asserts the opposite. Re-run both x42 clock files."
+    },
+    {
+      "id": "ADV-L04-3",
+      "ticket": 976,
+      "severity": "major",
+      "kind": "migration-shape",
+      "title": "0249 cannot re-apply under the #957 redo mode its own prestate announces and admits",
+      "evidence": "packages/db/migrations/0249_fa_particulars_completion_fold.sql:149-159 detects a redo and continues with raise notice '#976 prestate: ... treating this as a #957 REDO of 0249 itself. The recut is create-or-replace and the tail below re-proves the whole post-state from scratch.', and :164 skips the two recut pins on that branch. But :233 is a plain 'create function clara._fa_assert_particulars_completable(...)', not 'create or replace' -- unlike 0247, 0248, 0250 and 0251, every one of which uses create or replace for the same reason. Proved on clara_l04 inside a transaction I rolled back: re-executing lines 233-277 as clara_fn_owner raises 42723 'function \"_fa_assert_particulars_completable\" already exists with same argument types'. wave2-lane04-ticket976.md states the redo branch 'was never exercised for a real edit', which is why the contradiction shipped.",
+      "required_fix": "Change :233 to 'create or replace function'. Then exercise the path the file claims to support once (CLARA_MIGRATION_REDO=0249_fa_particulars_completion_fold, highest applied version only, destructive guard set) and record it, as the work order's wave-2 addendum asks."
+    },
+    {
+      "id": "ADV-L04-4",
+      "ticket": 976,
+      "severity": "major",
+      "kind": "behaviour-change",
+      "title": "The fold moved the change-class refusal past _reserve_op, deleting an invariant 0227 states twice in its own splice text",
+      "evidence": "0227_depreciation_history.sql:649 and :688 -- the two unrolled splices that installed this refusal -- both end their comment with 'Refused BEFORE the op key is reserved, so a retry is clean.', and both anchor the insertion on the op-key block so the raise lands ahead of clara._reserve_op. 0249 lifts the fragment into clara._fa_assert_particulars_completable and calls it AFTER _reserve_op, the firm check, pg_advisory_xact_lock and the SELECT FOR UPDATE (0249:322 and :378). The lifted comment at 0249:238-243 DROPS that sentence, so the fold's own text no longer records the invariant it broke -- contrary to the report's 'byte-for-byte lift with zero identifier substitution'. Verified live on clara_l04: position('Refused BEFORE the op key is reserved' in prosrc) is 0 in all three bodies; _reserve_op sits at offset 322 / 294 in the two doors and the change-class raise now lives only in the new core. Observable consequences, from 0004_governed_fns.sql:46-60: (a) a replay of an already-used op_key carrying change_class now answers CLR10 'op_key reused with different args' instead of CLR37 fa_change_class_on_completion, because _reserve_op compares request hashes before the wall runs; (b) a change-class payload naming an asset outside the client now answers CLR11 asset_not_found. wave2-lane04-ticket976.md measured only case (b) and argued from transaction rollback; it did not consider the replay arm, and it did not find 0227's stated intent.",
+      "required_fix": "Either keep the change-class check ahead of _reserve_op in both doors (it needs only p_particulars, not the locked row, so it can stay where 0227 put it and the fold can cover the already-complete half alone), or get the precedence change ruled on explicitly and carry 0227's sentence -- amended -- into 0249's own comment and into packages/db/README.md. Add a cell for the op-key-replay-with-change_class arm either way."
+    },
+    {
+      "id": "ADV-L04-5",
+      "ticket": 972,
+      "severity": "minor",
+      "kind": "incomplete-fix",
+      "title": "The watermark falls back to the reversing transaction's clock, so the retroactive birth returns for an approved entry with a NULL approved_at",
+      "evidence": "0247:214 uses coalesce(new.approved_at, now()). On the re-fire the reversal causes, now() is the REVERSING transaction's start, which is always >= fp.enrolled_at, so the join re-admits the entry and births exactly the row #972 exists to forbid. Measured on clara_l04: clara.journal_entries.approved_at is_nullable = YES, and no check constraint on that table mentions approved_at (0 rows from pg_constraint), so status='approved' AND approved_at IS NULL is representable. select count(*) from clara.journal_entries where status='approved' and approved_at is null returns 0 today, so this is latent, not live. The migration header calls the coalesce 'the belt's own reading of a NULL approved_at', which is true of the belt but not a reason the birth must copy it: the birth's question is whether the ENTRY predates enrolment, and now() answers a different question.",
+      "required_fix": "Either pin the assumption (a prestate/tail assertion, or a cell, that no approved entry carries a NULL approved_at) or make the birth's fallback conservative -- a NULL approved_at means 'cannot prove it post-dates the watermark', so it should not birth. State which, in the migration header."
+    },
+    {
+      "id": "ADV-L04-6",
+      "ticket": 972,
+      "severity": "minor",
+      "kind": "divergence",
+      "title": "clara._fa_on_approve arm 4 still births with no watermark, so the two birth sites now disagree in text",
+      "evidence": "0247 recuts only clara._tf_fa_acquisition_birth. Arm 4 of clara._fa_on_approve makes the same insert with the same conflict target and the same exclusions, and its join still reads 'fp.asset_account_code = jl.account_code and fp.active' with no watermark. The lane's own report files this as follow-up 1 and argues it is unreachable because arm 4 is only driven by an approve writer. That is the same argument that was true of the trigger until reverse_entry re-fired it: #972's whole finding is that a body gated on the approved STATE gets driven again by a caller nobody modelled. Two birth sites with two different scopes is the condition that produced this defect.",
+      "required_fix": "Align arm 4 with the belt's phrasing (0042's splice idiom, since arm 4's live body is 0041 file text), or add a census cell pinning that exactly one of the two birth sites is reachable after first approve. File it as a ticket if it is out of #972's scope."
+    },
+    {
+      "id": "ADV-L04-7",
+      "ticket": 977,
+      "severity": "note",
+      "kind": "weaker-than-documented",
+      "title": "The shared definition never asks whether the named author is a person; CONTEXT.md's new term says it does",
+      "evidence": "0250:196 accepts on v_kind = 'chat_turn' and v_author is not null and never reads clara.users.is_agent. clara.begin_chat_turn checks only firm_memberships ... status = 'active' for p_author (no is_agent filter, unlike clara.eligible_checker_count which does filter u.is_agent = false), and its ACL on clara_l04 is clara_fn_owner=X | clara_runtime=X -- the author is a parameter supplied by the runtime. Unexploitable today: select count(*) from clara.firm_memberships m join clara.users u on u.id=m.user_id where m.status='active' and u.is_agent is 0 on clara_l04. The owner's ruling is satisfied to the letter ('a chat_turn carrying a named author'), but the CONTEXT.md term #977 adds reads as proof a person typed it.",
+      "required_fix": "Either add 'and exists (select 1 from clara.users u where u.id = t.created_by and not u.is_agent)' to the chat arm, or say in CONTEXT.md that the proof is 'the chat ingress named a firm member as author', not 'a person typed it'. A cell pinning that no agent user holds an active membership would also hold the line."
+    },
+    {
+      "id": "ADV-L04-8",
+      "ticket": 979,
+      "severity": "note",
+      "kind": "mock-divergence",
+      "title": "The e2e mock returns authority_ref and a live authority_from that the real read has never returned",
+      "evidence": "apps/web/e2e/depreciation-mock.mjs:218-229 returns authority_ref: {kind:'accounting_work', id: DEP.workId} and authority_from: DEP.authorityFrom inside the authority object of the get_depreciation_authority response, with status 'live'. The real body returns neither: 0041_wave_d_a_fa_register.sql:4236-4239 builds exactly {id, status, cadence, proposed_by, signed_by, retired_by, created_at}, no migration between 0041 and 0250 recuts the function (a grep over packages/db/migrations finds only 0041's definition plus two census lists), and 0251:186-197 preserves that base object and appends the three retired fields on the retired arm only. So apps/web/e2e/depreciation-walk.spec.ts:67 ('fa-authority-window' contains DEP.authorityFrom, on a LIVE authority) and the fa-authority-ref testid can only ever be green against the mock. Pre-existing (#651's), not introduced here -- but #979's own type comment now states the divergence out loud ('undefined on a live one') and its report offers that spec as the untouched arm it could not run.",
+      "required_fix": "File it. Either the read surfaces authority_ref/authority_from on the live arm too (the ticket calls that 'a different ticket's widening') or the mock stops returning fields the door does not, so the walk stops proving a shape production never produces."
+    },
+    {
+      "id": "ADV-L04-9",
+      "ticket": 973,
+      "severity": "note",
+      "kind": "surface-widening",
+      "title": "The extracted leg-pairing core resolves caller-supplied asset ids with no firm or client predicate",
+      "evidence": "0248:186-189 joins clara.fixed_assets f on f.id = (x ->> 'asset_id')::uuid with no tenant predicate. This is faithful -- 0041:3521-3525 and 0227:1274-1278 both carry the identical select, including 'group by 1, 2 order by 1, 2', so leg order and journal line numbering are unchanged (I diffed them) -- but the fold promotes an inline query that only ever ran inside two tenant-checked doors into a standalone SECURITY DEFINER function that will answer about any asset id it is handed. It is ungranted today and 0248 tail T.1b pins that.",
+      "required_fix": "None required for this ticket. If a later lane grants or widens it, the firm/client predicate has to arrive with the grant; a line in the function's comment saying the caller owns the tenant check would make that explicit."
+    },
+    {
+      "id": "ADV-L04-10",
+      "ticket": 972,
+      "severity": "note",
+      "kind": "unreproducible-evidence",
+      "title": "x41.s4 is still red on the lane rig and #972's AC5 green lives only on a clone that was dropped",
+      "evidence": "Measured at HEAD: node --test --test-concurrency=1 $GATES tests/x41-round35-tie.test.mjs -> 3 tests, 2 pass, 1 FAIL (x41.s4, at as_of 2026-10-28). The attribution the report gives checks out: the only x41_b3 register rows on clara_l04 are x41_b3_12b745 (created 2026-09-20T04:36:37.333Z) and x41_b3_e58a5a (04:37:42.736Z), both before 0247 applied at 04:53:08.097Z, and no post-0247 x41_b3 register row exists even though x41.b3 has run repeatedly since (x41-wave-d-a-fa is 13/13 green with #972's new faRows(client).length === 0 assertion). So the fix holds; what is missing is a way for anyone else to re-verify AC5, because clara.fixed_assets forbids DELETE (CLR13) and the clone the green was taken on was dropped.",
+      "required_fix": "Hand the integrator the recipe rather than the result: the exact clone-and-clean steps, or a from-scratch leg, so AC5 is reproducible. The report's own follow-up 3 (no supported remedy for a register row born by the pre-0247 body) is the same gap and should be a ticket."
+    }
+  ],
+  "attacked_and_held": [
+    "Tenant ladder on clara._authority_ref_refusal: driven directly as root inside a rolled-back transaction against a real chat_turn. Own firm+client -> null (accept); foreign firm -> authority_ref_unresolved; foreign client -> authority_ref_unresolved. The not_human_instruction token never fires for a row outside the caller's firm AND client, so the new refusal is not a cross-tenant existence oracle. An unauthored chat_turn and an autodraft both -> authority_ref_not_human_instruction; an unknown kind raises CLR10.",
+    "Recut fidelity of both #977 doors: diffed the generated bodies against 0227:1132 (sign) and 0223:558 (plan) file text. Exactly two hunks each (v_ok boolean -> v_reason text, and the resolution block). No floor, grant, signature, replay path or other refusal moved.",
+    "#973's fold is textually identical to the original aggregation, 'group by 1, 2 order by 1, 2' included, so preview legs and posted line numbering cannot have moved.",
+    "0251's recut is 0041's body plus the fallback select and the conditional merge -- nothing dropped from the base object, and the live/proposed preference and the CLR11 firm check are untouched.",
+    "Safety of the unguarded retired merge: fa_depreciation_authorities admits exactly {proposed, live, retired}; ck_fa_authorities_retired forces reason/by/at non-null on a retired row and ck_fa_authorities_window forces authority_from non-null on live-or-retired. No other clara function calls get_depreciation_authority (catalog scan), and the one web caller gates on data.authority?.status === 'live'.",
+    "Green batteries at HEAD on clara_l04, full 55-import gate chain: fa-authority-retired-read + authority-ref-human-instruction + fa-birth-watermark + fa-depreciation-leg-fold + fa-particulars-completion-fold + fixed-asset-acquisition + x41-wave-d-a-fa + x41-depreciation + x41b0-surface = 79 tests, 79 pass, 0 fail, 0 skip. accounting-plans + prepayment-schedule + accrual-adjustments + x42b0-period-class + x56-rest-j + f-a4-pr1c-rungs + operation-census + rig-isolation + preintegration-gate-chain + migrate-redo = 118 tests, 117 pass, 0 fail, 1 skip (T19 destructive; reset flags never set).",
+    "apps/web/components/registers/fa-authority-ceremony.test.tsx: 3 tests, 3 pass.",
+    "pnpm typecheck at HEAD reports only the two inherited document-kind-dialog.tsx errors (TS2552, TS7006) -- the lane introduces no new type error, including through the newly strict faAuthorityEnvelope signature. pnpm lint exits 0."
+  ]
+}

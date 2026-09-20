@@ -1,0 +1,34 @@
+{
+  "axis": "RECHECK",
+  "lane": "wave2-lane06",
+  "branch": "riders/w2-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_rechecked": "993ab88de",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-fix.md",
+  "reviews_rechecked": [
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-codereview-spec.json (17 findings, 4 major)",
+    "docs/plan/active/riders-2026-09-20/reports/wave2-lane06-codereview-standards.json (F1 minor, F2 note)"
+  ],
+  "independent_reruns": [
+    "git log 23cfad947b5598214168ba9c43d391b4e16aa745..HEAD --oneline -> HEAD is 993ab88de, matches fix report's claimed new head; two new commits (483a153ae, 993ab88de) on top of the ten pre-existing ones; git status clean",
+    "code read: apps/web/components/firm-setup/firm-setup-checklist.tsx has isWalkStep (L06-SPEC-01), rendersRow (L06-SPEC-05), finishAvailable/started/notStarted/factCount (L06-SPEC-04/06/09) exactly as the fix report describes",
+    "packages/db, full gate chain, tests/onboarding-plan-firm-uniqueness.test.mjs+firm-setup-polish.test.mjs+firm-setup-applicability.test.mjs+firm-setup-user-notes.test.mjs+firm-setup-education-tips.test.mjs+firm-setup.test.mjs on clara_l06 -> 35 pass / 0 fail / 0 skip (matches fix report)",
+    "packages/db, full gate chain, operation-census.test.mjs+rig-isolation.test.mjs on clara_l06 -> 32 pass / 0 fail / 1 skip (T19 poison-role, correctly skipped) (matches fix report)",
+    "apps/web unit: firm-setup-checklist.test.tsx + firm-setup-a11y.test.tsx + firm-setup-keyboard.test.tsx -> 24 pass / 0 fail (matches)",
+    "apps/web unit: tests/firm-scope-db-pins.test.ts -> 22 pass / 0 fail (matches)",
+    "apps/web WHOLE unit suite, node scripts/run-tests.mjs -> 4754 tests, 4752 pass, 0 fail, 2 skipped (matches)",
+    "e2e firm-setup-walk on 3550/3551/3552 -> 5 passed (matches; includes the two-tip Later+Got-it walk for L06-SPEC-07)",
+    "pnpm typecheck -> clean (apps/web, packages/runtime) (matches)",
+    "pnpm lint -> exit 0 (matches)",
+    "CI=true GITHUB_ACTIONS=true pnpm lint -> same single FAIL, freeze-lint selftest case labeled '(L05-STD-02 fix round)'; confirmed git diff --name-only <base>..HEAD -- scripts/ is empty and git status scripts/ is clean, so this lane touches no file under scripts/ -- reproduces the fix report's attribution to lane 05 (matches)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files verified, 55 workflow modules frozen+registered, 3 retired (packages/runtime untouched by this lane, confirmed)",
+    "live query against clara_l06's committed clara.get_firm_setup body: zero occurrences of \"item_key in ('mpers_eligibility','tin')\" (the withdrawn widening is gone, L06-SPEC-02/03) and exactly 7 occurrences of \"retired_at is null\" (L06-SPEC-12 confirmed_facts filter present)",
+    "packages/db/migrations directory count -> 234 files (matches fix report's '234 applied, five migrations for five tickets')",
+    "git diff --name-only <base>..HEAD -- docs/PRD.md docs/ARCHITECTURE.md -> empty (rule 5 respected)",
+    "git diff --stat <base>..HEAD -> all 30 changed files are within this lane's declared scope (firm-setup web/db surfaces, README.md, CONTEXT.md, en.json, the five new migrations and their tests/gates/rig-meta); no shared-file overreach beyond the declared minimal hunks"
+  ],
+  "verdict": "accept",
+  "summary": "Every major and minor finding in both review reports that the fix report claims FIXED is fixed and reproduces on a fresh, independent re-run of the same cells and gates on this lane's own rig: L06-SPEC-01, -02, -03, -04, -05, -06, -07, -09 and -12, plus F2. The two items the fix report leaves open (L06-SPEC-08, the TIN-mirror question, and L06-SPEC-10, the append-only-trigger backfill shape) are both items whose OWN required_fix in the original review asked for an owner/integrator ruling, not a code fix; the fix report correctly declines to invent a resolution and files both as named follow-ups with the evidence re-verified above (checked: SS G's tail still measures zero widened occurrences and the catalogue's tin row still carries no knowledge_key). L06-SPEC-11 is documented (CONTEXT.md's retire sentence softened, confirmed by diff). F1 stays as the original review itself said no retroactive fix was required. Nothing above minor remains open, and nothing broke: the whole apps/web unit suite, the full db gate chain, operation-census/rig-isolation, typecheck, lint and the e2e walk all reproduce the exact counts the fix report claims, and the one CI-lint red is independently confirmed to be outside this lane's diff (no file under scripts/ touched).",
+  "findings": []
+}

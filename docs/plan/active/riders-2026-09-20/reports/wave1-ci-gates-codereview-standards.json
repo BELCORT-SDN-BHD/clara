@@ -1,0 +1,54 @@
+{
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": "#1026",
+      "severity": "minor",
+      "title": "Report's cited verification command does not literally reproduce its own number",
+      "evidence": "wave1-ci-gates-1026-1027.md AC1 says: \"Proven to take effect... all 24 leg invocations (`grep -c world-gate.mjs` = 24; no bare `node tests/...` remains in the file).\" Running `grep -c world-gate.mjs .github/actions/db-live-gates/action.yml` on the worktree at dd3d335dd actually returns 25, because the new header comment block also contains the literal substring `scripts/ci/world-gate.mjs` (line 30: 'declared in ONE place: `scripts/ci/world-gate.mjs`'), on top of the 24 real invocation lines. The underlying claim is true and I re-verified it with a precise pattern: `grep -c 'node \"$GITHUB_WORKSPACE/scripts/ci/world-gate.mjs\"'` = 24, and `grep -n 'node tests/'` = 0 hits. AGENTS.md item 6 ('Claims need evidence... a checkable source... No evidence, no claim') is met in substance but the specific command quoted as evidence is off by one and would mislead a reader who reruns it verbatim.",
+      "required_fix": "Not required for merge (the substantive AC1 claim holds under re-verification). If the report is amended, restate the command as one that actually yields 24 (e.g. grep -c the literal invocation string), so the quoted evidence reproduces exactly."
+    },
+    {
+      "id": "STD-2",
+      "ticket": "#1026",
+      "severity": "note",
+      "title": "Selftest's 7 unit-level cells reach the module's internal exported functions rather than the launcher's named public seam",
+      "evidence": "scripts/ci/world-gate.selftest.mjs imports `budgetFrom, childEnv, isHeapDeath, attribution, isEntryPoint` directly from world-gate.mjs and asserts on them in isolation (e.g. `eq(budgetFrom({}), HEAP_BUDGET_MB, ...)`, `eq(childEnv({}, 2048).NODE_OPTIONS, \"--max-old-space-size=2048\", ...)`). The implementer's own report names the ticket's seam as 'The child's exit status — the only signal a wrapper has for \"died of its budget\"' (i.e. the CLI + exit codes), and .claude/skills/tdd/SKILL.md's Seams section says 'Test only at pre-agreed seams... no test is written at an unconfirmed seam.' Taken strictly, the 7 unit cells test at a lower, unnamed seam. Mitigation, verified empirically rather than assumed: I copied world-gate.mjs + its selftest to a scratch directory OUTSIDE the worktree (not the tracked file) and broke two of these internals one at a time. (1) Made `childEnv` return `{ ...env }` unchanged (drops the flag): the unit cell 'the budget is APPENDED to NODE_OPTIONS...' failed, AND the e2e cell 'THE BUDGET REACHES THE PROCESS' (which spawns the real launcher) also failed — 2 of 12 cells red, everything else green. (2) Made `isHeapDeath` always `return false`: the unit cell 'a heap death is an abort or a kill...' failed, AND the e2e cell 'AN ABORT IS ATTRIBUTABLE' also failed — 2 of 12 cells red. So the true CLI seam (the 5 'end to end' cases that spawn the real launcher against throwaway children and check stdout/stderr/exit code) independently catches both regressions; the unit cells are additional, faster-failing coverage of pure functions that are genuinely exercised by main()'s own control flow, not test-only doubles. No vacuous cell found.",
+      "required_fix": "None required — flagged as a judgement call per the code-review skill's smell baseline, not a hard violation, since the CLI seam is independently and adequately covered."
+    },
+    {
+      "id": "STD-3",
+      "ticket": "#1027",
+      "severity": "note",
+      "title": "Possible Duplicated Code: the two LEG4 poll loops share the same shape within one file",
+      "evidence": "packages/runtime/tests/intake-batch-e2e.mjs, the two new `for (;;) { ...; if (<done>) break; if (Date.now() - start >= LEG4_DEADLINE_MS) throw new Error(await leg4Diagnosis(...)); await sleep(LEG4_POLL_MS); }` blocks (the `pWatch` loop building the refusal count, and the `qWatch` loop settling+polling firm Q) repeat the same sweep/assert/deadline-check/sleep skeleton back to back in the same function. The report frames the shape as `tests/queue-drain.mjs`'s house convention ('no second style was invented'; cites `pollWork` in chat-turn-v*-e2e.mjs and `waitFor` in body-census-guard-db.test.mjs as siblings using the same shape), which is a real, pre-existing repo pattern of per-file inline polling rather than one shared generic poller — so a documented convention plausibly overrides this smell across files. Within THIS single file, though, the two loops are new, adjacent, and near-identical in skeleton; a small local `pollToDeadline(step, isDone)` helper could remove the duplication without inventing a new house style.",
+      "required_fix": "None required for merge — a polish opportunity only, not asked for by #1027's ACs and not a violation of any documented standard (the repo's own convention already tolerates one-poll-shape-per-file)."
+    },
+    {
+      "id": "STD-4",
+      "ticket": "#1026",
+      "severity": "minor",
+      "title": "Signal-to-exit-code map is incomplete for signals outside the four heap-death/common set",
+      "evidence": "scripts/ci/world-gate.mjs: `process.exit(signal ? 128 + (({ SIGABRT: 6, SIGKILL: 9, SIGTERM: 15, SIGINT: 2 })[signal] ?? 0) : (code ?? 0));`. A child killed by a signal not in this map (e.g. SIGSEGV, SIGBUS) falls back to `128 + 0 = 128`, losing the signal-specific numeric distinction the `128+n` shell convention normally carries. This does not affect AC4 (isHeapDeath only ever fires on SIGABRT/SIGKILL/134/137, so an unmapped signal is never misattributed to memory) and is not exercised by the selftest.",
+      "required_fix": "Optional: derive the offset from `os.constants.signals[signal]` (Node exposes this) instead of a hand-maintained map, so no signal is ever silently flattened to 128. Not required for merge."
+    },
+    {
+      "id": "STD-5",
+      "ticket": "#1026",
+      "severity": "note",
+      "title": "Independent re-verification of the report's gate table",
+      "evidence": "On worktree C:\\Users\\zhant\\Desktop\\clara-wt\\int at dd3d335dd, I independently ran: `CI=true GITHUB_ACTIONS=true pnpm lint` -> exit 0, with `world-gate selftest: OK` present in the chain output (line 343 of the captured log); `pnpm typecheck` -> clean (apps/web, packages/runtime); `node scripts/check-frozen-workflows.mjs` -> `freeze-lint: OK — 312 frozen file(s)...`; `node packages/runtime/scripts/check-parts-parity.mjs` -> `parts-parity: OK`. All match the report's claimed gate results.",
+      "required_fix": "None — verification only."
+    },
+    {
+      "id": "STD-6",
+      "ticket": "#1026 / #1027",
+      "severity": "note",
+      "title": "Git history is squashed to one commit per ticket, so it neither confirms nor contradicts vertical-slice cadence",
+      "evidence": "`git log --oneline 7b83b1c0d..dd3d335dd` shows exactly two commits, one per ticket (17b9e2368 for #1027, dd3d335dd for #1026), each already containing its full test + implementation + docs diff together. WORK-ORDER.md rule 4 permits 'a small group of slices' per commit, so this is not a violation, but it means the red-before-green cadence the report narrates (the measured pre-fix/post-fix run tables) is attested only in the report's prose, not independently checkable from `git log --stat`.",
+      "required_fix": "None required — noted for the record per the review brief's explicit ask to check git log --stat for horizontal-slicing evidence."
+    }
+  ],
+  "summary": "No hard violations of a documented standard found. Both commits (17b9e2368 #1027, dd3d335dd #1026) name their ticket, end with the required Co-Authored-By line, touch only test/CI-infra files (no product/lib code), update packages/runtime/README.md in the same commits, and land the new scripts/ci/world-gate.selftest.mjs in the root package.json lint chain on the repo's existing scripts/*.selftest.mjs pattern. Independently re-ran and confirmed: CI=true GITHUB_ACTIONS=true pnpm lint exits 0 (world-gate selftest: OK in the chain), pnpm typecheck clean, check-frozen-workflows and check-parts-parity both OK, and the action.yml's 24 leg invocations are all wired through the launcher with zero bare `node tests/...` left. Broke two mechanisms of the launcher (childEnv's flag-append, isHeapDeath's classification) in a scratch copy OUTSIDE the worktree and confirmed both the matching unit cell and the matching real-launcher end-to-end cell went red — no vacuous selftest cell found. Findings are all minor or note-level judgement calls: an off-by-one in one report evidence command (STD-1, substance still holds under re-verification), the selftest's unit cells reaching internal exported functions rather than the ticket's named CLI seam — mitigated because the CLI seam is separately and adequately covered (STD-2), a within-file duplicated poll-loop shape that echoes the repo's own per-file polling convention (STD-3), an incomplete signal-to-exit-code map that never affects the ACs (STD-4), plus two purely evidentiary notes (STD-5, STD-6). Worst issue: STD-1/STD-4 (both minor)."
+}

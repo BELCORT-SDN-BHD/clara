@@ -1,0 +1,139 @@
+{
+  "axis": "spec",
+  "wave": 2,
+  "lane": "05",
+  "theme": "document intake",
+  "branch": "riders/w2-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "base": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head": "aa67d0ee84ec8142895f71cb05fa74fcad32891a",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "tickets": [964, 968, 965],
+  "spec_sources": [
+    "gh issue view 964 (body is the newest and only Agent Brief; zero comments)",
+    "gh issue view 968 --comments (owner ruling + Agent Brief, belcorttao 2026-09-19T19:47:51Z)",
+    "gh issue view 965 --comments (owner ruling Option B + Agent Brief, belcorttao 2026-09-19T19:47:44Z)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (wave-2 addendum: migration house shape)"
+  ],
+  "verification_re_run": [
+    "packages/db: node --test --test-concurrency=1 <52-entry gate chain> tests/document-ingest-window-myt.test.mjs tests/intake-refusal-record.test.mjs tests/intake-batch.test.mjs -> 45 tests, 45 pass, 0 fail, 0 skipped (so all p964/p965/p968 cells really ran)",
+    "packages/runtime: node --test tests/intake-refusal-unit.test.mjs tests/intake-batch-unit.test.mjs tests/intake-recovery-unit.test.mjs -> 29 tests, 29 pass, 0 fail",
+    "clara_l05 live catalog: schema_migrations tail = 0252/0253/0254 applied; _reserve/_resize/_settle_document_reservation all carry the Asia/Kuala_Lumpur clause and none carries the UTC one; get_intake_batch capacity literal = myt_day / 00:00 / Asia/Kuala_Lumpur; cancel_intake_batch carries the #968 exception; create_document_intake carries the #965 CLR18 arm",
+    "closed-world scan of every clara pg_proc body for date_trunc('day', now() at time zone 'utc') and for every function reading clara.document_ingest_reservations"
+  ],
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "L05-SPEC-01",
+      "ticket": 964,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "A fourth, shipped door enforcing the same daily page ceiling was left on the UTC calendar day",
+      "evidence": "Ticket line: \"Reserve, resize and settle agree on the same window boundary for the same instant\" and Key interfaces: \"The three reservation helpers each compute a start-of-today boundary and must move together. A mixed state would let one instant pass one check and fail another.\" Measured live on clara_l05 AFTER 0252 applied: clara.settle_ingest_reservation(uuid,integer,text) -- a SECURITY DEFINER door granted to clara_runtime -- still contains `and created_at >= (date_trunc('day',now() at time zone 'utc') at time zone 'utc');` and enforces `coalesce(l.pages_per_day,1000)` with its own CLR18 'actual pages exceed daily limit'. It is NOT a wrapper round the moved helper (its sibling clara.resize_ingest_reservation delegates to clara._resize_document_reservation; this one does the count itself). The repo's own closed-world census names it as one of the six pages_per_day readers alongside the three helpers 0252 moved: packages/db/tests/f-a9-pr-1b.test.mjs:429 pins the exact list \"_reserve_document_ingest, _resize_document_reservation, _settle_document_reservation, _tf_firm_document_limits_upsert, get_firm_commercial_state, settle_ingest_reservation\". It escaped every gate because 0252's anchor and its tail's v_utc_clause both spell the expression with a space (`date_trunc('day', now()`) while this body spells it without one (`date_trunc('day',now()`), and 0252 §T re-reads only the three helpers. Report wave2-lane05-ticket964.md classifies the surviving UTC idiom as \"0009's / 0038's / 0151's processing-call ceilings, a different domain -- LLM usage, not document ingest\"; that classification does not cover this door, which is the same document-ingest pages/day ceiling the ticket moves. No production caller today (grep over apps/web + packages/runtime finds only clara.refund_ingest_reservation in packages/runtime/lib/reconciler-documents.mjs:181), but it is a live granted door in the runtime door census (packages/db/tests/rig-meta.mjs:3055) and between MYT midnight and 08:00 MYT it counts a different set of reservations than the settle path 0252 moved.",
+      "required_fix": "Either move clara.settle_ingest_reservation's window to Asia/Kuala_Lumpur in the same generation (a second anchored splice, its own prestate pin), or state explicitly in the ticket report and in packages/db/README.md why a shipped door enforcing the same pages_per_day ceiling is deliberately left eight hours out of step, and file the residual. Whichever is chosen, 0252's tail should assert the chosen state for this fourth body too, so the next reader cannot miss it."
+    },
+    {
+      "id": "L05-SPEC-02",
+      "ticket": 965,
+      "severity": "major",
+      "kind": "surface-contradicts-shipped-behaviour",
+      "title": "The batch card still tells every user that a ceiling-refused file 'never joins a batch', which #965 made false",
+      "evidence": "Ticket AC: \"A refused file uploaded into an open batch either reaches the batch read as a capacity wait or is stated as not a member; the batch read never shows a silent absence.\" The lane chose the first arm and proved it: p965.refusal.batch_read_shows_a_capacity_wait_never_a_silent_absence re-ran green here (45/45, 0 skipped). But the shipped copy still states the second arm, unconditionally, on every batch card: apps/web/messages/en.json IntakeBatch.residual.preIntakeRefusal = \"A file refused by the daily quota before it was accepted never joins a batch -- look for it in the upload list above, which shows the database's own message and remedy.\", rendered at apps/web/components/documents/intake-batch-card.tsx:291 with no condition, beside the card comment at lines 286-290 (\"a file refused by the daily ceiling BEFORE its intake exists never becomes a member\"). Two live cells pin the retired claim: apps/web/components/documents/intake-batch-card.test.tsx:261 asserts the rendered text matches /refused by the daily quota before it was accepted never joins a batch/, and apps/web/lib/documents/batch-url-state.test.ts:82 asserts the catalogue string matches /never joins a batch/. A user can now see the refused file listed in facets.waiting AND the sentence saying it never joins a batch on the same card. wave2-lane05-ticket965.md's \"Out of scope -- confirmed untouched\" says \"No apps/web file is touched by any commit of this ticket\" and its follow-up #2 covers only the upload-receipt list; this contradiction is not noticed anywhere in the report.",
+      "required_fix": "Recut IntakeBatch.residual.preIntakeRefusal (and the card comment and the two cells that pin it) to the post-#965 fact -- a ceiling-refused file keeps its record and, inside an open batch, appears as an awaiting_capacity wait -- or gate the sentence off. Fixing the copy is inside #965's scope ('the batch read never shows a silent absence' is about what the surface tells the user) and is not the out-of-scope 'firm-facing UI to browse refused files'."
+    },
+    {
+      "id": "L05-SPEC-03",
+      "ticket": 968,
+      "severity": "major",
+      "kind": "house-shape-requirement-missing",
+      "title": "Migration 0253 ships with no preintegration gate module and no gate-chain entry, so #968's whole evidence base can skip silently",
+      "evidence": "WORK-ORDER.md wave-2 addendum, Migrations: \"House shape: header, prestate with sha256(prosrc) pins ..., the change, tail assertions, a preintegration gate module with a stable stem, a rig-meta cohort, the gate-chain entry in migration order.\" #964 added packages/db/tests/document-ingest-window-myt-preintegration-gate.mjs and #965 added packages/db/tests/intake-refusal-record-preintegration-gate.mjs, both appended to packages/db/package.json's test script (chain 50 -> 52 entries, verified). 0253_batch_cancel_reissue.sql added neither: `git diff <base>...HEAD --stat` lists exactly two new *-preintegration-gate.mjs files, and the gate chain contains no batch_cancel_reissue entry. Instead the four p968.reissue.* cells use an in-file helper, packages/db/tests/intake-batch.test.mjs gateReissue(), which calls markSkip() + t.skip() -- so against any database pinned below 0253 (a slice-frontier CI leg, an integrator's partial chain) the ticket's entire acceptance evidence disappears as four skips instead of failing loudly, which is the exact failure the gate modules exist to prevent (the file's own before hook: \"A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud\"). wave2-lane05-ticket968.md's Migration section enumerates the house shape it followed and never mentions the gate module; its Gates section describes the in-file helper as a \"new stem gate\".",
+      "required_fix": "Add packages/db/tests/batch-cancel-reissue-preintegration-gate.mjs with the stable stem `batch_cancel_reissue$` and its CLARA_ALLOW_MISSING_* env escape, on the shape of the two sibling gates this same lane wrote, and insert it into packages/db/package.json's test script in migration order (after document-ingest-window-myt, before intake-refusal-record). Keep the in-file gateReissue() for the slice-frontier skip, exactly as the other two stems do."
+    },
+    {
+      "id": "L05-SPEC-04",
+      "ticket": 964,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The card's second hardcoded reset string was updated, not removed, so the duplication the AC names survives",
+      "evidence": "Ticket AC: \"The batch-board `capacity` descriptor reports the MYT-midnight window, and the batch card shows it without a second hardcoded string.\" apps/web/components/documents/intake-batch-card.tsx:281 still reads `at: ready.capacity.resetsAtLocal ?? \"00:00\"` -- the literal moved from \"08:00\" to \"00:00\" but is still a local copy of the wall the door describes, and it is reachable: apps/web/lib/documents/intake-batch.ts:115 types capacity as `{ window: string | null; resetsAtLocal: string | null; timezone: string | null }` and line 207 parses it through asString(), which yields null for a missing or non-string field. The same hunk keeps `zone: ready.capacity.timezone ?? \"Asia/Kuala_Lumpur\"`. The next window move would again need a web edit, which is precisely what the AC was written to stop.",
+      "required_fix": "Either drop the fallback and render the capacity banner only when the door supplied resets_at_local (the door always does -- 0252 §T asserts the literal), or state in the report why a defensive default is kept and why '00:00' is the right thing to show when the door said nothing."
+    },
+    {
+      "id": "L05-SPEC-05",
+      "ticket": 964,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "Four surfaces still describe the retired 08:00 / UTC-day wall",
+      "evidence": "Ticket Desired behavior: \"The batch-board descriptor stops saying `utc_day` and `08:00` and states the MYT-midnight reset, so no surface describes a wall that no longer exists.\" AC7: \"The cell that pinned the UTC-day window now pins the MYT-day window, under a name that no longer asserts UTC is correct.\" Still asserting the retired fact on this branch: (1) apps/web/README.md:849-851 -- \"**THE CAPACITY COPY SAYS 08:00, NEVER \\\"MIDNIGHT\\\" AND NEVER \\\"TOMORROW\\\".** The daily document window is `date_trunc('day', now() at time zone 'utc')` (0007:1644), whose boundary is 08:00 `Asia/Kuala_Lumpur` -- MEASURED on a migrated rig.\" (the apps/web module README, which work-order rule 9 puts in the same commit as the change; packages/db/README.md WAS correctly rewritten). (2) packages/runtime/lib/intake-batches.mjs:300 -- \"the accountant's remedy is \\\"wait for 08:00\\\"\". (3) packages/runtime/README.md, the World-leg paragraph -- \"100 <=1MB PDFs is exactly what a fresh firm admits in one UTC day\" (the file was edited by #965 but this line was left). (4) apps/web/lib/documents/batch-url-state.test.ts:72,80 -- a live cell still named \"the capacity copy says 08:00 and never 'midnight' or 'tomorrow'\" whose assertion message reads \"the daily window is a UTC day, which is 08:00 MYT -- never midnight\"; AC7's rename was applied to the db cell (p636.batch.capacity_window_utc -> p964.window.capacity_window_myt) and the component cell, but not to this one.",
+      "required_fix": "Rewrite apps/web/README.md's capacity paragraph to the MYT-midnight fact, correct the two runtime comments, and rename/re-reason the batch-url-state cell so no surviving cell name or rationale asserts the UTC day is correct."
+    },
+    {
+      "id": "L05-SPEC-06",
+      "ticket": 965,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "Which ceiling refused the file is durable only in audit_log and the op receipt, never on the intake record itself",
+      "evidence": "Ticket AC: \"The record captures the firm, enough to identify the attempted file, the timestamp, and which ceiling was hit\", and the ticket defines the record as the intake record (\"A document's identity in the intake/batch model is its intake record (`clara.document_intakes`)\"). Measured: migration 0254's refusal arm writes `update clara.document_intakes set status='failed', failure_code='limit' where id=v_id;` and nothing else -- no column carries 'documents' vs 'pages'. The ceiling lives in the returned outcome, in the clara.audit_log args (`'ceiling',v_ceiling`, asserted by intake-refusal-record.test.mjs:214) and in the op_receipts result. A reader of the intake relation alone -- for instance apps/web/lib/documents/receipts.ts's INTAKE_RECEIPT_COLS, the only surface that will show these rows -- cannot tell a docs refusal from a pages refusal. The AC is arguably met, because audit_log is append-only and queryable and the ticket forbids new vocabulary on the intake relation, but the report states the AC as satisfied by \"the returned outcome\" first, which is not durable.",
+      "required_fix": "State plainly in the report (and in packages/db/README.md's #965 paragraph) that the durable home of the ceiling is clara.audit_log's args, name the query that answers \"which ceiling turned this file away\", and confirm the owner is content that document_intakes alone cannot answer it."
+    },
+    {
+      "id": "L05-SPEC-07",
+      "ticket": 965,
+      "severity": "minor",
+      "kind": "behaviour-not-asked-for",
+      "title": "Refused files now appear on the shipped upload-receipt list rendering the raw DB token 'limit'",
+      "evidence": "Ticket Out of scope: \"A firm-facing UI to browse refused files.\" The refused record is a row of clara.document_intakes_visible, which apps/web/lib/documents/receipts.ts already reads (INTAKE_RECEIPT_COLS carries status and failure_code), so every ceiling refusal now lands on the Documents tab upload list with no web change -- and apps/web/components/documents/intake-receipts.tsx:152-154 renders the failure code RAW: `{intake.status === \"failed\" && intake.failure_code ? <span className=\"text-xs text-error\">{intake.failure_code}</span> : null}`, i.e. the literal token \"limit\". The phrased copy exists (apps/web/messages/en.json IntakeBatch/queueFailure.limit, \"This firm has reached its upload allowance for today...\") but that catalogue is the upload QUEUE's, not this table's. wave2-lane05-ticket965.md's follow-up #2 discloses that refused files will appear there and calls it consistent with the ticket, but does not flag that the surface shows a raw enum token, which is the shape #1005's own cells forbid elsewhere in this same component family.",
+      "required_fix": "Either accept and record the new surface deliberately (one line in the ticket report plus a follow-up issue for phrasing the token), or gate the refused rows out of the receipts list until the phrasing lands. Do not leave it as an undeclared user-visible consequence."
+    },
+    {
+      "id": "L05-SPEC-08",
+      "ticket": 968,
+      "severity": "minor",
+      "kind": "requirement-implemented-as-specified-but-leaves-the-stuck-batch",
+      "title": "The re-issue exception's membership test is not firm-scoped, so a canceller active at any other firm still blocks the batch for ever",
+      "evidence": "Ticket Desired behavior: \"When the stored canceller no longer holds an active membership at or above the bookkeeper floor, which is the same condition the read already reports as the block, a different, currently active bookkeeper can re-issue the stop.\" Measured on the live body: clara.cancel_intake_batch's new guard is `exists (select 1 from clara.firm_memberships fm where fm.user_id = b.cancel_requested_by and fm.status = 'active' and clara.role_rank(fm.role) >= clara.role_rank('bookkeeper'))` -- no `fm.firm_id` predicate. It is byte-for-byte the predicate clara.get_intake_batch already evaluates for cancel_blocked (live prosrc lines 56-62), so the brief's \"keyed on exactly the condition the batch read already reports\" is honoured and the defect is inherited from 0229, not introduced by 0253. The consequence is still the one the ticket exists to remove: a bookkeeper who leaves THIS firm but holds an active bookkeeper+ membership at ANY other firm leaves the batch reported as blocked and refuses every re-issue, so the batch stays permanently stuck with no product remedy -- the exact 'Cost' the ticket's Option A names.",
+      "required_fix": "No change to 0253 (the brief mandates the read's own predicate). File a follow-up naming both sites -- clara.get_intake_batch's cancel_blocked predicate and clara.cancel_intake_batch's new exception -- and the fact that both must be firm-scoped together, and record the residual in this ticket's report."
+    },
+    {
+      "id": "L05-SPEC-09",
+      "ticket": 964,
+      "severity": "note",
+      "kind": "evidence-quality",
+      "title": "The three timing ACs are proved by re-evaluating the same expression, not by driving a reservation; the browser and World legs never ran",
+      "evidence": "AC1/AC2/AC3 (\"a reservation made at 06:00 MYT counts against that MYT calendar day's quota\", the 09:00/23:00 pair, the MYT-midnight reset) are asserted in p964.window.capacity_window_myt by running `date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') ...` over crafted timestamptz values in rootQuery -- the SAME expression the production bodies contain -- rather than by driving clara._reserve_document_ingest at a crafted instant. The link to the production bodies is document-ingest-window-myt.test.mjs's prosrc reading (all three carry the byte-identical clause exactly once). That is defensible: the three helpers are ungranted, created_at is immutable (_tf_reservation_update raises CLR08) and nothing here can move now(); the report says so. But no cell observes the ceiling actually refusing or admitting across a real boundary. Separately, two legs that carry this ticket's copy were recut and never run: apps/web/e2e/intake-batch-walk.spec.ts (next build fails on apps/web/components/documents/document-kind-dialog.tsx:95's undefined DOCUMENT_KINDS -- confirmed pre-existing here, `git log <base>..HEAD -- apps/web/components/documents/document-kind-dialog.tsx` is empty) and packages/runtime/tests/intake-batch-e2e.mjs (recut by BOTH #964 and #965, run by neither). Both disclosed in the reports; recorded here so the integrator carries them.",
+      "required_fix": "None on this branch. The integrator should run intake-batch-walk and the runtime World leg once the document-kind-dialog defect is fixed centrally, since three of this lane's edits (the card copy, the e2e mock, leg 5's member assertion) have no dynamic evidence."
+    }
+  ],
+  "already_satisfied_and_stopped_claims_checked": [
+    {
+      "claim": "#964 was not already satisfied on main (report: the live prosrc still carried the UTC clause before any change)",
+      "check": "Consistent with the branch: 0252 is a new file in this diff, its prestate pins sha 074c9b18.../41528b31.../b72d83e7... for the three helpers (0229's own pins), and the applied ledger on clara_l05 shows 0252/0253/0254 as the only versions above 0234. Accepted."
+    },
+    {
+      "claim": "#968 was not already satisfied (report: CLR13 raised unconditionally before 0253)",
+      "check": "Consistent: 0253's prestate pins cancel_intake_batch at 18f5b8d5..., the 0229 body, and the exception text exists only inside 0253's own splice. Accepted."
+    },
+    {
+      "claim": "#965 was not already satisfied (report: create_document_intake still called the reserve helper with no exception arm)",
+      "check": "Consistent: 0254's prestate pin 09784b31... is 0229's own recorded pin for the same OID, and the live body now carries the CLR18 arm. Accepted."
+    },
+    {
+      "claim": "#968/#965: 'no apps/web file is touched by any commit of this ticket'",
+      "check": "True as stated -- `git log <base>..HEAD -- apps/web` shows only #964's 60752b3fd. But see L05-SPEC-02: for #965 that is the finding, not the defence, because the untouched web copy now contradicts the shipped behaviour."
+    },
+    {
+      "claim": "#964/#968/#965: 'No rig-meta cohort' because no function was added, removed or regranted",
+      "check": "Verified: all three migrations' only DDL is create-or-replace on existing signatures plus comments; §T re-reads each ACL byte-identical; packages/db/tests/rig-meta.mjs is not in the diff and its cohorts are function-name based, with no migration-count pin. operation-census.test.mjs and rig-isolation.test.mjs need nothing new. Accepted."
+    },
+    {
+      "claim": "#965: 'Every existing caller of the creation door handles the new refusal shape'",
+      "check": "Re-derived independently. SQL: a live pg_proc scan finds clara.create_document_intake named only by itself and by clara.open_intake_batch, and in the latter only inside a prose comment. Code: the only production callers are beginDocumentIntake (packages/runtime/lib/intake.mjs:198) and beginIntakeInBatch (packages/runtime/lib/intake-batches.mjs:231), both reached from POST /api/intake/documents, and both paths converge on the route's single `if ((out as {refused?: boolean})?.refused === true) throw intakeLimitRefusal();` at packages/runtime/src/intakeRoutes.ts:131. apps/web names the door only in a comment (apps/web/lib/documents/intake-batch-doors.ts:4). Accepted."
+    },
+    {
+      "claim": "#965: a refused intake cannot be uploaded into",
+      "check": "Independently checked, since the row keeps its token_hash: clara.claim_document_intake_upload refuses unless `i.status='uploading'`, so a row committed at 'failed' is unclaimable. No finding."
+    }
+  ],
+  "summary": "Three tickets, all three substantially delivered and green on re-run (45/45 db cells, 29/29 runtime cells, 0 skipped). Two requirements are wrong rather than missing: #964 moved three of the FOUR shipped bodies that enforce the document-ingest daily ceiling and left clara.settle_ingest_reservation on the UTC calendar day, the mixed state its own Key interfaces forbid; and #965's shipped batch-card copy still tells every user that a ceiling-refused file 'never joins a batch' while the same card now lists it as an awaiting_capacity wait. #968's migration is missing the preintegration gate module and gate-chain entry the wave-2 work order's house shape requires, so its four acceptance cells skip silently below 0253. The rest are partials: the card kept a local reset literal, four docs/comments/cell names still describe the retired 08:00 wall, the refused record carries its ceiling only in audit_log, refused files newly surface on the receipts list rendering the raw token 'limit', and #968 inherits the read's unscoped membership predicate."
+}

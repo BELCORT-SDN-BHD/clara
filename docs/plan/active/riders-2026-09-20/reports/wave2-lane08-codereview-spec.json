@@ -1,0 +1,137 @@
+{
+  "axis": "spec",
+  "lane": "wave2-lane08",
+  "branch": "riders/w2-lane08",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "tickets": [840, 843, 861],
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    {
+      "cell": "packages/db/tests/activity-feed.test.mjs (full 53-module gate chain, clara_l08)",
+      "claimed": "41 pass / 0 fail / 0 skipped",
+      "measured": "41 pass / 0 fail / 0 skipped",
+      "agrees": true
+    },
+    {
+      "cell": "packages/db/tests/operator-support.test.mjs (full gate chain, clara_l08)",
+      "claimed": "22 pass / 0 fail / 0 skipped",
+      "measured": "22 pass / 0 fail / 0 skipped",
+      "agrees": true
+    },
+    {
+      "cell": "apps/web unit: lib/firm/activity.test.ts + activity-filters + activity-row + activity-event-sheet + firm-home-board",
+      "claimed": "green",
+      "measured": "70 pass / 0 fail / 0 skipped",
+      "agrees": true
+    },
+    {
+      "cell": "apps/web/e2e/e2e-fixture-ownership.test.ts (shared file, new ACTIVITY fixture ids)",
+      "claimed": "not separately reported",
+      "measured": "44 pass / 0 fail",
+      "agrees": true
+    },
+    {
+      "cell": "pnpm --filter @clara/web e2e activity-feed-walk on the lane triple 3570/3571/3572",
+      "claimed": "19 passed",
+      "measured": "19 passed (34.3s)",
+      "agrees": true
+    },
+    {
+      "cell": "clara_l08 catalog probe: client_scoped for the event types this lane touches",
+      "claimed": "n/a",
+      "measured": "work.cancelled=true; firm.created, firm_registration.rejected, admission.capacity_set, stripe_event.problem_resolved all false",
+      "agrees": true
+    },
+    {
+      "cell": "clara_l05 read-only probe, verifying the cross-lane repair the #861 report claims",
+      "claimed": "dec4bc22... / 80bc1390...",
+      "measured": "dec4bc22c7d01ca67e651168aa18718f05e47b9c9aba2ec84288981992e9f870 and 80bc1390416da02e3787cd64ea4a3df483402edafd5eb8067ae6289bc5b8531f, with 'then people' absent and 'else clients' absent",
+      "agrees": true
+    }
+  ],
+  "findings": [
+    {
+      "id": "L08-SPEC-01",
+      "ticket": 861,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The AC naming six owning tickets is reported done against a different set of tickets, and five of the six own no locatable activity-feed cell",
+      "evidence": "Ticket line (#861 Agent Brief, Acceptance criteria): \"- [ ] The activity-feed cells owned by #625, #633, #639, #646, #647 and #650 still pass.\" The report (reports/wave2-lane08-ticket861.md, AC table row 3) marks it done and cites \"The same run covers #632's, #728's, #630's, #770's and #840's own cells\" -- a disjoint set of ticket numbers. Measured on the branch: grep for #625|#633|#639|#646|#647|#650 over apps/web/components/firm/activity, apps/web/lib/firm/activity.ts, apps/web/lib/firm/activity.test.ts, packages/db/tests/activity-feed.test.mjs, apps/web/e2e/activity-mock.mjs and apps/web/e2e/activity-feed-walk.spec.ts returns NOTHING. Of the six, only #650 owns a spec that mentions activity at all (apps/web/e2e/home-board-walk.spec.ts), and that is the one walk the implementer ran (27 passed). The walks owned by #625/#633/#639/#646/#647 (members-invite, documents-intake, fixed-asset-acquisition, document-correction, counterparty-identity) contain no reference to the activity feed and were not run -- defensible, but the report never says so.",
+      "required_fix": "Either name, per ticket, the cells the AC means and the run that covered them, or record in the report that five of the six tickets own no activity-feed cell on this branch and that the AC is satisfied by the whole apps/web unit suite plus af.1-af.39b plus home-board-walk. The AC holds substantively; what is missing is the traceability it asks for."
+    },
+    {
+      "id": "L08-SPEC-02",
+      "ticket": 840,
+      "severity": "minor",
+      "kind": "requirement-not-honoured",
+      "title": "Both #840 and #861 instruct that the two door recuts land in ONE migration; two separate recuts landed and neither report names the instruction or the rule that overrides it",
+      "evidence": "#840 triage comment (2026-09-17): \"If #861 (the kind ladder) is in flight at the same time, land the two recuts in one migration rather than two.\" #861 owner ruling (2026-09-18): \"#840 recuts the same two doors: land the two in one migration if both are in flight.\" Both were in flight in the same lane. The branch lands 0262_activity_successor_link.sql and 0264_activity_kind_ladder.sql, each a create-or-replace of BOTH clara.list_activity and clara.get_activity_event (0262 lines 355/637; 0264 lines 444-449/738-743). grep for 'one migration', 'in flight' or 'coordinate' over all three lane reports returns nothing. The wave-2 WORK-ORDER addendum does override the ticket line (\"A ticket that needs a schema or function change writes EXACTLY ONE new migration file at the number reserved for it in your prompt\"; \"One implementer per ticket\"), and the sequencing is handled correctly: 0264's prestate pins 0262's OUTPUT shas (186ab1af.../37319708...) rather than 0202/0184's, and both bodies were rebuilt from 0262's committed text. The outcome is sound; the silence is the finding.",
+      "required_fix": "Record in the #840 and #861 reports that the ticket's one-migration line was superseded by the wave-2 addendum's one-migration-per-ticket rule, and that 0264 pins 0262's post-state so the two recuts compose. No code change."
+    },
+    {
+      "id": "L08-SPEC-03",
+      "ticket": 861,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "#861 deletes another ticket's honest-note disclosure from Firm Home and flips #659's own board assertion, neither of which its brief asks for",
+      "evidence": "#861's brief scopes the web side to \"The web activity kind vocabulary, labels, URL parser and filter control.\" Commit d4ad1554c additionally removes the activityKindResidual paragraph and its header stanza from apps/web/components/firm/firm-home/firm-recent-activity.tsx, deletes the key from apps/web/messages/en.json, and rewrites #659's own cell in apps/web/components/firm/firm-home/firm-home-board.test.tsx from assert.match(h.text(), /wrong kind by the activity door/) to assert.doesNotMatch(...). The reasoning is sound (the sentence became false the moment 0264 landed) and the implementer declares it under \"One seam the brief does not name was changed\"; firm-home-board.test.tsx greens (part of the 70-pass re-run). But it edits a surface and an acceptance cell belonging to a different ticket.",
+      "required_fix": "None on the branch -- the change is correct and declared. The integrator should confirm #659's owner accepts that its board cell now asserts the negative, and that no other lane this wave is editing firm-recent-activity.tsx or that en.json key."
+    },
+    {
+      "id": "L08-SPEC-04",
+      "ticket": 840,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "Commit a60a3f40d fixes apps/web/components/documents/document-kind-dialog.tsx, which no lane-08 ticket asks for, and two other lanes carry the same one-line fix",
+      "evidence": "Commit a60a3f40d (\"fix(web): DocumentKindDialog's trigger items referenced undefined DOCUMENT_KINDS\") changes apps/web/components/documents/document-kind-dialog.tsx, a file outside the briefs of #840, #843 and #861. The implementer declares it: #840's third AC requires a real Playwright walk, whose runner invokes next build, which fails on any type error anywhere in apps/web. The report itself names the collision risk (\"this is likely to be the SAME one-line change in more than one lane's branch; it should land exactly once\") and cites reports/wave2-lane03-ticket846.md and reports/wave2-lane09-ticket839.md as having found the same defect unfixed. The commit message deliberately does not name #840, so it is separable.",
+      "required_fix": "Integrator-level: land this one-line fix exactly once across the wave's lanes and close the follow-up line in the lane-03 and lane-09 reports. No change owed on this branch."
+    },
+    {
+      "id": "L08-SPEC-05",
+      "ticket": 861,
+      "severity": "note",
+      "kind": "requirement-unsatisfiable",
+      "title": "The owner ruling's \"the implementer writes both language files\" and its suggested Chinese labels are neither used nor addressed",
+      "evidence": "#861 owner ruling (2026-09-18): \"Suggested labels: People / Assets / Counterparties / Clients / Firm in Chinese (the implementer writes both language files).\" The branch writes English labels only, into apps/web/messages/en.json. Measured: apps/web/messages/ contains en.json alone, and apps/web/i18n/request.ts:91 pins const locale = \"en\", its header stating \"a single static locale, no locale-prefixed routing... Adding en-GB/ms/zh later is a routing.ts + middleware change\". So there is no second language file to write and the instruction is unsatisfiable as stated. reports/wave2-lane08-ticket861.md never mentions the ruling's label suggestion or the second file.",
+      "required_fix": "Record in the report that the estate is single-locale (apps/web/i18n/request.ts:91), so \"both language files\" resolves to en.json alone, and that the English labels are the implementer's rendering of the ruling's five names. If the owner wants the Chinese strings on record for a later locale, that is a separate ticket."
+    },
+    {
+      "id": "L08-SPEC-06",
+      "ticket": 840,
+      "severity": "note",
+      "kind": "implementation-divergence",
+      "title": "The feed row and the detail Sheet disagree about a successor on a row with no client: the row renders nothing, the Sheet renders unlinked text",
+      "evidence": "#840's brief: \"The feed renders it as a second deep link\" -- with no client caveat. apps/web/components/firm/activity/activity-row.tsx gates on {row.client_id && row.successor_work_id ? <Link .../> : null}, so a successor on a row with a null client_id vanishes entirely; apps/web/components/firm/activity/activity-event-sheet.tsx gates on {detail.successor_work_id ? ...} and falls back to t(\"linksToSuccessor\") as plain text when detail.client_id is null. Latent today, measured on clara_l08: clara.event_types carries work.cancelled with client_scoped = true, so the row always has a client. Neither report names the divergence.",
+      "required_fix": "None required while work.cancelled stays client-scoped. If the pair is touched again, make the row fall back the way the Sheet does (or make both drop the field), and say in the report that the two surfaces are deliberately different."
+    },
+    {
+      "id": "L08-SPEC-07",
+      "ticket": 861,
+      "severity": "note",
+      "kind": "cross-lane-risk",
+      "title": "The #861 report's self-declared write to lane 05's database -- independently verified repaired, flagged because it is outside this axis and must not be dropped",
+      "evidence": "reports/wave2-lane08-ticket861.md, section \"Cross-lane incident\": a generically-named scratchpad helper was overwritten by a concurrent lane session, and one vacuity-control write (else 'documents' -> else 'clients') landed on clara_l05's clara.list_activity and clara.get_activity_event. I re-measured clara_l05 read-only: both bodies now hash to dec4bc22c7d01ca67e651168aa18718f05e47b9c9aba2ec84288981992e9f870 and 80bc1390416da02e3787cd64ea4a3df483402edafd5eb8067ae6289bc5b8531f -- exactly the pre-0262 pins recorded in reports/wave2-lane08-ticket840.md before anything on this branch was applied -- with 'then people' absent and 'else clients' absent. The repair holds. One detail in that report is stale: clara_l05's clara.schema_migrations now shows 232 rows, not the 231 quoted.",
+      "required_fix": "Nothing on this branch. The orchestrator should confirm lane 05 re-ran anything it measured inside the window, and decide whether RIG.md gains the per-lane scratchpad rule the report proposes."
+    }
+  ],
+  "no_finding": [
+    "#840 AC1 -- af.31 proves a restated Work's work.cancelled row carries the successor in BOTH doors and that an unrelated operation_receipt row on the same page carries null; af.32 proves an ordinary cancellation carries an explicit null (hasOwnProperty), never an absent key. Re-run green.",
+    "#840 AC2 -- af.1..af.30 ran in the same invocation as af.31/af.32, and 0262's tail re-measures every arm 0202/0184 shipped against the committed text. Re-run green (41/41, including #861's later cells).",
+    "#840 AC3 -- activity-feed-walk asserts the exact href /clients/<client>/work/<successor> and the navigation, plus the negative on the row AND inside the Sheet (scoped to [data-slot=sheet-content] so the page's own restated row cannot leak a false pass). Re-run: 19 passed on the lane triple.",
+    "#840 out-of-scope honoured -- get_activity_event gains exactly one key; 0262 leaves the kind ladder untouched.",
+    "#843 AC1 -- os.20 proves all three acts on the operator firm's Activity with actor, null client_id, a non-empty description and the kind; an outsider firm reads none of the three types and no row acted by the operator; an operator-firm VIEWER meets CLR04 rather than an empty page, which is the brief's own wording. The cell argues, correctly, that uq_firms_one_operator makes 'a second firm's operator' necessarily a non-operator firm's owner. Re-run green.",
+    "#843 AC2 -- os.21 counts clara.domain_events as root before and after a same-op_key replay on both doors (1 and 1), asserts byte-identical receipts, then re-reads the timeline for exactly one line each. Re-run green.",
+    "#843 AC3 and the 2026-09-19 correction -- 0263 registers both types client_scoped=false routed context_update, its tail re-reads the catalog including the whole-catalog coverage anti-join, and the acceptance read moved off the retired clara.list_firm_timeline onto clara.list_activity exactly as the correction demands. The correction's added scope item (say which kind the two types take) is answered in os.20's own cell: they ride the stated default, documents.",
+    "#843 out-of-scope honoured -- no cross-firm or estate-wide audit read, no exposure of the redacted argument column, no export. Payload confidentiality is argued and pinned (capacity payload {}, resolution payload {problem} only), which matters because clara.domain_events is read estate-wide while clara.audit_log is firm-scoped.",
+    "#861 the five rungs are exactly the owner's ruling, in both doors, with like 'firm.%' written with the dot so firm_registration.* and firm_setup.* stay on the stated default. Measured on clara_l08: firm.created is the only firm.% type in the catalog (people 5, assets 3, counterparties 8, clients 10, everything else 112), and #843's os.20 pins firm_registration.rejected on documents on this same branch.",
+    "#861 AC 'the two ladders agree for every event type' -- af.39a compares the two INSTALLED bodies read from pg_proc against an independently written EXPECTED_LADDER; af.39b drives one event of every registered type through both doors against an independent prefix table, excluding only sweep.run_completed with its reason stated. Re-run green.",
+    "#861 AC 'an unknown event type lands on the documented default' -- af.38 across three families the ruling does not name (bank., egress., open_item.), in both doors. Re-run green.",
+    "#861 'a bookmarked URL naming a retired kind degrades' claimed already-satisfied -- verified on the branch: parseActivityUrlState filters through isActivityKind (apps/web/lib/firm/activity.ts) and apps/web/lib/firm/activity.test.ts:257 already pinned it. Re-run green; no second cell was added, correctly.",
+    "#861 out-of-scope honoured -- diffing 0262's list_activity body against 0264's shows only the p_kinds roster, the five ladder rungs and comments moved; the agent-receipt UNION arm and its report/agent split are byte-identical, no event type was registered and nothing was backfilled.",
+    "The web vocabulary is one contract in two places, not two ladders: ACTIVITY_KINDS is the only kind list in apps/web outside tests, activity-filters.tsx and activity-row.tsx both read t(`kindLabels.${kind}`) dynamically, and lib/firm/activity.test.ts pins the roster and the label map both ways against a list transcribed from 0264.",
+    "No frozen workflow, applied migration, docs/PRD.md or docs/ARCHITECTURE.md is touched; packages/runtime is untouched; the three new preintegration gate modules are wired into packages/db/package.json in migration order (activity-successor-link, operator-support-timeline, activity-kind-ladder); apps/web/test/manifest.txt is correctly untouched because no new .test. file was added.",
+    "No 2026-09-20 owner ruling exists on any of the three issues (gh: #840 one comment 2026-09-17; #843 comments 2026-09-17, 2026-09-17, 2026-09-19; #861 comments 2026-09-17, 2026-09-17), so the briefs the implementer worked to are the newest."
+  ]
+}

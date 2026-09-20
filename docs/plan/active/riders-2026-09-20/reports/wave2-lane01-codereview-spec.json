@@ -1,0 +1,132 @@
+{
+  "axis": "spec",
+  "wave": 2,
+  "lane": 1,
+  "branch": "riders/w2-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": 19,
+  "tickets": [1014, 868, 906, 914, 984],
+  "verdict": "accept-with-fixes",
+  "summary": "All five tickets are built, and every acceptance criterion I could re-measure on the lane rig holds. I re-ran, on 127.0.0.1:55741/clara_l01 with the full 54-module preintegration gate chain: opening-balance-evidence-link 7/7, subledger-hook-caller-roster 5/5, journal-basis-zero-total-unreachable 4/4, correction-client-rung-order 5/5, opening-balance-work 4/4, staff-expense-claim 24/24, x42-s5c-awcc + x37-wave-c-a-subledger + x27-filings-lock-order + wb-k-approval + operation-census + rig-isolation 93 pass / 1 documented skip, rig-docs-source-revision + intake-batch + activity-feed 78/78, and the four touched apps/web test files 120/120. I also independently re-derived two load-bearing claims: the estate has no body that takes a clara.clients ROW and then a clara.journal_entries row (approve_pair_reversal and cancel_pair_reversal read clients without a locking clause and already take je-rows then the client rung, so #914's new pair is safe), and the Work/Activity read doors (list_accounting_work, get_accounting_work_row, list_activity, get_activity_event) carry no closed purpose list and only LEFT joins to the run tables, so an opening Work really does surface. The one finding that must be actioned before the wave lands is that the work order's own pre-report gate, CI=true GITHUB_ACTIONS=true pnpm lint, was never run and is RED on this branch; the red is inherited from wave 1 (scripts/check-frozen-workflows.selftest.mjs is untouched by this lane) but no lane-01 report names it, and all five say 'pnpm lint exit 0' without the qualifier. The rest are scope notes and evidence gaps the lane mostly declared itself.",
+  "findings": [
+    {
+      "id": "L01W2-SPEC-01",
+      "ticket": 984,
+      "severity": "major",
+      "kind": "gate-unrun",
+      "title": "The binding pre-report gate CI=true GITHUB_ACTIONS=true pnpm lint was never run, and it is RED on this branch",
+      "evidence": "RIG.md's wave-2 addendum is explicit: 'Before you report, run the lint chain once more as the runner sees it: CI=true GITHUB_ACTIONS=true pnpm lint (wave 1 shipped a cell that was green on the rig and red on the runner, PR #1025).' grep over all five lane-01 reports for CI=true or GITHUB_ACTIONS returns nothing; every report instead states 'pnpm lint (root, full chain) exit 0' unqualified. I ran it in the lane worktree: it FAILS - 'freeze-lint selftest: FAIL - 1 case(s) failed', on '(L05-STD-02 fix round) --ruling followed by another flag ... expected the MISSING-RULING refusal specifically; got stderr: freeze-lint: --retire is REFUSED under CI'. The defect is INHERITED, not this lane's: git diff --name-only 23cfad94...HEAD does not list scripts/check-frozen-workflows.selftest.mjs, and the failing case cites wave-1 lane 05. But it is the exact failure mode the addendum exists to catch, it is unreported, and an integrator reading 'lint exit 0' five times will not expect a red runner.",
+      "required_fix": "Re-run CI=true GITHUB_ACTIONS=true pnpm lint in the lane worktree, record the result in the lane's reports, and hand the inherited freeze-lint selftest failure to the integrator as a wave-level blocker alongside the already-reported document-kind-dialog.tsx typecheck red (the selftest must clear CI/GITHUB_ACTIONS for the child process it spawns, per RIG.md's own note)."
+    },
+    {
+      "id": "L01W2-SPEC-02",
+      "ticket": 1014,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "The claim over-refuses concurrent shapes the wall does not forbid sequentially, which touches the ticket's own out-of-scope line",
+      "evidence": "#1014 Out of scope: 'Any change to what the evidence wall forbids, or to the opening lane's other doors.' 0235's upsert serializes on the DOCUMENT, not on the conflict, so a SERIALIZABLE opening approval that blocked on ANY other transaction binding the same document is refused CLR13 source_already_posted - including one that left no live evidence link. The migration header states this in full ('THE CLAIM SERIALIZES ON THE DOCUMENT, NOT ON THE CONFLICT - AND THAT OVER-REFUSES, ON PURPOSE') and names the one live divergence: a plain CODED approval carrying the tie document racing an opening approval, which 0213's opening arm lets both stand sequentially. So in that shape the set of refused outcomes genuinely grew. It is documented in the migration, in packages/db/README.md's 0235 section and as follow-up 1 in wave2-lane01-ticket1014.md, and the report argues (correctly, on the snapshot limit) that narrowing it is not available inside this design.",
+      "required_fix": "No code change required. Carry the over-refusal to the integrator as an explicit accepted deviation from #1014's out-of-scope line rather than as a report footnote, and file the follow-up ticket the report names so a real coded-entry/opening-seed tie-document workflow has somewhere to land."
+    },
+    {
+      "id": "L01W2-SPEC-03",
+      "ticket": 1014,
+      "severity": "note",
+      "kind": "requirement-reinterpreted",
+      "title": "The brief's named key interface - decide on FRESH state read under the lock - is not the mechanism that shipped",
+      "evidence": "#1014 Key interfaces: 'clara.approve_opening_seed and the shared document-binding lock it and clara.attach_entry_evidence both take: the approving side must decide on FRESH state read under the lock, not on its pre-lock snapshot.' 0235 does not make the approver read fresh state; it appends an 'insert ... on conflict (document_id) do update' to clara._lock_document_binding so the blocked side meets an index-arbitrated WRITE conflict and loses, then re-raises serialization_failure as CLR13. The report and the migration header both explain why the literal requirement is unreachable (a SERIALIZABLE transaction cannot read what committed after its snapshot at all) and back it with three measurements taken on a throwaway spike1014 schema. Every behavioural AC (exactly one commit in both orders, typed refusal, no raw 40001 on the raced arm) is met - I re-ran the battery at 7 pass / 0 fail / 0 skip.",
+      "required_fix": "None. Recorded so the deviation from the brief's stated mechanism is visible to whoever reads #1014's closure evidence."
+    },
+    {
+      "id": "L01W2-SPEC-04",
+      "ticket": 1014,
+      "severity": "note",
+      "kind": "partial-requirement",
+      "title": "'Never a raw serialization error surfacing to a person' holds for the claim upsert only",
+      "evidence": "#1014 Desired behavior: 'the other is refused with the wall's existing typed refusal, never a raw serialization error surfacing to a person'. 0235's 'exception when serialization_failure' block deliberately wraps ONLY the claim upsert, not the 'perform 1 from clara.documents d where d.id = p_document for update' above it - the header says why ('a serialization failure on clara.documents would mean the DOCUMENT ROW changed ... which is a different fact and must not be re-spelled as a binding conflict'). So a SERIALIZABLE opening approval that loses to a writer of the document row itself (per the header, the legacy bytes/storage upgrade) still propagates a raw 40001 out of the same human door. Rare and deliberate, but it is a residue of the AC's literal wording that no cell covers.",
+      "required_fix": "None for this ticket. If the estate wants the door to be 40001-free unconditionally, that is a separate decision about how a changed document row should be spelled to a person."
+    },
+    {
+      "id": "L01W2-SPEC-05",
+      "ticket": 914,
+      "severity": "minor",
+      "kind": "unverified-ac",
+      "title": "The from-scratch apply clause of #914 AC5 (and #1014 AC5, #868 AC3, #906 AC4) is not evidenced by the lane",
+      "evidence": "#914 AC5: 'Prestate pin, tail census, from-scratch apply.' #1014 AC5: 'From-scratch chain and the opening batteries pass...'. Both reports declare the from-scratch half unrun and cite RIG.md's addendum, which forbids a second from-scratch chain on a lane cluster (migration 0154 pins the cluster-wide role count) and says the integrator runs the proof on a disposable cluster. What IS evidenced: each migration applied cleanly from the live frontier with its prestate notice and green tail, 0235 through two #957 redos and 0239 through four, and 'node scripts/migrate.mjs' reports '0 new migration(s) applied - 234 total'. Five migrations (0235-0239) now ride on that undischarged clause.",
+      "required_fix": "The integrator must run the 0001 -> 0239 from-scratch chain on a disposable cluster before the wave lands, and record the result against #1014 AC5, #914 AC5, #868 AC3 and #906 AC4, all four of which say 'applies from scratch'."
+    },
+    {
+      "id": "L01W2-SPEC-06",
+      "ticket": 984,
+      "severity": "minor",
+      "kind": "scope-creep",
+      "title": "0239 changes more of the shared receipt table's shape than the brief's 'both purpose CHECKs'",
+      "evidence": "#984 AC1: 'A new migration widens both purpose CHECKs to one new opening value'; Key interfaces names only 'Both purpose CHECKs', _admit_accounting_work_core, _assert_adjustment_basis and _record_journal_entry_core. 0239 §C also (3) rewrites ck_accounting_work_adjustment_basis into a two-value no-particulars list, (4) rewrites ck_operation_receipts_outcome_shape so a committed opening receipt names seed_id instead of entry_id, and (5) drops clara.operation_receipts.task_id's NOT NULL behind a NEW constraint ck_operation_receipts_task_by_purpose. Each is a consequence of AC3 ('no agent_tasks row ... no model name') and the migration argues the task invariant is tightened rather than loosened (the three model-served purposes still REQUIRE a task, opening REFUSES one) - I confirmed the constraint text and the four-value CHECK texts in the catalog, and p638.core.no_regression plus obw984.vocabulary.census both pin them. Still, a NOT NULL removed from a shared governed table was not on the brief's list and is the kind of change #984's own preamble calls governed.",
+      "required_fix": "None technically. Name the task_id nullability change and the two rewritten shape CHECKs explicitly in the integration note, so the owner sees that the governed widening touched five constraints and one column's nullability, not two CHECKs."
+    },
+    {
+      "id": "L01W2-SPEC-07",
+      "ticket": 984,
+      "severity": "note",
+      "kind": "scope-creep",
+      "title": "A chat-part message key was added although the chat wire is out of scope",
+      "evidence": "#984 Out of scope: 'Surfacing an opening Work on the chat wire.' The diff adds Parts.workAccepted.purposeOpeningBalance: 'Opening balances' to apps/web/messages/en.json. The frozen parts module's own three-value purpose list is untouched (check-frozen-workflows.mjs shows no manifest diff) and no chat turn can mint an opening work-accepted card, so the key is unreachable today. The report states the reason - so purposeLabel(part.purpose, t, 'purpose') in components/parts/WorkCards.tsx can never ask that namespace for a missing key - and carries the rest as a chatTurn_v22 successor contract.",
+      "required_fix": "None. Recorded because it is a dead message key in a frozen surface's namespace; if chatTurn_v22 never admits the purpose it should be removed rather than left as a permanent orphan."
+    },
+    {
+      "id": "L01W2-SPEC-08",
+      "ticket": 984,
+      "severity": "note",
+      "kind": "unrequested-behaviour",
+      "title": "Both opening doors' audit payloads gain work, receipt and purpose keys",
+      "evidence": "0239 §E recuts clara._audit(...) in both doors to jsonb_build_object('seed',p_seed,'batch_n',v_batch,'entries',v_entries,'op_key',p_op_key,'work',v_work->>'work_id','receipt',v_work->>'receipt_id','purpose','opening_balance'). The brief asks for the Work and the receipt rows; it does not ask for the audit row's payload to change. The doors' WIRE answer is deliberately unchanged (the report says so and the existing opening batteries are green - wb-k-approval 14/14, x42-s5-residuals 9/9 re-run here), so nothing downstream reads a new key by surprise, and the addition is defensible (the audit now names what the door minted).",
+      "required_fix": "None. Recorded as an unasked-for payload change so the integrator can see it in one place."
+    },
+    {
+      "id": "L01W2-SPEC-09",
+      "ticket": 984,
+      "severity": "minor",
+      "kind": "evidence-gap",
+      "title": "AC7 is proved against mocked component rows; no cell drives the read doors with a real opening Work, and no browser walk ran",
+      "evidence": "#984 AC7: 'An opening Work renders with a human label on the Work list, Work detail and firm Activity feed, and is selectable in the Work list's purpose filter.' The three cells (p984.work_list.opening_purpose, p984.work_detail.opening_purpose, describeActivity: an opening-balance operation_receipt...) all feed hand-built rows into the components; the db battery opening-balance-work.test.mjs asserts the accounting_work and operation_receipts ROWS but never calls clara.list_accounting_work, clara.get_accounting_work_row or clara.list_activity. The report's bridging claim is that those doors' joins are all LEFT joins. I re-derived it rather than accepting it: on the lane database the four doors contain no journal_entry / payroll_obligation / opening_balance literal at all (no closed purpose list) and every join to clara._work_run_attempts, clara.agent_tasks, clara.journal_entries, clara.accounting_work and clara.clients is a LEFT join - so the surface is genuinely not broken. The walks the lane would have run (work-list-walk, journal-work-walk) could not run at all: next build type-checks first and dies on the inherited document-kind-dialog.tsx error.",
+      "required_fix": "Once the inherited typecheck red is fixed centrally, run work-list-walk and journal-work-walk on lane 01's triple against a database carrying an opening Work, or add one db cell that reads an approved opening batch back through clara.list_accounting_work and clara.list_activity."
+    },
+    {
+      "id": "L01W2-SPEC-10",
+      "ticket": 984,
+      "severity": "note",
+      "kind": "surface-residue",
+      "title": "An opening Work's Work-detail breadcrumb reads 'Journal entry'",
+      "evidence": "apps/web/lib/navigation/tree.ts:465 gives workDetail the static labelKey 'clientLeaf.workDetail', and apps/web/messages/en.json:83 defines 'workDetail': 'Journal entry'. The file's own header (lines 428-443) states this as a known limit - 'the remaining limit is only that a periodic adjustment's crumb says it too' - so it predates #984 and AC7 names the list, the detail body, the Activity feed and the filter, not the crumb. But the fourth purpose inherits the wrong crumb, and none of the report's four follow-ups mentions it.",
+      "required_fix": "None for this ticket. Add it to the lane's follow-ups so the crumb's static label is fixed once for all four purposes rather than rediscovered per purpose."
+    },
+    {
+      "id": "L01W2-SPEC-11",
+      "ticket": 868,
+      "severity": "note",
+      "kind": "overstated-claim",
+      "title": "The hook comment says 'MEASURED from the catalog, never transcribed', but the arrival migrations are literals",
+      "evidence": "#868 AC2: 'The hook's comment names all six callers with their arrival migrations.' That is met. The comment opens with 'the caller roster of this hook, MEASURED from the catalog, never transcribed' - true of the six NAMES (0236 §A item 2 re-derives them with the same position('clara._subledger_on_approve(' in p.prosrc) scan 0216/0221 use, and refuses unless they are the six), but the arrival migrations (0037 / 0056 / 0085) are transcribed literals inside the comment text, and 0236 §C's tail only string-matches them back out of the comment it just wrote (position('finalize_close (0056)' in v_cmt)), which is self-agreement rather than measurement. The test file's own ARRIVAL table is an independent derivation from the migration history and sr.2 checks the comment against it - that is the real control, and it passed 5/5 here.",
+      "required_fix": "None. Recorded because the comment's first sentence claims more for its second half than 0236's own guard delivers; the independent control lives in the test file, not in the migration."
+    }
+  ],
+  "per_ticket": {
+    "1014": "Status DONE and live-verified. AC1/AC2/AC3 re-run green (opening-balance-evidence-link 7 pass / 0 fail / 0 skip, including obw.race.evidence_then_opening now asserting exactly one standing entry and a CLR13 loser, obw.race.opening_then_evidence and obw.siblings_ok byte-unchanged, obw.race.typed_refusal pinning code !== 40001 and a byte-identical message against a sequential comparand, and obw.claim's catalog census). AC4's lock-order paragraph is restated once in the section-4 header and in packages/db/README.md's 0235 section. AC5's door half is asserted in 0235 section D and green; its from-scratch half is SPEC-05. Findings: SPEC-02, SPEC-03, SPEC-04, SPEC-05.",
+    "868": "Status DONE. AC1 (catalogue-derived roster, refuses unless the six) is 0236 section A item 2 and section C item 3; AC2 (all six named with arrival migrations) is the COMMENT ON FUNCTION, checked from the outside by sr.1/sr.2/sr.3 against an independently derived ARRIVAL table; AC3 (no body, trigger or grant change) is pinned by sha 6e37c601..., owner, prosecdef, acl {clara_fn_owner=X/clara_fn_owner} and a zero pg_trigger count, in both the migration tail and sr.4/sr.5. Battery 5 pass / 0 fail / 0 skip, re-run after 0238 recut approve_wrong_client_correction (the roster still measures the same six). The ticket's 'can share one migration with #906' is permissive, not binding, and two files is fine. One finding: SPEC-11.",
+    "906": "Status DONE, no findings. AC1 (the comment names nonzero_total unreachable and both guarding arms) is 0237 section B and jz.1; AC2 (body digest identical, proved in the tail) is the twin sha pin 2ba8e307... in sections A and C plus jz.2; AC3 (an all-zero balanced basis refused naming the per-line constraint) is jz.3, which measures detail.constraint === 'exactly_one_side' and field 'lines[1]' and asserts it is NOT nonzero_total; AC4 from-scratch is covered by SPEC-05's wave-level clause. jz.4 (the non-vacuous all-credit shape refused as 'balanced') is an addition beyond the AC and is a test-only one, so not scope creep. The triage comment's 'do not reorder' is honoured: the arm, its position and the refusal vocabulary are untouched. Battery 4 pass / 0 fail / 0 skip.",
+    "914": "Status DONE. AC1 cr.1 drives the rung-first adversary against a concurrent correction, proves the interleave with pg_blocking_pids before asserting, and uses 40P01 as the oracle; the report records the pre-0238 red as a genuine 'deadlock detected'. AC2 cr.2 censuses 11 clara.clients-row bodies with a comment-stripping, parenthesis-depth detector independent of 0238's own PostgreSQL-regex tail, and finds zero violators; cr.3 keeps the door inside that census on the right side. AC3 cr.4 races the door against clara.record_wiki_source_ingest in both directions on a second document filed to the same source client, reading the blocked side's own pg_locks, and cr.5 pins the acquisition before the filing retirement; both had a real vacuity control (the for-update deleted, four cells red). AC4 names an 18-suite battery and adds a 15-raise-site / 15-message tail census; I re-ran x42-s5c-awcc, x37-wave-c-a-subledger, x27-filings-lock-order, wb-k-approval, operation-census and rig-isolation together at 93 pass / 0 fail / 1 documented skip. I also re-derived the header's riskiest claim myself - that the new je-row-before-clients-row pair inverts against nothing: approve_pair_reversal and cancel_pair_reversal read clara.clients WITHOUT a locking clause and already take je rows for update then the client rung 203005004, so they agree with the new order rather than opposing it. Battery 5 pass / 0 fail / 0 skip. One finding: SPEC-05.",
+    "984": "Status DONE, built to the owner's ruling of 2026-09-20 (Option A), not to the ticket body's Option B - correct, the ruling is the newest word. AC1 both purpose CHECKs are the four-value text with the three prior values asserted individually; AC2 obw984.seed.work pins a zero-work/zero-receipt/zero-task prestate then asserts exactly one Work and one receipt with the full column census, and re-reads clara.opening_seed_approvals and the registry unchanged; AC3 is proved behaviourally (no agent_tasks row, none pointing at the Work), structurally (the tail refuses a body naming agent_tasks or a model) and at constraint level (ck_operation_receipts_task_by_purpose); AC4 is 0239 section B's new arm plus obw984.basis.vocabulary, which also shows a fifth value still answering invalid_purpose; AC5 re-reads _record_journal_entry_core's prosrc for the three-value IN-list and the absence of opening_balance, with the sha pinned in the tail; AC6 re-derives p638.core.no_regression (kept, renamed, four-value literal, each prior value re-asserted, a new assertion that the posting core does NOT name the opening purpose) and the web twin purpose.four; AC7 is the four surfaces through the one SUFFIX map plus KNOWN_PURPOSE_LABELS and KNOWN_PURPOSES; AC8 is the unchanged opening batteries, which I re-ran (wb-k-approval 14/14, rig-docs-source-revision + intake-batch + activity-feed 78/78, staff-expense-claim 24/24) plus the four touched web files at 120/120. Findings: SPEC-01, SPEC-06, SPEC-07, SPEC-08, SPEC-09, SPEC-10."
+  },
+  "claims_rechecked": [
+    "opening-balance-evidence-link.test.mjs 7 pass / 0 fail / 0 skip (full gate chain) - confirms #1014 AC1-AC3 on the post-0239 database",
+    "subledger-hook-caller-roster 5/5, journal-basis-zero-total-unreachable 4/4, correction-client-rung-order 5/5, opening-balance-work 4/4, staff-expense-claim 24/24",
+    "x42-s5c-awcc + x37-wave-c-a-subledger + x27-filings-lock-order + wave-b/wb-k-approval + operation-census + rig-isolation = 94 tests, 93 pass, 0 fail, 1 skip (the documented CLARA_RIG_ALLOW_RESET T19 skip)",
+    "rig-docs-source-revision + intake-batch + activity-feed = 78 pass / 0 fail / 0 skip",
+    "apps/web accounting-work-list.test.tsx + work-detail.test.tsx + lib/firm/activity.test.ts + lib/work/staff-expense-claim.test.ts = 120 pass / 0 fail / 0 skip",
+    "#914's 'no door takes a clara.clients row then a journal_entries row' - independently re-derived; the two extra hits my looser detector found (approve_pair_reversal, cancel_pair_reversal) read clara.clients with no locking clause and already order je-rows before the client rung",
+    "#984's 'the Work and Activity read doors are all LEFT joins and carry no closed purpose list' - re-read from pg_proc on the lane database for list_accounting_work, get_accounting_work_row, list_activity and get_activity_event; true",
+    "'the typecheck red is inherited, not this lane's' - git show 23cfad94:apps/web/components/documents/document-kind-dialog.tsx already calls DOCUMENT_KINDS at line 95 while line 35 imports only CLASSIFIABLE_DOCUMENT_KINDS, and git diff of that path over the lane range is empty",
+    "'pnpm lint exit 0' - true for the bare form; FALSE for the form RIG.md requires (CI=true GITHUB_ACTIONS=true), which fails the freeze-lint selftest (SPEC-01)"
+  ]
+}

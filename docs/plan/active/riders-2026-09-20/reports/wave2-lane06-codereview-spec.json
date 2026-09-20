@@ -1,0 +1,225 @@
+{
+  "axis": "SPEC",
+  "lane": "wave2-lane06",
+  "branch": "riders/w2-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": [
+    "07da571ae fix(web): #935 a pending education tip renders nothing on a committed checklist",
+    "4a605a9dd feat(web): #935 firm setup checklist renders education tips",
+    "67e92799b feat(db): #935 firm setup education tips catalogue, seed recut and the narrow dismiss door",
+    "544e9daa2 fix(web): document-kind-dialog references the renamed DOCUMENT_KINDS export",
+    "a43143735 docs(web): #934 firm setup checklist shows the accountant note, not the engineer note",
+    "9eb0fc61c feat(db): #934 firm setup user_note/retired_at columns and get_firm_setup recut",
+    "7f4f0cc69 feat(web): #891 firm setup checklist hides/marks inapplicable items",
+    "33b797e72 feat(db): #891 firm setup applicability predicates",
+    "dc9f16db4 fix(db): #895 0218 firm-setup migration polish -- three defects the #648 fix round left",
+    "4d23d3c5d fix(db): #894 harden uq_onboarding_plans_one_open_firm's predicate"
+  ],
+  "spec_sources": [
+    "gh issue view 894 --comments (Agent Brief + AI triage 2026-09-17)",
+    "gh issue view 895 --comments (Agent Brief + AI triage 2026-09-17)",
+    "gh issue view 891 --comments (Agent Brief + AI triage 2026-09-17)",
+    "gh issue view 934 (body: What to build, twelve approved notes, 4 ACs) + owner ruling 2026-09-20",
+    "gh issue view 935 (body: What to build, three approved tips, 4 ACs) + owner ruling 2026-09-20 + door-reuse triage"
+  ],
+  "reruns": [
+    "packages/db, full gate chain: node --test --test-concurrency=1 $GATES tests/onboarding-plan-firm-uniqueness.test.mjs tests/firm-setup-polish.test.mjs tests/firm-setup-applicability.test.mjs tests/firm-setup-user-notes.test.mjs tests/firm-setup-education-tips.test.mjs -> 18 pass / 0 fail / 0 skip",
+    "packages/db, full gate chain: tests/firm-setup.test.mjs -> 17 pass / 0 fail",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/firm-setup/firm-setup-checklist.test.tsx -> 14 pass / 0 fail",
+    "live door probe on clara_l06 through humanQuery (seed -> answer turnover RM1M-5M -> seed -> answer turnover <RM1M): tin ends {state:pending, applicability:inapplicable, required:false}; counter moved {required_total:9,required_answered:1} -> {8,1}; required_outstanding stayed 7 keys throughout; catalogue_total=15; seeded=false",
+    "throwaway component probes (both deleted; git status clean afterwards): (a) after both fixture tips are dismissed, firm-setup-group-tips is STILL RENDERED with only its heading and purpose; (b) with every required fact answered and one pending tip, firm-setup-commit is present and enabled while the commit.notReady copy renders and commit.ready does not"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "All five tickets are built and every acceptance criterion has a named cell or a measured migration clause; the 18 new db cells, firm-setup.test.mjs and the 14 web cells all re-ran green on this lane's rig. #894 and #895 are clean against their briefs. The spec gaps concentrate in the web surface, and the three largest come from one unrequested decision in #891: overloading items[].required and the required counter with effectively-required semantics for mpers_eligibility/tin. #935 adds two smaller surface leaks (a permanently empty tips card, and a Finishing-becomes-available line rendered beside an enabled Finish button whenever a tip is pending) and one thin browser leg (Got it is never pressed in the walk although AC4 asks the walk to cover reading a tip). Nothing found is a data-correctness defect; every finding is a surface or scope issue a fix round can close without touching an applied migration.",
+  "findings": [
+    {
+      "id": "L06-SPEC-01",
+      "ticket": 891,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "The bounded group walk still opens an answer form for a pending item that has become inapplicable",
+      "evidence": "Ticket #891 Key interfaces: 'The firm-setup checklist surface: an inapplicable item is hidden or shown as not applicable with its reason, WITH NO ANSWER FORM.' apps/web/components/firm-setup/firm-setup-checklist.tsx:521 computes the walk's set as group.items.filter((i) => isPending(i) && !isEducationTip(i)) -- no applicability filter; :451-453 computes openItems = env.items.filter((i) => i.group_key === open.groupKey && isPending(i)); :551-561 renders <FirmSetupItemForm items={openItems} .../> for the whole group. Only the PER-ITEM control is guarded (isAnswerable -> isNowInapplicable, apps/web/lib/firm-setup/types.ts:208). Reachability measured on clara_l06 through the real doors: seed -> answer turnover 'RM1M-5M' -> seed (tin becomes pending/applicable) -> answer turnover '<RM1M' leaves tin state=pending applicability=inapplicable, and the 'tax' group then holds two pending rows ['tin','fye'], so pending.length > 1 offers 'Answer these 2 together' and the resulting form includes the inapplicable tin. No cell covers this state: fs.web.13 exercises only state:'unseeded' (hidden) and state:'answered' (marked).",
+      "required_fix": "Exclude isNowInapplicable(item) from both the group's pending set and openItems, and add a cell for a PENDING inapplicable item beside fs.web.13's answered one."
+    },
+    {
+      "id": "L06-SPEC-02",
+      "ticket": 891,
+      "severity": "major",
+      "kind": "scope-creep-with-regression",
+      "title": "items[].required widened to 'effectively required', which removes the skip control from tin/mpers_eligibility and labels them Required although commit does not require them",
+      "evidence": "#891 asks only 'the required-answered over required-total counter excludes inapplicable items from both sides'; nothing asks for the per-item flag to change. 0257_firm_setup_applicability.sql:383-386 makes items[].required read k.required_for_commit or (k.item_key in ('mpers_eligibility','tin') and i.id is not null and clara._firm_setup_applicability(...) = 'applicable'). Measured on clara_l06: after turnover='RM1M-5M' and a reconcile, tin reads {state:'pending', applicability:'applicable', required:true}. apps/web/components/firm-setup/firm-setup-checklist.tsx:679 gates the skip control on isPending(item) && !item.required, so 'Not now' is now withheld from tin/mpers -- while 0257's own header promises the opposite ('defer_firm_setup_item still floors its refusal on k.required_for_commit (unmoved, still false for both conditional rows), so either one can still be explicitly skipped with a reason once it is seeded') and clara.commit_firm_setup still ignores both. The row also carries a 'Required' badge the Finish gate does not honour.",
+      "required_fix": "Keep items[].required on the catalogue flag alone and carry the effective-required notion only inside the counter (what the AC asks for); or, if the widening is kept, decouple the skip control and the badge from it so a seeded, applicable tin/mpers can still be skipped with a reason."
+    },
+    {
+      "id": "L06-SPEC-03",
+      "ticket": 891,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "counter.required_total and required_outstanding now disagree, so the checklist states a fraction its own 'Still needed' list contradicts",
+      "evidence": "0257 widened v_req_total/v_req_done to include a seeded, applicable tin/mpers but left v_out (required_outstanding) on k.required_for_commit alone (0257:417-421, unchanged from 0218). Measured on clara_l06 right after seeding an applicable tin: counter={required_total:9, required_answered:1} while required_outstanding listed 7 keys. apps/web/components/firm-setup/firm-setup-checklist.tsx:461-475 renders both on the same screen, so the surface reads '1 of 9 required facts recorded' above 'Still needed: <7 questions>' -- eight missing by arithmetic, seven named. The same asymmetry means the counter can never reach n-of-n while the Finish button is already enabled.",
+      "required_fix": "Make required_outstanding use the same effective-required predicate as the counter (or revert the counter widening per L06-SPEC-02), and add a cell asserting required_total - required_answered === required_outstanding.length for a plan carrying a seeded applicable conditional item."
+    },
+    {
+      "id": "L06-SPEC-04",
+      "ticket": 935,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "A pending tip makes the Finish section claim completion is unavailable, contradicting 'a tip never blocks completion'",
+      "evidence": "Owner ruling on #935: 'a tip never counts toward the required total or blocks completion'. apps/web/components/firm-setup/firm-setup-checklist.tsx:448 const allSettled = env.seeded && env.items.every((i) => !isPending(i)); -- no tip exclusion, although the same file excludes tips from the group walk at :521. :724 renders {allSettled ? t('commit.ready') : t('commit.notReady')}; apps/web/messages/en.json:558 notReady = 'Finishing becomes available once every required fact is recorded or deliberately skipped.' Measured with a throwaway component probe (every required item answered, required_outstanding empty, one pending tip): commit button present:true disabled:false, notReady copy shown:true, ready copy shown:false. The screen tells the admin finishing is unavailable next to a working Finish button, and the only way to clear the sentence is to dismiss the tip.",
+      "required_fix": "Exclude education tips from allSettled (e.g. env.items.every((i) => !isPending(i) || isEducationTip(i))) and pin it: all required answered plus one pending tip must render commit.ready."
+    },
+    {
+      "id": "L06-SPEC-05",
+      "ticket": 935,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "Once every tip is dismissed the 'A few things worth knowing' card stays on the page forever, empty",
+      "evidence": "#935: 'Reading or skipping a tip is remembered so it stops appearing' / AC3 'the tip disappears from the list afterwards'. The tip ROW is removed (firm-setup-checklist.tsx:577 if (item.state !== 'pending' || committed) return null;) but the group Card is rendered unconditionally per group (:523-536), and firmSetupGroups (apps/web/lib/firm-setup/types.ts:142-152) derives the 'tips' group from items regardless of state. Measured with a throwaway component probe after dismissing both fixture tips: firm-setup-group-tips STILL RENDERED, text = 'A few things worth knowingOptional reading, never a requirement. Reading or skipping one just gets it out of the way.' fs.web.14 asserts only that the tip rows disappear, never the card.",
+      "required_fix": "Skip a group Card that renders no rows (or specifically a 'tips' group with no pending tip), and extend fs.web.14 to assert the card is gone."
+    },
+    {
+      "id": "L06-SPEC-06",
+      "ticket": 935,
+      "severity": "minor",
+      "kind": "requirement-implemented-wrongly",
+      "title": "catalogue_total now counts the three tips, so a brand-new firm is told it has 15 facts to state",
+      "evidence": "#935: 'A tip never has an answer form, never counts toward the required total'; the not-started banner is a count of FACTS. 0259 adds three catalogue rows and 0258:363 computes catalogue_total as every non-retired firm_setup_keys row -- measured on clara_l06: catalogue_total=15. apps/web/components/firm-setup/firm-setup-checklist.tsx:502 renders t('notStarted.body', { count: env.catalogue_total }) and apps/web/messages/en.json:544 reads 'There are {count} facts to state about this firm.' A new firm is therefore told there are 15 facts, of which three are tips and up to two are conditional rows that may never be asked. p895.read.honest_no_plan was updated to catalogue_total === 15 and firm-setup.test.mjs p648.seed.empty to seeded === 13, pinning the new number without questioning what the surface says with it.",
+      "required_fix": "Exclude education rows from catalogue_total (re-pinning the cells), or count only non-education rows for the not-started banner."
+    },
+    {
+      "id": "L06-SPEC-07",
+      "ticket": 935,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC4's walk covers only skipping a tip; 'Got it' is never pressed in the browser leg, and the report records AC4 as met",
+      "evidence": "#935 AC4: 'the firm-setup walk covers READING AND SKIPPING a tip'. apps/web/e2e/firm-setup-walk.spec.ts:112-121 asserts the tip's title and body, asserts no answer/skip control, then clicks only firm-setup-tip-later-${TIP_KEY}. grep -rn 'gotit' apps/web/e2e/ returns nothing but the comment on line 112; the walk never asserts the 'Got it' button exists nor presses it. docs/plan/active/riders-2026-09-20/reports/wave2-lane06-ticket935.md:227 records AC4 as met ('The walk covers reading and skipping a tip: see AC3's walk evidence above (the tip is read, then ...)'), reading 'reading' as 'the spec reads the text' rather than the tip's own 'Got it' action.",
+      "required_fix": "Press 'Got it' on a second tip in the walk (the mock already handles the acknowledged action) and assert it disappears, or record AC4 as partial in the report."
+    },
+    {
+      "id": "L06-SPEC-08",
+      "ticket": 891,
+      "severity": "minor",
+      "kind": "requirement-implemented-wrongly",
+      "title": "The TIN predicate is mirrored as 'never asked' where the interview only makes the answer skippable, so a sub-RM1M firm that does hold a MyInvois TIN can no longer record one",
+      "evidence": "#891 Desired behavior: 'The two predicates mirror the interview's rules exactly.' The interview's TIN rule is a VALIDATOR gate, not an applies-to gate: packages/runtime/workflows/interview.v2.segments.ts:64-70 tinValidatorGatedByTurnover still ASKS the TIN question and, when tinExempt(prior.turnover) (interview.v1.core.ts:225-228, turnover === '<RM1M'), accepts an empty answer or 'skip'. Only eligibilitySegment.appliesTo (interview.v2.segments.ts:375) is a true applies-to predicate. 0257:273-283 maps '<RM1M' to 'inapplicable', so the row is never seeded and, per 0257's own header, answer_firm_setup_item then refuses it with firm_setup_item_not_seeded: a firm under RM1M that has voluntarily registered for MyInvois has no way to record its TIN in firm setup at all. p891.tin.turnover asserts exactly this (state 'unseeded', applicability 'inapplicable' at '<RM1M').",
+      "required_fix": "Confirm with the owner whether an exempt firm should still be able to volunteer a TIN. If yes, mirror the interview by keeping tin seeded-and-optional below RM1M (applicability affecting the counter only) rather than not asking at all."
+    },
+    {
+      "id": "L06-SPEC-09",
+      "ticket": 891,
+      "severity": "minor",
+      "kind": "behaviour-not-asked-for",
+      "title": "Answering a dependency flips seeded back to false, so 'Start firm setup' reappears and the Finish section vanishes mid-setup",
+      "evidence": "0257:369-375 makes v_unseeded still count an UNDETERMINED-but-unseeded row, so seeded = (p.id is not null and v_unseeded = 0) goes false again the moment entity_type is answered 'sdn_bhd' or turnover is answered at or above RM1M, until the admin reconciles again. apps/web/components/firm-setup/firm-setup-checklist.tsx:507-513 shows the big firm-setup-seed button ('Start firm setup', en.json:551) whenever !env.seeded, and :720 hides the whole Finish section whenever !env.seeded. Measured on clara_l06: after answering turnover='RM1M-5M' without re-seeding, get_firm_setup returns seeded=false. Nothing in #891's brief asks the reconcile control to come back mid-walk, and the label still says 'Start firm setup' on a half-answered checklist.",
+      "required_fix": "Either re-seed implicitly when an answer determines a conditional item, or give the control a second label for the reconcile case; pin whichever is chosen with a cell."
+    },
+    {
+      "id": "L06-SPEC-10",
+      "ticket": 934,
+      "severity": "minor",
+      "kind": "requirement-implemented-against-its-letter",
+      "title": "The backfill disables the append-only trigger and UPDATEs the twelve shipped rows, although AC1 says 'append-only rows untouched'",
+      "evidence": "#934 AC1: 'A new migration adds user_note and a retire flag to the firm-setup catalogue (APPEND-ONLY ROWS UNTOUCHED), seeds the twelve user notes...'; the ticket's rationale is 'so wording can be corrected or withdrawn later WITHOUT EDITING AN APPEND-ONLY ROW'. 0258_firm_setup_user_notes.sql:258-278 runs alter table clara.firm_setup_keys disable trigger t_firm_setup_keys_append_only; one update over the twelve rows; enable trigger. Only the brand-new column is in the SET list, the tail (SS T.3/T.5) re-reads the trigger enabled and the pre-existing columns byte-identical, and the shape has house precedent (0040_wave_c_c_tieout.sql:815-860 on an append-only trigger; 0176_counterparty_alias_kind_scope.sql:261-266) -- so this is a defensible reading, declared in the header, not a silent one. It remains the one reading of AC1 that makes the parenthetical false. Separately verified: all twelve seeded sentences are byte-exact against the ticket's approved table.",
+      "required_fix": "Have the owner or the integrator confirm the reading explicitly -- the alternative shape the sibling ticket #891 was told to consider (a second relation keyed by item_key) is exactly what would have kept the parenthetical literally true."
+    },
+    {
+      "id": "L06-SPEC-11",
+      "ticket": 934,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The retire flag cannot be set by anything: no door, and the append-only trigger still refuses an UPDATE",
+      "evidence": "#934's stated purpose: 'The catalogue gains a user-facing note column and a retire flag so wording can be corrected or withdrawn later without editing an append-only row'; #935's brief: 'Tips can be retired later (they use the retire flag the sibling ticket adds).' 0258 adds retired_at and filters on it in six places (tail SS T.6b asserts exactly six occurrences), but the table stays append-only (t_firm_setup_keys_append_only, 0218 SS A) and this lane adds no writer -- the only way to retire a row is another migration that disables the same trigger. 0258's own cells plant and remove a synthetic retired row through a withTriggerOff fixture, which is the proof that no lawful path exists. CONTEXT.md:334 nevertheless tells readers an item 'can also be retired, which removes it from every firm's checklist... without editing or deleting the append-only row itself.'",
+      "required_fix": "Soften the CONTEXT.md sentence to say retiring is a migration-time act today, or file the follow-up that gives retired_at a writer; either way record it as a known limit in the lane report."
+    },
+    {
+      "id": "L06-SPEC-12",
+      "ticket": 934,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "confirmed_facts is the one get_firm_setup surface that does not filter retired rows",
+      "evidence": "#934 AC1: 'recuts get_firm_setup to prefer user_note over note and TO OMIT RETIRED ROWS'. 0258 SS T.6b asserts exactly six retired_at is null occurrences (items[], required_outstanding, catalogue_total, v_unseeded, v_req_total, v_req_done); the confirmed_facts block's join clara.firm_setup_keys k on k.knowledge_key = r.knowledge_key (0258 SS C, verbatim from 0257) carries none, so a retired row with a knowledge_key would still supply item_key/question to that projection. The migration header names only the six surfaces and is silent on confirmed_facts; no row is retired today, so the gap has no effect yet.",
+      "required_fix": "Add the filter to the confirmed_facts join, or name confirmed_facts in the header's list of surfaces deliberately left out."
+    },
+    {
+      "id": "L06-SPEC-13",
+      "ticket": 935,
+      "severity": "note",
+      "kind": "requirement-evidence-thin",
+      "title": "AC4's 'the firm-home setup tile ignores tips' is argued as a corollary, with no cell of its own",
+      "evidence": "#935 AC4 names the tile explicitly. apps/web/components/firm/firm-home/firm-setup-tile.tsx is unedited and returns null at :43 when env.required_outstanding.length === 0; required_outstanding only ever names a required_for_commit row (0258 SS C:359) and a tip is required_for_commit=false, so the claim checks out -- verified by reading both. wave2-lane06-ticket935.md:220-226 rests AC4 on that corollary plus p935.counters.excludes_tips; no cell renders the tile with a pending tip in the envelope.",
+      "required_fix": "None strictly required -- the corollary is sound and verified. A one-line assertion in the tile's own test with a tip in the fixture would turn reasoning into evidence."
+    },
+    {
+      "id": "L06-SPEC-14",
+      "ticket": 935,
+      "severity": "note",
+      "kind": "behaviour-not-asked-for",
+      "title": "answer_firm_setup_item and defer_firm_setup_item were recut to refuse an education row -- the file's own decision, outside every AC",
+      "evidence": "0259_firm_setup_education_tips.sql header item (4): 'Closing it is this file's own decision, not named in the Agent Brief's acceptance criteria by name.' Both doors are recut in full (SS D/E) to raise CLR10 firm_setup_item_is_a_tip, with the third half of the fence in SS F (dismiss refusing a non-tip). The reasoning is sound -- either generic door would otherwise write an audited accounting act against a tip, precisely what the owner ruling forbids -- and p935.tip.narrow_door_guards pins it. Recording the widened blast radius for the integrator: this lane recuts seed_firm_setup_plan three times, get_firm_setup three times, and answer/defer once each.",
+      "required_fix": "None. Keep, and make sure the integrator's diff review sees the two extra recut doors."
+    },
+    {
+      "id": "L06-SPEC-15",
+      "ticket": 895,
+      "severity": "note",
+      "kind": "residual-declared",
+      "title": "required_outstanding stays plan-unaware, so a plan-less firm reads counter {0,0} beside all eight required keys listed as outstanding",
+      "evidence": "#895 Desired behavior: 'The read paints no progress for a plan that does not exist.' 0256 fixed v_req_total only; v_out keeps left join ... on p.id is not null, so for a plan-less firm every required key is outstanding -- 0256's own header names this as a 'STATED RESIDUAL, NOT FIXED HERE'. The Agent Brief's Key interfaces say 'required total and unseeded count plan-aware', so this is within the brief's letter; the surface still shows a plan-less firm eight named outstanding questions under a 0-of-0 counter. p895.read.honest_no_plan asserts the counter and confirmed_facts, not required_outstanding.",
+      "required_fix": "None for this ticket. Worth the follow-up ticket the migration header itself proposes."
+    },
+    {
+      "id": "L06-SPEC-16",
+      "ticket": 894,
+      "severity": "note",
+      "kind": "requirement-evidence-thin",
+      "title": "AC1's prestate refusal is proven by the migration's own text, not by a cell",
+      "evidence": "#894 AC1: 'The migration's prestate block MEASURES, AND REFUSES TO APPLY UNLESS, no firm holds more than one firm-scope plan in any state.' 0255_onboarding_plan_firm_uniqueness.sql SS 0.7 is exactly that clause (group by firm_id having count(*) > 1, CLR10). packages/db/tests/onboarding-plan-firm-uniqueness.test.mjs states in its header that AC1 is not re-run, because reproducing it would mean planting a duplicate the new index now forbids and corrupting the lane database (RIG.md: never a reset, never a second from-scratch chain). The other three ACs each have a green cell (18/18 re-run). This is the correct call; recorded so nobody later reads AC1 as cell-backed.",
+      "required_fix": "None."
+    },
+    {
+      "id": "L06-SPEC-17",
+      "ticket": 934,
+      "severity": "note",
+      "kind": "out-of-scope-fix",
+      "title": "One out-of-lane web fix rides this branch (document-kind-dialog.tsx)",
+      "evidence": "Commit 544e9daa2 changes apps/web/components/documents/document-kind-dialog.tsx:95 from DOCUMENT_KINDS to the already-imported CLASSIFIABLE_DOCUMENT_KINDS. No ticket in this lane asks for it. It is a pre-existing typecheck failure inherited from the base that blocked pnpm typecheck, next build and therefore every e2e walk including #934's own AC4; it is committed separately with that justification, and wave2-lane06-ticket934.md:235-258 records it with before/after suite counts (4728/4750 -> 4748/4750). Verified the diff is that single line.",
+      "required_fix": "None. Keep it as its own commit so it can be reverted independently."
+    }
+  ],
+  "ac_matrix": {
+    "894": {
+      "AC1": "met (0255 SS0.7 measures and refuses; no cell -- see L06-SPEC-16)",
+      "AC2": "met (p894.plans.any_state, re-run green)",
+      "AC3": "met (p894.claim.replay, re-run green)",
+      "AC4": "met (tail SS2 re-reads pg_index; the from-scratch proof is the integrator's per RIG.md)"
+    },
+    "895": {
+      "AC1": "met (p895.seed.noop)",
+      "AC2": "met (p895.read.honest_no_plan)",
+      "AC3": "met (p895.facts.state_filter)",
+      "AC4": "met (pins at 0256 SS0.2, tail SS T, batteries re-run green; from-scratch is the integrator's). See L06-SPEC-15 for the declared required_outstanding residual."
+    },
+    "891": {
+      "AC1": "met (p891.mpers.entity_type)",
+      "AC2": "met (p891.tin.turnover); see L06-SPEC-08 on the mirror",
+      "AC3": "met at the counter (p891.counter.excludes); see L06-SPEC-02 and L06-SPEC-03",
+      "AC4": "met (p891.answer.survives)",
+      "AC5": "met (0257 SS T.5 catalogue census; from-scratch is the integrator's)",
+      "surface": "PARTIAL -- L06-SPEC-01 (an answer form is still reachable for an inapplicable item) and L06-SPEC-02"
+    },
+    "934": {
+      "AC1": "met in substance, twelve notes byte-exact (see L06-SPEC-10, -11, -12)",
+      "AC2": "met (coalesce(user_note, note) at 0258 SS C; the item form renders item.note)",
+      "AC3": "met (firm-setup.test.mjs count cells and firm-setup-mock.mjs both updated; batteries re-run green)",
+      "AC4": "met (firm-setup-walk asserts the fye and tin sentences)"
+    },
+    "935": {
+      "AC1": "met (0259 SS A/B/C; p935.seed.education_kind); the read is pinned rather than recut, argued in the header",
+      "AC2": "met (p935.counters.excludes_tips); see L06-SPEC-06 on catalogue_total",
+      "AC3": "met at the door (p935.tip.dismiss_no_audit_trail); surface gaps at L06-SPEC-05",
+      "AC4": "PARTIAL -- the tile is a corollary (L06-SPEC-13) and the walk covers only 'Later' (L06-SPEC-07); counts and mock are updated"
+    }
+  }
+}

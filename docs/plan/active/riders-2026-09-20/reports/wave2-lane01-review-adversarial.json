@@ -1,0 +1,100 @@
+{
+  "lane": "wave2-lane01",
+  "branch": "riders/w2-lane01",
+  "lens": "ADVERSARIAL",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head": "6ecb4c244",
+  "tickets": [1014, 868, 906, 914, 984],
+  "verdict": "accept-with-fixes",
+  "summary": "Five migrations (0235 #1014, 0236 #868, 0237 #906, 0238 #914, 0239 #984) are applied on clara_l01 and every claim I re-ran is green: 7/7 opening-balance-evidence-link, 42/42 across correction-client-rung-order + journal-basis-zero-total-unreachable + subledger-hook-caller-roster + opening-balance-work + staff-expense-claim, 33 tests / 32 pass / 1 frontier skip / 0 fail across rig-isolation + operation-census, and 120/120 web unit cells on the four touched files. What I could NOT break, with the measurement rather than the argument: (a) #1014's claim closes the race in all four arrival shapes I drove with two real connections - fresh key + holder commit -> waiter blocks on a Lock and is refused CLR13 source_already_posted; pre-existing visible key + holder commit -> same; holder ROLLBACK in either shape -> waiter proceeds and commits, so an innocent aborted bystander does not poison anyone; (b) no SSI false positive: two SERIALIZABLE sessions claiming DIFFERENT documents with snapshots pinned before either write both commit; (c) #914's recut is byte-clean - a comment-stripped diff of the live body against 0125's text is EXACTLY the three-line move and nothing else, and the eleven-body census reproduces under a broader predicate ((UPDATE clara.clients OR clients FOR UPDATE/SHARE/NO KEY UPDATE) x (UPDATE clara.journal_entries OR je FOR UPDATE)) returning only this door; the two siblings that mention journal_entries (retire_document_filing, wake_reattribute_document) only READ it, and none of the ten siblings' callees takes rung 203005004, so the new 'journal_entries row -> clients row' pair inverts against nothing; (d) #906's unreachability holds under my own derivation - clara._journal_cents returns 0 for an absent key, raises for anything non-numeric, negative or fractional, and NEVER returns NULL, which is what makes (v_d>0)=(v_c>0) a total predicate and forecloses nonzero_total; (e) #868's roster re-derived from pg_proc at HEAD is exactly the six named, and it is still six AFTER 0238 recut one of them (approve_wrong_client_correction); (f) grants and floors are clean and measured: _lock_document_binding, _admit_opening_work and _assert_adjustment_basis hold EXECUTE for clara_fn_owner alone, both opening doors and the correction door keep clara_authenticated-only EXECUTE, their owners, SECURITY DEFINER flags, pinned search_paths and 0171's serializable proconfig; clara.document_binding_claims is enable+force RLS with one owner policy and zero privilege for PUBLIC/clara_authenticated/clara_runtime/clara_agent_ro; accounting_work carries fk_accounting_work_client (client_id, firm_id) so a mismatched tenant pair is structurally impossible; the new opening Work is read at the bookkeeper floor by list_accounting_work, which is NARROWER than the pre-existing firm-wide clara_authenticated read on clara.opening_items and clara.opening_seed_approvals, so nothing widened; (g) idempotency under replay with a different payload is refused CLR10 by clara._reserve_op; (h) the migration-safety arms all validate against live rows (every existing operation_receipts row has task_id NOT NULL and purpose <> opening_balance, so the new purpose-keyed CHECK TIGHTENS rather than loosens); (i) the hand-rebuilt approve_opening_correction body still carries all thirteen of 0041 S4.11's pinned markers at their exact counts, which is the one census that would NOT have caught a loss because it runs before 0239. What I did break, all minor: a raw 40P01 from the new claim upsert (the handler maps serialization_failure only), 0197's 'a document that does not exist locks nothing and RAISES NOTHING' contract, a membership probe in the new internal that is weaker than the sentence it raises, and a TS type that no longer describes its column. One rig note: I left clara_l01 dirty - see ADV-L01-09.",
+  "findings": [
+    {
+      "id": "ADV-L01-01",
+      "ticket": 1014,
+      "severity": "minor",
+      "kind": "error-mapping",
+      "title": "0235's claim handler maps serialization_failure only; a deadlock on the claim's own PK reaches the caller as a raw 40P01",
+      "evidence": "packages/db/migrations/0235_opening_binding_claim.sql:296-307 wraps the upsert in `exception when serialization_failure then raise ... CLR13 source_already_posted`. deadlock_detected (40P01) is a sibling class-40 condition and is not caught. Driven with two real connections (both sessions calling clara._lock_document_binding directly on clara_l01): T1 claims A then waits for B, T2 claims B then takes A -> T1 returns `ERR 40P01 deadlock detected  Process 380526 waits for ShareLock on transaction 75023; blocked by process 380527. Process 380527 waits for ShareLock on transaction 75021; blocked by process 380526.` with no CLR13 and no detail. Both document ids were NON-EXISTENT, so `perform 1 from clara.documents ... for update` locked nothing and the claim's primary-key rows were the ONLY contention point - i.e. the deadlock is the claim's own, not clara.documents'. With real (FK-satisfying) documents the clara.documents row locks deadlock first, which predates 0235, which is why this is minor and not major. #1014's AC says the refused side must see 'the wall's existing typed refusal, never a raw serialization error surfacing to a person'; class 40 is not exhausted by 40001.",
+      "required_fix": "Either widen the handler to `when serialization_failure or deadlock_detected` (the same CLR13 is honest for both: someone else has the binding), or state in the header why 40P01 is deliberately left raw, as the file already does for a serialization failure on clara.documents itself."
+    },
+    {
+      "id": "ADV-L01-02",
+      "ticket": 1014,
+      "severity": "minor",
+      "kind": "contract-drift",
+      "title": "0197's 'a document that does not exist locks nothing and RAISES NOTHING' is now only half true - the helper WRITES a claim row for an id that names no document",
+      "evidence": "packages/db/migrations/0235_opening_binding_claim.sql:245-251 argues the omitted FK PRESERVES 0197's tolerance, and the recut body (lines 291-301) keeps `if p_document is null then return; end if;` but then upserts unconditionally. Measured on clara_l01: `select count(*) from clara.documents where id in (A,B)` = 0, and after two calls to clara._lock_document_binding(A)/(B) both rows exist in clara.document_binding_claims with claim_seq 1 (rows deleted afterwards). Reachability through the two walls is nil today - clara.journal_entries.document_id and clara.entry_evidence_links.(document_id, firm_id) are both FK'd to clara.documents (journal_entries_document_id_fkey, fk_entry_evidence_links_document) - but the BEFORE-ROW trigger runs before the FK is checked, so a doomed transaction still creates the claim row and still contends on it (that is the window ADV-L01-01 deadlocks in).",
+      "required_fix": "Say it in the header: the helper no longer 'raises nothing and locks nothing' for an unknown document, it takes a claim on it. Either that, or gate the upsert on the `perform` having found a row (`if found then ... end if;`), which restores 0197's contract exactly and removes the ADV-L01-01 window with it."
+    },
+    {
+      "id": "ADV-L01-03",
+      "ticket": 1014,
+      "severity": "note",
+      "kind": "capacity",
+      "title": "clara.document_binding_claims is write-only, unpruned and unbounded - one row per document forever, one new row version per binding",
+      "evidence": "The table (0235 section B) has a PK and nothing else: no retention rule, no reader, no secondary index, no delete path. Every binding upserts `claim_seq = c.claim_seq + 1, claimed_at = now()`, so every coded approval and every evidence attachment writes a dead tuple. clara_l01 already holds 296 rows / 24576 bytes purely from the seeded fixtures and the db suite. Nothing in the migration, packages/db/README.md's new section or the ticket states a retention answer.",
+      "required_fix": "One sentence in the migration header or README: the token is retained for the life of the document and is expected to stay a one-row-per-document table, or a named follow-up if a prune is wanted. No code change."
+    },
+    {
+      "id": "ADV-L01-04",
+      "ticket": 984,
+      "severity": "minor",
+      "kind": "authorization",
+      "title": "clara._admit_opening_work's membership probe does not filter status='active', yet its refusal detail says actor_not_active",
+      "evidence": "packages/db/migrations/0239_opening_balance_work.sql:554-560: `select m.role into v_role from clara.firm_memberships m where m.user_id = p_actor and m.firm_id = p_firm order by (m.status = 'active') desc, m.created_at desc limit 1; if v_role is null then raise exception 'the approver is not a member of this firm' using errcode='CLR04', detail='{\"reason\":\"actor_not_active\"}'`. The predicate tests membership EXISTENCE; the sentence and the detail claim it tested ACTIVENESS, and the role it keeps (written to accounting_work.initiator_role) can come from a suspended or removed row. The same file, 150 lines later (0239:707-710), uses the house pattern for exactly this probe: `... and m.status='active' and clara.role_rank(m.role) >= clara.role_rank('bookkeeper')`. Not exploitable today, and I checked why rather than assuming: both callers pass c.firm/c.actor from clara._human_ctx, whose clara.jwt_firm() and clara.actor_role_rank() each select `from clara.firm_memberships m where ... and m.status='active'` (bodies read from pg_proc on clara_l01), so a caller with no active membership in that firm never reaches this function. The defect is that the new internal seam's own guard is weaker than the sentence it raises, which is what a third caller would inherit.",
+      "required_fix": "Add `and m.status = 'active'` to the select (the ordering clause then becomes redundant) so the refusal and the predicate say the same thing, or change the message and detail to `actor_not_a_member`."
+    },
+    {
+      "id": "ADV-L01-05",
+      "ticket": 984,
+      "severity": "minor",
+      "kind": "type-accuracy",
+      "title": "OperationReceiptRow.task_id is still typed `string` after 0239 made clara.operation_receipts.task_id nullable and an opening receipt always carries NULL",
+      "evidence": "apps/web/lib/work/types.ts:213 `task_id: string;`, and OPERATION_RECEIPT_SELECT at :222 includes `task_id`, so the Work detail's receipt read now returns null into a field typed non-nullable. 0239 section C item 5 drops the NOT NULL and adds ck_operation_receipts_task_by_purpose, verified live: `CHECK (((purpose = 'opening_balance' AND task_id IS NULL) OR (purpose <> 'opening_balance' AND task_id IS NOT NULL)))`. No crash: I grepped every task_id dereference on the Work surfaces (apps/web/lib/work/reads.ts:199-209 guards on work.current_task_id, which is a different column, and nothing reads receipt.task_id), so this is a silent type lie rather than a failure. #984's AC asked the surfaces to learn the new value; this one did not.",
+      "required_fix": "`task_id: string | null;` in apps/web/lib/work/types.ts, with the one-line reason (an opening receipt owns no run)."
+    },
+    {
+      "id": "ADV-L01-06",
+      "ticket": 984,
+      "severity": "note",
+      "kind": "copy-mismatch",
+      "title": "The new basisNoLines branch is purpose-agnostic but its sentence is opening-specific, so a non-opening Work with a lineless basis would be told something false",
+      "evidence": "apps/web/components/work/work-detail.tsx:603 branches on `!Array.isArray(work.basis.lines)` for ANY purpose, and renders apps/web/messages/en.json's `basisNoLines`: 'This work's basis carries no journal lines. Its entries were approved and posted before the work itself was recorded.' That second sentence is true only of an opening_balance Work. Unreachable today: clara._assert_adjustment_basis and clara._admit_accounting_work_core assert a journal basis (lines array, >= 2 lines) for all three model-served purposes before a Work exists - I probed the gate's full matrix on clara_l01 and journal_entry/periodic_stock_adjustment/payroll_obligation all require their shapes. So this is a branch/copy mismatch, not a live lie.",
+      "required_fix": "Either gate the branch on `work.purpose === 'opening_balance'` (falling back to basisUnreadable otherwise), or trim the copy to the first sentence, which is true of any lineless basis."
+    },
+    {
+      "id": "ADV-L01-07",
+      "ticket": 914,
+      "severity": "note",
+      "kind": "undeclared-behaviour-change",
+      "title": "0238 takes the client rung UNCONDITIONALLY; 0125 took it only inside the action='reverse' branch, and the header's before/after ladder does not say so",
+      "evidence": "Comment-stripped diff of the live clara.approve_wrong_client_correction body against the 0125 text (packages/db/migrations/0125_f_a7_alpha2_judgement_recut.sql): the removed line is `perform pg_advisory_xact_lock(203005004,hashtext(o.client_id::text));` sitting immediately after `if it.action='reverse' then`, and the added line at 0238:302 sits in the straight-line body. A correction whose items are all `withdraw_draft` or `already_reversed` therefore takes rung 203005004 where it previously took none. This is strictly MORE locking and I checked it adds no pair: every 'rung -> Y' pair it creates (the clients row, the item-state-hash and closed-period reads, the client_resolutions read, the allocated/bank probes, the draft-mirror `for update` on journal_entries) already existed in the reverse branch, and 0037 SECTION H.3's 'rung before clara._subledger_allocated_items_present' order is intact. The header's BEFORE ladder (0238:14-31) says 'client rung 203005004 on o.client_id, inside the item loop's reverse branch' but the AFTER ladder does not note that the branch condition is gone.",
+      "required_fix": "One clause in the AFTER ladder or in the 'WHICH CLIENT THE RUNG COVERS' paragraph: the rung is now taken for every correction, including one that reverses nothing. No code change."
+    },
+    {
+      "id": "ADV-L01-08",
+      "ticket": 984,
+      "severity": "note",
+      "kind": "edge-case",
+      "title": "Nothing guards an opening batch with zero entries, so a Work with entry_count 0 and entries [] can be minted",
+      "evidence": "packages/db/migrations/0239_opening_balance_work.sql:772-777 builds v_entries from `for e in select je.* from clara.opening_items oi join clara.journal_entries je ... where oi.seed_id=p_seed and je.status='draft'`; an empty result leaves v_entries '[]', and :812 calls clara._admit_opening_work with it unconditionally. clara._admit_opening_work then writes accounting_work.basis.entry_count = 0 and an operation_receipts row whose effects carry entry_count 0 (the outcome-shape CHECK is satisfied by seed_id, not by entries). That an EMPTY open seed is a real state is implied by clara.cancel_opening_seed, which exists specifically for one. I did not build the fixture, so REACHABILITY IS UNVERIFIED - clara._assert_opening_tie may refuse first.",
+      "required_fix": "Measure it: approve a seed with no draft items on the rig and either record that the tie assertion refuses it first, or add a guard/state in the header that a zero-entry batch mints a zero-entry Work on purpose."
+    },
+    {
+      "id": "ADV-L01-09",
+      "severity": "note",
+      "kind": "rig-state",
+      "title": "I left clara_l01 dirty: x41-round35-tie.test.mjs's x41.s4 is now red on this database, and it is MY doing, not the lane's",
+      "evidence": "Running `node --test <gates> tests/x41-wave-d-a-fa.test.mjs` created clients named x41_b3_* (all ten rows' created_at fall in 08:17-08:19Z, inside my run window; `now()` at the time of the check was 08:26Z). Afterwards `tests/x41-round35-tie.test.mjs` fails ALONE: 'x41.s4 ... at as_of 2026-10-28: the EXPLAINED difference on client x41_b3_59a277 (account 200-D41, cost_diff 77000 pre_cost 77000) is not named in this cell's allow-list'. Both files pass alone on a database without the other's fixtures (x41-wave-d-a-fa: 13/13). This is NOT attributable to 0235-0239: the failing rows are fixed-asset register-vs-GL differences FULLY EXPLAINED by the tie's own pre-enrolment column, and the cell's complaint is purely that the fixture NAME is outside ALLOWED_RED (tests/x41-round35-tie.test.mjs:80, :325-334, an allow-list the cell also pins at exactly one entry). I did not delete the fixtures: hand-deleting clients from a books-bearing schema is worse than reporting the state.",
+      "required_fix": "Whoever runs the lane-01 gates next should either reseed clara_l01 or expect x41.s4 red and check it against this note before chasing it. Separately worth a ticket on its own merits: x41.s4's allow-list is not robust to its sibling file's fixtures coexisting in one database, which makes it order-dependent on any reused rig."
+    },
+    {
+      "id": "ADV-L01-10",
+      "severity": "note",
+      "kind": "inherited-blocker",
+      "title": "apps/web/components/documents/document-kind-dialog.tsx does not compile at the wave-2 base - inherited, not this lane's",
+      "evidence": "`git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD -- apps/web/components/documents/` is EMPTY on riders/w2-lane01, so the lane did not touch it. Both wave2-lane01-ticket1014.md and wave2-lane01-ticket984.md report it as an inherited red from riders wave 1 lane 08 that blocks pnpm typecheck and every browser walk on every wave-2 branch. Recorded here so the adversarial lens is not read as clearing the wave's typecheck.",
+      "required_fix": "Not this lane's to fix; the integrator needs it closed before the wave's typecheck and e2e gates mean anything."
+    }
+  ]
+}

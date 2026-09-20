@@ -1,0 +1,72 @@
+{
+  "axis": "standards",
+  "lane": "wave2-lane01",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_checked": "6ecb4c244ea8d688c7aaff62e7cd1db5fba9b719",
+  "tickets": [1014, 868, 906, 914, 984],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (rules 1-10 and the wave-2 addendum)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (including the wave-2 addendum)",
+    ".claude/skills/code-review/SKILL.md",
+    ".claude/skills/tdd/SKILL.md (tests.md / mocking.md not present as separate files at this path; SKILL.md is what the skill directory contains)",
+    "packages/db/README.md (house migration law, \"Redo (#957)\" and the new 0235-0239 sections)",
+    "packages/db/tests/README.md (named-suite-family entries)",
+    "reports/wave2-lane01-ticket1014.md, ticket868.md, ticket906.md, ticket914.md, ticket984.md"
+  ],
+  "verification_performed": [
+    "git status / git log 23cfad94..HEAD --oneline in the lane worktree (C:\\Users\\zhant\\Desktop\\clara-wt\\635): clean, 15 commits, matches all five reports",
+    "Read all five new migrations in full: 0235 (510 lines), 0236 (209), 0237 (182), 0238 (653), 0239 (1228)",
+    "node scripts/migrate.mjs: '0 new migration(s) applied - 234 total' -- confirms the reported end state",
+    "Re-ran, with the FULL preintegration gate chain, from packages/db: subledger-hook-caller-roster.test.mjs + journal-basis-zero-total-unreachable.test.mjs -> 9/9 pass (matches #868 and #906 reports)",
+    "Re-ran opening-balance-evidence-link.test.mjs + correction-client-rung-order.test.mjs together -> 12/12 pass (7+5, matches #1014 and #914 reports)",
+    "Re-ran opening-balance-work.test.mjs -> 4/4 pass (matches #984 report)",
+    "Re-ran operation-census.test.mjs + rig-isolation.test.mjs together -> 33 tests, 32 pass, 1 skip (T19 poison-role, RIG.md-forbidden reset) -- consistent with every report's individual counts",
+    "Verified apps/web/components/documents/document-kind-dialog.tsx is byte-identical between the fixed point and HEAD (empty diff) -- the pre-existing typecheck red all five reports disclose and none of them caused",
+    "Verified scripts/check-frozen-workflows.mjs and scripts/check-frozen-workflows.selftest.mjs are byte-identical between the fixed point and HEAD, and packages/runtime is untouched by this lane's diff",
+    "Ran `CI=true GITHUB_ACTIONS=true pnpm lint` at the worktree root per RIG.md's wave-2 addendum ('run the lint chain once more as the runner sees it') -- FOUND a failure: 'freeze-lint selftest: FAIL - 1 case(s) failed' on the '--ruling followed by another flag' case, in a file this lane's diff never touches (see finding S2)",
+    "Confirmed git diff --name-only 23cfad94..HEAD touches no file under packages/runtime, docs/PRD.md, docs/ARCHITECTURE.md, or any existing migrations/*.sql -- only CONTEXT.md, five apps/web files (+2 test files), packages/db/README.md, packages/db/tests/README.md, packages/db/package.json, packages/db/tests/rig-meta.mjs, packages/db/tests/coding-lane-evidence-link-fixtures.mjs, the five new migrations and their five new test files/gate modules, and packages/db/tests/staff-expense-claim.test.mjs",
+    "Read commit-level `git show --stat` for every commit in the lane: each fix(db) commit pairs its migration edit with its test-file edit in the same commit (or the test file was extended in a prior/next commit alongside the doc commit), consistent with vertical-slice TDD and inconsistent with a 'battery of red tests first' pattern",
+    "Read the diff on all shared files this lane touched (CONTEXT.md, packages/db/package.json, packages/db/tests/rig-meta.mjs, packages/db/tests/coding-lane-evidence-link-fixtures.mjs): each hunk is minimal, at the sorted (migration-order) position, matching the ten-lane shared-file discipline WORK-ORDER.md rule 7 asks for"
+  ],
+  "findings": [
+    {
+      "id": "S1",
+      "ticket": 984,
+      "severity": "note",
+      "category": "primitive-obsession",
+      "title": "The four-value work-purpose vocabulary is a bare string literal list duplicated across three source files rather than one shared constant",
+      "file": "apps/web/lib/work/purpose-label.ts",
+      "line": 22,
+      "hunk": "const SUFFIX: Readonly<Record<string, string>> = Object.freeze({\n  journal_entry: \"JournalEntry\",\n  periodic_stock_adjustment: \"PeriodicStockAdjustment\",\n  payroll_obligation: \"PayrollObligation\",\n  opening_balance: \"OpeningBalance\",\n});",
+      "verdict": "PLAUSIBLE",
+      "failure_scenario": "The same four-member set is re-typed by hand in apps/web/components/work/accounting-work-list.tsx's KNOWN_PURPOSE_LABELS Set and apps/web/components/work/work-list-filters.tsx's KNOWN_PURPOSES array, with no shared source of truth. A fifth purpose value added to the database column's CHECK in a future ticket could be added to one or two of the three lists and missed in the third, degrading silently to a raw DB token or an 'A kind not in this list' filter entry rather than a compile error.",
+      "required_fix": "Not required of this ticket: the pattern (three independent lists) pre-dates #984 -- the ticket only appended 'opening_balance' consistently to each existing list, exactly as its own predecessor values were already split three ways. The repo already carries a standing structural guard for exactly this drift (apps/web/lib/work/staff-expense-claim.test.ts's `purpose.four` cross-surface census, re-derived by this same diff), so a future drift is caught by an existing test rather than silently. Worth a follow-up refactor (extract one shared `WORK_PURPOSES` tuple the three call sites derive from) but out of scope for this lane and not a regression it introduced.",
+      "outcome": null
+    },
+    {
+      "id": "S2",
+      "ticket": 1014,
+      "severity": "minor",
+      "category": "process-gate",
+      "title": "None of the five per-ticket reports document running the CI-flagged lint variant RIG.md's wave-2 addendum explicitly requires before reporting",
+      "file": "docs/plan/active/riders-2026-09-20/RIG.md",
+      "line": 68,
+      "hunk": "- CI sets `CI=true` and `GITHUB_ACTIONS=true`, and some CLIs here refuse ceremony acts under CI\n  (`--retire`, `--update`, `--lock-deployed`). ... Before you report,\n  run the lint chain once more as the runner sees it: `CI=true GITHUB_ACTIONS=true pnpm lint`\n  (wave 1 shipped a cell that was green on the rig and red on the runner, PR #1025).",
+      "verdict": "CONFIRMED",
+      "failure_scenario": "None of reports/wave2-lane01-ticket1014.md, ticket868.md, ticket906.md, ticket914.md or ticket984.md mentions `CI=true` or `GITHUB_ACTIONS=true` anywhere -- every one only reports the plain `pnpm lint`. Running the CI-flagged variant myself found a real failure: `freeze-lint selftest: FAIL -- 1 case(s) failed` on the case '(L05-STD-02 fix round) --ruling followed by another flag ... not swallowed as the literal ruling text', because under CI the tool now refuses `--retire` itself before it reaches the ruling-parsing branch the selftest is probing. This is NOT this lane's defect: `scripts/check-frozen-workflows.mjs` and `scripts/check-frozen-workflows.selftest.mjs` are both byte-identical between the fixed point and HEAD (empty `git diff`), and packages/runtime is untouched by this lane's whole diff -- so the failure is a pre-existing, wave-2-base residue in the same class as the `document-kind-dialog.tsx` typecheck red all five reports already disclose. But because the gate was never run, none of the five reports could have disclosed it, and an integrator relying on the reports' own 'pnpm lint: exit 0' line alone would not learn that the CI runner will fail differently from the rig -- exactly the PR #1025 lesson RIG.md cites this rule to prevent.",
+      "required_fix": "No code fix owed by this lane (the failing selftest is outside every ticket's files). The fix is procedural: a future lane report in this wave should run and record `CI=true GITHUB_ACTIONS=true pnpm lint` per RIG.md, and the integrator should track scripts/check-frozen-workflows.selftest.mjs's CI-only red as a known wave-2-base residue (alongside document-kind-dialog.tsx) rather than something any single lane needs to fix.",
+      "outcome": null
+    }
+  ],
+  "non_findings_considered_and_rejected": [
+    "Duplicated prestate/tail DO-block shape across all five migrations: this is the house migration law (RIG.md / packages/db/README.md 'Redo (#957)') this repo mandates for every migration, not a repo-wide Duplicated Code smell -- a documented repo standard overrides the baseline here.",
+    "Horizontal slicing (a battery of red tests committed before any implementation): checked via `git show --stat` on every commit in 23cfad94..HEAD; every fix(db)/test(db) commit pairs its migration file with its test file (or extends both in the same commit body, with the report's own text showing the red-then-green cycle happened before that commit), never a standalone batch of new *.test.mjs files with no corresponding migration.",
+    "Testing through an internal collaborator: `obw984.basis.vocabulary` calls `clara._assert_adjustment_basis` directly and `#914`'s `cr.2`/`cr.3` and `#984`'s `obw984.vocabulary.census` read pg_proc/pg_constraint directly -- all four are catalog/structural claims (owner-only internals with no public door, or 'no door in the estate does X') that work-order rule 4's own carve-out names ('where this repo's documented standard asks for a structural cell, that standard wins'), and each is declared as such at the top of its own report before any test was written, matching the seams-first discipline the work order requires. The business-behaviour claims in the same tickets (#1014's race, #914's deadlock, #984's Work/receipt minting) all drive the real human doors (`approve_opening_seed`, `approve_opening_correction`, `approve_wrong_client_correction`) as real signed-in sessions.",
+    "Mocking something the repo controls: no test in this diff mocks a database function, a migration body, or an internal collaborator this repo owns -- every db test drives real Postgres sessions on the lane rig, and the two web test files mock only the existing i18n translation helper already mocked by every other test beside them in the same files (a pre-existing, unrelated-to-this-diff pattern).",
+    "An applied migration edited, a PRD/ARCHITECTURE edit, or a frozen-workflow/frozen-evaluator manifest diff: none found -- `git diff --name-only` lists only new migration files (0235-0239), never an existing one, and no path under docs/PRD.md, docs/ARCHITECTURE.md or packages/runtime appears in the diff at all."
+  ],
+  "summary": "Five tickets (#1014, #868, #906, #914, #984), fifteen commits, five new migrations (0235-0239), all independently re-verified on the lane rig: every re-run test file (25 individual cells across opening-balance-evidence-link, correction-client-rung-order, subledger-hook-caller-roster, journal-basis-zero-total-unreachable and opening-balance-work) passed exactly as each report claimed, and operation-census/rig-isolation passed with only the one RIG.md-documented reset-gated skip. Every migration follows house law: a redo-tolerant prestate measuring live shas/ACLs/CHECK text before writing, `set role clara_fn_owner`/`reset role` around any recut body, a tail that re-derives every claim from the catalog rather than trusting the prestate, a preintegration gate module registered at the sorted position, and a rig-meta.mjs cohort entry (or an explicit, precedented statement of why none is owed) for every new relation or grant. #1014's new table is RLS-enabled-and-forced with exactly one owner policy and zero application-role grants; #984's new internal function has EXECUTE revoked from PUBLIC and is reachable only from the two already-audited human doors. No applied migration, PRD, ARCHITECTURE or frozen-workflow file was touched. TDD discipline holds at the commit level (test and implementation land together, vertical-slice by vertical-slice, with documented red-for-the-right-reason and vacuity-control evidence in every report) and every seam tested is either a real human door driven as a real session or a structural/catalog census the work order's own rule 4 carve-out covers, declared as such up front. Two non-blocking findings: a pre-existing (not this lane's) three-way duplication of the work-purpose value list, already guarded by an existing cross-surface census test (note); and none of the five reports ran the CI-flagged `pnpm lint` variant RIG.md's wave-2 addendum explicitly requires, which independently surfaced one real but pre-existing (wave-2-base, files this lane never touched) freeze-lint selftest failure that the reports' plain 'pnpm lint: exit 0' line does not disclose (minor, procedural).",
+  "verdict": "accept"
+}

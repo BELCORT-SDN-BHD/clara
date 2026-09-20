@@ -1,0 +1,150 @@
+{
+  "lane": "wave2-lane03",
+  "branch": "riders/w2-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "lens": "RECHECK",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "head_checked": "9e8fd9e4a00e04cb44219d956c6b33e32dd7e5c6",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave2-lane03-fix.md",
+  "tickets": [846, 782, 988],
+  "verdict": "accept",
+  "summary": "All nine findings the fix report claims FIXED are verified fixed on the current head by re-running the exact cells AND by independently re-driving each reproducer directly against clara_l03 as clara_fn_owner in rolled-back transactions (TRUNCATE of the mark ledger, the re-keying UPDATE, a backwards recorded_at, and the registry's own column comment). The two findings the report explicitly leaves open (ADV-846-5, ADV-988-4) are both 'note' severity and are still open exactly as described, with no regression. The two items the report marks as an orchestrator decision rather than a lane fix (SPEC-782-2 ARCHITECTURE.md, SPEC-ALL-1 document-kind-dialog.tsx) are unchanged and correctly out of this lane's hands per work-order rule 5. Every gate the report claims a count for reproduced the identical count: db high-water+registry 10/10+23/23 (33/33), the full gate chain + operation-census + rig-isolation 66 tests/65 pass/1 skip, apps/web targeted unit 40/40, the apps/web whole suite 4754 tests/4752 pass/0 fail/2 skip, pnpm typecheck exit 0, plain pnpm lint exit 0, documents-viewer-walk 22 passed, documents-intake-walk 12 passed, work-list-walk 18 passed, packages/runtime's document-facts-validation-db 6/6, check-frozen-workflows.mjs OK (312 files, no manifest diff), apps/web/test/manifest.txt consistent (495 files), and all four migration checksums (0244/0245/0246/0272) MATCH the ledger. Working tree is clean; no uncommitted changes. One new item surfaced during this recheck: CI=true GITHUB_ACTIONS=true pnpm lint fails on the current head, but this is proven pre-existing at the fixed point (byte-identical file at 23cfad947) and unrelated to any of this lane's three tickets or to the fix round's own diff -- see finding RECHECK-1. Nothing above minor remains that is attributable to this lane's fix round.",
+  "findings_from_review_reports_verified": [
+    {
+      "id": "SPEC-846-1 / ADV-846-2",
+      "ticket": 846,
+      "original_severity": "major",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "0272 SS B.1 arms clara._tf_no_truncate() as a BEFORE TRUNCATE FOR EACH STATEMENT trigger on clara.document_capability_version_high_water. Re-drove the exact reproducer live on clara_l03 as clara_fn_owner in a rolled-back transaction: `truncate clara.document_capability_version_high_water` now raises CLR08 'document_capability_version_high_water cannot be truncated' instead of succeeding. document-capability-high-water.test.mjs and document-capability-registry.test.mjs together: 33/33 pass (10+23), matching the report exactly."
+    },
+    {
+      "id": "ADV-846-1",
+      "ticket": 846,
+      "original_severity": "major",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "0272 SS B.2 arms a second trigger, t_document_capabilities_version_high_water_rekey, BEFORE UPDATE ... WHEN (format or document_kind changes), reusing the byte-unchanged high-water body. Re-drove the exact reproducer live: inserted a never-seen pair at version 1, then re-keyed it onto pdf x invoice (published mark 3) -- refused: CLR08, detail {reason: registry_version_high_water, format: pdf, document_kind: invoice, from: 3, to: 1}, naming the DESTINATION key as the migration's tail asserts. Also confirmed the non-regression the fix round's own header flags: an in-place LOWERING update on pdf x invoice still refuses under 0207's own reason (registry_version_monotone), not the new one -- re-driven live and confirmed."
+    },
+    {
+      "id": "ADV-846-4",
+      "ticket": 846,
+      "original_severity": "minor",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "clara._tf_document_capability_high_water_monotone recut with a fourth case arm (`new.recorded_at < old.recorded_at`), last in the expression per the header's stated ordering. Re-drove live: `update ... set recorded_at = '1999-01-01' where format='pdf' and document_kind='invoice'` now raises CLR08 'a capability registry_version high-water mark only ever rises (... recorded_at changed ...)' instead of succeeding."
+    },
+    {
+      "id": "SPEC-782-1",
+      "ticket": 782,
+      "original_severity": "minor",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "0272 SS B.4 re-issues `comment on column clara.document_capabilities.limits` from a successor file (0191/0245 unedited). Read the live col_description directly: it now documents the accepted_limitation/invoice_line_items_reason shape and contains no 'planned' or 'no table yet' wording. Migration tail SS D(5d) also confirms 28 rows carry the shape and 0 rows publish 'planned' anywhere in `limits`."
+    },
+    {
+      "id": "SPEC-988-1 / ADV-988-1",
+      "ticket": 988,
+      "original_severity": "major",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "apps/web/lib/documents/document-state.ts: OperationVerdict gains 'awaiting_confirmation', returned only when business_operation === 'proposal_only' and nothing is coded yet; every other branch (unsupported/reconciled/posted/coded/uncoded) is unchanged. operationTone() gives it its own 'info' tone (document-state.ts:283-284), matching capability-tiers.tsx's existing token. document-state.test.ts cell 'operation: proposal_only is its OWN verdict, never the store-only one' passes (re-run, 40/40 total including this cell); document-state-panel.test.tsx's fixture-diff cell also passes."
+    },
+    {
+      "id": "ADV-782-1",
+      "ticket": 782,
+      "original_severity": "major",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "document-state.ts adds a literal CAPABILITY_LIMIT_LEVEL_KEYS map (never a template-cast t() call) covering all seven live registry values, with capabilityLimitLevelKey() falling back to the raw token only for an unmapped value; document-state-panel.tsx renders the limit's VALUE through this key. en.json:2855 carries the new capabilityLimitLevel.* group. Re-ran documents-viewer-walk.spec.ts end to end: 22 passed (51.7s), matching the report; the spec now asserts the rendered sentence and toHaveCount(0) over the raw tokens."
+    },
+    {
+      "id": "ADV-988-2",
+      "ticket": 988,
+      "original_severity": "minor",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "CapabilityLevel is back to the closed four-value set; BusinessOperationLevel = CapabilityLevel | 'proposal_only' is business_operation's own union, with its own BUSINESS_OPERATION_LEVELS / isBusinessOperationLevel mirroring the db battery's own constant. CapabilityRegistryRow.business_operation, DocumentStateResult.operation.capability, DocumentCapability.business_operation and TierState.level (the union over all four axes) all read from the correct set -- confirmed by direct read of both files. pnpm typecheck exit 0."
+    },
+    {
+      "id": "S1",
+      "ticket": 988,
+      "original_severity": "minor",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "capability-tiers.tsx's TONE is now `Record<BusinessOperationLevel, string>` (the widest of the four axes' sets) with all five keys present and no `?? \"\"` fallthrough in tierTone(). A sixth level or a rename would now be a compile error. pnpm typecheck exit 0."
+    },
+    {
+      "id": "ADV-846-3",
+      "ticket": 846,
+      "original_severity": "minor",
+      "claimed_status": "FIXED",
+      "recheck_result": "CONFIRMED FIXED",
+      "evidence": "packages/db/tests/README.md's document-capability-high-water.test.mjs section now states 'Counts, measured on the lane database with the whole chain applied: 10/10 ... and 23/23 ...', matching the measured 10+23=33 from the re-run. (The unrelated '19/19' string still present elsewhere in the file belongs to a different battery, operator-support.test.mjs / os.19, #844 -- not this lane's finding.)"
+    },
+    {
+      "id": "ADV-988-3",
+      "ticket": 988,
+      "original_severity": "minor",
+      "claimed_status": "ACCEPTED, and now said plainly (not fixed)",
+      "recheck_result": "REFUTATION/REASON HOLDS",
+      "evidence": "Re-measured live: `update ... set business_operation='proposal_only' where format='ofx' and document_kind='bank_statement'` (typed_facts='unsupported' there) is still ACCEPTED -- the honesty invariant is still enforced only by a test cell, not a CHECK. packages/db/README.md's #988 section now states this residual explicitly with the measurement and names the successor CHECK (validated clean against the live 240 rows). This matches the report's own characterization; not a silent gap."
+    }
+  ],
+  "still_open_findings": [
+    {
+      "id": "ADV-988-4",
+      "ticket": 988,
+      "severity": "note",
+      "status": "STILL OPEN, as reported",
+      "evidence": "0246 (unedited by this fix round) still selects the CHECK to replace via an unordered `... into v_conname, v_def from pg_constraint ... ilike '%business_operation%'` with no ORDER BY or multiplicity assertion, at both the prestate (line 89-91) and the tail (line 220-222). Confirmed unchanged in the current diff. Correctly not fixed this round -- the report files it as a prerequisite for the honesty-invariant CHECK follow-up, and it is harmless today because exactly one CHECK matches. Below the recheck's minor threshold; listed for completeness only."
+    },
+    {
+      "id": "ADV-846-5",
+      "ticket": 846,
+      "severity": "note",
+      "status": "STILL OPEN, as reported",
+      "evidence": "document-capability-high-water.test.mjs's one committing cell still has no repair path if the deferred uniformity wall is ever absent -- confirmed unchanged (the fix report explicitly lists this as a follow-up not in this round's list, not as fixed). Below the recheck's minor threshold; listed for completeness only."
+    }
+  ],
+  "orchestrator_decision_items_unchanged": [
+    {
+      "id": "SPEC-782-2",
+      "note": "docs/ARCHITECTURE.md:529 still carries the stale 'planned' line-items row. Correctly declined by the lane per work-order rule 5 (a lane worker may not edit ARCHITECTURE.md); confirmed the file is untouched by this diff. Orchestrator/wayfinder action, not a lane defect."
+    },
+    {
+      "id": "SPEC-ALL-1",
+      "note": "Commits 1e7565e2f and 019506782 (document-kind-dialog.tsx DOCUMENT_KINDS -> CLASSIFIABLE_DOCUMENT_KINDS) are unchanged this round. Confirmed the base commit's document-kind-dialog.tsx does reference the unimported DOCUMENT_KINDS (git show 23cfad947:...) so the 'genuine unblock, not scope creep' characterization holds. Sits on the wave-1 integrated head so every wave-2 lane inherits it; a wave-wide, not lane-03-specific, decision for the orchestrator."
+    }
+  ],
+  "gates_rerun": [
+    "packages/db: node --test --test-concurrency=1 $GATES tests/document-capability-high-water.test.mjs tests/document-capability-registry.test.mjs -> 33 tests / 33 pass / 0 fail / 0 skip (matches report's 10/10 + 23/23)",
+    "packages/db: same $GATES + tests/operation-census.test.mjs tests/rig-isolation.test.mjs -> 66 tests / 65 pass / 0 fail / 1 skip (T19 poison-role, RIG.md-forbidden) -- matches report exactly",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test lib/documents/document-state.test.ts lib/documents/capability-registry.test.ts components/documents/document-state-panel.test.tsx -> 40 pass / 0 fail",
+    "apps/web whole unit suite (node scripts/run-tests.mjs) -> 4754 tests / 4752 pass / 0 fail / 2 skip / 138 suites -- matches report exactly",
+    "pnpm typecheck (worktree root) -> exit 0",
+    "pnpm lint (worktree root, plain) -> exit 0 -- matches report",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (worktree root, as the runner sees it, per RIG.md) -> exit 1, one failing selftest cell (see RECHECK-1 below) -- NOT run this way by the fix report or by any of the three prior review passes",
+    "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3520 CLARA_E2E_NEXT_PORT=3521 CLARA_E2E_RUNTIME_PORT=3522 pnpm --filter @clara/web e2e documents-viewer-walk -> 22 passed (51.7s)",
+    "same triple, e2e documents-intake-walk -> 12 passed (28.2s)",
+    "same triple, e2e work-list-walk -> 18 passed (29.2s)",
+    "packages/runtime: node --test tests/document-facts-validation-db.test.mjs -> 6 pass / 0 fail",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files verified, no manifest diff, 3 retired entries",
+    "node apps/web/scripts/check-test-manifest.mjs -> OK, 495 files, alphabetical, exactly once",
+    "migration checksums (sha256 of packages/db/migrations/{0244,0245,0246,0272}*.sql vs clara.schema_migrations.checksum) -> all 4 MATCH",
+    "clara_l03 direct probes (clara_fn_owner, rolled back): TRUNCATE of the mark ledger refused CLR08; a re-keying UPDATE onto pdf x invoice refused CLR08 naming the destination and its mark; an in-place lowering on the same pair still refused under 0207's own reason (registry_version_monotone), not the new one; a backwards recorded_at refused CLR08; live col_description on clara.document_capabilities.limits documents the accepted-limitation shape",
+    "git status (worktree root) -> clean, nothing to commit",
+    "git log 23cfad947..HEAD -> matches the fix report's claimed commit list and head (9e8fd9e4a) exactly"
+  ],
+  "new_findings": [
+    {
+      "id": "RECHECK-1",
+      "ticket": null,
+      "severity": "minor",
+      "kind": "inherited-ci-gap",
+      "title": "CI=true GITHUB_ACTIONS=true pnpm lint fails on the current head, but this predates the base commit and every wave-2 lane inherits it -- not a defect of this lane's fix round or its three tickets",
+      "evidence": "scripts/check-frozen-workflows.selftest.mjs's testCase '(L05-STD-02 fix round) `--ruling` followed by another flag ... is treated as NO ruling given' (line 721) spawns `node check-frozen-workflows.mjs --retire <path> --ruling --child-os` via spawnSync with no env override, so the child inherits the parent's CI=true/GITHUB_ACTIONS=true and hits the CLI's own '--retire is REFUSED under CI' guard before ever reaching the missing-ruling check the cell means to prove, so the assertion on stderr matching /requires --ruling/i fails. Confirmed this exact test case is BYTE-IDENTICAL at the lane's own base commit (`git show 23cfad947b5598214168ba9c43d391b4e16aa745:scripts/check-frozen-workflows.selftest.mjs` contains the same text at the same line), and confirmed the file carries zero diff between the base and HEAD in this lane's branch -- so this is inherited from the wave-1 integrated head, not introduced by any of #846/#782/#988 or by the fix round. It is exactly the failure shape RIG.md's addendum names (a cell green on the rig, red on the runner, PR #1025's own precedent) and none of the three prior review passes nor the fix report itself ran the CI-simulated command (all three reported plain `pnpm lint -> exit 0`).",
+      "required_fix": "Not this lane's fix. The selftest needs to clear CI and GITHUB_ACTIONS for the spawned child in that one cell (or any cell whose refusal sits behind the CI guard), the same pattern RIG.md prescribes. Since scripts/check-frozen-workflows.selftest.mjs is a shared file every wave-2 lane's branch carries unchanged from the same base, this is a wave-wide integration fix, not a per-lane one -- flagging for the orchestrator/integrator rather than requiring lane-03 rework, since lane-03's own three tickets and its fix round never touch this file."
+    }
+  ]
+}

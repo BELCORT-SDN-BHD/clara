@@ -1,0 +1,63 @@
+{
+  "axis": "standards",
+  "lane": "wave2-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "branch": "riders/w2-lane02",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commit_range": "23cfad947b5598214168ba9c43d391b4e16aa745..HEAD",
+  "commits_reviewed": [
+    "c8cc4cf5a feat(db): #898 financial_year_end_day knowledge key beside its month",
+    "4dae88baf test(db): #898 fd.04/fd.05 -- firm refusal and promotion-equals-client-row",
+    "c40fc04b7 feat(db): #913 drop the dead clara.knowledge_keys.scope_default column",
+    "041c28846 test(db): #913 sd.03/sd.04 -- firm-eligibility and floor unchanged by the drop",
+    "84febd087 feat(db): #993 tighten knowledge-key catalog CHECKs to the recorder's grammar",
+    "363054f2e test(db): #993 kg.04/kg.05 -- existing catalog keys and the recorder's own check are unmoved",
+    "f839ad1ea feat(db): #912 record the actor's role at the instant on clara.audit_log",
+    "b4402905e test(db): #912 ar.02 -- history keeps its unknown and nothing can back-fill it",
+    "20f603461 feat(db): #912 the firm register cites the role at the act beside the role now",
+    "80a491e63 test(db): #912 ar.04 -- a record the mechanism never saw reports unknown",
+    "72cc5e0f6 test(db): #912 ar.05 -- the census that makes \"every governed door\" mean something",
+    "3290dcfe1 feat(web): #912 the firm register renders the role at the act as its own fact",
+    "0622e3352 docs(db): #912 the battery's header names the trigger, not a recut of _audit",
+    "f9d755c97 test(db): #912 declare _tf_audit_actor_role on the S5.25 arm (D) clock roster",
+    "164c3ac5f test(db): #991 the pack-shaped-read ownership rule as a class, with its own census"
+  ],
+  "verification_performed": [
+    "Read all four new migrations in full (0240, 0241, 0242, 0243) against the house migration law in packages/db/README.md and the WORK-ORDER addendum.",
+    "Re-measured, on the live lane database (127.0.0.1:55742/clara_l02), the specific claims 0243 makes rather than trusting its comments: clara.audit_log.actor_role is a nullable text column (confirmed); 66,898 pre-existing rows carry NULL (matches the '~66.9k'/'>60000' claims); clara.knowledge_keys holds 14 rows and clara.client_fact_keys holds 5 (matches 0242's prestate/tail); clara._audit's prosrc sha256 is exactly 000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1, matching both migrations' pins; clara.audit_log has exactly one writer (clara._audit) and exactly 304 callers of clara._audit, matching 0243's tail; clara.verify_metric_input_producer_freeze() raises no exception.",
+    "Ran the lane's own new/touched db batteries against the live database with the full gate-import chain from packages/db/package.json: audit-actor-role.test.mjs, knowledge-fye-day.test.mjs, knowledge-scope-default-drop.test.mjs, knowledge-key-grammar.test.mjs, knowledge-firm-defaults.test.mjs, knowledge-onboarding-promotion.test.mjs, pack-shaped-knowledge-read-census.test.mjs -- 64/64 passed.",
+    "Ran packages/db/tests/operation-census.test.mjs (whole-estate grant/waiver census) to confirm the new ungranted trigger function clara._tf_audit_actor_role does not trip it -- 10/10 passed.",
+    "Read the full text of the audit-actor-role.test.mjs, knowledge-fye-day.test.mjs, knowledge-scope-default-drop.test.mjs, knowledge-key-grammar.test.mjs and pack-shaped-knowledge-read-census.test.mjs batteries against .claude/skills/tdd/SKILL.md, tests.md and mocking.md.",
+    "Diffed git log --stat for every commit in the range to check for horizontal-slicing (a whole battery of red tests landing before any implementation) -- none found; every 'test'-only commit follows a 'feat' commit that already implements the behaviour it extends.",
+    "Diffed the shared files this lane touches (CONTEXT.md, apps/web/messages/en.json, apps/web/test/manifest.txt, packages/db/tests/rig-meta.mjs, packages/db/tests/x42-s5-helpers.mjs, packages/db/package.json) for minimal, sorted-position hunks per work-order rule 7.",
+    "Confirmed docs/PRD.md and docs/ARCHITECTURE.md are untouched, and that all four new migrations are new files at their reserved numbers (none edits an applied migration).",
+    "Ran eslint (CI=true GITHUB_ACTIONS=true) over every web and db file this lane added or touched -- clean.",
+    "Fetched gh issue view 912 --comments and compared the owner's literal ruling text against 0243's implementation to check the trigger-vs-recut deviation is justified by a documented repo law rather than an unexplained substitution."
+  ],
+  "findings": [
+    {
+      "ticket": 991,
+      "id": "SB-991-01",
+      "severity": "minor",
+      "kind": "smell",
+      "category": "duplicated-code",
+      "title": "packages/db/tests/pack-shaped-knowledge-read-census.test.mjs's executors() re-implements f-a2-grants.test.mjs's executors()",
+      "file": "packages/db/tests/pack-shaped-knowledge-read-census.test.mjs",
+      "line": 63,
+      "evidence": "pack-shaped-knowledge-read-census.test.mjs:63-72 defines `async function executors(query, signature) { const r = await query(\\`select r.rolname from pg_roles r where r.rolname like 'clara%' and has_function_privilege(r.rolname, $1::regprocedure, 'EXECUTE') order by r.rolname\\`, [signature]); return r.rows.map((x) => x.rolname); }`. packages/db/tests/f-a2-grants.test.mjs:42-49 already defines the identical query, hardcoded to rootQuery instead of taking a query parameter: `async function executors(signature) { const r = await rootQuery(...same SQL...); return r.rows.map((x) => x.rolname); }`. The new file's own header (lines 26-28) explicitly names f-a2-grants.test.mjs's executors() as 'the same instrument', showing the duplication was noticed, not missed.",
+      "required_fix": "Fowler 'Duplicated Code' -> extract the shared shape. The only real difference is that pack-shaped-knowledge-read-census.test.mjs needs a caller-supplied query (rootQuery by default, or a transaction-scoped client for the pkc.3 CONTROL cell) so an uncommitted GRANT is visible to the same probe. A single shared helper in rig-fixtures.mjs or rig-helpers.mjs taking `(signature, query = rootQuery)` would serve both files and remove the second copy. This is a judgement call, not a hard violation -- the two files import from different fixture modules (rig-helpers.mjs vs rig-fixtures.mjs) and the duplication is small (10 lines) and already justified in the file's own comments."
+    }
+  ],
+  "notes": [
+    {
+      "ticket": 912,
+      "note": "0243's implementation stamps clara.audit_log.actor_role from a new BEFORE INSERT trigger on the table (clara._tf_audit_actor_role) rather than from clara._audit itself, which is what the owner ruling's literal 'Key interfaces' text names ('clara._audit ... gains the actor's rank'). This is NOT a standards violation: it is compelled by a documented, machine-enforced repo law that outranks the ruling's wording -- clara._audit is ordinal 10 of the frozen metric_input_snapshot v1 producer closure (clara.metric_input_producer_version_members / clara.verify_metric_input_producer_freeze()), and scripts/migrate.mjs's FREEZE_GUARDS refuse any migration that recuts a member. The migration's own header (0243:25-43) states this was measured, not assumed: 'an earlier draft of this file DID recut _audit and the runner rolled the whole migration back'. Re-verified live in this review: clara._audit's prosrc sha256 (000c730cd2...) is byte-identical to the pin in both 0243's prestate and tail, and clara.verify_metric_input_producer_freeze() raises no exception on the lane database. The trigger approach is also strictly WIDER than the literal recut would have been (it reaches the table's whole write path, not one function), and 0243's own tail proves the acceptance criteria the ruling actually asked for (one writer; 304 callers unchanged; a door from an untouched lane, clara.create_client, inherits the column with no per-door edit) -- all reconfirmed live in this review. This is exactly the code-review skill's own rule that 'a documented repo standard overrides' a baseline expectation; it is flagged here only as a note for the Spec-axis reviewer, since the deviation is against the ruling's literal interface wording rather than against any documented coding standard."
+    },
+    {
+      "ticket": 898,
+      "note": "packages/db/README.md and knowledge-fye-day.test.mjs both correctly account for 0241 (#913) dropping scope_default out from under 0240's own header, which originally referenced the column. The README's 0240-era prose was rewritten in the #913 commit rather than left stale, and fd.01's test comment explicitly documents the same handoff. No action needed; noted as evidence the lane kept its own cross-ticket documentation honest as later tickets in the same lane changed the ground under earlier ones."
+    }
+  ],
+  "summary": "One lane, five tickets (#898, #913, #993, #912, #991), four new migrations (0240-0243) plus one test-only ticket (#991). All four migrations were read in full against the house migration law (header, prestate with measured prosrc/shape pins, idempotent-under-#957-redo statements, tail assertions re-measuring row counts/CHECKs/grants/RLS/trigger posture, preintegration-gate module, rig-meta cohort, gate-chain entry) and every specific numeric or hash claim in 0243 (the ticket the task flagged for extra scrutiny) was independently re-measured live on the lane database and matched exactly: the actor_role column, the 66,898 untouched NULL rows, the single clara._audit writer, the 304 unchanged callers, the byte-identical frozen clara._audit body, and a passing clara.verify_metric_input_producer_freeze(). All 64 of the lane's new/touched db tests plus the whole-estate operation-census battery (10/10) pass on the live rig. TDD process was checked commit-by-commit: no horizontal slicing (a battery of red tests landing before implementation) was found anywhere in the range: every test-only commit extends a battery whose subject already exists from an earlier commit in the same ticket, and every test reads through a public interface (a governed SQL door or the table's own committed write, which this repo's documented rig idiom treats as the seam for a DB migration's own effect) with expected values coming from independently-minted fixtures or measured pins, never from re-deriving what the code computes. Shared files (CONTEXT.md, en.json, package.json, rig-meta.mjs, x42-s5-helpers.mjs, manifest.txt) were all touched minimally and at a sensible position. No PRD/ARCHITECTURE edit, no edit to an already-applied migration, and lint is clean on every touched file. One minor, judgement-call smell (Duplicated Code) is reported. Verdict: accept."
+}

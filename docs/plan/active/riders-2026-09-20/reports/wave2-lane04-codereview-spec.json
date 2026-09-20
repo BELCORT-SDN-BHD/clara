@@ -1,0 +1,145 @@
+{
+  "axis": "SPEC",
+  "wave": 2,
+  "lane": 4,
+  "branch": "riders/w2-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits": [
+    "44449bcdb fix(db): #972 the fixed-asset birth honours the enrolment watermark on every firing",
+    "497d02455 test(db): #972 leave x41.s4's allow-list alone",
+    "e71f1541e fix(db): #973 fold the depreciation leg-pairing aggregation into one routine",
+    "75b9f0df4 fix(db): #973 restore both splices 0227 and 0042 install into the poster's live body",
+    "4a27e15a0 docs(db): #973 module docs for the leg-pairing fold",
+    "e0f02845d fix(db): #976 fold the fixed-asset particulars completion wall into one routine",
+    "bc3dd6372 docs(db): #976 the particulars completion-wall fold and its grants-table row",
+    "f63b16ccb fix(db): #977 the signing door reads one shared definition of a person's instruction",
+    "05e64e1dd fix(db): #977 the plan door reads the same definition, on its own error class",
+    "2e966eb20 fix(db): #977 authorship is half the rule, not a consequence of the kind",
+    "f3088913c test(db,runtime): #977 what must NOT have moved, and the belt rig's own instruction",
+    "852ce993e docs: #977 one definition of a person's instruction, and where it is written down",
+    "97fd4b058 fix(db): #979 the depreciation authority read tells \"retired\" apart from \"never had one\"",
+    "f4782bfb5 fix(web): #979 the retired-authority surface: reason, author, window, never \"none\"",
+    "e81ad46b1 docs(db): #979 module docs for the retired-read fallback, and the NO-COHORT record"
+  ],
+  "spec_sources": [
+    "gh api repos/BELCORT-SDN-BHD/clara/issues/972 (body Agent Brief; no comments)",
+    "gh api .../973 (body Agent Brief; no comments)",
+    "gh api .../976 (body Agent Brief; no comments)",
+    "gh api .../977 (body + owner ruling comment 2026-09-20, which is the contract)",
+    "gh api .../979 (body + owner ruling comment 2026-09-20, which is the contract)"
+  ],
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "SPEC-L04-1",
+      "ticket": 979,
+      "severity": "blocker",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#979 inverts the read contract and leaves the existing regression cell that pins the old one RED on the branch",
+      "evidence": "Ticket AC: \"Existing callers that only test for an active authority are unaffected by the added fields.\" The branch leaves packages/db/tests/depreciation-history.test.mjs:456 (cell p651.authority.retire_unsigned) failing at line 487: assert.equal(env.authority, null, \"...and the READ is honest: a retired-only client shares the 'none proposed' state with a fresh one, which is what the surface already renders\"). Re-run on the lane rig (clara_l04, 127.0.0.1:55744, chain 0001..0234 + 0247..0251), full 55-import gate chain: `node --test --test-concurrency=1 $GATES tests/depreciation-history.test.mjs` -> `not ok 11 - p651.authority.retire_unsigned`, actual = {id, status:'retired', retired_reason:'p651 wrong cadence, withdrawn before signature', retired_by, retired_at, authority_from:'2026-09-01', ...}, expected null. Reproduced again in a whole-packages/db run (`not ok 776`), and again in the eight-file FA batch (76 tests, 75 pass, 1 fail - this one). The cause is 0251's fallback select (packages/db/migrations/0251_fa_authority_retired_read.sql:173-177), which is exactly what the ticket asked for; what is missing is the corresponding update to the cell that encodes the superseded contract. wave2-lane04-ticket979.md's gate table does not list depreciation-history.test.mjs at all - the one file whose contract the ticket inverts was never re-run.",
+      "required_fix": "In #979's own commits, recut p651.authority.retire_unsigned (depreciation-history.test.mjs:456-490, including the comment quoting the F6 note) to the new three-state contract: a retired-only client returns THAT authority, and the 'lane reopens' fact is proved by propose/sign succeeding rather than by authority === null. Then re-run tests/depreciation-history.test.mjs with the full gate chain and record the count."
+    },
+    {
+      "id": "SPEC-L04-2",
+      "ticket": 972,
+      "severity": "major",
+      "kind": "behaviour-not-asked-for",
+      "title": "#972's watermark predicate puts a session clock into the birth trigger, breaking two pinned clock-roster censuses that the branch leaves RED",
+      "evidence": "Ticket Desired behavior: \"The belt never births a register row from an entry posted before the enrolling account's watermark, on any firing, including a re-fire caused by an UPDATE such as the reversed_by stamp. Reversal is otherwise unchanged.\" Nothing in the ticket asks for a clock read. 0247_fa_birth_watermark.sql:78/262 splices `coalesce(new.approved_at, now()) >= fp.enrolled_at` into clara._tf_fa_acquisition_birth. Re-run on the lane rig, full gate chain: `node --test --test-concurrency=1 $GATES tests/x42b2-r7-s5-clock.test.mjs tests/x42b2-s5c-clock.test.mjs` -> 4 tests, 2 pass, 2 fail: `not ok - x42.r7.s5c.5` (x42b2-r7-s5-clock.test.mjs:211) and `not ok - x42.s5c.6` (x42b2-s5c-clock.test.mjs:369). Set-diff of each cell's actual vs expected arm-(D) bare-token roster, computed from the run output, is exactly [\"_tf_fa_acquisition_birth\"] in both, with nothing missing. All three x42 files (x42b2-r7-s5-clock.test.mjs, x42b2-s5c-clock.test.mjs, x42-s5-helpers.mjs) are byte-identical to BASE (`git diff 23cfad94...HEAD -- <files>` empty), so the reds are the migration's, not a test edit's. packages/db/tests/x42-s5-helpers.mjs:1161-1166 still states in prose that the birth trigger carries no clock. #972's own report (wave2-lane04-ticket972.md) lists neither x42 file in its gates; the reds were discovered later by #977's implementer and recorded as \"follow-up 0\" rather than fixed.",
+      "required_fix": "Inside #972's own scope, either (a) keep the birth body clock-free - the ticket's rule is about the entry's own post date, and clara.journal_entries.approved_at is nullable with no constraint tying it to status='approved' (measured: 0 approved rows with a null approved_at on clara_l04), so a non-clock fallback such as new.posting_date is available - or (b) extend arm (D)'s pinned roster and correct the FA_ACQUISITION_0216_CLOCK_NAMES prose in packages/db/tests/x42-s5-helpers.mjs, in the same ticket, and re-run both x42 cells."
+    },
+    {
+      "id": "SPEC-L04-3",
+      "ticket": 976,
+      "severity": "major",
+      "kind": "behaviour-not-asked-for",
+      "title": "#976's fold moves both completion refusals behind _reserve_op and the client/asset walls, reversing a property 0227 documented as deliberate - and deletes the sentence that documented it",
+      "evidence": "Ticket Desired behavior: \"Every caller keeps its current signature, grants and refusal codes; only the duplication is removed.\" 0227_depreciation_history.sql:649-657 and :684-692 - the two spliced copies the fold replaces - each carry the comment \"Refused BEFORE the op key is reserved, so a retry is clean.\" On the branch, both doors now reserve first: measured off pg_proc on clara_l04, clara._fa_complete_particulars_core has _reserve_op at offset 293 and clara._fa_assert_particulars_completable at offset 1138, with the client lookup, the advisory lock and the SELECT ... FOR UPDATE in between; clara.complete_fixed_asset_particulars is the same shape (see its live prosrc). The new shared routine clara._fa_assert_particulars_completable carries 0227's comment for the change-class arm verbatim EXCEPT that the \"Refused BEFORE the op key is reserved, so a retry is clean.\" sentence is gone. Two observable consequences the ticket did not ask for and no cell covers: (1) a call carrying a revision-only key plus an unknown client or asset now refuses CLR11 client_not_found / asset_not_found instead of CLR37 fa_change_class_on_completion; (2) the refusal now happens after an op_receipts insert - clara._reserve_op is a plain `insert ... on conflict do nothing`, so it rolls back with the RAISE in the normal one-statement call, but nothing on the branch proves that, and the estate's own written statement of the property was removed rather than re-derived. wave2-lane04-ticket976.md argues (2) from 0004_governed_fns.sql's header; the argument is plausible but untested.",
+      "required_fix": "Either keep the change-class arm before _reserve_op (the one routine can expose a pre-reservation arm and a post-lock arm, both owned in one place, which still satisfies AC1/AC2 'only one place contains the check'), or add a cell that drives a change-class refusal through each door and then proves clara.op_receipts holds no row for that op_key, and restore 0227's sentence to the shared routine with its new justification."
+    },
+    {
+      "id": "SPEC-L04-4",
+      "ticket": 972,
+      "severity": "minor",
+      "kind": "acceptance-evidence-not-reproducible",
+      "title": "#972 AC5's green was taken on a throwaway clone that no longer exists; x41.s4 is still RED on the lane rig",
+      "evidence": "Ticket AC: \"On a freshly built family, x41.s4 reports zero unexplained differences at all three as-ofs, allow-list unchanged at one entry.\" Re-run on the lane rig, full gate chain, in a 13-file batch (143 tests, 141 pass, 1 fail, 1 skip): `not ok 128 - x41.s4 the x41-family-scoped fa_register_tie sweep at three as-ofs`. wave2-lane04-ticket972.md states the AC5 green was measured on a template copy (clara_l04_s4) in which four pre-0247 register rows were deleted with clara._tf_fixed_assets_immutable_0017 temporarily disabled, and that the clone was then dropped - so the figure cannot be re-taken. The other half of the AC IS verifiable and holds: packages/db/tests/x41-round35-tie.test.mjs is byte-identical to BASE (`git diff 23cfad94...HEAD -- <file>` empty), so ALLOWED_RED is unchanged at one entry.",
+      "required_fix": "The integrator re-takes AC5 on the disposable from-scratch cluster (0001 -> 0251) and records the sweep's own summary line, so the ticket's last acceptance criterion rests on a reproducible measurement rather than on a dropped clone."
+    },
+    {
+      "id": "SPEC-L04-5",
+      "ticket": 979,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#979 AC4 has no browser evidence and no e2e fixture covers the retired state",
+      "evidence": "Ticket AC: \"A surface rendering a client's authority status shows the retirement's reason, author and window when the read reports a retired authority.\" The component evidence is real and green (re-run: components/registers/fa-authority-ceremony.test.tsx + three sibling register files, 25 tests, 25 pass), and the whole apps/web unit suite re-run is 4752 tests / 4730 pass / 20 fail / 2 skip with 19 of the 20 failures carrying `ReferenceError: DOCUMENT_KINDS is not defined` from apps/web/components/documents/document-kind-dialog.tsx - inherited (that file's last change, 4b1376f40, is an ancestor of BASE; the lane touches no documents file). But no browser walk was run (that same defect aborts `next build`), and neither e2e mock was extended: apps/web/e2e/depreciation-mock.mjs:216-233 and apps/web/e2e/fixed-asset-mock.mjs still answer get_depreciation_authority with a live-only authority, so no walk exercises the new surface at all.",
+      "required_fix": "Once the DOCUMENT_KINDS defect is fixed, run depreciation-walk on this lane's triple; and add a retired-authority arm to one of the two depreciation e2e mocks so the AC4 surface has a walk, or record explicitly that AC4 ships on unit evidence only."
+    },
+    {
+      "id": "SPEC-L04-6",
+      "ticket": 979,
+      "severity": "note",
+      "kind": "observation",
+      "title": "#979 pins, without closing, a read/mock divergence on authority_from that the same testid depends on",
+      "evidence": "0251 merges authority_from onto the returned object ONLY on the retired arm (packages/db/migrations/0251_fa_authority_retired_read.sql:195-197), and p979.preferred asserts by key absence that a live authority carries none of it. apps/web/components/registers/fa-authority-ceremony.tsx renders the window on `(au.status === \"live\" || au.status === \"retired\") && au.authority_from`, and apps/web/e2e/depreciation-mock.mjs:228 returns authority_from on a LIVE authority, which apps/web/e2e/depreciation-walk.spec.ts:67 then asserts through `fa-authority-window`. So the live half of that testid is exercised only against a payload the real read does not produce. This predates #979 (it is #651's), and #979's own comment in apps/web/lib/registers/depreciation.ts names it as \"a different ticket's widening\" - flagged here because #979 reuses that exact testid for the retired case.",
+      "required_fix": "No change required of #979. Worth a follow-up ticket: either surface authority_from on the live arm too, or correct the e2e mock so the walk stops asserting a field the door never returns."
+    },
+    {
+      "id": "SPEC-L04-7",
+      "ticket": 977,
+      "severity": "note",
+      "kind": "observation",
+      "title": "#977's new refusal token has no lane-side mapping yet; nothing raises it today, so this is not a gap in the ticket",
+      "evidence": "Owner's ruling AC set does not ask for a UI or runtime message, and the ticket's Out of scope covers other lanes. Verified there is no live path: no packages/runtime module calls clara.sign_depreciation_authority or clara.create_accounting_plan (grep over packages/runtime/lib and packages/runtime/workflows returns only a comment in depreciation-run.ts:152 saying \"a door this lane never calls\"), and apps/web's sign dialog renders a governed refusal's code and message VERBATIM from the database (apps/web/components/common/dialog-refusal.tsx, toDialogRefusal), so the new token surfaces with its own sentence and no missing-message key. packages/runtime/lib/depreciation-run.ts:178-180 and packages/runtime/lib/prepayment-schedule-basis.ts:122 still enumerate only authority_ref_invalid / authority_ref_unresolved; wave2-lane04-ticket977.md already carries both as forward-looking successor-contract rows.",
+      "required_fix": "None for #977. The successor-contract rows in wave2-lane04-ticket977.md should be carried into whichever cut ships the prepayment tool."
+    }
+  ],
+  "verified_clean": {
+    "972": [
+      "AC2 - x41.b3 extended to look at the register after the reversal: packages/db/tests/x41-wave-d-a-fa.test.mjs:435-447, green in the 76-test FA batch",
+      "AC3 - reverse_entry unchanged (pinned prestate + tail), the two pre-existing x41.b3 assertions still pass",
+      "AC4 - x41.b4 green",
+      "AC6 - only new migrations added: git diff --name-status shows A 0247, A 0248, A 0249, A 0250, A 0251 and no M under packages/db/migrations/"
+    ],
+    "973": [
+      "AC1 - exactly one routine computes the pairing: the raw grouped aggregation now occurs in exactly one clara body (catalog query: only clara._fa_depreciation_leg_pairing(jsonb)), and both clara._fa_run_period_core and clara.preview_depreciation_run call it",
+      "AC4 - p651.preview.matches_run green (depreciation-history.test.mjs, 19 cells, only the #979 cell red)",
+      "AC6 - the poster's two runtime splices survive in the live body: _wdb_rerun_breach and _fa_assert_period_open both present; p651.census.rerun_gate and p651.period.closed_refused green; operation-census and rig-isolation green (33 tests, 32 pass, 1 destructive skip)",
+      "AC7 - new migration only, nothing edited"
+    ],
+    "976": [
+      "AC1/AC2 - each wall fragment lives in exactly one body: fa_change_class_on_completion and fa_particulars_already_complete both resolve to clara._fa_assert_particulars_completable (the only other hit for the first is a comment inside clara._fa_validate_particulars)",
+      "AC4 - fixed-asset-acquisition.test.mjs 23/23, x41-wave-d-a-fa 13/13, x41b0-surface and x41b2-surface green in the 143-test batch",
+      "AC5 - new migration 0249 only"
+    ],
+    "977": [
+      "AC1/AC2/AC3 - clara._authority_ref_refusal(text,uuid,uuid,uuid) returns null only for kind='chat_turn' AND created_by is not null, in the same firm and client; every other agent_tasks kind (wake, autodraft, close_prep, accounting_work) returns 'authority_ref_not_human_instruction'",
+      "AC4 - the accounting_work arm is a byte-for-byte carry-through of the old existence test (firm AND client)",
+      "AC5 - exactly clara.sign_depreciation_authority and clara.create_accounting_plan read the definition (catalog query); clara._accrual_plan_core keeps the old inline test and is the only body that still carries it, as the ruling intends; each door keeps its own error class (CLR38 / CLR10) and the unresolved refusal's message and detail shape are identical to 0227:1207-1210",
+      "AC6 - new migration 0250 only; AC7 - CONTEXT.md gains the term 'Authorising instruction' in the house term/_Avoid_ shape",
+      "Blast radius re-run: accounting-plans, prepayment-schedule and accrual-adjustments all green in the 143-test batch"
+    ],
+    "979": [
+      "AC1 - p979.none green; AC2 - p979.retired green; AC3 - p979.preferred green (live preferred over proposed, added keys absent on the live arm)",
+      "AC4 - three new component cells green (retired.facts, retired.actions, retired.badge)",
+      "AC5 - the only consumer, apps/web/components/registers/depreciation-authority-panel.tsx, gates on data.authority?.status === 'live'; no clara function and no packages/runtime module reads the door (catalog + grep)",
+      "AC6 - new migration 0251 only"
+    ]
+  },
+  "gates_rerun_by_this_review": [
+    "packages/db, full gate chain, FA batch: fa-birth-watermark + fa-depreciation-leg-fold + fa-particulars-completion-fold + authority-ref-human-instruction + fa-authority-retired-read + depreciation-history + fixed-asset-acquisition + x41-wave-d-a-fa = 76 tests, 75 pass, 1 fail (p651.authority.retire_unsigned), 0 skip",
+    "packages/db, full gate chain, clock census: x42b2-r7-s5-clock + x42b2-s5c-clock = 4 tests, 2 pass, 2 fail (x42.r7.s5c.5, x42.s5c.6), 0 skip",
+    "packages/db, full gate chain, blast radius: x41-round35-tie + x41b0-surface + x41b2-surface + x41-depreciation + x41-reducing-balance + x41-round4-g2 + accounting-plans + prepayment-schedule + accrual-adjustments + operation-census + rig-isolation + preintegration-gate-chain + migrate-redo = 143 tests, 141 pass, 1 fail (x41.s4), 1 skip (T19 destructive)",
+    "apps/web whole unit suite (node scripts/run-tests.mjs) = 4752 tests, 4730 pass, 20 fail, 2 skip; 19 of the 20 carry ReferenceError: DOCUMENT_KINDS is not defined, inherited from BASE; none in the fixed-asset surface",
+    "apps/web focused: fa-authority-ceremony + fixed-assets-a11y + register-refresh-siblings + lib/registers/depreciation = 25 tests, 25 pass",
+    "A whole packages/db run was started and stopped at 945 cells after confirming the two reds above; it additionally surfaced `not ok 765 - delta contract requires a fresh disposable DB` (delta-catalog-phase.mjs:654, verified_deployed 8 !== 7), which that cell's own name attributes to a long-lived rig rather than to this branch - unverified either way, and not attributed to lane 04"
+  ],
+  "unverified": [
+    "No from-scratch chain (0001 -> 0251) was run; RIG.md forbids a second from-scratch chain on a lane cluster. Every prestate pin in the five migrations is therefore taken on trust from the lane rig's catalog.",
+    "No browser walk was run: `next build` fails on the inherited apps/web/components/documents/document-kind-dialog.tsx defect.",
+    "The whole packages/db suite was not run to completion by this review (stopped at 945 of ~5223 cells); the three reds it had reached are each reproduced above by a focused run."
+  ],
+  "summary": "Five tickets, all implemented against the newest brief (the 2026-09-20 owner rulings on #977 and #979 were correctly taken as the contract). #973 and #977 are clean on this axis. Three findings need a fix before integration: #979 inverted clara.get_depreciation_authority's contract without recutting the regression cell that pins the old one, so p651.authority.retire_unsigned is red on the branch (blocker); #972's watermark predicate introduced a session-clock read into the birth trigger and left two pinned clock-roster censuses red (major); #976's fold moved both completion refusals behind _reserve_op and the client/asset walls, reversing a property 0227 documented as deliberate and deleting the sentence that said so (major). Two minors and two notes besides."
+}

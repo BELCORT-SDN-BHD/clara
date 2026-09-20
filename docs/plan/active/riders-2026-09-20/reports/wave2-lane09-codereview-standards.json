@@ -1,0 +1,94 @@
+{
+  "axis": "standards",
+  "lane": "wave2-lane09",
+  "fixed_point": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "commits_command": "git log 23cfad947b5598214168ba9c43d391b4e16aa745..HEAD --oneline",
+  "tickets": [839, 880, 905, 885],
+  "verification_performed": [
+    "Read WORK-ORDER.md, RIG.md, AGENTS.md, CONTEXT.md, .claude/skills/code-review/SKILL.md, .claude/skills/tdd/SKILL.md + tests.md + mocking.md before reviewing.",
+    "Read migrations 0265, 0266, 0267 and 0268 in full (headers, prestate, body, tail).",
+    "Re-measured live catalog state on the lane rig (clara_l09, 127.0.0.1:55749) via WSL psql: prosrc of clara._work_question_record matches the migration's committed body; signature/ACL/owner/security-mode of clara.list_accounting_work match 0267's tail claims exactly ({clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner}, security invoker, owner clara_fn_owner); the three new #885 functions exist and are EXECUTE-unreachable by clara_authenticated and clara_runtime.",
+    "Re-ran (focused invocation, full preintegration-gate chain from packages/db/package.json, against clara_l09): work-question-admitted-basis.test.mjs (3/3 pass), work-source-correction-supersede.test.mjs (6/6 pass, matches EXPECTED_CELLS), work-list.test.mjs (32/32 pass, includes new wl.29/wl.30/wl.31/wl.32), client-work-pack.test.mjs (13/13 pass), rig-docs-source-revision.test.mjs (16/16 pass, includes rewritten p646.question.version and p646.horn_a.no_work).",
+    "Ran the new web unit test file components/work/work-question-panel.test.tsx directly (5/5 pass).",
+    "Read every touched web file's diff (WorkCards.tsx, work-restate.tsx, work-question-panel.tsx, work-question-form.tsx, accounting-work-list.tsx, use-work-list.ts, questions.ts, client-work-attention.tsx, client-work-pack.ts, work-list-url-state.ts, work-list.ts, document-kind-dialog.tsx, home-board-walk.spec.ts) and the shared-file diffs (en.json, test/manifest.txt, packages/db/tests/rig-meta.mjs, packages/db/package.json)."
+  ],
+  "findings": [
+    {
+      "id": "STD-1a",
+      "ticket": 839,
+      "severity": "major",
+      "category": "documentation-standard",
+      "rule": "WORK-ORDER.md rule 9 (\"Docs in the same commits: the module README your change affects\"); packages/db/README.md's own established convention of one section per meaningful migration",
+      "file": "packages/db/README.md",
+      "title": "Migration 0265 (#839) has no packages/db/README.md section",
+      "evidence": "`git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD -- packages/db/README.md` shows only one hunk, added under the existing \"Document source revision (#646, migration 0217)\" heading, and it documents ONLY migration 0268/#885. `grep -n \"0265\\|0266\\|0267\" packages/db/README.md` returns nothing. Every other migration through the base commit has its own README section, e.g. line 852 \"### A source correction retires the Work waiting on it (#885, migration 0268)\", line 991 \"### Bounded knowledge retrieval... (#658, 0230)\", line 1621 \"## 0234 — the platform's legal enforcement mode (#1008)\". 0265 recuts `clara._work_question_record` (a shared, widely-consumed projection) and is the kind of change this README otherwise always narrates.",
+      "required_fix": "Add a short README section (or a paragraph under an existing one) for migration 0265: what it changes, why the body-only recut needed no new cohort, and the deploy-order argument the migration header already contains."
+    },
+    {
+      "id": "STD-1b",
+      "ticket": 880,
+      "severity": "major",
+      "category": "documentation-standard",
+      "rule": "WORK-ORDER.md rule 9; packages/db/README.md's own per-migration convention",
+      "file": "packages/db/README.md",
+      "title": "Migration 0266 (#880) has no packages/db/README.md section",
+      "evidence": "Same diff as STD-1a: no README text anywhere names 0266 or #880. 0266 widens two granted, human-facing doors (`clara.list_accounting_work`, `clara.get_accounting_work_row`) with a new claim-label projection — the same class of change 0203/#809 got documented for elsewhere in this README's precedent, but this widen of the same pair got none.",
+      "required_fix": "Add a README paragraph for 0266: the additive claim_id/claimant_label projection, the LEFT JOIN safety argument (unique work_id), and that clara.get_work_claim_origin is untouched."
+    },
+    {
+      "id": "STD-1c",
+      "ticket": 905,
+      "severity": "major",
+      "category": "documentation-standard",
+      "rule": "WORK-ORDER.md rule 9; packages/db/README.md's own per-migration convention",
+      "file": "packages/db/README.md",
+      "title": "Migration 0267 (#905) has no packages/db/README.md section",
+      "evidence": "Same diff as STD-1a/1b: no README text names 0267 or #905, even though it is a drop-and-recreate that changes `clara.list_accounting_work`'s signature (adds `p_receipt_since`/`p_receipt_until`) — exactly the kind of signature-changing precedent (0202/#770's `p_work` widen) this README documents elsewhere.",
+      "required_fix": "Add a README paragraph for 0267: the receipt-dated bound, the drop-and-recreate rationale (parameter addition cannot be a plain CREATE OR REPLACE), and that get_accounting_work_row is untouched."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 839,
+      "severity": "minor",
+      "category": "duplicated-code",
+      "rule": "Smell baseline — Duplicated Code (Fowler, Refactoring ch.3)",
+      "file": "apps/web/components/work/work-question-panel.tsx",
+      "line": 179,
+      "title": "The RestateWorkPanel mount block is duplicated verbatim (in shape) in two files",
+      "evidence": "work-question-panel.tsx:179-186 mounts `<RestateWorkPanel work={{ id: data.record.work_id, basis: data.record.basis ?? null }} clientId={data.record.client_id} session={sessionTokenAccessor} onRestated={reload} />`; apps/web/components/parts/WorkCards.tsx's `WorkQuestionCard` (around line 332) mounts the identical shape: `<RestateWorkPanel work={{ id: data.record.work_id, basis: data.record.basis ?? null }} clientId={part.client_id} session={sessionTokenAccessor} onRestated={reload} />`. Both exist because WorkQuestionCard bypasses WorkQuestionPanel and mounts WorkQuestionForm directly, so `offerRestate` cannot reach it — but the fix duplicates the mounting shape rather than sharing it.",
+      "required_fix": "Extract a small shared helper (e.g. a `<RestateForQuestionRecord record clientId onRestated/>` wrapper, or a hook returning the props) that both call sites use, so a future change to how a WorkQuestionRecord maps onto RestateWorkPanel's props cannot drift between the two copies. Judgement call, not a hard violation — two call sites of a four-line JSX shape is a small duplication."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 885,
+      "severity": "minor",
+      "category": "test-quality",
+      "rule": ".claude/skills/tdd/SKILL.md — \"One slice at a time\" / \"Red before green\"; WORK-ORDER.md rule 4",
+      "file": "packages/db/migrations/0268_work_source_correction_supersede.sql",
+      "title": "Two of the four terms of clara._source_corrected_work's rule were implemented before a dedicated red test existed for them",
+      "evidence": "Commit 63358cd19 (\"feat(db): #885 a document-fact correction cancels and re-admits...\") lands the COMPLETE four-term rule in `clara._source_corrected_work` — pending question, cites this document, NO committed receipt (term c), and restatable status (term d) — backed by only 2 test cells (w885.supersede.cancels, w885.answer.superseded), neither of which exercises terms (c) or (d). The two carve-out cells that actually exercise (c) and (d) — w885.posted.untouched and w885.terminal_residue.ignored — are added only in the following commit, 48c9e6387 (\"test(db): #885 the three carve-outs...\"), with no accompanying SQL change. So the SQL for those two carve-outs existed before a red test drove it, which is implementation-ahead-of-test at the level of two of the rule's four conjuncts, inside an otherwise correctly-sliced ticket.",
+      "required_fix": "None required retroactively — both terms are now covered (verified green: 6/6 in work-source-correction-supersede.test.mjs, re-run on the rig). Flagging as a process note for future migrations of this shape: land each conjunct of a multi-term predicate behind its own red test before writing it, or say explicitly in the commit message that the whole predicate was modelled on an already-proven precedent (clara.list_source_dependents' work_questions arm) and reviewed rather than test-driven per term. This is a judgement call, not a hard violation — the commit message does claim a vacuity check per new cell (\"each proven non-vacuous by deliberately breaking the one rule and watching it go red\"), and all six cells reproduce green on re-run."
+    },
+    {
+      "id": "STD-4",
+      "ticket": 905,
+      "severity": "note",
+      "category": "commit-convention",
+      "rule": "WORK-ORDER.md rule 2 (\"One ticket = its own commits, whose messages name it... every commit message ends with Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\")",
+      "file": "(commit metadata)",
+      "title": "One commit in the lane's history departs from the lane's own commit-message convention",
+      "evidence": "Commit 9df3f0df5, \"fix(web): unblock the build — SelectValue's kind roster used the wrong constant\", carries no ticket number in its subject line (the commit body says \"Pre-existing bug, unrelated to #905\") and ends with `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` plus a `Claude-Session:` trailer, not the lane's `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` every other commit in this lane carries. The fix itself is correct, one line, and necessary (it unblocked `next build`'s TypeScript pass, which was blocking every e2e walk in the worktree including #905's own gate), so this is a process/attribution note rather than a code-quality issue.",
+      "required_fix": "None functionally required. For future lane hygiene: a cross-cutting, non-ticket build-unblock commit should still carry the lane's own commit-message and attribution convention, or be called out explicitly as an out-of-band fix in the ticket report (it is: 905's own report should say so)."
+    }
+  ],
+  "positive_notes": [
+    "All four migrations (0265-0268) follow the house shape precisely: statement_timeout/lock_timeout set first, prestate pins measured on the live rig (re-measured independently and confirmed matching), body, tail census re-reading the committed catalog, owner/SECURITY DEFINER-or-INVOKER/search_path/ACL all explicitly re-asserted and verified unchanged where claimed.",
+    "0268's lock-order argument (Work rungs before clara.documents, to avoid an ABBA against clara._lock_document_binding) is asserted positionally in the tail (position() comparisons) and independently reproduces green.",
+    "The #957 redo of 0268 (commit 4dc9acac4, comment-only) is exactly the documented exception in WORK-ORDER.md's migrations rule (own unmerged migration, highest applied version, recorded as done) — not a violation of 'never edit an applied migration'.",
+    "TDD vertical-slicing is otherwise well observed: each db feat commit pairs its migration with its own test file in the same commit, each web feat commit is its own ticket-scoped commit, and the new work-question-panel.tsx logic was deliberately extracted into a pure, exported `offersRestateFor` function specifically so a test could reach it without mocking the Supabase session seam.",
+    "Shared files (CONTEXT.md, en.json, apps/web/test/manifest.txt, packages/db/tests/rig-meta.mjs, packages/db/package.json) were all touched minimally and at sorted/logical positions, consistent with the multi-lane shared-file rule.",
+    "The in-file migration-frontier skip helpers added to work-list.test.mjs and client-work-pack.test.mjs (gateClaimLabel/gateReceiptWindow) are a reasonable, precedented substitute for a global preintegration-gate.mjs module when the ticket only widens an EXISTING shared test file rather than adding a new one."
+  ],
+  "summary": "Standards axis: no hard violations of a documented repo standard were found in the SQL or TypeScript logic itself — all four migrations reproduce their prestate/tail claims live on the rig and every re-run test file is green. The one repeated, citable rule violation is documentation: three of the four tickets' migrations (0265/#839, 0266/#880, 0267/#905) are missing the packages/db/README.md section that WORK-ORDER.md rule 9 requires and that this README's own convention gives every other migration through the base commit. One small Duplicated Code smell (a four-line RestateWorkPanel mount repeated in two files) and one TDD process note (two carve-out terms implemented before their own red test, though later covered and verified) are judgement calls, not blockers. One commit departs from the lane's commit-message/attribution convention but is otherwise a correct, necessary, disclosed fix."
+}

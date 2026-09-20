@@ -1,0 +1,156 @@
+{
+  "axis": "SPEC",
+  "lane": "wave2-lane09",
+  "branch": "riders/w2-lane09",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\659",
+  "base": "23cfad947b5598214168ba9c43d391b4e16aa745",
+  "diff_command": "git diff 23cfad947b5598214168ba9c43d391b4e16aa745...HEAD",
+  "tickets": [839, 880, 905, 885],
+  "spec_sources": [
+    "gh issue view 839 --comments (Agent Brief 2026-09-17 + sequencing note 2026-09-19)",
+    "gh issue view 880 --comments (Agent Brief 2026-09-17)",
+    "gh issue view 905 --comments (Agent Brief 2026-09-17)",
+    "gh issue view 885 --comments (Agent Brief 2026-09-18 + owner ruling 2026-09-20)"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    {
+      "command": "node --test --test-concurrency=1 $GATES tests/work-question-admitted-basis.test.mjs",
+      "result": "3 pass / 0 fail"
+    },
+    {
+      "command": "node --test --test-concurrency=1 $GATES tests/work-source-correction-supersede.test.mjs tests/rig-docs-source-revision.test.mjs tests/work-list.test.mjs tests/client-work-pack.test.mjs",
+      "result": "67 pass / 0 fail / 0 skipped (wl.30-32 and all six w885 cells green)"
+    },
+    {
+      "command": "node scripts/run-tests.mjs (apps/web whole unit suite)",
+      "result": "4762 tests / 4760 pass / 0 fail / 2 skipped - confirms #885's report and refutes #839/#880's inherited 20-fail baseline, which commit 9df3f0df5 cleared"
+    },
+    {
+      "command": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3580 CLARA_E2E_NEXT_PORT=3581 CLARA_E2E_RUNTIME_PORT=3582 pnpm --filter @clara/web e2e home-board-walk",
+      "result": "27 passed (1.3m)"
+    }
+  ],
+  "findings": [
+    {
+      "id": "L09-SPEC-01",
+      "ticket": 885,
+      "severity": "major",
+      "kind": "implemented-wrongly",
+      "title": "The new converge sentence asserts a source correction for every superseded question, including a plain #721 restatement",
+      "evidence": "Ticket line (Agent Brief 2026-09-18, Key interfaces): \"The Work question record: closed with a superseded reason; `answer_work_question` refuses it by that reason.\" The 0268 arm is deliberately generic - packages/db/migrations/0268_work_source_correction_supersede.sql:712: `when i.status = 'cancelled' and w.superseded_by is not null then 'superseded'` - and clara.restate_accounting_work (0200:612) sets superseded_by on ANY human restatement. The web copy added for that one reason states a fact: apps/web/messages/en.json WorkQuestion.convergeSuperseded = \"The source this question was asked about has been corrected, so this Work was replaced...\", reached from apps/web/components/work/work-question-form.tsx:911 `case \"superseded\": return \"convergeSuperseded\"`. A bookkeeper who restates a Work from the Work detail (#721, nothing corrected) and then answers its old question is told a document was corrected. The implementer's own comment (apps/web/lib/work/questions.ts:144-148) records that the reason also fires \"for a #721 restatement\", and the report lists the #721 path under \"Anything unverified\" - but the sentence was written as if the source-correction case were the only one.",
+      "required_fix": "Either word the sentence neutrally (\"This Work was replaced by a newer one; open it to continue\"), or have the door distinguish the two retirement causes (the correcting path already mints a source_corrected:<revision>:<work> op key it could surface) and keep the corrected-source wording for that arm only."
+    },
+    {
+      "id": "L09-SPEC-02",
+      "ticket": 885,
+      "severity": "major",
+      "kind": "implemented-wrongly",
+      "title": "The replacement Work is admitted on the OLD basis, not \"the corrected facts\" the AC and the owner's ruling name",
+      "evidence": "Ticket line (AC1, Agent Brief 2026-09-18): \"a new Work is admitted with the corrected facts\". Owner's ruling 2026-09-20: \"every Work parked on a question about that document is cancelled and re-admitted on the corrected facts\". What the branch does: packages/db/migrations/0268_work_source_correction_supersede.sql:358-359 calls clara.restate_accounting_work(v_id, p_actor, v_key, w.basis, w.basis_origin, w.source_refs, v_model, v_key) - the predecessor's own basis row, verbatim. The cell that pins it is named for the deviation: \"w885.supersede.cancels: ... admits a successor on the same basis\" (re-run green here). The basis is not an abstract instruction: packages/runtime/workflows/claraWork.v1.tools.ts:83-91 (journalBasisSchema) is posting_date + memo + currency + lines of integer cents, and the run must echo it or be refused basis_mismatch at commit - so a Work whose basis_origin is clara_interpreted (derived from the very document that was corrected) is re-admitted carrying, and will post, the pre-correction figures. The migration header (0268:49-53) argues the choice (\"a basis is what a human asked for\"); the report repeats it. Neither escalated the divergence from the AC's and the ruling's own words, and packages/db/tests/rig-docs-source-revision.test.mjs now asserts with the message \"the Work points at the successor admitted on the corrected reading\", which is not what the code does.",
+      "required_fix": "Put the choice to the owner before integration. If re-deriving is out of scope, the AC and the ruling text must be amended and the assertion message corrected; if it is not, a clara_interpreted basis has to be re-derived from the corrected facts, or the successor admitted in a state that forces a re-read before posting."
+    },
+    {
+      "id": "L09-SPEC-03",
+      "ticket": 839,
+      "severity": "major",
+      "kind": "implemented-wrongly",
+      "title": "Two restate controls can render for the same Work in the same rail transcript - AC3's \"no duplicate restate UI\" was checked only against the Work detail",
+      "evidence": "Ticket line (AC3): \"No second restate door or duplicate restate UI exists.\" The diff mounts RestateWorkPanel twice in one file: apps/web/components/parts/WorkCards.tsx:192 (WorkAcceptedCard -> <WorkQuestionPanel ... offerRestate />, gated on `parked = work?.status === \"awaiting_input\"`, line 125) and apps/web/components/parts/WorkCards.tsx:335-342 (WorkQuestionCard -> its own <RestateWorkPanel>, gated on offersRestateFor(data.record, true), i.e. the same work_status === \"awaiting_input\"). The two cards are documented as living in the SAME conversation: apps/web/lib/parts/catalog.ts:337-341 - \"#629: the shared question, offered inside the conversation that started the Work\" - and WorkCards.tsx:90-92 - work_accepted \"IS durable ... so it is the one card that can still FIND the question later\", beside the live-stream work_question. Both gates are true at exactly the same moment (a Work parked on a pending question), and apps/web/components/parts/PartRenderer.tsx:307 renders both kinds. The report's AC3 evidence is only that work-detail.tsx was not edited and that offersRestateFor defaults to false; no cell or walk drives a transcript carrying both parts. The code comment at WorkCards.tsx:192 reasons about the Work detail only (\"this card is never mounted on the Work detail itself\") and does not consider its sibling card.",
+      "required_fix": "Prove the two parts cannot co-render (a cell rendering a transcript with both a work_accepted and a work_question part for one Work), or drop one of the two mounts - most cheaply, leave WorkQuestionCard's own mount out and let the durable WorkAcceptedCard own the control."
+    },
+    {
+      "id": "L09-SPEC-04",
+      "ticket": 839,
+      "severity": "major",
+      "kind": "missing-or-partial",
+      "title": "AC2 is not met at the seam it names: no cell renders a rail card and finds the restate control",
+      "evidence": "Ticket line (AC2): \"A cell proves the rail's affordance offers the restate action and that submitting it reaches clara.restate_accounting_work.\" What exists: apps/web/components/work/work-question-panel.test.tsx (5 cells) tests the PURE predicate offersRestateFor, no render; apps/web/components/work/work-restate.test.tsx's new cell mounts RestateWorkPanel DIRECTLY with an injected restate door. Neither WorkAcceptedCard nor WorkQuestionCard is rendered in any cell that asserts a restate control appears, and no e2e walk exercises restate on any surface. The report concedes this under \"Anything unverified\" (\"the render branch itself cannot be driven to 'shows restate' here\") and still records AC2 as \"done, at the seam this harness can reach\". The blocking dependency named (getSessionIdentity()) is real for WorkQuestionPanel, but WorkQuestionCard's restate branch depends only on data.record, so at least that half was reachable with the same useHydratedPart double the file's own sibling cells already use.",
+      "required_fix": "Add one render cell over WorkQuestionCard (the branch with no session dependency) asserting the restate control is present for an awaiting_input record with a basis and absent otherwise; state plainly that the WorkAcceptedCard/WorkQuestionPanel half stays unproven, rather than marking AC2 done."
+    },
+    {
+      "id": "L09-SPEC-05",
+      "ticket": 880,
+      "severity": "major",
+      "kind": "missing-or-partial",
+      "title": "The claim label reaches only the narrow-viewport compact line; at md and up the Work list shows no kind label at all",
+      "evidence": "Ticket line (Desired behavior): \"The list surfaces the claim label for every claim row on the current page through one batched read, or through an additive projection...\" The only render site added is apps/web/components/work/accounting-work-list.tsx:474, inside <p className=\"text-xs text-muted-foreground md:hidden\"> (line 471) - the block whose own comment reads \"THE COLUMNS THE NARROW TABLE WITHDRAWS ... Hidden at `md` and up, where they have their own columns\". The table header (lines 366-377) has columns for Work, Client, Status, Origin, Entered-by and Submitted - there is NO purpose/kind column, so at the default desktop width the claim label (like the purpose label before it) is never rendered. The cell that is supposed to prove the label appears asserts on h.text() in jsdom (accounting-work-list.test.tsx, \"a staff expense claim row shows its claimant label on the compact line\"), where Tailwind's md:hidden has no effect, so it passes without proving visibility. The db half is sound and stronger than asked (zero extra round trips; wl.29 re-run green).",
+      "required_fix": "Render the kind label where a desktop reader sees it (a kind column, or beside the memo in the always-visible cell), or get the owner's agreement that the Work list is mobile-only for this fact - and either way say so in the report instead of letting a jsdom text scan stand for visibility."
+    },
+    {
+      "id": "L09-SPEC-06",
+      "ticket": 885,
+      "severity": "minor",
+      "kind": "missing-or-partial",
+      "title": "The affected-question rule implements the source-refs half of the brief and drops the evidence-links half without recording it",
+      "evidence": "Ticket line (Desired behavior, 2026-09-18): \"every Work parked on ask_question whose basis cites that document (through its source-document ids or evidence links)\". clara._source_corrected_work (0268:256-278) tests only jsonb_array_elements(w.source_refs) x where x->>'kind' = 'document' and x->>'document_id' = p_document. There is no clara.entry_evidence_links term. The choice is defensible (a Work with posted evidence links normally holds a committed receipt, which carve-out (c) already excludes), but the report's \"what was deliberately left\" section does not name the evidence-links half at all - it presents the rule as the full write-side twin of clara.list_source_dependents.",
+      "required_fix": "State the omission in the report with the argument for it (evidence links imply a committed receipt, which (c) already carves out), so the integrator is not left to discover it from the SQL."
+    },
+    {
+      "id": "L09-SPEC-07",
+      "ticket": 885,
+      "severity": "minor",
+      "kind": "missing-or-partial",
+      "title": "No source_corrected token is durable on the cancellation itself, only inside two derived key strings",
+      "evidence": "Ticket line (AC1): \"the old Work is cancelled with source_corrected\". clara.cancel_accounting_work(uuid,uuid,text) takes no reason argument, and the work.cancelled event it appends (0199:354-359) carries work, from_status, author, outcome ('superseded') and superseded_by - no reason. The only durable spellings of source_corrected are the successor's intent_key and the restatement's op key (both the literal source_corrected:<revision>:<work>, 0268:356-357) plus the superseded_work array on the correction's own receipt and audit row (0268:621, 0268:629). So a feed row, or anyone reading clara.accounting_work, can only recover WHY a Work was retired by string-parsing an intent key. The report presents AC1 as done on the strength of the receipt array.",
+      "required_fix": "Name this in the report as the shape AC1 actually took (the reason is a derived key, not a first-class cancellation reason), so the owner can decide whether a reason column or event key is owed before #840's feed surface depends on it."
+    },
+    {
+      "id": "L09-SPEC-08",
+      "ticket": 885,
+      "severity": "minor",
+      "kind": "missing-or-partial",
+      "title": "\"Needs-you shows the replacement\" is in the brief and is nowhere in the evidence",
+      "evidence": "Ticket line (Desired behavior, 2026-09-18): \"the old question closes as superseded; Needs-you shows the replacement.\" The diff touches no Needs-you surface (apps/web/components/firm/work-question-affordance.tsx and lib/firm/needs-you.ts are unchanged in git diff 23cfad94...HEAD), no cell reads the review queue after a correction, and the report's AC table does not carry the line at all. In practice the successor is admitted queued with no pending question, so at the moment of correction Needs-you shows nothing new and the old row simply disappears.",
+      "required_fix": "Either add the evidence (a cell reading clara.list_review_queue after a correction, or a stated argument that the successor's own re-ask is what satisfies it) or record the line as deliberately left, with the reason."
+    },
+    {
+      "id": "L09-SPEC-09",
+      "ticket": 839,
+      "severity": "minor",
+      "kind": "missing-or-partial",
+      "title": "One of the two files the ticket's newest comment calls \"the rail's work-question affordance\" was left at the default",
+      "evidence": "Ticket comment of 2026-09-19 (the newest on #839, and the one that narrows where the work goes): \"The rail's work-question affordance is apps/web/components/firm/work-question-affordance.tsx:174 and apps/web/components/parts/WorkCards.tsx:191, both mounting the shared components/work/work-question-panel.tsx.\" Only the second got offerRestate; work-question-affordance.tsx is unchanged (git diff 23cfad94...HEAD -- apps/web/components/firm/work-question-affordance.tsx is empty) and keeps the default offerRestate=false. The implementer's reason is sound on its own terms (that file's header calls itself \"#629 (B4) - Needs-you's tenth row kind\", which is not the rail) and is recorded as follow-up 1 in the report, but the ticket's own newest text names both files and the report resolves the conflict unilaterally.",
+      "required_fix": "Flag the conflict to the owner as one line (\"the ticket names two files as 'the rail'; one of them is Needs-you - turn restate on there too, or amend the ticket\"), since turning it on is the single offerRestate prop the report already describes."
+    },
+    {
+      "id": "L09-SPEC-10",
+      "ticket": 839,
+      "severity": "minor",
+      "kind": "implemented-wrongly",
+      "title": "WorkQuestionCard's restate mount ignores the card's own addressability gate and can render the /clients//work/<id> link the file refuses to build",
+      "evidence": "apps/web/components/parts/WorkCards.tsx:304 computes `const addressable = usableId(part.work_id) && usableId(part.client_id);` and line 322 uses it to DROP the card's own link. The new restate mount (lines 335-342) is gated only on offersRestateFor(data.record, true) and passes clientId={part.client_id} straight through. apps/web/lib/parts/catalog.ts:356-363 documents the empty-client_id fixture explicitly (\"the card drops its link rather than building /clients//work/...\"). On that shape, an accepted restatement renders RestateOutcome's <Link href={workDetailHref(clientId, result.workId)}> (apps/web/components/work/work-restate.tsx:149) with an empty client segment - the exact route the card exists to refuse.",
+      "required_fix": "Add `addressable &&` to the WorkQuestionCard restate condition, or pass data.record.client_id, which the hydrated record carries and the panel's own sibling mount already uses."
+    },
+    {
+      "id": "L09-SPEC-11",
+      "ticket": 905,
+      "severity": "note",
+      "kind": "not-asked-for",
+      "title": "An unrelated file is fixed on the lane branch in its own commit",
+      "evidence": "9df3f0df5 \"fix(web): unblock the build - SelectValue's kind roster used the wrong constant\" changes apps/web/components/documents/document-kind-dialog.tsx, which no lane-09 ticket names. The change itself is right (DOCUMENT_KINDS was never imported; CLASSIFIABLE_DOCUMENT_KINDS is the roster the sibling SelectContent uses) and it is what makes the whole web suite green here (re-run: 4762 tests / 4760 pass / 0 fail, against #839's and #880's recorded 20 fails) and what lets #905's own e2e gate build at all (re-run: home-board-walk 27 passed). It is still a hunk outside every ticket in this lane, on a file lane 03's wave2-lane03-ticket846.md also reports; two lanes fixing it independently is a merge collision.",
+      "required_fix": "Tell the integrator this hunk exists and let one lane own it - the commit is already separate and clearly labelled, so it can be dropped or kept wholesale."
+    },
+    {
+      "id": "L09-SPEC-12",
+      "ticket": 885,
+      "severity": "note",
+      "kind": "implemented-wrongly",
+      "title": "The migration header claims superseded_work reaches the document.fact_revised reader contract; it does not",
+      "evidence": "packages/db/migrations/0268_work_source_correction_supersede.sql:107-108: \"...and by the superseded_work array this file adds to the revision's own receipt, audit row and document.fact_revised reader contract.\" The event call at 0268:599-603 builds jsonb_build_object('revision_id', ..., 'field_path', ..., 'extraction_id', ..., 'observed_version', ..., 'facts_version', ..., 'source', 'human') - no superseded_work key, and it could not carry one: the file deliberately appends the event BEFORE the supersession runs (0268:605-613). Only the audit row (0268:621) and the _finish_op receipt (0268:629) carry it.",
+      "required_fix": "Correct the header sentence to name the receipt and the audit row only."
+    }
+  ],
+  "verified_correct": [
+    "#839 AC1: w839.basis.pending/settled/pending-address re-run green (3/3). The record's key set is pinned at exactly 0180's twenty plus basis, and both delegating doors are pinned byte-identical in 0265's tail.",
+    "#880 AC1/AC2/AC3: wl.29 resolves both claim fields from ONE page read (zero extra round trips, stronger than \"at most one\"); plain rows carry nulls; work-detail.tsx and staff-expense-claim-reads.ts are untouched in the diff.",
+    "#905 AC1/AC2/AC3/AC4: wl.30, wl.31, wl.32 re-run green, wl.1-wl.29 unchanged and green. A Work with no committed receipt is excluded by the NULL comparison rather than dated by something else.",
+    "#905 AC5: p650.pack.recent_success_drilldown rewritten to assert set equality and re-run green; recentSuccessListBasis is deleted from en.json and the tile; home-board-walk's drilldown leg re-run green (27 passed).",
+    "#905 out-of-scope honoured: no visible date control added to the filter bar (work-list-filters.tsx is not in the diff); the pack's seven-day window and preview limit are untouched.",
+    "#885 AC2/AC3: w885.unrelated.untouched and w885.posted.untouched re-run green, each with a recorded non-vacuity control; the committed-receipt carve-out is load-bearing on its own.",
+    "#885 AC4 at the level a lane can reach: w885.feed.successor proves exactly one work.cancelled row with outcome='superseded' and the successor id, ordered after the document.fact_revised that caused it.",
+    "#885 AC5: p646.question.version is rewritten in place (16 cells, EXPECTED_CELLS unchanged) and asserts the ruling above the 0268 frontier; re-run green.",
+    "#885 owner's 2026-09-20 implementation preference honoured: the cancel-and-admit runs inside clara.revise_document_fact's own transaction; node scripts/check-frozen-workflows.mjs shows no manifest diff and no frozen closure is touched.",
+    "#885: the #658 drift banner is untouched, as the ruling requires."
+  ]
+}
