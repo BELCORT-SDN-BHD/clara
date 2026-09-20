@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { CELL_BUDGET, grantCellBudget, settleForScan, watchReactFaults } from "./helpers";
+import { CELL_BUDGET, grantCellBudget, settleForScan, signIn as sharedSignIn, watchReactFaults } from "./helpers";
 import { MEMBERS_LIFECYCLE } from "./members-lifecycle-mock.mjs";
 
 /**
@@ -39,13 +39,13 @@ import { MEMBERS_LIFECYCLE } from "./members-lifecycle-mock.mjs";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
+/** SIGN IN AND LAND — the setup every cell in this walk repeats, and after #851 the sign-in half
+ *  is the SHARED helper's (`helpers.ts`, #804) rather than a fourteenth copy of the login form.
+ *  The shared helper carries the `CELL_BUDGET.signIn` grant, the explicit post-login wait and the
+ *  landmark proof this copy used to spell for itself; what remains here is this lane's own
+ *  destination — the members register — which is not a sign-in at all. */
 async function signInToMembers(page: Page): Promise<void> {
-  grantCellBudget(CELL_BUDGET.signIn);
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(MEMBERS_LIFECYCLE.email);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await sharedSignIn(page, MEMBERS_LIFECYCLE.email);
   await page.goto("/settings/members");
   await expect(page.getByRole("heading", { name: "Everyone with access", level: 2 })).toBeVisible();
 }

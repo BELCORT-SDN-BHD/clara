@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 import { FIRM_SETUP_COOKIE } from "./firm-setup-mock.mjs";
 
 /**
@@ -43,23 +43,15 @@ const SETUP_URL = "/settings/setup";
  * below is not one: two full sign-ins and two server renders happen inside it, which is why the
  * describe carries its own 180s test budget. On a host running twelve worktree lanes at once, the
  * 5s per-assertion default turns a slow-but-correct convergence into a reported missing one — the
- * same reason `signInTo` above already takes 30s rather than 5.
+ * same reason the SHARED `signInTo` (#804, `helpers.ts`) names `CELL_BUDGET.signIn` for its own
+ * post-login wait rather than falling through to 5s. (#851 retired this file's local copy of that
+ * helper; the budget reasoning it carried lives in `helpers.ts` now.)
  */
 const CONVERGED = { timeout: 30_000 };
 
 async function arm(context: BrowserContext): Promise<void> {
   const origin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
   await context.addCookies([{ name: FIRM_SETUP_COOKIE, value: "armed", url: origin }]);
-}
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // A GENEROUS TIMEOUT, not the 5s default: this host runs several rigs at once and the
-  // post-sign-in navigation is a full server render.
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
 }
 
 async function settle(page: Page): Promise<void> {

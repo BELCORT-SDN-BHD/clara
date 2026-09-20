@@ -11,6 +11,13 @@ const nextPort = process.env.CLARA_E2E_NEXT_PORT ?? "3101";
 
 export default defineConfig({
   testDir: "./e2e",
+  // #851 — THE BROWSER WALKS ONLY. This directory holds two runners' files: `*.spec.ts` is
+  // Playwright's, `*.test.ts` is `node:test`'s (declared in `test/manifest.txt`, run by
+  // `scripts/run-tests.mjs`). Playwright's stock `testMatch` is
+  // `**/*.@(spec|test).?(c|m)[jt]s?(x)` — it takes BOTH — so a filterless run `import`-ed the
+  // node:test files too and their assertions ran inside the Playwright process, reported by
+  // nobody. Narrowing here is the fix; `e2e/spec-discovery.test.ts` is the cell that holds it.
+  testMatch: /.*\.spec\.ts$/,
   outputDir: "./e2e/.artifacts",
   // #804 — polls the HTTPS app origin's own `/login` (the origin the browser actually drives,
   // not only this file's own `webServer.url` probe of the internal Next port) until it genuinely

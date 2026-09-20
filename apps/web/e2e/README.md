@@ -10,6 +10,8 @@ pnpm --filter @clara/web e2e
 
 Always run it as `pnpm --filter @clara/web e2e`, never a bare `npx playwright test` or an IDE's own Playwright runner: those invoke [`serve-built.mjs`](serve-built.mjs) directly and skip the build, silently serving a stale `.next/` (measured on the #648 fix round: a 19-minute-stale build produced a false failure with no other symptom). `serve-built.mjs` logs the `BUILD_ID` it is about to serve and its age at startup so a stale run is visible rather than silent.
 
+**Two runners share this directory.** `*.spec.ts` is Playwright's; `*.test.ts` is `node:test`'s, declared in [`../test/manifest.txt`](../test/manifest.txt) and run by `pnpm --filter @clara/web test`. Playwright's stock `testMatch` takes both suffixes, so until #851 a filterless run also `import`-ed the `node:test` files and executed their assertions inside the Playwright process, where no reporter ever read them — a broken census assertion printed `not ok` into that stream and the run still exited 0. `playwright.config.ts` now pins `testMatch: /.*\.spec\.ts$/`, and [`spec-discovery.test.ts`](spec-discovery.test.ts) holds it with Playwright's stock pattern re-typed as its vacuity control.
+
 ## Fixture boundary
 
 The default suite uses [`serve-built.mjs`](serve-built.mjs). The browser and production bundle are real; Supabase, PostgREST responses, Stripe, and most runtime responses are deterministic local fixtures. The suite is suitable for route behavior, client state, accessibility, responsive layout, same-origin proxying, and request-shape checks. It does not prove live RLS, a deployed workflow, Cloudflare streaming, mail delivery, Stripe, or production configuration.
@@ -29,6 +31,37 @@ pnpm --filter @clara/web e2e
 ```
 
 On PowerShell, set those environment variables before running the command.
+
+### Gating on one spec, and `--no-build` (#630, #851)
+
+Extra arguments reach Playwright, so a lane gates on the spec it touched instead of borrowing the whole suite's wall-clock:
+
+```sh
+pnpm --filter @clara/web e2e -- documents-viewer-walk
+```
+
+[`run.mjs`](run.mjs) rebuilds `@clara/web` before every invocation, which is right after an edit and pure cost when the same code is being measured twice. `--no-build` skips that build and runs Playwright against the `.next/` already on disk:
+
+```sh
+pnpm --filter @clara/web e2e -- --no-build documents-viewer-walk
+```
+
+- **A bare run is unchanged.** With the flag absent the build happens and the argument list Playwright receives is exactly what it always was — held by [`run-args.test.ts`](run-args.test.ts) against the historical expression itself, not against a copied list.
+- **The flag is the runner's own and never reaches Playwright.** [`run-args.mjs`](run-args.mjs) matches it by exact equality: `--no-builds` or a spec filter that merely reads like the flag is forwarded untouched, because a loose match would silently widen a one-spec gate into the whole suite (the failure #630 recorded for a stray `--`).
+- **Use it for a REPEAT measurement, never for the first run after an edit.** A stale `.next/` proves the app as it was. Three consecutive runs of one walk, or #804's five cold-start runs, are what it is for.
+
+### One sign-in, and the census that holds it (#804, #851)
+
+Every spec takes its sign-in from [`helpers.ts`](helpers.ts) — `signIn(page, email?)` or `signInTo(page, destination, email?)`. #804's fourth acceptance criterion said so in prose and, by 2026-09-17, fourteen spec files written during that wave had each grown a local copy again, several with a hand-picked 30 s or 60 s wait and one (`intake-batch-walk.spec.ts`) with regex locators and the wrong fixture password. Nothing went red.
+
+[`sign-in-census.test.ts`](sign-in-census.test.ts) is that rule with a cell behind it. It reads the login FORM — a Password fill plus the "Sign in" submit, in either the string or the regex spelling, and through a locator bound to a variable as readily as one chained in place — rather than a function name, so a local helper called anything at all is caught and a thin wrapper that delegates is not. The two halves must land **within ten lines of each other**: ANDed across a whole file they read a `/signup` password fill and a focus-only login button in some other cell as one sign-in, which is how `entry-faces-walk.spec.ts` came to hold an exception for something it does not do. Measured at `dd3f8f1d`, every one of the fourteen local sign-ins the fold retired put its two halves one line apart; that false positive put them 38 apart. Two short lists, each entry carrying its reason in source:
+
+| List | Entries | What it permits |
+|---|---|---|
+| `FORM_EXCEPTIONS` | `reports-download-walk.spec.ts` | driving the login form itself — the live-stack lane #804 named out of scope, whose `establishSession` signs a REAL user in against real Postgres |
+| `WRAPPERS` | `chat-parity-walk.spec.ts`, `documents-intake-walk.spec.ts`, `members-invite-walk.spec.ts` | declaring a sign-in function, provided it imports the shared helper |
+
+A third cell keeps both lists live: an entry that no longer offends fails, so the lists can shrink but cannot rot — it is what forced the `entry-faces-walk.spec.ts` entry out once the detector stopped mis-reading that file. A fourth is the vacuity control — the detector is driven over synthetic offenders (the variable-then-click shape, the indirected Password locator, the regex spellings, and a real form whose two acts are separated by a comment block) and over compliant, signup and two-different-forms sources, so an empty census is evidence rather than an instrument that never fired.
 
 ## One worker, one host (#706)
 

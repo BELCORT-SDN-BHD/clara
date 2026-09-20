@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signInTo } from "./helpers";
 import { DEP } from "./depreciation-mock.mjs";
 
 /**
@@ -34,17 +34,6 @@ const CLIENT = DEP.clientId;
 const LIST_URL = `/clients/${CLIENT}/registers?tab=fixedAssets`;
 const LOCKED_LIST_URL = `/clients/${DEP.lockedClientId}/registers?tab=fixedAssets`;
 const DETAIL_URL = `/clients/${CLIENT}/registers/assets/${DEP.assetId}`;
-
-async function signInTo(page: Page, destination: string, who = "owner@example.test"): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill(who);
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // A GENEROUS TIMEOUT, not the 5s default: this host runs several rigs at once and the
-  // post-sign-in navigation is a full server render. A short wait reports "the app did not sign
-  // in" for a page that had simply not finished, which is a false finding.
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
-}
 
 async function settle(page: Page): Promise<void> {
   await page.mouse.move(0, 0);

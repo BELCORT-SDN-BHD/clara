@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInTo } from "./helpers";
 import { CI } from "./counterparty-identity-mock.mjs";
 
 // #647 — journeys C13 (knowledge/identity), A6, C1, C4 and C6 at their identity seam:
@@ -25,17 +26,6 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 // redirect alone outran `toHaveURL`'s 5 s default. The a11y walk sets its own budget the same
 // way (e2e/a11y-finish-walk.spec.ts:77). A budget changes no assertion.
 test.describe.configure({ timeout: 150_000 });
-
-async function signInTo(page: Page, destination: string): Promise<void> {
-  await page.goto(`/login?next=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
-    { timeout: 60_000 },
-  );
-}
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();

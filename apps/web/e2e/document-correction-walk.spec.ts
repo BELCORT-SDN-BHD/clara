@@ -22,7 +22,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { CORR } from "./document-correction-mock.mjs";
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, signIn } from "./helpers";
 
 const DOCUMENTS_URL = `/clients/${CORR.clientId}/documents`;
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -38,18 +38,6 @@ test.beforeEach(async ({ request }) => {
   });
   expect(response.ok(), "the lane fixture must actually reset before each cell").toBe(true);
 });
-
-async function signIn(page: Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("owner@example.test");
-  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  // 20s, not the 5s default: the FIRST cell of a freshly started `next start` pays for the
-  // server's own cold compile of `/login` and the firm shell, which is a property of the harness
-  // rather than of this journey (measured: the first cell of this file timed out at 5s while every
-  // later one signed in in well under a second).
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: 20_000 });
-}
 
 /** Open the walk's document straight at an address — the shape a shared link takes. */
 async function openDocument(page: Page, tab?: "facts" | "accounting", document = CORR.doc): Promise<void> {
