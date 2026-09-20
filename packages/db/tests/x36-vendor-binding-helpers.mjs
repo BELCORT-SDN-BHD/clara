@@ -1,7 +1,18 @@
 // Migration 0028 -- shared rig fixtures for the vendor identity binding battery (task #36).
 // NOT a test file (does not end in `.test.mjs`): `node --test` ignores it. Split out of
-// x36-vendor-binding-dwell.test.mjs so the ceremony test (propose/sign/revoke,
-// x36-vendor-binding-ceremony.test.mjs) shares the exact same fixtures rather than drifting.
+// x36-vendor-binding-dwell.test.mjs so every vendor-binding battery shares the exact same
+// fixtures rather than drifting.
+//
+// #921 (2026-09-20/21, migration 0273): `propose`/`sign` below still call the REAL human doors
+// and now correctly THROW 42501 for `clara_authenticated` — `x36-vendor-binding-ceremony.test.mjs`
+// (which drove exactly that ceremony) is RETIRED (see its own removal note in
+// packages/db/README.md's "0273" section); `vendor-binding-write-doors-revoked.test.mjs` is
+// where the denial itself is proven. Every OTHER battery in this estate that used `propose`/
+// `sign`/`signLive` purely as a FIXTURE (to get a binding into 'proposed'/'live' so it could
+// test something else entirely) now uses the raw, door-bypassing builders below instead:
+// `insertHumanProposedBinding`, `signLiveDirect`, `declineDirect`. None of the three claims to
+// test a door — they mirror each door's exact historical write shape (measured from the live
+// 0154 bodies) so a fixture that needs a binding in a given state can still build one.
 
 import { randomUUID } from "node:crypto";
 import { rootQuery, withActor, humanQuery, namedCall, opk, ROLES } from "./rig-helpers.mjs";
@@ -174,12 +185,96 @@ export async function signLive(sub, opts = {}) {
 }
 
 /** Propose + sign a binding to 'live' over a fully-qualifying window. Returns the live binding's
- *  receipt. */
+ *  receipt.
+ *
+ *  #921: this used to drive the human propose/sign doors; both now throw 42501 for
+ *  `clara_authenticated` (migration 0273). Every caller of this helper only ever wanted a LIVE
+ *  binding to test something else against (the resolver's F1/F2/F3 matching) — never the
+ *  propose/sign ceremony itself — so it now builds the same row shape with the raw,
+ *  door-bypassing fixtures below. */
 export async function seedLiveBinding(w, tag) {
   const cp = await seedPassingWindow(w, tag);
-  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  const signed = await signLive(w.users.alice, { binding: proposed.binding_id });
-  return { cp, binding: signed };
+  const proposed = await insertHumanProposedBinding(w.firms.A, w.clients.A1, cp.id, w.users.bob);
+  await signLiveDirect(proposed.binding_id, w.users.alice);
+  const binding = (await rootQuery(
+    "select * from clara.vendor_identity_bindings where id=$1", [proposed.binding_id],
+  )).rows[0];
+  return { cp, binding };
+}
+
+// ---------------------------------------------------------------------------
+// #921 FIXTURE-ONLY builders (bypass the now-retired human write doors).
+// ---------------------------------------------------------------------------
+// `clara_authenticated` no longer holds EXECUTE on propose_vendor_identity_binding,
+// sign_vendor_identity_binding or decline_vendor_identity_binding (migration 0273) — D6 keeps
+// only historical receipts and in-flight legacy visibility, so no human may create, approve or
+// refuse a NEW binding any more. These three mirror each retired door's exact historical write
+// shape (measured from the live 0154 bodies, quoted in each function's own comment below) so a
+// battery that needs a binding in a given STATE — never the retired CEREMONY itself — can still
+// build one. None drives `clara_authenticated`; they write as root, exactly like every other
+// direct-insert fixture in this file (seedApprovedEntry, seedBareDocument, …).
+
+/** Mirrors `propose_vendor_identity_binding`'s own INSERT (0154 SS10b): the SAME derivation
+ *  (`_derive_vendor_binding_proposal`), the SAME five content columns, `created_by` the human
+ *  who "proposed" it, every other provenance column left at its table default (no
+ *  `directed_by`, `proposed_by_agent` false) — exactly what the retired door used to write for
+ *  a human caller. Raises whatever `_derive_vendor_binding_proposal` itself raises (the F1/LCP
+ *  floor, an identity wall, …) — those walls live in the shared derivation, not in the door, and
+ *  are unmoved by #921. */
+export async function insertHumanProposedBinding(firm, client, counterpartyId, createdBy) {
+  const derived = (await rootQuery(
+    "select clara._derive_vendor_binding_proposal($1,$2,$3) as d", [firm, client, counterpartyId],
+  )).rows[0].d;
+  const ins = await rootQuery(
+    `insert into clara.vendor_identity_bindings(
+       firm_id,client_id,counterparty_id,status,
+       f1_vendor_name_norm,f2_invoice_prefix,registration_at_signing,
+       content_hash,created_by,expires_at
+     ) values ($1,$2,$3,'proposed',$4,$5,$6,$7,$8,now()+interval '12 months')
+     returning id`,
+    [firm, client, derived.counterparty_id, derived.f1_vendor_name_norm,
+      derived.f2_invoice_prefix, derived.registration_at_signing, derived.content_hash, createdBy],
+  );
+  const bindingId = ins.rows[0].id;
+  for (const ev of derived.evidence) {
+    await rootQuery(
+      `insert into clara.vendor_identity_binding_evidence(
+         binding_id,firm_id,client_id,entry_id,document_id,facts_extraction_id,ocr_extraction_id)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [bindingId, firm, client, ev.entry_id, ev.document_id, ev.facts_extraction_id, ev.ocr_extraction_id],
+    );
+  }
+  return { binding_id: bindingId, status: "proposed", ...derived };
+}
+
+/** Mirrors `sign_vendor_identity_binding`'s own UPDATE (0154 SS10b3) for the plain
+ *  admin-signs-someone-else's-proposal case: `status='live'`, `signed_by`/`signed_at` stamped,
+ *  `self_approved=false` (no attestation — that arm only exists for a directed solo self-sign,
+ *  which nothing here fixtures). Returns the updated row. */
+export async function signLiveDirect(bindingId, signedBy) {
+  const r = await rootQuery(
+    `update clara.vendor_identity_bindings
+        set status='live', signed_by=$2, signed_at=now(),
+            self_approved=false, self_approval_reason=null,
+            signer_count_at_signing=null, signer_roster_epoch=null
+      where id=$1
+      returning *`,
+    [bindingId, signedBy],
+  );
+  return r.rows[0];
+}
+
+/** Mirrors `decline_vendor_identity_binding`'s own UPDATE (0154 SS10): `status='declined'`,
+ *  `declined_by`/`declined_at`/`decline_reason` stamped. Returns the updated row. */
+export async function declineDirect(bindingId, declinedBy, reason = "rig decline") {
+  const r = await rootQuery(
+    `update clara.vendor_identity_bindings
+        set status='declined', declined_by=$2, declined_at=now(), decline_reason=$3
+      where id=$1
+      returning *`,
+    [bindingId, declinedBy, reason],
+  );
+  return r.rows[0];
 }
 
 /** The 0029 LEDGER row. Kept for the one cell that genuinely asks about the ledger; it is NOT
