@@ -888,16 +888,18 @@ async function enqueueWork(taskId: string): Promise<void> {
  * generic carrier: a map from a door's `reason` to the wire field path a refusal carrying none
  * should focus. Data, not code — a lane adds a row, never an arm.
  *
- * ONE ROW TODAY. `clara._trade_invoice_resolve_party` raises `party_ambiguous` with the candidate
+ * TWO ROWS. `clara._trade_invoice_resolve_party` raises `party_ambiguous` with the candidate
  * list and NO `field`, and the control the person has to return to is the counterparty box.
  * Before #981 that default lived inside a bespoke catch in the trade-invoice route that also
  * unfolded `detail.candidates` onto a body of its own; the unfolding is gone (the carrier does
- * it) and this is what is left. It is a DEFAULT, never an override, and it applies to the one
- * reason it names: `party_unresolved` and every other field-less refusal on the lane still answer
- * `basis`, exactly as they did.
+ * it) and this is what is left. #982's `party_identifier_conflict` (0274) is the second row and
+ * needed no arm at all, only this line — which is the shape's whole claim. It is a DEFAULT, never
+ * an override, and it applies to the reasons it names: `party_unresolved` and every other
+ * field-less refusal on the lane still answer `basis`, exactly as they did.
  */
 export const TRADE_INVOICE_FIELD_DEFAULTS: Readonly<Record<string, string>> = Object.freeze({
   party_ambiguous: "invoice.counterparty",
+  party_identifier_conflict: "invoice.counterparty",
 });
 
 /** #981 — the three field-scoped reasons whose wire `reason` IS the database's `constraint`

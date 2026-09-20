@@ -1697,8 +1697,11 @@ ITSELF with a bare token and the two halves must not speak two vocabularies for 
 raw token is on the carrier as well. It folds by NAME, never "whenever a constraint exists":
 `invalid_adjustment`, `stale_basis` and `adjustment_lines_mismatch` carry one too and have always
 ridden back under their own names. The trade-invoice fold is gone entirely; what is left of it is
-`TRADE_INVOICE_FIELD_DEFAULTS`, one row of DATA saying which control to focus when the door raises
-`party_ambiguous` with no `field` at all.
+`TRADE_INVOICE_FIELD_DEFAULTS`, rows of DATA saying which control to focus when the door raises a
+party refusal with no `field` at all — `party_ambiguous`, and since #982 (migration 0274)
+`party_identifier_conflict`, the refusal raised when a document's registration number and its TIN
+name two different live parties. The second reason needed no code at all, only a second row, which
+is the shape's whole claim.
 
 **403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
 this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
