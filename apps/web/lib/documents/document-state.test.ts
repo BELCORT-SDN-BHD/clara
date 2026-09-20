@@ -15,8 +15,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  capabilityLimits, custodyVerdict, extractionTone, extractionVerdict, factsTone, factsVerdict,
-  failingChecks, isCapabilityLevel, landedFactsExtractions, operationVerdict, unmeasuredChecks,
+  BUSINESS_OPERATION_LEVELS, CAPABILITY_LEVELS, capabilityLimits, custodyVerdict, extractionTone,
+  extractionVerdict, factsTone, factsVerdict, failingChecks, isBusinessOperationLevel,
+  isCapabilityLevel, landedFactsExtractions, operationVerdict, unmeasuredChecks,
   type DocumentStateResult,
 } from "./document-state";
 
@@ -63,18 +64,33 @@ const validation = (over: Partial<DocumentStateResult["facts"]["validations"][nu
   ...over,
 });
 
-// #988 — business_operation's own fifth level joins the closed set this guard checks. custody,
-// byte_extraction and typed_facts never actually carry it (their own DB CHECKs stay four-valued),
-// but the wire shape shares ONE `CapabilityLevel` type across all four tiers, so the guard admits
-// it here too — the same shape the four original levels already share across tiers that do not
-// all use every one of them (e.g. custody never reads `planned` in practice either).
-test("the five capability levels are a closed set and nothing else passes the guard", () => {
-  for (const level of ["supported", "stored_only", "unsupported", "planned", "proposal_only"]) {
+// THE GUARDS MIRROR THE DATABASE'S OWN CHECKS, ONE PER SHAPE. Measured on the estate: only
+// `document_capabilities_business_operation_check` admits `proposal_only` (0246);
+// `..._custody_check`, `..._byte_extraction_check` and `..._typed_facts_check` all still read the
+// original four. A single widened union across all four axes would admit a value three of those
+// columns can never legitimately carry, which is a guard that has stopped guarding.
+test("the four shared capability levels are a closed set and nothing else passes the guard", () => {
+  for (const level of ["supported", "stored_only", "unsupported", "planned"]) {
     assert.equal(isCapabilityLevel(level), true, level);
   }
   for (const junk of ["maybe", "", null, undefined, 1, "SUPPORTED", "PROPOSAL_ONLY"]) {
     assert.equal(isCapabilityLevel(junk), false, String(junk));
   }
+  assert.equal(isCapabilityLevel("proposal_only"), false,
+    "proposal_only is business_operation's alone (0246): custody, byte_extraction and typed_facts "
+    + "each still carry the four-value CHECK, so the shared guard must not admit it");
+});
+
+test("business_operation's own guard admits the fifth level, and still nothing else", () => {
+  for (const level of ["supported", "stored_only", "unsupported", "planned", "proposal_only"]) {
+    assert.equal(isBusinessOperationLevel(level), true, level);
+  }
+  for (const junk of ["maybe", "", null, undefined, 1, "SUPPORTED", "PROPOSAL_ONLY"]) {
+    assert.equal(isBusinessOperationLevel(junk), false, String(junk));
+  }
+  assert.equal(BUSINESS_OPERATION_LEVELS.length, CAPABILITY_LEVELS.length + 1,
+    "the business-operation set is the shared set plus exactly one value, mirroring 0246's "
+    + "widening of one CHECK and only one");
 });
 
 test("custody: a legal hold is the loudest true thing and outranks verification", () => {

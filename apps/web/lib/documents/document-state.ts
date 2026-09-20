@@ -15,25 +15,39 @@
 // inference is exactly the defect C-37 names, and the whole point of the DB registry is that the
 // answer lives in one place.
 
-/** The capability levels, shared across all four axes (custody, byte extraction, typed facts,
- *  business operation). A closed set, mirroring the CHECKs on `clara.document_capabilities`
- *  (0191) — with one asymmetry (#988): custody, byte_extraction and typed_facts each keep the
- *  ORIGINAL four-value CHECK, while business_operation's own CHECK
- *  (0246_business_operation_proposal_only.sql) admits a fifth, `proposal_only` — "Clara reads
- *  deterministically and derives a real proposal, but never carries it into a posted operation on
- *  its own authority; a person confirms first". This module keeps ONE shared type across all four
- *  tiers rather than a business-operation-only variant, the same way it already does for the
- *  original four (custody, for one, never actually reads `planned` in practice either) — in
- *  practice the fifth value only ever arrives on `business_operation`, because that is the only
- *  column whose CHECK admits it. */
-export type CapabilityLevel = "supported" | "stored_only" | "unsupported" | "planned" | "proposal_only";
+/** The capability levels shared by THREE of the four axes — custody, byte extraction, typed
+ *  facts. A closed set, mirroring those three columns' CHECKs on `clara.document_capabilities`
+ *  (0191), which 0246 did not touch. */
+export type CapabilityLevel = "supported" | "stored_only" | "unsupported" | "planned";
 
 export const CAPABILITY_LEVELS: readonly CapabilityLevel[] = [
-  "supported", "stored_only", "unsupported", "planned", "proposal_only",
+  "supported", "stored_only", "unsupported", "planned",
 ] as const;
 
 export function isCapabilityLevel(value: unknown): value is CapabilityLevel {
   return typeof value === "string" && (CAPABILITY_LEVELS as readonly string[]).includes(value);
+}
+
+/** BUSINESS OPERATION has its own, WIDER set (#988): the four above plus `proposal_only` —
+ *  "Clara reads the pair deterministically and derives a real proposal, but never carries it into
+ *  a posted operation on its own authority; a person confirms first".
+ *
+ *  WHY IT IS A SECOND TYPE AND NOT ONE WIDENED SHARED TYPE. The asymmetry is the DATABASE's, not
+ *  this module's, and it is checkable: `document_capabilities_business_operation_check` admits
+ *  five values since 0246, while `..._custody_check`, `..._byte_extraction_check` and
+ *  `..._typed_facts_check` each still read the original four — measured on the estate, and the
+ *  sibling db battery pins it with its own BUSINESS_OPERATION_LEVELS constant rather than
+ *  widening LEVELS. A single widened union would make `isCapabilityLevel` admit, for custody, a
+ *  value custody's own CHECK refuses; a guard that admits what the database refuses has stopped
+ *  mirroring it. */
+export type BusinessOperationLevel = CapabilityLevel | "proposal_only";
+
+export const BUSINESS_OPERATION_LEVELS: readonly BusinessOperationLevel[] = [
+  ...CAPABILITY_LEVELS, "proposal_only",
+] as const;
+
+export function isBusinessOperationLevel(value: unknown): value is BusinessOperationLevel {
+  return typeof value === "string" && (BUSINESS_OPERATION_LEVELS as readonly string[]).includes(value);
 }
 
 /** `clara._document_capability(format, kind)`'s jsonb. `known_pair`/`kind_known` are the two
@@ -46,7 +60,7 @@ export type DocumentCapability = {
   custody: CapabilityLevel;
   byte_extraction: CapabilityLevel;
   typed_facts: CapabilityLevel;
-  business_operation: CapabilityLevel;
+  business_operation: BusinessOperationLevel;
   engine_id: string | null;
   engine_byte: string | null;
   registry_version: number | null;
@@ -123,7 +137,7 @@ export type DocumentStateResult = {
     validations: DocumentFactValidation[];
   };
   operation: {
-    capability: CapabilityLevel;
+    capability: BusinessOperationLevel;
     codeable_kind: boolean;
     entries: { entry_id: string; status: string }[];
     statements: {
@@ -285,4 +299,37 @@ export function extractionTone(verdict: ExtractionVerdict): StateTone {
 export function capabilityLimits(capability: DocumentCapability): [string, string][] {
   const limits = capability.limits ?? {};
   return Object.keys(limits).sort().map((key) => [key, String(limits[key])]);
+}
+
+/** #782 fix round — the limit VALUE's own message key.
+ *
+ *  A limit is a `[name, value]` pair and BOTH halves are machine tokens. The surfaces already
+ *  render the NAME through its own key (`capabilityLimit.*`); until this map the VALUE was
+ *  interpolated verbatim, so the invoice sentence read "Per-line invoice facts:
+ *  accepted_limitation." and its reason read "Reason: no_consumer_reads_line_facts." A
+ *  snake_case identifier is neither a sentence nor a reason a professional can act on, and #782's
+ *  deliverable is precisely that sentence.
+ *
+ *  A LITERAL MAP, never a `t(\`capabilityLimitLevel.${value}\`)` cast: document-facts-table.tsx's
+ *  own header settled that argument for this family — a missing translation renders the KEY at a
+ *  professional, which is worse than printing nothing. An unmapped value therefore falls back to
+ *  the raw token, which is honest rather than wrong, exactly as an unmapped limit NAME already
+ *  does through `capabilityLimitUnknown`.
+ *
+ *  The roster is CLOSED and MEASURED: these are the seven distinct values
+ *  `clara.document_capabilities.limits` publishes across all 240 rows (registry v3). */
+const LIMIT_LEVEL_KEY: Record<string, string> = {
+  absent: "capabilityLimitLevel.absent",
+  absent_in_format: "capabilityLimitLevel.absentInFormat",
+  accepted_limitation: "capabilityLimitLevel.acceptedLimitation",
+  myinvois_ubl_only: "capabilityLimitLevel.myinvoisUblOnly",
+  no_consumer_reads_line_facts: "capabilityLimitLevel.noConsumerReadsLineFacts",
+  parse_succeeds_corroboration_cannot: "capabilityLimitLevel.parseSucceedsCorroborationCannot",
+  tab_separated_mime_not_routed: "capabilityLimitLevel.tabSeparatedMimeNotRouted",
+};
+
+/** The message key for a limit's value, or `null` when this app publishes no phrase for it —
+ *  in which case the caller shows the raw token. */
+export function capabilityLimitLevelKey(level: string): string | null {
+  return LIMIT_LEVEL_KEY[level] ?? null;
 }

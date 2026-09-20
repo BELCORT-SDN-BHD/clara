@@ -40,9 +40,9 @@ import { getDocumentState } from "@/lib/documents/reads";
 import { activityJournalsHref } from "@/lib/firm/activity";
 import { businessDateTime } from "@/lib/business-date";
 import {
-  capabilityLimits, custodyVerdict, extractionTone, extractionVerdict, factsTone, factsVerdict,
-  failingChecks, landedFactsExtractions, operationTone, operationVerdict, unmeasuredChecks,
-  type DocumentStateResult, type StateTone,
+  capabilityLimitLevelKey, capabilityLimits, custodyVerdict, extractionTone, extractionVerdict,
+  factsTone, factsVerdict, failingChecks, landedFactsExtractions, operationTone, operationVerdict,
+  unmeasuredChecks, type DocumentStateResult, type StateTone,
 } from "@/lib/documents/document-state";
 import { DoorFeedback } from "./door-feedback";
 import { DocumentWorkLinksPanel } from "./document-work-links";
@@ -333,11 +333,21 @@ function StateBody({ state, clientId, t }: { state: DocumentStateResult; clientI
         </p>
         {limits.length > 0 ? (
           <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-            {limits.map(([name, level]) => (
-              <li key={name}>
-                {LIMIT_KEY[name] ? t(LIMIT_KEY[name], { level }) : t("capabilityLimitUnknown", { name, level })}
-              </li>
-            ))}
+            {/* #782 — BOTH halves of a limit are machine tokens, and both are rendered through
+                their own message key: the NAME through capabilityLimit.*, the VALUE through
+                capabilityLimitLevel.*. An unpublished value falls back to the raw token, which
+                is honest; a rendered message key never would be. */}
+            {limits.map(([name, level]) => {
+              const levelKey = capabilityLimitLevelKey(level);
+              const levelText = levelKey ? t(levelKey) : level;
+              return (
+                <li key={name}>
+                  {LIMIT_KEY[name]
+                    ? t(LIMIT_KEY[name], { level: levelText })
+                    : t("capabilityLimitUnknown", { name, level: levelText })}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </div>

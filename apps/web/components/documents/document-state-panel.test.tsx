@@ -302,12 +302,39 @@ test("a FAILED arithmetic check names the check, keeps the facts readable, and s
 
 test("a supported invoice still declares its LINE-ITEM limit — header facts are not per-line facts", async () => {
   await mount(INVALID_INVOICE, async (text) => {
-    assert.match(text(), /Per-line invoice facts: accepted_limitation/,
+    const t = text();
+    assert.match(t, /Per-line invoice facts: an accepted limitation/,
       "the registry's named limit must reach the reader, or 'facts recorded' overstates what was read");
-    assert.doesNotMatch(text(), /planned/i,
+    assert.doesNotMatch(t, /planned/i,
       "ticket 782: invoice line items are a standing limitation, never described as coming");
-    assert.match(text(), /Reason: no_consumer_reads_line_facts/,
+    assert.match(t, /Reason: nothing Clara posts through reads a per-line fact/,
       "the limitation carries its own reason, not a bare verdict (ticket 782)");
+
+    // …AND THE REGISTRY'S MACHINE TOKENS DO NOT REACH THE ACCOUNTANT. `limits` is a
+    // machine-readable column; the panel renders each pair through its OWN message key, which is
+    // document-state.ts's stated reason for returning [name, level] pairs at all. Before this
+    // fix the sentence read "Per-line invoice facts: accepted_limitation." — a snake_case
+    // identifier is neither a sentence nor a reason a professional can act on.
+    assert.doesNotMatch(t, /accepted_limitation/,
+      "the limit's VALUE is rendered through its own message key, never interpolated raw");
+    assert.doesNotMatch(t, /no_consumer_reads_line_facts/,
+      "…and so is its reason");
+  });
+});
+
+test("an unpublished limit VALUE degrades to the raw token rather than to a wrong sentence", async () => {
+  const invented: DocumentStateResult = {
+    ...INVALID_INVOICE,
+    capability: { ...INVALID_INVOICE.capability, limits: { invoice_line_items: "some_future_value" } },
+    facts: { ...INVALID_INVOICE.facts, limits: { invoice_line_items: "some_future_value" } },
+  };
+  await mount(invented, async (text) => {
+    assert.match(text(), /Per-line invoice facts: some_future_value/,
+      "a value this app has no phrase for is shown as it is — an honest unknown, the same rule "
+      + "the panel already follows for an unnamed limit KEY, never a guessed sentence and never "
+      + "a rendered message key");
+    assert.doesNotMatch(text(), /capabilityLimitLevel/,
+      "…and never the key itself, which is what a dynamic t(`x.${value}`) cast would print");
   });
 });
 

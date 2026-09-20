@@ -2852,6 +2852,15 @@
       "reader": "Reader limit: {level}.",
       "router": "Routing limit: {level}."
     },
+    "capabilityLimitLevel": {
+      "absent": "absent",
+      "absentInFormat": "absent",
+      "acceptedLimitation": "an accepted limitation",
+      "myinvoisUblOnly": "MyInvois UBL documents only",
+      "noConsumerReadsLineFacts": "nothing Clara posts through reads a per-line fact",
+      "parseSucceedsCorroborationCannot": "the file is read, but its figures cannot be corroborated against anything else in it",
+      "tabSeparatedMimeNotRouted": "tab-separated files are not routed to a reader"
+    },
     "capabilityLimitUnknown": "{name}: {level}",
     "checkName": {
       "invoiceSixTermIdentity": "the invoice arithmetic tie",
