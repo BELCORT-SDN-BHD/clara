@@ -22,11 +22,13 @@
 // argument, an outage — and painting it as "not built yet" would be the same lie in the opposite
 // direction. It renders as the typed read failure it is.
 //
-// #861 IS NAMED ON THIS SURFACE AND NOT PATCHED HERE. `clara.list_activity`'s kind ladder misfiles
-// membership, invite, asset-acquisition, counterparty-identity and client-home-facet events under
-// `documents`. That is a DOOR defect with its own open ticket and a `ready-for-human` label;
-// correcting it in the browser would put a second, disagreeing ladder in the product. The residual
-// is disclosed under the list instead.
+// #861 WAS FIXED IN THE DOOR, AND ITS DISCLOSURE LEFT WITH IT. This file used to carry a sentence
+// under the list saying that `clara.list_activity`'s kind ladder misfiled membership, invite,
+// asset-acquisition, counterparty-identity and client-home-facet events under `documents` — a DOOR
+// defect that was never going to be patched in the browser, because a second, disagreeing ladder
+// in the product is worse than a named residual. Migration 0264 gave those five families their own
+// kinds, so the sentence became untrue; an honest note is removed when it stops being honest, not
+// left standing because it was once earned.
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -102,9 +104,6 @@ export function FirmRecentActivity({ clientNames }: { clientNames: ReadonlyMap<s
               </ol>
             </div>
           ))}
-          {/* THE RESIDUAL, ON THE SURFACE. Named rather than silently carried — see this file's
-              header for why the ladder is not corrected in the browser. */}
-          <p className="text-xs text-muted-foreground">{t("activityKindResidual")}</p>
           <Link href="/activity" className="text-xs text-primary underline-offset-4 hover:underline">
             {t("seeActivity")}
           </Link>

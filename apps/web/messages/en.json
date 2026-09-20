@@ -154,7 +154,6 @@
     "seeAgentActivity": "See all agent activity",
     "activityHeading": "Recent activity",
     "activityEmpty": "No firm activity recorded yet.",
-    "activityKindResidual": "Some events are still filed under the wrong kind by the activity door (#861). The sentence and the person are right; the category may not be.",
     "portfolio": {
       "heading": "Client portfolio",
       "seeRegister": "Open the client register",
