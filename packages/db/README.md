@@ -870,8 +870,11 @@ overrides the firm row carrying that condition and leaves an unconditional firm 
   (`0240_financial_year_end_day.sql` added the fourteenth) that admits four keys in all (the three
   seeds plus `coa_seed_decision`) and refuses ten, `entity_type`, `msic`, `sst_regime`,
   `financial_year_end_month` and `financial_year_end_day` among them: a client-identity fact is
-  never a firm default. `knowledge_keys.scope_default` is deliberately NOT the mechanism — that
-  table is append-only on UPDATE, so its already-seeded rows can never be re-defaulted.
+  never a firm default. `knowledge_keys.scope_default` was never the mechanism — that table is
+  append-only on UPDATE, so its already-seeded rows could never have been re-defaulted — and
+  `0241_knowledge_scope_default_drop.sql` (#913) has since dropped the column outright: three
+  writes, zero reads, confirmed dead by #654's own triage before this file ever named it a
+  non-mechanism.
 - **What a firm default may cite** — `clara._tf_knowledge_firm_evidence`, the second BEFORE INSERT
   trigger, refuses a firm-scope record pinning a document that carries **any** live
   `clara.document_filings` row (CLR10 `firm_scope_client_evidence`) and a firm-scope record pinning

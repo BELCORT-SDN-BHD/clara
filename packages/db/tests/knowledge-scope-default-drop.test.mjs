@@ -8,17 +8,29 @@
 //         table survives by name, and the catalogue's rows are exactly what they were before the
 //         drop — same count, same kind census, and 0240's OWN inserted row (the newest before
 //         this ticket) still carries its full remaining shape (sd.01, sd.02).
+//   AC2 — the firm-defaultability wall (0220, a relation this migration never touches) still
+//         refuses a client-identity key and admits the three D8-seeded keys, through the real
+//         `clara.capture_knowledge` door (sd.03).
+//   AC3 — the catalogue's key count and its floor function's answers are unchanged (sd.04).
+//
+// sd.03 and sd.04 need NO new code: the migration that made sd.01/sd.02 green already left the
+// firm-eligibility wall and clara._knowledge_floor untouched, so these two cells are the
+// emergent-behaviour proof of that claim, exactly as knowledge-fye-day.test.mjs's fd.04/fd.05
+// were for #898.
 //
 // NONE of these cells duplicate knowledge-firm-defaults.test.mjs's own 21-cell battery: that file
 // is untouched by this ticket and its own green run (unaffected by a column it never reads) is
-// itself part of the evidence, reported separately.
+// itself part of the evidence, reported separately. These cells exist because #913's OWN
+// acceptance criteria name "the firm-defaultability cells" and "the catalogue's key count and
+// kind/floor assertions" as claims about the STATE AFTER THIS MIGRATION, which deserves its own
+// proof rather than an inference from a neighbour file staying green.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { endPool, rootQuery } from "./rig-fixtures.mjs";
-import { scopeDefaultDroppedCohortApplied } from "./knowledge-fixtures.mjs";
+import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
+import { knowledgeWorld, scopeDefaultDroppedCohortApplied } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 4;
 let live = false;
 let executed = 0;
 
@@ -89,4 +101,73 @@ cell("sd.02 the catalogue's rows are exactly what they were before the drop -- s
   assert.equal(row.allowed_values, null);
   assert.equal(row.authority_bearing, false);
   assert.equal(row.min_role, "bookkeeper");
+});
+
+// Door wrapper, the same shape knowledge-firm-defaults.test.mjs's and knowledge-fye-day.test.mjs's
+// CAPTURE use so the three batteries cannot drift into three dialects.
+const CAPTURE = `select clara.capture_knowledge(
+  p_knowledge_key => $1, p_value => $2::jsonb, p_basis => $3, p_op_key => $4,
+  p_scope_kind => $5, p_client => $6, p_source_kind => $7, p_applies_when => $8::jsonb,
+  p_effective_from => $9::date, p_effective_to => $10::date, p_source => $11::jsonb) as r`;
+
+function capture(sub, o) {
+  return humanQuery(sub, CAPTURE, [
+    o.key, JSON.stringify(o.value), o.basis ?? "rig basis", o.opKey ?? opk("p913"),
+    o.scope ?? "client", o.client ?? null, o.sourceKind ?? "user_statement",
+    JSON.stringify(o.appliesWhen ?? {}), o.from ?? null, o.to ?? null,
+    JSON.stringify(o.source ?? {}),
+  ]).then((r) => r.rows[0].r);
+}
+
+const reasonOf = (err) => {
+  try { return JSON.parse(err.detail ?? "{}").reason ?? null; } catch { return null; }
+};
+
+cell("sd.03 the firm-defaultability wall is unchanged: a client-identity key stays refused, the three D8-seeded keys stay admitted", async () => {
+  const w = await knowledgeWorld("sd3");
+
+  const refused = await assertRaises("CLR10", () => capture(w.admin, {
+    key: "financial_year_end_month", scope: "firm", client: null, value: 6,
+    basis: "the partner wants every client closed in June",
+  }), "capture_knowledge(firm, financial_year_end_month)");
+  assert.equal(reasonOf(refused), "knowledge_scope_not_firm_defaultable");
+
+  const currency = await capture(w.admin, {
+    key: "default_currency", scope: "firm", client: null, value: "MYR",
+    basis: "the firm presents in ringgit unless a client says otherwise",
+  });
+  assert.equal(currency.status, "captured");
+
+  const framework = await capture(w.admin, {
+    key: "reporting_framework", scope: "firm", client: null,
+    value: { framework_code: "MPERS", framework_label: "Malaysian Private Entities Reporting Standard" },
+    basis: "the firm prepares MPERS accounts unless a client's own framework says otherwise",
+  });
+  assert.equal(framework.status, "captured");
+
+  const basis = await capture(w.admin, {
+    key: "accounting_basis", scope: "firm", client: null,
+    value: { accounting_basis: "accrual", accounting_basis_label: "Accrual basis" },
+    basis: "the firm prepares on the accrual basis unless a client's own basis says otherwise",
+  });
+  assert.equal(basis.status, "captured");
+});
+
+cell("sd.04 the catalogue's key count and clara._knowledge_floor's answers are unchanged", async () => {
+  const total = await rootQuery("select count(*)::int as n from clara.knowledge_keys");
+  assert.equal(total.rows[0].n, 14);
+
+  const floor = (key, scope) =>
+    rootQuery("select clara._knowledge_floor($1, $2) as f", [key, scope]).then((r) => r.rows[0].f);
+  assert.equal(await floor("entity_type", "client"), "admin");
+  assert.equal(await floor("customer_identity_policy", "client"), "owner");
+  assert.equal(await floor("coa_seed_decision", "client"), "bookkeeper");
+  assert.equal(await floor("coa_seed_decision", "firm"), "admin");
+  assert.equal(await floor("reporting_framework", "client"), "admin");
+
+  const refusedCount = await rootQuery(
+    `select count(*)::int as n from clara.knowledge_keys k
+      where not exists (select 1 from clara.knowledge_key_firm_eligibility e where e.knowledge_key = k.knowledge_key)
+        and k.kind not in ('preference', 'policy')`);
+  assert.equal(refusedCount.rows[0].n, 10, "the firm-scope-refused census (#898's own tail) must be unmoved by this drop");
 });
