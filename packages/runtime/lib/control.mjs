@@ -34,6 +34,10 @@ import { resumeHook as apiResumeHook, getRun as apiGetRun } from "workflow/api";
 import { makeRuntimeClient, setRuntimeRoleOn } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 import { settleCancelledByKind } from "./reconciler.mjs";
+// #852 — THE ONE hook-not-found predicate and THE ONE resume-payload builder, in a LEAF that
+// imports nothing first-party, so `reconciler-chat-clarify.mjs` can read them without taking an
+// edge through THIS module (which imports reconciler.mjs, closing a cycle). Re-exported below.
+import { isHookNotFound, resumePayloadFor } from "./hook-resume.mjs";
 // THE ONE run-not-found predicate in this package, imported from the module that DECLARES it
 // rather than restated here. Reviewed finding: this module carried a fourth copy whose body
 // was `/not\s*found/i` over the message — a substring test that matches "client not found",
@@ -63,49 +67,15 @@ const MAX_LEASE_RENEWALS = Number(process.env.CLARA_CTL_MAX_LEASE_RENEWALS || 6)
 /** A stable per-process claimant id (host:pid:rand) for lease attribution. */
 export const LISTENER_ID = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
-/** True iff the error is the engine's single-shot "hook already gone" signal. */
-export function isHookNotFound(err) {
-  return err != null && (err.name === "HookNotFoundError" || /hook not found/i.test(String(err.message || "")));
-}
-
-/** An instant, as the wire carries it. `pg` hands a timestamptz back as a Date; a WDK resume
- *  payload is JSON, and a Date that round-trips through the engine as `{}` is a fact silently
- *  lost. */
-function asInstant(v) {
-  return v instanceof Date ? v.toISOString() : v ?? null;
-}
-
-/**
- * Build the resume payload the workflow's hook awaits, from a row status.
- *
- * A WORK question (#629) carries its OWN IDENTITY into the run: which question, which VERSION, and
- * on whose authority the answer was accepted. `claraWork_v2`'s `recheckAuthorityStep` re-reads that
- * human's CURRENT membership before continuing, and it cannot re-read a human the payload never
- * named. A CHAT clarify keeps exactly the payload it had before 0180 — chatTurn's frozen resume
- * body reads `{kind, answer}` and nothing else, and widening it would be a change to a closure this
- * ticket does not own.
- */
-export function resumePayloadFor(row) {
-  if (row.status === "answered") {
-    if (row.work_id) {
-      return {
-        kind: "answer",
-        answer: row.answer ?? null,
-        question_id: row.id,
-        question_version: row.question_version ?? null,
-        answered_by: row.answered_by ?? null,
-        answered_role: row.answered_role ?? null,
-        answered_at: asInstant(row.answered_at),
-      };
-    }
-    return { kind: "answer", answer: row.answer ?? null };
-  }
-  if (row.status === "expired") return { kind: "expired" };
-  if (row.status === "cancelled") return { kind: "cancelled" };
-  // Defensive — never lease a non-terminal row (predicate excludes it), but if we
-  // somehow do, surface it as cancelled so the workflow unblocks and settles.
-  return { kind: "cancelled" };
-}
+// THE TWO RESUME SYMBOLS LIVE IN A LEAF NOW (#852), and are re-exported here so every existing
+// import site — tests/unit.test.mjs, tests/control-work-question.test.mjs and anything else that
+// learned to read them from the module that used to declare them — keeps resolving unchanged.
+// THE MOVE IS ABOUT IMPORT DIRECTION, NOT SIZE: this module imports reconciler.mjs, so a belt that
+// read them from here could not be registered inside runReconcilerSweep without closing
+// `reconciler -> reconciler-chat-clarify -> control -> reconciler`. lib/hook-resume.mjs imports
+// nothing first-party, so both sides can share it and the graph stays a DAG. See that file's
+// header for the whole argument. The import itself sits in the block at the top of this file.
+export { isHookNotFound, resumePayloadFor };
 
 // ---------------------------------------------------------------------------
 // Deploy-order capability probe.

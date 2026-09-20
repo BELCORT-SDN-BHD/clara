@@ -33,6 +33,12 @@ import { reconcilePlanOccurrences } from "./plan-occurrences.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
 import { cancelSettleForWork, reconcileAccountingWorkTasks, settleWorkTerminal, workResultForTask } from "./reconciler-work.mjs";
 import { reconcileIntakeBatchCancellations } from "./reconciler-batches.mjs"; // #636 belt (0229)
+// #852 — the chat lane's clarification belt, registered HERE at last. It ran from leader.mjs for
+// one reason only: `reconciler-chat-clarify.mjs` took its two resume symbols from control.mjs,
+// and control.mjs imports THIS module, so the direct edge closed a cycle. Those symbols now live
+// in lib/hook-resume.mjs, a leaf with no first-party import at all, so the edge below is a DAG
+// edge and the belt's counters and failures reach the receipt like every sibling's.
+import { reconcileChatClarifies } from "./reconciler-chat-clarify.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -647,6 +653,9 @@ function isLeaderHalt(err) {
  * (The sixth daily flag this sweep once carried, opts.autopostRules, retired with its DB
  * function at `0118` — see the comment above reconcileSstWatches's own belt block.)
  *
+ * The chat-clarify belt (#852) runs FIRST, ahead of every other belt, for the reason its own
+ * module header gives; its five `chatClarify*` counters ride the same receipt.
+ *
  * EVERY belt is individually contained (see the wrapper's own comment): one belt's escape
  * costs that belt this cycle and never the belts behind it. The result carries `heartbeatOk`
  * and `beltErrors` (the names of the belts that threw, empty on a clean sweep) so a caller
@@ -655,7 +664,9 @@ function isLeaderHalt(err) {
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
  *          sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
- *          adjRuns?:boolean}} deps
+ *          adjRuns?:boolean, resumeHook?:Function}} deps  `resumeHook` is the chat-clarify belt's
+ *          world call (#852): without it that belt is a clean no-op that issues no statement at
+ *          all, rather than half a probe that settles conversations on a guess.
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
@@ -726,6 +737,22 @@ export async function runReconcilerSweep(client, deps) {
     return { heartbeatOk: false, beltErrors: ["heartbeat"] };
   }
 
+  // #852 — THE FIRST BELT, AND THE ORDER IS LOAD-BEARING rather than alphabetical. reconcileTasks'
+  // section C mirrors engine truth onto a parked chat turn with
+  // `terminalFor('awaiting_input','lost') = cancelled/engine_lost` — a generic terminal that says
+  // nothing about the question the turn was waiting on. A turn whose clarification is UNREACHABLE
+  // deserves the terminal its own parked hook would have produced: `expired`, carrying a
+  // `clarify_closed` part. So the specific arm decides first, and the generic mirror never sees the
+  // row. It sits AFTER the heartbeat because the heartbeat is not a belt: it is this sweep's one
+  // deliberate fail-fast (see its own comment), and nothing that breaks that single-row upsert
+  // would spare a belt running on the same connection.
+  //
+  // CONTAINED LIKE EVERY SIBLING. The belt already isolates its own faults per row and returns
+  // counters rather than throwing — and it is ALSO wrapped, because "a sweeper that cannot fail" is
+  // a claim and this repo's own history is a list of times that claim was wrong. Its fallback is
+  // `{}`, not zeroed counters, under the law stated at the return: a failed belt contributes NO
+  // counters, and `beltErrors` names it positively instead.
+  const chatClarify = await belt("chat clarify reconcile", () => reconcileChatClarifies(client, deps));
   const expiry = await belt("clarify expiry", () => expireClarifies(client, { onlyFirm: deps.onlyFirm ?? null }));
   const tasks = await belt("task reconcile", () => reconcileTasks(client, deps));
   const autodraftTasks = await belt("autodraft reconcile", () => reconcileAutoDraftTasks(client, deps));
@@ -767,5 +794,5 @@ export async function runReconcilerSweep(client, deps) {
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...plans, ...wake, ...work, ...batchCancels, ...prune };
+  return { heartbeatOk: true, beltErrors, ...chatClarify, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...plans, ...wake, ...work, ...batchCancels, ...prune };
 }

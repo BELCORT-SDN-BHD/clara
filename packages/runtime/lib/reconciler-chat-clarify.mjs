@@ -33,7 +33,9 @@
 // than be expired away. So the order is: resume first, settle only once the engine has confirmed
 // the hook really is gone.
 //
-// ORDERING INSIDE THE SWEEP IS LOAD-BEARING. This belt runs BEFORE `reconcileTasks`, and that is
+// ORDERING INSIDE THE SWEEP IS LOAD-BEARING. This belt is the FIRST belt `runReconcilerSweep`
+// runs (#852 moved it there from leader.mjs, which had carried it outside the sweep only because
+// of the import edge the leaf above removed), so it runs BEFORE `reconcileTasks`, and that is
 // not cosmetic: `terminalFor('awaiting_input', 'lost')` settles a parked chat turn `cancelled`
 // with `engine_lost` — a generic engine-truth mirror that says nothing about the question the turn
 // was waiting on. For a turn whose clarification is UNREACHABLE the honest terminal is the one the
@@ -50,7 +52,13 @@
 // (`clara.settle_chat_turn` concatenates the checkpoints itself when handed no parts; this belt
 // hands it the concatenation PLUS the closing part, which is the only way to get both.)
 
-import { isHookNotFound, resumePayloadFor } from "./control.mjs";
+// THE ONE hook-not-found predicate and THE ONE resume-payload builder, read from the LEAF that
+// declares them (#852). They lived in `control.mjs` until this belt moved inside
+// `runReconcilerSweep`: control.mjs imports reconciler.mjs, so THIS edge was the one that closed
+// `reconciler -> chat-clarify -> control -> reconciler` and kept the belt — and its counters —
+// outside the sweep receipt. lib/hook-resume.mjs imports nothing first-party, so the two symbols
+// stay singly-declared AND the graph stays a DAG.
+import { isHookNotFound, resumePayloadFor } from "./hook-resume.mjs";
 // THE ONE run-not-found predicate in this package, imported from the module that DECLARES it
 // (reconciler-documents.mjs) rather than restated — the same edge `control.mjs` and
 // `reconciler-work.mjs` take, and for the reason their own comments give: a `/not found/i`

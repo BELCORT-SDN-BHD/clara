@@ -358,8 +358,16 @@ Other configuration groups:
 - Models/auth: `OPENAI_API_KEY`; `SUPABASE_JWT_ISSUER`, `SUPABASE_JWT_AUD`, and either
   `SUPABASE_JWT_JWKS_URL` or `SUPABASE_JWT_SECRET`.
 - Intake: `CLARA_INTAKE_CORS_ORIGINS` (exact origins), `CLARA_SPOOL_DIR`,
-  `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN`, `CLARA_CLAMD_SOCKET`,
-  `CLARA_CLAMD_MANAGED`. The Fly volume mounts at `/data`.
+  `CLARA_SPOOL_QUOTA_MB`, `CLARA_SPOOL_TTL_MIN` (its reaper owns EVERY `intake-*.(bin|json)` in
+  `CLARA_SPOOL_DIR` since #966, not only uuid-named ones — point `CLARA_SPOOL_DIR` at a directory
+  nothing else writes), `CLARA_CLAMD_SOCKET`,
+  `CLARA_CLAMD_MANAGED`, `CLARA_INTAKE_SIDECAR_QUIET_MS` (default 5000) and
+  `CLARA_SPOOL_RENAME_RETRY_MS` (default 250). The Fly volume mounts at `/data`.
+  The last two are the two halves of the #966 intake/sweep race; raise
+  `CLARA_SPOOL_RENAME_RETRY_MS` on a host whose AV scanner or indexer holds spool files open for
+  longer than a reader does (the failure it buys time for is a live intake failed with an untyped
+  `internal`). Both are explained under "#966 — the intake recovery belt can no longer fail a live
+  intake".
 - Storage: `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`.
   Runtime custody requires the dedicated insert/read role; browser requests receive neither
   this credential nor a signed Storage URL. `realConfig()` refuses `anon`, `authenticated`
@@ -1390,3 +1398,106 @@ CLR04 — which means its stored canceller has lost authority and no future swee
 because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
+
+## #852 — the chat-clarify belt inside the sweep receipt
+
+**What moved.** `reconcileChatClarifies` used to run from `lib/leader.mjs`, in its own try/catch,
+beside `runReconcilerSweep`. It is now the FIRST belt inside the sweep, registered exactly like
+every sibling. `leader.mjs` reads its counters off the sweep result and no longer imports it.
+
+**Why it was outside, and what the fix actually is.** The reason was IMPORT DIRECTION, not cadence:
+`lib/reconciler-chat-clarify.mjs` read `isHookNotFound` and `resumePayloadFor` from
+`lib/control.mjs`, and `control.mjs` imports `settleCancelledByKind` from `lib/reconciler.mjs` — so
+registering the belt inside the sweep closed `reconciler → chat-clarify → control → reconciler`.
+Both symbols now live in `lib/hook-resume.mjs`, a LEAF that imports nothing first-party; `control.mjs`
+re-exports them by name so every existing import site keeps resolving. The edge is removed rather
+than routed around.
+
+**What the receipt now carries.** The five `chatClarifyResumed / Expired / Landed / ProbeFailed /
+SettleFailed` counters ride `runReconcilerSweep`'s returned object, and a belt failure is named in
+`beltErrors` as `"chat clarify reconcile"` (logged with the estate's `[reconcile] <belt> error:`
+idiom) instead of being a log line only the leader could see. The estate law still holds: a FAILED
+belt contributes no counters at all, so `"chatClarifyResumed" in swept` is positive evidence that
+the belt was REACHED and did not throw — not that it did any work: the belt returns the same
+zeroed counter bag, and issues no statement at all, when `resumeHook` is absent or the delivery
+columns are not there yet.
+
+**Order.** The belt runs first of the belts and immediately after the heartbeat — the heartbeat is
+not a belt but the sweep's one deliberate fail-fast. Say the consequence out loud, because an
+incident is the wrong time to rediscover it: a sweep that cannot record its own beat now skips
+this belt too, where the leader's old standalone call ran regardless. That follows the heartbeat's
+own argument (nothing that breaks a single-row upsert would spare a belt on the same connection),
+and the next sweep is ~2 s away. The order is load-bearing: `reconcileTasks`'
+section C would mirror engine truth onto the same parked chat turn as `cancelled`/`engine_lost`,
+and only this belt writes the honest `expired` + `clarify_closed` terminal.
+
+**Evidence.** `tests/chat-clarify-sweep-wiring.test.mjs` (eight cells: the leaf's empty import list,
+the belt closure never reaching `reconciler.mjs`, the ONE pre-existing `reconciler ↔ reconciler-wake`
+cycle pinned by name, the five counters, the contained failure, the statement order, the leader's
+silence). `tests/control-chat-clarify.test.mjs`'s `chat.wiring` cell pins the registration.
+
+## #966 — the intake recovery belt can no longer fail a live intake
+
+**The defect, measured.** `recoverPendingDocumentIntakes` opened and parsed EVERY pending intake's
+spool sidecar on every leader sweep, though it acts on at most ten. A live intake writes its own
+sidecar atomically (temp file, then `rename()` into place) and on Windows a `rename()` over a
+destination another handle holds open fails `EPERM` — so a sweep landing between two
+`writeIntakeMeta` calls threw inside the intake, which was then failed with an untyped `internal`
+(a 500 on the byte PUT). #636 measured one child in six at the default 2 s cadence.
+
+**Both halves of the fix.**
+
+- **The writer.** `lib/spool.mjs`'s `atomicJson` now renames through `renameIntoPlace`, which
+  retries only `EPERM` / `EACCES` / `EBUSY` against a deadline (`CLARA_SPOOL_RENAME_RETRY_MS`,
+  default 250 ms) and surfaces every other failure immediately. A reader's handle lives for
+  microseconds, so the retry turns a hard failure into a sub-millisecond wait — the shape
+  `graceful-fs` has shipped for a decade. A rename that still fails takes its temp file with it.
+  The deadline is 250 ms rather than the 2000 ms of the first cut because a handle that is NEVER
+  released (a stuck indexer or AV scan) costs the full deadline once per status transition per
+  intake, on the intake path — measured at `EPERM after 2003 ms`. The answer is the same either
+  way; only the stall differs.
+- **The reader.** `listIntakeMetaEntries()` returns DIRECTORY METADATA — `{name, path, mtimeMs,
+  read()}` — and opens nothing. `stat()` does not hold a handle a rename can block; `open()` does.
+  The belt's recency guard (always there, always five seconds) now runs on `mtimeMs` BEFORE the
+  open rather than on the sidecar's `updatedAt` field after it. The quiet skip happens BEFORE any
+  budget is taken, so a spool full of live uploads cannot starve the belt of the crashed intake
+  behind them. `listIntakeMetas` / `listTaskMetas` keep their exact old contract, expressed over
+  the lazy shape so the two cannot drift. The knob is `CLARA_INTAKE_SIDECAR_QUIET_MS` (default
+  5000).
+- **The ten are ten sidecars that CARRY AN INTAKE** (fix round 1; wording corrected in fix round 2
+  after review finding SPEC-3). The first cut took its ten off the raw listing, so a sidecar
+  carrying no intake — the `{corrupt, file}` marker, a body with no `intakeId`, a file collected
+  between the listing and the read — spent one of the ten, and ten such files ahead of a crashed
+  intake blinded the belt silently. Before #966 that was impossible, because the filter ran before
+  the slice. The belt now reads past those without spending a slot (`RECOVERY_BATCH`), under a
+  separate, larger bound on opens (`RECOVERY_OPEN_BUDGET`, 3x), because an open is still the handle
+  a live rename collides with. **It is not ten actions in the wider sense, deliberately:** a
+  sidecar that carries a real intake in a status the belt cannot act on — `uploading`, `receiving`,
+  a large body still streaming, whose last status write is older than the quiet window — spends a
+  slot while nothing is done with it, exactly as it did before #966. Exempting those would let one
+  sweep open up to thirty live sidecars instead of ten, tripling the belt's handle-taking on the
+  very files this ticket exists to stop touching; and unlike `{corrupt}` junk, a live sidecar
+  clears itself, because it carries a 15-minute capability and the expiry arm is an action the belt
+  always takes. `tests/intake-sidecar-race.test.mjs`'s `p966.budget: a settled LIVE upload DOES
+  spend one of the ten` pins both halves. Unreadable sidecars are reported once
+  per sweep — `[reconcile] intake recovery skipped N unreadable sidecar(s) this sweep: …` — never
+  once per file. The residual is stated rather than hidden: more than thirty settled-but-unusable
+  sidecars ahead of a crashed one still delay it, and `sweepSpoolTtl` is what ends that — it now
+  reaps any `intake-*.(bin|json)` past the TTL, not only uuid-named ones, which is the one shape
+  no `removeIntakeSpool(id)` will ever be called for. (`atomicJson`'s `.tmp` files stay unmatched;
+  the writer that made them removes them.)
+
+**A consequence, stated.** An intake whose capability has already expired but whose sidecar was
+written in the last five seconds is expired on the NEXT sweep rather than this one. That is the
+guard doing its job: a sidecar written moments ago belongs to a request still in flight.
+
+**Evidence.** `tests/intake-sidecar-race.test.mjs` — the host property measured both ways (a held
+read handle IS `EPERM`; a `stat` is not), 500 writes against concurrent sweeps with zero failures
+(428 of 500 failed before the fix), the quiet-window sidecar never opened (counted double), the
+ten-action budget past twelve unusable sidecars, the thirty-open bound, the give-up deadline under
+a permanently held handle, the TTL reap of an unreadable sidecar, the expiry arm, and the listing
+contract. Every cell that touches the filesystem takes its own spool directory, so the suite's
+result never depends on the order its cells ran in or on how long the box took between them. `tests/intake-db.test.mjs` carries the
+end-to-end recovery cell (`p966 the belt still recovers a crashed mid-flight intake`) and the
+abandoned-sidecar expiry cell, both of which now age their fixture's mtime rather than sweeping
+against a file they wrote in the same millisecond.
