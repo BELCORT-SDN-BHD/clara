@@ -1609,6 +1609,18 @@ const USER_PREFERENCES_0179_HUMAN_FNS = ["get_my_preferences", "save_my_preferen
 // audit surface, never something a model lane produces or consumes on its own.
 const ACTIVITY_FEED_0181_HUMAN_FNS = ["list_activity", "get_activity_event"];
 
+// #840 [0262, the successor Work link on a work.cancelled row] — NO NEW COHORT, NO NEW NAME, NO
+// GRANT CHANGE, each MEASURED rather than assumed (0262's own §T re-reads owner/SECURITY/settings/
+// ACL after the recut and refuses on drift). `clara.list_activity`/`clara.get_activity_event` are
+// STILL 0181's SAME two doors at their SAME signatures and grant (ACTIVITY_FEED_0181_HUMAN_FNS
+// above already covers them; 0183's own note above records the first body-only recut of these
+// names, 0262 is another one): it adds ONE additive jsonb key, `successor_work_id`, to each door's
+// return payload via `create or replace` — no parameter, no new function, no widened or narrowed
+// ACL — so no roster change is owed for either name, the same "wholly present or wholly absent"
+// reasoning 0183's own note states for this exact pair, and the same shape 0200's note (below,
+// #721) states for `clara.answer_work_question`/`clara._tf_accounting_work_immutable`.
+// #840 END
+
 // #629 [0180, shared Work questions] — the SHARED-QUESTION lane, one cohort for the same "wholly
 // present or wholly absent" reason 0178's list above carries.
 //
