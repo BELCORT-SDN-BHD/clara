@@ -43,6 +43,14 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
 
 const CLIENTS = [{ id: "c1", name: "Acme Sdn Bhd", status: "active", created_at: "2026-01-01T00:00:00Z" }];
 
+/** #996 fix round (L10-STD-01 / S-996-1) — a register with MANY rows, which every cell above
+ *  was blind to: their fixture carries exactly one client and one watch, so a per-row roster
+ *  read and a per-panel one are indistinguishable in them. */
+const MANY_IDS = ["c1", "c2", "c3", "c4", "c5"];
+const MANY_CLIENTS = MANY_IDS.map((id, i) => ({
+  id, name: `Client ${i + 1} Sdn Bhd`, status: "active", created_at: "2026-01-01T00:00:00Z",
+}));
+
 const ENVELOPE_BASE = {
   watermark: "w1",
   counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 1, lint_findings: 0 },
@@ -101,35 +109,42 @@ type Router = {
   roster?: unknown[];
 };
 
-function mockFetchFactory(opts: Router) {
+function mockFetchFactory(opts: Router & { clients?: unknown[]; aggregate?: unknown }) {
   const calls: { url: string; body: Record<string, unknown> }[] = [];
+  /** EVERY request, including the bodyless REST GETs `calls` deliberately skips — the roster
+   *  read (`clara.firm_members_visible`) is one of those, and counting it is the whole point of
+   *  the per-panel-vs-per-row cell below. */
+  const urls: string[] = [];
   const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    urls.push(u);
     if (init?.body) calls.push({ url: u, body });
     if (u.includes("/rpc/list_review_queue")) {
       const scope = body.p_scope as { client_id?: string } | undefined;
       if (scope?.client_id) {
         return jsonResponse({ ...ENVELOPE_BASE, rows: opts.scopedRows?.[scope.client_id] ?? [] });
       }
-      return jsonResponse(aggregateEnvelope());
+      return jsonResponse(opts.aggregate ?? aggregateEnvelope());
     }
     if (u.includes("/rpc/get_compliance_watch_disposition")) {
-      const answer = opts.disposition;
+      const answer = typeof opts.disposition === "function"
+        ? (opts.disposition as (b: Record<string, unknown>) => unknown)(body)
+        : opts.disposition;
       if (answer && typeof answer === "object" && "code" in (answer as Record<string, unknown>) && "message" in (answer as Record<string, unknown>)) {
         const a = answer as { code: string; message: string; status?: number };
         return jsonResponse({ code: a.code, message: a.message }, a.status ?? 400);
       }
       return jsonResponse(answer ?? { code: "CLR11", message: "watch not found" }, answer ? 200 : 400);
     }
-    if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+    if (u.includes("/rest/v1/clients")) return jsonResponse(opts.clients ?? CLIENTS);
     if (u.includes("/firm_members_visible")) {
       if (opts.roster === undefined) return jsonResponse({ message: "roster unavailable" }, 403);
       return jsonResponse(opts.roster);
     }
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
-  return { impl, calls };
+  return { impl, calls, urls };
 }
 
 async function mount() {
@@ -194,6 +209,60 @@ test("Ticket 996 AC3: a caller below the bookkeeper floor sees the register plus
       assert.match(text, /digital_services/);
       assert.doesNotMatch(text, /Disposition/, "no per-row disposition block for a floor this session cannot clear");
       assert.match(text, /bookkeeper/i, "and a stated reason, naming the floor, appears somewhere on the page");
+    } finally { await h.unmount(); for (let i = 0; i < 3; i++) await h.settle(); }
+  });
+});
+
+test("Ticket 996 fix round: a register with five dispositioned rows reads the firm roster ONCE, not once per row", async () => {
+  // THE DEFECT THIS CELL EXISTS FOR (standards review L10-STD-01, spec review S-996-1,
+  // 2026-09-20). Extracting `WatchDispositionLine` moved `useMemberNames` out of the
+  // per-affordance `WatchDispositionReceipt` and INTO the per-act line — and this panel renders
+  // that line once per register row. `lib/members/use-member-names.ts`'s own header states the
+  // rule in as many words: "ONE READ PER MOUNT ... callers that show many actors on one page
+  // should hold the hook ONCE at the panel level and pass `resolve` down, rather than mounting
+  // it per row." A firm-wide register is exactly such a page, and the cells above could not see
+  // it because their fixture has one client and one watch.
+  const aggregate = {
+    ...ENVELOPE_BASE,
+    rows: [],
+    compliance: {
+      stale_evaluator: false,
+      clients: MANY_IDS.map((id) => ({
+        client_id: id, service_group: "digital_services", state: "crossed",
+        confirmed_included_cents: 50000000, unknown_or_mixed_cents: 0, screening_proxy_cents: 0,
+        earliest_crossing_month: "2026-07-01", application_due: "2026-08-28",
+        future_method_status: "not_assessed",
+      })),
+    },
+  };
+  const scopedRows: Record<string, unknown[]> = {};
+  for (const id of MANY_IDS) scopedRows[id] = [{ ...watchRow(`w-${id}`), client_id: id }];
+
+  const { impl, urls } = mockFetchFactory({
+    aggregate,
+    clients: MANY_CLIENTS,
+    scopedRows,
+    // Each watch answers for ITS OWN client, so `byKey` carries five distinct entries rather
+    // than five copies of one — the register's own keying is (client_id, service_group).
+    disposition: (body: Record<string, unknown>) => {
+      const watch = String(body.p_watch);
+      return { ...ACKNOWLEDGED, watch_id: watch, client_id: watch.replace(/^w-/, "") };
+    },
+    roster: ROSTER,
+  });
+  await withMockedEnv(impl, async () => {
+    const h = await mount();
+    try {
+      // The rows really are all there and all resolved, so the count below is not a count over
+      // an empty register.
+      const text = h.text();
+      for (let i = 1; i <= MANY_IDS.length; i++) assert.match(text, new RegExp(`Client ${i} Sdn Bhd`));
+      assert.equal((text.match(/Acknowledged by Siti Rahman/g) ?? []).length, MANY_IDS.length,
+        "every row resolved its actor through the roster");
+
+      const rosterReads = urls.filter((u) => u.includes("/firm_members_visible")).length;
+      assert.equal(rosterReads, 1,
+        `the firm roster is read ONCE for the whole panel, not once per row (saw ${rosterReads} for ${MANY_IDS.length} rows)`);
     } finally { await h.unmount(); for (let i = 0; i < 3; i++) await h.settle(); }
   });
 });

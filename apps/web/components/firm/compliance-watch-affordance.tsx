@@ -37,7 +37,7 @@ import {
 } from "@/lib/firm-admin/compliance";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { MemberName } from "@/components/common/member-name";
-import { useMemberNames } from "@/lib/members/use-member-names";
+import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 import { ErrorMessage } from "./data-state";
 import type { NeedsYouAffordanceProps } from "./needs-you-affordances";
 
@@ -69,6 +69,15 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
   const t = useTranslations("FirmAdminCompliance.needsYou");
   const [disposition, setDisposition] = useState<WatchDisposition | null>(null);
   const [unreadable, setUnreadable] = useState(false);
+  // THE ROSTER READ LIVES HERE, ONE PER AFFORDANCE — where it lived before #996's extraction, and
+  // where `lib/members/use-member-names.ts`'s own header puts it ("ONE READ PER MOUNT … callers
+  // that show many actors on one page should hold the hook ONCE at the panel level and pass
+  // `resolve` down, rather than mounting it per row"). Fix round 2026-09-20 (standards L10-STD-01,
+  // spec S-996-1): the extraction had moved it into `WatchDispositionLine`, which
+  // `/settings/compliance`'s firm-wide register renders once per row. Holding it here also restores
+  // this mount's pre-#996 network behaviour byte for byte (spec S-996-2): a hook above the early
+  // returns fires its read for a watch with NOTHING recorded too, exactly as it did before.
+  const memberNames = useMemberNames(sessionTokenAccessor);
 
   const read = useCallback(async () => {
     try {
@@ -92,7 +101,13 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
     return <p className="text-xs text-muted-foreground">{t("receiptNone")}</p>;
   }
 
-  return <WatchDispositionLine act={act} resolvedEvidence={disposition?.resolvedEvidence ?? null} />;
+  return (
+    <WatchDispositionLine
+      act={act}
+      resolvedEvidence={disposition?.resolvedEvidence ?? null}
+      resolver={memberNames}
+    />
+  );
 }
 
 /**
@@ -108,9 +123,14 @@ function WatchDispositionReceipt({ watchId, epoch }: { watchId: string; epoch: n
 export function WatchDispositionLine({
   act,
   resolvedEvidence,
+  resolver,
 }: {
   act: WatchDispositionEvent;
   resolvedEvidence: string | null;
+  /** THE CALLER'S resolver, never one this line mounts for itself. A page that renders many acts
+   *  (the firm-wide register) holds ONE `useMemberNames` and passes it to every row; a page that
+   *  renders one (the needs-you inbox row, the client Tax tab) holds it in its own affordance. */
+  resolver: MemberNameResolver;
 }) {
   const t = useTranslations("FirmAdminCompliance.needsYou");
   // AN ATTRIBUTABLE ACTOR, NOT A uuid (fix round 1, finding A7). AC6 asks the receipt to be
@@ -125,7 +145,13 @@ export function WatchDispositionLine({
   // The agent branch inside `MemberName` is unreachable from here by construction: all three
   // compliance doors refuse an agent identity with CLR03 before any write
   // (`p659.watch.agent_refused`), so no event on this trail can carry one.
-  const memberNames = useMemberNames(sessionTokenAccessor);
+  //
+  // THE RESOLVER ARRIVES AS A PROP (fix round 2026-09-20, L10-STD-01 / S-996-1). This line is
+  // rendered once per act, and `/settings/compliance`'s register has as many acts as the firm has
+  // open watches, so mounting `useMemberNames` here fired one `clara.firm_members_visible` read
+  // per row. The count is pinned by
+  // `components/firm-admin/compliance-register-panel.test.tsx`'s five-row cell.
+  const memberNames = resolver;
 
   const at = act.createdAt === null ? "" : businessDateTime(act.createdAt);
   const kind = act.eventKind ?? "";

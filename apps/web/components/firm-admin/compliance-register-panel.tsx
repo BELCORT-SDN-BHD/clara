@@ -52,6 +52,7 @@ import {
 } from "@/lib/firm-admin/compliance";
 import { lastDispositionAct, type WatchDisposition } from "@/lib/firm/compliance-disposition";
 import { WatchDispositionLine } from "@/components/firm/compliance-watch-affordance";
+import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { fmtCents } from "@/lib/firm-admin/money";
 import { classifyTaxReadOutcome } from "@/lib/tax/read-state";
@@ -110,6 +111,16 @@ export function ComplianceRegisterPanel() {
       : String(clientsState.error)
     : null;
 
+  // ONE ROSTER READ FOR THE WHOLE REGISTER (fix round 2026-09-20, standards L10-STD-01, spec
+  // S-996-1). `lib/members/use-member-names.ts`'s own header states the rule: "callers that show
+  // many actors on one page should hold the hook ONCE at the panel level and pass `resolve` down,
+  // rather than mounting it per row." This register is exactly that page — one row per (client,
+  // service_group) across the whole firm — and each row's `WatchDispositionLine` names an actor.
+  // The hook has no cache and no shared context, so before this fix a firm with N dispositioned
+  // watches issued N identical `clara.firm_members_visible` reads. The count is pinned by
+  // `compliance-register-panel.test.tsx`'s five-row cell.
+  const memberNames = useMemberNames(sessionTokenAccessor);
+
   return (
     <div className="flex flex-col gap-3">
       {/* P6-T (FS-8): one sentence linking this firm-wide threshold watch to
@@ -152,6 +163,7 @@ export function ComplianceRegisterPanel() {
               row={row}
               clientName={clientsById.get(row.client_id)?.name ?? null}
               disposition={dispositions?.byKey.get(`${row.client_id}:${row.service_group}`) ?? null}
+              resolver={memberNames}
             />
           ))}
         </ul>
@@ -164,10 +176,13 @@ function ComplianceClientRow({
   row,
   clientName,
   disposition,
+  resolver,
 }: {
   row: ComplianceClientWatch;
   clientName: string | null;
   disposition: WatchDisposition | null;
+  /** The PANEL's one resolver, threaded down — never a per-row `useMemberNames`. */
+  resolver: MemberNameResolver;
 }) {
   const t = useTranslations("FirmAdminCompliance.compliance");
   // #996 AC2 — a watch with nothing recorded yet and a watch whose id this panel could not
@@ -219,7 +234,13 @@ function ComplianceClientRow({
       </dl>
       {/* #996 AC1 — the SAME rendering the needs-you inbox row and the client Tax tab already
           use for a recorded act, reused rather than a second copy of the wording. */}
-      {act !== null ? <WatchDispositionLine act={act} resolvedEvidence={disposition?.resolvedEvidence ?? null} /> : null}
+      {act !== null ? (
+        <WatchDispositionLine
+          act={act}
+          resolvedEvidence={disposition?.resolvedEvidence ?? null}
+          resolver={resolver}
+        />
+      ) : null}
     </li>
   );
 }
