@@ -1993,3 +1993,25 @@ test("af.37 firm.created lands on kind=firm, and the two LOOK-ALIKE families (fi
       `af.37 get_activity_event agrees for ${row.event_type}`);
   }
 });
+
+test("af.38 an event type whose prefix no rung names lands on the STATED DEFAULT, documents, in both doors", async (t) => {
+  if (await gateKindLadder(t)) return;
+  const cli = world.clients.A1;
+  // THREE unrelated families the owner's ruling does not name, so the cell is about the `else`
+  // arm and not about one lucky prefix: a bank statement, a typed-egress activation and an open
+  // item. None of them is a document act either — the default is the door's honest "I have no
+  // kind for this", stated in its own comment and in 0264's header, not a claim about documents.
+  const seeded = [];
+  for (const type of ["bank.statement_ingested", "egress.purpose_activated", "open_item.created"]) {
+    seeded.push({ type, ...(await mkEvent({ firm: FIRM_A(), type, client: cli, actor: ALICE() })) });
+  }
+
+  const page = rowsOf(await listActivity(BOB(), { client: cli, kinds: ["documents"], limit: 100 }));
+  for (const ev of seeded) {
+    const row = page.find((r) => r.id === ev.eventId);
+    assert.ok(row, `af.38 ${ev.type} is reachable under the default kind`);
+    assert.equal(row.kind, "documents", `af.38 list_activity files ${ev.type} on the stated default`);
+    const detail = await getActivityEvent(BOB(), "event", row.id);
+    assert.equal(detail.kind, "documents", `af.38 get_activity_event agrees for ${ev.type}`);
+  }
+});
