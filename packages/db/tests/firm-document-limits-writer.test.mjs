@@ -393,15 +393,26 @@ test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exa
   if (gate(t)) return;
 
   // (a) The pre-images, MEASURED on this rig before 0270 applied and transcribed here.
+  //
+  // RE-MEASURED AT INTEGRATION (wave 2, 2026-09-20). Four of these nine are recut EARLIER in
+  // merged chain order by 0252 (#964, lane 05 — the Asia/Kuala_Lumpur ingest window), which
+  // lane 10 never had on its own database: _reserve_document_ingest,
+  // _resize_document_reservation, _settle_document_reservation and settle_ingest_reservation.
+  // The cell's claim is unchanged — 0270 must not move a body that enforces a cap — so the four
+  // pins now name what 0252 leaves live, exactly as migration 0270's own prestate/tail arrays
+  // do. A flat re-measure (rather than the two-generation shape intake-batch.test.mjs uses) is
+  // right here because this battery gates on 0270, and no chain can carry 0270 without 0252:
+  // 0252 is lower in the same ordered chain. The other five are untouched by any wave-2
+  // migration and keep the values lane 10 measured.
   const PINS = {
     "clara._reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)":
-      "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734",
+      "32a42ca3de5c3f4de81971530430ceffe4f763eb9ed2b7e215941c8a94e70400",
     "clara._reserve_processing_call(uuid,integer)":
       "a713fa374a9069e08862a5a234ad0df6f5303a4223de3bdaaeafc99ae4358043",
     "clara._resize_document_reservation(uuid,uuid,integer)":
-      "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf",
+      "865f01a0c1094caf82efe9b9fec8b3bc4d611d1266be26058a42e9d8b60cc622",
     "clara._settle_document_reservation(uuid,uuid,integer)":
-      "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6",
+      "c96f43c0d5e4acec8871012044f3c4763f7af13b139b91ba7f3cede26f4b7d00",
     "clara._settle_processing_call(uuid,integer)":
       "e8b50f0d10da45be4caf6e278248750a4b1e862148dc879fbe38e7a5b4a02408",
     "clara._tf_firm_document_limits_upsert()":
@@ -411,7 +422,7 @@ test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exa
     "clara.get_firm_commercial_state()":
       "347141ee22b52c125ff845451051f03354f1f0e9d57cc43d759253f3273ed19e",
     "clara.settle_ingest_reservation(uuid,integer,text)":
-      "a7b8d4eeed2c17bfaf252fe73e2185c78255ce4d1e10fac2b933619ff50a9aab",
+      "0cb7be8fd77bc076c395d22cf282dc345a0636998c46a37787d51d015d18bb75",
   };
   for (const [fn, sha] of Object.entries(PINS)) {
     const r = await rootQuery(
