@@ -1399,6 +1399,34 @@ because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
 
+**#1027 — LEG 4 CONVERGES BEFORE IT JUDGES.** The cross-firm poison leg used to make two
+single-shot observations (one sweep, one read, twice) of facts the World produces asynchronously,
+and it discarded its own settle failures. Both observations reddened CI at random, on `main` and on
+a feature branch (jobs 105954490814 and 106051996127). Both are now bounded polls in
+`tests/queue-drain.mjs`'s shape — re-run the sweep, re-read the state, to `CLARA_P636_LEG4_DEADLINE_MS`
+(default 30 s, poll 500 ms) — with nothing weakened: the refusal count is cumulative over the
+polled sweeps and must still reach at least one, firm Q must still reach `cancelled`, `batchCancelOk`
+is now asserted on EVERY sweep rather than one, and a settle that cannot be performed is retried
+inside the same deadline and then named with its task id and last error instead of being swallowed.
+A deadline prints both firms, both parents, both states, every child's Work status and the last
+receipt, so a red is diagnosable from the job log alone.
+
+Measured on a throwaway clone of a migrated database (WSL, Node 22): unperturbed, both polls
+converge on the FIRST sweep in under 20 ms, so the happy path costs nothing. Under
+`CLARA_P636_LEG4_FAULT=slow_settle` (firm Q's children held running with every settle held back)
+the leg's own settles never land and firm Q's parent still converges in 6 sweeps over 2774 ms —
+driven by the World — where the single-shot read failed at once. Under
+`CLARA_P636_LEG4_FAULT=late_poison` (the poisoned parent's decision lands 1.5 s late) the refusal
+is counted after 4 sweeps in 1516 ms, where the single-shot read failed at once. With the belt
+deliberately broken so a refusal is recorded as a success, the polled block still reds — at its
+deadline, after 59 sweeps in 30.5 s, with the census.
+
+**What #1027 did NOT fix, and how to recognise it.** Firm P's children are ordinary admitted Work,
+so the World can drive them terminal on its own within seconds; when it does, the parent has no
+live children left and the belt settles it — correctly. A leg slow enough to see that reds on
+"firm P's is honestly still stopping" or on the refusal deadline with the census showing P's
+children already `failed`. That is a different defect from the two above and is not addressed here.
+
 ## #852 — the chat-clarify belt inside the sweep receipt
 
 **What moved.** `reconcileChatClarifies` used to run from `lib/leader.mjs`, in its own try/catch,
