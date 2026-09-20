@@ -1742,3 +1742,45 @@ edits no applied migration, and re-pins `clara._tf_source_binding_wall`,
 in its tail. It owes **no** writer-quiescence window: a transaction that began under the old body
 simply does not take the claim, which is the behaviour that shipped before it. Rollback is a
 successor migration restoring 0197's two-line body; the table may stay, since nothing reads it.
+
+## 0236 — the subledger hook's caller roster, stated on the hook itself (#868)
+
+`clara._subledger_on_approve` ([0037](migrations/0037_wave_c_a_subledger.sql)) is the one hook that
+births `clara.open_items` rows and classifies a coding kind when a journal entry is approved. It
+carried no statement of its own reachability: the first thing a reader who greps its name finds is
+0037's own tail, which pins its caller set at **four** — a pin that was already two migrations
+stale by the time [0216](migrations/0216_fixed_asset_acquisition.sql) and
+[0221](migrations/0221_staff_expense_claims.sql) each independently re-derived and re-pinned the
+live set at **six**, because neither had one shared place to read it from.
+
+The live six, and where each one's direct call arrived:
+
+| caller | arrived |
+|---|---|
+| `_approve_entry_core` | [0037](migrations/0037_wave_c_a_subledger.sql) (hook's own creation) |
+| `_approve_opening_entry` | [0037](migrations/0037_wave_c_a_subledger.sql) |
+| `approve_wrong_client_correction` | [0037](migrations/0037_wave_c_a_subledger.sql) |
+| `reverse_entry` | [0037](migrations/0037_wave_c_a_subledger.sql) |
+| `finalize_close` | [0056](migrations/0056_wave_e_close_model.sql) (created already calling it) |
+| `reopen_fiscal_year` | [0085](migrations/0085_b3_reopen_ends_on.sql) / [0086](migrations/0086_b3_reopen_ends_on_part2.sql) |
+
+`reopen_fiscal_year` is the one entry worth a note: through 0056 it unwound a closed year by
+calling `clara.reverse_entry`, so it was not itself a direct caller yet — measured absent from
+0056's own body, and stated in 0085's own header ("0056's reopen routes its unwind through
+`clara.reverse_entry`"). 0085 gave it a dedicated reversal mirror and its own direct call; 0086 (its
+obligatory sibling file) pinned the resulting six-name caller census and the six-count
+approve-writer census, both re-derived from the live catalog. 0216's own comment attributes both
+new callers to "0056" — imprecise on this one point; 0085/0086 is the correct citation, and 0236's
+comment carries the corrected one.
+
+[0236_subledger_hook_caller_roster.sql](migrations/0236_subledger_hook_caller_roster.sql) closes
+the discoverability gap with exactly one statement: a `comment on function` naming all six callers
+and the migration each arrived in, and stating that 0037's four-name census is stale by two. Its
+prestate re-derives the roster from the catalog the same way 0216/0221's own tails do and refuses
+to apply unless it is still that measured six; its tail re-reads the comment's content and
+re-confirms the hook's body (`sha256(prosrc)`), owner, `SECURITY DEFINER` flag and (empty) grant
+are byte-for-byte unmoved, and that the hook is still reachable by no trigger directly. No door, no
+wire shape, no new relation, and no shared roster-census helper (out of scope, Agent Brief): the
+next migration that needs the count still re-derives it in its own tail, exactly as 0216 and 0221
+did — this file only gives the first reader a durable place to learn what that census currently
+reads.

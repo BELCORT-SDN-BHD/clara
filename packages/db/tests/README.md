@@ -71,6 +71,13 @@ the six non-regression `prosrc` pins that prove 0224 recut nothing. Its gate is
 `preview-invite-preintegration-gate.mjs`; a focused run leaves `CLARA_ALLOW_MISSING_PREVIEW_INVITE`
 unset and must count zero skips.
 
+`subledger-hook-caller-roster.test.mjs` reads `clara._subledger_on_approve`'s catalog comment
+(0236, #868): all six live callers named with the migration each arrived in, the historical
+four-name pin (0037) stated as stale, and the AC3 non-regression pins (`prosrc` sha, owner,
+`SECURITY DEFINER` flag, grant, trigger reachability) that prove 0236 changed nothing but the
+comment. Its gate is `subledger-hook-caller-roster-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_SUBLEDGER_HOOK_ROSTER` unset and must count zero skips.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator
