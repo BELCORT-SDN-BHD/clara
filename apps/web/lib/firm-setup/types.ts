@@ -34,8 +34,10 @@ export type FirmSetupItem = {
   /** Which Card this fact belongs under. A bounded RELATED SET is exactly one group's pending items. */
   group_key: string;
   question: string;
-  /** The catalogue's own note: why the row exists, what the interview asked verbatim, and every
-   *  honest boundary (an unverified registration format, a conditional statutory screen). */
+  /** #934 — one accountant-readable sentence: what the answer is used for and Clara's stated
+   *  boundary, never an accounting conclusion. `clara.get_firm_setup()` PREFERS the catalogue's
+   *  `user_note` here (0258_firm_setup_user_notes.sql); the engineer's own provenance note (file
+   *  names, line numbers) that rendered here before #934 is no longer what this surface shows. */
   note: string;
   required: boolean;
   min_role: string;

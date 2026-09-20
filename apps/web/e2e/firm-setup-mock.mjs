@@ -61,47 +61,51 @@ function armed(request) {
  * meets a single-`Field` fact, a bounded related set, an optional fact it can skip, and a fact
  * that reaches the knowledge register. The shapes and option lists are the ones 0218 seeds from
  * `clara.knowledge_keys.allowed_values`; nothing here invents a vocabulary.
+ *
+ * #934 — every `note` below is the owner-approved ACCOUNTANT sentence
+ * (0258_firm_setup_user_notes.sql), never the engineer's own provenance text: `get_firm_setup`
+ * itself now prefers that sentence, so a fixture modelling the real door's response must too.
  */
 const CATALOGUE = [
   {
     item_key: "legal_name", kind: "must_ask", group_key: "identity",
     question: "What is the firm's registered legal name?",
-    note: "FIRM_SEGMENTS_V2 legal_name. Recorded on the setup plan with its author.",
+    note: "Enter the name exactly as on the SSM certificate. It appears on every report and letter Clara produces for the firm.",
     required: true, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 10, knowledge_key: null,
   },
   {
     item_key: "address", kind: "must_ask", group_key: "identity",
     question: "What is the firm's registered address?",
-    note: "FIRM_SEGMENTS_V2 address. Recorded on the setup plan with its author.",
+    note: "The registered address as filed with SSM, not the office you work from.",
     required: true, min_role: "admin", answer_shape: "long_text", answer_options: [], answer_field: null,
     sort_order: 20, knowledge_key: null,
   },
   {
     item_key: "mia", kind: "capture", group_key: "identity",
     question: "What is the firm's MIA registration number?",
-    note: "FIRM_SEGMENTS_V2 mia — optional and skippable in the interview, and optional here.",
+    note: "Optional. The firm's MIA registration number, if it has one; skip with a reason if none.",
     required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 30, knowledge_key: null,
   },
   {
     item_key: "fye", kind: "must_ask", group_key: "tax",
     question: "Which month is the firm's financial year-end?",
-    note: "FIRM_SEGMENTS_V2 fye — a whole month 1-12, the interview's own validateFye shape.",
+    note: "The month the firm's own financial year ends, 1 to 12. Clients keep their own year-end on their client record.",
     required: true, min_role: "admin", answer_shape: "month", answer_options: [], answer_field: null,
     sort_order: 40, knowledge_key: null,
   },
   {
     item_key: "tin", kind: "capture", group_key: "tax",
     question: "What is the firm's MyInvois TIN?",
-    note: "FIRM_SEGMENTS_V2 tin — not required for commit here, and skippable with a stated reason.",
+    note: "The firm's MyInvois TIN. Required when annual turnover is RM1 million or more; otherwise skip with a reason.",
     required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 45, knowledge_key: null,
   },
   {
     item_key: "currency", kind: "capture", group_key: "accounting",
     question: "What is the firm's default currency?",
-    note: "FIRM_SEGMENTS_V2 currency. Firm-defaultable (D8): answering it records a firm-scope knowledge record.",
+    note: "The currency the firm keeps its own books in, as a three-letter code. Client books carry their own currency.",
     required: false, min_role: "admin", answer_shape: "choice",
     answer_options: ["MYR", "USD", "SGD", "EUR", "GBP", "OTHER"], answer_field: null,
     sort_order: 50, knowledge_key: "default_currency",
