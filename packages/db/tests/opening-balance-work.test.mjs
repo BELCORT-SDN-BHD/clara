@@ -58,6 +58,8 @@ import {
   humanQuery,
   // fix round (ADV-L01-04) -- a person who is no longer a member of this firm.
   insertUser, addMember,
+  // fix round (ADV-L01-08) -- a seed with a tie document and NOTHING staged against it.
+  openingDoc, createOpeningSeed,
 } from "./wave-b/wb-fixtures.mjs";
 
 /** The migration whose effects this file describes, and the stem its gate module keys on. */
@@ -603,4 +605,58 @@ test("obw984.admit.membership: the admission seam refuses an actor whose members
   assert.equal(works[0].initiator_role, "admin",
     "and its initiator_role comes from the ACTIVE membership row, which is the role this Work was taken under");
   noteLane(`obw984: the admission seam's membership floor reads status; removed member refused, active member minted work ${works[0].id}`);
+});
+
+// =============================================================================================
+// 7 - obw984.zero_entry -- THE BATCH THAT WOULD MINT A WORK OUT OF NOTHING, and why it cannot.
+//
+// WHY THIS CELL EXISTS (fix round, ADV-L01-08). Section E builds `v_entries` from the seed's
+// DRAFT opening items and hands it to `clara._admit_opening_work` unconditionally, so on a
+// reading of that block alone an empty result would mint a Work with `basis.entry_count = 0` and
+// a receipt whose `effects.entry_count` is 0 -- the outcome-shape CHECK is satisfied by the
+// seed_id, not by the entries. That an EMPTY open seed is a real state is implied by
+// `clara.cancel_opening_seed`, which exists for one. The adversarial lens could not say whether
+// the shape is REACHABLE and said so rather than guessing.
+//
+// It is not, and the guard is not the tie assertion: both doors carry a "has no draft entries"
+// arm (0017, preserved verbatim by 0239 at :730 for the seed and :889 for the correction) that
+// runs BEFORE the entry loop and before the admission call. This cell pins that ordering through
+// the door, so a later recut that hoists the Work minting above the guard is a red cell rather
+// than a zero-entry Work in the books.
+// =============================================================================================
+
+test("obw984.zero_entry an opening seed with nothing staged is refused before any Work is minted", async (t) => {
+  if (unready(t)) return;
+
+  const onb = await onboardingClient(w.users.hana);
+  await seedOpeningCoa(w.users.alice, onb.client);
+  const doc = await openingDoc(w.users.bob, { firm: w.firms.A, client: onb.client });
+  const receipt = await createOpeningSeed(w.users.bob, {
+    client: onb.client, plan: onb.plan, asOf: "2026-01-01",
+    tieDocument: doc.documentId, tieSha256: doc.sha256,
+  });
+  const seed = receipt.seed_id ?? receipt.id;
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.opening_items where seed_id=$1", [seed])).rows[0].n, 0,
+  "zero_entry: the seed is open with NOTHING staged against it -- the premise of this cell");
+
+  const rev = await planRevision(onb.plan);
+  const err = await assertRaises("CLR31", () => approveOpeningSeed(w.users.hana, {
+    seed, planRevision: rev, tieSha256: doc.sha256,
+    entryRevisions: {}, opKey: opk("obw984-zero"),
+  }), "approving a seed with no staged draft entries");
+  assert.match(err.message, /opening seed has no draft entries/,
+    "zero_entry: ...and it is the door's OWN no-draft-entries arm that refuses, not a tie or "
+    + "revision mismatch dressed up as one");
+
+  // THE POINT OF THE CELL: nothing was minted on the way to that refusal.
+  for (const [rel, sql] of [
+    ["accounting_work", "select count(*)::int as n from clara.accounting_work where client_id=$1"],
+    ["operation_receipts", "select count(*)::int as n from clara.operation_receipts where client_id=$1"],
+  ]) {
+    assert.equal((await rootQuery(sql, [onb.client])).rows[0].n, 0,
+      `zero_entry: no ${rel} row exists for this client -- a Work with entry_count 0 is not a `
+      + "state the doors can reach");
+  }
+  noteLane(`obw984: a zero-entry seed (${seed}) is refused CLR31 by the door's own guard, before any Work`);
 });

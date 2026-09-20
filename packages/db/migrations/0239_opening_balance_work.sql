@@ -819,6 +819,12 @@ begin
   -- admission path (`clara._admit_opening_work`) rather than by `clara._admit_accounting_work_core`:
   -- that core inserts an `agent_tasks` row for a model run, and this approval is deterministic and
   -- human-made. The dedicated `clara.opening_seed_approvals` receipt above is untouched.
+  -- `v_entries` CANNOT BE EMPTY HERE (fix round, ADV-L01-08): this door's own "opening seed has no
+  -- draft entries" arm (0017's, kept verbatim above) refuses an empty batch BEFORE the loop that
+  -- builds it, so no `entry_count = 0` Work is reachable through either door. Measured on the rig
+  -- rather than reasoned: approving a seed with nothing staged raises CLR31 and writes no
+  -- accounting_work and no operation_receipts row (`obw984.zero_entry`). The order matters -- a
+  -- later recut that hoists this call above that arm would mint a Work out of nothing.
   v_work:=clara._admit_opening_work(c.firm,s.client_id,c.actor,p_seed,v_batch,v_entries,
     p_op_key,s.tie_document_id,'seed');
   perform clara._audit(c.firm,c.actor,null,null,'approve_opening_seed',null,

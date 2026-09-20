@@ -1946,6 +1946,17 @@ two alone:
 | `clara._admit_accounting_work_core` | **not** widened — it inserts an `agent_tasks` row and demands a model name |
 | `clara._record_journal_entry_core` | **not** widened — an opening Work never reaches the posting core |
 
+**No Work is minted out of nothing** (fix round, ADV-L01-08). Both doors build the Work's entry
+array from the seed's DRAFT opening items and hand it to `clara._admit_opening_work`
+unconditionally, so on a reading of that block alone an empty batch would mint a Work with
+`basis.entry_count = 0`. It cannot happen, and the guard is each door's own "opening seed / opening
+correction has no draft entries" arm (0017's, kept verbatim by 0239 at :730 and :889), which runs
+before the loop that builds the array. Measured on the rig: approving a seed with nothing staged
+raises `CLR31` and leaves no `clara.accounting_work` and no `clara.operation_receipts` row
+(`obw984.zero_entry` in
+[tests/opening-balance-work.test.mjs](tests/opening-balance-work.test.mjs) pins the ordering, so a
+later recut that hoists the minting above the guard is a red cell).
+
 **Two shape CHECKs also read the purpose,** and they are why this file is bigger than a CHECK swap.
 `clara.operation_receipts.task_id` was `NOT NULL` with an FK to `clara.agent_tasks`; an opening
 approval owns no run, so the column becomes nullable behind a NEW purpose-keyed CHECK
