@@ -247,6 +247,60 @@ test("`party_ambiguous` renders its candidates INLINE as a choice, and picking o
     "picking one resolves the refusal in place");
 });
 
+test("#982 the chooser shows each candidate's TIN beside its registration number", async () => {
+  // LHDN MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and a
+  // person telling two parties apart may only have the TIN to go on. The door has always carried
+  // each candidate's `tin` in the refusal; this form mapped id, name and registration number and
+  // dropped it, so the one identifier that told the SECOND party here apart never reached the
+  // screen.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001", tin: "C24680135791" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: "C13579246802" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("200101000001"), "the registration number still shows");
+  assert.ok(String(h.text()).includes("C24680135791"), "…and now the TIN beside it");
+  assert.ok(String(h.text()).includes("C13579246802"),
+    "…including for the candidate whose registration number the books do not hold, which is the one a person could not otherwise tell apart");
+});
+
+test("#982 `party_identifier_conflict` is a banner with its own sentence, its code and BOTH sides as controls", async () => {
+  // The door's third party refusal (0274): the document's registration number and its TIN name two
+  // different live parties. It is not `party_unresolved` (something DID answer) and not
+  // `party_ambiguous` (the person is choosing between two identifiers the document carries, not
+  // between two parties one identifier reaches), so it gets its own sentence — and the same
+  // chooser, because the remedy is the same act.
+  const h = await renderComponent(App({
+    submit: async () => ({
+      kind: "invalid_basis", field: "invoice.counterparty", reason: "party_identifier_conflict",
+      candidates: [
+        { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001", tin: null, matched_on: "registration" },
+        { counterparty_id: BETA, name: "Beta Trading Sdn Bhd", registration_no: null, tin: "C13579246802", matched_on: "tin" },
+      ],
+    }) as unknown as SubmitTradeInvoiceWorkResult,
+  }));
+  await fillBill(h);
+  await submitForm(h);
+  assert.ok(String(h.text()).includes("party_identifier_conflict"), "the door's CODE, verbatim");
+  assert.match(String(h.text()), /registration number and the tax identification number/i,
+    "…beside a sentence that names what disagreed, not a generic one");
+  assert.ok(String(h.text()).includes("200101000001"), "the party the registration number reached");
+  assert.ok(String(h.text()).includes("C13579246802"), "…and the party the TIN reached");
+  const pick = h.find((n) => n.tagName === "BUTTON"
+    && String(n.textContent ?? "").trim() === "Beta Trading Sdn Bhd");
+  assert.ok(pick, "both sides are CONTROLS, so the person chooses rather than being informed");
+  await h.fireEvent(pick, "click");
+  await h.settle();
+  assert.equal(String(h.text()).includes("party_identifier_conflict"), false,
+    "picking one resolves the refusal in place");
+});
+
 test("every refusal is a BANNER carrying the door's code — and there is no toast anywhere", async () => {
   for (const [reason, phrase] of [
     ["credit_shape_not_admitted", "credit note is not recorded here"],

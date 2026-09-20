@@ -336,6 +336,11 @@ export function TradeInvoiceFormView({
           counterparty_id: typeof c.counterparty_id === "string" ? c.counterparty_id : "",
           name: typeof c.name === "string" ? c.name : "",
           registration_no: typeof c.registration_no === "string" ? c.registration_no : null,
+          // #982 — the TIN is CARRIED, not dropped. LHDN MyInvois requires the buyer TIN and BRN,
+          // so a Malaysian document carries both and the TIN is sometimes the only identifier
+          // that tells two candidates apart. The door has always put it in the refusal; this
+          // mapping used to discard it, so it never reached the screen.
+          tin: typeof c.tin === "string" ? c.tin : null,
         }))
         .filter((c) => c.counterparty_id !== "" && c.name !== "");
       setOutcome({ kind: "refused", reason: res.reason ?? "invalid_basis", field, candidates });
@@ -431,6 +436,7 @@ export function TradeInvoiceFormView({
                 const id = typeof c.counterparty_id === "string" ? c.counterparty_id : null;
                 const name = typeof c.name === "string" ? c.name : "";
                 const reg = typeof c.registration_no === "string" ? c.registration_no : null;
+                const tin = typeof c.tin === "string" ? c.tin : null;
                 return (
                   <li key={id ?? `candidate-${i}`} className="flex items-center gap-2">
                     <Button
@@ -446,7 +452,16 @@ export function TradeInvoiceFormView({
                     >
                       {name}
                     </Button>
-                    {reg ? <span className="text-xs text-muted-foreground">{reg}</span> : null}
+                    {reg ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t("candidates.registration", { value: reg })}
+                      </span>
+                    ) : null}
+                    {tin ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t("candidates.tin", { value: tin })}
+                      </span>
+                    ) : null}
                   </li>
                 );
               })}

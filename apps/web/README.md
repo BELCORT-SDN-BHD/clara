@@ -651,6 +651,16 @@ hands the derived basis back, which is what the success banner renders.
 filter over the counterparty reads the registers already use, and `party_ambiguous`'s candidates
 render INLINE as a choice.
 
+**#982 — the chooser shows each candidate's TIN, and answers a third party refusal.** LHDN
+MyInvois requires the buyer TIN and BRN, so a Malaysian document carries both and the TIN is
+sometimes the only identifier that tells two candidates apart. The door has always carried each
+candidate's `tin`; this form mapped id, name and registration number and dropped it, so it never
+reached the screen. It now renders labelled (`Reg. …` / `TIN …`) beside the name. Migration 0274's
+`party_identifier_conflict` — the document's registration number and its TIN name two different
+live parties — renders through the SAME banner and the SAME chooser, because the remedy is the
+same act; it has its own sentence because the person is choosing between two identifiers the
+document carries, not between two parties one identifier reaches.
+
 **AC5's mutual links**: ONE block on the Work detail, from `clara.get_trade_invoice` — the kind,
 the party, the two dates, the reference and, once posted, the entry, the open item and its
 outstanding. The other half was already built and needed nothing:

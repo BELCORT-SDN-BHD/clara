@@ -1843,7 +1843,9 @@
       "title": "Clara did not record this"
     },
     "candidates": {
-      "label": "Which party do you mean?"
+      "label": "Which party do you mean?",
+      "registration": "Reg. {value}",
+      "tin": "TIN {value}"
     },
     "conflict": {
       "title": "That draft was already submitted",
@@ -1879,6 +1881,7 @@
     "refusals": {
       "party_ambiguous": "More than one party answers to that name. Say which one.",
       "party_unresolved": "No party of this client answers to that.",
+      "party_identifier_conflict": "The registration number and the tax identification number on this document name two different parties. Say which one it is.",
       "credit_shape_not_admitted": "A credit note is not recorded here. Record it as a credit against the invoice it corrects.",
       "invalid_total": "The stated total does not match the control leg's signed amount.",
       "unbalanced_basis": "The journal does not balance.",

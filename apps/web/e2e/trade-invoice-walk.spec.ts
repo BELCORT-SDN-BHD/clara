@@ -168,8 +168,11 @@ test("a refused party renders its candidates INLINE and preserves the draft", as
       name: TI.vendorName,
       expected_counterparty_kind: "vendor",
       candidates: [
-        { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565" },
-        { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: "200101065566" },
+        { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565", tin: "C65565565651" },
+        // #982 — the second candidate's registration number is NOT on the books, so its TIN is the
+        // only identifier that tells it apart. Before 0274's web half the form dropped `tin` when
+        // it mapped the refusal and this candidate reached the screen as a bare name.
+        { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: null, tin: "C65565565652" },
       ],
     },
   });
@@ -181,10 +184,47 @@ test("a refused party renders its candidates INLINE and preserves the draft", as
   await expect(page.getByText("party_ambiguous")).toBeVisible();
   // …and the candidates as CONTROLS, not prose — never a toast, never a dialog.
   await expect(page.getByRole("button", { name: TI.vendorTwinName })).toBeVisible();
+  // #982 — each candidate's TIN is ON SCREEN beside its registration number, so a person can tell
+  // apart two parties the books hold no registration number for.
+  await expect(page.getByText("C65565565651")).toBeVisible();
+  await expect(page.getByText("C65565565652")).toBeVisible();
   // EVERY KEYSTROKE SURVIVES.
   await expect(field(page, "reference")).toHaveValue("ALPHA-2026-0042");
   await expect(field(page, "memo")).toHaveValue("Alpha Supplies bill, office paper");
   await expect(field(page, "totalCents")).toHaveValue(/1,?060/);
+});
+
+test("#982 an identifier conflict names what disagreed and offers BOTH parties", async ({ page }) => {
+  // 0274's third party refusal, driven through the SAME carrier every refusal on this lane rides:
+  // the runtime hands `detail` back verbatim and the form reads `detail.candidates` off it. The
+  // person is choosing between the two identifiers the document itself carries, so the sentence
+  // says so and each side says which identifier reached it.
+  await control(page, {
+    op: "refuse_next",
+    field: "invoice.counterparty",
+    reason: "party_identifier_conflict",
+    detail: {
+      reason: "party_identifier_conflict",
+      registration_no: "200101065565",
+      tin: "C65565565652",
+      expected_counterparty_kind: "vendor",
+      candidates: [
+        { counterparty_id: TI.vendorId, name: TI.vendorName, registration_no: "200101065565", tin: null, matched_on: "registration" },
+        { counterparty_id: TI.vendorTwinId, name: TI.vendorTwinName, registration_no: null, tin: "C65565565652", matched_on: "tin" },
+      ],
+    },
+  });
+  await fillBill(page);
+  await page.getByRole("button", { name: "Record it" }).click();
+
+  await expect(page.getByText(/registration number and the tax identification number/i))
+    .toBeVisible({ timeout: CELL_BUDGET.poll });
+  await expect(page.getByText("party_identifier_conflict")).toBeVisible();
+  await expect(page.getByText("Reg. 200101065565")).toBeVisible();
+  await expect(page.getByText("TIN C65565565652")).toBeVisible();
+  // BOTH sides are controls, and picking one resolves the refusal in place.
+  await page.getByRole("button", { name: TI.vendorTwinName }).click();
+  await expect(page.getByText("party_identifier_conflict")).toHaveCount(0);
 });
 
 test("a duplicate submit after a dropped acknowledgement resolves to ONE Work", async ({ page }) => {

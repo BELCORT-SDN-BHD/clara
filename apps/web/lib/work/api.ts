@@ -137,6 +137,10 @@ export type PartyCandidateWire = {
   name?: unknown;
   registration_no?: unknown;
   tin?: unknown;
+  /** #982 (migration 0274) — which identifier reached this candidate, `"registration"` or
+   *  `"tin"`, present only on a `party_identifier_conflict`. Declared because the door raises it;
+   *  no surface renders it yet. */
+  matched_on?: unknown;
 };
 
 export type RetryWorkResult =
