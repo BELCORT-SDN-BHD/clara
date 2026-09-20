@@ -369,6 +369,17 @@ function resolveDocumentLaneClass(lane) {
  * Live tasks bound to NO workflow run, across both tables. ALWAYS measured — `measured:true` is
  * part of the contract, because the whole B1 lesson is that an unlooked-for zero is the worst
  * answer this command can print.
+ *
+ * #1015 — THE DOCUMENT LANE'S OWN SCOPING RULE, which is not the agent lane's. `clara.
+ * document_processing_tasks` carries no `work_id`/`task_id` column, so `workIds`/`taskIds` name
+ * nothing that table could filter on. A caller who names either (an AGENT-shaped scope) and
+ * leaves `documentTaskIds` OUT of the scope object entirely narrows the document lane to NONE —
+ * not to "every row", which is what an absent filter means in SQL and was this function's actual
+ * defect. `documentTaskIds` PRESENT in the scope object — even as `null` — is the caller
+ * explicitly asking for the document lane's own full, unscoped picture regardless of what else is
+ * scoped; presence of the key, not its value, is the signal. An entirely EMPTY scope (`{}`, or no
+ * `scope` at all — neither table is scoped by anything) is the same explicit ask from the other
+ * side, and is how `preflight()`'s GLOBAL census and `tests/queue-drain.mjs` get the full picture.
  * @param {(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>} query
  * @param {{workIds?:ReadonlyArray<string>|null, taskIds?:ReadonlyArray<string>|null,
  *          documentTaskIds?:ReadonlyArray<string>|null}} [scope]
@@ -405,9 +416,13 @@ export async function censusUnboundTasks(query, scope = {}) {
   // #1015 — no filter is NOT the same question as no correspondence. `clara.document_processing_
   // tasks` carries no work_id/task_id column at all, so a caller who scoped the AGENT half by
   // taskIds/workIds has given the document half nothing it could legitimately match against —
-  // the honest answer for that half is NONE, not EVERYTHING.
+  // the honest answer for that half is NONE, not EVERYTHING. A caller that wants the full,
+  // unscoped document picture regardless must ASK, by naming the `documentTaskIds` key at all
+  // (even as `null`) — presence, not value, is what distinguishes "not requested" from
+  // "explicitly requesting the unscoped full census" (the Agent Brief's own two cases).
   const agentScoped = scope.workIds != null || scope.taskIds != null;
-  const documentTaskIds = scope.documentTaskIds ?? (agentScoped ? [] : null);
+  const docScopeGiven = Object.prototype.hasOwnProperty.call(scope, "documentTaskIds");
+  const documentTaskIds = docScopeGiven ? (scope.documentTaskIds ?? null) : (agentScoped ? [] : null);
   const docs = await query(
     `select id, lane, status
        from clara.document_processing_tasks
