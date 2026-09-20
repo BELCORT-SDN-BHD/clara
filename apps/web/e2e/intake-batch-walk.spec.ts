@@ -62,9 +62,10 @@ test.describe("#636 the durable intake batch", () => {
     await expect(card(page)).toContainText("Awaiting the daily quota");
     await expect(card(page).getByRole("link", { name: /Open the work/i }).first()).toBeVisible();
 
-    // The capacity sentence names 08:00 and never "midnight" or "tomorrow".
+    // The capacity sentence names the door's own reset moment (#964: MYT midnight, 00:00 —
+    // moved off the retired 08:00 UTC-day reset) and never "midnight" or "tomorrow" as words.
     const text = await card(page).innerText();
-    expect(text).toContain("08:00");
+    expect(text).toContain("00:00");
     expect(text.toLowerCase()).not.toContain("midnight");
     expect(text.toLowerCase()).not.toContain("tomorrow");
 

@@ -149,7 +149,79 @@ export async function sweepBatchCancellations(client, { limit = 20 } = {}) {
 // both vanish; `cleanup` (the route passes `removeIntakeSpool`) then drops the sidecar the begin
 // wrote, because a sidecar whose intake no longer exists would be re-driven by
 // `recoverPendingDocumentIntakes` every sweep until its 15-minute TTL expired it.
+//
+// #965 — ON A CEILING REFUSAL, THE OPPOSITE. Since migration 0254 the creation door COMMITS a
+// refused intake at failed/limit and RETURNS `refused: true` rather than raising CLR18, and this
+// function's blanket `rollback` would throw that record away again — the exact loss the ticket
+// exists to stop. So a refused begin takes `commitRefusedMember` below instead, which gives the
+// record a member, declares its wait through the GOVERNED door, and COMMITS.
+//
+// THE BELT DOES NOT PICK THIS UP. 0229's trigger arm (b) fires on an UPDATE that moves
+// `failure_code` to 'limit' on an intake that already has a member; here the member does not exist
+// yet when the door writes that value (the attach can only happen once the intake id exists), so
+// the arm's `select … where b.intake_id = new.id` finds nothing and returns. The wait therefore has
+// to be declared explicitly — which is also what `recordCapacityWait` does for the post-custody
+// refusal, through the same door, with the same verbatim reason.
 // ---------------------------------------------------------------------------------------------
+
+/**
+ * #965 — a file the daily ceiling refused, inside an OPEN batch.
+ *
+ * WHY EVERY DOOR CALL HERE SITS UNDER A SAVEPOINT. `attachIntake` and `setMemberDependency` catch
+ * their own refusals and answer typed — but the failed statement has already aborted the
+ * transaction, and `commit` on an aborted transaction is a ROLLBACK. Without the savepoint, a
+ * batch that closed between the upload and the refusal would silently take the refusal record
+ * down with it, which is precisely the defect this ticket closes. The record is the thing that
+ * must survive; the membership is best-effort on top of it.
+ *
+ * NO OBJECT SPREAD, like every other return in this module.
+ *
+ * @returns {Promise<{refused: true, intake_id: string, status: string, failure_code: string,
+ *                    ceiling: string|null, reason: string|null, batch_id: string,
+ *                    member_id: string|null, dependency: string|null}>}
+ */
+async function commitRefusedMember({ client, principal, batchId, opKey, started, intakeId, log }) {
+  let memberId = null;
+  let dependency = null;
+
+  await client.query("savepoint clara_refused_attach");
+  const attached = await attachIntake(client, { actor: principal.sub, batchId, intakeId, opKey });
+  if (attached.status !== "ok") {
+    await client.query("rollback to savepoint clara_refused_attach");
+    log(`[clara-runtime] intake batch: a ceiling-refused intake=${intakeId} could not join batch=${batchId}: ${attached.status} ${attached.code ?? ""} ${attached.reason ?? ""} — the refusal record is kept, the batch shows no member`);
+  } else {
+    memberId = attached.member?.member_id ?? null;
+    await client.query("savepoint clara_refused_wait");
+    const waited = await setMemberDependency(client, {
+      actor: principal.sub,
+      intakeId,
+      dependency: "awaiting_capacity",
+      // The database's OWN sentence, verbatim — the operator remedy the batch card renders, and
+      // the same text `recordCapacityWait` passes for the post-custody refusal.
+      reason: started.reason ?? "document daily limit reached",
+      opKey: `intake-batch-capacity:${intakeId}`,
+    });
+    if (waited.status !== "ok") {
+      await client.query("rollback to savepoint clara_refused_wait");
+      log(`[clara-runtime] intake batch: capacity wait not recorded for refused intake=${intakeId}: ${waited.status} ${waited.code ?? ""} ${waited.reason ?? ""}`);
+    } else {
+      dependency = "awaiting_capacity";
+    }
+  }
+
+  await client.query("commit");
+  return Object.freeze({
+    refused: true,
+    intake_id: intakeId,
+    status: "failed",
+    failure_code: started.failure_code ?? "limit",
+    ceiling: started.ceiling ?? null,
+    reason: started.reason ?? null,
+    batch_id: batchId,
+    member_id: memberId,
+    dependency,
+  });
+}
 
 /**
  * @param {{ client: any, principal: any, input: any, batchId: string, opKey: string,
@@ -163,6 +235,13 @@ export async function beginIntakeInBatch({ client, principal, input, batchId, op
   try {
     const started = await begin(client, principal, input);
     intakeId = String(started.intake_id);
+    // #965: a ceiling refusal is a RETURNED outcome whose record is already written in this
+    // transaction. It must be COMMITTED, not rolled back — see commitRefusedMember above.
+    if (started.refused === true) {
+      return await commitRefusedMember({
+        client, principal, batchId, opKey, started, intakeId, log,
+      });
+    }
     const attached = await attachIntake(client, {
       actor: principal.sub, batchId, intakeId, opKey,
     });
@@ -218,8 +297,9 @@ export async function beginIntakeInBatch({ client, principal, input, batchId, op
 //
 // IT SWALLOWS ITS OWN REFUSAL. A CLR04 (the uploader's authority was revoked between upload and
 // refusal) or a CLR11 (this intake is in no batch) is logged and returned typed. It must NEVER
-// turn the finalize route's honest 429 into a 500: the accountant's remedy is "wait for 08:00",
-// not "something exploded".
+// turn the finalize route's honest 429 into a 500: the accountant's remedy is "wait for the daily
+// reset" — MYT midnight since #964's 0252 moved the window off the UTC day, not the retired 08:00
+// MYT — not "something exploded".
 // ---------------------------------------------------------------------------------------------
 
 /** @returns {Promise<BatchAnswer>} */

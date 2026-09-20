@@ -209,4 +209,33 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "c75d8d8e388452174af4227c2773fc4a65b69245fefc6a1fbdf4e43529bcd67d",
     },
   ],
+  // riders wave 2, lane 05 (document intake) — three files of the SAME 0177/0191/0201/0226/0234
+  // splice family, appended at the sorted position. Added in this lane's fix round: the first
+  // generation shipped all three without an entry, so this census threw
+  // "unreviewed dynamic-SQL barrier at 0252_document_ingest_window_myt.sql" and the walk stopped
+  // there — which is also why only 0252 was named while all three needed one.
+  [
+    "0252_document_ingest_window_myt.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly FIVE named functions, each read at its own literal regprocedure spelled in this file — clara._reserve_document_ingest(uuid,uuid,integer,timestamptz), clara._resize_document_reservation(uuid,uuid,integer), clara._settle_document_reservation(uuid,uuid,integer) and clara.settle_ingest_reservation(uuid,integer,text) each on ONE anchor (the daily window clause, moved from a UTC calendar day to Asia/Kuala_Lumpur), and clara.get_intake_batch(uuid,integer) on TWO (its capacity descriptor's explanatory comment and the jsonb literal beside it). Four return uuid, void or jsonb and the fifth returns jsonb, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. Every block asserts the split at the AS $function$ boundary, counts its anchor and refuses unless it occurs EXACTLY once, then re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned pre-image byte for byte. The file creates no relation, no function and no grant: its only other statements are one `comment on function` and its prestate/tail assertion blocks, which additionally census every clara body reading document_ingest_reservations and pages_per_day for either spelling of the retired UTC idiom and require that set to be empty.",
+      sha256: "44f6326f5d528702e7319192b1ebfdd8c7cc6c794ed1933f2a549424f164b728",
+    },
+  ],
+  [
+    "0253_batch_cancel_reissue.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE named function, clara.cancel_intake_batch(uuid,uuid,text), read at its own literal regprocedure spelled in this file, on TWO counted anchors — the refusal-on-duplicate guard, which gains one named exception for a stopping batch whose stored canceller holds no active bookkeeper-or-above membership OF THAT FIRM, and the state-transition block, which gains the re-issue's own elsif branch. It returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The block asserts the split at the AS $function$ boundary, counts both anchors and refuses unless each occurs EXACTLY once, then re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned 0229 pre-image byte for byte. The file creates no relation, no function and no grant: its only other statements are one `comment on function` and its prestate/tail assertion blocks, which re-read the ACL byte-identically and prove exactly one batch_already_cancelling raise site survives.",
+      sha256: "c8ad1b9c5645f660f4f80fb711a10b71b9a9457a155357cfc358c7603520a462",
+    },
+  ],
+  [
+    "0254_intake_refusal_record.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE named function, clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text), read at its own literal regprocedure spelled in this file, on TWO counted anchors — the declare line, which gains the refusal flag, and the single clara._reserve_document_ingest call, which gains an `exception when sqlstate 'CLR18'` arm committing the already-inserted intake row at failed/limit and returning a refusal outcome. It returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view is reachable, by construction rather than by inspection of a rendered string. The block asserts the split at the AS $function$ boundary, counts both anchors and refuses unless each occurs EXACTLY once, then re-reads the COMMITTED body and applies the REVERSE substitution, requiring the remainder to hash to the pinned 0007 pre-image byte for byte. The file creates no relation, no function and no grant: its only other statements are one `comment on function` and its prestate/tail assertion blocks, which re-read the ACL byte-identically, count the audit calls and prove the reservation helper and the batch read are untouched.",
+      sha256: "e233d61e67d33c19a339b15612f6973e0461da88bd10af4f18c51af420e1f3ef",
+    },
+  ],
 ]);

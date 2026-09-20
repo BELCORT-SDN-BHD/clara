@@ -941,7 +941,20 @@ function dynamicOperations(sql: string, fn: string, file: string): OrderedSqlFun
         }
         const oidSource = /^to_regprocedure\s*\(\s*([A-Za-z_]\w*)\s*\)$/i.exec(expression);
         const literalOidSource = /^to_regprocedure\s*\(\s*'clara\."?([A-Za-z_]\w*)"?\([^']*\)'\s*\)$/i.exec(expression);
-        const safeOidTarget = literalOidSource?.[1] ?? (oidSource === null
+        /** THE CAST SPELLING OF THE SAME PROOF (#964 fix round). `v_oid := 'clara.f(…)'::regprocedure`
+         *  names its target exactly as strongly as `to_regprocedure('clara.f(…)')` does — the
+         *  signature is a LITERAL in the file's own bytes either way — and it is the spelling the
+         *  repo's OTHER instrument requires: `scripts/wiki-lint-checks.mjs`'s CoR-patch
+         *  attribution (WB-R21) resolves `pg_get_functiondef`'s argument only through a direct
+         *  signature literal or a variable whose latest assignment is one, and treats a
+         *  function-call RHS as deliberately unattributable. Without this arm the two gates
+         *  contradict each other: a migration written to satisfy one throws
+         *  `sql_function_census_unresolved_execute` in the other. Measured on migrations
+         *  0252/0253/0254. A cast of a VARIABLE is deliberately NOT admitted here — only a literal
+         *  signature in the file's own text. */
+        const literalCastOidSource =
+          /^'clara\."?([A-Za-z_]\w*)"?\([^']*\)'\s*::\s*(?:pg_catalog\.)?regprocedure$/i.exec(expression);
+        const safeOidTarget = literalOidSource?.[1] ?? literalCastOidSource?.[1] ?? (oidSource === null
           ? null
           : safeSignatureTargets.get(oidSource[1] as string) ?? null);
         const definitionOidSource = /^pg_get_functiondef\s*\(\s*([A-Za-z_]\w*)\s*\)$/i.exec(expression);

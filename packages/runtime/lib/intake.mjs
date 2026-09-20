@@ -162,6 +162,39 @@ async function callWriter(client, sql, params) {
   return receipt((await client.query(sql, params)).rows[0]);
 }
 
+/**
+ * #965 — the refusal outcome `clara.create_document_intake` has RETURNED since migration 0254,
+ * named field by field. NO object spread anywhere in this package: `check-parts-parity.mjs`
+ * refuses one it cannot classify statically, and naming the fields also documents the wire shape
+ * the route and `beginIntakeInBatch` read.
+ *
+ * `reason` is the DATABASE's own refusal sentence, verbatim — the same text 0229's capacity wait
+ * carries onto the batch card as the operator remedy. It is never paraphrased here.
+ */
+function refusedIntake(rec) {
+  return Object.freeze({
+    refused: true,
+    intake_id: String(rec.intake_id),
+    status: "failed",
+    failure_code: String(rec.failure_code ?? "limit"),
+    ceiling: rec.ceiling ?? null,
+    firm_id: rec.firm_id ?? null,
+    filename: rec.filename ?? null,
+    refused_at: rec.refused_at ?? null,
+    reason: String(rec.reason ?? "document daily limit reached"),
+  });
+}
+
+/**
+ * #965 — the UPLOADER-FACING answer to a ceiling refusal, unchanged in status, code and wording
+ * from what `mapIntakeError` produced for a raised CLR18 (see its `err?.code === "CLR18"` arm
+ * below, which stays exactly where it is for the post-custody refusals that still raise). What
+ * changed is where the refusal comes from, never what the person uploading sees.
+ */
+export function intakeLimitRefusal() {
+  return new IntakeError(429, "limit", "intake limit reached");
+}
+
 export async function beginDocumentIntake(client, principal, input) {
   const body = validateBegin(input);
   const uploadToken = randomBytes(32).toString("base64url");
@@ -173,6 +206,15 @@ export async function beginDocumentIntake(client, principal, input) {
     "select clara.create_document_intake($1,$2,$3,$4,$5,$6,$7,$8,$9) as receipt",
     [principal.sub, body.origin, body.sessionId, body.filename, body.mime, body.declaredBytes, hash, expiresAt, beginOp],
   );
+  // #965: A CEILING REFUSAL IS A RETURNED OUTCOME, NOT A RAISE. Since migration 0254 the door
+  // COMMITS the refused intake at failed/limit and answers `refused: true` instead of raising
+  // CLR18 and taking its own row down with the rolled-back transaction. It is RETURNED here
+  // rather than thrown because the batch caller (`beginIntakeInBatch`) must keep that committed
+  // record and give it a member; the ONE place this becomes the uploader's unchanged 429 is the
+  // route. Nothing else happens on this path: no capability is minted for a file the database
+  // never admitted, and no sidecar is written — `recoverPendingDocumentIntakes` would otherwise
+  // re-drive a refused intake on every sweep until its 15-minute TTL expired it.
+  if (out?.refused === true) return refusedIntake(out);
   const intakeId = String(out.intake_id);
   try {
     await writeIntakeMeta(intakeId, {

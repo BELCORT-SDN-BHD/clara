@@ -95,11 +95,12 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * THIRTEEN ENTRIES as of 2026-09-02 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
- * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) the newest — the count
- * above is load-bearing and must be kept current, never left to describe an earlier state of this
- * list). Adding an entry is a contract-level decision, exactly like widening WIKI_WHITELIST — each
- * entry rides a reviewed PR with its why printed.
+ * TWENTY ENTRIES as of 2026-09-20 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
+ * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) one, #964/0252 five (four
+ * in the first generation, a fifth — `settle_ingest_reservation` — in its fix round), #968/0253
+ * one, #965/0254 the newest — the count above is load-bearing and must be kept current, never
+ * left to describe an earlier state of this list). Adding an entry is a contract-level decision,
+ * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
   // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
@@ -277,6 +278,120 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       + "which is exactly what this rewrite exists to avoid.",
     relations: ["stripe_events", "stripe_event_problems", "firm_registration_payments"],
     calls: [],
+  }],
+  // #964 (0252_document_ingest_window_myt.sql), four anchored splices moving the document-ingest
+  // daily ceiling's window from a UTC calendar day to Asia/Kuala_Lumpur -- the SAME `execute
+  // v_head || 'AS $tag$' || v_new || '$tag$'` idiom the F-A3 PR-1a family above uses, each
+  // reading its own LIVE prosrc via `pg_get_functiondef(v_oid)` where `v_oid` is assigned a
+  // single literal-cast regprocedure (never `to_regprocedure(v_sig)` -- a function-call RHS is
+  // deliberately unattributable to this gate, so the migration binds `v_oid` directly to the
+  // signature literal instead). Every target therefore resolves, `kind:'unprovable'` (v_head/
+  // v_new/v_back are catalog-derived migration-time text, never a literal in the file's own
+  // words), and each entry's relations/calls are the EXACT `clara.*` tokens the LIVE prosrc was
+  // MEASURED to contain (`select prosrc from pg_proc where oid = '<sig>'::regprocedure`, regex
+  // `\bclara\s*\.\s*(?:"(\w+)"|(\w+))` -- the identical extraction `claraTargets()` uses --
+  // riders wave 2 lane 05 rig `clara_l05`, chain 0001->0252, PG 17.11, 2026-09-20). None is a
+  // wiki relation or wiki-touch call. `get_intake_batch`'s three bare function names
+  // (`_human_ctx`, `_intake_batch_pending_members`, `_work_door_ctx`) are cited only in that
+  // body's OWN prose comments (0229's design-rationale blocks), never called -- declared anyway
+  // because the measurement is a byte-level regex over prosrc text, which cannot distinguish a
+  // comment from code, and a waiver must never UNDER-declare.
+  ["_reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)", {
+    why: "#964 SS A -- the admission-time guard's window clause moves to Asia/Kuala_Lumpur; every "
+      + "other byte is the pinned 0007 body (reverse-substitution proof in the migration itself "
+      + "and in document-ingest-window-myt.test.mjs).",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: [],
+  }],
+  ["_resize_document_reservation(uuid,uuid,integer)", {
+    why: "#964 SS B -- the trusted-page-count guard, same window move, same proof discipline.",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: [],
+  }],
+  ["_settle_document_reservation(uuid,uuid,integer)", {
+    why: "#964 SS C -- the actual-page-count guard, same window move, same proof discipline.",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: [],
+  }],
+  ["get_intake_batch(uuid,integer)", {
+    why: "#964 SS D -- ONLY the capacity descriptor's comment and jsonb literal move (myt_day / "
+      + "00:00, replacing utc_day / 08:00); the five facets, waiting_basis and every other byte "
+      + "are the pinned 0229 body, proved by reverse substitution in the migration and by "
+      + "p964.window.capacity_descriptor_myt in intake-batch.test.mjs.",
+    relations: ["accounting_work", "agent_interruptions", "document_filings",
+      "document_intakes_visible", "document_processing_tasks_visible", "firm_memberships",
+      "intake_batch_members", "intake_batches", "operation_receipts"],
+    calls: ["_human_ctx", "_intake_batch_pending_members", "_work_door_ctx", "_work_run_attempts",
+      "actor_role_rank", "jwt_firm", "jwt_sub", "role_rank"],
+  }],
+  // #964 SS E (fix round, L05-SPEC-01), a FIFTH splice in the same file and the same CoR-idiom
+  // shape: the shipped, `clara_runtime`-granted door `clara.settle_ingest_reservation` enforces
+  // the SAME pages/day ceiling itself instead of delegating, so it had to move with the three
+  // helpers. relations/calls are the EXACT `clara.*` tokens the LIVE installed body was MEASURED
+  // to contain (`select prosrc from pg_proc where oid =
+  // 'clara.settle_ingest_reservation(uuid,integer,text)'::regprocedure` on riders wave 2 lane 05
+  // rig `clara_l05`, chain 0001->0254, PG 17.11, 2026-09-20; regex
+  // `\bclara\s*\.\s*(?:"(\w+)"|(\w+))`, the identical extraction `claraTargets()` uses). None is
+  // a wiki relation or wiki-touch call (also confirmed: the body carries no word-bounded "wiki"
+  // substring at all).
+  ["settle_ingest_reservation(uuid,integer,text)", {
+    why: "#964 SS E -- the FOURTH shipped body enforcing the document-ingest pages/day ceiling, "
+      + "and the only one that counts the reservations itself rather than delegating to a helper; "
+      + "its window clause moves to Asia/Kuala_Lumpur and every other byte is its pinned "
+      + "pre-image, proved by reverse substitution in the migration and by "
+      + "p964.window.mechanism_myt (settle_ingest_reservation) in document-ingest-window-myt"
+      + ".test.mjs.",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: ["_finish_op", "_hash", "_reserve_op"],
+  }],
+  // #968 (0253_batch_cancel_reissue.sql), the SAME `execute v_head || 'AS $tag$' || v_new ||
+  // '$tag$'` idiom as the #964 family immediately above, one CoR patch on
+  // `clara.cancel_intake_batch`, `v_oid` bound to a single literal-cast regprocedure (never
+  // `to_regprocedure(v_sig)`, for the identical CoR-patch-attribution reason the #964 header
+  // explains). `kind:'unprovable'` (v_head/v_new/v_back are catalog-derived migration-time text).
+  // relations/calls are the EXACT `clara.*` tokens the LIVE installed body was MEASURED to
+  // contain (`select prosrc from pg_proc where oid =
+  // 'clara.cancel_intake_batch(uuid,uuid,text)'::regprocedure` on riders wave 2 lane 05 rig
+  // `clara_l05`, chain 0001->0253, PG 17.11, 2026-09-20; regex `\bclara\s*\.\s*(?:"(\w+)"|(\w+))`,
+  // the identical extraction `claraTargets()` uses). None is a wiki relation or wiki-touch call
+  // (also confirmed: the body carries no word-bounded "wiki" substring at all). `cancel_
+  // accounting_work` and `get_intake_batch` are cited only in this body's OWN prose comments
+  // (the function-header doc-comment naming the fan-out caller, and this file's own new
+  // re-issue-exception comment naming the read whose predicate it mirrors) — never called from
+  // this body — declared anyway because the measurement is a byte-level regex over prosrc text,
+  // which cannot distinguish a comment from code, and a waiver must never UNDER-declare.
+  ["cancel_intake_batch(uuid,uuid,text)", {
+    why: "#968 — the refusal-on-duplicate guard gains one named exception (a `cancelling` batch "
+      + "whose stored canceller no longer holds an active bookkeeper+ membership admits a "
+      + "different bookkeeper's fresh decision) and the state-transition block gains the "
+      + "re-issue's own `elsif` branch; every other byte is the pinned 0229 body, proved by "
+      + "reverse substitution in the migration itself and by the p968.reissue.* cells in "
+      + "intake-batch.test.mjs.",
+    relations: ["firm_memberships", "intake_batch_member_events", "intake_batches"],
+    calls: ["_audit", "_finish_op", "_hash", "_intake_batch_actor_ctx",
+      "_intake_batch_live_children", "_intake_batch_pending_members", "_reserve_op",
+      "cancel_accounting_work", "get_intake_batch", "role_rank"],
+  }],
+  // #965 (0254_intake_refusal_record.sql), the SAME `execute v_head || 'AS $tag$' || v_new ||
+  // '$tag$'` idiom again, one CoR patch on `clara.create_document_intake`, `v_oid` bound to a
+  // single literal-cast regprocedure (never `to_regprocedure(v_sig)`, for the identical
+  // CoR-patch-attribution reason the #964 header explains). `kind:'unprovable'` (v_head/v_new/
+  // v_back are catalog-derived migration-time text). relations/calls are the EXACT `clara.*`
+  // tokens the LIVE installed body was MEASURED to contain (`select prosrc from pg_proc where
+  // oid = 'clara.create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamptz,text)'
+  // ::regprocedure` on riders wave 2 lane 05 rig `clara_l05`, chain 0001->0254, PG 17.11,
+  // 2026-09-20; regex `\bclara\s*\.\s*(?:"(\w+)"|(\w+))`, the identical extraction
+  // `claraTargets()` uses). None is a wiki relation or wiki-touch call (also confirmed: the body
+  // carries no word-bounded "wiki" substring at all).
+  ["create_document_intake(uuid,text,uuid,text,text,bigint,text,timestamp with time zone,text)", {
+    why: "#965 — the single `clara._reserve_document_ingest` call gains an `exception when "
+      + "sqlstate 'CLR18'` arm, and the refusal it catches commits the already-inserted intake "
+      + "row at failed/limit and RETURNS a refusal outcome instead of letting the raise roll the "
+      + "row back; every other byte is the pinned 0007 body, proved by reverse substitution in "
+      + "the migration itself and by the p965.refusal.* cells in intake-refusal-record.test.mjs.",
+    relations: ["chat_sessions", "document_intakes", "firm_memberships"],
+    calls: ["_audit", "_declared_page_ceiling", "_finish_op", "_hash",
+      "_reserve_document_ingest", "_reserve_op", "role_rank"],
   }],
 ]);
 

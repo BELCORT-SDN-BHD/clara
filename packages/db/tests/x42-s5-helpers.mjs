@@ -1675,6 +1675,28 @@ const KL_ROSTER_0232_CLIENT_FINANCIAL = [
 ];
 // WAVE 2026-09-18 END
 
+// ===========================================================================================
+// RIDERS WAVE 2 (0252) - stem-gated, never number-gated.
+//
+// #964 [0252] - CLASS 2. The daily document-ingest ceiling behind CLR18 moved from a UTC
+// calendar day to an Asia/Kuala_Lumpur one (D4's named residual from #636, closed by this
+// ticket): `clara._reserve_document_ingest`, `clara._resize_document_reservation` and
+// `clara._settle_document_reservation` each derive a real TIMESTAMPTZ value —
+// `date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur'`,
+// the instant of MYT midnight for "today" — and compare a reservation's `created_at` against it.
+// That is a genuine value derived from the zone, never a zone-as-label the way
+// `get_intake_batch`'s own mention is (KL_ROSTER_0229_INTAKE_BATCHES above, CLASS 1: it REPORTS
+// this window's reset moment in its `capacity` block but computes none of the three boundaries
+// itself). NOT a MONEY date and NOT re-pointed at `clara._book_today()`, for the same reason
+// 0214's window bounds are exempt (KL_ROSTER_0214_WORK_PACK above): this is a per-firm DAILY
+// CAPACITY ceiling's reset moment, never a posting date, a due date or a period bound, and
+// nothing it derives reaches a ledger row. The three move TOGETHER, byte-identically (0252's own
+// tail asserts this), so they are rostered together rather than split one-by-one.
+const KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW = [
+  "_reserve_document_ingest", "_resize_document_reservation", "_settle_document_reservation",
+];
+// RIDERS WAVE 2 END
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
   const applied = async (pat) => (await query(
@@ -1705,5 +1727,7 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("knowledge_retrieval$")) names.push(...KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL);
   if (await appliedStem("firm_portfolio_pack$")) names.push(...KL_ROSTER_0231_FIRM_PORTFOLIO);
   if (await appliedStem("client_financial_pack$")) names.push(...KL_ROSTER_0232_CLIENT_FINANCIAL);
+  // RIDERS WAVE 2 - stem-gated, never number-gated.
+  if (await appliedStem("document_ingest_window_myt$")) names.push(...KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW);
   return names.sort().join(" ");
 }

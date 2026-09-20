@@ -6,6 +6,7 @@ import {
   bearerCapability,
   beginDocumentIntake,
   finalizeDocumentIntake,
+  intakeLimitRefusal,
   isTypedIntakeError,
   mapIntakeError,
   uploadDocumentBytes,
@@ -120,6 +121,15 @@ export function intakeRoutes(): express.Router {
           cleanup: removeIntakeSpool,
         });
       });
+      // #965: THE ONE PLACE A RETURNED CEILING REFUSAL BECOMES THE UPLOADER'S ANSWER. Since
+      // migration 0254 `clara.create_document_intake` COMMITS the refused intake at failed/limit
+      // and RETURNS `refused: true` instead of raising CLR18, and both begin paths hand that
+      // outcome up unchanged (the batch path first gives it a member and commits, so the record
+      // this ticket exists to keep survives). What the person uploading sees is byte-identical to
+      // the CLR18 mapping it replaces — `429 {error:"limit", message:"intake limit reached"}`,
+      // at the same moment in the same request — which is exactly what
+      // `p965.runtime.uploader_answer_unchanged` pins.
+      if ((out as { refused?: boolean })?.refused === true) throw intakeLimitRefusal();
       res.status(201).json(out);
     } catch (err) {
       sendError(res, err);

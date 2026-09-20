@@ -1429,11 +1429,31 @@ and every one of its files went on to be admitted and posted. A member merely si
 with nothing running is NOT pending: a Work another lane admits for it afterwards is that lane's
 own new decision, taken after the stop.
 
-**A stop that can never finish is NAMED.** The fan-out must re-issue with the stored
-`cancel_requested_by`; if that person's membership goes away, every child refuses CLR04 on every
-sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'` from the live
-membership rather than storing a fourth state, the card renders the remedy, and the reconciler belt
-counts that parent as `batchCancelBlocked` rather than as one more transient failure.
+**A stop that can never finish is NAMED — and, since #968, remedied.** The fan-out must re-issue
+with the stored `cancel_requested_by`; if that person's membership goes away, every child refuses
+CLR04 on every sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'`
+from the live membership rather than storing a fourth state, the card renders the remedy, and the
+reconciler belt counts that parent as `batchCancelBlocked` rather than as one more transient
+failure.
+
+**#968** (migration 0253) gives that block a remedy at the door. `cancel_intake_batch`'s
+refusal-on-duplicate rule (CLR13 `batch_already_cancelling`) gains ONE named exception: while the
+batch is still `cancelling` AND its stored canceller no longer holds an active bookkeeper+
+membership — the EXACT predicate above, re-read rather than restated — a call from a DIFFERENT
+actor under a FRESH op key is admitted as a genuinely new decision, re-pointing
+`cancel_requested_by` / `cancel_op_key` / `cancel_requested_at` at the new actor, key and moment.
+`_intake_batch_actor_ctx`'s own live re-check (run before the row lock) already proves the new
+caller is active, so the new decision's actor can never be the same blocked identity re-keying
+itself. A batch whose stored canceller is still active, or one already `cancelled` (terminal),
+keeps refusing a second decision exactly as 0229 shipped it — the exception is gated on
+`b.state = 'cancelling'` and nothing else. Neither `get_intake_batch` nor
+`sweep_intake_batch_cancellations` needed a single line changed: the read already evaluates
+`cancel_blocked` LIVE off the row on every call, so the block clears itself the moment the row's
+canceller changes, and the sweep already reads `cancel_requested_by`/`cancel_op_key` LIVE too. Every
+decision — the original AND the re-issue — reaches `clara._audit`'s append-only `audit_log`
+unconditionally, so the original decision (its actor, its op key) stays readable forever; nothing
+in this file adds a new column or table to hold it. See `p968.reissue.*` in
+`intake-batch.test.mjs` for the door proof.
 
 **`settled` and `failed` are NOT compatible facets.** The five facets overlap by construction and
 are never summed, but a member holding a committed receipt is business-complete and is excluded
@@ -1446,10 +1466,82 @@ receipt.
 **The capacity wall is a WAITING state, not a raised limit.** #636 changes no default and touches
 none of the three reservation bodies. Measured on a migrated rig: 100 ≤1MB PDFs are admitted and
 the 101st is refused CLR18 on the DOCS guard with both ceilings flush (docs 100 / pages 1000); 100
-images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window is
-`date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. **08:00 Asia/Kuala_Lumpur** — the
-read reports that in its `capacity` block so the surface can say 08:00 rather than "midnight".
-Moving the window to MYT is #635's ticket.
+images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window WAS
+`date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. 08:00 Asia/Kuala_Lumpur, until
+**#964** (migration 0252) moved all FOUR bodies that enforce it — the three reservation helpers
+`_reserve_document_ingest`, `_resize_document_reservation`, `_settle_document_reservation`, AND the
+shipped, `clara_runtime`-granted door `settle_ingest_reservation`, which counts `pages_per_day`
+itself instead of delegating the way its siblings `resize_ingest_reservation` /
+`refund_ingest_reservation` do — to
+`date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')`, i.e. **MYT MIDNIGHT**. They move
+together, byte-identically, because a mixed state would let one instant pass one check and fail
+another; `get_intake_batch`'s `capacity` block reports `window: 'myt_day'`,
+`resets_at_local: '00:00'` accordingly. Default quotas and the five-rung page ladder are
+unchanged. 0252's tail proves the move by CENSUS, not by naming bodies: every `clara` function
+that reads `document_ingest_reservations` AND `pages_per_day` is re-read for either spelling of
+the UTC idiom (the fourth door writes `date_trunc('day',now()` with no space, which is how it
+slipped past the first generation's four-name tail) and the set must be empty. See
+`document-ingest-window-myt.test.mjs` for the mechanism proof (0234's own anchored-splice /
+reverse-substitution discipline, applied to a small internal-function recut with no
+time-travelling public door to observe through).
+
+**The move costs one transition, once.** MYT midnight is EIGHT HOURS EARLIER than the retired UTC
+boundary, so at the instant 0252 commits, reservations created between 00:00 and 08:00 MYT of the
+current day move from "yesterday" into "today" — a firm inside its ceiling one second before the
+deploy can be refused one second after it, while the card names a reset moment that has already
+passed for that day. Nothing about this is a defect (no quota changed, and the next MYT midnight
+resets everything), but a release that lands inside that window has to be able to explain the
+first refusal: apply outside 00:00–08:00 MYT where the schedule allows, and carry the paragraph
+into the as-run where it does not.
+
+**A file the ceiling refuses at CREATION now leaves a record — #965 (migration 0254).** Until it,
+`create_document_intake` inserted the intake row and then reserved in the SAME transaction, so a
+CLR18 refusal rolled the row back and the file it named disappeared: the uploader saw one 429 and
+nothing survived it. 0254 wraps the ONE `_reserve_document_ingest` call in a plpgsql block whose
+`exception when sqlstate 'CLR18'` arm moves the already-inserted row (inserted ABOVE the block, so
+the implicit subtransaction cannot reach it) to the lane's EXISTING `failed` status with its
+EXISTING `limit` failure reason, and RETURNS a refusal outcome — `refused: true`, which ceiling
+(`documents` / `pages`, read off the reserve helper's own two sentences with `get stacked
+diagnostics`), the firm, the filename, the moment, and the database's sentence verbatim — through
+the same `_finish_op` receipt every other answer goes through. The refusal reaches the append-only
+`audit_log` through the SAME `clara._audit` call the admission uses. No new status, no new failure
+reason, no new column, no new table and no new granted name; the ACCEPTED path executes the
+identical statements in the identical order, gaining only the block's implicit savepoint.
+`get_intake_batch` needed no edit at all: its `waiting` facet already counts a member whose intake
+carries `failure_code='limit'` and its `failed` facet already excludes one (D4 above). What 0229's
+BELT cannot do is declare the wait — arm (b) fires on an UPDATE moving `failure_code` on an intake
+that already HAS a member, and a file refused at creation has none yet — so the runtime attaches
+the refused intake and declares `awaiting_capacity` through the governed
+`set_intake_batch_member_dependency` door (`beginIntakeInBatch` → `commitRefusedMember`,
+`packages/runtime/lib/intake-batches.mjs`), under savepoints, so a closed batch costs the
+membership and never the record. See `intake-refusal-record.test.mjs` for the door proof and
+`packages/runtime/tests/intake-refusal-unit.test.mjs` for the caller's.
+
+**WHICH ceiling turned a file away lives in `audit_log`, never on the intake row.** Say it plainly,
+because the intake relation is what a reader reaches for first: `document_intakes` carries
+`status='failed'` and `failure_code='limit'` and NOTHING that separates a docs refusal from a pages
+one — 0254 adds no column, by the ticket's own "no new vocabulary" rule. The durable home of the
+ceiling is the append-only `clara.audit_log` row the refusal writes (and, for the caller that made
+the attempt, the stored `op_receipts` result). The query that answers it:
+
+```sql
+select a.at, a.actor, a.args->>'ceiling' as ceiling, a.args->>'reason' as db_sentence,
+       i.original_filename, i.declared_mime, i.declared_bytes
+  from clara.audit_log a
+  join clara.document_intakes i on i.id = (a.args->>'intake')::uuid
+ where a.fn = 'create_document_intake' and (a.args->>'refused')::boolean
+   and a.firm_id = $1
+ order by a.at desc;
+```
+
+(The audit row carries `intake`, `op_key`, `origin`, `reason`, `ceiling` and `refused`; the file's
+own identity — filename, mime, bytes, moment — stays on the intake row it points at, which is the
+whole point of committing that row. MEASURED on the lane rig, 2026-09-20.)
+
+So a firm-facing "why was this file refused" surface reads `audit_log`, not `document_intakes`
+alone. (Owner check outstanding: whether `document_intakes` alone SHOULD be able to answer it —
+that would be a new column and a new ticket.)
+
 ## #660 — the client home's money band (0232)
 
 TWO RELATIONS and THREE DOORS, all `clara_authenticated` only. No agent twin, no wake wrapper, no
