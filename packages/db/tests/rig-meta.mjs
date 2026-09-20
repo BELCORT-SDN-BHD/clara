@@ -119,18 +119,30 @@ const REGISTRY_0057_HUMAN_FNS = [
 // default is "no role may execute anything unlisted", so cohortFailures() catches a name
 // that silently VANISHES from the catalog while its exemption lives on here.
 const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
-// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. ELEVEN names on
+// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. TEN names on
 // clara_authenticated and NOTHING anywhere else — the agent, both wake roles, clara_runtime and
 // both non-inheriting login shells gain ZERO EXECUTE across all four files, which delta's own
 // security tail asserts in-migration (its v_entrypoints loop refuses if any of them holds EXECUTE)
 // and which this roster is the second, independent instrument for.
 //
-// WHAT EACH GROUP IS, because "eleven granted verbs" is not self-explaining: four are the metric
-// definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
+// #1003 (2026-09-20) RETIRED THE ELEVENTH. create_account_set_v1 held EXECUTE here from 0059
+// until 0271 dropped the function outright: two independently measured censuses (T9's rung-0
+// sweep and #660's re-confirmation) found zero product callers, and its capability was already
+// covered by the live agent-lane sibling (clara._agent_create_account_set_core /
+// clara.wake_create_account_set, DERIVED from this body at 0113 and standing on its own since).
+// Its name is removed from this array rather than left in it: the grant-matrix sweep below
+// (T17, operation-census.test.mjs's attribution roster) reads a name still here against a
+// dropped catalog entry as a finding, and cohortFailures() below reads it as a PARTIAL cohort —
+// this is a single planned removal from a ten-member group that otherwise still ships whole,
+// never the whole group's own retirement.
+//
+// WHAT EACH REMAINING GROUP IS, because "ten granted verbs" is not self-explaining: four are the
+// metric definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
 // approver-≠-proposer segregation; reject and supersede are owner-floored) — every floor is
-// body-enforced, so the grant is a door, never the authority. create_account_set_v1 and
-// mint_metric_input_snapshot_v1 mint the two frozen inputs an evaluation reads. evaluate_metric_v1
-// and evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
+// body-enforced, so the grant is a door, never the authority. mint_metric_input_snapshot_v1
+// mints the frozen input an evaluation reads (account sets, the algebra's OTHER frozen input,
+// now mint only through the agent-lane wake door named above). evaluate_metric_v1 and
+// evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
 // INDEPENDENT re-check (E6), a separate frozen closure that reads only immutable facts.
 // verify_evaluator_freeze is a VERIFIER, not a writer — it is granted because a human needs to be
 // able to ask whether the deployed closure still matches its registration, and it writes nothing.
@@ -141,7 +153,7 @@ const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
 // ruling keeps evaluation authenticated-human-only; lane eta's wake wrappers reach these bodies as
 // internal ungranted calls under clara_fn_owner and never by a grant of their own.
 const METRICS_0058_HUMAN_FNS = [
-  "create_account_set_v1", "mint_metric_input_snapshot_v1",
+  "mint_metric_input_snapshot_v1",
   "propose_metric_definition", "approve_metric_definition",
   "reject_metric_definition", "supersede_metric_definition",
   "evaluate_metric_v1", "evaluate_fs_pack_v1",
@@ -155,9 +167,11 @@ const METRICS_0058_HUMAN_FNS = [
 // together across 0059/0060 and must live or die together — v2 ships in a different migration and
 // would make that cohort read PARTIAL on every pre-card-1 chain.
 const CARD1_SEAM_HUMAN_FNS = ["evaluate_metric_v2"];
-// A COHORT for the same closed-set reason as 0057's: these eleven ship together across 0059/0060
+// A COHORT for the same closed-set reason as 0057's: these ten ship together across 0059/0060
 // and must live or die together, so a name that silently vanishes while its exemption survives
-// here is a finding rather than a quiet pass.
+// here is a finding rather than a quiet pass. create_account_set_v1 is deliberately not one of
+// the ten any more (#1003 retired it alone, above) — it is removed from the cohort rather than
+// left in it to go "PARTIAL".
 const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
 // 0064 [Wave E lane theta]: the close-plan-as-document read. ONE name on
 // clara_authenticated -- the /close consumer (closeApi.ts's getClosePlan, called

@@ -1717,3 +1717,40 @@ set mode = 'enforce' where id;` as the superuser satisfies the relation's CHECK 
 it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no receipt — the change
 becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
 using it.
+
+## 0271 — retiring the human account-set writer (#1003)
+
+The owner ruled on 2026-09-20 to retire `clara.create_account_set_v1` (0058): two independently
+measured censuses (the T9 rung-0 sweep, 2026-08-28, and #660's re-confirmation) found zero callers
+in `apps/web` or `apps/dashboard` history, and its capability was already covered by the live
+agent-lane sibling `clara._agent_create_account_set_core` / `clara.wake_create_account_set`,
+DERIVED from this same body at 0113 and standing on its own since. 0271 `drop function`s it
+outright rather than only revoking its grant — the owner's own Option A reasoning: "removes a
+decoy a future UI could be wired to instead of the newer door, and one more body every security
+census has to re-confirm as dead."
+
+**NOTHING ELSE MOVES.** No table, column, trigger or policy changes; the agent core and its wake
+door are pinned in 0271's prestate and tail and are byte-identical before and after. Historical
+`clara.op_receipts` rows under `fn='create_account_set_v1'`, if any are ever found on a real
+estate database, are untouched — out of scope by the ticket's own ruling.
+
+**FOUR LIVE TEST-SIDE FILES NAMED THE RETIRING SIGNATURE AND ARE UPDATED IN THE SAME CHANGE**,
+not inside 0271 itself (they are source, not DDL):
+- `packages/db/tests/rig-meta.mjs` — `METRICS_0058_HUMAN_FNS`/`_COHORT` drop the name (ten
+  members now, not eleven); left in place it would read the grant-matrix sweep (T17) as a
+  mismatch on any post-0271 database and `cohortFailures()` as a PARTIAL cohort.
+- `packages/db/tests/client-financial-pack.test.mjs` — `p660.census.pins_unmoved` drops the
+  now-meaningless pin (a `::regprocedure` cast on a dropped function raises, it does not fail an
+  assertion) and asserts the retirement directly instead.
+- `packages/db/tests/delta-fixtures.mjs` — `DELTA_ENTRYPOINTS`/`DELTA_ARGUMENT_NAMES` drop the
+  entry (the readiness roster no longer requires it), and `createAccountSet()` — the delta suite's
+  one remaining caller of the retiring door — now mints through `clara.wake_create_account_set`
+  under a cached per-firm interactive wake credential, the SAME agent-lane path the runtime uses,
+  never a copy of its validation logic. The op-reservation `fn` key for account-set creation is
+  therefore `agent_create_account_set` from this point on, not `create_account_set_v1` (0113's own
+  derivation renamed it); the two delta phase files that asserted zero leftover receipts under the
+  old key (`delta-algebra-phase.mjs`, `delta-account-set-acceptance-phase.mjs`) now check the new
+  one.
+- `packages/db/tests/f-a5-reporting-agency-pr2-cores.test.mjs` is untouched and stays the wake
+  door's own direct battery — the delta suite's retarget exercises the same door end to end but is
+  not a substitute for it.

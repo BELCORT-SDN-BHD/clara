@@ -1079,15 +1079,13 @@ test("p660.pack.no_agent_reach — clara_runtime, clara_agent_ro and every clara
   }
 });
 
-test("p660.census.pins_unmoved — the five pinned dependency bodies are byte-identical after 0232", async (t) => {
+test("p660.census.pins_unmoved — the four pinned dependency bodies are byte-identical after 0232", async (t) => {
   if (await gate(t)) return;
   const PINS = {
     "clara.trial_balance_as_of(uuid,date)":
       "51f18cba8b3d1fb4e225b83773803ea340b7b492a7647d50304589a86922c63c",
     "clara._metric_selector_account_ids(uuid,jsonb)":
       "c8f32cd986403f94c0943e147a1ffe207b7e770843b9b6fbb2b9765cec04b1e9",
-    "clara.create_account_set_v1(uuid,text,text,jsonb,boolean,date,text)":
-      "25f9274792b14c054f1633e4518f689084a8e6548d10e3079cec4e760fd28495",
     "clara.finalize_close(uuid,text,text)":
       "59ebaa4fe7ff49c90ff6f3d5c9a73d7c6b853b042368f0c20b8c2ce2c8173bf4",
     "clara.reopen_fiscal_year(uuid,text,jsonb,text,text)":
@@ -1099,6 +1097,21 @@ test("p660.census.pins_unmoved — the five pinned dependency bodies are byte-id
       + "where oid = $1::regprocedure", [sig]);
     assert.equal(r.rows[0].sha, expected, `${sig} moved — 0232 claims to recut nothing`);
   }
+  // #1003 (2026-09-20) RETIRED clara.create_account_set_v1 (0271 dropped it outright): this
+  // census pinned its body ONLY to prove 0232 recut nothing of it, per this file's own header
+  // (0232:27, 0232:57) explaining why 0232 built a separate relation family rather than riding
+  // it. A pin on a body that no longer exists is not a drift check any more — it is a cast that
+  // raises `does not exist` on every future run — so the fifth PINS entry is removed rather than
+  // left to fail, and the retirement is asserted here directly instead: the signature no longer
+  // resolves at all, and 0232's own two doors (which never called it) are unaffected by its
+  // absence.
+  assert.equal(
+    (await rootQuery(
+      "select to_regprocedure('clara.create_account_set_v1(uuid,text,text,jsonb,boolean,date,text)') is null as ok",
+    )).rows[0].ok,
+    true,
+    "clara.create_account_set_v1 still resolves — #1003/0271 claims to have dropped it",
+  );
   // 0232 installs exactly four functions and NO overload of any of them.
   const census = await rootQuery(
     "select p.proname, count(*)::int n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace "
