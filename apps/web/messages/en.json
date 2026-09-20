@@ -202,9 +202,6 @@
     },
     "seeInbox": "See the full inbox",
     "seeActivity": "See all activity",
-    "clientsEmpty": "No clients yet.",
-    "clientsLine": "{active} active · {onboarding} onboarding · {archived} archived",
-    "clientsOther": "{count, plural, one {# client has another status} other {# clients have another status}}",
     "notBuilt": "A firm-wide close status per client is still not built: close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one. And organising work in batches across clients does not exist at this altitude — the portfolio counts Work per client and links into the list that owns it."
   },
   "NeedsYou": {

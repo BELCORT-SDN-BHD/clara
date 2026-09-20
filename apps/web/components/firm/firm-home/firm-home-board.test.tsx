@@ -303,9 +303,12 @@ test("Firm Home: ONE failed read does not blank the others — a dead client reg
       try {
         assert.match(h.text(), /Needs you: 3/, "the queue section still renders its real numbers");
         assert.match(h.text(), /An entry was posted\./, "and so does recent activity");
-        assert.match(h.text(), /Something went wrong/, "while the failed section shows its own failure");
-        // The register failing must not fabricate a client mix.
-        assert.doesNotMatch(h.text(), /active · .* onboarding/);
+        // #995 retired the tally section — the ONE surface that used to turn a register failure
+        // into its own "Something went wrong" text. What is left is the header's pre-existing
+        // fallback (`roleAndClients` -> `roleOnly` once `register.error` is set): the role alone,
+        // never a stale or fabricated client count.
+        assert.match(h.text(), /BELCORT SDN BHDOwner/, "the header falls back to role-only");
+        assert.doesNotMatch(h.text(), /Owner · \d+ clients/, "a failed register read must not fabricate a client count");
       } finally { await h.unmount(); }
     },
   );
@@ -327,6 +330,66 @@ test("Firm Home: the two-column grid reflows on a CONTAINER query, not a viewpor
       assert.doesNotMatch(cls, /\blg:grid-cols-|\bmd:grid-cols-|\bxl:grid-cols-/, "no viewport breakpoint may drive this grid");
     } finally { await h.unmount(); }
   });
+});
+
+test("Firm Home (#995): the portfolio table is the ONE client-population summary — the older active/onboarding/archived tally is gone", async () => {
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      // The portfolio (#659) is the summary that stays.
+      assert.match(h.text(), /Client portfolio/);
+      // The status tally this ticket retires. CLIENTS is one active + one onboarding, so the old
+      // sentence would have read exactly this — its absence is the discriminator, not a guess at
+      // wording.
+      assert.doesNotMatch(h.text(), /1 active · 1 onboarding · 0 archived/,
+        "the older status tally must not render beside the portfolio — #995");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("Firm Home (#995): a caller below the bookkeeper floor still sees a client count, from the header sentence the register read already feeds", async () => {
+  const VIEWER = [{
+    user_id: "u2", firm_id: "f1", firm_name: "BELCORT SDN BHD", role: "viewer",
+    role_rank: 0, is_operator: false,
+  }];
+  await withMockedEnv(
+    wire({
+      "/rest/v1/caller_context": () => jsonResponse(VIEWER),
+      // The portfolio door floors at bookkeeper (firm-portfolio-section.tsx's own header) — a
+      // viewer's own read comes back denied, exactly as it does against the live door.
+      "/rpc/get_firm_portfolio_pack": () => jsonResponse({ message: "forbidden" }, 403),
+    }),
+    async () => {
+      const h = await mount();
+      try {
+        // The plain count — sourced from the SAME register read the removed tally used
+        // (`/rest/v1/clients`, wired to the same two-client CLIENTS fixture above).
+        assert.match(h.text(), /Viewer · 2 clients/);
+        // No per-client breakdown: the portfolio's own honest floor sentence stands instead.
+        assert.match(h.text(), /Work records need a bookkeeper role/);
+        assert.doesNotMatch(h.text(), /1 active · 1 onboarding · 0 archived/,
+          "a viewer must not see the retired per-status breakdown either");
+      } finally { await h.unmount(); }
+    },
+  );
+});
+
+test("Firm Home (#995): a client status outside active/onboarding/archived is still counted in what a caller sees", async () => {
+  const CLIENTS_WITH_OTHER = [
+    ...CLIENTS,
+    { id: "c3", name: "Odd Co", status: "suspended", created_at: "2026-03-01T00:00:00Z" },
+  ];
+  await withMockedEnv(
+    wire({ "/rest/v1/clients": () => jsonResponse(CLIENTS_WITH_OTHER) }),
+    async () => {
+      const h = await mount();
+      try {
+        // Three clients total, including the one whose status the CHECK constraint does not
+        // admit today — the count a caller sees must include it, never silently drop it.
+        assert.match(h.text(), /Owner · 3 clients/);
+      } finally { await h.unmount(); }
+    },
+  );
 });
 
 test("Firm Home: zero a11y violations, with one h1 and no skipped heading level", async () => {

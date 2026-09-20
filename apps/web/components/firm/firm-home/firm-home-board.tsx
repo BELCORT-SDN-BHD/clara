@@ -69,7 +69,6 @@ const TRIAGE_ROWS = 5;
 
 export function FirmHomeBoard() {
   const t = useTranslations("FirmHome");
-  const tcr = useTranslations("ClientsRegister");
   // The roster's own role vocabulary — one catalog for the four values, shared with
   // `components/admin/members-panel.tsx` rather than copied into a second list here.
   const tm = useTranslations("Members");
@@ -236,32 +235,14 @@ export function FirmHomeBoard() {
                 page already read, and returns null when the envelope carries none. */}
             <SweepStatusPanel sweep={queue.sweep} />
 
-            <section aria-labelledby="firm-home-clients" className="flex flex-col gap-2">
-              <SectionHeader level={2}>
-                <span id="firm-home-clients">{tcr("heading")}</span>
-              </SectionHeader>
-              <DataState
-                loading={register.loading}
-                error={register.error}
-                isEmpty={clients.length === 0}
-                emptyMessage={t("clientsEmpty")}
-              >
-                <p className="enter-content text-sm">
-                  <Link href="/clients" className="text-primary underline-offset-4 hover:underline">
-                    {t("clientsLine", {
-                      active: tally.active,
-                      onboarding: tally.onboarding,
-                      archived: tally.archived,
-                    })}
-                  </Link>
-                </p>
-                {/* A status the CHECK constraint does not admit today would otherwise vanish from
-                    a line that claims to cover the register. It is named, never folded in. */}
-                {tally.other > 0 ? (
-                  <p className="text-xs text-muted-foreground">{t("clientsOther", { count: tally.other })}</p>
-                ) : null}
-              </DataState>
-            </section>
+            {/* #995 — THE OLDER STATUS TALLY IS RETIRED. The portfolio table above is Firm Home's
+                ONE client-population summary now; an active/onboarding/archived breakdown reading
+                the SAME register beside it was a second summary of the same population, and the
+                owner's ruling keeps Option A: one table, not two counts of it. A caller BELOW the
+                portfolio's bookkeeper floor does not lose the population entirely — the header's
+                `roleAndClients` sentence above already renders `tally.total` for every role off
+                this same `loadClientRegister` read, so that sentence is the kept fallback rather
+                than a second computed count. */}
 
             <NotBuiltNote className="text-xs">{t("notBuilt")}</NotBuiltNote>
           </div>
