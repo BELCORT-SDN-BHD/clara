@@ -35,10 +35,35 @@
 -- not) — that surrounding machinery is each door's own province and this file does not touch it.
 --
 -- =====================================================================================
--- THE FIX: ONE ROUTINE OWNS THE WALL, LIFTED VERBATIM.
+-- THE FIX: ONE ROUTINE OWNS EACH HALF OF THE WALL, LIFTED VERBATIM — AND EACH HALF STAYS WHERE
+-- 0227 PUT IT.
 --
--- `clara._fa_assert_particulars_completable(p_asset uuid, fa clara.fixed_assets, p_particulars
--- jsonb)` is the two wall fragments T's own prestate pins, lifted UNCHANGED into one function
+-- The wall has TWO halves, and they are not interchangeable, because they need different things
+-- and therefore belong at different points in a door:
+--
+--   * `clara._fa_assert_completion_not_a_change(p_asset uuid, p_particulars jsonb)` — "a first
+--     completion is not a change" (CLR37 `fa_change_class_on_completion`). It needs ONLY the
+--     payload: not the resolved client, not the locked register row. 0227 spliced it immediately
+--     after each door's op-key check and BEFORE `clara._reserve_op`, and said why, twice, in its
+--     own splice text: "Refused BEFORE the op key is reserved, so a retry is clean." This file
+--     keeps it exactly there, in both doors.
+--   * `clara._fa_assert_particulars_completable(p_asset uuid, fa clara.fixed_assets, p_particulars
+--     jsonb)` — everything that needs the LOCKED row: "already complete", the lifecycle check, the
+--     `clara._fa_validate_particulars` call and the non-depreciable/residual bounds. It runs where
+--     it always ran, after the select-for-update.
+--
+-- TWO routines, not one, is still exactly ONE place per check, which is the ticket (#976 AC1/AC2:
+-- "only one place contains the check"). An earlier cut of this file folded both halves into the
+-- single post-lock routine; that moved the change-class refusal BEHIND `_reserve_op`, the
+-- firm-membership check, the advisory lock and the row lock, and deleted the sentence that
+-- recorded the invariant. Two observable consequences, both MEASURED on this rig and now driven by
+-- `p976.wall.before_reserve`: a replay carrying a spent op_key plus `change_class` answered CLR10
+-- "op_key reused with different args", and a `change_class` payload naming an asset outside the
+-- client answered CLR11 `asset_not_found` — in both cases telling the caller about a collision
+-- instead of about the mistake that is theirs to fix (SPEC-L04-3, ADV-L04-4).
+--
+-- `clara._fa_assert_particulars_completable` is the post-lock wall fragment T's own prestate pins,
+-- lifted UNCHANGED into one function
 -- (`p_asset` is redundant with `fa.id` by construction — the callers both select `fa` `where id
 -- = p_asset` — and is kept anyway so the extraction is a byte-for-byte lift with ZERO identifier
 -- substitution, the same discipline 0248's own header states for its aggregation fold). It
@@ -48,27 +73,10 @@
 -- `stable` (it writes nothing — only PostgreSQL RAISEs or returns a value), EXECUTE revoked from
 -- PUBLIC, granted to no role.
 --
--- Both callers now select-and-lock `fa` exactly as before, then call the one routine in place of
--- their own six-check copy, then proceed to their OWN UPDATE / audit / finish-op exactly as
--- before. Signatures, grants and refusal CODES are unchanged for every caller.
---
--- ONE DELIBERATE, MEASURED, HARMLESS RELOCATION: the "first completion is not a change" check
--- used to run BEFORE `clara._reserve_op` in both bodies ("Refused BEFORE the op key is reserved,
--- so a retry is clean" — 0227's own comment); it now runs AFTER the op-key reservation, the
--- firm-membership check, the advisory lock and the row select-for-update, alongside the
--- "already complete" check it always ran after. This is safe by this estate's OWN documented
--- invariant, not merely convenient: 0004's own header states "a RAISE aborts the txn incl. the
--- receipt" — an uncaught exception in a SECURITY DEFINER function rolls back EVERY DML the same
--- call already performed, including `_reserve_op`'s own insert into `clara.op_receipts`, whether
--- the RAISE happens one line or thirty lines after that insert. A retry with the SAME op_key
--- therefore sees no stale reservation either way, and neither wall refusal writes anything a
--- rollback would need to undo. The only OBSERVABLE consequence is refusal PRECEDENCE for a
--- caller who sends BOTH an out-of-firm client/asset AND a change-class key in the SAME call — an
--- input nothing in this repo's test suite constructs (measured: `grep -rn
--- fa_change_class_on_completion packages/db/tests/*.test.mjs` finds exactly the two call sites
--- 0227 itself added, neither combined with a bad client or asset) — and which AC3 does not speak
--- to (it pins the CODE and DETAIL SHAPE of the two named refusals, not their precedence against a
--- THIRD, unrelated one).
+-- Both callers now check the payload through the one guard where they already checked it, then
+-- reserve / resolve / lock exactly as before, then call the one post-lock routine in place of
+-- their own five-check copy, then proceed to their OWN UPDATE / audit / finish-op exactly as
+-- before. Signatures, grants, refusal CODES and refusal PRECEDENCE are unchanged for every caller.
 --
 -- WHAT THIS FILE DOES NOT DO. It does not change what `clara._fa_validate_particulars` accepts
 -- or refuses (pinned in the prestate AND re-read byte-for-byte in the tail — T.6). It does not
@@ -226,26 +234,57 @@ $p976_pre$;
 set role clara_fn_owner;
 
 -- =====================================================================================
--- §A  THE SHARED CORE. Lifted verbatim from the human door's own copy (the richer of the two —
---     it alone carried the "COMPLETE-ONCE" and "NON-DEPRECIABLE" explanatory comments; the
---     core's copy lacked them, and both callers now read the same, better-documented text).
+-- §A0 THE PRE-RESERVATION GUARD. The half of the wall that needs only the PAYLOAD, lifted
+--     verbatim from the human door's own copy — INCLUDING 0227's last sentence, which records
+--     WHERE it has to run and is the invariant an earlier cut of this file broke by folding it
+--     in with the post-lock half.
 -- =====================================================================================
-create function clara._fa_assert_particulars_completable(p_asset uuid, fa clara.fixed_assets,
-    p_particulars jsonb) returns jsonb
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
-declare v_p jsonb; v_res bigint;
+-- `create OR REPLACE` throughout §A0/§A, and not decoration: the prestate above detects a #957
+-- redo of this very file and continues on that branch, which a bare `create function` then
+-- contradicts with 42723 "function already exists with same argument types" (ADV-L04-3 proved it
+-- by running it; the fix round then hit the same refusal through scripts/migrate.mjs itself).
+-- 0247, 0248, 0250 and 0251 all use `create or replace` for the same reason.
+create or replace function clara._fa_assert_completion_not_a_change(p_asset uuid,
+    p_particulars jsonb) returns void
+  language plpgsql immutable security definer set search_path = clara, pg_temp as $$
 begin
   -- 0227 (#651): A FIRST COMPLETION IS NOT A CHANGE. The change classification describes what
   -- kind of REVISION superseded a generation; a row whose particulars were never filled in has
   -- nothing to reclassify, and admitting the keys here would let a caller stamp a class on a root
   -- row that `ck_fixed_assets_change_class` would then refuse with a constraint name instead of a
-  -- sentence.
+  -- sentence. Refused BEFORE the op key is reserved, so a retry is clean — and, since the check
+  -- needs nothing but the payload, before the client and asset walls too, so a caller who sends
+  -- two mistakes is told about the one that is theirs to fix rather than about a collision.
   if p_particulars ? 'change_class' or p_particulars ? 'change_reason' then
     raise exception 'depreciation particulars are being completed for the first time; a change class describes a REVISION (clara.revise_fixed_asset_particulars), not a completion'
       using errcode = 'CLR37',
         detail = jsonb_build_object('reason', 'fa_change_class_on_completion',
           'asset_id', p_asset, 'remedy', 'revise_fixed_asset_particulars')::text;
   end if;
+end $$;
+revoke all on function clara._fa_assert_completion_not_a_change(uuid, jsonb) from public;
+comment on function clara._fa_assert_completion_not_a_change(uuid, jsonb) is
+  '#976 (0249): THE ONE routine that owns the fixed-asset "a first completion is not a change" '
+  'refusal (CLR37 fa_change_class_on_completion), called by both '
+  'clara.complete_fixed_asset_particulars and clara._fa_complete_particulars_core in place of '
+  'each carrying its own copy of 0227''s splice. It reads ONLY the payload, which is why 0227 put '
+  'it BEFORE clara._reserve_op and before the client/asset walls, and why this file keeps it '
+  'there: refused before the op key is reserved, so a retry is clean, and a caller who also '
+  'named the wrong asset is still told what is wrong with the CALL they made. The rest of the '
+  'completion wall -- everything that needs the LOCKED register row -- lives in '
+  'clara._fa_assert_particulars_completable. An UNGRANTED internal: owned by clara_fn_owner, '
+  'EXECUTE revoked from public, granted to no role.';
+
+-- =====================================================================================
+-- §A  THE POST-LOCK CORE. Lifted verbatim from the human door's own copy (the richer of the two —
+--     it alone carried the "COMPLETE-ONCE" and "NON-DEPRECIABLE" explanatory comments; the
+--     core's copy lacked them, and both callers now read the same, better-documented text).
+-- =====================================================================================
+create or replace function clara._fa_assert_particulars_completable(p_asset uuid, fa clara.fixed_assets,
+    p_particulars jsonb) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare v_p jsonb; v_res bigint;
+begin
   -- COMPLETE-ONCE. After completion the row is immutable except for lifecycle facts; a
   -- correction goes through revise_fixed_asset_particulars, which is prospective and leaves
   -- the history it already charged intact.
@@ -277,16 +316,18 @@ begin
 end $$;
 revoke all on function clara._fa_assert_particulars_completable(uuid, clara.fixed_assets, jsonb) from public;
 comment on function clara._fa_assert_particulars_completable(uuid, clara.fixed_assets, jsonb) is
-  '#976 (0249): THE ONE routine that owns the fixed-asset particulars COMPLETION WALL -- "a '
-  'first completion is not a change" (fa_change_class_on_completion), "already complete" '
-  '(fa_particulars_already_complete), the lifecycle check, the clara._fa_validate_particulars '
-  'call, and the non-depreciable/residual bounds -- called by both '
-  'clara.complete_fixed_asset_particulars and clara._fa_complete_particulars_core, in place of '
-  'each carrying its own copy. Returns the validated particulars object for the caller''s own '
-  'UPDATE. An UNGRANTED internal core: owned by clara_fn_owner, EXECUTE revoked from public, '
-  'granted to no role -- reachable only from another SECURITY DEFINER body already running as '
-  'the owner. Replaces the duplication #651 (0227) had to splice into both bodies separately '
-  'and #973 (0248) named again as out of its own scope.';
+  '#976 (0249): THE ONE routine that owns the POST-LOCK half of the fixed-asset particulars '
+  'COMPLETION WALL -- "already complete" (fa_particulars_already_complete), the lifecycle check, '
+  'the clara._fa_validate_particulars call, and the non-depreciable/residual bounds -- called by '
+  'both clara.complete_fixed_asset_particulars and clara._fa_complete_particulars_core, in place '
+  'of each carrying its own copy. Everything here needs the LOCKED clara.fixed_assets row, which '
+  'is why it runs after the select-for-update; the payload-only half ("a first completion is not '
+  'a change") is clara._fa_assert_completion_not_a_change, which both doors call BEFORE '
+  'clara._reserve_op, where 0227 put it. Returns the validated particulars object for the '
+  'caller''s own UPDATE. An UNGRANTED internal core: owned by clara_fn_owner, EXECUTE revoked '
+  'from public, granted to no role -- reachable only from another SECURITY DEFINER body already '
+  'running as the owner. Replaces the duplication #651 (0227) had to splice into both bodies '
+  'separately and #973 (0248) named again as out of its own scope.';
 
 -- =====================================================================================
 -- §B  THE HUMAN DOOR. `clara.complete_fixed_asset_particulars` (0041:3035, recut by 0227) --
@@ -303,6 +344,9 @@ begin
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required' using errcode = 'CLR10';
   end if;
+  -- #976 (0249): the payload-only half of the completion wall, at 0227's own anchor -- BEFORE the
+  -- op key is reserved, so a retry is clean. See clara._fa_assert_completion_not_a_change.
+  perform clara._fa_assert_completion_not_a_change(p_asset, p_particulars);
   v_dedupe := clara._reserve_op(c.firm, 'complete_fixed_asset_particulars', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'asset', p_asset,
       'particulars', p_particulars)));
@@ -357,6 +401,9 @@ begin
     raise exception 'op_key is required' using errcode = 'CLR10',
       detail = '{"reason":"invalid_op_key"}';
   end if;
+  -- #976 (0249): the payload-only half of the completion wall, at 0227's own anchor -- BEFORE the
+  -- op key is reserved, so a retry is clean. See clara._fa_assert_completion_not_a_change.
+  perform clara._fa_assert_completion_not_a_change(p_asset, p_particulars);
   v_dedupe := clara._reserve_op(p_firm, p_door, p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'asset', p_asset,
       'particulars', p_particulars)));
@@ -435,26 +482,33 @@ declare
     || 'using errcode = ''clr37'', detail = '
     || '''{"reason":"fa_particulars_invalid","axis":"residual"}''; end if;';
 begin
-  -- T.1 THE NEW CORE EXISTS, is STABLE, SECURITY DEFINER, owned by clara_fn_owner, its
-  -- search_path pinned, and grants EXECUTE to nobody -- an INTERNAL like its siblings.
-  select count(*)::int into v_n from pg_proc p
-   where p.oid = 'clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)'::regprocedure
-     and p.provolatile = 's' and p.prosecdef
-     and p.proowner::regrole::text = 'clara_fn_owner'
-     and 'search_path=clara, pg_temp' = any(p.proconfig);
-  if v_n <> 1 then
-    raise exception '#976 tail T.1: clara._fa_assert_particulars_completable is missing its stable/definer/owner/search_path shape'
-      using errcode='CLR10';
-  end if;
-  select count(*)::int into v_n from pg_proc p, unnest(coalesce(p.proacl, '{}'::aclitem[])) as a
-   where p.oid = 'clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)'::regprocedure
-     and a::text not like 'clara_fn_owner=%';
-  if v_n <> 0 then
-    raise exception '#976 tail T.1b: clara._fa_assert_particulars_completable gained % grant(s) -- it is an INTERNAL, granted to nobody', v_n
-      using errcode='CLR10';
-  end if;
+  -- T.1 BOTH NEW ROUTINES EXIST with the right shape: SECURITY DEFINER, owned by clara_fn_owner,
+  -- search_path pinned, EXECUTE granted to nobody -- INTERNALS like their siblings. The guard is
+  -- IMMUTABLE (it reads only its own arguments); the post-lock core is STABLE (it calls
+  -- clara._fa_particulars_complete and clara._fa_validate_particulars).
+  for v_pin in select * from (values
+      ('clara._fa_assert_completion_not_a_change(uuid,jsonb)', 'i'),
+      ('clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)', 's')
+    ) as t(sig, vol) loop
+    select count(*)::int into v_n from pg_proc p
+     where p.oid = v_pin.sig::regprocedure
+       and p.provolatile = v_pin.vol and p.prosecdef
+       and p.proowner::regrole::text = 'clara_fn_owner'
+       and 'search_path=clara, pg_temp' = any(p.proconfig);
+    if v_n <> 1 then
+      raise exception '#976 tail T.1: % is missing its %/definer/owner/search_path shape', v_pin.sig, v_pin.vol
+        using errcode='CLR10';
+    end if;
+    select count(*)::int into v_n from pg_proc p, unnest(coalesce(p.proacl, '{}'::aclitem[])) as a
+     where p.oid = v_pin.sig::regprocedure
+       and a::text not like 'clara_fn_owner=%';
+    if v_n <> 0 then
+      raise exception '#976 tail T.1b: % gained % grant(s) -- it is an INTERNAL, granted to nobody', v_pin.sig, v_n
+        using errcode='CLR10';
+    end if;
+  end loop;
 
-  -- T.2 BOTH RECUT BODIES NOW CALL THE SHARED CORE, BY ITS FULLY-QUALIFIED NAME.
+  -- T.2 BOTH RECUT BODIES NOW CALL BOTH SHARED ROUTINES, BY FULLY-QUALIFIED NAME.
   select p.prosrc into v_h from pg_proc p
    where p.oid = 'clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)'::regprocedure;
   select p.prosrc into v_c from pg_proc p
@@ -465,6 +519,35 @@ begin
   end if;
   if position('clara._fa_assert_particulars_completable(' in v_c) = 0 then
     raise exception '#976 tail T.2: clara._fa_complete_particulars_core does not call the shared wall core'
+      using errcode='CLR10';
+  end if;
+  if position('clara._fa_assert_completion_not_a_change(' in v_h) = 0 then
+    raise exception '#976 tail T.2c: clara.complete_fixed_asset_particulars does not call the shared change-class guard'
+      using errcode='CLR10';
+  end if;
+  if position('clara._fa_assert_completion_not_a_change(' in v_c) = 0 then
+    raise exception '#976 tail T.2c: clara._fa_complete_particulars_core does not call the shared change-class guard'
+      using errcode='CLR10';
+  end if;
+
+  -- T.2d …AND THE GUARD RUNS BEFORE THE RESERVATION IN BOTH, which is 0227's own written
+  -- invariant ("Refused BEFORE the op key is reserved, so a retry is clean", stated twice in its
+  -- splice text) and the property an earlier cut of THIS file silently reversed. Proved off the
+  -- catalog, by offset, not argued from a header.
+  if position('clara._fa_assert_completion_not_a_change(' in v_h)
+       >= position('clara._reserve_op(' in v_h) then
+    raise exception '#976 tail T.2d: clara.complete_fixed_asset_particulars calls the change-class guard AFTER clara._reserve_op -- 0227 requires it before'
+      using errcode='CLR10';
+  end if;
+  if position('clara._fa_assert_completion_not_a_change(' in v_c)
+       >= position('clara._reserve_op(' in v_c) then
+    raise exception '#976 tail T.2d: clara._fa_complete_particulars_core calls the change-class guard AFTER clara._reserve_op -- 0227 requires it before'
+      using errcode='CLR10';
+  end if;
+  -- …and the post-lock core still runs AFTER the row lock, where every check it carries needs it.
+  if position('clara._fa_assert_particulars_completable(' in v_h) <= position('for update' in v_h)
+     or position('clara._fa_assert_particulars_completable(' in v_c) <= position('for update' in v_c) then
+    raise exception '#976 tail T.2e: the post-lock wall core no longer runs after the select-for-update in both doors'
       using errcode='CLR10';
   end if;
 
@@ -491,20 +574,20 @@ begin
     end if;
   end;
 
-  -- T.4 THE change-class FRAGMENT NOW SURVIVES IN EXACTLY ONE clara FUNCTION -- the new core.
-  -- Never zero (the check vanished), never two-or-more (a THIRD copy crept in somewhere).
+  -- T.4 THE change-class FRAGMENT NOW SURVIVES IN EXACTLY ONE clara FUNCTION -- the pre-reservation
+  -- guard. Never zero (the check vanished), never two-or-more (a THIRD copy crept in somewhere).
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara'
      and position(c_frag_a in lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))) <> 0;
   if v_n <> 1 then
-    raise exception '#976 tail T.4: the change-class fragment now occurs in % clara function(s), expected exactly 1 (clara._fa_assert_particulars_completable)', v_n
+    raise exception '#976 tail T.4: the change-class fragment now occurs in % clara function(s), expected exactly 1 (clara._fa_assert_completion_not_a_change)', v_n
       using errcode='CLR10';
   end if;
   select array_agg(p.proname) into v_names from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara'
      and position(c_frag_a in lower(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))) <> 0;
-  if v_names is distinct from array['_fa_assert_particulars_completable'] then
-    raise exception '#976 tail T.4b: the ONE function carrying the change-class fragment is %, expected _fa_assert_particulars_completable', v_names
+  if v_names is distinct from array['_fa_assert_completion_not_a_change'] then
+    raise exception '#976 tail T.4b: the ONE function carrying the change-class fragment is %, expected _fa_assert_completion_not_a_change', v_names
       using errcode='CLR10';
   end if;
 
@@ -585,6 +668,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#976 tail OK: clara._fa_assert_particulars_completable exists, stable, definer-owned by clara_fn_owner and ungranted; clara.complete_fixed_asset_particulars and clara._fa_complete_particulars_core both call it and no longer carry either raw wall fragment, each of which now lives in exactly that one function; both recut doors keep their owner/definer/search_path/no-PUBLIC-grant and their own caller sets; and clara._fa_validate_particulars, clara._fa_particulars_complete, clara.complete_fixed_asset_particulars_for and clara.revise_fixed_asset_particulars are byte-for-byte unmoved.';
+  raise notice '#976 tail OK: clara._fa_assert_completion_not_a_change (immutable) and clara._fa_assert_particulars_completable (stable) both exist, definer-owned by clara_fn_owner and ungranted; clara.complete_fixed_asset_particulars and clara._fa_complete_particulars_core call BOTH -- the guard BEFORE clara._reserve_op, 0227''s own anchor, and the wall core after the select-for-update -- and neither still carries either raw wall fragment, each of which now lives in exactly one function (change-class in the guard, already-complete in the core); both recut doors keep their owner/definer/search_path/no-PUBLIC-grant and their own caller sets; and clara._fa_validate_particulars, clara._fa_particulars_complete, clara.complete_fixed_asset_particulars_for and clara.revise_fixed_asset_particulars are byte-for-byte unmoved.';
 end
 $p976_tail$;

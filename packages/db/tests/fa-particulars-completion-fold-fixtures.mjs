@@ -90,5 +90,10 @@ export const FRAG_ALREADY_COMPLETE =
   + "using errcode = 'clr37', detail = "
   + "'{\"reason\":\"fa_particulars_invalid\",\"axis\":\"residual\"}'; end if;";
 
-/** The fully-qualified call the fold wires into both recut bodies. */
+/** The fully-qualified calls the fold wires into both recut bodies. TWO routines, because the
+ *  wall has two halves with two different PLACES in a door: the change-class guard needs only
+ *  the payload and 0227 put it AHEAD of clara._reserve_op ("refused BEFORE the op key is
+ *  reserved, so a retry is clean"); the rest needs the locked register row and has always run
+ *  after it. Each half is still owned in exactly one place, which is the ticket. */
+export const PARTICULARS_CHANGE_GUARD_CALL = "clara._fa_assert_completion_not_a_change(";
 export const PARTICULARS_WALL_CALL = "clara._fa_assert_particulars_completable(";

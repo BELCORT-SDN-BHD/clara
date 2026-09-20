@@ -1126,14 +1126,22 @@ stem (migration 0249) — never on a number — and shares `fa-particulars-compl
 which itself re-exports the whole `depreciation-history-fixtures.mjs` world (`p651Client`,
 `faWorld`, `buyAsset`, `completeWith`, `completeForWith`, `refuses`, `caught`, `reasonToken`, …)
 rather than forking a second copy of it: #976 changes nothing about what a completion MEANS, only
-where the wall it enforces lives. Three `p976.*` cells: `p976.core.shape` reads the new routine
-`clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)` off the catalog — owned
-by `clara_fn_owner`, `stable`, SECURITY DEFINER, UNGRANTED (PUBLIC and every named application
-role denied EXECUTE) — the vacuity anchor, red against 0248 alone; `p976.callers.recut` re-reads
-both `complete_fixed_asset_particulars` and `_fa_complete_particulars_core` off the catalog and
-asserts each now calls the shared core, neither still carries EITHER raw duplicated fragment (the
-change-class check and the already-complete-onward check are censused independently), and each
-fragment survives in exactly one clara function afterwards; `p976.behaviour.already_complete_both_doors`
+where the wall it enforces lives. Four `p976.*` cells: `p976.core.shape` reads BOTH new routines
+— `clara._fa_assert_completion_not_a_change(uuid,jsonb)` and
+`clara._fa_assert_particulars_completable(uuid,clara.fixed_assets,jsonb)` — off the catalog, each
+owned by `clara_fn_owner`, SECURITY DEFINER, UNGRANTED (PUBLIC and every named application role
+denied EXECUTE), with the volatility its reads earn (`immutable` for the payload-only guard,
+`stable` for the post-lock core) — the vacuity anchor, red against 0248 alone;
+`p976.callers.recut` re-reads both `complete_fixed_asset_particulars` and
+`_fa_complete_particulars_core` off the catalog and asserts each now calls BOTH shared routines,
+neither still carries EITHER raw duplicated fragment (the change-class check and the
+already-complete-onward check are censused independently), and each fragment survives in exactly
+one clara function afterwards; `p976.wall.before_reserve` drives the PRECEDENCE 0227 wrote down
+twice ("Refused BEFORE the op key is reserved, so a retry is clean") through both doors on two
+shapes that can only answer it if the guard really does run first — a change-class payload
+carrying an already-spent `op_key`, and a change-class payload naming an asset outside the client
+— then re-reads both bodies to prove the guard's call offset precedes `clara._reserve_op`'s;
+`p976.behaviour.already_complete_both_doors`
 is the behavioural proof at the public seam NOTHING in this repo's existing suite ever reached —
 measured: `grep -rln fa_particulars_already_complete packages/db/tests` before this ticket names
 only the two fixture files that DEFINE the token string, never a test that drives the refusal
@@ -1142,21 +1150,32 @@ attempt on the SAME asset through the human door is refused `fa_particulars_alre
 second asset completes through the runtime door, then a second attempt on IT through the runtime
 door is refused the same way — same code, same detail shape.
 
-**Why the wall could not be lifted as ONE contiguous fragment.** The two bodies' "already complete
-onward" text (the lifecycle check, the validator call, the non-depreciable/residual bounds) sits
-immediately AFTER their "first completion is not a change" check in BOTH bodies, but the text
-BETWEEN the two checks — `_reserve_op`, the firm-membership check, the advisory lock, the
-select-for-update — is NOT identical (the human door resolves `c := clara._human_ctx(...)` and
-reserves under a literal verb name with no DETAIL on its CLR10/CLR11 refusals; the core takes
-`p_firm`/`p_actor`/`p_door` as arguments and carries a DETAIL on the same two refusals). The fold
-therefore lifts TWO separate fragments — `FRAG_CHANGE_CLASS` and `FRAG_ALREADY_COMPLETE` in
-`fa-particulars-completion-fold-fixtures.mjs`, copied from the migration's own prestate/tail
-constants so a drift in either file is visible as a diff — into ONE new function that both callers
-invoke at the point where `fa` (the locked row) is available, moving the change-class check to run
-AFTER the reservation/lock instead of before. 0249's own header proves this is safe: an uncaught
-RAISE aborts the whole transaction including `_reserve_op`'s own insert (`0004_governed_fns.sql`'s
-own documented invariant), so a retry with the same `op_key` sees no stale reservation on either
-side of the move.
+**Why the wall could not be lifted as ONE contiguous fragment, and why it is TWO routines.** The
+two bodies' "already complete onward" text (the lifecycle check, the validator call, the
+non-depreciable/residual bounds) sits immediately AFTER their "first completion is not a change"
+check in BOTH bodies, but the text BETWEEN the two checks — `_reserve_op`, the firm-membership
+check, the advisory lock, the select-for-update — is NOT identical (the human door resolves
+`c := clara._human_ctx(...)` and reserves under a literal verb name with no DETAIL on its
+CLR10/CLR11 refusals; the core takes `p_firm`/`p_actor`/`p_door` as arguments and carries a DETAIL
+on the same two refusals). The fold therefore lifts TWO separate fragments — `FRAG_CHANGE_CLASS`
+and `FRAG_ALREADY_COMPLETE` in `fa-particulars-completion-fold-fixtures.mjs`, copied from the
+migration's own prestate/tail constants so a drift in either file is visible as a diff — into TWO
+new functions, each called where its own fragment already ran. That is still exactly one place per
+check, which is what #976 asks for.
+
+**The first cut of this fold put both halves in the post-lock routine, and that was wrong.** The
+change-class check reads nothing but the payload, and 0227 therefore anchored it ahead of
+`clara._reserve_op` in both bodies and said why, twice, in its splice text: "Refused BEFORE the op
+key is reserved, so a retry is clean." Folding it in with the post-lock half moved it behind the
+reservation, the firm-membership check, the advisory lock and the row lock, and deleted the
+sentence. Two observable consequences, both since MEASURED at the door seam and now driven by
+`p976.wall.before_reserve`: a change-class payload carrying an already-spent `op_key` answered
+CLR10 "op_key reused with different args" (because `_reserve_op` compares request hashes before
+the wall ran), and a change-class payload naming an asset outside the client answered CLR11
+`asset_not_found`. Both told the caller about a collision instead of about the mistake that is
+theirs to fix. The transaction-rollback argument the first cut made is true and is not the point:
+the refusal a caller SEES is a contract, and it had changed. 0249's tail T.2d now proves the
+ordering off the catalog, by call offset, in both bodies.
 
 `fa-particulars-completion-fold-preintegration-gate.mjs` is the package-wide sweep's escape
 (`CLARA_ALLOW_MISSING_FA_PARTICULARS_COMPLETION_FOLD=1`), registered in

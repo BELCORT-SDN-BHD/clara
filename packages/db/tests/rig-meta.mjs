@@ -1995,9 +1995,15 @@ export const FA_DEPRECIATION_LEG_FOLD_0248_COHORT = [
 // same "wholly present or wholly absent" reason FA_DEPRECIATION_LEG_FOLD_0248_COHORT carries:
 // folding this ONE name into 0216's own cohort would red every database between the two
 // frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
-// `_fa_assert_particulars_completable` is UNGRANTED like `_fa_depreciation_leg_pairing` above:
-// the main sweep fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS.
-const FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS = ["_fa_assert_particulars_completable"];
+// Both names are UNGRANTED like `_fa_depreciation_leg_pairing` above: the main sweep fails the
+// moment a grant appears on either, this cohort fails if either ever DISAPPEARS. TWO names and
+// not one because the wall has two halves that belong at two different points in a door -- the
+// payload-only change-class guard runs BEFORE `clara._reserve_op` (0227's own anchor), the rest
+// after the row lock -- and 0249 mints both in the same statement pair, so they are wholly
+// present or wholly absent together, which is exactly what `cohortFailures()` wants.
+const FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS = [
+  "_fa_assert_completion_not_a_change", "_fa_assert_particulars_completable",
+];
 export const FA_PARTICULARS_COMPLETION_FOLD_0249_COHORT = [
   ...FA_PARTICULARS_COMPLETION_FOLD_0249_UNGRANTED_FNS,
 ];
