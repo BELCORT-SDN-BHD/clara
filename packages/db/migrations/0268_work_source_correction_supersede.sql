@@ -35,6 +35,18 @@
 -- generated in exactly one place and a future change to the restatement contract cannot leave a
 -- second, divergent spelling behind.
 --
+-- WHO MAY CAUSE A RESTATEMENT, AND WHY NO GRANT MOVES. `clara.restate_accounting_work` is granted
+-- to `clara_runtime` alone, and it still is: this file changes no ACL. It is reached here as
+-- `clara_fn_owner`, from inside a SECURITY DEFINER body, which is the ordinary way one definer door
+-- composes another in this estate. What IS new is the PATH: before this file a restatement could
+-- only originate from the runtime lane (`POST /api/work/:id/restate`, the human's `sub` passed
+-- through), and now a bookkeeper's own correction can cause one. That is exactly what the owner
+-- ruled, and the floor is not weakened by it: `clara.revise_document_fact` is agent-walled
+-- (CLR03) and `clara._human_ctx(role_rank('bookkeeper'))`-floored at its top, and
+-- `clara._work_door_ctx` then re-reads the SAME actor's ACTIVE bookkeeper+ membership at the
+-- restatement door, per Work. A viewer cannot correct a fact and therefore cannot restate; an
+-- agent identity cannot do either.
+--
 -- WHAT THE REPLACEMENT CARRIES. The SAME admitted basis, the SAME `basis_origin` and the SAME
 -- `source_refs`, verbatim off the old row — because the INSTRUCTION did not change, the DOCUMENT
 -- did. The successor is admitted `queued`, so the run that picks it up reads the document's
