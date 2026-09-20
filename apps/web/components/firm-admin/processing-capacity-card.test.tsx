@@ -183,7 +183,15 @@ test("ticket 960 — a number the door's own argument type cannot carry is never
     await h.act(() => { setFieldValue(fieldFor(h, "docs-per-day") as Stub, "2147483648"); });
     assert.equal((saveButton(h) as { disabled?: boolean } | null)?.disabled, true,
       "the control refuses to send it");
-    assert.match(h.text(), /whole number/i, "...and the field says what it will accept");
+    // THE MESSAGE HAS TO NAME THE UPPER BOUND, not only the lower one. `2147483648` IS "a whole
+    // number above zero", so a card that refuses it while saying only that states a rule the
+    // person's value already satisfies and leaves them no way out — the same class of untruth as
+    // the issuer_lapsed notice ADV-L10-02 caught one ticket earlier. The largest number the
+    // door's argument carries is a wire fact this build may state; the estate's CEILING is still
+    // not restated here, and is still learnt only from the database's own refusal sentence.
+    assert.match(h.text(), /2,147,483,647/,
+      "...and the field names the largest number it will carry");
+    assert.match(h.text(), /whole number/i, "...still saying the shape it accepts");
 
     // THE OTHER SIDE OF THE BOUNDARY, so a green here cannot mean "the card refuses everything":
     // the largest number the argument carries is sent, and the estate's own ceiling answers it.

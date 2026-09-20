@@ -7179,7 +7179,7 @@
     "capacitySourceNote": "An owner or admin of this firm sets these. Every change is receipted and recorded against the person who made it. Clara's own estate ceiling stands above whatever you set here.",
     "capacitySeatsNote": "There is no per-firm seat count. Seats are accepted product direction with no delivery date.",
     "capacityEditHint": "Whole numbers above zero. Change only what you mean to move — a field you leave alone keeps the cap it has. Clearing a field leaves that cap alone too.",
-    "capacityFieldInvalid": "Each cap is a whole number above zero. Clear a field to leave that cap as it is.",
+    "capacityFieldInvalid": "Each cap is a whole number from 1 to 2,147,483,647. Clear a field to leave that cap as it is.",
     "capacitySave": "Save processing caps",
     "capacitySaving": "Saving…",
     "capacityRefusedTitle": "That change was refused",

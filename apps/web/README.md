@@ -1091,9 +1091,24 @@ THE UPPER BOUND ON WHAT A FIELD WILL SEND IS THE DOOR'S ARGUMENT TYPE, NOT THAT 
 value above INT4_MAX dies in the cast before the body's ceiling check can answer, as a raw `22003`
 that `lib/wire.ts` cannot classify as a governed refusal — the card then said "could not be sent,
 so nothing was saved", which is false on both halves. `ProcessingCapacityCard` now refuses to send
-such a value and says what the field accepts. NAMED RESIDUAL: a caller reaching the RPC directly
+such a value and NAMES the largest number the field will carry (`2,147,483,647`) — a message
+stating only "a whole number above zero" would refuse a value that satisfies it. NAMED RESIDUAL: a caller reaching the RPC directly
 still meets that raw 22003; closing it needs the four parameters widened to `bigint` so the body's
 own `v_asked > ceiling` check answers every number a caller can send.
+
+WHY THAT RESIDUAL IS NOT CLOSED ON THIS LANE, MEASURED RATHER THAN ASSUMED (fix round, second
+pass, 2026-09-20). Widening the parameters means editing migration 0270 and re-applying it, and
+#957's supported redo path takes the HIGHEST applied version only. Run on `clara_l10` with
+`CLARA_MIGRATION_REDO=0270_firm_document_limits_writer`:
+
+    migrate: FAIL — redo refused: 0270_firm_document_limits_writer is not the highest applied
+    version (0271_retire_create_account_set_v1 is) — redoing anything below the frontier would
+    silently invalidate whatever was applied on top of it.
+
+So an edited 0270 could be neither applied nor re-measured here, and shipping an unverified
+migration edit is worse than a named residual. The widening belongs to a follow-up ticket that
+owns its own migration number, where the prestate pins can be measured on a chain that carries
+it.
 
 **Revocation is focus-driven, not push-driven, and not a poll.** `FirmSettingsPanel` re-issues both
 governed reads on `visibilitychange`→visible and on window `focus`, and a CLR04 REPLACES the view:

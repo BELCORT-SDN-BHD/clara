@@ -118,6 +118,11 @@ export function ProcessingCapacityCard({
   // `lib/wire.ts` cannot classify — and the card would report "could not be sent, so nothing was
   // saved", which is false on both halves. This is the field saying what it can carry.
   //
+  // `capacityFieldInvalid` NAMES that number, and must: `2147483648` is itself "a whole number
+  // above zero", so a message stating only the lower bound would refuse the person's value while
+  // reciting a rule it satisfies, and leave them nowhere to go. The message still says nothing
+  // about the estate's CEILING — that number is the database's to state, and does.
+  //
   // NAMED RESIDUAL: a caller reaching the RPC directly still meets that raw 22003. Closing it
   // needs the door's four parameters widened to `bigint` (the body's ceiling check then answers
   // every number a caller can send with a typed CLR10) — see this ticket's fix report.
