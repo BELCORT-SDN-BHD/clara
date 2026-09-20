@@ -87,6 +87,19 @@ direct calls prove an all-zero basis lands on `exactly_one_side` while an all-cr
 `journal-basis-zero-total-unreachable-preintegration-gate.mjs`; a focused run leaves
 `CLARA_ALLOW_MISSING_JOURNAL_BASIS_ZERO_TOTAL_ARM` unset and must count zero skips.
 
+`correction-client-rung-order.test.mjs` drives `clara.approve_wrong_client_correction` under forced
+two- and three-session schedules (0238, #914): an adversary in the rung-first order every sibling
+door uses no longer deadlocks against a concurrent correction (the 40P01 SQLSTATE is the oracle,
+and the door is proven blocked on the rung with `pg_blocking_pids` first, so the schedule really
+interleaved); a catalogue census over every `clara` body proves no door is left that takes a
+`clara.clients` row before the client rung `203005004`; and the source client is still serialised
+against wiki publication in both directions, measured on a SECOND document filed to the same
+client so the only shared object is that client, with the blocked side's own `pg_locks` read to
+say which lock it is queued behind. Its gate is
+`correction-client-rung-order-preintegration-gate.mjs`; a focused run leaves
+`CLARA_ALLOW_MISSING_CORRECTION_CLIENT_RUNG_ORDER` unset and must count zero skips — and against a
+pre-0238 chain it fails on the deadlock, which is the evidence.
+
 ## Freshness and split chains
 
 A fresh database per full run is the reliable default. Some tests prove one-way evaluator
