@@ -152,6 +152,14 @@ export function FirmHomeBoard() {
           and still renders. It is shown, never swallowed: a page that quietly forgot the firm's
           name would look identical to one that never had it. */}
       {caller.error ? <ErrorMessage error={caller.error} /> : null}
+      {/* #995's fix round — AND THE SAME RULE FOR THE REGISTER READ. Retiring the status tally
+          took with it the page's only DataState over `register`, which is what turned a failed
+          client-register read into a silent fall back to the role-only sentence. No ticket line
+          asked for that loss, and the rule one line above is the page's own: a failed read
+          degrades what it feeds and is SAID. It is a banner here, not a restored section —
+          `register` feeds the header's client count and the client-name map the triage list and
+          recent activity read through, all of which sit ABOVE where the section stood. */}
+      {register.error ? <ErrorMessage error={register.error} /> : null}
 
       {/* The orientation sentence. OMITTED ENTIRELY while the envelope is unread — a sentence
           with a blank where a count belongs is worse than no sentence, and this one is the first
@@ -250,7 +258,10 @@ export function FirmHomeBoard() {
                 portfolio's bookkeeper floor does not lose the population entirely — the header's
                 `roleAndClients` sentence above already renders `tally.total` for every role off
                 this same `loadClientRegister` read, so that sentence is the kept fallback rather
-                than a second computed count. */}
+                than a second computed count. What the section ALSO carried — the one DataState
+                over `register`, and so the only place a failed register read was said out loud —
+                is kept too, as the page-level banner beside the caller read's own (fix round,
+                SPEC-L07-03); losing it was a silent degradation no ticket line asked for. */}
 
             <NotBuiltNote className="text-xs">{t("notBuilt")}</NotBuiltNote>
           </div>

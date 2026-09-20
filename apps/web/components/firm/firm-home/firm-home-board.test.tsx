@@ -327,15 +327,49 @@ test("Firm Home: ONE failed read does not blank the others — a dead client reg
       try {
         assert.match(h.text(), /Needs you: 3/, "the queue section still renders its real numbers");
         assert.match(h.text(), /An entry was posted\./, "and so does recent activity");
-        // #995 retired the tally section — the ONE surface that used to turn a register failure
-        // into its own "Something went wrong" text. What is left is the header's pre-existing
-        // fallback (`roleAndClients` -> `roleOnly` once `register.error` is set): the role alone,
-        // never a stale or fabricated client count.
+        // #995 retired the tally section, which used to carry the register read's own
+        // "Something went wrong". Its fix round put that failure back as a page-level banner
+        // (its own cell below measures it); what THIS cell is about is the header's fallback
+        // (`roleAndClients` -> `roleOnly` once `register.error` is set): the role alone, never a
+        // stale or fabricated client count.
         assert.match(h.text(), /BELCORT SDN BHDOwner/, "the header falls back to role-only");
         assert.doesNotMatch(h.text(), /Owner · \d+ clients/, "a failed register read must not fabricate a client count");
       } finally { await h.unmount(); }
     },
   );
+});
+
+test("Firm Home (ticket 995, SPEC-L07-03): a failed client-register read is still SAID, not swallowed", async () => {
+  // THE FACE #995 NEARLY TOOK WITH THE TALLY. The retired `firm-home-clients` section carried the
+  // page's ONLY DataState over `register`, so removing it left a failed register read degrading
+  // silently to the header's role-only sentence — a page that quietly forgot the client
+  // population looking identical to one that never had it. No ticket line asked for that, and
+  // firm-home-board.tsx already states the opposite rule one read above ("A failed caller read
+  // degrades the HEADING only ... It is shown, never swallowed"). The register now answers to the
+  // same rule, as a banner beside the header rather than a restored section.
+  await withMockedEnv(
+    wire({ "/rest/v1/clients": () => jsonResponse({ message: "boom" }, 500) }),
+    async () => {
+      const h = await mount();
+      try {
+        assert.match(h.text(), /Something went wrong/,
+          "the failed register read is named through the shared classifier, exactly as a failed caller read is");
+        // ...and it is still only a DEGRADED heading: everything else on the page stands.
+        assert.match(h.text(), /Needs you: 3/, "the queue section is untouched by the register's failure");
+        assert.match(h.text(), /Client portfolio/, "and so is the portfolio, which reads its own door");
+        assert.doesNotMatch(h.text(), /Owner · \d+ clients/,
+          "a failed register read must not fabricate a client count");
+      } finally { await h.unmount(); }
+    },
+  );
+  // AND THE BANNER IS NOT ALWAYS-ON: a register read that RESOLVES leaves no failure text behind.
+  await withMockedEnv(wire(), async () => {
+    const h = await mount();
+    try {
+      assert.match(h.text(), /Owner · 2 clients/);
+      assert.doesNotMatch(h.text(), /Something went wrong/);
+    } finally { await h.unmount(); }
+  });
 });
 
 test("Firm Home: the two-column grid reflows on a CONTAINER query, not a viewport one", async () => {
