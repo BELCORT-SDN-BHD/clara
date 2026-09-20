@@ -532,3 +532,35 @@ test("kf.13 a rule recorded before Clara kept the role says UNKNOWN, and says wh
     },
   );
 });
+
+test("kf.14 a promoter who held NO membership when the act was recorded is said in words, not as the database's own marker", async () => {
+  // 'none' is not a rank and must never read as one. clara.audit_log.actor_role carries it when
+  // the stamp looked a NAMED actor up and found no active membership: on this register that is
+  // the narrow case where a membership is withdrawn while the act is still parked on a lock (the
+  // role is resolved at the audit write -- 0243's header, CONTEXT.md "Role at the act", db
+  // battery ar.07), so the value is rare but reachable, and rendering it raw would put the bare
+  // token "none" under "Their role at the time" as if it were a rank the person held.
+  //
+  // The register's OTHER marker, 'no_actor', is unreachable here and deliberately gets no
+  // wording: clara.knowledge_records.asserted_by is NOT NULL and the authority subquery matches
+  // `a.actor is not distinct from r.asserted_by`, so an audit row with no actor can never be the
+  // one this block cites.
+  await mount(
+    okFetch([firmRow({
+      authority: {
+        ...firmRow().authority,
+        promoter_role_at_act: "none",
+        promoter_role_now: "bookkeeper",
+      },
+    })]),
+    async (h) => {
+      const text = h.text();
+      assert.match(text, /No membership in this firm when the rule was recorded/,
+        "'none' is a measured fact about a person, and the register must say it in words");
+      assert.doesNotMatch(text, /Their role at the times*none/,
+        "…never the database's own marker rendered as if it were a rank");
+      assert.match(text, /Their role now/,
+        "…and the current role is still shown, as the separate fact it is");
+    },
+  );
+});
