@@ -111,43 +111,44 @@ cell("ar.01 a governed act records the role its actor held at write time -- the 
     "the SAME door, walked by an admin, must carry admin -- the column is the actor's role, not the door's floor");
 });
 
-cell("ar.02 history is left alone -- the rows that predate the column still read unknown, nothing can back-fill them later, and a row arriving from the past is never handed a role", async () => {
-  // (a) THE HISTORY IS STILL THERE, AND STILL UNKNOWN. 0243's own §A measured this in the
-  // transaction that minted the column ("all 66879 pre-existing row(s) stay NULL, none
-  // back-filled"); this is the same claim re-measured from outside the migration. The bound is a
-  // floor, not an equality: the battery cannot know how many acts this rig has run since.
-  const nulls = (await rootQuery(
+cell("ar.02 history is left alone -- a row arriving from the past is never handed a role, nothing can back-fill it later, and writing a fresh act moves no historical row", async () => {
+  // WHAT THIS CELL CLAIMS, AND WHY IT IS NOT A ROW COUNT. 0243's own §A measured "every
+  // pre-existing row stays NULL" inside the transaction that minted the column. That measurement
+  // is about the MIGRATION; this cell is about the MECHANISM, and it must mean the same thing on
+  // any database. An earlier cut asserted `nulls > 60000` -- true only of THIS rig, whose 66.9k
+  // NULL rows are the batteries this lane ran between applying 0240 and applying 0243. On a
+  // from-scratch chain 0243 lands before the seed, so the NULL population is in the hundreds and
+  // that assertion would be red for a reason that has nothing to do with the mechanism. So the
+  // claim here is RELATIVE and self-minted: whatever carries NULL before this cell runs still
+  // carries NULL after a real act has been written through the armed stamp.
+  const nullsBefore = (await rootQuery(
     "select count(*)::int as n from clara.audit_log where actor_role is null")).rows[0].n;
-  assert.ok(nulls > 60000,
-    `only ${nulls} audit row(s) carry NULL -- the ~66.9k rows that predate the column must still read unknown, never a back-filled guess`);
 
-  // (b) …AND NOTHING CAN EVER BACK-FILL THEM. The claim that matters is not a snapshot but an
+  // (a) A ROW ARRIVING FROM THE PAST IS NOT AN ACT. scripts/restore.mjs replays a plain dump
+  // through psql, whose COPY fires this same BEFORE INSERT trigger; a row that arrives carrying a
+  // timestamp from before this transaction is history being re-loaded, and the database must not
+  // invent a role for an act it never witnessed. Minted HERE rather than found in the log, so the
+  // cell owns its own subject on any database.
+  const w = await knowledgeWorld("p912a2");
+  const history = (await rootQuery(
+    `insert into clara.audit_log(firm_id, actor, fn, args, at)
+     values ($1, $2, 'rig_912_replayed_history', '{}'::jsonb, now() - interval '400 days')
+     returning id, actor_role`, [w.firm, w.admin])).rows[0];
+  assert.equal(history.actor_role, null,
+    "a row whose own timestamp predates this transaction is history being re-loaded, not an act -- it keeps its unknown");
+
+  // (b) …AND NOTHING CAN EVER BACK-FILL IT. The claim that matters is not a snapshot but an
   // enforced property: clara.audit_log is append-only (0003), so a later editor cannot decide to
-  // give history a role after the fact. Proved through the table itself, as the OWNER of the
-  // table, which is the highest privilege any migration or definer body runs at.
-  const victim = (await rootQuery(
-    "select id from clara.audit_log where actor_role is null order by id limit 1")).rows[0].id;
+  // give history a role after the fact. Proved against the row this cell just minted, through the
+  // table itself, as the OWNER of the table -- the highest privilege any migration or definer
+  // body runs at.
   const refusal = await assertRaises("CLR08", () => roleQuery(ROLES.fnOwner,
-    "update clara.audit_log set actor_role = 'owner' where id = $1", [victim]),
+    "update clara.audit_log set actor_role = 'owner' where id = $1", [history.id]),
   "back-filling a role onto a pre-mechanism audit row");
   assert.equal(refusal.message, "audit_log is append-only");
 
-  // (c) …AND RE-LOADING HISTORY DOES NOT HAND IT ONE EITHER. scripts/restore.mjs replays a plain
-  // dump through psql, whose COPY fires this same BEFORE INSERT trigger; a row that arrives
-  // carrying a timestamp from the past is not an act this database witnessed.
-  const w = await knowledgeWorld("p912a2");
-  await rootQuery(
-    `insert into clara.audit_log(firm_id, actor, fn, args, at)
-     values ($1, $2, 'rig_912_replayed_history', '{}'::jsonb, now() - interval '400 days')`,
-    [w.firm, w.admin]);
-  const replayed = (await rootQuery(
-    "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_replayed_history'",
-    [w.firm])).rows[0];
-  assert.equal(replayed.actor_role, null,
-    "a row whose own timestamp predates this transaction is history being re-loaded, not an act -- it keeps its unknown");
-
-  // The control that proves the stamp was armed the whole time: the SAME actor, the same table, a
-  // row that claims to be happening NOW, is stamped.
+  // (c) THE CONTROL that proves the stamp was armed the whole time: the SAME actor, the same
+  // table, a row that claims to be happening NOW, is stamped.
   await rootQuery(
     `insert into clara.audit_log(firm_id, actor, fn, args)
      values ($1, $2, 'rig_912_act_now', '{}'::jsonb)`, [w.firm, w.admin]);
@@ -155,6 +156,14 @@ cell("ar.02 history is left alone -- the rows that predate the column still read
     "select actor_role from clara.audit_log where firm_id = $1 and fn = 'rig_912_act_now'",
     [w.firm])).rows[0];
   assert.equal(now.actor_role, "admin");
+
+  // (d) …AND THE HISTORY DID NOT MOVE WHILE THAT HAPPENED. Exactly ONE row joined the NULL
+  // population -- the one (a) minted -- so the armed stamp neither back-filled an old row nor
+  // left the fresh act unstamped. This is the portable form of 0243 §A's "none back-filled".
+  const nullsAfter = (await rootQuery(
+    "select count(*)::int as n from clara.audit_log where actor_role is null")).rows[0].n;
+  assert.equal(nullsAfter, nullsBefore + 1,
+    "the only audit row to join the unknown population is the one this cell replayed from the past -- no historical row may be given a guess, and no fresh act may be left unstamped");
 });
 
 // =============================================================================================
