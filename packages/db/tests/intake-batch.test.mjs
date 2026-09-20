@@ -88,6 +88,31 @@ async function gateMytWindow(t) {
   return true;
 }
 
+// #968 — the batch-cancellation RE-ISSUE lives in its OWN migration (0253), the same
+// separate-frontier reason MYT_WINDOW_STEM exists above: a slice-frontier CI leg can be pinned at
+// 0229 (or anywhere before 0253), before this exception exists, and the cells below must skip
+// cleanly there rather than red on a `cancel_intake_batch` that still refuses unconditionally.
+const REISSUE_STEM = "batch_cancel_reissue$";
+let _reissueReady = null;
+async function reissueReady() {
+  if (_reissueReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REISSUE_STEM]);
+      _reissueReady = r.rows[0].n > 0;
+    } catch {
+      _reissueReady = false;
+    }
+  }
+  return _reissueReady;
+}
+async function gateReissue(t) {
+  if (await reissueReady()) return false;
+  markSkip();
+  t.skip(`#968 batch-cancellation re-issue absent (no ${REISSUE_STEM} migration applied)`);
+  return true;
+}
+
 let world = null;
 before(async () => {
   // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud.
@@ -1142,6 +1167,140 @@ test("p636.batch.cancel_blocked_after_revocation — a stuck fan-out is NAMED, n
       "…and the board NAMES why, instead of showing 'stopping' forever with no explanation");
     assert.ok((await sweep(50)).batches.some((x) => x.batch_id === batch.batch_id),
       "the worklist still carries it — the blockage is reported, not hidden by dropping the parent");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+// ===========================================================================================
+// #968 — THE RE-ISSUE. `p636.batch.cancel_blocked_after_revocation` above proves the block is
+// NAMED; these cells prove the remedy: a different, currently active bookkeeper may take over
+// the SAME stop, as a genuinely new decision, once the stored canceller no longer holds an
+// active bookkeeper+ membership — the owner's 2026-09-20 ruling on #968, Option B.
+// ===========================================================================================
+
+test("p968.reissue.blocked_canceller_may_be_replaced — a different active bookkeeper re-issues the stop as a genuinely new decision", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 reissue" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 reissue" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p968-reissue-run") });
+  const originalKey = opk("p968-original-cancel");
+  const original = await cancelBatch(BOB(), batch.batch_id, originalKey);
+  assert.equal(original.state, "cancelling");
+  assert.equal(original.cancel_requested_by, BOB());
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const blocked = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(blocked.cancel_blocked, "canceller_not_active",
+      "the board names the block before the re-issue");
+
+    const newKey = opk("p968-reissue-cancel");
+    const reissued = await cancelBatch(ALICE(), batch.batch_id, newKey);
+    assert.equal(reissued.state, "cancelling", "the one live child has not been fanned out to yet");
+    assert.equal(reissued.cancel_requested_by, ALICE(), "the NEW decision names the NEW actor");
+    assert.equal(reissued.cancel_op_key, newKey, "…under its OWN fresh key");
+    assert.notEqual(reissued.cancel_op_key, originalKey, "never the original key");
+    assert.deepEqual(reissued.children.map((c) => c.work_id), [m.work_id],
+      "the still-live child is handed to the NEW decision");
+
+    const row = await batchRow(batch.batch_id);
+    assert.equal(row.cancel_requested_by, ALICE(), "the row itself now names the new decision");
+    assert.equal(row.cancel_op_key, newKey);
+
+    const cleared = await getBatch(ALICE(), batch.batch_id);
+    assert.equal(cleared.cancel_blocked, null,
+      "the block clears once the new decision is accepted — with NO change to get_intake_batch's own body");
+
+    // THE ORIGINAL DECISION STAYS READABLE — an append-only audit trail, never overwritten.
+    const trail = await rootQuery(
+      `select actor, args->>'op_key' as op_key from clara.audit_log
+        where fn='cancel_intake_batch' and (args->>'batch')::uuid = $1 order by at`, [batch.batch_id]);
+    assert.equal(trail.rows.length, 2, "two decisions, both recorded — the original is never deleted or rewritten");
+    assert.equal(trail.rows[0].actor, BOB());
+    assert.equal(trail.rows[0].op_key, originalKey);
+    assert.equal(trail.rows[1].actor, ALICE());
+    assert.equal(trail.rows[1].op_key, newKey);
+
+    // The fan-out then re-issues under the STORED (new) actor and key, exactly as the sweep would.
+    const out = await cancelWork(m.work_id, reissued.cancel_requested_by,
+      `${reissued.cancel_op_key}:${m.work_id}`);
+    assert.ok(["cancel_requested", "stopping", "cancelled"].includes(out.status),
+      "the fan-out succeeds under the new decision's own actor and key");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+test("p968.reissue.active_canceller_still_refuses — the second-decision refusal is unchanged while the canceller is active", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(ALICE(), { label: "p968 still active" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { memo: "p968 still active" });
+  await claimWorkRun({ task: m.task_id, runId: opk("p968-active-run") });
+  const key = opk("p968-active-cancel");
+  const decision = await cancelBatch(ALICE(), batch.batch_id, key);
+  assert.equal(decision.state, "cancelling");
+
+  const err = await assertRaises(CLR13,
+    () => cancelBatch(BOB(), batch.batch_id, opk("p968-active-second")),
+    "a second decision while the stored canceller is STILL active");
+  assert.equal(detailOf(err).reason, "batch_already_cancelling");
+  assert.equal(detailOf(err).cancel_op_key, key, "the refusal still names the LIVE (unchanged) decision");
+  assert.equal((await batchRow(batch.batch_id)).cancel_requested_by, ALICE(),
+    "the stored decision is untouched — no re-issue was admitted");
+});
+
+test("p968.reissue.excludes_already_committed_child — the re-issue never re-keys or re-cancels a posted sibling", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 committed sibling" });
+  const committed = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 committed" });
+  const receiptId = await postWork({ client: world.clients.A1, work: committed.work_id, task: committed.task_id });
+  const live = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 live" });
+  await claimWorkRun({ task: live.task_id, runId: opk("p968-committed-run") });
+
+  const originalKey = opk("p968-committed-cancel");
+  const original = await cancelBatch(BOB(), batch.batch_id, originalKey);
+  assert.ok(!original.children.map((c) => c.work_id).includes(committed.work_id),
+    "the committed sibling was never in the original decision's own live list either");
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const reissued = await cancelBatch(ALICE(), batch.batch_id, opk("p968-committed-reissue"));
+    assert.deepEqual(reissued.children.map((c) => c.work_id), [live.work_id],
+      "the committed sibling is NEVER handed to the new decision");
+    const receipts = (await receiptsForWork(committed.work_id)).filter((r) => r.outcome === "committed");
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].id, receiptId, "its receipt is untouched, byte for byte, by the re-issue");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [BOB(), FIRM_A()]);
+  }
+});
+
+test("p968.reissue.terminal_batch_never_reissued — a cancelled batch stays refused even if its canceller is inactive", async (t) => {
+  if (await gate(t)) return;
+  if (await gateReissue(t)) return;
+  const batch = await openBatch(BOB(), { label: "p968 terminal" });
+  const m = await workMember(batch.batch_id, world.clients.A1, { actor: ALICE(), memo: "p968 terminal" });
+  await postWork({ client: world.clients.A1, work: m.work_id, task: m.task_id });
+  const key = opk("p968-terminal-cancel");
+  const decision = await cancelBatch(BOB(), batch.batch_id, key);
+  assert.equal(decision.state, "cancelled", "no live child — terminal in the same call");
+
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [BOB(), FIRM_A()]);
+  try {
+    const err = await assertRaises(CLR13,
+      () => cancelBatch(ALICE(), batch.batch_id, opk("p968-terminal-reissue")),
+      "a cancelled (terminal) batch has nothing left to decide, even with an inactive canceller");
+    assert.equal(detailOf(err).reason, "batch_already_cancelling");
   } finally {
     await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
       [BOB(), FIRM_A()]);
