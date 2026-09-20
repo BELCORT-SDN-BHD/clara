@@ -215,9 +215,18 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // detail Sheet — the SAME shape as this list's other raw-button carriers
     // (journal-entries-table's sortable header, drafts-queue-panel's disclosure), so it takes
     // the shadcn ring for the same reason they do. Twenty plus one is TWENTY-ONE.
+    //
+    // #970 (the shadcn native-chat `attachment`/`message-scroller` install, owner ruling
+    // 2026-09-20), +1 NET. `components/ui/attachment.tsx` JOINS this census: its card wears a
+    // `focus-within:ring-ring/NN` treatment for whichever inner trigger/action received focus,
+    // upstream's own idiom, re-cut from the generated `/50` to `/70` in the same edit that
+    // installed it (that file's own header). `components/ui/message-scroller.tsx` — installed in
+    // the same change — does NOT join: its one focusable control renders through `Button`'s own
+    // `render` prop, so it inherits button.tsx's ring rather than drawing a second one. Twenty-one
+    // plus one is TWENTY-TWO.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 21, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 22, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/clara/ClaraThreadView.tsx",
       "components/common/dialog-refusal.tsx",
@@ -228,6 +237,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/journals/drafts-queue-panel.tsx",
       "components/journals/journal-entries-table.tsx",
       "components/tax/TurnoverClassificationPanel.tsx",
+      "components/ui/attachment.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",
       "components/ui/field.tsx",
