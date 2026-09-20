@@ -119,6 +119,28 @@ async function gateReissue(t) {
 // and rolls its own intake row back. The two cells below branch on this rather than skip, because
 // both must stay true in BOTH generations.
 const REFUSAL_STEM = "intake_refusal_record$";
+
+// #905 — clara.list_accounting_work's RECEIPT WINDOW (0267) is a third frontier of its own, and it
+// differs in kind from the two above: #880 (0266) recuts the nine-argument body, then #905 (0267)
+// DROPS that signature and creates an ELEVEN-argument one (two trailing timestamptz bounds, both
+// defaulting to null, so every call of up to nine arguments still resolves). A pin naming the
+// nine-argument signature therefore does not read a different sha below — it raises 42883,
+// "function ... does not exist". The census pins the signature AND the value in both generations.
+const WORK_LIST_WINDOW_STEM = "work_list_receipt_window$";
+let _workListReady = null;
+async function workListWindowReady() {
+  if (_workListReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [WORK_LIST_WINDOW_STEM]);
+      _workListReady = r.rows[0].n > 0;
+    } catch {
+      _workListReady = false;
+    }
+  }
+  return _workListReady;
+}
 let _refusalReady = null;
 async function refusalRecordReady() {
   if (_refusalReady === null) {
@@ -472,6 +494,7 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
   // reverse-substitution proof live in migration 0254 and in intake-refusal-record.test.mjs.
   const mytLive = await mytWindowReady();
   const refusalLive = await refusalRecordReady();
+  const workListLive = await workListWindowReady();
   const pins = [
     ["clara._tf_accounting_work_immutable()", "a1c4e0fc07dfe535433ee3061c54192ffeba640eae1375d8a2f529b3d1ff518e"],
     ["clara._assert_journal_source_refs(uuid,uuid,jsonb,boolean)", "f028c8ea70f7bcfde3cdd8ebaae045964ca763746010011a50d4c489bff232d2"],
@@ -492,13 +515,17 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
       mytLive ? "c96f43c0d5e4acec8871012044f3c4763f7af13b139b91ba7f3cede26f4b7d00"
               : "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6"],
     ["clara._declared_page_ceiling(bigint,text)", "82bc5e67afd4ea074665a320f357092fb0e93af9221f10b489a50cec3e4b4ca6"],
-    ["clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer)", "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a"],
+    [workListLive
+      ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer,timestamptz,timestamptz)"
+      : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer)",
+      workListLive ? "dffa917db2180f5a13be48795ea823ef5cece813677d8d6ad6c61cf01726a828"
+                   : "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a"],
   ];
   for (const [sig, expected] of pins) {
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, expected, `${sig} MOVED unexpectedly — 0229 recuts nothing, and only #964's named MYT-window change is tolerated`);
+    assert.equal(r.rows[0].sha, expected, `${sig} MOVED unexpectedly — 0229 recuts nothing, and only #964's named MYT-window change, #965's refusal record and #880/#905's work-list recut are tolerated`);
   }
 });
 
