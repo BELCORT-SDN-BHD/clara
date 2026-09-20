@@ -693,6 +693,10 @@ _Avoid_: Calling an unattributed source a Work; calling a processing task a chil
 The DECLARED reason a batch member is waiting: `awaiting_fact` (a question is open), `awaiting_attribution` (the document is in custody with no live filing), `awaiting_capacity` (the firm's daily document quota, which resets at MYT midnight in `Asia/Kuala_Lumpur`). The read unions the declaration with the signals it can derive and says which is which, so the batch's waiting number can be explained against any other number over the same relation.
 _Avoid_: Treating a quota block as a failure; treating the declared value as the only source of "waiting".
 
+**Batch cancellation re-issue**:
+A second, genuinely new decision to stop an intake batch, admitted only while it is still `cancelling` and its stored canceller no longer holds an active bookkeeper-or-above membership — the same fact the batch board names as `cancel_blocked: canceller_not_active`. A different, currently active bookkeeper decides it under its own fresh operation key; the original decision is never mutated, replayed under the new identity, or re-keyed onto the new actor's children, so both decisions stay independently readable. A batch whose stored canceller is still active, or one already terminal, refuses a second decision exactly as before.
+_Avoid_: A retry of the original decision; a remedy for a terminal (`cancelled`) batch, which has nothing left to decide; treating the block as cleared by anything other than a new decision actually being admitted.
+
 **Unassigned source**:
 An adopted document with no live filing: the firm holds it and its bytes are sealed and readable, but no client's shelf has claimed it. It is firm-visible, awaits exactly ONE attribution act, and leaves the population the moment that act lands. A document that is unassigned is not a document that failed — it is a document nobody has answered a question about yet.
 _Avoid_: An unprocessed or failed upload; a document whose filing was retired (that one has a history); a per-person inbox — the population is the firm's, not the uploader's.

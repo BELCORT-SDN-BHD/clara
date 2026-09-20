@@ -95,11 +95,11 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * THIRTEEN ENTRIES as of 2026-09-02 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
- * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) the newest — the count
- * above is load-bearing and must be kept current, never left to describe an earlier state of this
- * list). Adding an entry is a contract-level decision, exactly like widening WIKI_WHITELIST — each
- * entry rides a reviewed PR with its why printed.
+ * EIGHTEEN ENTRIES as of 2026-09-20 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
+ * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) one, #964/0252 four, #968/
+ * 0253 the newest — the count above is load-bearing and must be kept current, never left to
+ * describe an earlier state of this list). Adding an entry is a contract-level decision, exactly
+ * like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
   // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
@@ -322,6 +322,34 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       "intake_batch_members", "intake_batches", "operation_receipts"],
     calls: ["_human_ctx", "_intake_batch_pending_members", "_work_door_ctx", "_work_run_attempts",
       "actor_role_rank", "jwt_firm", "jwt_sub", "role_rank"],
+  }],
+  // #968 (0253_batch_cancel_reissue.sql), the SAME `execute v_head || 'AS $tag$' || v_new ||
+  // '$tag$'` idiom as the #964 family immediately above, one CoR patch on
+  // `clara.cancel_intake_batch`, `v_oid` bound to a single literal-cast regprocedure (never
+  // `to_regprocedure(v_sig)`, for the identical CoR-patch-attribution reason the #964 header
+  // explains). `kind:'unprovable'` (v_head/v_new/v_back are catalog-derived migration-time text).
+  // relations/calls are the EXACT `clara.*` tokens the LIVE installed body was MEASURED to
+  // contain (`select prosrc from pg_proc where oid =
+  // 'clara.cancel_intake_batch(uuid,uuid,text)'::regprocedure` on riders wave 2 lane 05 rig
+  // `clara_l05`, chain 0001->0253, PG 17.11, 2026-09-20; regex `\bclara\s*\.\s*(?:"(\w+)"|(\w+))`,
+  // the identical extraction `claraTargets()` uses). None is a wiki relation or wiki-touch call
+  // (also confirmed: the body carries no word-bounded "wiki" substring at all). `cancel_
+  // accounting_work` and `get_intake_batch` are cited only in this body's OWN prose comments
+  // (the function-header doc-comment naming the fan-out caller, and this file's own new
+  // re-issue-exception comment naming the read whose predicate it mirrors) — never called from
+  // this body — declared anyway because the measurement is a byte-level regex over prosrc text,
+  // which cannot distinguish a comment from code, and a waiver must never UNDER-declare.
+  ["cancel_intake_batch(uuid,uuid,text)", {
+    why: "#968 — the refusal-on-duplicate guard gains one named exception (a `cancelling` batch "
+      + "whose stored canceller no longer holds an active bookkeeper+ membership admits a "
+      + "different bookkeeper's fresh decision) and the state-transition block gains the "
+      + "re-issue's own `elsif` branch; every other byte is the pinned 0229 body, proved by "
+      + "reverse substitution in the migration itself and by the p968.reissue.* cells in "
+      + "intake-batch.test.mjs.",
+    relations: ["firm_memberships", "intake_batch_member_events", "intake_batches"],
+    calls: ["_audit", "_finish_op", "_hash", "_intake_batch_actor_ctx",
+      "_intake_batch_live_children", "_intake_batch_pending_members", "_reserve_op",
+      "cancel_accounting_work", "get_intake_batch", "role_rank"],
   }],
 ]);
 

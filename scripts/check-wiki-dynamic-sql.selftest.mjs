@@ -282,9 +282,14 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // single literal-cast regprocedure, never `to_regprocedure(v_sig)` — the identical F-A3
   // PR-1a attribution shape, restated), each independently rig-measured to carry no
   // word-bounded "wiki" token anywhere in its body (riders wave 2 lane 05, chain 0001->0252,
-  // 2026-09-20). Seventeen pinned keys total: the eleven CoR-idiom cores, the four #964 adds,
-  // the one ACL-walled composed statement, and the one checked reconstruction. The NEXT entry
-  // must trip this pin and earn its own reviewed justification, exactly as these seventeen did.
+  // 2026-09-20). #968 (0253_batch_cancel_reissue.sql) adds ONE more, back to the same CoR-idiom
+  // shape: a single `unprovable` CoR patch on `clara.cancel_intake_batch` (`pg_get_functiondef
+  // (v_oid)` where `v_oid` binds a single literal-cast regprocedure, the identical attribution
+  // shape), independently rig-measured to carry no word-bounded "wiki" token anywhere in its
+  // body (riders wave 2 lane 05, chain 0001->0253, 2026-09-20). Eighteen pinned keys total: the
+  // eleven CoR-idiom cores, the four #964 adds, the one #968 add, the one ACL-walled composed
+  // statement, and the one checked reconstruction. The NEXT entry must trip this pin and earn
+  // its own reviewed justification, exactly as these eighteen did.
   const expectedKeys = [
     "_reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)",
     "_resize_document_reservation(uuid,uuid,integer)",
@@ -293,6 +298,7 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
     "apply_open_items(uuid,jsonb,text,text)",
     "apply_stripe_events(integer)",
     "book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)",
+    "cancel_intake_batch(uuid,uuid,text)",
     "complete_bank_reconciliation(uuid,uuid[],text)",
     "get_intake_batch(uuid,integer)",
     "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",

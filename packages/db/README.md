@@ -1323,11 +1323,31 @@ and every one of its files went on to be admitted and posted. A member merely si
 with nothing running is NOT pending: a Work another lane admits for it afterwards is that lane's
 own new decision, taken after the stop.
 
-**A stop that can never finish is NAMED.** The fan-out must re-issue with the stored
-`cancel_requested_by`; if that person's membership goes away, every child refuses CLR04 on every
-sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'` from the live
-membership rather than storing a fourth state, the card renders the remedy, and the reconciler belt
-counts that parent as `batchCancelBlocked` rather than as one more transient failure.
+**A stop that can never finish is NAMED — and, since #968, remedied.** The fan-out must re-issue
+with the stored `cancel_requested_by`; if that person's membership goes away, every child refuses
+CLR04 on every sweep for ever. `get_intake_batch` derives `cancel_blocked='canceller_not_active'`
+from the live membership rather than storing a fourth state, the card renders the remedy, and the
+reconciler belt counts that parent as `batchCancelBlocked` rather than as one more transient
+failure.
+
+**#968** (migration 0253) gives that block a remedy at the door. `cancel_intake_batch`'s
+refusal-on-duplicate rule (CLR13 `batch_already_cancelling`) gains ONE named exception: while the
+batch is still `cancelling` AND its stored canceller no longer holds an active bookkeeper+
+membership — the EXACT predicate above, re-read rather than restated — a call from a DIFFERENT
+actor under a FRESH op key is admitted as a genuinely new decision, re-pointing
+`cancel_requested_by` / `cancel_op_key` / `cancel_requested_at` at the new actor, key and moment.
+`_intake_batch_actor_ctx`'s own live re-check (run before the row lock) already proves the new
+caller is active, so the new decision's actor can never be the same blocked identity re-keying
+itself. A batch whose stored canceller is still active, or one already `cancelled` (terminal),
+keeps refusing a second decision exactly as 0229 shipped it — the exception is gated on
+`b.state = 'cancelling'` and nothing else. Neither `get_intake_batch` nor
+`sweep_intake_batch_cancellations` needed a single line changed: the read already evaluates
+`cancel_blocked` LIVE off the row on every call, so the block clears itself the moment the row's
+canceller changes, and the sweep already reads `cancel_requested_by`/`cancel_op_key` LIVE too. Every
+decision — the original AND the re-issue — reaches `clara._audit`'s append-only `audit_log`
+unconditionally, so the original decision (its actor, its op key) stays readable forever; nothing
+in this file adds a new column or table to hold it. See `p968.reissue.*` in
+`intake-batch.test.mjs` for the door proof.
 
 **`settled` and `failed` are NOT compatible facets.** The five facets overlap by construction and
 are never summed, but a member holding a committed receipt is business-complete and is excluded
