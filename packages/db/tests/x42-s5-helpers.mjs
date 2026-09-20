@@ -1288,6 +1288,25 @@ const CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES = [
 // roster, and the other three read none at all.
 const LEGAL_ENFORCEMENT_0234_CLOCK_NAMES = ["set_legal_enforcement_mode"];
 
+// RIDER #912 [0243, the role at the instant of a governed act] — ONE name, and it is a TRIGGER
+// body: `clara._tf_audit_actor_role` stamps `clara.audit_log.actor_role` BEFORE INSERT, and its
+// first statement is `if new.at is null or new.at < now() then return new; end if;` — a bare
+// `now()`, no `::date`, no zone. Arm (D)'s reading is the ordinary one: the token is an INSTANT,
+// compared against the row's own `at` (itself a `now()` column DEFAULT) to tell an act happening
+// in this transaction apart from history being re-loaded by a restore. It derives no DATE, so it
+// adds nothing to arm (B), and it spells no zone.
+//
+// `now()` is the RIGHT clock here, not `clock_timestamp()` or `statement_timestamp()`: the
+// comparison's whole job is "is this row part of THIS transaction", and `at`'s own DEFAULT is the
+// transaction clock. A statement clock on one side and a transaction clock on the other would
+// make an ordinary multi-statement door's audit row look like history.
+//
+// 0243's OTHER change adds no name: `clara.list_firm_knowledge` is RECUT, but the one key it
+// gains reads `clara.audit_log`, not a clock, and the body's existing `now() at time zone
+// 'Asia/Kuala_Lumpur'` is 0220's own, already adjudicated on KNOWLEDGE_FIRM_0220_CLOCK_NAMES.
+// `clara._audit` is NOT recut at all (it is a frozen metric-input-producer member).
+const AUDIT_ACTOR_ROLE_0243_CLOCK_NAMES = ["_tf_audit_actor_role"];
+
 // #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
 // arm-(D) census over 0001..0194 returns nothing out of either file. 0191's three constraint
 // triggers derive their verdicts from stored terms and stamp `evaluated_at` through a column
@@ -1428,6 +1447,8 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("client_financial_pack$")) names.push(...CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES);
   // RIDER #1008 (0234) - stem-gated, never number-gated, for the reason :207-214 gives.
   if (await appliedStem("legal_enforcement_mode$")) names.push(...LEGAL_ENFORCEMENT_0234_CLOCK_NAMES);
+  // RIDER #912 (0243) - stem-gated, never number-gated, for the reason :207-214 gives.
+  if (await appliedStem("audit_actor_role$")) names.push(...AUDIT_ACTOR_ROLE_0243_CLOCK_NAMES);
   return names.sort();
 }
 
