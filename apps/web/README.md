@@ -345,6 +345,14 @@ at the unit level (`send()` posts to the override with the exact body a walk wou
 on, and the fence rejects a non-loopback value); wiring a walk to reach it is a follow-up gated on
 the second seam, not a re-litigation of this ruling.
 
+**Re-verified, code-review fix round (SPEC-874-1): unchanged, third confirmation.** All 38
+`invite-mail-transport.test.ts` cells re-run green; `e2e/members-invite-walk.spec.ts`'s own header
+still states the harness sets no mail transport so the invite leg settles at `mail_not_configured`
+before any admin call; and a repo-wide search finds no `GoTrueAdminApi`/admin `generate_link`
+mock anywhere under `e2e/` — only the general `/e2e-supabase` REST prefix, which is not the admin
+API `canMintFor`/`mintSupabaseTokenHash` need. The tension is between AC2 as written and the
+owner's own 2026-09-18 ruling, not a lane shortfall; resolving it needs the owner, not more build.
+
 **There is no resend door, by design.** The plaintext token is never stored (裁-16a) so no link can
 be re-sent, and `clara.invite_member` refuses a second pending invitation for the same address
 (CLR10, `0147:399`). Revoke, then invite again — the old link stops working immediately, and the
@@ -1088,6 +1096,29 @@ under `app/` and `components/` for a `<SelectValue>` with neither path (an AST c
 of `tsc`, so an `as any` or a `@ts-expect-error` at a call site is still caught) and for any file
 importing `@base-ui/react/select` directly instead of through this wrapper.
 
+**Decision recorded (code-review ADV-2 / SPEC-1005-1): three new message keys need owner wording
+review before release.** `withUnmatchedFallback` (this file) plus
+`AccountingWork.filterClientUnknown` / `filterPurposeUnknown` / `filterInitiatorUnknown` and
+`Activity.filterClientUnknown` in `messages/en.json` synthesize a distinguishable label ("A client
+not in this list", "A kind not in this list", "Someone not in this list") for a well-formed filter
+value the mounted roster does not carry (an archived client, a purpose newer than the known list, a
+former member) — without it, that state rendered identically to "no filter applied", which is a
+real defect the fix genuinely closes. This is a THIRD display state the ticket's own brief did not
+specify. Flagged here for owner wording sign-off; no code change needed if the copy is accepted.
+
+**Decision recorded (code-review ADV-9 / SPEC-1005-2): four never-used props exist only to make a
+Base UI popup mountable in a unit cell.** `correction-wizard.tsx`'s `initialToClient`,
+`document-kind-control.tsx` and `document-kind-dialog.tsx`'s `initialKind`, and
+`unassigned-sources.tsx`'s `initialClientId` each carry a doc comment stating "no production caller
+sets this"; `unassigned-sources.tsx`'s `SourceRow`/`UnassignedRow` were also widened from
+module-private to exported for the same reason. The cause: these five Selects render inside a Base
+UI `Dialog`, which portals into `document.body`, and this repo's lightweight DOM harness
+(`test/hookHarness.ts`) has no seam for opening that portalled popup and selecting an option — so a
+real fixture-driven selection could not be reached the way the other five #1005 surfaces already
+had one to reuse. Filed as a follow-up rather than fixed here: build one shared harness helper that
+opens a portalled Select/Dialog popup and picks an option, then remove these five props. Do not add
+a sixth without the same note.
+
 ## #956 — an abort now cancels a PENDING reconnect, not just the in-flight read
 
 **The defect.** `lib/clara/stream.ts`'s `runClaraTaskStream` reattaches after a backoff sleep on
@@ -1133,6 +1164,26 @@ listener: `.then(finish, finish)`, so a failing clock ends that backoff exactly 
 one, never a hang. New cell in `streamReattach.test.mjs`, confirmed to fail (unhandled rejection
 at the exact pre-fix line) via `git stash`/`pop`, then restored byte-for-byte.
 
+**Decision recorded (code-review ADV-7 / SPEC-956-2): `abortAllStreams()` stays a documented
+test-support primitive with no production caller.** Its own doc comment says so; the only caller
+is `use-clara-thread-stop.test.ts`'s file-level `test.afterEach`. Both alternatives were checked
+and rejected: moving teardown into the test file over its own tracked task ids would need a large,
+risky refactor of a ~1300-line test file with no single choke point where every cell's task id is
+already recorded; giving it a real production caller (sign-out was the one plausible site) would
+directly contradict this same file's own documented decision that "a live tab keeps a task's read
+running across an ordinary sign-out, BY DESIGN." Leave it uncalled in production rather than treat
+it as dead code to delete.
+
+**Also recorded (SPEC-956-1): the absence cell's own reattach window is safe in practice, not by
+construction.** `use-clara-thread-stop.test.ts`'s "ALREADY FINISHED does not re-attach" cell spends
+a fixed 20-hop settle budget rather than proving impossibility. Re-verified this round, by reading
+`stopReply`'s own code and by an empirical run (600 settle hops, ~9s real time, `net.streams`
+stayed at 0 throughout): a `finished` cause is explicitly excluded from the reattach branch
+(`settled.cause !== "finished"` guards the only `openStream` call a refused stop can make), so this
+specific cell's flow never opens a stream at all — there is no pending backoff to race against,
+which is a STRONGER guarantee than the original finding assumed (impossible by the code's own
+branching, not merely unobserved within budget). No change made.
+
 ## #875 — poll-bound test-budget audit (fix round, landing the deliverable)
 
 **#875's whole deliverable is this table** — the point, per its own brief, is that the NEXT
@@ -1173,4 +1224,35 @@ the first tick in principle, but 40 macrotask `h.settle()` hops are not always e
 poll's own tick to land under host contention (1 failure in a 5-run sample). Follow-up: audit
 that cell's own settle budget specifically — out of #875's stated scope (auditing *other*
 pollers) and not the same instance #875 was asked to fix.
+
+## #897 — the full-screen onboarding altitude leg (code-review fix round; still open)
+
+**Not delivered.** #897's own AC1 asks for a mock-lane cell proving typed-but-unsubmitted
+interview answers and focus survive the rail-to-full-screen escalation; AC2/AC3 ask for the
+fixture and its ownership declaration. None of the three is built. This fix round did two things,
+neither of which counts as delivering the ticket:
+
+**Fixed (SPEC-897-2): the AC4 header note no longer asserts coverage that does not exist.**
+`e2e/interview-walk.spec.ts`'s header used to say the arm is "proven without docker in a real
+built-app Playwright walk exactly like every other mock-lane spec in this directory" — no such
+walk exists anywhere, so the note recreated exactly the false-coverage state #897 exists to
+remove. Reworded to say plainly that the arm is not proven anywhere today and to name #897 as
+the open ticket.
+
+**Reproduced (SPEC-897-1): the blocker is now backed by a runtime empirical result, not only a
+static trace.** `components/clara/interview-draft-persistence.test.tsx` (new) mounts a real
+`ClaraFullScreenThread` instance, types an unsubmitted answer, unmounts it without submitting,
+then mounts a second fresh instance against the identical server-side run and reads its answer
+field. Today it starts empty — confirming, by running the actual component rather than only
+reading its source, that `InterviewRunCard.tsx`'s `draft` (`useState("")`, two call sites total,
+no persistence) does not survive an unmount of the tree that held it. This is not #897's
+deliverable (it does not touch the rail, the route-group boundary or a mock fixture) and its own
+header says so; it is the cheapest empirical confirmation available before committing to the
+larger build, and it is the test whose assertion should flip once #897 lands real persistence.
+
+**Still needed, unchanged from the prior report:** an owner ruling on whether AC1's typed-data
+and focus-return criteria mean literal cross-route-group survival, and — if so — a new
+interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
+`/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
+genuine multi-piece build, not a same-shape addition to an existing fixture.
 

@@ -43,9 +43,14 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * live-stack path — this file stays docker-only, unchanged). Escalating `ClaraRail` to the
  * full-screen `(full)` route group needs a run PARKED OPEN AND UNANSWERED, independent of the
  * shared COMPLETE/CANCEL/RACE fixtures every test above consumes and mutates; this runner
- * provisions none such. The arm belongs to whichever mock lane owns `ClaraRail`'s onboarding
- * card fixtures instead, proven without docker in a real built-app Playwright walk exactly like
- * every other mock-lane spec in this directory.
+ * provisions none such.
+ *
+ * THIS ARM IS NOT PROVEN ANYWHERE TODAY — not here, not in a mock lane. #897 (open, not
+ * delivered) is where it belongs and where it is tracked; do not read this comment as coverage.
+ * The mock-lane fixture (the OPEN/unanswered park) and the interview-runtime handlers a walk
+ * would need have not been built. Whoever picks up #897 should read that ticket's own report for
+ * the traced reason: `InterviewRunCard.tsx`'s typed answer is a plain, un-persisted `useState`,
+ * so a walk asserting survival across this exact escalation has nothing true to assert yet.
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
