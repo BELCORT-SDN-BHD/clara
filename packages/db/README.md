@@ -1737,11 +1737,11 @@ estate database, are untouched — out of scope by the ticket's own ruling.
 **FOUR LIVE TEST-SIDE FILES NAMED THE RETIRING SIGNATURE AND ARE UPDATED IN THE SAME CHANGE**,
 not inside 0271 itself (they are source, not DDL):
 - `packages/db/tests/rig-meta.mjs` — `METRICS_0058_HUMAN_FNS`/`_COHORT` drop the name (ten
-  members now, not eleven); left in place it would read the grant-matrix sweep (T17) as a
-  mismatch on any post-0271 database and `cohortFailures()` as a PARTIAL cohort.
+  members now, not eleven); left in place it would read `cohortFailures()` as a PARTIAL cohort.
+  It is NOT dropped from `ALLOWED`: see the retirement window below.
 - `packages/db/tests/client-financial-pack.test.mjs` — `p660.census.pins_unmoved` drops the
   now-meaningless pin (a `::regprocedure` cast on a dropped function raises, it does not fail an
-  assertion) and asserts the retirement directly instead.
+  assertion) and asserts the retirement directly instead, frontier-gated on 0271's own stem.
 - `packages/db/tests/delta-fixtures.mjs` — `DELTA_ENTRYPOINTS`/`DELTA_ARGUMENT_NAMES` drop the
   entry (the readiness roster no longer requires it), and `createAccountSet()` — the delta suite's
   one remaining caller of the retiring door — now mints through `clara.wake_create_account_set`
@@ -1754,3 +1754,32 @@ not inside 0271 itself (they are source, not DDL):
 - `packages/db/tests/f-a5-reporting-agency-pr2-cores.test.mjs` is untouched and stays the wake
   door's own direct battery — the delta suite's retarget exercises the same door end to end but is
   not a substitute for it.
+
+### 0271's retirement window — the removal-shaped mirror of a bimodal cohort
+
+Added in the 2026-09-20 review fix round (standards L10-STD-02, spec S-1003-1, adversarial
+ADV-L10-03), which all three reported the same gap: 0271 shipped without the wave-2 work order's
+migration triad (a preintegration gate with a stable stem, a rig-meta cohort, the gate-chain entry
+in migration order).
+
+**An ADDITION needs no frontier arm; a REMOVAL does.** Both consumers of `rig-meta.mjs`'s `ALLOWED`
+iterate the LIVE catalog — `grantMatrixFailures()` compares each live body's grants against it, and
+`scripts/operation-census/findings.mjs`'s `unattributed` label attributes each live PUBLIC door
+against it flattened. A name added to `ALLOWED` before its migration lands is simply never reached
+on an earlier frontier. A name REMOVED from it is the opposite: below 0271 the body is still live
+and still granted, so both consumers hard-FAIL rather than skip. Measured on `clara_l10` inside a
+transaction that was rolled back and verified rolled back: with the pre-0271 catalog state
+recreated, the grant sweep reported `clara_authenticated EXECUTE clara.create_account_set_v1:
+expected false, got true` and the census reported the name `unattributed` — and with the arm in
+place both passed.
+
+The three artefacts:
+- `RETIRED_0271_HUMAN_FNS` in `tests/rig-meta.mjs`, spread into `ALLOWED[clara_authenticated]` and
+  deliberately NOT a `cohortFailures()` cohort (above the frontier this name is SUPPOSED to be
+  absent from the catalog while its exemption survives, which is the one shape that instrument
+  reports). **Scheduled for deletion** once every rig and frontier leg this package runs against
+  carries 0271.
+- `tests/retire-create-account-set-preintegration-gate.mjs`, keyed on the stem
+  `retire_create_account_set_v1$` — never a migration NUMBER (claimed at merge) and never the
+  function's ABSENCE (a chain below 0059 is absent too, because the body was never created there).
+- its `--import` token in `package.json`'s test script, in migration order after 0270's.

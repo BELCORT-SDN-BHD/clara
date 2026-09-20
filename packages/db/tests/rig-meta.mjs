@@ -130,11 +130,13 @@ const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
 // sweep and #660's re-confirmation) found zero product callers, and its capability was already
 // covered by the live agent-lane sibling (clara._agent_create_account_set_core /
 // clara.wake_create_account_set, DERIVED from this body at 0113 and standing on its own since).
-// Its name is removed from this array rather than left in it: the grant-matrix sweep below
-// (T17, operation-census.test.mjs's attribution roster) reads a name still here against a
-// dropped catalog entry as a finding, and cohortFailures() below reads it as a PARTIAL cohort —
-// this is a single planned removal from a ten-member group that otherwise still ships whole,
-// never the whole group's own retirement.
+// Its name is removed from THIS array (the ten-member cohort) rather than left in it, because
+// cohortFailures() below would read it as a PARTIAL cohort — this is a single planned removal
+// from a group that otherwise still ships whole, never the whole group's own retirement. It is
+// NOT removed from ALLOWED: while a frontier below 0271 can still carry the live, granted body,
+// removing the exemption makes the grant-matrix sweep and the census's attribution roster
+// hard-FAIL instead of skip. That arm is `RETIRED_0271_HUMAN_FNS` below, with the whole
+// reasoning and its scheduled deletion beside it.
 //
 // WHAT EACH REMAINING GROUP IS, because "ten granted verbs" is not self-explaining: four are the
 // metric definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
@@ -173,6 +175,36 @@ const CARD1_SEAM_HUMAN_FNS = ["evaluate_metric_v2"];
 // the ten any more (#1003 retired it alone, above) — it is removed from the cohort rather than
 // left in it to go "PARTIAL".
 const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
+// #1003 [0271] THE RETIREMENT WINDOW — the REMOVAL-SHAPED MIRROR of the bimodal cohorts the
+// additions below use (0234's, 0270's), added in the 2026-09-20 fix round for standards
+// L10-STD-02, spec S-1003-1 and adversarial ADV-L10-03.
+//
+// WHY AN ADDITION NEEDS NO ARM AND A REMOVAL DOES. Both of this file's consumers iterate the LIVE
+// catalog: `grantMatrixFailures()` below compares each live body's grants against ALLOWED, and
+// `scripts/operation-census/findings.mjs`'s `unattributed` label attributes each live PUBLIC door
+// against ALLOWED flattened. So a name ADDED to ALLOWED before its migration lands is simply never
+// reached on an earlier frontier — which is why `set_firm_document_limits` needs no condition and
+// its cohort's bimodal guard exists only for the dead-exemption check. A name REMOVED from ALLOWED
+// is the opposite: below the retiring migration's frontier the body is STILL LIVE and STILL
+// granted, so removing the exemption makes both consumers hard-FAIL rather than skip —
+// `clara_authenticated EXECUTE clara.create_account_set_v1: expected false, got true` (T17,
+// opcen.1) and an `unattributed` finding (opcen.7's own HARD label). Measured on clara_l10 inside
+// a rolled-back transaction: with the pre-0271 catalog state recreated, both fired.
+//
+// SO THE EXEMPTION STAYS WHILE THE BODY CAN STILL BE LIVE, and it is deliberately NOT a cohort:
+// `cohortFailures()` is the dead-exemption instrument, and above 0271's frontier this name is
+// SUPPOSED to be absent from the catalog while its exemption survives here — the one shape that
+// instrument reports. The retirement itself is asserted from the other side, by
+// `client-financial-pack.test.mjs`'s `p660.census.pins_unmoved` (frontier-gated on the
+// `retire_create_account_set_v1$` stem), and by 0271's own tail.
+//
+// SCHEDULED REMOVAL, not a permanent carve-out: drop this roster and its spread below once every
+// rig and every frontier leg this package runs against carries 0271 (i.e. after the riders wave-2
+// integration lands and the frontier matrix's legs are re-cut above it). F-A3 PR-3's own
+// retirements (propose_bank_rule and the twelve names beside it, TIEOUT_0040_* above) were
+// removed outright with no window because they merged long before any frontier leg could stand
+// between their creation and their drop; this one cannot, because 0271 is unmerged.
+const RETIRED_0271_HUMAN_FNS = ["create_account_set_v1"];
 // 0064 [Wave E lane theta]: the close-plan-as-document read. ONE name on
 // clara_authenticated -- the /close consumer (closeApi.ts's getClosePlan, called
 // from close/page.tsx). Originally authored with clara_agent_ro granted too (the
@@ -2683,6 +2715,10 @@ export const ALLOWED = {
     // lifecycle verbs, the two frozen-input minters, the evaluator pair, the independent E6
     // re-check, the A30b attempt-receipt writer and the freeze verifier — clara_authenticated
     // ONLY, every floor body-enforced; agent/wake/runtime gain ZERO (see the block above)
+    ...RETIRED_0271_HUMAN_FNS, // #1003 [0271] the RETIREMENT WINDOW's own arm —
+    // create_account_set_v1, held here only while a frontier below 0271 can still carry the live,
+    // granted body. See the block where the roster is declared for why a removal needs an arm and
+    // an addition does not, and for when this line is deleted.
     ...CARD1_SEAM_HUMAN_FNS, // [Wave-F Track A, F-A5b card 1] clara.evaluate_metric_v2, on
     // evaluate_metric_v1's own terms — clara_authenticated ONLY; agent/wake/runtime gain ZERO
     ...CLOSE_PLAN_0064_HUMAN_FNS, // 0064 [Wave E lane θ] the close-plan-as-document read —
