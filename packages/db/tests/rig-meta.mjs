@@ -1650,6 +1650,18 @@ export const WORK_QUESTIONS_0180_COHORT = [
 // present on every database from 0180 onward regardless of whether 0198 has been applied.
 // #720 END
 
+// #839 [0265, the shared question record gains the admitted basis] — NO COHORT, NO NEW NAME, NO
+// GRANT CHANGE, the same shape #720 above records. 0265 creates no function: it RECUTS
+// `clara._work_question_record` to add one key (`basis`, off `clara.accounting_work.basis`) to the
+// jsonb it already built. The name is already on WORK_QUESTIONS_0180_UNGRANTED_FNS above and STAYS
+// there — same signature `(uuid)`, same owner, same SECURITY DEFINER, same pinned search_path, same
+// "granted to nobody" ACL (0265's §T re-reads it, grantor included). `clara.get_work_question` and
+// `clara.get_work_pending_question` are not recut at all — 0265's §T pins both byte-identical to
+// their pre-images — so WORK_QUESTIONS_0180_HUMAN_FNS is untouched too. A cohort of its own would be
+// WRONG here for the same reason #720's is: cohortFailures() fails a HALF-present cohort, and 0265
+// adds no name for one to be half of.
+// #839 END
+
 // #634 [0182, optional and LATE journal evidence] — the EVIDENCE lane, its own cohort for the
 // same "wholly present or wholly absent" reason 0178's carries: folding these names into 0178's
 // roster would red every database between the two frontiers, and `cohortFailures()` fails a
