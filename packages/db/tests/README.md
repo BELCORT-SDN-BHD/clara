@@ -1049,19 +1049,47 @@ roster stays true unwidened, and 0247's own tail (T.8) re-proves that off the ca
 makes the same insert with the same conflict target, and 0247 deliberately leaves its join
 watermark-free — two birth sites that now differ in text is exactly the condition that produced
 #972's defect, so the reasons it is safe here are measured off the catalog instead of argued.
-Two facts, and the cell reds if either moves: arm 4's own guard still reads `not
-e.is_opening_balance and e.reversal_of is null and not (e.flags ? 'fa_disposal')`, which excludes
-the reversal MIRROR — the only entry arm 4 sees during a reversal, since `clara.reverse_entry`
-hands its hook `v_mirror`, never the original; and the caller ladder is exactly
-`_fa_on_approve` ← `_subledger_on_approve` ← the six approve writers (`_approve_entry_core`,
-`_approve_opening_entry`, `approve_wrong_client_correction`, `finalize_close`,
-`reopen_fiscal_year`, `reverse_entry`), each of which hands the hook an entry approved in the
-SAME transaction. A seventh writer, or anything reaching `_fa_on_approve` directly, reds the
-cell — which is the point: the next person to widen the ladder is asked #972's question first.
-The behavioural half is already driven by `p972.retro`, whose reversal runs
-`reverse_entry`'s own hook call inside the same transaction. VACUITY CONTROL RUN: a throwaway
-`clara._p972_vacuity_probe(uuid)` calling `clara._fa_on_approve` was created on the lane rig, the
-cell went RED on the caller-set assertion, and the probe was dropped and the cell re-run green.
+Three facts, and the cell reds if any moves. (1) The DIVERGENCE is real: arm 4 carries its
+watermark-free join exactly once and no copy of the trigger's watermark — an absence nothing
+checks is not an absence. (2) Arm 4's own guard still reads `not e.is_opening_balance and
+e.reversal_of is null and not (e.flags ? 'fa_disposal')`, which excludes the reversal MIRROR —
+the only entry arm 4 sees during a reversal, since `clara.reverse_entry` hands its hook
+`v_mirror`, never the original. That is the precise difference from the trigger, which the house
+reversal law re-fires on the ORIGINAL. (3) `clara._fa_on_approve`'s caller set is exactly
+`{_subledger_on_approve}`: every approve writer reaches arm 4 through that one function, in the
+same statement run that flips the entry to approved, so arm 4 only ever sees an entry whose
+`approved_at` is this transaction's instant. A caller reaching `_fa_on_approve` DIRECTLY would
+not, and reds this cell. The OUTER rung of that ladder — `_subledger_on_approve`'s own caller set
+— is `x41.a3`'s frontier-gated census and is deliberately not restated here. The behavioural half
+is already driven by `p972.retro`, whose reversal runs `reverse_entry`'s own hook call inside the
+same transaction. VACUITY CONTROL RUN (twice, before and after the cell was simplified to the
+inner rung): a throwaway `clara._p972_vacuity_probe(uuid)` calling `clara._fa_on_approve` was
+created on the lane rig, the cell went RED on the caller-set assertion (5 tests, 4 pass, 1 fail),
+and the probe was dropped, its absence re-measured at 0 `pg_proc` rows, and the file re-run 5/5.
+
+**`x41.s4` and the pre-0247 residue: the reproducible measurement.** On a long-lived rig the two
+register rows the PRE-0247 body birthed survive — `clara.fixed_assets` forbids DELETE (CLR13) —
+so `x41.s4` keeps reporting them as one unexplained difference per client at its settled as-of,
+and #972 puts cleaning them out of scope. That made #972's AC5 green unreproducible, because it
+was taken on a throwaway clone that was then dropped. The recipe, and the figure it produced,
+re-taken 2026-09-20 on the lane rig and recorded here so the integrator can repeat it:
+
+1. `create database clara_l04_s4fix template clara_l04` (a template copy, NOT a second
+   from-scratch chain — no migration runs, so 0154's cluster-wide role census is untouched).
+2. On the clone only: `alter table clara.fixed_assets disable trigger
+   t_fixed_assets_immutable_0017`, `delete from clara.fixed_assets f using clara.clients cl
+   where cl.id = f.client_id and cl.name like 'x41_b3%'`, then `enable trigger` again and
+   re-read `pg_trigger.tgenabled` to prove it is back on (`O`).
+3. Run `x41-round35-tie.test.mjs` and `x41-wave-d-a-fa.test.mjs` against the clone on the full
+   gate chain, then `drop database clara_l04_s4fix`.
+
+Measured: 2 rows deleted; **16 tests, 16 pass, 0 fail, 0 skip — `x41.s4` GREEN**, with
+`ALLOWED_RED` untouched at its single `/^x41_r3_/` entry (the file is byte-identical to the
+wave-2 base). The attribution is independently checkable on the lane rig itself without any
+surgery: 14 `x41_b3_…` clients have been created there, and only TWO carry a register row — both
+created at 04:36:37 and 04:37:42 on 2026-09-20, before 0247 first applied at 04:53:08. Every
+`x41.b3` run since has birthed none, which is also what #972's own
+`faRows(client).length === 0` assertion inside `x41.b3` now asserts on every run.
 
 `fa-birth-watermark-preintegration-gate.mjs` is the package-wide sweep's escape
 (`CLARA_ALLOW_MISSING_FA_BIRTH_WATERMARK=1`), registered in `packages/db/package.json`'s `"test"`

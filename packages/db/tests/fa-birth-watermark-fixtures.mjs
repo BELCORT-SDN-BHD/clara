@@ -136,15 +136,13 @@ export const ARM4_WATERMARK_FREE_JOIN =
   `               and fp.asset_account_code = jl.account_code and fp.active
              where jl.entry_id = p_entry`;
 
-/** The ONE function that calls `clara._fa_on_approve`, and the approve writers that call THAT.
- *  Measured off the live catalog; a SEVENTH approve writer — or any other caller reaching
- *  `_fa_on_approve` directly — is exactly the condition that produced #972's defect at the
- *  trigger, and `p972.sites` reds on it. */
+/** The ONE function that calls `clara._fa_on_approve`, measured off the live catalog. Every
+ *  approve writer reaches arm 4 through it, in the same statement run that flips the entry to
+ *  approved; a caller reaching `_fa_on_approve` DIRECTLY would not, which is the condition that
+ *  produced #972's defect at the trigger, and `p972.sites` reds on it. The outer rung —
+ *  `_subledger_on_approve`'s own caller set — is x41.a3's frontier-gated census and is not
+ *  restated here. */
 export const FA_ON_APPROVE_CALLERS = ["_subledger_on_approve"];
-export const SUBLEDGER_ON_APPROVE_CALLERS = [
-  "_approve_entry_core", "_approve_opening_entry", "approve_wrong_client_correction",
-  "finalize_close", "reopen_fiscal_year", "reverse_entry",
-];
 
 /** 0216's watermark-FREE join, verbatim. Its absence is what makes the recut non-vacuous. */
 export const WATERMARK_FREE_JOIN = `             and fp.asset_account_code = jl.account_code and fp.active

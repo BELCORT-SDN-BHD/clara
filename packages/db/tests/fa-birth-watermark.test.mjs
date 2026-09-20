@@ -21,10 +21,10 @@
 //                arm 4 makes the same insert and its join still carries NO watermark. 0247
 //                leaves it alone deliberately; this cell records the divergence off the
 //                catalog and pins the two facts that make it unreachable — arm 4's own
-//                `e.reversal_of is null` guard, and the caller ladder that hands it only
-//                entries approved in the SAME transaction. A seventh approve writer, or any
-//                new caller reaching `_fa_on_approve` directly, reds this cell: that is the
-//                condition that produced #972's defect at the trigger.
+//                `e.reversal_of is null` guard, and the single caller through which every
+//                approve writer reaches it. A new caller reaching `_fa_on_approve` DIRECTLY
+//                reds this cell: that is the condition that produced #972's defect at the
+//                trigger. The outer rung of that ladder is x41.a3's frontier-gated census.
 //   p972.source  THE ASSUMPTION THE PREDICATE RESTS ON, driven rather than assumed: the
 //                watermark's first operand can never be NULL on a row this trigger fires for,
 //                because `clara._tf_entry_immutable` refuses an approval that carries no
@@ -45,7 +45,7 @@ import assert from "node:assert/strict";
 import {
   gate972, p972Client, birthBodySource, WATERMARK_EXPR, WATERMARK_FREE_JOIN,
   TIE_PRE_ENROLMENT_EXPR, NULL_APPROVED_AT_UPDATE, FA_BIRTH_WATERMARK_STEM,
-  ARM4_GUARD, ARM4_WATERMARK_FREE_JOIN, FA_ON_APPROVE_CALLERS, SUBLEDGER_ON_APPROVE_CALLERS,
+  ARM4_GUARD, ARM4_WATERMARK_FREE_JOIN, FA_ON_APPROVE_CALLERS,
   rootQuery, opk, noteLane, endPool, printLaneNotes, printSkipCount, x41EnsureReady, skip41,
   faWorld, faRows, faRow, entryRowOf, approvedEntry, buyAsset, reverseEntry, upsertFaProfile,
   faRegisterTie, caught, mon, dayIn, COST, ACCUM, EXPENSE, BANK,
@@ -299,30 +299,30 @@ test("p972.sites clara._fa_on_approve arm 4 still births with NO watermark, and 
     "arm 4's guard is still `not e.is_opening_balance and e.reversal_of is null and not (e.flags "
     + "? 'fa_disposal')`, exactly once — the clause that keeps the reversal mirror out");
 
-  // FACT 2 — THE CALLER LADDER, OFF THE CATALOG. `_fa_on_approve` is reached through exactly one
-  // function, and that function is reached from exactly the approve writers measured below. A
-  // SEVENTH writer, or anything calling `_fa_on_approve` directly, reds this cell — which is the
-  // point: the next person to widen this ladder is asked #972's question before they do.
-  for (const [callee, expected] of [
-    ["clara._fa_on_approve(", FA_ON_APPROVE_CALLERS],
-    ["_subledger_on_approve(", SUBLEDGER_ON_APPROVE_CALLERS],
-  ]) {
-    const self = callee.replace("clara.", "").replace("(", "");
-    const callers = await rootQuery(
-      `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'clara' and p.proname <> $2 and position($1 in p.prosrc) <> 0
-        order by p.proname`, [callee, self]);
-    assert.deepEqual(callers.rows.map((r) => r.proname), expected,
-      `${callee}'s caller set is exactly ${JSON.stringify(expected)} (got `
-      + `${JSON.stringify(callers.rows.map((r) => r.proname))}) — a new caller is the condition `
-      + "that produced #972's defect at the trigger, and 0247 does not protect arm 4 from it");
-  }
+  // FACT 2 — THE INNER RUNG OF THE CALLER LADDER, OFF THE CATALOG. `clara._fa_on_approve` is
+  // reached through exactly ONE function, `clara._subledger_on_approve`, which every approve
+  // writer calls in the same statement run that flips the entry to approved — so arm 4 only ever
+  // sees an entry whose `approved_at` is this transaction's instant, at or after any enrolment
+  // that already exists. Anything calling `_fa_on_approve` DIRECTLY would bypass that, which is
+  // the condition that produced #972's defect at the trigger, and 0247 does not protect arm 4
+  // from it. The OUTER rung — `_subledger_on_approve`'s own caller set — is already a pinned,
+  // frontier-gated census (`x41.a3` in x41-wave-d-a-fa.test.mjs) and is deliberately not
+  // restated here.
+  const callers = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname <> '_fa_on_approve'
+        and position('clara._fa_on_approve(' in p.prosrc) <> 0
+      order by p.proname`);
+  assert.deepEqual(callers.rows.map((r) => r.proname), FA_ON_APPROVE_CALLERS,
+    `clara._fa_on_approve's caller set is exactly ${JSON.stringify(FA_ON_APPROVE_CALLERS)} (got `
+    + `${JSON.stringify(callers.rows.map((r) => r.proname))}) — a direct caller would reach arm 4 `
+    + "outside an approve, where the watermark it does not carry would matter");
 
   // …AND THE COMBINED SYSTEM IS ALREADY DRIVEN: p972.retro reverses a pre-enrolment acquisition
   // through the real door, and clara.reverse_entry's own hook call reaches arm 4 inside that same
   // transaction. The register stays empty there, which is the behavioural half of this argument.
   noteLane("p972.sites: clara._fa_on_approve arm 4 keeps its watermark-free join (divergence "
     + "recorded, not fixed); it is unreachable for a pre-enrolment entry because its "
-    + "`e.reversal_of is null` guard excludes the reversal mirror and its caller ladder is "
-    + `exactly {${FA_ON_APPROVE_CALLERS.join(", ")}} <- {${SUBLEDGER_ON_APPROVE_CALLERS.join(", ")}}`);
+    + "`e.reversal_of is null` guard excludes the reversal mirror and its only caller is "
+    + `{${FA_ON_APPROVE_CALLERS.join(", ")}}, whose own caller set x41.a3 pins`);
 });
