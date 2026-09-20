@@ -48,13 +48,17 @@ const CAPABILITY_COLUMNS =
 /** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
  *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
  *  absence. */
-const EXPECTED_CELLS = 7;
+const EXPECTED_CELLS = 8;
 
 let live = false;
 let executed = 0;
 
-/** 0244's whole cohort, read from the LIVE CATALOG. Wholly present or wholly absent; anything
- *  between the two is a half-applied migration and is reported as such. */
+/** #846's whole closure, read from the LIVE CATALOG: 0244's five objects plus the three routes
+ *  0272 closed in the SAME pull request (`g5` stands for all three — 0272 installs them in one
+ *  file, so its truncate trigger is that file's frontier the way the five-value CHECK is 0246's
+ *  in the sibling battery). Wholly present or wholly absent; anything between the two is a
+ *  half-applied migration and is reported as such. There is no shipped chain between 0244 and
+ *  0272 for the same reason: they land together or not at all. */
 async function cohortApplied() {
   const r = await rootQuery(`select
       to_regclass('clara.document_capability_version_high_water')                     is not null as t1,
@@ -77,7 +81,11 @@ async function cohortApplied() {
       exists (select 1 from pg_constraint c
                where c.conname = 't_document_capabilities_version_uniform'
                  and c.connamespace = 'clara'::regnamespace
-                 and c.condeferrable and c.condeferred)                               as g4`);
+                 and c.condeferrable and c.condeferred)                               as g4,
+      exists (select 1 from pg_trigger t
+               where t.tgrelid = 'clara.document_capability_version_high_water'::regclass
+                 and t.tgname = 't_document_capability_high_water_no_truncate'
+                 and not t.tgisinternal)                                              as g5`);
   const flags = Object.entries(r.rows[0]);
   const present = flags.filter(([, v]) => v).length;
   if (present !== 0 && present !== flags.length) {
@@ -216,6 +224,35 @@ cell("the high-water mark itself is append-only: DELETE is refused, a lowering U
   assert.equal(JSON.parse(seen.lower.detail ?? "{}").reason, "registry_version_high_water_append_only");
 
   assert.equal(seen.raised, seen.mark + 1, "raising the high-water mark must still succeed");
+});
+
+// FIX ROUND (0272) — THE THREE ROUTES THE FIRST CUT LEFT OPEN. 0244 walled DELETE and a lowering
+// or re-keying UPDATE of the mark, and an INSERT below it. The adversarial lens then drove three
+// more routes to the same end, as clara_fn_owner — the role every migration runs as and the only
+// writer either table has. Each cell below reproduces one of them and is the refusal's only
+// witness; each FAILED against 0244 alone before 0272 closed it.
+
+cell("TRUNCATE of the high-water mark is refused: a row trigger does not fire on TRUNCATE, so the ledger needs its own statement wall", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const before = (await c.query(
+      "select count(*)::int as n from clara.document_capability_version_high_water")).rows[0].n;
+    await c.query("savepoint probe_truncate");
+    const err = await caught(() => c.query("truncate clara.document_capability_version_high_water"));
+    await c.query("rollback to savepoint probe_truncate");
+    const after = (await c.query(
+      "select count(*)::int as n from clara.document_capability_version_high_water")).rows[0].n;
+    return { err, before, after };
+  });
+
+  assert.ok(seen.before > 0, "the mark ledger really carries rows to truncate");
+  assert.ok(seen.err,
+    "TRUNCATE emptied the mark ledger — #846's reproducer is back in two statements: truncate the "
+    + "marks, delete the registry row, re-insert it BELOW the version it published");
+  assert.equal(seen.err.code, CLR08, `expected the immutability-family code ${CLR08}, got ${seen.err.code}`);
+  assert.match(seen.err.message, /document_capability_version_high_water cannot be truncated/,
+    "the refusal names the relation, the way clara._tf_no_truncate has named every other "
+    + "append-only relation since 0003");
+  assert.equal(seen.after, seen.before, "the refused TRUNCATE left every mark in place");
 });
 
 // ---------------------------------------------------------------------------------------------
