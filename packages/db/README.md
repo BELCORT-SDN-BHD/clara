@@ -1792,9 +1792,25 @@ audit row, not in a new membership-revision relation.
   every revision with that revision's own id in `args.revision_id`, and `actor` is re-checked
   against `asserted_by` because the promotion lane audits each record under the **answerer**). It
   sits beside `promoter_role_now` and `required_role` as a third, separately-labelled fact; the web
-  register renders all three and says *"Not recorded — this rule predates the record of authority"*
-  for a null. `ix_audit_log_knowledge_revision` keeps that citation off a sequential scan of the
-  whole log.
+  register renders all three, says *"Not recorded — this rule predates the record of authority"*
+  for a null, and says *"No membership in this firm when the rule was recorded"* for `'none'` —
+  the marker is never rendered raw, because it is not a rank. (`'no_actor'` cannot reach this
+  block: `clara.knowledge_records.asserted_by` is `NOT NULL` and the subquery matches
+  `a.actor is not distinct from r.asserted_by`.) `ix_audit_log_knowledge_revision` keeps that
+  citation off a sequential scan of the whole log.
+
+- **Why a viewer may read it, although `clara.audit_log` itself starts at bookkeeper.** Review
+  (ADV-04) asked whether this lowers an audit-log fact to the register's own viewer floor.
+  Measured on the lane database: `p_audit_log_human` is
+  `firm_id = clara.jwt_firm() AND coalesce(clara.actor_role_rank(), -1) >= clara.role_rank('bookkeeper')`,
+  but `p_firm_memberships_human` is `firm_id = clara.jwt_firm()` with **no rank floor at all**
+  and `clara_authenticated` holds `SELECT` on `clara.firm_memberships` — so *"what role does
+  this colleague hold in my firm"* is already a viewer-readable fact at the table that owns
+  roles. The bookkeeper floor protects the **log** — which acts ran, by whom, with which
+  arguments and outcome — and this key discloses none of that: one role word, about the promoter
+  of a rule the same viewer is already being shown, beside `promoter_role_now`, which that
+  viewer can read from `firm_memberships` directly. Nothing was loosened; the datum is the same
+  KIND of fact at the same firm scope, pinned to an instant.
 
 Battery: `tests/audit-actor-role.test.mjs` (ar.01–ar.07), gated by
 `tests/audit-actor-role-preintegration-gate.mjs`.
