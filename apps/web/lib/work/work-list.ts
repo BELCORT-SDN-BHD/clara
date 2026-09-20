@@ -61,6 +61,18 @@ export type WorkListRow = {
    *  key, and its absence from this projection was the whole reason a second, direct-table list
    *  reader of clara.accounting_work existed beside this one until #809 deleted it. */
   intent_key: string;
+  /** #880 — `clara.staff_expense_claims`, LEFT JOINED by migration 0266 on its own UNIQUE
+   *  `work_id`. Both null for any Work that is not a staff expense claim (a plain journal entry,
+   *  a periodic stock adjustment or a payroll obligation) — the honest absence, never a
+   *  fabricated origin. A claim posts under the plain, unwidened `journal_entry` purpose (0221's
+   *  own header: a fourth purpose cannot post through the closed core), so `claim_id` is how a
+   *  caller tells the two apart without a purpose value, and WITHOUT a second, per-row call to
+   *  `clara.get_work_claim_origin` (`lib/work/staff-expense-claim-reads.ts`), which stays the
+   *  Work detail's own richer read — this projection carries only the two fields the LIST needs
+   *  to label a row; the settlement, the amounts and the item counts are not here (0189's "a list
+   *  of operations is not a ledger" stands). */
+  claim_id: string | null;
+  claimant_label: string | null;
   memo: string | null;
   posting_date: string | null;
   currency: string | null;

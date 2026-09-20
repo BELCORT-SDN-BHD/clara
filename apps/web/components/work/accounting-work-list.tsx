@@ -119,11 +119,34 @@ export type WorkListScope = { kind: "firm" } | { kind: "client"; clientId: strin
 //
 // A STAFF EXPENSE CLAIM IS NOT A FOURTH VALUE HERE, and that is by design rather than by omission:
 // it is admitted with purpose `journal_entry` (migration 0221's header says why a fourth purpose
-// cannot post), and what makes it a CLAIM is read from `clara.get_work_claim_origin` — the Work
-// detail asks that door by name. Adding a token here would be inventing a purpose the estate does
-// not have.
+// cannot post). Until #880/migration 0266 the ONLY way to tell one apart from an ordinary journal
+// entry was `clara.get_work_claim_origin`, asked by name — and only the Work detail asked it. The
+// list door's own projection now carries `claim_id`/`claimant_label` straight from the same
+// relation (see `workRowKindLabel` below), so THIS surface can say what a claim actually is with
+// NO extra call; the Work detail's richer read (settlement, amounts, item counts) is unchanged.
+// Adding a token to THIS set would still be wrong — it would be inventing a purpose the estate
+// does not have.
 const KNOWN_PURPOSE_LABELS = new Set(["journal_entry", "periodic_stock_adjustment", "payroll_obligation"]);
 const KNOWN_ORIGIN_LABELS = new Set(["user_direct", "clara_interpreted"]);
+
+/**
+ * #880 — the compact line's own label for what a Work IS: the claim label when the list door's
+ * own projection says so (a non-null `claim_id`), falling back to the KNOWN purpose label, and
+ * finally to the raw purpose token this build has not learned (the SAME degrade
+ * `KNOWN_PURPOSE_LABELS` above already applies). A non-null `claim_id` with a null
+ * `claimant_label` cannot happen on a live row (the claim relation's own `claimant_label` column
+ * is NOT NULL, 0221) — the `?? ""` is a defensive fallback for a malformed wire answer, never a
+ * shape the door produces, so it renders an empty claimant rather than throwing on one.
+ */
+export function workRowKindLabel(
+  row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label">,
+  t: (key: string, values?: Record<string, string>) => string,
+): string {
+  if (row.claim_id !== null) {
+    return t("claimLabel", { claimant: row.claimant_label ?? "" });
+  }
+  return KNOWN_PURPOSE_LABELS.has(row.purpose) ? t(`purposeLabels.${row.purpose}`) : row.purpose;
+}
 
 export function AccountingWorkList({
   scope,
@@ -446,7 +469,7 @@ function WorkRow({
           <p className="text-xs text-muted-foreground md:hidden">
             {[
               scope.kind === "firm" ? (row.client_name ?? t("unknownClient")) : null,
-              KNOWN_PURPOSE_LABELS.has(row.purpose) ? t(`purposeLabels.${row.purpose}`) : row.purpose,
+              workRowKindLabel(row, t),
               row.created_at === null ? null : businessDateTime(row.created_at),
             ]
               .filter((part): part is string => typeof part === "string" && part !== "")

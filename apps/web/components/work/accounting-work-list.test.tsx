@@ -29,7 +29,7 @@ import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/
 import { DoorError } from "../../lib/doors";
 import { RefusalError } from "../../lib/wire";
 import messages from "../../messages/en.json";
-import { AccountingWorkList, type WorkListScope } from "./accounting-work-list";
+import { AccountingWorkList, workRowKindLabel, type WorkListScope } from "./accounting-work-list";
 import type { WorkListRow } from "../../lib/work/work-list";
 
 enableDomInspection();
@@ -98,6 +98,8 @@ function row(over: Partial<WorkListRow> = {}): WorkListRow {
     initiator_role: "bookkeeper",
     basis_origin: "user_direct",
     intent_key: "w623:journal_entry:2026-09-01:office-rent",
+    claim_id: null,
+    claimant_label: null,
     memo: "Office rent, September",
     posting_date: "2026-09-01",
     currency: "MYR",
@@ -223,6 +225,80 @@ test("rows render the memo, the client, the state WORD and a link to the Work's 
       assert.ok(link !== null, "every row links to its own durable address");
       // NO MONEY ON A LIST ROW (the door projects none, and this asserts the page renders none).
       assert.doesNotMatch(text, /1,200\.00|120000/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ===========================================================================================
+// #880 — workRowKindLabel, the pure decision behind the compact line's label. Tested directly at
+// the function boundary (no render, no fetch) so the three branches are each one assertion, plus
+// once end-to-end through the rendered list below to prove it is actually wired in.
+// ===========================================================================================
+{
+  const t = (key: string, values?: Record<string, string>) => {
+    if (key === "claimLabel") return `Staff expense claim — ${values?.claimant ?? ""}`;
+    if (key === "purposeLabels.journal_entry") return "Journal entry";
+    if (key === "purposeLabels.periodic_stock_adjustment") return "Periodic stock adjustment";
+    throw new Error(`unexpected key in workRowKindLabel test double: ${key}`);
+  };
+
+  test("workRowKindLabel: a claim row (claim_id set) renders the claimant label, not the purpose", () => {
+    assert.equal(
+      workRowKindLabel({ purpose: "journal_entry", claim_id: "claim-1", claimant_label: "Farah binti Idris" }, t),
+      "Staff expense claim — Farah binti Idris",
+    );
+  });
+
+  test("workRowKindLabel: a plain row (claim_id null) with a KNOWN purpose is unchanged", () => {
+    assert.equal(
+      workRowKindLabel({ purpose: "journal_entry", claim_id: null, claimant_label: null }, t),
+      "Journal entry",
+    );
+    assert.equal(
+      workRowKindLabel({ purpose: "periodic_stock_adjustment", claim_id: null, claimant_label: null }, t),
+      "Periodic stock adjustment",
+    );
+  });
+
+  test("workRowKindLabel: a plain row with a purpose this build has not learned renders it VERBATIM", () => {
+    assert.equal(
+      workRowKindLabel({ purpose: "vendor_bill_stub", claim_id: null, claimant_label: null }, t),
+      "vendor_bill_stub",
+    );
+  });
+
+  // Defensive only — clara.staff_expense_claims.claimant_label is NOT NULL (0221), so a live row
+  // never carries this combination; asserted so a malformed wire answer degrades rather than throws.
+  test("workRowKindLabel: claim_id set with a null claimant_label renders an empty claimant, never throws", () => {
+    assert.equal(
+      workRowKindLabel({ purpose: "journal_entry", claim_id: "claim-1", claimant_label: null }, t),
+      "Staff expense claim — ",
+    );
+  });
+}
+
+test("a staff expense claim row shows its claimant label on the compact line, never 'Journal entry'", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      load: async () => ({
+        rows: [
+          row({ claim_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", claimant_label: "Farah binti Idris" }),
+          row({
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", memo: "Bank fee", claim_id: null, claimant_label: null,
+          }),
+        ],
+        next_cursor: null,
+        truncated: false,
+      }),
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /Staff expense claim — Farah binti Idris/, "the claim row carries its label");
+      // The plain row on the SAME page is unchanged — the regression AC2 asks for.
+      assert.match(text, /Journal entry/, "a plain journal Work on the same page still reads 'Journal entry'");
     } finally {
       await h.unmount();
     }

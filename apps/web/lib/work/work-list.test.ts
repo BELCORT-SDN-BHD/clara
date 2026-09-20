@@ -69,6 +69,8 @@ function row(over: Partial<WorkListRow> = {}): WorkListRow {
     initiator_role: "bookkeeper",
     basis_origin: "user_direct",
     intent_key: "w623:journal_entry:2026-09-01:office-rent",
+    claim_id: null,
+    claimant_label: null,
     memo: "Office rent, September",
     posting_date: "2026-09-01",
     currency: "MYR",

@@ -2198,6 +2198,7 @@
     "columnActions": "Row actions",
     "untitledWork": "Untitled work",
     "unknownClient": "Unknown client",
+    "claimLabel": "Staff expense claim — {claimant}",
     "postingDate": "Posting date {date}",
     "noPostingDate": "No posting date recorded",
     "rowMenuLabel": "More actions for this work",
