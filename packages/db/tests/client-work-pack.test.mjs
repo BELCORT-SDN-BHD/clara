@@ -81,6 +81,19 @@ async function receiptWindowReady() {
 
 async function gateReceiptWindow(t) {
   if (await receiptWindowReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (review finding L09-ADV-08).
+  // The package-wide sweep preloads this widen’s OWN pre-integration gate module (named in
+  // the refusal below), which sets the flag below to declare "a database below this migration is an
+  // expected pre-integration state". A worker running this file directly preloads nothing, so
+  // an absent widen fails HERE rather than reporting a green run over a cell that quietly
+  // executed no assertion.
+  if (process.env.CLARA_ALLOW_MISSING_WORK_LIST_RECEIPT_WINDOW !== "1") {
+    throw new Error(
+      `#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} row in clara.schema_migrations)`
+      + " and CLARA_ALLOW_MISSING_WORK_LIST_RECEIPT_WINDOW is unset -- this is a FOCUSED run"
+      + " and must fail loudly, not skip. Preload ./tests/work-list-receipt-window-preintegration-gate.mjs"
+      + " for an estate sweep against a pre-PR chain.");
+  }
   markSkip();
   t.skip(`#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} migration applied)`);
   return true;
