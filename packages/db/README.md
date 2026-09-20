@@ -1826,3 +1826,70 @@ unmoved. No door, no wire shape, no new relation, no reordering and no recut of 
 [tests/journal-basis-zero-total-unreachable.test.mjs](tests/journal-basis-zero-total-unreachable.test.mjs)
 calls the predicate directly (the ticket's own named seam) and proves both shapes above land on
 the arm this section says they do, never on `nonzero_total`.
+
+## 0238 — the correction door takes the client rung before any client row (#914)
+
+`clara.approve_wrong_client_correction` was the **only** door in the estate that acquired a
+`clara.clients` row **before** the client advisory rung `203005004`. #649's round-two re-check
+censused every rung-bearing body, found exactly one such door, measured a real deadlock against an
+adversary in the prescribed order, and recorded it in `DECISIONS.md` §3.1 as a pre-existing
+violation — explicitly not #649's to fix.
+
+**The ladder, before and after** (acquisition sequence, not source order):
+
+| step | before (0027 → 0037 → 0038 → 0125) | after (0238) |
+|---|---|---|
+| 1 | firm rung `203005002` | firm rung `203005002` |
+| 2 | `filing_corrections` row `for update` | `filing_corrections` row `for update` |
+| 3 | `clara.documents` row `for update` (0027 task #29) | unchanged |
+| 4 | `clara.document_filings` rows `order by id for update` | unchanged |
+| 5 | **`clara.clients` row on `x.from_client`** | `clara.journal_entries` rows `for update of je` |
+| 6 | `clara.journal_entries` rows `for update of je` | **client rung `203005004` on `x.from_client`, once** |
+| 7 | client rung `203005004` on `o.client_id`, per item, inside the reverse branch | **`clara.clients` row on `x.from_client`** |
+
+**Why the remedy is to move the ROW down, not the rung up.** 0037 §K states the rung ladder as a
+partial order with one named exception: `clara.reverse_entry` and this door lock a *pre-existing*
+`clara.journal_entries` row **first**, because `clara._approve_entry_core` does, and inverting that
+in one verb would itself be the deadlock. 0037 §H.3 installed a body census pinning the rung after
+`for update of je` and before `clara._subledger_allocated_items_present(`
+([tests/x37-wave-c-a-subledger.test.mjs](tests/x37-wave-c-a-subledger.test.mjs) still asserts it
+live). Hoisting the rung to the top of the body — the obvious-looking remedy — would break that
+pin and invert against the core. 0238 therefore moves the client row *down*, below a rung that
+stays exactly where 0037 put it relative to the entry row locks.
+
+**Which client the rung covers, and why once is enough.** The correction's **source** client,
+`x.from_client`. Every captured item is an entry selected by `je.filing_id = <the source client's
+active filing>` (`clara.preview_wrong_client_correction`,
+[0007](migrations/0007_document_pipeline.sql):2460, whose plan `propose_wrong_client_correction`
+stores verbatim); `ck_je_document_filing_pair` makes `document_id` and `filing_id` null together,
+and the `t_je_provenance` constraint trigger refuses any entry with a document whose filing's
+`client_id` differs from the entry's own. So `o.client_id = x.from_client` for every item,
+structurally — and neither column can drift afterwards (neither appears in any allowset of
+`t_je_immutable`, and a filing's identity is immutable as well). Advisory xact locks are
+re-entrant, so the old per-item acquisition was already a no-op after the first item; 0238 takes
+the same key once, earlier, and holds it a little longer. Its prestate refuses to apply if either
+of those two walls is missing.
+
+**The new pair this creates, stated rather than hoped.** The `journal_entries` row locks now
+precede the `clara.clients` row, so a door taking a client row and *then* a `journal_entries` row
+would invert against 0238. There is none: of the eleven live bodies that acquire a `clara.clients`
+row, this is the only one that also locks a `clara.journal_entries` row.
+
+[0238_correction_client_rung_order.sql](migrations/0238_correction_client_rung_order.sql) is one
+`create or replace function` carrying 0125's body with exactly three edits (the `for update of je`
+statement moves up, one `pg_advisory_xact_lock(203005004, hashtext(x.from_client::text))` is
+inserted, the per-item acquisition becomes a comment). Everything else — every refusal code and
+message, the reversal mirror and its adoption branch, the single `clara._subledger_on_approve` call,
+`clara._book_today()`, the filing retirement and re-filing, the coding task, the notification, the
+audit row, the domain events and the receipt — is 0125's, verbatim. Its prestate pins the 0125 body
+by `sha256(prosrc)` (and accepts its own body, so a #957 redo is safe), the owner, the
+`SECURITY DEFINER` flag and the ACL; its tail re-reads the new ladder off the catalog, re-asserts
+0027's documents-before-`document_filings` order, counts the fifteen refusals and both rungs, proves
+the source filing is still retired under the source client's row lock, and runs a
+catalogue-derived census over **every** `clara` body proving no door is left that takes a
+`clara.clients` row before the rung.
+[tests/correction-client-rung-order.test.mjs](tests/correction-client-rung-order.test.mjs) drives
+the schedule that deadlocked — an adversary holding the rung, then taking the row — with the
+deadlock SQLSTATE as its oracle, races the door against `clara.record_wiki_source_ingest` to prove
+the source client is still serialised against publication, and re-runs the same census from the
+other side.
