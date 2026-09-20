@@ -8,11 +8,26 @@
 -- 额度、不动三个预留函数；UTC/MYT 不一致记成具名残留并另开一张票", recorded as follow-up #1 in
 -- docs/plan/active/refresh-wave-2026-09-18/reports/636-final.md — this is that ticket).
 --
--- WHAT THIS FILE CHANGES, IN ONE SENTENCE. The three reservation helpers behind the document
--- daily ceiling — `clara._reserve_document_ingest`, `clara._resize_document_reservation`,
--- `clara._settle_document_reservation` — now compute "today" as an Asia/Kuala_Lumpur calendar day
--- instead of a UTC calendar day, and `clara.get_intake_batch`'s `capacity` descriptor reports the
--- MYT-midnight reset it now performs instead of the 08:00 MYT reset 0229 shipped as a fact.
+-- WHAT THIS FILE CHANGES, IN ONE SENTENCE. Every body that enforces the document daily ceiling —
+-- the three reservation helpers `clara._reserve_document_ingest`,
+-- `clara._resize_document_reservation`, `clara._settle_document_reservation` AND the fourth,
+-- shipped, `clara_runtime`-granted door `clara.settle_ingest_reservation`, which does the
+-- pages/day count itself rather than delegating — now computes "today" as an Asia/Kuala_Lumpur
+-- calendar day instead of a UTC calendar day, and `clara.get_intake_batch`'s `capacity`
+-- descriptor reports the MYT-midnight reset it now performs instead of the 08:00 MYT reset 0229
+-- shipped as a fact.
+--
+-- WHAT THE MOVE DOES TO ROWS THAT ALREADY EXIST (fix round, ADV-W2L05-07). The boundary moves
+-- EIGHT HOURS EARLIER, so at the instant this file commits, reservations created between MYT
+-- midnight and 08:00 MYT of the current day move from "yesterday" into "today". MEASURED on the
+-- lane rig inside a rolled-back transaction: a reservation stamped 02:00 MYT today counts
+-- myt_today=1 / utc_today=0, and driven through the real door with `docs_per_day=2` it left room
+-- for exactly one more file where the retired window would have admitted two. On a database with
+-- real rows a firm inside its ceiling one second before the deploy can therefore be refused one
+-- second after it, while the card names a reset moment (00:00) that has already passed for that
+-- day. This is a ONE-TIME transition, not a defect: no quota is changed and the following MYT
+-- midnight resets everything. The release runs outside 00:00-08:00 MYT where it can, and the
+-- as-run carries this paragraph so the first refusal after the deploy is explainable.
 --
 -- THE ONE EXPRESSION, MOVED IN THREE BODIES TOGETHER. 0007:1644/1672/1709 each compare a
 -- reservation's `created_at` against `date_trunc('day', now() at time zone 'utc') at time zone
@@ -37,23 +52,26 @@
 --     are untouched — §T re-reads both after the splice.
 --   * `clara._refund_document_reservation` (0007:1679) reads NO window today (a refund needs no
 --     "today" to un-reserve) and this file gives it none — the Agent Brief's own scope note.
+--     `clara.resize_ingest_reservation` and `clara.refund_ingest_reservation` read no window
+--     either: they delegate to the helpers §B/§C move. `clara.settle_ingest_reservation` is the
+--     one shipped door that does NOT delegate, which is why §E exists.
 --   * NO other lane's UTC-day truncation idiom moves. 0009's and 0038's and 0151's PROCESSING-CALL
 --     ceilings (a different domain: LLM usage, not document ingest) keep `at time zone 'utc'`
 --     unchanged — #964's Agent Brief rules this out of scope by name, and §0's prestate below
 --     pins ONLY the four document-ingest names, never touching those other bodies' OIDs.
 --   * NO change to `clara.firm_document_limits`, no new relation, no new granted name, no ACL
---     change on any of the four functions this file touches (§T re-reads all four ACLs
+--     change on any of the five functions this file touches (§T re-reads all five ACLs
 --     byte-identical to what §0 measured) — so this migration needs NO rig-meta cohort: nothing
 --     was added, removed or regranted for `operation-census.test.mjs` / `rig-isolation.test.mjs`
 --     to track.
 --
 -- REDO-SAFETY (#957). Every statement below is `create or replace function` / `comment on
--- function` — naturally idempotent DDL, never a bare `create table`. Each of the four splices
+-- function` — naturally idempotent DDL, never a bare `create table`. Each of the five splices
 -- below is ALSO idempotent against ITS OWN prior effect: if the live body already carries the
 -- target (new) clause, the splice is skipped with a NOTICE rather than re-applied (an anchor that
 -- already landed cannot "occur exactly once" a second time against ITSELF the way a genuine
 -- pre-0252 body would), so `CLARA_MIGRATION_REDO=0252_document_ingest_window_myt` after an
--- unmerged fix-round edit re-runs cleanly whether or not the prior attempt got all four bodies.
+-- unmerged fix-round edit re-runs cleanly whether or not the prior attempt got all five bodies.
 -- =====================================================================================
 
 do $w964_pre$
@@ -68,7 +86,9 @@ begin
       'clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)',
       'clara._resize_document_reservation(uuid,uuid,integer)',
       'clara._settle_document_reservation(uuid,uuid,integer)',
-      'clara.get_intake_batch(uuid,integer)']
+      'clara.get_intake_batch(uuid,integer)',
+      -- §E, the fourth shipped door on the same ceiling (fix round, L05-SPEC-01).
+      'clara.settle_ingest_reservation(uuid,integer,text)']
   loop
     if to_regprocedure(v_sig) is null then
       raise exception '#964 prestate: % is absent -- its owning migration must apply first', v_sig
@@ -336,6 +356,68 @@ comment on function clara.get_intake_batch(uuid,int) is
   'a UTC day by #964). No total, no percentage, no page length. clara_authenticated only, '
   'bookkeeper+.';
 
+-- =====================================================================================
+-- §E  clara.settle_ingest_reservation — THE FOURTH SHIPPED DOOR ON THE SAME CEILING (fix round,
+--     L05-SPEC-01). Unlike its sibling `clara.resize_ingest_reservation`, which delegates to
+--     `clara._resize_document_reservation`, this SECURITY DEFINER door granted to `clara_runtime`
+--     does the `coalesce(l.pages_per_day,1000)` count ITSELF, over the same
+--     `clara.document_ingest_reservations` relation, with its own CLR18 'actual pages exceed
+--     daily limit'. Leaving it on the UTC calendar day is exactly the mixed state this file's own
+--     header forbids: between MYT midnight and 08:00 MYT it would count a different set of
+--     reservations than §C's settle helper. It escaped the first generation because it spells the
+--     idiom WITHOUT the space after the comma (`date_trunc('day',now()`), which neither §A-§C's
+--     anchor nor §T's `v_utc_clause` matches. One anchor, same discipline, its own prestate pin.
+-- =====================================================================================
+do $w964_settle_door$
+declare
+  v_sig text := 'clara.settle_ingest_reservation(uuid,integer,text)';
+  v_pre constant text := 'a7b8d4eeed2c17bfaf252fe73e2185c78255ce4d1e10fac2b933619ff50a9aab';
+  v_oid oid; v_src text; v_def text; v_head text; v_new text; v_back text; v_occ int;
+  v_t1 text; v_r1 text;
+begin
+  -- A LITERAL cast, never `to_regprocedure(v_sig)` — see §A's identical comment.
+  v_oid := 'clara.settle_ingest_reservation(uuid,integer,text)'::regprocedure;
+  select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
+
+  v_t1 := $t1$        and created_at >= (date_trunc('day',now() at time zone 'utc') at time zone 'utc');$t1$;
+  v_r1 := $r1$        and created_at >= (date_trunc('day',now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur');$r1$;
+
+  if v_src like ('%' || v_r1 || '%') then
+    raise notice '#964 settle door: already at the MYT-window target (a redo over this function''s own prior effect) -- skipping the splice.';
+  else
+    if encode(sha256(convert_to(v_src,'UTF8')),'hex') <> v_pre then
+      raise exception '#964 prestate: % has DRIFTED from its pinned pre-image -- re-measure on a migrated rig before applying', v_sig
+        using errcode='CLR10';
+    end if;
+    v_occ := (length(v_src) - length(replace(v_src, v_t1, ''))) / length(v_t1);
+    if v_occ <> 1 then
+      raise exception '#964 settle door: the UTC window anchor occurs % time(s), expected exactly 1', v_occ
+        using errcode='CLR10';
+    end if;
+
+    v_def := pg_get_functiondef(v_oid);
+    v_head := left(v_def, position(E'\nAS $function$' in v_def));
+    if v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n' then
+      raise exception '#964 settle door: % does not split at the AS $function$ boundary', v_sig using errcode='CLR10';
+    end if;
+
+    v_new := replace(v_src, v_t1, v_r1);
+    execute v_head || 'AS $w964sdr$' || v_new || '$w964sdr$';
+
+    select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
+    if v_src not like ('%' || v_r1 || '%') then
+      raise exception '#964 settle door: % did not land the MYT window after the splice', v_sig using errcode='CLR10';
+    end if;
+    v_back := replace(v_src, v_r1, v_t1);
+    if encode(sha256(convert_to(v_back,'UTF8')),'hex') is distinct from v_pre then
+      raise exception '#964 settle door: the splice on % changed MORE than the one window anchor -- the reverse substitution does not reproduce the pinned pre-image', v_sig
+        using errcode='CLR10';
+    end if;
+    raise notice '#964 settle door: clara.settle_ingest_reservation now reads an Asia/Kuala_Lumpur calendar day; every other byte is its pinned pre-image.';
+  end if;
+end
+$w964_settle_door$;
+
 reset role;
 
 -- =====================================================================================
@@ -344,11 +426,18 @@ reset role;
 -- =====================================================================================
 do $w964_tail$
 declare
-  v_reserve_src text; v_resize_src text; v_settle_src text; v_batch_src text;
+  v_reserve_src text; v_resize_src text; v_settle_src text; v_batch_src text; v_door_src text;
   v_myt_clause constant text :=
     $mc$(date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')$mc$;
   v_utc_clause constant text := $uc$(date_trunc('day', now() at time zone 'utc') at time zone 'utc')$uc$;
-  v_acl text; v_local_time text;
+  -- §E's door spells the SAME idiom without the space after the comma. Two constants, not one
+  -- loosened pattern: a `like` wide enough to match both spellings would also stop proving WHICH
+  -- one each body carries, and it was precisely the one-space difference that let the fourth door
+  -- slip past the first generation's tail (fix round, L05-SPEC-01).
+  v_door_myt_clause constant text :=
+    $dm$(date_trunc('day',now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur')$dm$;
+  v_door_utc_clause constant text := $du$(date_trunc('day',now() at time zone 'utc') at time zone 'utc')$du$;
+  v_acl text; v_local_time text; v_stragglers text;
 begin
   select p.prosrc into v_reserve_src from pg_proc p
    where p.oid = 'clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)'::regprocedure;
@@ -358,6 +447,8 @@ begin
    where p.oid = 'clara._settle_document_reservation(uuid,uuid,integer)'::regprocedure;
   select p.prosrc into v_batch_src from pg_proc p
    where p.oid = 'clara.get_intake_batch(uuid,integer)'::regprocedure;
+  select p.prosrc into v_door_src from pg_proc p
+   where p.oid = 'clara.settle_ingest_reservation(uuid,integer,text)'::regprocedure;
 
   -- (T1) THE MECHANISM. All three reservation bodies carry the MYT clause, none carry the UTC one.
   if v_reserve_src not like '%'||v_myt_clause||'%' or v_reserve_src like '%'||v_utc_clause||'%'
@@ -377,6 +468,31 @@ begin
      or (length(v_resize_src) - length(replace(v_resize_src, v_myt_clause, ''))) / length(v_myt_clause) <> 1
      or (length(v_settle_src) - length(replace(v_settle_src, v_myt_clause, ''))) / length(v_myt_clause) <> 1 then
     raise exception '#964 tail: the MYT window clause does not occur exactly once in each of reserve/resize/settle'
+      using errcode='CLR10';
+  end if;
+
+  -- (T2b) THE FOURTH SHIPPED DOOR (fix round, L05-SPEC-01). Same two halves as T1/T2, against
+  -- §E's own spelling: it carries the MYT clause exactly once and never the UTC one.
+  if v_door_src not like '%'||v_door_myt_clause||'%' or v_door_src like '%'||v_door_utc_clause||'%'
+     or (length(v_door_src) - length(replace(v_door_src, v_door_myt_clause, ''))) / length(v_door_myt_clause) <> 1 then
+    raise exception '#964 tail: clara.settle_ingest_reservation does not carry the MYT window exactly once (or still carries the UTC one)'
+      using errcode='CLR10';
+  end if;
+
+  -- (T2c) CLOSED WORLD: NO FIFTH BODY ENFORCES THIS CEILING ON THE OLD DAY. Every clara function
+  -- that reads clara.document_ingest_reservations AND firm_document_limits.pages_per_day is
+  -- re-read here, in EITHER spelling of the UTC idiom, and the set must be empty. This is the
+  -- assertion whose absence let the fourth door ship eight hours out of step: a census, not four
+  -- named bodies.
+  select string_agg(p.oid::regprocedure::text, ', ' order by p.oid::regprocedure::text)
+    into v_stragglers
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and p.prosrc like '%document_ingest_reservations%'
+     and p.prosrc like '%pages_per_day%'
+     and (p.prosrc like '%'||v_utc_clause||'%' or p.prosrc like '%'||v_door_utc_clause||'%');
+  if v_stragglers is not null then
+    raise exception '#964 tail: these bodies still count the document-ingest ceiling over a UTC calendar day: %', v_stragglers
       using errcode='CLR10';
   end if;
 
@@ -426,7 +542,12 @@ begin
   if v_acl is distinct from '{clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner}' then
     raise exception '#964 tail: clara.get_intake_batch''s ACL moved to %', v_acl using errcode='CLR10';
   end if;
+  select p.proacl::text into v_acl from pg_proc p
+   where p.oid = 'clara.settle_ingest_reservation(uuid,integer,text)'::regprocedure;
+  if v_acl is distinct from '{clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner}' then
+    raise exception '#964 tail: clara.settle_ingest_reservation''s ACL moved to %', v_acl using errcode='CLR10';
+  end if;
 
-  raise notice '#964 tail: OK -- clara._reserve_document_ingest, clara._resize_document_reservation and clara._settle_document_reservation all read the byte-identical Asia/Kuala_Lumpur window clause and none carries the old UTC one; clara.get_intake_batch reports capacity as myt_day/00:00; the MYT boundary itself lands at midnight local time; the 0007 page ladder and defaults are unmoved; and all four functions'' ACLs are exactly what §0 measured before this file ran.';
+  raise notice '#964 tail: OK -- clara._reserve_document_ingest, clara._resize_document_reservation, clara._settle_document_reservation and the shipped door clara.settle_ingest_reservation all read an Asia/Kuala_Lumpur calendar day and none carries the old UTC one (proved by census, not by naming four bodies); clara.get_intake_batch reports capacity as myt_day/00:00; the MYT boundary itself lands at midnight local time; the 0007 page ladder and defaults are unmoved; and all five functions'' ACLs are exactly what §0 measured before this file ran.';
 end
 $w964_tail$;

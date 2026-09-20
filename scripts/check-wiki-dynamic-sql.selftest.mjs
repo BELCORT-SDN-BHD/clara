@@ -291,10 +291,14 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // single `unprovable` CoR patch on `clara.create_document_intake` (`pg_get_functiondef(v_oid)`
   // where `v_oid` binds a single literal-cast regprocedure, the identical attribution shape),
   // independently rig-measured to carry no word-bounded "wiki" token anywhere in its body
-  // (riders wave 2 lane 05, chain 0001->0254, 2026-09-20). Nineteen pinned keys total: the
-  // eleven CoR-idiom cores, the four #964 adds, the one #968 add, the one #965 add, the one
-  // ACL-walled composed statement, and the one checked reconstruction. The NEXT entry must trip
-  // this pin and earn its own reviewed justification, exactly as these nineteen did.
+  // (riders wave 2 lane 05, chain 0001->0254, 2026-09-20). #964's FIX ROUND (L05-SPEC-01) adds a
+  // FIFTH entry to the same migration, `clara.settle_ingest_reservation` — the shipped door that
+  // enforces the same pages/day ceiling itself rather than delegating, and therefore had to move
+  // with the three helpers — the same CoR-idiom shape, likewise rig-measured to carry no
+  // word-bounded "wiki" token. Twenty pinned keys total: the eleven CoR-idiom cores, the five
+  // #964 adds, the one #968 add, the one #965 add, the one ACL-walled composed statement, and
+  // the one checked reconstruction. The NEXT entry must trip this pin and earn its own reviewed
+  // justification, exactly as these twenty did.
   const expectedKeys = [
     "_reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)",
     "_resize_document_reservation(uuid,uuid,integer)",
@@ -310,6 +314,7 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
     "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
     "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",
     "resolve_bank_line_exception(uuid,text,text,uuid,text)",
+    "settle_ingest_reservation(uuid,integer,text)",
     "unmatch_bank_match(uuid,uuid,text,text)",
     "upsert_account(uuid,text,text,text,text,text,text)",
     "void_bank_reconciliation(uuid,text,text)",

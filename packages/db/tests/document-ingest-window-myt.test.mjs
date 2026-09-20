@@ -38,6 +38,17 @@ const RESIZE = "clara._resize_document_reservation(uuid,uuid,integer)";
 const SETTLE = "clara._settle_document_reservation(uuid,uuid,integer)";
 const HELPERS = [RESERVE, RESIZE, SETTLE];
 
+/** FIX ROUND (L05-SPEC-01) — THE FOURTH DOOR. `clara.settle_ingest_reservation` is a SHIPPED,
+ *  SECURITY DEFINER door granted to `clara_runtime` (not one of the three ungranted helpers
+ *  above) and it does the pages/day count ITSELF rather than delegating to
+ *  `clara._settle_document_reservation` the way its sibling `clara.resize_ingest_reservation`
+ *  delegates. It enforces the SAME `coalesce(l.pages_per_day,1000)` ceiling over the SAME
+ *  relation, so leaving it on the UTC calendar day is exactly the mixed state #964's own Key
+ *  interfaces forbid: between MYT midnight and 08:00 MYT it counted a different set of
+ *  reservations than the settle path 0252 moved. It escaped the first generation's tail because
+ *  it spells the idiom WITHOUT the space after the comma. */
+const SETTLE_DOOR = "clara.settle_ingest_reservation(uuid,integer,text)";
+
 /** The 0007 clause #964 replaces (six-space indent, verbatim across all three bodies — measured
  *  by `grep` over 0007_document_pipeline.sql:1644,1672,1709 before this file was written). */
 const OLD_UTC_CLAUSE =
@@ -45,6 +56,14 @@ const OLD_UTC_CLAUSE =
 /** The clause #964 lands, same shape, Asia/Kuala_Lumpur in both `at time zone` legs. */
 const NEW_MYT_CLAUSE =
   "      and created_at >= (date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') "
+  + "at time zone 'Asia/Kuala_Lumpur');";
+
+/** The fourth door's own spelling of the same idiom: eight-space indent, and NO space after the
+ *  comma in `date_trunc('day',now()...)`. Measured on the live body, never transcribed. */
+const DOOR_OLD_UTC_CLAUSE =
+  "        and created_at >= (date_trunc('day',now() at time zone 'utc') at time zone 'utc');";
+const DOOR_NEW_MYT_CLAUSE =
+  "        and created_at >= (date_trunc('day',now() at time zone 'Asia/Kuala_Lumpur') "
   + "at time zone 'Asia/Kuala_Lumpur');";
 
 /** The pre-0252 pre-images, MEASURED on this lane's own rig (clara_l05, PG 17.11, chain
@@ -57,11 +76,12 @@ const PREIMAGE = {
   [RESERVE]: "074c9b180729e3f2d8af8d9fecb38be158db9e2a74e4292b11ff7533a1ed9734",
   [RESIZE]: "41528b318065207775e48c4ac3f196f07d6cdf0511d108affc72b86c07114dbf",
   [SETTLE]: "b72d83e70645d7bbce44a491002981576059e9d0db41a95ee07e6b87930ddee6",
+  [SETTLE_DOOR]: "a7b8d4eeed2c17bfaf252fe73e2185c78255ce4d1e10fac2b933619ff50a9aab",
 };
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 6;
 
 async function laneReady() {
   try {
@@ -156,7 +176,31 @@ cell("p964.window.reserve_resize_settle_agree — the three helpers carry the by
 });
 
 // ---------------------------------------------------------------------------------------------
-// CELL 5 — VACUITY CONTROL (work order rule 4: "show the new cell FAILING against a deliberately
+// CELL 5 (fix round, L05-SPEC-01) — THE FOURTH SHIPPED DOOR. AC4 is about the ceiling, not about
+// three particular function names: `clara.settle_ingest_reservation` enforces the SAME
+// `pages_per_day` bound over the SAME relation and must therefore read the SAME calendar day.
+// The closed-world census behind this cell was re-run on the live catalog: of every clara
+// function that names `clara.document_ingest_reservations` AND `pages_per_day`, exactly four
+// carry a day window, and this is the fourth.
+// ---------------------------------------------------------------------------------------------
+cell("p964.window.mechanism_myt — settle_ingest_reservation, the fourth shipped door on the same ceiling, reads an Asia/Kuala_Lumpur calendar day", async () => {
+  const src = await prosrcOf(SETTLE_DOOR);
+  assert.ok(src.includes(DOOR_NEW_MYT_CLAUSE),
+    `${SETTLE_DOOR} does not carry the Asia/Kuala_Lumpur window clause — the granted door still `
+    + "counts a UTC calendar day while the three helpers count an MYT one");
+  assert.ok(!src.includes(DOOR_OLD_UTC_CLAUSE),
+    `${SETTLE_DOOR} still carries the OLD UTC window clause — the splice duplicated rather than replaced it`);
+
+  const reconstructed = src.replace(DOOR_NEW_MYT_CLAUSE, DOOR_OLD_UTC_CLAUSE);
+  const { createHash } = await import("node:crypto");
+  const sha = createHash("sha256").update(reconstructed, "utf8").digest("hex");
+  assert.equal(sha, PREIMAGE[SETTLE_DOOR],
+    `${SETTLE_DOOR} changed MORE than its window clause — substituting the new clause back for `
+    + "the old one does not reproduce the pinned pre-0252 body");
+});
+
+// ---------------------------------------------------------------------------------------------
+// CELL 6 — VACUITY CONTROL (work order rule 4: "show the new cell FAILING against a deliberately
 // broken subject once, then restore the subject byte for byte"). Restores
 // `_reserve_document_ingest` to its EXACT 0007 pre-image inside a transaction this cell rolls
 // back, proves the mechanism check above would have RED on it, then proves the rollback held.

@@ -95,11 +95,12 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * EIGHTEEN ENTRIES as of 2026-09-20 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
- * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) one, #964/0252 four, #968/
- * 0253 the newest — the count above is load-bearing and must be kept current, never left to
- * describe an earlier state of this list). Adding an entry is a contract-level decision, exactly
- * like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
+ * TWENTY ENTRIES as of 2026-09-20 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
+ * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) one, #964/0252 five (four
+ * in the first generation, a fifth — `settle_ingest_reservation` — in its fix round), #968/0253
+ * one, #965/0254 the newest — the count above is load-bearing and must be kept current, never
+ * left to describe an earlier state of this list). Adding an entry is a contract-level decision,
+ * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
   // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
@@ -322,6 +323,26 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       "intake_batch_members", "intake_batches", "operation_receipts"],
     calls: ["_human_ctx", "_intake_batch_pending_members", "_work_door_ctx", "_work_run_attempts",
       "actor_role_rank", "jwt_firm", "jwt_sub", "role_rank"],
+  }],
+  // #964 SS E (fix round, L05-SPEC-01), a FIFTH splice in the same file and the same CoR-idiom
+  // shape: the shipped, `clara_runtime`-granted door `clara.settle_ingest_reservation` enforces
+  // the SAME pages/day ceiling itself instead of delegating, so it had to move with the three
+  // helpers. relations/calls are the EXACT `clara.*` tokens the LIVE installed body was MEASURED
+  // to contain (`select prosrc from pg_proc where oid =
+  // 'clara.settle_ingest_reservation(uuid,integer,text)'::regprocedure` on riders wave 2 lane 05
+  // rig `clara_l05`, chain 0001->0254, PG 17.11, 2026-09-20; regex
+  // `\bclara\s*\.\s*(?:"(\w+)"|(\w+))`, the identical extraction `claraTargets()` uses). None is
+  // a wiki relation or wiki-touch call (also confirmed: the body carries no word-bounded "wiki"
+  // substring at all).
+  ["settle_ingest_reservation(uuid,integer,text)", {
+    why: "#964 SS E -- the FOURTH shipped body enforcing the document-ingest pages/day ceiling, "
+      + "and the only one that counts the reservations itself rather than delegating to a helper; "
+      + "its window clause moves to Asia/Kuala_Lumpur and every other byte is its pinned "
+      + "pre-image, proved by reverse substitution in the migration and by "
+      + "p964.window.mechanism_myt (settle_ingest_reservation) in document-ingest-window-myt"
+      + ".test.mjs.",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: ["_finish_op", "_hash", "_reserve_op"],
   }],
   // #968 (0253_batch_cancel_reissue.sql), the SAME `execute v_head || 'AS $tag$' || v_new ||
   // '$tag$'` idiom as the #964 family immediately above, one CoR patch on

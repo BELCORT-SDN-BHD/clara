@@ -1362,15 +1362,31 @@ none of the three reservation bodies. Measured on a migrated rig: 100 ≤1MB PDF
 the 101st is refused CLR18 on the DOCS guard with both ceilings flush (docs 100 / pages 1000); 100
 images refuse on docs; 20 ≤5MB PDFs refuse on PAGES. The daily window WAS
 `date_trunc('day', now() at time zone 'utc')` (0007:1644), i.e. 08:00 Asia/Kuala_Lumpur, until
-**#964** (migration 0252) moved all three reservation bodies — `_reserve_document_ingest`,
-`_resize_document_reservation`, `_settle_document_reservation` — to
-`date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')`, i.e. **MYT MIDNIGHT**. The three move
+**#964** (migration 0252) moved all FOUR bodies that enforce it — the three reservation helpers
+`_reserve_document_ingest`, `_resize_document_reservation`, `_settle_document_reservation`, AND the
+shipped, `clara_runtime`-granted door `settle_ingest_reservation`, which counts `pages_per_day`
+itself instead of delegating the way its siblings `resize_ingest_reservation` /
+`refund_ingest_reservation` do — to
+`date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')`, i.e. **MYT MIDNIGHT**. They move
 together, byte-identically, because a mixed state would let one instant pass one check and fail
 another; `get_intake_batch`'s `capacity` block reports `window: 'myt_day'`,
 `resets_at_local: '00:00'` accordingly. Default quotas and the five-rung page ladder are
-unchanged. See `document-ingest-window-myt.test.mjs` for the mechanism proof (0234's own
-anchored-splice / reverse-substitution discipline, applied to a small internal-function recut with
-no time-travelling public door to observe through).
+unchanged. 0252's tail proves the move by CENSUS, not by naming bodies: every `clara` function
+that reads `document_ingest_reservations` AND `pages_per_day` is re-read for either spelling of
+the UTC idiom (the fourth door writes `date_trunc('day',now()` with no space, which is how it
+slipped past the first generation's four-name tail) and the set must be empty. See
+`document-ingest-window-myt.test.mjs` for the mechanism proof (0234's own anchored-splice /
+reverse-substitution discipline, applied to a small internal-function recut with no
+time-travelling public door to observe through).
+
+**The move costs one transition, once.** MYT midnight is EIGHT HOURS EARLIER than the retired UTC
+boundary, so at the instant 0252 commits, reservations created between 00:00 and 08:00 MYT of the
+current day move from "yesterday" into "today" — a firm inside its ceiling one second before the
+deploy can be refused one second after it, while the card names a reset moment that has already
+passed for that day. Nothing about this is a defect (no quota changed, and the next MYT midnight
+resets everything), but a release that lands inside that window has to be able to explain the
+first refusal: apply outside 00:00–08:00 MYT where the schedule allows, and carry the paragraph
+into the as-run where it does not.
 
 **A file the ceiling refuses at CREATION now leaves a record — #965 (migration 0254).** Until it,
 `create_document_intake` inserted the intake row and then reserved in the SAME transaction, so a
