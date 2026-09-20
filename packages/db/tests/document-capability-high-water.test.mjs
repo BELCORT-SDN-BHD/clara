@@ -48,7 +48,7 @@ const CAPABILITY_COLUMNS =
 /** The count WITH 0244 applied. The `after` hook asserts it, so a cell that silently stops
  *  running — the way a mis-gated cell does — fails the whole battery rather than passing by
  *  absence. */
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 7;
 
 let live = false;
 let executed = 0;
@@ -286,4 +286,101 @@ cell("a UNIFORM publish passes the same wall: every row raised together is admit
   assert.equal(seen.state.v, seen.published + 1, "…and it is the raised one");
   assert.ok(seen.moved >= 240,
     `the probe raised the WHOLE registry (12 formats x 20 kinds = 240 rows at authoring); it moved ${seen.moved}`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// THE WALL CLOSES A HOLE; IT DOES NOT CLOSE THE DOOR. Three cells for the three things #846
+// requires to keep WORKING, each of which an over-wide wall would break silently — a refusal
+// that refuses everything passes the two cells above and fails the estate.
+// ---------------------------------------------------------------------------------------------
+
+cell("a retired pair may be re-published AT its high water and ABOVE it", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+
+    await c.query("savepoint at_mark");
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+    await reinsert(c, row, row.registry_version);
+    const at = (await c.query(`select registry_version from clara.document_capabilities ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    await c.query("rollback to savepoint at_mark");
+
+    await c.query("savepoint above_mark");
+    await c.query(`delete from clara.document_capabilities ${PDF_INVOICE}`);
+    await reinsert(c, row, row.registry_version + 1);
+    const above = (await c.query(`select registry_version from clara.document_capabilities ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    // The mark follows the publication up — that is what makes the NEXT re-insert's floor the new
+    // version rather than the old one.
+    const mark = (await c.query(
+      `select registry_version from clara.document_capability_version_high_water ${PDF_INVOICE}`))
+      .rows[0].registry_version;
+    await c.query("rollback to savepoint above_mark");
+
+    return { published: row.registry_version, at, above, mark };
+  });
+
+  assert.equal(seen.at, seen.published, "re-inserting AT the high water must succeed");
+  assert.equal(seen.above, seen.published + 1, "re-inserting ABOVE the high water must succeed");
+  assert.equal(seen.mark, seen.published + 1, "…and the mark follows the publication upward");
+});
+
+cell("the FIRST publication of a never-seen pair is admitted, and mints its mark", async () => {
+  const seen = await inRolledBackTxn(async (c) => {
+    const row = await capturePdfInvoice(c);
+    // A pair the registry has never carried. Deliberately not a live format: 0191's registry is
+    // TOTAL over the twelve canonical formats x the live kind roster, so every real pair already
+    // has a row and a mark, and only a synthetic pair can exercise the never-seen branch.
+    const probe = { ...row, format: "probe846", document_kind: "probe_kind" };
+    const before = (await c.query(
+      "select count(*)::int as n from clara.document_capability_version_high_water where format = 'probe846'"))
+      .rows[0].n;
+    // At the PUBLISHED version, because a first publication at any other version would leave the
+    // registry non-uniform — which is the other half of this file's subject, not this cell's.
+    await reinsert(c, probe, row.registry_version);
+    const stored = (await c.query(
+      "select registry_version from clara.document_capabilities where format = 'probe846'")).rows[0];
+    const mark = (await c.query(
+      "select registry_version, first_seen_at, recorded_at from clara.document_capability_version_high_water where format = 'probe846'"))
+      .rows[0];
+    return { before, stored: stored.registry_version, mark, published: row.registry_version };
+  });
+
+  assert.equal(seen.before, 0, "the probe pair really had no mark before the insert");
+  assert.equal(seen.stored, seen.published, "a first publication of a never-seen pair must succeed");
+  assert.ok(seen.mark, "…and the writer minted its high-water mark in the same statement");
+  assert.equal(seen.mark.registry_version, seen.published, "the minted mark carries the version just published");
+  assert.ok(seen.mark.first_seen_at instanceof Date, "the minted mark records when the pair was first published");
+});
+
+cell("ROLLBACK HYGIENE — after every probe the registry and its marks are byte-identical", async () => {
+  const registry = (await rootQuery(
+    `select count(*)::int as rows, count(distinct registry_version)::int as versions,
+            min(registry_version)::int as v
+       from clara.document_capabilities`)).rows[0];
+  assert.equal(registry.versions, 1, "a probe write survived: the registry no longer publishes exactly one version");
+  assert.equal(registry.rows, 240,
+    "a probe write survived: the registry is no longer 12 formats x 20 kinds (0191's totality)");
+
+  const marks = (await rootQuery(
+    `select count(*)::int as rows, count(distinct registry_version)::int as versions,
+            min(registry_version)::int as v
+       from clara.document_capability_version_high_water`)).rows[0];
+  assert.equal(marks.rows, registry.rows, "a probe write survived: the marks and the registry no longer agree in count");
+  assert.equal(marks.versions, 1, "a probe write survived: the marks no longer sit at one version");
+  assert.equal(marks.v, registry.v, "a probe write survived: the marks moved off the published version");
+
+  const orphans = (await rootQuery(
+    `select count(*)::int as n
+       from clara.document_capability_version_high_water h
+       left join clara.document_capabilities c
+         on c.format = h.format and c.document_kind = h.document_kind
+      where c.format is null`)).rows[0].n;
+  assert.equal(orphans, 0, "a probe write survived: a synthetic pair left a mark behind");
+
+  // The sibling battery's own subject, re-read here so a leak shows up in THIS file rather than
+  // in a later one that never touched the registry.
+  const pdf = (await rootQuery(`select registry_version, limits from clara.document_capabilities ${PDF_INVOICE}`)).rows[0];
+  assert.equal(pdf.registry_version, registry.v, "the probed row's own version is back where it started");
+  assert.deepEqual(pdf.limits, { invoice_line_items: "planned" }, "the probed row's limits are back where they started");
 });
