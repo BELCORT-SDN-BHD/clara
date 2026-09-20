@@ -116,7 +116,8 @@ function mixedBody() {
       by_dependency: { awaiting_fact: 0, awaiting_attribution: 0, awaiting_capacity: 1 },
       by_unfiled: 1, by_capacity_failure: 0,
     },
-    capacity: { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
+    // #964: the daily window moved from a UTC day (utc_day/08:00) to an Asia/Kuala_Lumpur day.
+    capacity: { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" },
   };
 }
 
@@ -140,7 +141,8 @@ function emptyBody() {
       by_dependency: { awaiting_fact: 0, awaiting_attribution: 0, awaiting_capacity: 0 },
       by_unfiled: 0, by_capacity_failure: 0,
     },
-    capacity: { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
+    // #964: the daily window moved from a UTC day (utc_day/08:00) to an Asia/Kuala_Lumpur day.
+    capacity: { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" },
   };
 }
 

@@ -59,7 +59,8 @@ function body(overrides: Record<string, unknown> = {}): Record<string, unknown> 
       by_dependency: { awaiting_fact: 1, awaiting_attribution: 0, awaiting_capacity: 1 },
       by_unfiled: 1, by_capacity_failure: 0,
     },
-    capacity: { window: "utc_day", resets_at_local: "08:00", timezone: "Asia/Kuala_Lumpur" },
+    // #964: the daily window moved from a UTC day (utc_day/08:00) to an Asia/Kuala_Lumpur day.
+    capacity: { window: "myt_day", resets_at_local: "00:00", timezone: "Asia/Kuala_Lumpur" },
     ...overrides,
   };
 }
@@ -245,11 +246,11 @@ test("p636.card.child_addresses — UI-30/UI-31: every preview row names its OWN
   await h.unmount();
 });
 
-test("intake batch card: the capacity sentence says 08:00 and never 'midnight' or 'tomorrow'", async () => {
+test("intake batch card: the capacity sentence says 00:00 and never 'midnight' or 'tomorrow'", async () => {
   const h = await render(ready());
   const text = textOf(h.container as never);
-  assert.match(text, /resets at 08:00 Asia\/Kuala_Lumpur/);
-  assert.ok(!/midnight/i.test(text), "the window is a UTC day, which is 08:00 MYT — never midnight");
+  assert.match(text, /resets at 00:00 Asia\/Kuala_Lumpur/);
+  assert.ok(!/midnight/i.test(text), "the window is an Asia/Kuala_Lumpur day, reset at 00:00 MYT — never the word 'midnight'");
   assert.ok(!/tomorrow/i.test(text), "…and never 'tomorrow', which is wrong for half the day");
   await h.unmount();
 });

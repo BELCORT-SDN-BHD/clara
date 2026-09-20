@@ -25,10 +25,10 @@
 // aria-live="polite"` region speaks the batch's settlement once. The ROWS are not live regions — a
 // hundred rows would otherwise speak a hundred times on every re-render.
 //
-// THE CAPACITY COPY SAYS 08:00, NEVER "MIDNIGHT" AND NEVER "TOMORROW". The daily window is
-// `date_trunc('day', now() at time zone 'utc')` (0007:1644), whose boundary is 08:00
-// Asia/Kuala_Lumpur — MEASURED on a migrated rig. The string is the DOOR's own `resets_at_local`,
-// so it cannot drift from the wall it describes.
+// THE CAPACITY COPY SAYS 00:00, NEVER "MIDNIGHT" AND NEVER "TOMORROW". The daily window is
+// `date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur')` (0252, #964 — moved off 0007:1644's
+// UTC day, whose boundary was 08:00 Asia/Kuala_Lumpur), so the reset is MYT MIDNIGHT. The string
+// is the DOOR's own `resets_at_local`, so it cannot drift from the wall it describes.
 //
 // AT 320px the Kind/State columns withdraw into the row's primary cell; the table primitive's own
 // focusable `overflow-x-auto` region is what keeps the PAGE from scrolling horizontally.
@@ -278,7 +278,7 @@ export function IntakeBatchCard({
         || (ready.waitingBasis.byCapacityFailure ?? 0) > 0 ? (
           <StateBanner tone="info" title={t("capacity.title")}>
             {t("capacity.body", {
-              at: ready.capacity.resetsAtLocal ?? "08:00",
+              at: ready.capacity.resetsAtLocal ?? "00:00",
               zone: ready.capacity.timezone ?? "Asia/Kuala_Lumpur",
             })}
           </StateBanner>

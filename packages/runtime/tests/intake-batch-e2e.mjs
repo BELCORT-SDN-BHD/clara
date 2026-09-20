@@ -401,7 +401,11 @@ async function main() {
   assert.equal(typeof pack.pending_members, "number",
     "the door reports how many members are still in flight — the count the stop dialog needs");
   assert.equal(pack.cancel_blocked, null, "nothing about this batch's stop is blocked");
-  assert.equal(pack.capacity.resets_at_local, "08:00");
+  // #964: the daily window moved from a UTC day (08:00 MYT reset) to an Asia/Kuala_Lumpur day
+  // (MYT midnight reset). Not re-run by this ticket (see packages/db's document-ingest-window
+  // -myt.test.mjs and intake-batch.test.mjs's p964.window.capacity_descriptor_myt for the
+  // targeted, executed proof of the same door and the same literal value).
+  assert.equal(pack.capacity.resets_at_local, "00:00");
   assert.ok(!("total" in pack) && !("total" in pack.facets.admitted),
     "no denominator anywhere — AC3 forbids a fabricated percentage");
 
