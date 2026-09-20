@@ -14,12 +14,12 @@ import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { KNOWN_FACT_PATHS } from "../../lib/documents/extract-shape";
-import { DocumentFactsTable, hasFactLabelArm } from "./document-facts-table";
+import { DocumentFactsTable, SourceRevisionWorkEffect, hasFactLabelArm } from "./document-facts-table";
 import { DocumentPageOverlayContent } from "./document-page-overlay";
 import { enableDomInspection } from "../../test/domInspect";
 import messages from "../../messages/en.json";
 import type { EvidenceRegion } from "../../lib/documents/extract-shape";
-import type { DocumentExtractResult } from "../../lib/documents/types";
+import type { DocumentExtractResult, SourceRevisionResult } from "../../lib/documents/types";
 
 // The overlay cell below mounts @base-ui/react-backed primitives; without this
 // their floating-ui internals throw "Element is not defined" (test/domInspect.ts).
@@ -331,6 +331,81 @@ test("646 · with the affordance, a revisable path gets a control and an unrevis
     };
     collect(h.container as never);
     assert.equal(triggers.length, 1, "exactly one control, on exactly the row the DB admits");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// #885 (fix round) — WHAT A CORRECTION DID TO THE WORK QUEUE, SAID OUT LOUD ------------------
+//
+// Migration 0268 retires every Work parked on a question about the corrected document inside the
+// correcting transaction, and since review finding L09-ADV-01 a Work whose basis was DERIVED from
+// the reading that just moved gets NO successor: re-admitting it would let the run post the
+// PRE-correction figure against the corrected document, which is the blocker this lane fixed. The
+// consequence is that a correction can legitimately leave work nobody is doing any more, and the
+// person who pressed the button is the one who has to hear it. The door says so on its own
+// receipt (`superseded_work`); this is the sentence.
+function revisionReceipt(superseded: readonly unknown[] | undefined): SourceRevisionResult {
+  return {
+    document_id: "d1", revision_id: "rev-1", field_path: "invoice.total",
+    prior_value: { text: "1050.00", cents: 105_000 },
+    new_value: { text: "1150.00", cents: 115_000 },
+    extraction_id: "ext-2", observed_extraction_id: "ext-1",
+    observed_version: 1, facts_version: 2, carried_regions: 3,
+    ...(superseded === undefined ? {} : { superseded_work: superseded }),
+  } as SourceRevisionResult;
+}
+
+const REPLACED = {
+  work_id: "w-1", new_work_id: "w-2", reason: "source_corrected",
+  replaced: true, not_replaced_reason: null, revision_id: "rev-1",
+};
+const NOT_REPLACED = {
+  work_id: "w-3", new_work_id: null, reason: "source_corrected",
+  replaced: false, not_replaced_reason: "interpreted_basis", revision_id: "rev-1",
+};
+
+test("885 · a correction that retired work SAYS SO, and separates what carried on from what needs stating again", async () => {
+  const h = await renderComponent(App(createElement(SourceRevisionWorkEffect, {
+    result: revisionReceipt([REPLACED, NOT_REPLACED, NOT_REPLACED]),
+  })));
+  try {
+    const text = h.text();
+    assert.match(text, /3 pieces of accounting work that were waiting/,
+      "the total is what the door retired, plural-agreed");
+    assert.match(text, /One continued as new work carrying the same instruction/,
+      "the replaced half, in words rather than a bare digit");
+    assert.match(text, /2 were not replaced/, "and the half a person now has to state again");
+    assert.match(text, /read from the value you just corrected/,
+      "…with the REASON, which is the whole point of telling them");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("885 · a correction that retired NOTHING says nothing, and a door below the 0268 frontier says nothing either", async () => {
+  for (const [label, r] of [
+    ["an empty array", revisionReceipt([])],
+    ["no key at all (a database below 0268)", revisionReceipt(undefined)],
+  ] as const) {
+    const h = await renderComponent(App(createElement(SourceRevisionWorkEffect, { result: r })));
+    try {
+      assert.equal(h.text().trim(), "", label + ": no banner, no reassurance nobody asked for");
+    } finally {
+      await h.unmount();
+    }
+  }
+});
+
+test("885 · ONE Work, and every sentence agrees with itself", async () => {
+  const h = await renderComponent(App(createElement(SourceRevisionWorkEffect, {
+    result: revisionReceipt([NOT_REPLACED]),
+  })));
+  try {
+    const text = h.text();
+    assert.match(text, /one piece of accounting work that was waiting/, "singular, never “1 pieces”");
+    assert.match(text, /One was not replaced/, "…and the same in the second sentence");
+    assert.doesNotMatch(text, /continued as new work/, "nothing carried on, so nothing claims to have");
   } finally {
     await h.unmount();
   }

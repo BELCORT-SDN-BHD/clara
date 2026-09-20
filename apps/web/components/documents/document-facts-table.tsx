@@ -12,12 +12,14 @@
 // columns, a professional reads DOWN a column to compare them, and a screen
 // reader announces column headers. The old <dl> plus `truncate` gave neither.
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { EmptyState } from "@/components/common/state";
+import { EmptyState, StateBanner } from "@/components/common/state";
 import type { EvidenceRegion } from "@/lib/documents/extract-shape";
+import type { SourceRevisionResult } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
 import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
 
@@ -32,7 +34,7 @@ export type FactRevisionAffordance = {
   /** The facts version every revision opened from this table must quote. */
   factsVersion: number;
   busy: boolean;
-  onRevised: () => void;
+  onRevised: (result: SourceRevisionResult) => void;
 };
 
 /** The human label for a fact's `field_path`.
@@ -82,6 +84,41 @@ function factValue(region: EvidenceRegion, t: (key: string) => string): string {
   return region.text_content ?? t("evidenceNoValue");
 }
 
+
+/**
+ * #885 — WHAT A CORRECTION DID TO THE WORK QUEUE, SAID WHERE IT WAS DONE.
+ *
+ * `clara.revise_document_fact` (migration 0268) retires every Work parked on a question about the
+ * corrected document INSIDE the correcting transaction, and reports one `superseded_work` entry per
+ * Work on its own receipt. Two outcomes, and the second is why this sentence exists: a Work whose
+ * basis is the human's OWN instruction (`user_direct`) is re-admitted carrying it, while a Work
+ * whose basis was DERIVED from the reading that just moved is retired with NO successor — because
+ * re-admitting it would let the run post the PRE-correction figure against the corrected document
+ * (review finding L09-ADV-01). That is work nobody is doing any more, and the person who corrected
+ * the figure is the only one present at the moment it happens.
+ *
+ * IT COUNTS, IT DOES NOT NAME. The Work ids are on the receipt and every one of them is a row on
+ * the Work list under this client; repeating them here would be a second, drifting index of the
+ * same rows. The number, the split and the REASON are what change what a person does next.
+ *
+ * NOTHING RETIRED, NOTHING SAID — including against a database below the 0268 frontier, whose
+ * receipt carries no `superseded_work` key at all.
+ */
+export function SourceRevisionWorkEffect({ result }: { result: SourceRevisionResult | null }) {
+  const t = useTranslations("ClientDocuments");
+  const retired = result?.superseded_work ?? [];
+  if (retired.length === 0) return null;
+  const replaced = retired.filter((w) => w.replaced === true).length;
+  const notReplaced = retired.length - replaced;
+  return (
+    <StateBanner tone="info" data-testid="facts-revision-work-effect">
+      <p>{t("factsRevisionWorkStopped", { count: retired.length })}</p>
+      {replaced > 0 ? <p>{t("factsRevisionWorkReplaced", { count: replaced })}</p> : null}
+      {notReplaced > 0 ? <p>{t("factsRevisionWorkNotReplaced", { count: notReplaced })}</p> : null}
+    </StateBanner>
+  );
+}
+
 export function DocumentFactsTable<T extends EvidenceRegion>({
   facts,
   selectedId,
@@ -101,13 +138,19 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
   revise?: FactRevisionAffordance | null;
 }) {
   const t = useTranslations("ClientDocuments");
+  // #885 — the door's answer outlives the dialog that asked. `DocumentRevisionDialog` is keyed on
+  // `${region.id}:${revise.factsVersion}` and the facts version MOVES on every accepted revision,
+  // so the dialog remounts the moment it succeeds; this table does not.
+  const [workEffect, setWorkEffect] = useState<SourceRevisionResult | null>(null);
 
   if (facts.length === 0) {
     return <EmptyState>{t("factsEmpty")}</EmptyState>;
   }
 
   return (
-    <DataTableCard>
+    <div className="flex flex-col gap-2">
+      <SourceRevisionWorkEffect result={workEffect} />
+      <DataTableCard>
       <TableHeader>
         <TableRow>
           <TableHead>{t("colFactField")}</TableHead>
@@ -177,7 +220,7 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
                       currentValue={factValue(region, t)}
                       factsVersion={revise.factsVersion}
                       busy={revise.busy}
-                      onRevised={revise.onRevised}
+                      onRevised={(result) => { setWorkEffect(result); revise.onRevised(result); }}
                     />
                   ) : (
                     <span className="text-xs text-muted-foreground">{t("factNotRevisable")}</span>
@@ -188,6 +231,7 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
           );
         })}
       </TableBody>
-    </DataTableCard>
+      </DataTableCard>
+    </div>
   );
 }
