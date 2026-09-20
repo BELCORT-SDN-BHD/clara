@@ -65,6 +65,12 @@
 --   by this file. What changes is only that a SERIALIZABLE session which blocked on a document
 --   another session was binding now LOSES instead of committing on a stale snapshot.
 --
+--   RETENTION IS "FOR THE LIFE OF THE DOCUMENT" (fix round, ADV-L01-03). Nothing prunes the table
+--   and nothing should: the token's whole value is that the key is there to conflict on. It is
+--   written only by this helper, only for a document that EXISTS (§C), and the upsert re-uses the
+--   one row rather than adding another -- so the row count is bounded above by clara.documents and
+--   the dead tuples an upsert leaves are ordinary autovacuum work.
+--
 --   THE LOSER GETS THE WALL'S OWN REFUSAL, NEVER A RAW 40001. The upsert is wrapped in the one
 --   handler this file adds: `serialization_failure` becomes CLR13 with reason
 --   `source_already_posted`, the document and `conflict = true` — 0182's shape, the same token
@@ -102,6 +108,19 @@
 --   accounting_work -> agent_tasks -> agent_interruptions` (ARCHITECTURE §6) is untouched: no body
 --   in it takes this claim, and this claim takes nothing in it.
 --
+--   CLASS 40 IS NOT EXHAUSTED BY 40001, AND THE DEADLOCK ARM IS CLOSED BY CONSTRUCTION RATHER THAN
+--   BY A HANDLER (fix round, ADV-L01-01). `deadlock_detected` (40P01) is `serialization_failure`'s
+--   sibling and is deliberately NOT caught. It does not need to be: the claim is taken only AFTER
+--   `clara.documents … for update` for the SAME document, and only when that row EXISTS (§C's
+--   `if not found` gate), so two sessions contending for one document meet on the document row
+--   first, in the order `clara.documents` already imposes, and cannot form a cycle on the claim's
+--   own primary key. The one shape that DID deadlock there was measured on ids naming NO document:
+--   with no row to lock, the claims were the only contention point and the loser saw a raw 40P01.
+--   The gate removes that window instead of re-spelling its error. A deadlock on `clara.documents`
+--   ITSELF -- two transactions inverting two real documents -- predates this file and stays raw,
+--   for the same reason a serialization failure on that row does: it is a fact about the DOCUMENT
+--   ROW, and re-spelling it as a binding conflict would be a lie.
+--
 -- WHAT THIS FILE DOES NOT DO.
 --   * It does not recut `clara._tf_source_binding_wall` (0213's body), `clara._tf_evidence_link_
 --     binding_wall` (0197's), `clara._document_posting_entry` (0182's) or
@@ -126,10 +145,15 @@ set local lock_timeout = '5s';
 -- =====================================================================================
 -- §A  PRESTATE. The world this file reasons about, measured rather than remembered.
 --
--- REDO-TOLERANT BY CONSTRUCTION (#957, packages/db/README.md "Redo"). The one pin that names a
--- body this file REPLACES admits two lawful states: the 0197 body (a first apply) and this file's
--- own (a redo of an unmerged edit). The notice says which one the database was in. Every OTHER pin
--- is absolute, because this file must not run against a drifted estate either way.
+-- REDO-TOLERANT BY CONSTRUCTION (#957, packages/db/README.md "Redo"). The pin that names the body
+-- this file REPLACES admits two lawful states: the 0197 body (a first apply) and this file's own
+-- (a redo of an unmerged edit). The notice says which one the database was in. The two OPENING
+-- DOOR pins admit two states for a different reason (fix round): this file applies before #984's
+-- 0239 on every from-scratch chain, but a lane rig mid-wave already carries 0239's Work-minting
+-- recut of both doors -- so the pinned body OR, only on a redo and only when the live door calls
+-- #984's `clara._admit_opening_work`, whatever is live; §D then re-reads exactly what §A accepted, which is the real claim ("this file
+-- moved neither door"). Every OTHER pin is absolute, because this file must not run against a
+-- drifted estate either way.
 -- =====================================================================================
 do $w1014_pre$
 declare v_sha text; v_src text; v_n int; v_def text; v_sig text; v_state text;
@@ -194,18 +218,31 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
-   where p.oid='clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
-  if v_sha is distinct from 'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132' then
-    raise exception '#1014 prestate: clara.approve_opening_seed has DRIFTED (sha %) -- this file must not change a human-facing opening door and cannot prove it did not against a body it does not know', v_sha
-      using errcode='CLR10';
-  end if;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
-   where p.oid='clara.approve_opening_correction(uuid,jsonb,text,text)'::regprocedure;
-  if v_sha is distinct from '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4' then
-    raise exception '#1014 prestate: clara.approve_opening_correction has DRIFTED (sha %)', v_sha
-      using errcode='CLR10';
-  end if;
+  -- THE TWO DOOR PINS ARE TWO-STATE, for the same reason pin 1 is (fix round). On any
+  -- from-scratch chain this file applies BEFORE #984's 0239, so the pinned 0171/0213-era bodies
+  -- are the only lawful ones. On a LANE RIG mid-wave, 0239 has already recut both doors to mint
+  -- the opening Work, and a redo of this file's own unmerged edit meets those bodies instead.
+  -- Both states are lawful and NOTHING ELSE IS; what §A accepted is handed to §D through a
+  -- session setting, so the tail still proves this file moved neither door -- a stronger claim
+  -- than re-reading the same literal twice.
+  foreach v_sig in array array['clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',
+                               'clara.approve_opening_correction(uuid,jsonb,text,text)'] loop
+    select p.prosrc, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_src, v_sha from pg_proc p
+     where p.oid = v_sig::regprocedure;
+    -- The second lawful state is recognised by the EFFECT, not by a ledger row: #984's recut is
+    -- the one that calls `clara._admit_opening_work`. (A redo dance rewrites the ledger itself,
+    -- so a ledger probe would be measuring the wrong thing.)
+    if v_sha is distinct from (case when v_sig like 'clara.approve_opening_seed%'
+                                    then 'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132'
+                                    else '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4' end)
+       and not (v_state like 'redo%' and position('_admit_opening_work' in v_src) > 0) then
+      raise exception '#1014 prestate: % has DRIFTED (sha %) -- this file must not change a human-facing opening door and cannot prove it did not against a body it does not know', v_sig, v_sha
+        using errcode='CLR10';
+    end if;
+    perform set_config(case when v_sig like 'clara.approve_opening_seed%'
+                            then 'clara.w1014_pre_seed_sha' else 'clara.w1014_pre_corr_sha' end,
+                       v_sha, false);
+  end loop;
 
   -- 4 · 0213 IS APPLIED: both coding-wall triggers admit opening rows, so the opening arm the
   -- claim protects is reachable at all.
@@ -246,7 +283,8 @@ set role clara_fn_owner;
 -- does not exist locks nothing and RAISES NOTHING" — an FK here would turn that into a
 -- foreign_key_violation and change the helper's tolerance, and its FOR KEY SHARE would add a
 -- second acquisition on a row the caller already holds FOR UPDATE. The claim is a token; the FKs
--- on each lane's own write are what say the document is real.
+-- on each lane's own write are what say the document is real. §C's `if not found` gate is the
+-- other half of keeping that contract: no document, no claim (fix round, ADV-L01-02).
 -- =====================================================================================
 create table if not exists clara.document_binding_claims (
   document_id uuid        primary key,
@@ -261,7 +299,8 @@ comment on table clara.document_binding_claims is
   'document another session was binding and still commit on their pre-block snapshot. The upsert '
   'makes that a real write conflict Postgres resolves without consulting either snapshot. It '
   'answers no question and carries no domain meaning: both walls still decide from their own '
-  'probes.';
+  'probes. Retention is the life of the document: one row per document, upserted in place, '
+  'written only for a document that exists, pruned by nothing.';
 
 alter table clara.document_binding_claims enable row level security;
 alter table clara.document_binding_claims force row level security;
@@ -295,6 +334,16 @@ begin
     return;
   end if;
   perform 1 from clara.documents d where d.id = p_document for update;
+  -- ...AND THE CLAIM IS PART OF THAT CONTRACT (fix round, ADV-L01-02). An id that names no
+  -- document locked nothing before this file; an UNCONDITIONAL upsert would have it write a token
+  -- on a key no document owns -- an unreachable row, and a contention point OUTSIDE the
+  -- `clara.documents` ordering that is what serialises two sessions binding the same document in
+  -- the first place (two such calls can deadlock on the claim's own primary key, which the
+  -- `for update` above can no longer order for them). The claim is for documents that exist; the
+  -- FKs on each lane's own write are what say the document is real.
+  if not found then
+    return;
+  end if;
   begin
     insert into clara.document_binding_claims as c (document_id) values (p_document)
       on conflict (document_id) do update
@@ -315,7 +364,9 @@ comment on function clara._lock_document_binding(uuid) is
   'clara.document_binding_claims -- because a lock that is only taken and released forces no '
   're-evaluation on a SERIALIZABLE waiter, which is how an opening approval could block on a '
   'concurrent evidence attachment and still commit (#854). The upsert''s serialization failure is '
-  're-raised as the walls'' own CLR13 source_already_posted, never a raw 40001. Granted to nobody: '
+  're-raised as the walls'' own CLR13 source_already_posted, never a raw 40001. An id that names '
+  'no document still locks nothing, claims nothing and raises nothing (0197''s contract, whole). '
+  'Granted to nobody: '
   'it is reachable only from the two binding-wall triggers.';
 
 reset role;
@@ -324,7 +375,7 @@ reset role;
 -- §D  TAIL CENSUS. Everything above, re-read from the catalog.
 -- =====================================================================================
 do $w1014_tail$
-declare v_src text; v_n int; v_sig text; v_sha text; v_role text;
+declare v_src text; v_n int; v_sig text; v_sha text; v_role text; v_pre text;
 begin
   -- 1 · THE CLAIM RELATION: owned, forced, policied for the owner ALONE, and reachable by no
   -- application role. A token every lane could read would be a new, meaningless oracle.
@@ -392,6 +443,16 @@ begin
   end if;
   if position('for update' in v_src) > position('document_binding_claims' in v_src) then
     raise exception '#1014 tail: the helper claims BEFORE it locks -- the document row must stay the first contention point'
+      using errcode='CLR10';
+  end if;
+  -- (fix round, ADV-L01-02) 0197'S TOLERANCE COVERS THE CLAIM TOO: no document, no token. Read
+  -- positionally off the live body, between the lock and the claim, because a later recut that
+  -- drops the gate reopens both an unreachable row and a contention point outside
+  -- clara.documents' own ordering.
+  if position('if not found then' in v_src) = 0
+     or position('if not found then' in v_src) < position('for update' in v_src)
+     or position('if not found then' in v_src) > position('document_binding_claims' in v_src) then
+    raise exception '#1014 tail: clara._lock_document_binding claims without first establishing that the document EXISTS -- 0197''s contract ("an id that names no document locks nothing and raises nothing") must cover the claim'
       using errcode='CLR10';
   end if;
   if position('on conflict do nothing' in v_src) > 0 then
@@ -462,18 +523,25 @@ begin
       end if;
     end loop;
   end loop;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
-   where p.oid='clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
-  if v_sha is distinct from 'f18f4c95e8d79c842c707207cfe4a4cc26418c503c33a9c8cce8c85a20791132' then
-    raise exception '#1014 tail: clara.approve_opening_seed moved during this migration (sha %)', v_sha
-      using errcode='CLR10';
-  end if;
-  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
-   where p.oid='clara.approve_opening_correction(uuid,jsonb,text,text)'::regprocedure;
-  if v_sha is distinct from '4a1e7bc37827fc382ed91451d21274ace20e24575620df050cddb562ab05ffc4' then
-    raise exception '#1014 tail: clara.approve_opening_correction moved during this migration (sha %)', v_sha
-      using errcode='CLR10';
-  end if;
+  -- UNMOVED *BY THIS FILE*, whichever of §A's two lawful states the database was in: the sha §A
+  -- measured is the one §D must still see. On a from-scratch chain that is the literal pin above;
+  -- on a lane rig carrying #984's 0239 it is 0239's body. Either way a body this file replaced a
+  -- door with would be caught here.
+  foreach v_sig in array array['clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',
+                               'clara.approve_opening_correction(uuid,jsonb,text,text)'] loop
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+     where p.oid = v_sig::regprocedure;
+    v_pre := current_setting(case when v_sig like 'clara.approve_opening_seed%'
+                                  then 'clara.w1014_pre_seed_sha' else 'clara.w1014_pre_corr_sha' end, true);
+    if v_pre is null or v_pre = '' then
+      raise exception '#1014 tail: §A never recorded %''s prestate sha -- the tail cannot prove the door is unmoved', v_sig
+        using errcode='CLR10';
+    end if;
+    if v_sha is distinct from v_pre then
+      raise exception '#1014 tail: % moved during this migration (prestate %, now %)', v_sig, v_pre, v_sha
+        using errcode='CLR10';
+    end if;
+  end loop;
 
   -- 5 · WHO CAN REACH THE NEW REFUSAL AT ALL. The claim's serialization failure is only possible
   -- for a caller running under a snapshot isolation level, and in this estate exactly two bodies
@@ -505,6 +573,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#1014 tail: OK -- clara._lock_document_binding still takes clara.documents FOR UPDATE FIRST and now upserts clara.document_binding_claims for the same document, so a SERIALIZABLE session that blocked on a binding another session was taking loses on a real write conflict instead of committing on its pre-block snapshot; the upsert''s serialization failure is re-raised as the walls'' own CLR13 source_already_posted (document named, entry_id null -- the winner committed after this transaction''s snapshot), never a raw 40001, and the handler wraps the upsert ALONE so a change to the document ROW keeps its own spelling. The claim relation is a clara_fn_owner table with RLS enabled and FORCED, one policy (the owner''s), a TRUNCATE guard, and no grant for PUBLIC or any application role: it answers no question and no door reads it. Both walls decide exactly as before -- clara._tf_source_binding_wall, clara._tf_evidence_link_binding_wall, clara._document_posting_entry and clara._approve_opening_entry are all re-read at their pinned shas, unmoved -- and both human-facing opening doors keep their bodies, owners, SECURITY DEFINER flags, pinned search_paths, 0171 SERIALIZABLE pins and their EXECUTE audience (clara_authenticated, and nobody else). Exactly two bodies in the database pin an isolation level and both are those doors, so the single refusal spelling this arm raises is the right one for every caller that can reach it.';
+  raise notice '#1014 tail: OK -- clara._lock_document_binding still takes clara.documents FOR UPDATE FIRST and now upserts clara.document_binding_claims for the same document, so a SERIALIZABLE session that blocked on a binding another session was taking loses on a real write conflict instead of committing on its pre-block snapshot; the upsert''s serialization failure is re-raised as the walls'' own CLR13 source_already_posted (document named, entry_id null -- the winner committed after this transaction''s snapshot), never a raw 40001, and the handler wraps the upsert ALONE so a change to the document ROW keeps its own spelling. An id that names NO document still locks nothing, claims nothing and raises nothing, so 0197''s tolerance is whole and the claim cannot be contended for outside clara.documents'' own ordering. The claim relation is a clara_fn_owner table with RLS enabled and FORCED, one policy (the owner''s), a TRUNCATE guard, and no grant for PUBLIC or any application role: it answers no question and no door reads it. Both walls decide exactly as before -- clara._tf_source_binding_wall, clara._tf_evidence_link_binding_wall, clara._document_posting_entry and clara._approve_opening_entry are all re-read at their pinned shas, unmoved -- and both human-facing opening doors keep their bodies, owners, SECURITY DEFINER flags, pinned search_paths, 0171 SERIALIZABLE pins and their EXECUTE audience (clara_authenticated, and nobody else). Exactly two bodies in the database pin an isolation level and both are those doors, so the single refusal spelling this arm raises is the right one for every caller that can reach it.';
 end
 $w1014_tail$;

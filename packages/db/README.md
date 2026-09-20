@@ -1728,18 +1728,41 @@ links alone, so sequentially both stand. Narrowing it is not available: the losi
 read *what* the winner claimed, which is the same snapshot limit the claim exists to work around.
 The outcome is conservative, typed and retryable.
 
+**An id that names no document still claims nothing** (fix round, ADV-L01-02). 0197's contract for
+the helper is that an unknown document "locks nothing and raises nothing"; the claim is gated on the
+`for update` having found the row (`if not found then return`), so the token is never written for a
+key no document owns. Without that gate the helper left an unreachable row behind and — measured
+with two sessions on two such ids — gave them a contention point OUTSIDE `clara.documents`' own
+ordering, where they deadlocked and the loser saw a raw `40P01`. Re-measured after the gate: both
+sessions return `ok` and no claim row exists.
+
+**Retention** (fix round, ADV-L01-03): the life of the document. One row per document, upserted in
+place, written only by this helper and only for a document that exists; nothing prunes it and
+nothing should, because the token's value is that the key is there to conflict on. The row count is
+bounded above by `clara.documents`, and the dead tuples an upsert leaves are ordinary autovacuum
+work.
+
 **Lock order.** The claim is taken after the document row and only ever for the same document, so a
 transaction binding documents A then B takes `A.doc, A.claim, B.doc, B.claim`: the relative order
 of two documents is the one `clara.documents` already imposed, and two transactions that inverted it
 would already have deadlocked on `clara.documents`. It joins neither the member-door order above
 nor the wave ladder `accounting_plans → accounting_work → agent_tasks → agent_interruptions`.
+`deadlock_detected` (40P01) is therefore not caught beside `serialization_failure`: with the claim
+taken only after — and only for — a document row that exists, two sessions contending for one
+document meet on that row first and cannot form a cycle on the claim's primary key. A deadlock on
+`clara.documents` itself predates this file and stays raw, for the same reason a serialization
+failure on that row does.
 
 Deployment notes: it recuts exactly one body (`clara._lock_document_binding`, a `create or
 replace`, so no catalog entry enters or leaves and the grant matrix is unchanged), mints one table,
 edits no applied migration, and re-pins `clara._tf_source_binding_wall`,
 `clara._tf_evidence_link_binding_wall`, `clara._document_posting_entry`,
-`clara._approve_opening_entry` and both opening doors by `sha256(prosrc)` in its prestate and again
-in its tail. It owes **no** writer-quiescence window: a transaction that began under the old body
+`clara._approve_opening_entry` by `sha256(prosrc)` in its prestate and again in its tail. The two
+opening DOOR pins are two-state, because 0239 recuts both to mint the opening Work: on a
+from-scratch chain 0235 runs first and the pinned bodies are the only lawful ones, while on a lane
+rig mid-wave a redo meets 0239's bodies (recognised by their call to `clara._admit_opening_work`,
+not by a ledger row — a redo rewrites the ledger). What the prestate accepted is handed to the tail
+through a session setting, so the tail still proves this file moved neither door. It owes **no** writer-quiescence window: a transaction that began under the old body
 simply does not take the claim, which is the behaviour that shipped before it. Rollback is a
 successor migration restoring 0197's two-line body; the table may stay, since nothing reads it.
 

@@ -15,6 +15,7 @@
 // door's own answer.
 
 import { test, before, after } from "node:test";
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   rootQuery, opk, endPool, printLaneNotes, printSkipCount,
@@ -552,4 +553,49 @@ test("obw.claim the binding claim is a locked-down serialization token, and the 
   assert.ok(Number(claimed.rows[0].claim_seq) >= s.drafts.all.length,
     "claim: every opening item of the batch passed through the helper \u2014 the seq counts the "
     + `upserts, one per item (seq ${claimed.rows[0].claim_seq}, items ${s.drafts.all.length})`);
+});
+
+// ===========================================================================================
+// 6 · #1014 FIX ROUND (ADV-L01-02) — 0197'S TOLERANCE, WHOLE.
+//
+// 0197 §B's contract for `clara._lock_document_binding` is three words long: an id that names no
+// document "locks nothing and RAISES NOTHING". 0235 appended a claim to the same body and argued
+// the omitted foreign key PRESERVED that tolerance — but an unconditional upsert kept the third
+// half of it open: the helper wrote a token row for an id that names no document at all. That is
+// a row nothing can ever delete, on a key no document owns, and (measured by the adversarial
+// lens) a second contention point two sessions can deadlock on OUTSIDE the `clara.documents`
+// ordering that is supposed to serialise them.
+//
+// WHY THE HELPER IS DRIVEN DIRECTLY HERE. This is a SEAM contract, not a door's behaviour: no
+// door can pass an unknown document id (both lanes' writes are foreign-keyed to
+// `clara.documents`), so the only interface the contract lives at is the helper itself — the same
+// interface 0197's own tail and section 5's census read. The estate's doors are what the rest of
+// this file drives.
+// ===========================================================================================
+
+test("obw.claim.unknown_document an id that names no document locks nothing, raises nothing — and claims nothing", async (t) => {
+  if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
+
+  const ghost = randomUUID();
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.documents where id=$1", [ghost])).rows[0].n, 0,
+  "unknown_document: the id names no document — the premise of 0197's tolerance");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.document_binding_claims where document_id=$1",
+    [ghost])).rows[0].n, 0, "unknown_document: and no claim stands on it yet");
+
+  // RAISES NOTHING — the call itself is the assertion; a throw fails the cell.
+  await rootQuery("select clara._lock_document_binding($1)", [ghost]);
+
+  const claimed = (await rootQuery(
+    "select count(*)::int as n from clara.document_binding_claims where document_id=$1",
+    [ghost])).rows[0].n;
+  // The rig keeps no ghost token either way: read first, then clean, then judge.
+  await rootQuery("delete from clara.document_binding_claims where document_id=$1", [ghost]);
+  assert.equal(claimed, 0,
+    "unknown_document: the helper CLAIMED an id that names no document — 0197's contract says it "
+    + "locks nothing and raises nothing, and a token on a key no document owns is neither a lock "
+    + "nor a refusal, only an unreachable row and a contention point outside clara.documents' own "
+    + "ordering");
 });
