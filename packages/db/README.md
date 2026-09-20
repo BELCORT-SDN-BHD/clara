@@ -772,6 +772,7 @@ is.
 | `clara.fa_depreciation_authorities.authority_kind` / `.authority_ref` / `.authority_from` | — | `clara.accounting_plans`' own shape (0193:415-430), relaxed to NULL-able for the backfill alone. The reference is REQUIRED at signature and RESOLVED against `clara.accounting_work` / `clara.agent_tasks` in the same firm AND client; `authority_from` is the first day of the SIGNING month in the book's `Asia/Kuala_Lumpur` calendar, written once and frozen. `clara._tf_fa_authority_transition`'s write allowlist gained exactly these two sign-time columns, or the door could not write them at all — and, because an ALLOWLIST IS NOT A FREEZE, the same trigger carries the write-once wall for both: once either value is set, no transition may move it (CLR38 `authority_immutable`, naming the column). 0193:476-478 freezes the plan lane's twin pair the same way. |
 | `clara._fa_assert_period_open(uuid,date)` | NONE — ungranted | **The fixed-asset lane's whole locked-period law, in one body.** It selects the fiscal year containing `p_date` exactly the way `0056:656-662` does, returns silently when there is none or it is `open`/`reopened`, and otherwise raises CLR38 `period_request_invalid` / axis `period_closed` naming the year, its status and the reopen path. **#678 adopts it unchanged rather than minting a second predicate.** |
 | `clara.preview_depreciation_run(uuid)` | `clara_authenticated` | What the NEXT run would do: the period the DATABASE chose, per-asset amounts, the two GL legs, the skipped assets with reasons, and `mode_would_be`. It is `stable`, so the LANGUAGE refuses to let it write. The ungranted-core/granted-wrapper idiom: `clara._fa_compute_charges` stays ungranted and `rig-meta.mjs`' main sweep fails the moment a grant appears on it. |
+| `clara._fa_depreciation_leg_pairing(jsonb)` | NONE — ungranted | **#973 (migration 0248).** The ONE routine that turns a charge set into the two-line-per-pair GL legs both `preview_depreciation_run` and `_fa_run_period_core` post, grouped by the PAIR of (expense account, accumulated account) — never by either account alone. Folds what used to be two independent copies of the same aggregation. |
 | `clara.run_depreciation_period_for(uuid,date,text,uuid)` | `clara_runtime` ONLY | The OBO machine door, on `complete_fixed_asset_particulars_for`'s live-authority ladder verbatim (including the measured `firms … for key share` then `firm_memberships … for share` lock pair). It DELEGATES to `clara._fa_run_period_core` and inserts nothing, and carries NO floor bypass. **A NEW NAME is mandatory, not stylistic:** `rig-meta.mjs:691-693` is an executable census that fails the moment `run_depreciation_manual` reaches a machine role, because that would give the maker-checker ladder a bypass. |
 | `clara.sign_depreciation_authority(uuid,uuid,text,jsonb)` | `clara_authenticated` | DROP + CREATE'd from three arguments to four — one `pg_proc` row per name, never an overload. The `0018:188` scar is the precedent: the old arity's grant died with it, so this file re-states the grant and the owner. |
 | `clara.retire_depreciation_authority(uuid,uuid,text,text)` | `clara_authenticated` | RECUT by 0227 §B.3 because 0227's own `ck_fa_authorities_window` broke it. It is the ONE way a NEVER-SIGNED authority leaves `proposed` (a firm withdraws the wrong cadence), and 0041 wrote it for that case by coalescing the signature stamps rather than demanding them. It now stamps the window floor by the same `coalesce`, so the withdrawal cannot meet the CHECK as a raw 23514 with no CLR code. A SIGNED authority's floor is carried through untouched. |
@@ -801,14 +802,24 @@ never propose a pre-floor period, and a future `closePrep_v2` inherits the loss.
 door `clara.run_depreciation_manual` (bookkeeper+, caller-named period, identical mechanics) is
 unchanged and is the one way back.
 
-**Two residuals this lane names rather than hides.** (1) The `period_earlier_unmet` sequencing
+**One residual this lane names rather than hides.** The `period_earlier_unmet` sequencing
 guarantee — the thing that pins the reducing-balance arithmetic so a run can never read around an
 unapproved period — STOPS BINDING BELOW THE FLOOR for a caller-named period, because the only
 instruments that could re-derive it unfloored are the one 1-arg oracle (whose consumer set is
 `deepEqual`-pinned by two live CI batteries) or a bypass parameter on it (a DROP + CREATE against
-§2.2 rule 4). `p651.authority.floor_sequencing` pins the exposure. (2) `preview_depreciation_run`
-DUPLICATES the poster's leg aggregation rather than extracting it; the duplication is bound two ways
-— a normalized-fragment assertion in 0227's tail and the behavioural cell `p651.preview.matches_run`.
+§2.2 rule 4). `p651.authority.floor_sequencing` pins the exposure.
+
+**The leg-pairing duplication this lane named as a residual is FOLDED (#973, migration 0248).**
+`preview_depreciation_run` used to duplicate the poster's leg aggregation verbatim rather than
+extract it (SYNTHESIS J3's ruling for this wave: a shared core inside a 0042 splice was the
+riskiest edit available for a cosmetic gain), bound only by a normalized-fragment assertion in
+0227's tail (T.13) and the behavioural cell `p651.preview.matches_run`. #973 lifts that fragment,
+unchanged, into `clara._fa_depreciation_leg_pairing(jsonb)` — an ungranted internal core, `stable`,
+owned by `clara_fn_owner` like `_fa_compute_charges` and `_fa_assert_period_open` — and both
+`preview_depreciation_run` and `_fa_run_period_core` now call it. The two can no longer disagree,
+because there is only one aggregation; 0227's own T.13 is untouched (it still passes at its own
+point in a from-scratch chain, against the pre-fold bodies), and 0248's own tail proves the shared
+call replaces its job going forward.
 
 **And one thing this file is not.** It does NOT unpark `close_prep`: the wake source stays
 registered-and-disabled, asserted in the prestate AND the tail in `0223:247-250`'s own idiom.

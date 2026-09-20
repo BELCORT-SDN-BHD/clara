@@ -69,12 +69,12 @@ declare
   -- The live pre-images of the TWO bodies this file recuts, measured off pg_proc.prosrc on the
   -- lane-04 rig (clara_l04, PG 17, chain 0001..0234 + 0247 + wave-2 lane-04 commits through #972)
   -- — never transcribed from file text. The poster's pre-image is 0041's ORIGINAL body PLUS
-  -- 0227's own SPLICE (§E: a runtime `pg_get_functiondef` + string-replace that installs
-  -- `perform clara._fa_assert_period_open(p_client, v_pe);` before the draft insert) — 0227 never
-  -- re-declares `clara._fa_run_period_core` with `create or replace`, so that splice is otherwise
-  -- invisible to a `grep` of the migrations directory and easy to lose in a hand recut. This
-  -- file's own §B keeps it, in the same position, so the locked-period wall #651 (0227, D9) added
-  -- survives the fold.
+  -- 0227's own SPLICE (§E: a runtime read of the function's own definition, string-replaced and
+  -- reinstalled, that adds `perform clara._fa_assert_period_open(p_client, v_pe);` before the
+  -- draft insert) — 0227 never re-declares `clara._fa_run_period_core` with `create or replace`
+  -- of its own, so that splice is otherwise invisible to a `grep` of the migrations directory and
+  -- easy to lose in a hand recut. This file's own §B keeps it, in the same position, so the
+  -- locked-period wall #651 (0227, D9) added survives the fold.
   c_poster_pre constant text :=
     '8a69c2355559e700f060c94c7a97950366e9743dd6794d810985fcbc74237681';
   c_preview_pre constant text :=
@@ -597,11 +597,11 @@ begin
   end loop;
 
   -- T.8 0227's OWN §E SPLICE SURVIVED THE FOLD. `_fa_run_period_core` is never re-declared by
-  -- 0227 with `create or replace` — the locked-period wall was installed at RUNTIME by a
-  -- `pg_get_functiondef` + string-replace, so a hand recut against the 0041 file text ALONE (never
-  -- re-reading the live, already-spliced body) drops it silently. This is exactly that mistake,
-  -- caught: the wall must still be there, phrased identically to 0227's own splice, and still
-  -- between the arithmetic and the first write.
+  -- 0227 with `create or replace` of its own — the locked-period wall was installed at RUNTIME by
+  -- reading the function's own definition and string-replacing it, so a hand recut against the
+  -- 0041 file text ALONE (never re-reading the live, already-spliced body) drops it silently.
+  -- This is exactly that mistake, caught: the wall must still be there, phrased identically to
+  -- 0227's own splice, and still between the arithmetic and the first write.
   v_n := (length(v_a) - length(replace(v_a, 'perform clara._fa_assert_period_open(p_client, v_pe);', '')))
     / length('perform clara._fa_assert_period_open(p_client, v_pe);');
   if v_n <> 1 then

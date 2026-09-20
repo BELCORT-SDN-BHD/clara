@@ -224,15 +224,9 @@ test("p973.behaviour.two_pairs a client with TWO chargeable assets under TWO dif
   assert.deepEqual(pv.legs, HAND_COMPUTED,
     `four legs, one debit/credit pair per asset's own account pair, NEVER merged across pairs (got ${JSON.stringify(pv.legs)})`);
 
-  const receipt = await runManual(w.users.bob,
-    { client, periodStart: pv.period_start, periodEnd: pv.period_end, opKey: opk("p973run") });
+  const { receipt } = await runManualAndSettle(client, { start: pv.period_start, end: pv.period_end });
   assert.equal(receipt.charged_cents, pv.charged_cents,
     "the RUN charges exactly what the preview showed");
-  const e = await entryRowOf(receipt.entry_id);
-  if (e.status === "draft") {
-    await approveEntry(w.users.alice,
-      { entry: receipt.entry_id, expectedRevision: e.revision_token, opKey: opk("p973apr2") });
-  }
   const lines = await entryLinesOf(receipt.entry_id);
   assert.deepEqual(
     lines.map((l) => ({ account_code: l.account_code, debit_cents: Number(l.debit_cents), credit_cents: Number(l.credit_cents) })),

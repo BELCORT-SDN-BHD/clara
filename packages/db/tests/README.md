@@ -1053,3 +1053,48 @@ A register row born by the PRE-0247 body does survive on a long-lived rig — th
 immutability trigger forbids DELETE (CLR13) — so a rig that ran the defect keeps reading those
 clients as one UNEXPLAINED difference at the settled as-of until it is rebuilt. #972 puts cleaning
 them out of scope explicitly, and the count drifts run to run; it is not a number to quote.
+
+## The depreciation leg-pairing fold (#973)
+
+`fa-depreciation-leg-fold.test.mjs` is frontier-gated on the `fa_depreciation_leg_fold$` stem
+(migration 0248) — never on a number — and shares `fa-depreciation-leg-fold-fixtures.mjs`, which
+itself re-exports the whole `depreciation-history-fixtures.mjs` world (`p651Client`, `faWorld`,
+`buyAsset`, `completeSL`, `liveAuthorityWithRef`, `previewRun`, `runManual`, …) rather than forking
+a second copy of it: #973 changes nothing about what a preview or a run MEANS, only where the leg
+pairing they agree on lives. Four `p973.*` cells: `p973.core.shape` reads the new routine
+`clara._fa_depreciation_leg_pairing(jsonb)` off the catalog — owned by `clara_fn_owner`, `stable`,
+SECURITY DEFINER, UNGRANTED (PUBLIC and every named application role denied EXECUTE) — the vacuity
+anchor, red against 0227 alone; `p973.core.pairs` calls the routine directly (root, since it is
+ungranted) with a synthetic charge set spanning TWO account pairs and asserts the four legs against
+an independent, hand-computed expectation; `p973.callers.recut` re-reads both `_fa_run_period_core`
+and `preview_depreciation_run` off the catalog and asserts each now calls the shared core, neither
+still carries the raw duplicated fragment, and the fragment survives in exactly one clara function
+afterwards; `p973.behaviour.two_pairs` is the behavioural proof at the public seam neither #651
+cell reaches — #651's own `p651.preview.matches_run` uses a single account pair throughout, which
+cannot tell "grouped by the pair" from "grouped by the expense account alone" — a client with two
+chargeable assets under two different account pairs proves the preview's four legs, hand-computed,
+and the run that follows posts the identical four.
+
+**The two splices `_fa_run_period_core` already carried, and the mistake of forgetting them.**
+Neither 0042 §S5.15d (the re-run admission gate, `clara._wdb_rerun_breach`) nor 0227 §E (the
+locked-period wall, `clara._fa_assert_period_open`) re-declares `clara._fa_run_period_core` with a
+`create or replace` in its own migration file — both install their change at RUNTIME, via a
+`pg_get_functiondef` read plus a string-replace, so neither shows up in a plain `grep` of the
+migrations directory for the function's name. A first draft of 0248 recut the poster against
+0041's ORIGINAL file text alone and silently dropped both, which reddened `p651.period.closed_refused`
+and `p651.census.rerun_gate` — an existing regression this ticket's own gates caught before it
+shipped. Both are restored, in their original positions, and 0248's own tail (T.8, T.9) now proves
+each survives independently: present exactly once, phrased identically, and ordered correctly
+relative to the arithmetic and the first write, so a future recut of this body cannot lose either
+silently again.
+
+`fa-depreciation-leg-fold-preintegration-gate.mjs` is the package-wide sweep's escape
+(`CLARA_ALLOW_MISSING_FA_DEPRECIATION_LEG_FOLD=1`), registered in `packages/db/package.json`'s
+`"test"` chain at its MIGRATION-order position (last, after
+`fa-birth-watermark-preintegration-gate.mjs`, 0247). A FOCUSED run does not preload it and FAILS
+LOUDLY below 0248; final acceptance is exactly that focused shape counting ZERO skips.
+
+**0227's own tail assertion T.13 is untouched.** An applied migration is immutable, and T.13 (the
+normalized-fragment agreement it enforced by text comparison) is not this file's to edit. It still
+passes at its own point in a from-scratch chain, against the pre-fold bodies the chain has built up
+to that point; what replaces its JOB going forward is 0248's own tail (T.2–T.4).
