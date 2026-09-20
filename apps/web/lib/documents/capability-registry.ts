@@ -197,5 +197,6 @@ export function tierStateKey(tier: TierState): string {
 
 export const TIER_STATE_KEYS: readonly string[] = [
   "capabilityTier.supported", "capabilityTier.stored_only", "capabilityTier.unsupported",
-  "capabilityTier.planned", "capabilityTier.needs_classification", "capabilityTier.unknown",
+  "capabilityTier.planned", "capabilityTier.proposal_only", "capabilityTier.needs_classification",
+  "capabilityTier.unknown",
 ];

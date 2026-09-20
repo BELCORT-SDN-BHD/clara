@@ -32,6 +32,11 @@ const TONE: Record<string, string> = {
   stored_only: "text-muted-foreground",
   unsupported: "text-warning",
   planned: "text-muted-foreground",
+  // #988 — Clara proposes, a person confirms: real work happened (unlike `stored_only`'s "Clara
+  // derives nothing"), but nothing posted on Clara's own authority (unlike `supported`'s green).
+  // Its own tone, rather than falling through to the unmatched-key default, so the fifth level
+  // reads as a distinct tier rather than a blank one.
+  proposal_only: "text-info",
 };
 
 function tierTone(tier: TierState): string {

@@ -63,11 +63,16 @@ const validation = (over: Partial<DocumentStateResult["facts"]["validations"][nu
   ...over,
 });
 
-test("the four capability levels are a closed set and nothing else passes the guard", () => {
-  for (const level of ["supported", "stored_only", "unsupported", "planned"]) {
+// #988 — business_operation's own fifth level joins the closed set this guard checks. custody,
+// byte_extraction and typed_facts never actually carry it (their own DB CHECKs stay four-valued),
+// but the wire shape shares ONE `CapabilityLevel` type across all four tiers, so the guard admits
+// it here too — the same shape the four original levels already share across tiers that do not
+// all use every one of them (e.g. custody never reads `planned` in practice either).
+test("the five capability levels are a closed set and nothing else passes the guard", () => {
+  for (const level of ["supported", "stored_only", "unsupported", "planned", "proposal_only"]) {
     assert.equal(isCapabilityLevel(level), true, level);
   }
-  for (const junk of ["maybe", "", null, undefined, 1, "SUPPORTED"]) {
+  for (const junk of ["maybe", "", null, undefined, 1, "SUPPORTED", "PROPOSAL_ONLY"]) {
     assert.equal(isCapabilityLevel(junk), false, String(junk));
   }
 });

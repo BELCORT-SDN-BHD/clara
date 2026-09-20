@@ -2674,6 +2674,7 @@
       "stored_only": "Stored, not read",
       "unsupported": "Not supported",
       "planned": "Planned",
+      "proposal_only": "Proposed, needs confirmation",
       "needs_classification": "Needs classification",
       "unknown": "Not published"
     },

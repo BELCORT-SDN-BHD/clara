@@ -15,12 +15,21 @@
 // inference is exactly the defect C-37 names, and the whole point of the DB registry is that the
 // answer lives in one place.
 
-/** The four capability levels. A closed set, mirroring the CHECK on
- *  `clara.document_capabilities` (0191). */
-export type CapabilityLevel = "supported" | "stored_only" | "unsupported" | "planned";
+/** The capability levels, shared across all four axes (custody, byte extraction, typed facts,
+ *  business operation). A closed set, mirroring the CHECKs on `clara.document_capabilities`
+ *  (0191) — with one asymmetry (#988): custody, byte_extraction and typed_facts each keep the
+ *  ORIGINAL four-value CHECK, while business_operation's own CHECK
+ *  (0246_business_operation_proposal_only.sql) admits a fifth, `proposal_only` — "Clara reads
+ *  deterministically and derives a real proposal, but never carries it into a posted operation on
+ *  its own authority; a person confirms first". This module keeps ONE shared type across all four
+ *  tiers rather than a business-operation-only variant, the same way it already does for the
+ *  original four (custody, for one, never actually reads `planned` in practice either) — in
+ *  practice the fifth value only ever arrives on `business_operation`, because that is the only
+ *  column whose CHECK admits it. */
+export type CapabilityLevel = "supported" | "stored_only" | "unsupported" | "planned" | "proposal_only";
 
 export const CAPABILITY_LEVELS: readonly CapabilityLevel[] = [
-  "supported", "stored_only", "unsupported", "planned",
+  "supported", "stored_only", "unsupported", "planned", "proposal_only",
 ] as const;
 
 export function isCapabilityLevel(value: unknown): value is CapabilityLevel {
