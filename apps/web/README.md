@@ -1208,12 +1208,16 @@ past the poller's own first-tick delay): six avoid the whole class structurally
 
 **Scope, stated rather than left implicit (fix-round SPEC-875-1).** The audit above covers
 exactly the eight pollers this ticket's brief names — it is not a claim that these are the only
-interval-driven pollers in `apps/web`. Two further ones exist and were checked separately, for
+interval-driven pollers in `apps/web`. Three further ones exist and were checked separately, for
 the same reason: `lib/dashboard/use-financial-pack.ts`'s `FINANCIAL_PACK_REFRESH_MS` (pinned by
-`lib/dashboard/use-financial-pack.test.ts`, capture-and-manually-fire) and
+`lib/dashboard/use-financial-pack.test.ts`, capture-and-manually-fire),
 `lib/firm/use-firm-portfolio.ts`'s `FIRM_PORTFOLIO_REFRESH_MS` (pinned by
-`lib/firm/use-firm-portfolio.test.ts`, the same shape). Both are structurally non-vacuous; no
-poller anywhere in the app was found with no budget cell at all.
+`lib/firm/use-firm-portfolio.test.ts`, the same shape), and `components/clara/TurnProgress.tsx`'s
+`TURN_PROGRESS_TICK_MS=1000` (pinned by `components/clara/thread-live-stream-stability.test.tsx`,
+which intercepts `setInterval` calls at that exact period and fires them manually — added on
+re-check, code-review SPEC-875-1, so the census is exhaustive over the whole app, not only the
+brief's eight). All three are structurally non-vacuous; no poller anywhere in the app was found
+with no budget cell at all.
 
 **A genuinely new, adjacent finding — not fixed here (scope discipline).** One whole-suite run
 (during #956's own verification) hit `documents-workbench-refresh.test.tsx`'s `"[633]: an
