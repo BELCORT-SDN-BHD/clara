@@ -62,3 +62,8 @@ out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files)
 - A second from-scratch chain on a cluster that already ran one needs the #867 recipe
   (`packages/db/README.md`, "From-scratch reapply on a reused cluster"). Lanes never need it: the
   integrator runs the from-scratch proof on a disposable cluster.
+- CI sets `CI=true` and `GITHUB_ACTIONS=true`, and some CLIs here refuse ceremony acts under CI
+  (`--retire`, `--update`, `--lock-deployed`). A selftest that spawns such a CLI must clear both
+  variables for the child when the refusal it pins sits behind the CI refusal. Before you report,
+  run the lint chain once more as the runner sees it: `CI=true GITHUB_ACTIONS=true pnpm lint`
+  (wave 1 shipped a cell that was green on the rig and red on the runner, PR #1025).
