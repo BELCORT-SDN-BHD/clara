@@ -12,11 +12,51 @@
 // would make the resumed attempt behave differently from the original, which is exactly the
 // property the crash scenario exists to measure.
 //
-// TWO SCRIPTS, selected by CLARA_WORK_TEST_SCRIPT:
-//   post     (default) read the chart, then record the admitted basis verbatim.
-//   narrate            answer in prose without calling a tool at all — the "the model said it
-//                      did something and did nothing" case, which must settle the Work `failed`
-//                      with `no_effect` rather than `completed`.
+// THREE SCRIPTS, selected by CLARA_WORK_TEST_SCRIPT:
+//   post          (default) read the chart, then record the admitted basis verbatim.
+//   narrate                 answer in prose without calling a tool at all — the "the model said
+//                           it did something and did nothing" case, which must settle the Work
+//                           `failed` with `no_effect` rather than `completed`.
+//   ask_question  (#980)    read the chart, then ASK a typed clarifying question and stop, on ONE
+//                           named client's Work and no other. The run parks (`awaiting_input`),
+//                           and it stays parked until a human answers through
+//                           `clara.answer_work_question`; only then does it record the admitted
+//                           basis. It is the same shape tests/work-question-serve.mjs drives for
+//                           the journal lane, lifted into the SHARED harness so any lane spawning
+//                           this file can reach the park — the trade-invoice lane is the first
+//                           (#980), and `post` and `narrate` take exactly the branches they
+//                           always did.
+//
+// TWO KNOBS FOR THE THIRD SCRIPT, AND #980 ASKED FOR ONE — said plainly rather than left for the
+// next reader to trip over (reviewed finding L10S-3). The ticket's key-interfaces line says the
+// new shape is "selectable the same way" as `post` and `narrate`, i.e. by CLARA_WORK_TEST_SCRIPT
+// alone; it is not. `ask_question` ALSO requires CLARA_WORK_ASK_ONLY_CLIENT, and a caller that
+// sets only the script gets a loud child exit rather than a park. The deviation is deliberate:
+// the scope is the only thing keeping the park on the Work the leg is actually holding (next
+// paragraph), and deriving it from whatever envelope this process picked up first would restore
+// the failure the gate exists to prevent — on a rig where one stranded `awaiting_input` row costs
+// the NEXT leg a 90s timeout. A later lane may fold the two into one selector value
+// (`ask_question:<client id>`); no lane may quietly drop the scope.
+//
+// THE ask_question SCRIPT IS SCOPED TO ONE CLIENT, AND THE SCOPE IS MANDATORY — reviewed finding
+// L10-A3. ONE supervisor serves every queued accounting Work on the database, leftovers from
+// earlier legs and earlier crashed runs included (tests/work-cancel-e2e.mjs's `makeGate` says so
+// in the same words and gates its held marker on the Work id). An `ask_question` arm that asked
+// on whatever this process picked up therefore parked FOREIGN Work on a question nobody is
+// holding, and `awaiting_input` is a state no leg polls out of: the next leg times out after 90s
+// instead of measuring anything, and the row stays pending on the rig for good. Three such rows
+// were left on lane 10's database by exactly that path before this gate existed.
+//
+// So `CLARA_WORK_ASK_ONLY_CLIENT` names the client whose Work may be asked, it is REQUIRED
+// whenever the script is `ask_question`, and every other Work this process picks up takes the
+// `post` branch exactly as it would under the default script. Fail-closed rather than
+// fail-open: a caller that forgets the scope gets a loud child exit, not a quiet park on a
+// stranger's Work.
+//
+// A PARK IS A WINDOW, and that is why the cancel leg uses it too. While the run is parked the
+// Work is live, the run holds the task and NOTHING has been admitted to the ledger — the same
+// window tests/work-cancel-serve.mjs manufactures with a gate file, held open by the estate's own
+// mechanism instead of by a timer, which is why it needs no bound.
 //
 // ONE MODEL, TWO HALVES, BECAUSE ONE PROCESS RUNS BOTH LANES. `resolveModel` reads the same
 // `globalThis.__claraModelForTest` for every closure in the image, and the two lanes call the SDK
@@ -30,6 +70,17 @@
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
 const SCRIPT = process.env.CLARA_WORK_TEST_SCRIPT || "post";
+
+/** The ONE client whose Work the `ask_question` script may ask about (see the header). Required
+ *  for that script and meaningless for the other two. */
+const ASK_ONLY_CLIENT = (process.env.CLARA_WORK_ASK_ONLY_CLIENT || "").trim();
+if (SCRIPT === "ask_question" && !ASK_ONLY_CLIENT) {
+  throw new Error(
+    "CLARA_WORK_TEST_SCRIPT=ask_question needs CLARA_WORK_ASK_ONLY_CLIENT — the client id whose "
+    + "Work may be parked on a question. One supervisor serves every queued Work on the database, "
+    + "and an unscoped ask parks a Work no leg will ever answer.",
+  );
+}
 
 function usage() {
   return {
@@ -80,12 +131,56 @@ function toolsUsed(prompt) {
   return names;
 }
 
+/** TRUE once the human's ANSWER has come back as this tool's result. The workflow feeds it in as
+ *  a `tool-result` for `ask_question`, so its presence IS the resume, structurally — read the
+ *  same way `toolsUsed` reads, never by counting calls. (tests/work-question-serve.mjs's own
+ *  reader, unchanged.) */
+function answerArrived(prompt) {
+  for (const message of prompt ?? []) {
+    if (typeof message?.content === "string") continue;
+    for (const part of message?.content ?? []) {
+      if (part?.type === "tool-result" && part.toolName === "ask_question") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * THE TYPED QUESTION the `ask_question` script asks: a date and an amount in integer cents — the
+ * pair `clara._assert_work_answer` validates by kind and the browser's bounded stepper renders.
+ *
+ * IT DOES NOT CHANGE WHAT IS POSTED, and that is a constraint rather than a choice: the admission
+ * door digested the basis before the run existed and `clara._record_journal_entry_core` refuses
+ * any echo that does not hash to it. What the answer does is UNBLOCK the model — which is exactly
+ * what a lane driving the park needs, because the outcome it converges on must be the admitted
+ * one whether the replay landed before or after the answer.
+ */
+const ASK_QUESTION_INPUT = {
+  question: "Which date should this be posted on, and for how much?",
+  reason: "The instruction named a payment but I have not been told which day it cleared or the exact amount.",
+  fields: [
+    { key: "posting_date", label: "Posting date", kind: "date", required: true },
+    { key: "amount_cents", label: "Amount", kind: "money", required: true, unit: "MYR cents" },
+  ],
+};
+
 /** The envelope line claraWork.v1.impl's `workEnvelopeMessage` writes immediately above the
  *  admitted basis. Anchoring on it is the only stable way in: the basis is read back out of
  *  `jsonb`, and jsonb REORDERS object keys by (length, byte order) — so the serialised envelope
  *  begins `{"memo":…`, never `{"posting_date":…`, and a probe for a leading key name silently
  *  finds nothing and turns this script into the `narrate` one. */
 const BASIS_MARKER = "The admitted basis, to be echoed verbatim:";
+
+/** The CLIENT this envelope's Work belongs to, or `null` when the prompt carries no envelope.
+ *
+ *  `workEnvelopeMessage` (claraWork.v1.impl.ts, re-exported unchanged by every later body) opens
+ *  with `Work <uuid> — record one journal entry for client <uuid>.`, so the client id is on the
+ *  wire for every lane and every bundle version. Read the LAST occurrence, the way
+ *  `admittedBasis` reads the last marker: a resumed segment replays the whole conversation. */
+function envelopeClient(text) {
+  const all = [...text.matchAll(/for client ([0-9a-f-]{36})\./gi)];
+  return all.length ? all[all.length - 1][1] : null;
+}
 
 /** Pull the admitted basis object out of the envelope by BRACE MATCHING from that marker, so the
  *  model echoes the exact bytes it was given rather than a re-serialisation of a parsed copy. */
@@ -192,6 +287,38 @@ const model = new MockLanguageModelV4({
         usage: usage(),
         warnings: [],
       };
+    }
+
+    // #980 · THE PARK. Between reading the chart and recording the entry, ask once and stop —
+    // but ONLY for the client this process was scoped to (header; reviewed finding L10-A3). A
+    // Work belonging to anybody else falls through to the `post` branch below and settles on its
+    // own, exactly as the default script would have settled it.
+    if (SCRIPT === "ask_question" && envelopeClient(text) === ASK_ONLY_CLIENT) {
+      if (!used.has("ask_question")) {
+        return {
+          content: [{
+            type: "tool-call",
+            toolCallId: "e2e-ask",
+            toolName: "ask_question",
+            input: JSON.stringify(ASK_QUESTION_INPUT),
+          }],
+          finishReason: { unified: "tool-calls", raw: "tool_use" },
+          usage: usage(),
+          warnings: [],
+        };
+      }
+      if (!answerArrived(prompt)) {
+        // The question is on the wire and no answer has come back. Recording anything here would
+        // settle the Work over a question a human is still holding, so this branch exists only to
+        // be LOUD if the park ever fails to park: the Work settles `failed`/`no_effect` and the
+        // leg reds on the terminal rather than on a timeout.
+        return {
+          content: [{ type: "text", text: "I am waiting on the answer to my question." }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usage(),
+          warnings: [],
+        };
+      }
     }
 
     if (!used.has("record_journal_entry")) {

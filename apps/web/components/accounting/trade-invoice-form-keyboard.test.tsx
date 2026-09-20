@@ -162,10 +162,9 @@ test("a SERVER refusal focuses the control the DOOR named, not the first invalid
 test("resolving a `party_ambiguous` refusal RETURNS focus to the party control, never to nowhere", async () => {
   const h = await renderComponent(App({
     submit: async () => ({
-      // The wire shape `submitTradeInvoiceWork` really returns: the route unfolds the door's
-      // typed `detail.candidates` onto a first-class field (`lib/wire.ts` keeps only
-      // `detail.reason`), so a fixture carrying the raw detail would be testing a shape the
-      // browser never sees.
+      // The wire shape `submitTradeInvoiceWork` really returns: the candidate list comes off
+      // the refusal's generic `detail` carrier (#981) and is typed as a first-class field, so a
+      // fixture carrying only the raw body would be testing a shape this component never sees.
       kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
       candidates: [
         { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },

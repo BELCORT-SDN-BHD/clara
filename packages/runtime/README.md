@@ -1501,3 +1501,111 @@ result never depends on the order its cells ran in or on how long the box took b
 end-to-end recovery cell (`p966 the belt still recovers a crashed mid-flight intake`) and the
 abandoned-sidecar expiry cell, both of which now age their fixture's mtime rather than sweeping
 against a file they wrote in the same millisecond.
+
+## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
+
+`src/workRoutes.ts` turns one raised database error into one HTTP answer (`workErrorResponse`). It
+used to take the door's typed `detail` jsonb APART — a shared fold that overwrote `reason` with
+`detail.constraint` for three field-scoped reasons, and, inside the trade-invoice route's own
+catch, a second differently-shaped fold that lifted `detail.candidates` onto a body of its own.
+Every refusal that carried structured detail therefore needed a new fold here AND a new arm on
+`apps/web/lib/work/api.ts`; until both landed, the detail did not exist as far as a browser was
+concerned. The rationale in the code cited `apps/web/lib/wire.ts` "discarding every detail key but
+`reason`" — true when written, false since #629 added `parseRefusalDetail`, and never applicable
+to THESE bodies anyway, because the durable-Work client parses this JSON itself and never goes
+through wire.ts.
+
+**The door's typed detail now rides back whole, under `detail`, on every 400 and 409 this file
+builds.** `refusalDetail()` parses it once; `reasonOf` and `detailField` are views on that one
+object. The top-level keys are PROMOTIONS of what a caller keys on (`reason` focuses a control,
+`work_id` renders a link, `status` renders the state that made an act illegal) and every one of
+them is byte-for-byte what it was — `tests/work-routes-unit.test.mjs`'s `LEGACY_BODIES` is the
+twelve-row proof, driven in both directions.
+
+**What survives of the folds, and why.** The three constraint reasons (`invalid_basis`,
+`invalid_source_ref`, `invalid_claim`, now the named set `CONSTRAINT_FOLD_REASONS`) still answer
+the database's `constraint` token as the wire `reason`, because this route refuses the cheap cases
+ITSELF with a bare token and the two halves must not speak two vocabularies for one refusal. The
+raw token is on the carrier as well. It folds by NAME, never "whenever a constraint exists":
+`invalid_adjustment`, `stale_basis` and `adjustment_lines_mismatch` carry one too and have always
+ridden back under their own names. The trade-invoice fold is gone entirely; what is left of it is
+`TRADE_INVOICE_FIELD_DEFAULTS`, one row of DATA saying which control to focus when the door raises
+`party_ambiguous` with no `field` at all.
+
+**403 and 404 carry no carrier.** A 404 here answers both "no such Work" and "a Work that is not
+this firm's", and that identity is the point — no existence oracle across firms. A typed reason on
+it would loosen an access answer.
+
+**The carrier is measured over the real wire in three World e2es, not one.** `workErrorResponse` is
+driven as a pure function by `tests/work-routes-unit.test.mjs`; what an actual HTTP response
+carries is pinned by `tests/work-journal-e2e.mjs`, `tests/periodic-adjustment-e2e.mjs` and
+`tests/staff-expense-claim-e2e.mjs`, each of which reads the unfiled-document 400 off the socket,
+destructures `detail` out, asserts the promoted half is exactly what it was before #981, and
+asserts the door's own object beside it. All three carried the same pre-#981 literal
+`assert.deepEqual(body, {error, field, reason})`, and `node:assert/strict` deepEqual is
+deepStrictEqual — one additive key fails it. Any future change to the promoted half of a
+durable-Work refusal has to move those three lines together.
+
+## #980 — the shared World harness's third script, and the trade-invoice lane's park and cancel
+
+`tests/work-journal-serve.mjs` is the child bootstrap nine standalone World e2es spawn. It offered
+two scripted-model conversation shapes, `post` and `narrate`, so no lane spawning it could reach
+the ONE place a run blocks on a human. It now offers a third, `ask_question` (#980): read the
+chart, ask ONE typed clarifying question and stop, and record the admitted basis only once the
+answer comes back as a `tool-result` for `ask_question`. The branch is the shape
+`tests/work-question-serve.mjs` already drove for the journal lane, lifted into the shared file;
+`post` and `narrate` return before it and no existing caller sets the new value, which
+`tests/work-journal-e2e.mjs` — the estate's only `narrate` driver — confirms on the rig rather than
+by reading. The census behind "no existing caller" is one grep over `CLARA_WORK_TEST_SCRIPT`: all
+NINE spawners of this bootstrap `delete base.CLARA_WORK_TEST_SCRIPT` when they build the child env,
+so the `post` default applies; `accrual`, `plan-occurrence` and `prepayment-occurrence` re-set it to
+`"post"` explicitly on their crash legs; `work-journal-e2e.mjs` sets `"narrate"` on one leg; and
+only `trade-invoice-e2e.mjs:609` sets `"ask_question"`, with the scope var beside it. No other
+value is set anywhere in the repo.
+
+**The park IS the window, which is why one script serves both new legs.** While a run is parked
+the Work is live, the run holds the task and NOTHING has been admitted. `tests/work-cancel-serve.mjs`
+manufactures the same window with a gate file and a bound; the estate's own park holds it open
+until a human acts.
+
+**`tests/trade-invoice-e2e.mjs` gains legs 6 and 7.** Leg 6 drives a REPLAY into the parked
+window: the run asks, the Work reads `awaiting_input`, the SAME intent key is re-POSTed (one Work,
+one task, one invoice, ONE question — it does not re-ask, and it does not un-park), a human answers
+through `clara.answer_work_question`, and the whole thing converges on one entry, one receipt, one
+open item, with a further replay AFTER the answer still resolving to the same Work. Leg 7 spawns
+`tests/work-cancel-serve.mjs` UNCHANGED — borrowing that file's hold rather than copying it into the
+shared harness — holds the model before `record_journal_entry`, cancels there, and pins the whole
+absence of effect: `stopping` over the real route, `cancelled` as the terminal, zero entries, zero
+receipts, zero open items, and an invoice ledger that never reaches `posted`. The invoice ROW
+survives, because it was born inside the admission transaction and a cancel is not a retraction.
+
+**The `ask_question` script is scoped to ONE client, and the scope is mandatory.** One supervisor
+serves every queued accounting Work on the database — leftovers from earlier legs and from earlier
+crashed runs included — so an ask arm that fired on whatever the process picked up parked FOREIGN
+Work on a question nobody is holding, and `awaiting_input` is a state no leg polls out of: the next
+leg times out after 90s instead of measuring anything, and the row stays pending on the rig for
+good. `CLARA_WORK_ASK_ONLY_CLIENT` names the client whose Work may be asked; every other Work takes
+the `post` branch exactly as the default script would have taken it, and a caller that forgets the
+scope gets a loud child exit rather than a quiet park on a stranger's Work. Leg 6 admits a
+BYSTANDER Work for a second client in the same window and asserts it was never asked and settled on
+its own — the cell that says so. **This is a deviation from #980's own wording** and is recorded
+as one (reviewed finding L10S-3): the ticket says the third shape is "selectable the same way" as
+the other two, i.e. by `CLARA_WORK_TEST_SCRIPT` alone, and it takes two env vars instead. Deriving
+the scope from whatever envelope the process picked up first would put the choice back in the
+hands of queue order, which is the failure the gate exists to prevent; folding the two into one
+selector value (`ask_question:<client id>`) is open to a later lane.
+
+**Four World e2es' local gates now admit `clara_l<NN>`**, the per-lane database shape of the riders
+wave, beside `clara_rt_test` / `clara_wave_b_ci` / `clara_<ticket>`: `trade-invoice-e2e.mjs`,
+`work-journal-e2e.mjs`, `periodic-adjustment-e2e.mjs` and `staff-expense-claim-e2e.mjs`. Still
+loopback-only, still a parsed DSN equality check against the PG env, still fail-closed. The
+remaining spawners (`accrual`, `plan-occurrence`, `prepayment-occurrence`,
+`fixed-asset-acquisition`, `work-egress`, `work-cancel`, `work-question`) still carry the narrow
+literal and cannot be run on a lane rig; one shared `tests/local-db-gate.mjs` is the standing
+follow-up.
+
+**No World e2e removes its gate directory recursively.** `tests/trade-invoice-e2e.mjs`'s hold gate
+cleans up its own two files and leaves `.trade-invoice-gates/` alone: the directory is shared with
+every other gate on the rig, and `open()` — the one call that must never throw, because a held
+child waits on that file forever — now re-creates its parent first. Both gate directories are
+git-ignored, because a watchdog exit skips the `finally` that would have removed their files.

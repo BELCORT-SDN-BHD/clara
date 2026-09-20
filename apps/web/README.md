@@ -1291,3 +1291,36 @@ interview-runtime mock subsystem (an OPEN/unanswered park fixture plus
 `/api/runtime/interview/*` handlers reachable through the rail) that this lane scoped as a
 genuine multi-piece build, not a same-shape addition to an existing fixture.
 
+## #981 — the durable-Work refusal carrier, read once
+
+`lib/work/api.ts` is the only reader of the runtime's durable-Work refusal bodies (they never go
+through `lib/wire.ts`). Those bodies now carry the governed door's WHOLE typed detail under one
+key, so this module surfaces it in one helper, `carrier()`, on EVERY refusal arm a durable-Work
+door can answer with — and a new structured key reaches a form with no new arm here and no new
+fold in `packages/runtime/src/workRoutes.ts`.
+
+**Every door, and every ARM of every door.** The five admission doors (`submitJournalWork`,
+`submitPeriodicAdjustmentWork`, `submitStaffExpenseClaimWork`, `submitTradeInvoiceWork`,
+`restateWork`) read the carrier on their `invalid_basis` and `conflict` arms; the four that can
+refuse a document already backing a posted entry read it on `source_conflict` too, and
+`restateWork` on `not_restatable`; `retryWork` reads it on `not_retryable`, `cancelWork` on
+`conflict` and `invalid`, and `takeOverWork` on `not_takeable`, `confirm_basis` and `invalid`. The
+runtime carries the door's typed detail on every 400 and 409 it builds, so an edge that read it on
+some arms only would have gone on discarding it exactly where the ticket says it must not — which
+is what the first round of this ticket did on those five call sites, and what review findings
+L10S-1 and STD-2 caught. `source_conflict` and `not_restatable` are the two that most need it:
+the first is built by the same `answer()` as its `conflict` sibling, and the second is the only
+place the door names `superseded_by`, the successor a surface has to link to. The ONE refusal that
+deliberately carries nothing is `transient`: PostgreSQL broke a deadlock, the statement never ran,
+and there is no state to describe.
+
+**It is spread, not assigned, and that is the compatibility promise.** A body with no typed detail
+yields `{}`, so `{kind, field, reason}` stays exactly `{kind, field, reason}` for every caller and
+every existing cell. A `detail` that is not a JSON object (PostgreSQL's own errors carry plain
+text) yields `{}` too — never a wrapper around a string, which would be a guess.
+
+**The trade invoice keeps `candidates`, and it is the minimum typing layered on the carrier.**
+D12(a)'s list is read off `detail.candidates` and typed as a first-class field because
+`components/accounting/trade-invoice-form.tsx` RENDERS it inline as a choice; the rest of the
+door's sentence (the name it could not resolve, the counterparty kind it expected) is readable
+beside it now, where the route-specific fold used to throw it away.

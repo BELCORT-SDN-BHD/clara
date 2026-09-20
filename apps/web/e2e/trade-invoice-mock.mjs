@@ -18,10 +18,14 @@
 // EVERY REFUSAL BODY BELOW IS THE REAL ONE, TRANSCRIBED FROM THE ROUTE — never a shape invented to
 // make a cell go green:
 //
-//   400 `{ "error": "invalid_basis", "field": "invoice.<snake_key>", "reason": <token> }` — the
-//   route emits every trade-invoice path under the single `invoice.` prefix (`toDbTradeInvoice`),
-//   and `apps/web/lib/work/trade-invoice.ts`'s `fieldForServerPath` is the ONE mapper onto a
-//   control. A mock that made up a field name would let a broken mapper pass a browser walk.
+//   400 `{ "error": "invalid_basis", "field": "invoice.<snake_key>", "reason": <token>,
+//   "detail": <the door's whole typed object> }` — the route emits every trade-invoice path under
+//   the single `invoice.` prefix (`toDbTradeInvoice`), and `apps/web/lib/work/trade-invoice.ts`'s
+//   `fieldForServerPath` is the ONE mapper onto a control. A mock that made up a field name would
+//   let a broken mapper pass a browser walk. Since #981 `detail` is the GENERIC carrier: the
+//   route no longer unfolds `party_ambiguous` in a catch of its own, so the walk's control body
+//   hands over the door's whole object (`reason`, `name`, `expected_counterparty_kind`,
+//   `candidates`) and this handler passes it through untouched.
 //
 //   409 `{ "error": "intent_payload_conflict", "work_id" }` — the id of the Work that intent key
 //   ALREADY names, which is what lets the form offer a route to it instead of an apology.

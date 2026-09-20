@@ -15,7 +15,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cancelWork, probeWork, retryWork, submitJournalWork, takeOverWork, type JournalBasisWire } from "./api";
+import {
+  cancelWork, probeWork, restateWork, retryWork, submitJournalWork, submitPeriodicAdjustmentWork,
+  submitStaffExpenseClaimWork, submitTradeInvoiceWork, takeOverWork,
+  type JournalBasisWire,
+} from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const auth: SessionTokenAccessor = { getAccessToken: async () => "tok" };
@@ -462,4 +466,326 @@ test("a 409 TRANSIENT is not `not_takeable` — on the take-over door", async ()
       assert.deepEqual(await takeOverWork(auth, { workId: "w1", opKey: "k" }), { kind: "transient" });
     },
   );
+});
+
+// ===========================================================================================
+// #981 — THE GENERIC STRUCTURED-DETAIL CARRIER, read at this edge.
+//
+// The runtime's durable-Work routes stopped taking a refusal's typed detail apart key by key: the
+// door's whole `detail` object rides back under one key on every 400 and 409. This module is the
+// only reader of those bodies (they never go through `lib/wire.ts`), so the carrier is surfaced
+// HERE — once, in one helper — and every lane gets it without a new arm.
+//
+// THE OPTIONALITY IS THE COMPATIBILITY PROMISE, not laziness. A body that carries no structured
+// detail returns the result object it always returned, key for key, so no existing caller and no
+// existing cell sees a shape it did not see before.
+// ===========================================================================================
+
+test("981.web: a 400 with NO structured detail returns exactly the result it always did", async () => {
+  await withFetch(
+    () => json({ error: "invalid_basis", field: "memo", reason: "nonempty" }, 400),
+    async () => {
+      assert.deepEqual(await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS }), {
+        kind: "invalid_basis",
+        field: "memo",
+        reason: "nonempty",
+      });
+    },
+  );
+});
+
+test("981.web: a detail key this file has never heard of reaches the caller", async () => {
+  // THE WHOLE POINT. `max` / `length` / `clarified_by` are named nowhere in lib/work/api.ts, and
+  // they arrive anyway — the runtime promoted none of them and this edge unfolded none of them.
+  await withFetch(
+    () => json({
+      error: "invalid_basis",
+      field: "memo",
+      reason: "max_length",
+      detail: { reason: "invalid_basis", field: "memo", constraint: "max_length", max: 4000, length: 4001 },
+    }, 400),
+    async () => {
+      const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "invalid_basis");
+      assert.equal(out.kind === "invalid_basis" ? out.field : null, "memo", "the promoted keys are untouched");
+      assert.equal(out.kind === "invalid_basis" ? out.reason : null, "max_length");
+      assert.deepEqual(out.kind === "invalid_basis" ? out.detail : null,
+        { reason: "invalid_basis", field: "memo", constraint: "max_length", max: 4000, length: 4001 },
+        "…and the door's own object is readable whole");
+    },
+  );
+  // A detail that is not an object at all is NOT a guess: the caller sees no carrier rather than
+  // a wrapper around a string, exactly as `wire.ts`'s `parseRefusalDetail` answers null.
+  for (const detail of ["plain text", 42, ["a"], null]) {
+    await withFetch(
+      () => json({ error: "invalid_basis", field: "memo", reason: "nonempty", detail }, 400),
+      async () => {
+        const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+        assert.deepEqual(out, { kind: "invalid_basis", field: "memo", reason: "nonempty" },
+          `a ${JSON.stringify(detail)} detail carries no structured detail`);
+      },
+    );
+  }
+});
+
+test("981.web: the trade invoice's candidates are the SAME carrier, typed once", async () => {
+  // D12(a)'s list is no longer unfolded by a route-specific arm; it is read off the generic
+  // carrier, and `candidates` survives as a typed field because the form renders it INLINE as a
+  // choice and a `Record<string, unknown>` would make every render site parse for itself.
+  const candidates = [
+    { counterparty_id: "cp-1", name: "Alpha Supplies Sdn Bhd", registration_no: "199001000001", tin: null },
+    { counterparty_id: "cp-2", name: "Alpha Supplies Trading", registration_no: null, tin: "C1234567890" },
+  ];
+  await withFetch(
+    () => json({
+      error: "invalid_basis",
+      field: "invoice.counterparty",
+      reason: "party_ambiguous",
+      detail: { reason: "party_ambiguous", name: "Alpha Supplies", expected_counterparty_kind: "vendor", candidates },
+    }, 400),
+    async () => {
+      const out = await submitTradeInvoiceWork(auth, {
+        clientId: "c1", intentKey: "i1", kind: "supplier_bill", invoice: {}, basis: {},
+      });
+      assert.equal(out.kind, "invalid_basis");
+      if (out.kind !== "invalid_basis") return;
+      assert.equal(out.field, "invoice.counterparty");
+      assert.equal(out.reason, "party_ambiguous");
+      assert.deepEqual(out.candidates, candidates, "the typed field the form renders");
+      assert.equal(out.detail?.name, "Alpha Supplies",
+        "…and the rest of the door's sentence is there too, which the route-specific fold threw away");
+    },
+  );
+  // A refusal with no candidates leaves an EMPTY list rather than undefined — the banner's plain
+  // arm reads `candidates.length === 0`, and that must keep working for every other refusal.
+  await withFetch(
+    () => json({ error: "invalid_basis", field: "invoice.total_cents", reason: "invalid_total" }, 400),
+    async () => {
+      const out = await submitTradeInvoiceWork(auth, {
+        clientId: "c1", intentKey: "i1", kind: "supplier_bill", invoice: {}, basis: {},
+      });
+      assert.deepEqual(out, {
+        kind: "invalid_basis", field: "invoice.total_cents", reason: "invalid_total", candidates: [],
+      });
+    },
+  );
+});
+
+test("981.web: an UNNAMED 409 keeps the door's own reason on the carrier", async () => {
+  // The generic conflict arm is the 409 half of the same gap: before #981 a CLR13 nobody had
+  // promoted arrived as `{kind:"conflict", workId:null}` and every fact the door raised — which
+  // state, whose, since when — was gone by the time a surface could show it.
+  await withFetch(
+    () => json({
+      error: "conflict",
+      detail: { reason: "operation_in_flight", status: "running", op_key: "k-1" },
+    }, 409),
+    async () => {
+      const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "conflict");
+      assert.equal(out.kind === "conflict" ? out.workId : "x", null, "the promoted key is unchanged");
+      assert.deepEqual(out.kind === "conflict" ? out.detail : null,
+        { reason: "operation_in_flight", status: "running", op_key: "k-1" });
+    },
+  );
+  // …and the one every composer already reads is byte-for-byte what it was.
+  await withFetch(
+    () => json({ error: "intent_payload_conflict", work_id: "work-9" }, 409),
+    async () => {
+      assert.deepEqual(await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS }),
+        { kind: "conflict", workId: "work-9" });
+    },
+  );
+});
+
+test("981.web: EVERY durable-Work door reads the carrier — retry, cancel and take-over too", async () => {
+  // Reviewed finding L10-A2. The runtime carries the door's typed detail on EVERY 400 and 409
+  // `workErrorResponse` builds, and these three doors answer some of those. Before this cell the
+  // carrier stopped at the five ADMISSION doors, so the detail arrived here and was dropped —
+  // which is precisely the gap the ticket describes: a refusal gaining a structured key still
+  // needed a new arm in this file for take-over, retry and cancel.
+  //
+  // The promoted keys of each arm are asserted ALONGSIDE the carrier, because the compatibility
+  // promise is per-arm: `status`, `reason`, `basis_digest` keep their values and their spelling.
+
+  // retry — 409 `not_retryable`
+  await withFetch(
+    () => json({ error: "conflict", status: "running", detail: { reason: "run_already_terminal", status: "running", since: "2026-09-20T02:00:00Z" } }, 409),
+    async () => {
+      const out = await retryWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "not_retryable");
+      assert.equal(out.kind === "not_retryable" ? out.status : null, "running", "the promoted key is unchanged");
+      assert.deepEqual(out.kind === "not_retryable" ? out.detail : null,
+        { reason: "run_already_terminal", status: "running", since: "2026-09-20T02:00:00Z" });
+    },
+  );
+  await withFetch(
+    () => json({ error: "conflict", status: "running" }, 409),
+    async () => {
+      assert.deepEqual(await retryWork(auth, { workId: "w1", opKey: "k" }),
+        { kind: "not_retryable", status: "running" }, "no carrier, no new key");
+    },
+  );
+
+  // cancel — 409 `conflict` and 400 `invalid`
+  await withFetch(
+    () => json({ error: "already_terminal", status: "completed", detail: { reason: "already_terminal", receipt_id: "r-1" } }, 409),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "conflict");
+      assert.equal(out.kind === "conflict" ? out.reason : null, "already_terminal");
+      assert.equal(out.kind === "conflict" ? out.status : null, "completed");
+      assert.deepEqual(out.kind === "conflict" ? out.detail : null, { reason: "already_terminal", receipt_id: "r-1" });
+    },
+  );
+  await withFetch(
+    () => json({ error: "invalid_op_key", reason: "invalid_op_key", detail: { reason: "invalid_op_key", op_key: "" } }, 400),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "" });
+      assert.equal(out.kind, "invalid");
+      assert.equal(out.kind === "invalid" ? out.reason : null, "invalid_op_key");
+      assert.deepEqual(out.kind === "invalid" ? out.detail : null, { reason: "invalid_op_key", op_key: "" });
+    },
+  );
+  // A transient 409 carries NOTHING, here as at the runtime: the statement never ran, so there is
+  // no state to describe and the arm stays the bare marker every composer switches on.
+  await withFetch(
+    () => json({ error: "transient", detail: { reason: "serialization_failure" } }, 409),
+    async () => {
+      assert.deepEqual(await cancelWork(auth, { workId: "w1", opKey: "k" }), { kind: "transient" });
+    },
+  );
+
+  // take-over — 409 `not_takeable`, 400 `confirm_basis` and 400 `invalid`
+  await withFetch(
+    () => json({ error: "conflict", status: "running", detail: { reason: "work_not_takeable", status: "running", responsible: "u-7" } }, 409),
+    async () => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "not_takeable");
+      assert.equal(out.kind === "not_takeable" ? out.status : null, "running");
+      assert.deepEqual(out.kind === "not_takeable" ? out.detail : null,
+        { reason: "work_not_takeable", status: "running", responsible: "u-7" });
+    },
+  );
+  await withFetch(
+    () => json({
+      error: "basis_confirmation_required", basis_digest: "d-1", basis_origin: "clara_interpreted",
+      detail: { reason: "basis_confirmation_required", basis_digest: "d-1", interpreted_at: "2026-09-19T10:00:00Z" },
+    }, 400),
+    async () => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "confirm_basis");
+      assert.equal(out.kind === "confirm_basis" ? out.basisDigest : null, "d-1", "the promoted digest is unchanged");
+      assert.equal(out.kind === "confirm_basis" ? out.basisOrigin : null, "clara_interpreted");
+      assert.equal(out.kind === "confirm_basis" ? out.detail?.interpreted_at : null, "2026-09-19T10:00:00Z");
+    },
+  );
+  await withFetch(
+    () => json({ error: "invalid_op_key", reason: "invalid_op_key" }, 400),
+    async () => {
+      assert.deepEqual(await takeOverWork(auth, { workId: "w1", opKey: "" }),
+        { kind: "invalid", reason: "invalid_op_key" }, "no carrier, no new key");
+    },
+  );
+});
+
+test("981.web: `source_conflict` carries the door's typed detail too — the arm round one left bare", async () => {
+  // Reviewed findings L10S-1 / STD-2. `workErrorResponse` builds the `source_already_posted` 409
+  // through the SAME `answer()` as every other refusal, so the door's object IS on that body.
+  // This edge promoted the two ids off it and threw the rest away, which is exactly the cost the
+  // ticket exists to retire: a structured key gained on THIS refusal still needed a new arm here.
+  const detail = {
+    reason: "source_already_posted",
+    entry_id: "e-1",
+    document_id: "d-1",
+    posted_at: "2026-09-01T00:00:00Z",
+  };
+  await withFetch(
+    () => json({ error: "source_already_posted", entry_id: "e-1", document_id: "d-1", detail }, 409),
+    async () => {
+      const out = await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "source_conflict");
+      assert.equal(out.kind === "source_conflict" ? out.entryId : null, "e-1", "the promoted ids are unchanged");
+      assert.equal(out.kind === "source_conflict" ? out.documentId : null, "d-1");
+      assert.deepEqual(out.kind === "source_conflict" ? out.detail : null, detail,
+        "…and the door's own object is readable whole");
+    },
+  );
+  // …and a body with NO carrier is byte-for-byte the result this arm always returned.
+  await withFetch(
+    () => json({ error: "source_already_posted", entry_id: "e-1", document_id: "d-1" }, 409),
+    async () => {
+      assert.deepEqual(await submitJournalWork(auth, { clientId: "c1", intentKey: "i1", basis: BASIS }),
+        { kind: "source_conflict", entryId: "e-1", documentId: "d-1" });
+    },
+  );
+});
+
+test("981.web: the three SIBLING admission doors read that same carrier, not just the journal one", async () => {
+  // `submitPeriodicAdjustmentWork`, `submitStaffExpenseClaimWork` and `submitTradeInvoiceWork`
+  // each reuse `SubmitJournalWorkResult`'s `source_conflict` arm BECAUSE the four routes share
+  // `workErrorResponse` — so the arm has to read the shared body the same way on all four, or the
+  // reuse claim in this module's own doc comment is false for three of them.
+  const detail = { reason: "source_already_posted", entry_id: "e-2", document_id: "d-2", posted_at: "2026-08-14" };
+  const body = { error: "source_already_posted", entry_id: "e-2", document_id: "d-2", detail };
+  const calls: ReadonlyArray<[string, () => Promise<{ kind: string; detail?: unknown }>]> = [
+    ["periodic adjustment", () => submitPeriodicAdjustmentWork(auth, {
+      clientId: "c1", intentKey: "i1", purpose: "accrual", basis: BASIS, adjustment: {},
+    })],
+    ["staff expense claim", () => submitStaffExpenseClaimWork(auth, {
+      clientId: "c1", intentKey: "i1", claim: {},
+    })],
+    ["trade invoice", () => submitTradeInvoiceWork(auth, {
+      clientId: "c1", intentKey: "i1", kind: "supplier_bill", invoice: {}, basis: {},
+    })],
+  ];
+  for (const [door, call] of calls) {
+    await withFetch(() => json(body, 409), async () => {
+      const out = await call();
+      assert.equal(out.kind, "source_conflict", door);
+      assert.deepEqual(out.detail, detail, `${door}: the door's own object is readable whole`);
+    });
+    await withFetch(() => json({ error: "source_already_posted", entry_id: "e-2", document_id: "d-2" }, 409), async () => {
+      assert.deepEqual(await call(), { kind: "source_conflict", entryId: "e-2", documentId: "d-2" },
+        `${door}: no carrier, no new key`);
+    });
+  }
+});
+
+test("981.web: `restateWork`'s 409 carries the carrier — `superseded_by` and all", async () => {
+  // Reviewed finding STD-2. `workErrorResponse`'s restate arm answers
+  // `{error, reason, status, superseded_by}` through `answer()`, so the door's object rides with
+  // it; this edge returned `{kind, reason, status}` and dropped everything else, including the
+  // successor id the surface needs to offer a link to the Work that already replaced this one.
+  const detail = {
+    reason: "already_superseded",
+    status: "cancelled",
+    superseded_by: "work-77",
+    superseded_at: "2026-09-19T09:00:00Z",
+  };
+  await withFetch(
+    () => json({
+      error: "already_superseded", reason: "already_superseded", status: "cancelled",
+      superseded_by: "work-77", detail,
+    }, 409),
+    async () => {
+      const out = await restateWork(auth, { workId: "w1", opKey: "k", intentKey: "i1", basis: BASIS });
+      assert.equal(out.kind, "not_restatable");
+      assert.equal(out.kind === "not_restatable" ? out.reason : null, "already_superseded",
+        "the promoted keys are unchanged");
+      assert.equal(out.kind === "not_restatable" ? out.status : null, "cancelled");
+      assert.deepEqual(out.kind === "not_restatable" ? out.detail : null, detail,
+        "…and the successor the door named is readable, not dropped");
+    },
+  );
+  // …and the bodies that carry no detail are byte-for-byte what this arm always returned.
+  for (const reason of ["not_restatable", "already_superseded", "not_restatable_purpose"]) {
+    await withFetch(
+      () => json({ error: reason, reason, status: "posted" }, 409),
+      async () => {
+        assert.deepEqual(await restateWork(auth, { workId: "w1", opKey: "k", intentKey: "i1", basis: BASIS }),
+          { kind: "not_restatable", reason, status: "posted" }, `${reason}: no carrier, no new key`);
+      },
+    );
+  }
 });

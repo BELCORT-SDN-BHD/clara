@@ -31,9 +31,13 @@
 //
 // WIRE FIELD PATHS — ONE VOCABULARY, AND IT IS THE DATABASE'S.
 //
-// A 400 from this surface has two machine-readable slots, `field` and `reason`, and both of them
-// are spelled the way migration 0178 spells them, whether the refusal came from this file or from
-// `clara._assert_journal_basis`:
+// A 400 from this surface has two machine-readable slots, `field` and `reason` — plus, since
+// #981, a third that is not a slot at all: `detail`, THE WHOLE typed object the governed door
+// raised, carried back verbatim on every 400 and 409 this file builds (`workErrorResponse`).
+// `field` and `reason` are PROMOTIONS of what a caller keys on; nothing else is taken apart, so a
+// refusal that gains a structured key reaches the browser with no change here and no new arm in
+// `apps/web/lib/work/api.ts`. The two promoted slots are spelled the way migration 0178 spells
+// them, whether the refusal came from this file or from `clara._assert_journal_basis`:
 //
 //   field    `basis` | `posting_date` | `memo` | `currency` | `lines` | `lines[N]` |
 //            `lines[N].account_code` | `lines[N].debit_cents` | `lines[N].credit_cents` |
@@ -58,11 +62,21 @@
 //            browser posts it camelCase, so `toWireField` re-spells it — the SECOND and last
 //            translation this route performs, beside `source_refs` → `sourceRefs`, and it is a
 //            total function rather than a table so a new field cannot fall out of step. Its
-//            reasons are the database's own: `invalid_adjustment` folds to its `constraint`
-//            exactly as `invalid_basis` does, and `adjustment_all_zero`, `adjustment_lines_mismatch`,
-//            `adjustment_account_relationship`, `advance_not_enrolled`, `scope_overbroad`,
-//            `stale_basis` and the three `correction_target_*` tokens ride back under their own
-//            names. A locked period is CLR19 `write_into_closed_period`, which `workErrorStatus`
+//            reasons are the database's own, and NONE of them folds — `invalid_adjustment`
+//            included, despite what this note claimed from #643 until #981 measured it. It rides
+//            back under its own name exactly like `adjustment_all_zero`,
+//            `adjustment_lines_mismatch`, `adjustment_account_relationship`,
+//            `advance_not_enrolled`, `scope_overbroad`, `stale_basis` and the three
+//            `correction_target_*` tokens. `CONSTRAINT_FOLD_REASONS` below is the WHOLE roster of
+//            reasons whose wire `reason` is the `constraint` token, and it names three:
+//            `invalid_basis`, `invalid_source_ref`, `invalid_claim`
+//            (`work-routes-unit.test.mjs`'s "the three constraint folds are the only typing left"
+//            pins both halves). Whether `invalid_adjustment` SHOULD have been the fourth is a
+//            live question — this note and `apps/web/lib/work/journal-basis.ts`'s mapper were
+//            written as though it were — and a ticket of its own; moving a refusal's reason
+//            vocabulary was out of #981's scope. Either way the raw token is now readable on
+//            `detail.constraint`.
+//            A locked period is CLR19 `write_into_closed_period`, which `workErrorStatus`
 //            maps for the first time here — see its own note for why that code could not reach
 //            this surface before.
 //
@@ -796,38 +810,48 @@ export const WORK_MAPPED_CODES = Object.freeze([
   "40P01", "40001",
 ]);
 
+/**
+ * #981 — THE WHOLE typed detail a governed door raised, parsed ONCE.
+ *
+ * Every reader below is a view on this one object, and the 400/409 bodies carry it back verbatim
+ * rather than taking it apart. PostgreSQL's OWN errors (a deadlock, a serialization failure, a
+ * unique violation) carry a plain-text detail, so anything that is not a JSON object answers
+ * `null` — never `{}`, which would tell a reader "the door raised a typed detail and it was
+ * empty", a different fact from "there is none". This is `apps/web/lib/wire.ts`'s
+ * `parseRefusalDetail` for the PostgREST lane, on the durable-Work lane, with the same defensive
+ * contract.
+ */
+export function refusalDetail(err: unknown): Record<string, unknown> | null {
+  const detail = (err as { detail?: unknown })?.detail;
+  if (typeof detail !== "string" || detail.length === 0) return null;
+  try {
+    const parsed = JSON.parse(detail) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    /* a plain-text detail is not a typed refusal detail */
+    return null;
+  }
+}
+
 /** Read the typed `detail.reason` off a raised error. PostgreSQL's own details are plain text, so
  *  a non-JSON detail yields null rather than a guess. */
 export function reasonOf(err: unknown): string | null {
-  const detail = (err as { detail?: unknown })?.detail;
-  if (typeof detail !== "string" || detail.length === 0) return null;
-  try {
-    const parsed = JSON.parse(detail) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const reason = (parsed as { reason?: unknown }).reason;
-      return typeof reason === "string" ? reason : null;
-    }
-  } catch {
-    /* a plain-text detail carries no typed reason */
-  }
-  return null;
+  const reason = refusalDetail(err)?.reason;
+  return typeof reason === "string" ? reason : null;
 }
 
 /** Read one string-valued key off a raised error's typed `detail` jsonb. PostgreSQL's own
- *  details are plain text, so a non-JSON detail yields null rather than a guess. */
+ *  details are plain text, so a non-JSON detail yields null rather than a guess.
+ *
+ *  STRING-VALUED is the limit that made #981 necessary: `max`, `length` and the candidate list
+ *  are a number, a number and an array, so nothing this function can see could ever have carried
+ *  them. The bodies below promote what a caller keys on THROUGH this reader and carry everything
+ *  else on the generic carrier, where its type survives. */
 export function detailField(err: unknown, key: string): string | null {
-  const detail = (err as { detail?: unknown })?.detail;
-  if (typeof detail !== "string" || detail.length === 0) return null;
-  try {
-    const parsed = JSON.parse(detail) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const value = (parsed as Record<string, unknown>)[key];
-      return typeof value === "string" ? value : null;
-    }
-  } catch {
-    /* a plain-text detail carries no typed field */
-  }
-  return null;
+  const value = refusalDetail(err)?.[key];
+  return typeof value === "string" ? value : null;
 }
 
 /** Read the typed `detail.field` off a raised error, for the 400 payload. */
@@ -860,15 +884,70 @@ async function enqueueWork(taskId: string): Promise<void> {
 }
 
 /**
+ * #981 — THE PER-LANE FIELD DEFAULTS, and they are the ONLY typing a lane may layer on the
+ * generic carrier: a map from a door's `reason` to the wire field path a refusal carrying none
+ * should focus. Data, not code — a lane adds a row, never an arm.
+ *
+ * ONE ROW TODAY. `clara._trade_invoice_resolve_party` raises `party_ambiguous` with the candidate
+ * list and NO `field`, and the control the person has to return to is the counterparty box.
+ * Before #981 that default lived inside a bespoke catch in the trade-invoice route that also
+ * unfolded `detail.candidates` onto a body of its own; the unfolding is gone (the carrier does
+ * it) and this is what is left. It is a DEFAULT, never an override, and it applies to the one
+ * reason it names: `party_unresolved` and every other field-less refusal on the lane still answer
+ * `basis`, exactly as they did.
+ */
+export const TRADE_INVOICE_FIELD_DEFAULTS: Readonly<Record<string, string>> = Object.freeze({
+  party_ambiguous: "invoice.counterparty",
+});
+
+/** #981 — the three field-scoped reasons whose wire `reason` IS the database's `constraint`
+ *  token. See the fold's own note inside `workErrorResponse`; the set is named rather than
+ *  inlined so the roster is one thing to read and one thing to extend. */
+const CONSTRAINT_FOLD_REASONS: ReadonlySet<string> = new Set([
+  "invalid_basis", "invalid_source_ref", "invalid_claim",
+]);
+
+/**
  * The COMPLETE translation of one raised database error into an HTTP answer, or `null` when this
  * map does not claim the error (the caller logs it and answers 500). Exported so a cell drives
  * THIS function rather than a copy of its predicate — the same reason `toDbBasis` and
  * `workErrorStatus` are exported, and the only way to test the 409 body without an HTTP server.
+ *
+ * #981 — THE DOOR'S TYPED DETAIL RIDES BACK WHOLE, under `detail`, on every 400 and 409 this map
+ * builds. The top-level keys below are PROMOTIONS, not extractions: they exist because a live
+ * reader keys on them (`reason` focuses a control, `work_id` renders a link, `status` renders the
+ * state that made an act illegal) and every one of them is unchanged. What is gone is the idea
+ * that a refusal's detail is only as visible as the keys somebody remembered to promote — a new
+ * structured key now reaches the browser with no change in this file and no new arm in
+ * `apps/web/lib/work/api.ts`.
+ *
+ * 403 AND 404 CARRY NO CARRIER, deliberately. A 404 here answers BOTH "no such Work" and "a Work
+ * that is not this firm's", and that identity is the point: no existence oracle across firms. A
+ * typed reason on it would loosen an access answer.
  */
-export function workErrorResponse(err: unknown): { status: number; body: Record<string, unknown> } | null {
+export function workErrorResponse(
+  err: unknown,
+  options?: { fieldDefaults?: Readonly<Record<string, string>> },
+): { status: number; body: Record<string, unknown> } | null {
   const code = (err as { code?: string })?.code;
+  const detail = refusalDetail(err);
   const reason = reasonOf(err);
   const status = workErrorStatus(code, reason);
+  /**
+   * The promoted body plus the door's own object, in ONE place so no arm below can forget it.
+   *
+   * IT ASSIGNS RATHER THAN SPREADS, and that is deliberate: every `body` handed in is a fresh
+   * literal at its call site, and `check-parts-parity.mjs` refuses an unreviewed object spread
+   * anywhere under `packages/runtime` because a spread is a shape it cannot classify. One
+   * assignment is the same result with nothing for that census to guess at.
+   */
+  const answer = (
+    httpStatus: number,
+    body: Record<string, unknown>,
+  ): { status: number; body: Record<string, unknown> } => {
+    if (detail !== null) body.detail = detail;
+    return { status: httpStatus, body };
+  };
   // #630 · A TRANSIENT IS NOT A CONFLICT WITH THE WORLD, and it must not be dressed as one. It
   // carries no `detail.reason` (PostgreSQL raised it, not a door), so it is answered here BEFORE
   // every reason-keyed arm below, under its own word: the surface says "that did not go through —
@@ -883,44 +962,44 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
   // body saying `{error:"invalid_basis", field:"basis"}` would tell them their input was wrong,
   // which it was not, and would carry nothing they could act on.
   if (reason === "basis_confirmation_required") {
-    return {
-      status: 400,
-      body: {
-        error: "basis_confirmation_required",
-        basis_digest: detailField(err, "basis_digest"),
-        basis_origin: detailField(err, "basis_origin"),
-      },
-    };
+    return answer(400, {
+      error: "basis_confirmation_required",
+      basis_digest: detailField(err, "basis_digest"),
+      basis_origin: detailField(err, "basis_origin"),
+    });
   }
   if (status === 400) {
-    // `constraint` IS the reason on the wire for a field-scoped CLR10, so the route's own 400s and
-    // the database's speak ONE vocabulary (see the WIRE FIELD PATHS note in this file's header).
-    // Every other CLR10 has no constraint and rides back under its own typed reason.
+    // THE ONE FOLD LEFT, and #981 pared it back to what it is actually for: ONE VOCABULARY FOR
+    // ONE REFUSAL, whichever half caught it. `toDbBasis` / `toDbSourceRefs` / `toDbClaim` above
+    // refuse the cheap cases THEMSELVES and answer a bare constraint token (`nonempty`,
+    // `iso_date`, `at_most_one_document`, …); migrations 0178 / 0182 / 0221 answer the SAME
+    // tokens for the cases only the database can see, buried in `detail.constraint` under a
+    // category reason. Unfolded, one refusal reached the browser under two different spellings
+    // depending on which half caught it, and the database-only tokens (`not_filed` above all —
+    // the one a preparer can actually act on) never reached the wire at all.
     //
-    // #634 · `invalid_source_ref` FOLDS TOO, and the reason is measured rather than symmetric for
-    // its own sake. `toDbSourceRefs` above answers `object` / `kind` / `at_most_one_document` /
-    // `uuid` — bare constraint tokens — while the database answers the SAME four plus `not_filed`,
-    // the one only it can reach (is this an active, byte-verified filing of THIS client?), under
-    // `reason: "invalid_source_ref"` with the token buried in `detail.constraint`. Unfolded, the
-    // browser saw two different vocabularies for one refusal depending on WHICH half caught it,
-    // and `not_filed` — the only case a preparer can actually act on — never reached the wire at
-    // all. `lib/wire.ts` surfaces `detail.reason` and discards every other detail key, so folding
-    // here is the only place it can happen.
+    // WHAT IT IS NOT FOR, though the note here used to say so: it is not a workaround for a
+    // browser that could see nothing but `reason`. The raw token rides `detail.constraint` on the
+    // carrier now, for every refusal, folded or not. `reason` stays the WIRE vocabulary because
+    // `apps/web/lib/work/journal-basis.ts` and its siblings key on it — #981 moved no token.
+    //
+    // NAMED REASONS ONLY, never "whenever a constraint exists". `invalid_adjustment`,
+    // `stale_basis` and `adjustment_lines_mismatch` carry a `constraint` too and have always
+    // ridden back under their own names; folding by presence would have moved three vocabularies
+    // silently for a symmetry nobody asked for.
     const constraint = detailField(err, "constraint");
-    // #638 · `invalid_claim` folds on the same footing and for the same measured reason: the
-    // route's own earlier validation answers bare constraint tokens (`object` / `nonempty` /
-    // `integer_cents` / `iso_date` / …) while migration 0221 answers the SAME tokens buried in
-    // `detail.constraint` under `reason: "invalid_claim"`. Unfolded, the browser saw two
-    // vocabularies for one refusal depending on WHICH half caught it.
-    const folds = reason === "invalid_basis" || reason === "invalid_source_ref" || reason === "invalid_claim";
-    return {
-      status: 400,
-      body: {
-        error: "invalid_basis",
-        field: toWireField(fieldOf(err)) ?? "basis",
-        reason: folds && constraint !== null ? constraint : (reason ?? "invalid_basis"),
-      },
-    };
+    const folded = reason !== null && CONSTRAINT_FOLD_REASONS.has(reason) && constraint !== null
+      ? constraint
+      : (reason ?? "invalid_basis");
+    return answer(400, {
+      error: "invalid_basis",
+      // #981 · the lane's own default for a refusal the door raised with no `field` (see
+      // `TRADE_INVOICE_FIELD_DEFAULTS`). A door that named one always wins.
+      field: toWireField(fieldOf(err))
+        ?? (reason !== null ? options?.fieldDefaults?.[reason] : undefined)
+        ?? "basis",
+      reason: folded,
+    });
   }
   if (status === 409) {
     if (reason === "source_already_posted") {
@@ -929,24 +1008,21 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // becoming a second effect — so the answer carries the entry that already stands there and
       // the document that was refused, and the composer offers a link to it instead of a
       // resubmit of the same intent. Neither id is invented: a detail without one answers null.
-      return {
-        status: 409,
-        body: {
-          error: "source_already_posted",
-          entry_id: detailField(err, "entry_id"),
-          document_id: detailField(err, "document_id"),
-        },
-      };
+      return answer(409, {
+        error: "source_already_posted",
+        entry_id: detailField(err, "entry_id"),
+        document_id: detailField(err, "document_id"),
+      });
     }
     if (reason === "not_retryable") {
       // The contract's 409 body: the machine-readable error AND the Work status that made the
       // retry illegal, which is what the detail's own `status` field carries.
-      return { status: 409, body: { error: "not_retryable", status: detailField(err, "status") } };
+      return answer(409, { error: "not_retryable", status: detailField(err, "status") });
     }
     if (reason === "not_takeable") {
       // #630 · the takeover's own 409, in the same shape and for the same reason: the surface
       // renders "this Work is not available to take over" beside the status that made it so.
-      return { status: 409, body: { error: "not_takeable", status: detailField(err, "status") } };
+      return answer(409, { error: "not_takeable", status: detailField(err, "status") });
     }
     // #721
     if (reason === "not_restatable" || reason === "already_superseded") {
@@ -954,21 +1030,18 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // use: the machine-readable token AND the operable fact beside it — the status that made the
       // restatement illegal, or the successor that already exists. `reason` rides beside `error`
       // because the browser's one reader keys on it for every other refusal on this lane.
-      return {
-        status: 409,
-        body: {
-          error: reason,
-          reason,
-          status: detailField(err, "status"),
-          superseded_by: detailField(err, "superseded_by"),
-        },
-      };
+      return answer(409, {
+        error: reason,
+        reason,
+        status: detailField(err, "status"),
+        superseded_by: detailField(err, "superseded_by"),
+      });
     }
     // #721
     if (reason === "work_cancelled" || reason === "work_settled") {
       // #630 · the BOUNDARY's own refusals, reachable here only through a door that calls the
       // posting core. The status is the operable fact: the surface converges on the Work's own row.
-      return { status: 409, body: { error: reason, status: detailField(err, "status") } };
+      return answer(409, { error: reason, status: detailField(err, "status") });
     }
     if (reason === "intent_payload_conflict") {
       // THE WORK ID IS THE WHOLE POINT OF THIS 409. `clara.admit_journal_work` puts the EXISTING
@@ -976,17 +1049,22 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // was already submitted with different figures" WITH A LINK to that Work. Dropping it left
       // the human told they had a conflict and given no way to look at it — a dead end where the
       // database had supplied the exit.
-      return { status: 409, body: { error: "intent_payload_conflict", work_id: detailField(err, "work_id") } };
+      return answer(409, { error: "intent_payload_conflict", work_id: detailField(err, "work_id") });
     }
-    return { status: 409, body: { error: "conflict" } };
+    return answer(409, { error: "conflict" });
   }
   if (status === 404) return { status: 404, body: { error: "not_found", message: "not found" } };
   if (status === 403) return { status: 403, body: { error: "forbidden", message: "not permitted" } };
   return null;
 }
 
-function sendAdmissionError(res: express.Response, err: unknown, label: string): void {
-  const answer = workErrorResponse(err);
+function sendAdmissionError(
+  res: express.Response,
+  err: unknown,
+  label: string,
+  options?: { fieldDefaults?: Readonly<Record<string, string>> },
+): void {
+  const answer = workErrorResponse(err, options);
   if (answer !== null) {
     res.status(answer.status).json(answer.body);
     return;
@@ -1360,34 +1438,15 @@ export function workRoutes(): express.Router {
       if (sendAuthError(res, err)) return;
       // D12(a) — `party_ambiguous` IS THE ONE REFUSAL THAT CARRIES DATA. The door raises it with
       // the candidate list VERBATIM in its typed detail, because the person has to pick and a
-      // sentence they cannot act on is worse than no sentence. `sendAdmissionError` answers the
-      // other thirteen faithfully but keeps only `detail.reason` (its own note at the
-      // `invalid_source_ref` arm says why: the browser must not have to parse Postgres detail), so
-      // this ONE arm is unfolded HERE, inside this lane's own route, rather than widening the
-      // shared responder for every door in the file.
-      if (reasonOf(err) === "party_ambiguous") {
-        const raw = (err as { detail?: unknown })?.detail;
-        let candidates: unknown[] = [];
-        if (typeof raw === "string" && raw.length > 0) {
-          try {
-            const parsed = JSON.parse(raw) as unknown;
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-              const list = (parsed as Record<string, unknown>).candidates;
-              if (Array.isArray(list)) candidates = list;
-            }
-          } catch {
-            /* a plain-text detail carries no candidates — the banner is the door's sentence alone */
-          }
-        }
-        res.status(400).json({
-          error: "invalid_basis",
-          field: fieldOf(err) ?? "invoice.counterparty",
-          reason: "party_ambiguous",
-          detail: { candidates },
-        });
-        return;
-      }
-      sendAdmissionError(res, err, "trade invoice admission");
+      // sentence they cannot act on is worse than no sentence.
+      //
+      // #981 · IT NO LONGER NEEDS AN ARM OF ITS OWN. This catch used to re-parse the raised
+      // detail, lift `candidates` out of it and answer a body shaped for this one refusal, on the
+      // stated grounds that the shared responder kept nothing but `detail.reason`. The shared
+      // responder now carries the door's whole typed detail — candidates, name, expected kind and
+      // anything a later migration adds — so the only thing left that is genuinely this lane's is
+      // WHICH CONTROL to focus when the door names no field, and that is one row of data.
+      sendAdmissionError(res, err, "trade invoice admission", { fieldDefaults: TRADE_INVOICE_FIELD_DEFAULTS });
     }
   });
 

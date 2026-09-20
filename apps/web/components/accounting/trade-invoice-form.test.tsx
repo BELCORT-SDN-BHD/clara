@@ -222,9 +222,9 @@ test("a clean bill sends EXACT cents, `absent` when no due date is stated, and n
 test("`party_ambiguous` renders its candidates INLINE as a choice, and picking one clears the banner", async () => {
   const h = await renderComponent(App({
     submit: async () => ({
-      // THE WIRE SHAPE `submitTradeInvoiceWork` REALLY RETURNS: the route unfolds the door's
-      // typed `detail.candidates` onto a first-class field, because `lib/wire.ts` keeps
-      // `detail.reason` and discards every other detail key.
+      // THE WIRE SHAPE `submitTradeInvoiceWork` REALLY RETURNS: the candidate list comes off
+      // the refusal's generic `detail` carrier (#981) and is typed as a first-class field
+      // because this component renders it.
       kind: "invalid_basis", field: "invoice.counterparty", reason: "party_ambiguous",
       candidates: [
         { counterparty_id: ALPHA, name: "Alpha Supplies Sdn Bhd", registration_no: "200101000001" },

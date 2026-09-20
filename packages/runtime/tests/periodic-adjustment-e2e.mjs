@@ -66,17 +66,20 @@ if (process.env.CLARA_SKIP_WORK_E2E === "1") {
 
 // --- Fail-closed local gate. BYTE-IDENTICAL to `work-journal-e2e.mjs`'s, deliberately: this file
 // spawns the same server, against the same throwaway databases, and a gate that admitted one more
-// name here would be a second, looser answer to one question. A worker whose local rig database is
-// named something else clones it (`create database clara_rt_test template <rig>`) rather than
-// widening the wall.
+// name here would be a second, looser answer to one question. That file's gate moved to admit the
+// riders wave's per-lane `clara_l<NN>` (#980); this one moves with it, for the same reason and in
+// the same shape, so the two stay one answer. Still loopback-only, still a parsed-DSN equality
+// check against the PG env, still fail-closed on anything else.
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
+const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|l\d{2})$/;
 if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
-  throw new Error("periodic-adjustment-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci}");
+  throw new Error(
+    "periodic-adjustment-e2e is hard-gated to a loopback host + PGDATABASE in "
+    + "{clara_rt_test, clara_wave_b_ci, clara_l<NN>}");
 }
 if (!process.env.WORKFLOW_POSTGRES_URL
-    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("periodic-adjustment-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
+    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci|l[0-9][0-9])(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
+  throw new Error("periodic-adjustment-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci|l<NN>)");
 }
 {
   const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
@@ -543,7 +546,7 @@ async function main() {
       // AN UNFILED DOCUMENT IS A 400 NAMING THE CONTROL, never a 500 and never a silent drop. This
       // is the refusal the form's chooser renders (`fieldForServerPath` maps `sourceRefs[N]` onto
       // the `evidence` control), and the token is the DATABASE's own `constraint`, folded into
-      // `reason` by `workErrorResponse` because `lib/wire.ts` surfaces nothing else.
+      // `reason` by `workErrorResponse`.
       const unfiled = await api("POST", "/api/work/periodic-adjustment", {
         clientId: ev.client,
         intentKey: randomUUID(),
@@ -554,7 +557,16 @@ async function main() {
       }, ev.jwt);
       assert.equal(unfiled.status, 400,
         `an unfiled citation is a 400 (got ${unfiled.status} ${JSON.stringify(unfiled.body)})`);
-      assert.deepEqual(unfiled.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      // #981 · THE CARRIER, OVER THE REAL WIRE. The promoted keys are what they always were —
+      // that is the compatibility claim, and it is measured here off an actual HTTP response
+      // rather than off `workErrorResponse` — and the door's whole typed detail now rides beside
+      // them under `detail`, additively.
+      const { detail: unfiledDetail, ...unfiledPromoted } = unfiled.body;
+      assert.deepEqual(unfiledPromoted, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      assert.deepEqual(unfiledDetail,
+        { reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed" },
+        "the door's own object, verbatim: the category reason the wire overwrote, the DB's 1-based "
+        + "path, and the raw constraint token");
       assert.equal(await countEntries(ev.client), 1, "…and nothing else was admitted");
       console.log("[pa-e2e] PASS 6: a cited document rides admission -> commit -> evidence link + adjustment row; an unfiled one is a typed 400 on the chooser");
     } else {
