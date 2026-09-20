@@ -91,11 +91,13 @@ export function DocumentKindDialog({
             {/* #633 AC2 — the option LABEL is a phrase; the option VALUE stays the DB enum,
                 because that value is exactly what `set_document_kind` is called with.
                 #878 — the ROSTER is the SAME filtered one `document-kind-control.tsx` (#633's
-                list/receipt entrance) exports: `clara.set_document_kind` refuses
-                `consent_evidence` on either side of the change (CLR28) no matter which control
-                asked, so offering it here produced only a guaranteed, avoidable refusal.
-                Importing the sibling's own constant, instead of a second copy of the filter,
-                is what keeps there being exactly one roster to keep correct. */}
+                list/receipt entrance) exports: `clara.set_document_kind` refuses the
+                consent-evidence kind on either side of the change (CLR28) no matter which
+                control asked, so offering it here produced only a guaranteed, avoidable
+                refusal. Importing the sibling's own constant, instead of a second copy of the
+                filter, is what keeps there being exactly one roster to keep correct — see
+                CLASSIFIABLE_DOCUMENT_KINDS's own header in document-kind-control.tsx for the
+                excluded value's literal spelling. */}
             {CLASSIFIABLE_DOCUMENT_KINDS.map((k) => <SelectItem key={k} value={k}>{renderKindLabel(k, t)}</SelectItem>)}
           </SelectContent>
         </Select>

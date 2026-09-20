@@ -178,11 +178,17 @@ test("[633] fix round: the list/receipt classify control never offers a kind the
 });
 
 test("[878] the DETAIL surface's classify Select also stops offering a kind the door always refuses", async () => {
-  // The DOM idiom above cannot enumerate a live option list — `@base-ui`'s popup mounts
-  // lazily and no test in this repo drives it open (see the non-vacuity comment on the first
-  // test in this file). The house proof for "which roster backs this Select", established by
-  // the [633] fix-round cell above, is the SOURCE the component actually imports: one shared
-  // constant, never a second copy of the filter.
+  // The DOM idiom above cannot enumerate a live option list — `@base-ui`'s Select popup is
+  // Portal + Positioner (floating-ui) backed and mounts lazily, and no test anywhere in this
+  // repo drives one open (`grep -rl "select-item\|SelectItem" apps/web --include=*.test.tsx`
+  // returns only this file, and only as a source-text match, confirmed 2026-09-20 CRS-07-09
+  // fix round). Opening a real Select popup here would need the same class of new harness
+  // plumbing `test/domInspect.ts`'s own header describes abandoning for axe-core — floating-ui
+  // positioning, not just the zero-geometry `getBoundingClientRect` stub that already lets
+  // `@base-ui/react`'s Menu/Dialog backdrops mount — which is disproportionate build-out for
+  // this one minor finding. The house proof for "which roster backs this Select", established
+  // by the [633] fix-round cell above, is therefore the SOURCE the component actually imports:
+  // one shared constant, never a second copy of the filter.
   const dialogSource = textOfFile("document-kind-dialog.tsx");
   assert.match(
     dialogSource,
@@ -199,12 +205,16 @@ test("[878] the DETAIL surface's classify Select also stops offering a kind the 
     /\bDOCUMENT_KINDS\.map\(/,
     "the dialog must not fall back to mapping the full, unfiltered roster",
   );
-  // The comment #878's brief asks corrected: the old text asserted the full roster was a
-  // deliberate, permanent choice for this surface. That claim must not survive verbatim.
+  // CRS-07-09 (code-review recheck) — the three assertions above prove the Select's OPTIONS
+  // come from the filtered roster's `.map(...)`, but say nothing about a hand-written
+  // `<SelectItem value="consent_evidence">` (or a `.flatMap`/spread that side-steps the single
+  // `.map(` call) added elsewhere in the same file — that would leave every assertion above
+  // green while the defect returned. This closes that gap directly: the literal string must
+  // not appear ANYWHERE in the dialog's source, not merely absent from the mapped roster.
   assert.doesNotMatch(
     dialogSource,
-    /observation it would not change/,
-    "the dialog's own comment must no longer claim the full roster is permanent here",
+    /consent_evidence/,
+    "'consent_evidence' must not appear anywhere in the dialog's source — not just absent from the CLASSIFIABLE_DOCUMENT_KINDS.map(...) roster",
   );
 });
 
