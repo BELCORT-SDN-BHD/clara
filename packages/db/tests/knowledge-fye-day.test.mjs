@@ -74,9 +74,16 @@ const promote = (sub, plan, opKey = opk("p898_pr")) =>
     "select clara.promote_plan_answers_to_knowledge(p_plan => $1, p_op_key => $2) as r",
     [plan, opKey]).then((r) => r.rows[0].r);
 
-cell("fd.01 the catalogue carries financial_year_end_day, typed/scoped/floored the SAME WAY financial_year_end_month is", async () => {
+cell("fd.01 the catalogue carries financial_year_end_day, typed/floored the SAME WAY financial_year_end_month is", async () => {
+  // `scope_default` was live when this file (0240) was authored and is asserted here no longer:
+  // #913 (0241_knowledge_scope_default_drop.sql) dropped the column from clara.knowledge_keys as
+  // a dead column (three writes, zero reads -- see that migration's own header). The scope-side
+  // half of "typed/scoped/floored the SAME WAY" now lives at knowledge-scope-default-drop.test.mjs
+  // (sd.03: the firm-eligibility wall, the mechanism that was ALWAYS the real one, still refuses
+  // financial_year_end_month -- and by the same construction, financial_year_end_day -- at firm
+  // scope; fd.04 below proves that for the day key specifically).
   const r = await rootQuery(
-    `select kind, value_shape, validated_against, allowed_values, scope_default, authority_bearing, min_role
+    `select kind, value_shape, validated_against, allowed_values, authority_bearing, min_role
        from clara.knowledge_keys where knowledge_key = 'financial_year_end_day'`);
   assert.equal(r.rowCount, 1, "financial_year_end_day must exist exactly once");
   const row = r.rows[0];
@@ -84,7 +91,6 @@ cell("fd.01 the catalogue carries financial_year_end_day, typed/scoped/floored t
   assert.equal(row.value_shape, "number");
   assert.equal(row.validated_against, "range:day_1_31");
   assert.equal(row.allowed_values, null);
-  assert.equal(row.scope_default, "client");
   assert.equal(row.authority_bearing, false);
   assert.equal(row.min_role, "bookkeeper", "the SAME floor financial_year_end_month carries");
 });

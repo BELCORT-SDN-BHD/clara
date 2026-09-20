@@ -64,6 +64,20 @@ export async function fyeDayCohortApplied() {
   return present === flags.length;
 }
 
+/** True iff #913's column drop (0241_knowledge_scope_default_drop.sql) is applied:
+ *  `clara.knowledge_keys` no longer carries `scope_default`. Unlike the two cohorts above there
+ *  is exactly one thing to lose, not several to land together, so there is no PARTIAL state a
+ *  multi-flag count could catch — a single boolean is the whole check. */
+export async function scopeDefaultDroppedCohortApplied() {
+  const r = await rootQuery(
+    `select not exists (
+       select 1 from information_schema.columns
+        where table_schema = 'clara' and table_name = 'knowledge_keys' and column_name = 'scope_default'
+     ) as dropped`,
+  );
+  return r.rows[0].dropped;
+}
+
 /** One firm, four people at four ranks, two clients. Returns everything a cell addresses. */
 export async function knowledgeWorld(tag) {
   const suffix = `${tag}_${randomUUID().slice(0, 8)}`;
