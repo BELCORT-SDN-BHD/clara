@@ -91,7 +91,8 @@ test("intake receipts: every live failure code is phrased, and an unknown one na
     const text = textOf(h.container as never);
     const phrase = (messages as unknown as { ClientDocuments: { queueFailure: Record<string, string> } })
       .ClientDocuments.queueFailure[code];
-    assert.ok(text.includes(phrase.slice(0, 40)),
+    assert.equal(typeof phrase, "string", `the catalogue has no queueFailure.${code} phrase at all`);
+    assert.ok(text.includes(String(phrase).slice(0, 40)),
       `the ${code} row does not carry its own phrased next step`);
     await h.unmount();
   }

@@ -330,7 +330,7 @@ test("intake batch card: a STOPPING batch whose canceller lost authority NAMES w
   // bookkeeper may press Stop again and the door admits it as a genuinely new decision. The
   // banner named only the two pre-#968 workarounds, so it sent the firm the long way round.
   assert.match(text, /press Stop again/i,
-    "…and names the remedy this product actually ships (#968), first");
+    "…and names the remedy this product actually ships (ticket 968), first");
   assert.match(text, /remaining work item from its own page/,
     "…without dropping the fallbacks that still work");
   assertNoDenominator(h, "cancel blocked");
