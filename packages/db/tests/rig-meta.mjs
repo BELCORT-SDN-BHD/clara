@@ -1723,9 +1723,10 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 //
 //   the TWO doors + the ONE helper — clara_authenticated ONLY. `list_accounting_work` and
 //   `get_accounting_work_row` are SECURITY INVOKER over already-granted, firm-scoped sources
-//   (clara.accounting_work, clara.agent_interruptions, clara.clients and — since #880's
-//   claim_id/claimant_label widen, migration 0266 — clara.staff_expense_claims) with their own
-//   inline bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
+//   (clara.accounting_work, clara.agent_interruptions, clara.clients, clara.staff_expense_claims
+//   — since #880's claim_id/claimant_label widen, migration 0266 — and, since #905's
+//   receipt-dated window, migration 0267, clara.operation_receipts) with their own inline
+//   bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
 //   because `clara.agent_tasks` carries NO clara_authenticated grant at all (humans read the
 //   masked `clara.agent_tasks_visible`, which does not republish `work_id`) — the SAME gap, and
 //   the same remedy, 0183 recorded for `clara.sweep_runs`. It is GRANTED and therefore
@@ -1736,6 +1737,15 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 //   `clara.save_my_preferences` is 0179's SAME name at its SAME signature and grant
 //   (USER_PREFERENCES_0179_HUMAN_FNS above already covers it; 0189 only edits its BODY), so no
 //   roster change is owed for that name.
+//
+//   #905 [0267, the receipt-dated window] — NO COHORT CHANGE, NO NEW NAME, the same "still the
+//   SAME name and ACL" shape #839/0265's own note beside 0180's cohort records. `list_accounting_
+//   work` is a DROP-and-CREATE (a new parameter cannot be added by `create or replace`, the same
+//   reason 0202/#770 gives for `list_activity`/`p_work`), but a drop-and-create of the SAME name
+//   is not a new name: 0267's own tail re-reads owner clara_fn_owner, SECURITY INVOKER and the
+//   literal ACL {clara_fn_owner, clara_authenticated} unchanged after the recut, so this roster
+//   entry already covers the widened door. `get_accounting_work_row` is untouched (0267's own
+//   tail pins it byte-identical to its 0266 pre-image), so it needs no roster change either.
 const WORK_LIST_0189_HUMAN_FNS = [
   "list_accounting_work", "get_accounting_work_row", "_work_run_attempts",
 ];
