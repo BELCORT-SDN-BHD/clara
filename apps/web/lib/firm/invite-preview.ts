@@ -72,7 +72,15 @@ export type InvitePreviewStatus = (typeof INVITE_PREVIEW_STATUSES)[number];
  *  shows the notice and the accept door is unchanged") — it is read-time colour on a still-open
  *  invitation, not a fourth dead-invitation face. Every other value is a DEFINITE negative: there
  *  is nothing left to accept, and `BlockedInvitationFace` is what renders it
- *  (`components/invite-accept-form.tsx`). */
+ *  (`components/invite-accept-form.tsx`).
+ *
+ *  NON-BLOCKING IS NOT "WILL BE ACCEPTED" (fix round 2026-09-20, adversarial ADV-L10-02). An
+ *  `issuer_lapsed` invite whose issuer was REMOVED is refused by `clara.accept_invite` at every
+ *  role, and one whose issuer was demoted is refused whenever the invited role outranks the
+ *  issuer's current rank — the same third wall this module's header already names as a residual
+ *  the preview cannot see. Keeping the form open is right (the door is the authority, and this
+ *  read is not a verdict); promising the outcome is not, so the notice this status renders claims
+ *  nothing about acceptance. */
 export const INVITE_PREVIEW_NON_BLOCKING_STATUSES = ["pending", "issuer_lapsed"] as const;
 
 /** The four roles `clara.firm_invites.role` admits (`0141:179`, the same CHECK

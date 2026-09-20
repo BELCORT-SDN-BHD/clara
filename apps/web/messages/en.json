@@ -4115,7 +4115,7 @@
       "roleLabel": "Role",
       "emailLabel": "Invited address",
       "roleNote": "Your role decides what you can do in this firm. An admin there can change it later.",
-      "issuerLapsedNote": "Whoever sent this invitation is no longer an admin or owner there. You can still continue — accepting is unaffected.",
+      "issuerLapsedNote": "Whoever sent this invitation is no longer an admin or owner there. You can still continue: the firm re-checks who may accept this invitation when you finish, and it may ask an admin there to send you a fresh one.",
       "indefiniteNote": "We couldn't show which firm this invitation is for just now. You can still continue: the firm checks the invitation itself when you finish.",
       "expiredTitle": "This invitation has expired",
       "expiredDescription": "The invitation to {firm} was open for a limited time and that time has passed. There is no resend: ask an admin there to revoke it and invite you again, which issues a fresh link.",

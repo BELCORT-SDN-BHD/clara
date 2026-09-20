@@ -871,7 +871,17 @@ export function InviteAcceptForm({
             </dl>
             <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("roleNote")}</p>
             {/* #872 — a NOTICE, never a block: the owner ruling is explicit that acceptance stays
-                open in this state, so the ONLY difference from `pending` is this one line. */}
+                open in this state, so the ONLY difference from `pending` is this one line.
+                WHAT THAT LINE MAY AND MAY NOT SAY (fix round 2026-09-20, adversarial ADV-L10-02):
+                it must not promise that accepting is unaffected. `issuer_lapsed` is true when the
+                issuer's rank is below admin; `clara.accept_invite` refuses CLR04 when the invited
+                role outranks the issuer's CURRENT rank, and for a REMOVED issuer that is every
+                role there is (coalesce(NULL,-1) = -1 < role_rank('viewer') = 0). The two overlap,
+                and `clara.preview_invite` returns no issuer rank, so this surface cannot tell the
+                acceptable case from the refused one. It therefore claims nothing and says the
+                firm re-checks at the end — the same register `indefiniteNote` uses for the other
+                question this surface cannot decide. Pinned by
+                `p872.web.issuer_lapsed_removed` in invite-accept-form.test.tsx. */}
             {preview.preview.status === "issuer_lapsed" ? (
               <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("issuerLapsedNote")}</p>
             ) : null}
