@@ -1250,18 +1250,46 @@ test("630 a refused stop whose re-attach OPENS says so, and clears the buffer th
   }
 });
 
-test("642 a refused stop whose re-attach is REFUSED says so, and does not keep a question that cannot be answered", async () => {
-  // Fix round 1, review finding ADV-642-5, on the stop path — the sibling of the cell
-  // above and the reason its fixture was re-encoded. A 404 (or 403) on the stream route is
-  // not "the lane is down": it is `assertTaskStreamAccess`'s masked-view refusal, and it is
-  // the SAME fact `streamRoute.ts` sends mid-stream as `revoked`. Read as a transport
-  // failure it produced "Reconnecting…" at a reader whose access was gone.
-  //
-  // THE LIVE BUFFER GOES WITH IT, deliberately, and that is the one place this differs from
-  // the transport arm above. The buffer's only job here is to draw the parked clarify card;
-  // a reader who may not read the stream may not answer the question either, so leaving the
-  // card up would invite an answer that every door will refuse. The honest surface says
-  // what happened instead.
+// ===========================================================================================
+// #1024 — A REFUSED RE-ATTACH THAT THIS TAB OPENED AFTER A REFUSED STOP IS NOT EVIDENCE ABOUT
+// THE READER'S ACCESS. This RE-DECIDES the #642 cell that stood here ("642 a refused stop whose
+// re-attach is REFUSED says so, and does not keep a question that cannot be answered"), openly
+// and with its argument, per the ticket's triage ruling of 2026-09-20. Nothing it proved about
+// the MACHINE is dropped: `reattach: "lost"` is still asserted, on the same fixture.
+//
+// #642 made ONE fact of two, and for its own path that was right: `runClaraTaskStream` delivers
+// a 403/404 AT ATTACH as the same `revoked` event a mid-stream revocation delivers, because a
+// tab's FIRST attach is its only view of the turn and a refusal there is the whole of what it
+// knows. The read `stopReply` opens for its OWN benefit after a refused press is not that read,
+// and three things follow.
+//
+//   1. A 404 on that route also covers a task the runtime no longer holds — a reply that ended,
+//      was reaped, or a stale id. Rendering it as "You no longer have access to this reply"
+//      turns an EXISTENCE fact into an ACCESS fact, which is precisely what #642's own
+//      masked-view law forbids this copy from being.
+//   2. The reader had just been told, by the DOOR'S OWN ANSWER, that their press did not stop
+//      the reply and it is still running. Overwriting that with a sentence about a background
+//      read replaces something a door established with an inference that has a second
+//      explanation.
+//   3. `applyStreamEvent`'s `revoked` arm writes `turnStatus: null`, and for a turn this tab did
+//      not post that is the ONLY live arm of `ClaraThreadView`'s "is a turn live?" — so a
+//      statement about access silently withdrew the Stop control from a reply the refusal had
+//      just called live. Measured: `e2e/work-cancel-walk.spec.ts` B7 failed 8 of 22 isolated
+//      runs on `origin/main` and 16 of 22 on the wave-1 integration branch, always on that
+//      button and always under that status line
+//      (docs/plan/active/riders-2026-09-20/reports/wave1-integration-b7-ab.md).
+//
+// So that read says only what it establishes: THIS TAB could not resume. That is `reattach:
+// "lost"` and `markReattachFailed` — the same state a re-attach that failed at the TRANSPORT
+// already reaches (the two cells above), which is the point: one press says one thing, and the
+// same thing every time, whether the re-attach was refused or could not connect.
+//
+// WHAT IS UNCHANGED: a genuine revocation. On a first attach, or delivered mid-stream on a read
+// that OPENED, it is still `revoked`, still retires the clock, still withdraws the parked
+// question. The cell after this one drives the mid-stream half on the stop path itself.
+// ===========================================================================================
+
+test("1024 a refused stop whose re-attach is REFUSED says only that THIS TAB could not resume", async () => {
   const { useClaraThread } = await import("./useClaraThread");
   const original = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -1294,13 +1322,17 @@ test("642 a refused stop whose re-attach is REFUSED says so, and does not keep a
         "the re-attach recording that it did not open", SETTLE_PASSES);
 
       assert.equal(reattachOf(h.current.stop), "lost",
-        "the machine still records that the re-attach did NOT open");
+        "the machine still records that the re-attach did NOT open — that much the refusal proves");
       const stream = claraThreadStore.getThread(THREAD_REATTACH_REFUSED).stream;
-      assert.equal(stream.status, "revoked",
-        "a refused attach is a revocation, not a detach — `detached` is what renders 'Reconnecting…'");
-      assert.equal(stream.revokedReason, "not_found", "…carrying the route's own word");
-      assert.equal(stream.provisionalChunks.length, 0,
-        "the parked question goes with the access that would have answered it");
+      assert.notEqual(stream.status, "revoked",
+        "a read THIS TAB opened for its own benefit may not pronounce on the reader's access: the "
+        + "same 404 covers a reply that simply ended, and the copy behind `revoked` is not allowed "
+        + "to be an existence oracle");
+      assert.equal(stream.revokedReason, null,
+        "…so nothing carries a revocation reason either — there was no revocation to report");
+      assert.equal(stream.provisionalChunks.length, 1,
+        "and the parked question stays with the turn the refusal says is still running: it was "
+        + "discarded on the strength of an access claim this read never established");
     } finally {
       await h.unmount();
     }

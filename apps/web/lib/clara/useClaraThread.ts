@@ -163,6 +163,24 @@ function useClaraThreadState(threadId: string): ClaraThreadUiState {
   );
 }
 
+/** #1024 — WHAT A REFUSED ATTACH MEANS FOR *THIS* READ. The two answers are different facts and
+ *  only the caller knows which one it is asking for.
+ *
+ *  `runClaraTaskStream` delivers a 403/404 AT ATTACH as the same `revoked` event a mid-stream
+ *  revocation delivers (#642, ./stream.ts: "one fact, one face"). That is right for the read a tab
+ *  has no CHOICE about — a first attach is its only view of the turn, so a refusal there is the
+ *  whole of what it knows, and `"revocation"` is the default for exactly that reason.
+ *
+ *  It is wrong for the read `stopReply` opens for its OWN benefit after the door refused a press.
+ *  A 404 from that route also covers a task the runtime no longer holds — a reply that ended, was
+ *  reaped, a stale id — so reading it as a revocation renders an EXISTENCE fact as an ACCESS fact,
+ *  which is the one thing #642's masked-view copy may never be. And `applyStreamEvent`'s `revoked`
+ *  arm writes `turnStatus: null`, which for a turn this tab did not post is the ONLY live arm of
+ *  `ClaraThreadView`'s "is a turn live?": a statement about access withdrew the Stop control from a
+ *  reply the door had just said was still running. That caller therefore says
+ *  `"this-tab-cannot-resume"`, and its own bookkeeping records the one thing the refusal proves. */
+export type AttachRefusalMeaning = "revocation" | "this-tab-cannot-resume";
+
 /** The one place `runClaraTaskStream` is actually invoked — shared by a fresh send
  *  (`sendMessage`) and a manual retry after the give-up ceiling (`retryConnection`,
  *  FIX 1). Wires every stream callback to its store method; `onOpen` is the caller's
@@ -177,6 +195,8 @@ function attachClaraStream(
    *  "Stop reply" had no seam to pull. The controller lives in the hook so one press can both abort
    *  the read and cancel the turn behind it. */
   signal?: AbortSignal,
+  /** #1024 — see `AttachRefusalMeaning` above. */
+  attachRefusalMeans: AttachRefusalMeaning = "revocation",
 ): Promise<void> {
   return resolveStreamAuth(auth).then(({ token }) =>
     runClaraTaskStream({
@@ -185,6 +205,11 @@ function attachClaraStream(
       signal: signal ?? new AbortController().signal,
       onOpen,
       onEvent: (evt) => {
+        // #1024 — A READ THIS TAB OPENED FOR ITSELF DOES NOT WRITE A REVOCATION INTO THE SHARED
+        // STREAM STATE. The refusal is kept out of the store entirely rather than translated into
+        // some other status: the caller that asked for this read is the one holding the press it
+        // followed, and it records what the read cost in its own machine.
+        if (evt.event === "revoked" && attachRefusalMeans === "this-tab-cannot-resume") return;
         claraThreadStore.applyStreamEvent(threadId, evt);
         if (evt.event === "message") {
           // Terminal authority arrived — refetch the DB's own transcript rather than
@@ -281,10 +306,12 @@ export function useClaraThread(
   const openStream = useCallback((
     taskId: string,
     onOpen?: () => void,
+    /** #1024 — see `AttachRefusalMeaning`. Defaults to the reading every other caller wants. */
+    attachRefusalMeans: AttachRefusalMeaning = "revocation",
   ): { controller: AbortController; done: Promise<void> } => {
     const controller = new AbortController();
     claraThreadStore.registerStreamAbort(taskId, controller);
-    const done = attachClaraStream(auth, threadId, taskId, onOpen, controller.signal)
+    const done = attachClaraStream(auth, threadId, taskId, onOpen, controller.signal, attachRefusalMeans)
       .finally(() => claraThreadStore.releaseStreamAbort(taskId, controller));
     return { controller, done };
   }, [auth, threadId]);
@@ -718,7 +745,12 @@ export function useClaraThread(
         // duplication the clear ever existed to prevent.
         claraThreadStore.beginRetry(threadId);
         setStop({ phase: "failed", cause, reattach: "reading" });
-      });
+      },
+      // #1024 — AND THIS READ MAY NOT SPEAK ABOUT THE READER'S ACCESS. It is opened for this
+      // tab's own benefit, after a door has already told the reader their press did not stop the
+      // reply; a refusal here establishes that this tab could not resume, and nothing else. The
+      // `.finally` below records exactly that.
+      "this-tab-cannot-resume");
       void done.catch(() => {
         if (controller.signal.aborted) return;
         handled = true;
