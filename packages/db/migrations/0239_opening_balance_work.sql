@@ -831,6 +831,181 @@ begin
     'batch_n',v_batch,'entry_count',jsonb_array_length(v_entries),'entries',v_entries);
   return clara._finish_op(c.firm,'approve_opening_seed',p_op_key,v_result);
 end $aosfn$;
+create or replace function clara.approve_opening_correction(p_seed uuid, p_entry_revisions jsonb,
+    p_attestation text, p_op_key text)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp
+  set default_transaction_isolation = serializable as $aocfn$
+declare
+  c record; s record; e record; q record; oi record; v_dedupe jsonb;
+  v_batch int; v_entries jsonb:='[]'::jsonb; v_result jsonb; v_replacement uuid;
+  v_work jsonb;                                                            -- #984
+  v_asset_transition_count int;
+begin
+  c:=clara._human_ctx(clara.role_rank('admin'));
+  if current_setting('transaction_isolation')<>'serializable' then
+    raise exception 'opening correction approval requires serializable isolation'
+      using errcode='CLR31',detail='{"reason":"not_serializable"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  select firm_id into s from clara.opening_seed_registry where id=p_seed;
+  if s.firm_id is null or s.firm_id<>c.firm then
+    raise exception 'opening seed not in your firm' using errcode='CLR11';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'approve_opening_correction',p_op_key,
+    clara._hash(jsonb_build_object('seed',p_seed,
+      'entry_revisions',p_entry_revisions,'attestation',p_attestation)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  select * into s from clara.opening_seed_registry where id=p_seed for update;
+  if s.state<>'open' then
+    raise exception 'opening registry is not open'
+      using errcode='CLR31',detail='{"reason":"registry_not_open"}';
+  end if;
+  perform pg_advisory_xact_lock(203005004,hashtext(s.client_id::text));
+  select * into q from clara._open_question_blocks(s.client_id,null,null) limit 1;
+  if found then
+    raise exception 'an open question blocks the opening correction'
+      using errcode='CLR26',detail=jsonb_build_object(
+        'question_id',q.question_id,'scope',q.scope_kind)::text;
+  end if;
+  if exists(select 1 from clara._opening_seed_draft_class(p_seed) where not is_correction) then raise exception 'a non-correction draft blocks the opening correction' using errcode='CLR31',detail='{"reason":"non_correction_draft_present"}'; end if; if not exists(select 1 from clara.journal_entries je
+      where je.status='draft' and je.is_opening_balance and (
+        exists(select 1 from clara.opening_items x where x.seed_id=p_seed
+          and x.entry_id=je.id and x.supersedes_item_id is not null)
+        or exists(select 1 from clara.opening_items x where x.seed_id=p_seed
+          and x.entry_id=je.reversal_of))) then
+    raise exception 'opening correction has no draft entries'
+      using errcode='CLR31',detail='{"reason":"revision_mismatch"}';
+  end if;
+  for e in select je.* from clara.journal_entries je
+      where je.status='draft' and je.is_opening_balance and (
+        exists(select 1 from clara.opening_items x where x.seed_id=p_seed
+          and x.entry_id=je.id and x.supersedes_item_id is not null)
+        or exists(select 1 from clara.opening_items x where x.seed_id=p_seed
+          and x.entry_id=je.reversal_of)) order by je.id loop
+    if not clara._opening_revision_matches(
+        p_entry_revisions,e.id,e.revision_token) then
+      raise exception 'opening correction revision mismatch'
+        using errcode='CLR31',detail=jsonb_build_object(
+          'reason','revision_mismatch','entry_id',e.id)::text;
+    end if;
+    -- [R1-F12] K6 mirrors K5: checker separation is preflighted for every
+    -- correction draft before any tie or fixed-asset assertion can run.
+    if e.last_human_editor=c.actor then
+      if clara.eligible_checker_count(c.firm)>=2 then
+        raise exception 'opening correction needs a distinct checker'
+          using errcode='CLR05',detail='{"reason":"distinct_checker"}';
+      elsif nullif(btrim(p_attestation),'') is null then
+        raise exception 'solo opening correction requires an attestation'
+          using errcode='CLR05',detail='{"reason":"self_attestation"}';
+      end if;
+    end if;
+  end loop;
+  -- 0056 S9b (Wave E lane beta; the battery's seventh catch): while a pinned
+  -- close stands, a correction batch must be balance-sheet-neutral per account --
+  -- anything else moves every subsequent closing; reopen first (key 3).
+  perform clara._assert_correction_pin_neutral(p_seed);
+  perform clara._assert_opening_tie(p_seed);
+  perform clara._assert_fa_baseline(p_seed);
+  v_batch:=s.batch_n+1;
+  for e in select je.* from clara.journal_entries je
+      where je.status='draft' and je.is_opening_balance and (
+        exists(select 1 from clara.opening_items x where x.seed_id=p_seed
+          and x.entry_id=je.id and x.supersedes_item_id is not null)
+        or exists(select 1 from clara.opening_items x where x.seed_id=p_seed
+          and x.entry_id=je.reversal_of)) order by je.id loop
+    v_entries:=v_entries||clara._approve_opening_entry(
+      p_seed,e.id,c.actor,p_attestation,v_batch);
+  end loop;
+  for oi in select old.* from clara.opening_items old
+      where old.seed_id=p_seed and old.state='active'
+        and exists(select 1 from clara.opening_items repl
+          where repl.seed_id=p_seed and repl.supersedes_item_id=old.id
+            and exists(select 1 from clara.journal_entries je
+              where je.id=repl.entry_id and je.status='approved')) loop
+    select id into v_replacement from clara.opening_items
+      where seed_id=p_seed and supersedes_item_id=oi.id
+      order by created_at desc,id desc limit 1;
+    update clara.opening_items set state='superseded',
+      superseded_by_item=v_replacement where id=oi.id;
+    -- [R2-F3] One SQL statement performs the register hand-off: the pending
+    -- replacement becomes active exactly as the predecessor becomes
+    -- superseded. A two-row count is required; partial transitions abort.
+    if oi.fixed_asset_id is not null then
+      update clara.fixed_assets fa set
+        status=case when fa.id=oi.fixed_asset_id
+          then 'superseded' else 'active' end,
+        superseded_by_asset_id=case when fa.id=oi.fixed_asset_id
+          then repl.fixed_asset_id else null end,
+        -- 0041 [round-3.5 fold G3] THE SUPERSEDE DATE. Without it clara._fa_included_at holds
+        -- BOTH the corrected row and its replacement in the register at every as-of, and the
+        -- D-a tie reads double on a corrected carry-down. The date is the correction entry's
+        -- own posting date -- an accounting date, like every other boundary the as-of rule
+        -- reads.
+        superseded_at=case when fa.id=oi.fixed_asset_id
+          then rje.posting_date else null end,
+        updated_at=now()
+      from clara.opening_items repl
+        join clara.journal_entries rje on rje.id=repl.entry_id
+      where repl.id=v_replacement and repl.fixed_asset_id is not null
+        and fa.id in (oi.fixed_asset_id,repl.fixed_asset_id)
+        and ((fa.id=oi.fixed_asset_id and fa.status='active')
+          or (fa.id=repl.fixed_asset_id and fa.status='pending'));
+      get diagnostics v_asset_transition_count=row_count;
+      if v_asset_transition_count<>2 then
+        raise exception 'fixed-asset replacement transition is incomplete'
+          using errcode='CLR31',detail='{"reason":"tie_mismatch"}';
+      end if;
+    end if;
+  end loop;
+  -- [R3-F3] K5 and K6 use one checker policy: approving either set records the
+  -- checker as a contributor before the plan can be used at Gate O.
+  perform clara._record_onboarding_contributor(s.plan_id,c.actor);
+  -- [R3-F4] Re-check the post-hand-off correspondence in the same transaction.
+  perform clara._assert_fa_baseline(p_seed);
+  update clara.opening_seed_registry set state='finalized',batch_n=v_batch,
+    finalized_at=now(),finalized_by=c.actor,tie_asserted_at=now(),
+    through_event_seq=(select coalesce(max(seq),0) from clara.domain_events
+      where firm_id=c.firm) where id=p_seed;
+  -- #984 · THE WORK AND ITS RECEIPT, on exactly the footing the seed door mints them: one Work,
+  -- one operation receipt, the `opening_balance` purpose, no agent task and no model name. A
+  -- correction batch is a second approval of the same registry, so it is a SECOND Work -- its own
+  -- batch_n is what keeps the intent key distinct.
+  v_work:=clara._admit_opening_work(c.firm,s.client_id,c.actor,p_seed,v_batch,v_entries,
+    p_op_key,s.tie_document_id,'correction');
+  perform clara._audit(c.firm,c.actor,null,null,'approve_opening_correction',null,
+    jsonb_build_object('seed',p_seed,'batch_n',v_batch,
+      'entries',v_entries,'op_key',p_op_key,
+      'work',v_work->>'work_id','receipt',v_work->>'receipt_id',
+      'purpose','opening_balance'));
+  for e in select je.* from clara.opening_seed_approvals a
+      join clara.journal_entries je on je.id=a.entry_id
+      where a.seed_id=p_seed and a.batch_n=v_batch order by a.id loop
+    perform clara._append_event(c.firm,'entry.approved',s.client_id,c.actor,
+      null,null,e.id,e.document_id,null,
+      jsonb_build_object('opening_seed_id',p_seed,'batch_n',v_batch,
+        'correction',true));
+    if e.reversal_of is not null then
+      perform clara._append_event(c.firm,'entry.reversed',s.client_id,c.actor,
+        null,null,e.reversal_of,null,null,
+        jsonb_build_object('opening_seed_id',p_seed));
+    end if;
+  end loop;
+  for oi in select * from clara.opening_items where seed_id=p_seed
+      and state='superseded'
+      and superseded_by_item in (select item_id from clara.opening_seed_approvals
+        where seed_id=p_seed and batch_n=v_batch) loop
+    perform clara._append_event(c.firm,'opening_item.superseded',s.client_id,
+      c.actor,null,null,oi.entry_id,null,null,jsonb_build_object(
+        'seed_id',p_seed,'item_id',oi.id,
+        'superseded_by_item',oi.superseded_by_item,'batch_n',v_batch));
+  end loop;
+  v_result:=jsonb_build_object('seed_id',p_seed,'status','finalized',
+    'batch_n',v_batch,'entry_count',jsonb_array_length(v_entries),'entries',v_entries);
+  return clara._finish_op(c.firm,'approve_opening_correction',p_op_key,v_result);
+end $aocfn$;
 
 reset role;
 
@@ -973,6 +1148,23 @@ begin
   end if;
   if position('clara._admit_opening_work' in v_src) < position('clara._assert_opening_tie' in v_src) then
     raise exception '#984 tail: the seed door mints its Work BEFORE it ties out -- the Work records an act that has already happened'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.approve_opening_correction(uuid,jsonb,text,text)'::regprocedure;
+  if position('clara._admit_opening_work' in v_src) = 0 then
+    raise exception '#984 tail: clara.approve_opening_correction does not mint the Work -- both doors approve an opening batch and both owe one'
+      using errcode='CLR10';
+  end if;
+  if position('clara._approve_opening_entry' in v_src) = 0
+     or position('clara._assert_opening_tie' in v_src) = 0
+     or position('clara._assert_correction_pin_neutral' in v_src) = 0
+     or position('clara._finish_op' in v_src) = 0 then
+    raise exception '#984 tail: clara.approve_opening_correction lost the per-entry approval, the pin-neutrality assertion, the tie assertion or the op receipt'
+      using errcode='CLR10';
+  end if;
+  if position('clara._admit_opening_work' in v_src) < position('clara._assert_opening_tie' in v_src) then
+    raise exception '#984 tail: the correction door mints its Work BEFORE it ties out'
       using errcode='CLR10';
   end if;
   foreach v_sig in array array['clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',

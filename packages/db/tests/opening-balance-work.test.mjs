@@ -42,8 +42,9 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   rootQuery, endPool, opk, assertRaises, printLaneNotes, noteLane,
-  wbEnsureReady, buildWaveBWorld, onboardingClient, seedOpeningCoa, stageBeeSet,
+  wbEnsureReady, buildWaveBWorld, onboardingClient, seedOpeningCoa, stageBeeSet, stageFullSet,
   planRevision, approveOpeningSeed, openingApprovalRows, seedRegRow,
+  approveOpeningCorrection, supersedeOpeningItem, openingItemRows, entryRow, revMapOf,
 } from "./wave-b/wb-fixtures.mjs";
 
 /** The migration whose effects this file describes, and the stem its gate module keys on. */
@@ -240,4 +241,78 @@ test("obw984.seed.work: approving an opening seed mints exactly ONE accounting_w
   assert.equal((await seedRegRow(s.seed)).state, "finalized",
     "and the registry finalized exactly as before");
   noteLane(`obw984: an approved opening seed now carries work ${work.id} and receipt ${r.id}`);
+});
+
+// =============================================================================================
+// 3 - obw984.correction.work -- the SECOND door, on the same footing.
+//
+// A correction batch is a second approval of the same registry, so it is a SECOND Work: its own
+// batch number is what keeps the intent key distinct, and nothing about the first Work moves.
+// =============================================================================================
+test("obw984.correction.work: approving an opening correction mints a SECOND Work and receipt of the opening purpose, still with no agent task, and leaves the seed's Work exactly where it was", async (t) => {
+  if (unready(t)) return;
+  const onb = await onboardingClient(w.users.hana);
+  await seedOpeningCoa(w.users.alice, onb.client);
+  const st = await stageFullSet(w.users.bob,
+    { owner: w.users.alice, client: onb.client, plan: onb.plan, firm: w.firms.A });
+  await approveOpeningSeed(w.users.hana, {
+    seed: st.seed, planRevision: await planRevision(onb.plan), tieSha256: st.doc.sha256,
+    entryRevisions: st.revMap, opKey: opk("obw984-corbase"),
+  });
+  const seedWorks = await workRows(onb.client);
+  assert.equal(seedWorks.length, 1, "mandatory setup: the seed batch minted its one Work");
+  const seedWork = seedWorks[0];
+
+  // THE CORRECTION. Superseding an item drafts the reversal/replacement pair and reopens the
+  // registry; the correction door then approves that pair as batch 2.
+  const arItem = (await openingItemRows(st.seed)).find((i) => i.item_key === "ar:cust1");
+  assert.ok(arItem, "mandatory setup: the AR item to correct");
+  const sup = await supersedeOpeningItem(w.users.bob, {
+    item: arItem.id,
+    replacement: {
+      item: { item_kind: "ar_open_item", item_key: "ar:cust1:v2", amount_cents: 3_000_000,
+        counterparty_id: arItem.counterparty_id, item_ref: "SI-100R", item_date: "2025-12-15" },
+    },
+    opKey: opk("obw984-sup"),
+  });
+  const replacement = (await openingItemRows(st.seed)).find((i) => i.item_key === "ar:cust1:v2");
+  const drafts = [];
+  for (const eid of new Set([sup.reversal_entry_id ?? sup.reversal_id, replacement.entry_id])) {
+    const e = await entryRow(eid);
+    if (e.status === "draft") drafts.push({ entry_id: eid, revision_token: e.revision_token });
+  }
+  assert.ok(drafts.length >= 1, "mandatory setup: the correction really drafted something");
+  await approveOpeningCorrection(w.users.hana, {
+    seed: st.seed, entryRevisions: revMapOf(drafts), opKey: opk("obw984-cor"),
+  });
+
+  const works = await workRows(onb.client);
+  assert.equal(works.length, 2, "a correction batch is a SECOND Work, not a mutation of the first");
+  const corWork = works.find((x) => x.id !== seedWork.id);
+  assert.equal(corWork.purpose, OPENING);
+  assert.equal(corWork.basis.batch, "correction", "and it says which door approved it");
+  assert.equal(corWork.basis.batch_n, 2, "at the registry's own second batch");
+  assert.equal(corWork.basis.entry_count, drafts.length);
+  assert.equal(corWork.adjustment_basis, null);
+  assert.equal(corWork.current_task_id, null);
+  assert.equal(corWork.status, "completed");
+  assert.notEqual(corWork.intent_key, seedWork.intent_key,
+    "the batch number is what keeps the two intent keys apart under one (firm, client) unique index");
+
+  const receipts = await receiptRows(onb.client);
+  assert.equal(receipts.length, 2, "one receipt per batch");
+  const corReceipt = receipts.find((x) => x.work_id === corWork.id);
+  assert.ok(corReceipt, "the correction Work has its own receipt");
+  assert.equal(corReceipt.purpose, OPENING);
+  assert.equal(corReceipt.task_id, null, "still no run");
+  assert.equal(corReceipt.outcome, "committed");
+  assert.equal(corReceipt.effects.seed_id, st.seed);
+  assert.equal(corReceipt.effects.batch_kind, "correction");
+  assert.deepEqual(await taskRows(onb.client), [], "AC3 again: a correction mints no agent task either");
+
+  // THE FIRST WORK IS BYTE-UNCHANGED. `clara.accounting_work` is immutable by trigger, so this
+  // is a live re-read of a row nothing was allowed to touch.
+  const seedWorkAfter = (await workRows(onb.client)).find((x) => x.id === seedWork.id);
+  assert.deepEqual(seedWorkAfter, seedWork, "the seed batch's Work is untouched by the correction");
+  noteLane(`obw984: a corrected opening now carries two works (${seedWork.id}, ${corWork.id})`);
 });
