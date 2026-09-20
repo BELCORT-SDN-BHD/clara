@@ -2944,6 +2944,16 @@ const FIRM_SETUP_TIP_0259_HUMAN_FNS = ["dismiss_firm_setup_tip"];
 export const FIRM_SETUP_TIP_0259_COHORT = [...FIRM_SETUP_TIP_0259_HUMAN_FNS];
 // #935 END
 
+// #936 [0284, a dedicated accrual-correction door] — its own cohort, the same "wholly present or
+// wholly absent" reason 0222's own carries: the `db-slice-frontiers` matrix runs this package
+// against databases pinned at earlier frontiers where 0222 has applied and 0284 has not.
+//
+//   the ONE human door — clara_authenticated ONLY. It nests clara.revise_accounting_plan
+//   (0193, UNCHANGED — lane 05's own pin) rather than recutting it, so it mints no new plan-lane
+//   body and no new runtime verb; there is no OBO twin for this ticket's scope.
+const ACCRUAL_CORRECTION_0284_HUMAN_FNS = ["correct_accrual_adjustment"];
+export const ACCRUAL_CORRECTION_0284_COHORT = [...ACCRUAL_CORRECTION_0284_HUMAN_FNS];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3206,6 +3216,10 @@ export const ALLOWED = {
     // four wake lanes gain ZERO, and the ungranted ceiling clara._firm_document_limit_ceiling
     // holds no role at all.
     ...FIRM_DOCUMENT_LIMITS_0270_HUMAN_FNS,
+    // #936 [0284] the dedicated accrual-correction door — see the block above. clara_authenticated
+    // ONLY; clara_runtime, both agent read roles and all four wake lanes gain ZERO, and the door
+    // nests clara.revise_accounting_plan (0193) UNCHANGED rather than recutting it.
+    ...ACCRUAL_CORRECTION_0284_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3729,6 +3743,13 @@ export async function grantMatrixFailures() {
   if (capWriterLive.length !== 0) {
     failures.push(...cohortFailures("#960 0270 firm document-limits writer",
       FIRM_DOCUMENT_LIMITS_0270_COHORT, liveNames));
+  }
+  // #936 [0284] — bimodal, same reasoning as 0270's above: wholly present once 0284 applies,
+  // wholly absent before it.
+  const accrualCorrectionLive = ACCRUAL_CORRECTION_0284_COHORT.filter((n) => liveNames.has(n));
+  if (accrualCorrectionLive.length !== 0) {
+    failures.push(...cohortFailures("#936 0284 dedicated accrual-correction door",
+      ACCRUAL_CORRECTION_0284_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

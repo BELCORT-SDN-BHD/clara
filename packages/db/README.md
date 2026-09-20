@@ -2969,3 +2969,52 @@ re-creation of 0244's own trigger at 0244's spelling, so a database carrying the
 comes back), `create or replace function`, and an idempotent `comment on`. The prestate reports
 FIRST or REDO, and its pin for the ONE body this file recuts is two-valued by construction —
 0244's pre-image or 0272's own post-image, both measured.
+
+## 0284 — a dedicated accrual-correction door (#936, riders wave 3, lane 06)
+
+`0284_accrual_correction.sql` closes the bug measured during #907's review: the only way to
+change an accrual's amount was `clara.revise_accounting_plan` (0193), which advances the plan to a
+new revision while `clara.accrual_adjustments` (0222) — keyed on `(plan_id, revision)` — stayed at
+the FIRST revision, because the accrual configuration door only ever writes the first one. A reader
+joining plan → revision → accrual detail then saw the OLD amount beside the NEW one the ledger
+would post from the next due date on.
+
+**The choice, and why it is the only one of the ticket's two the lane could take.** The Agent Brief
+offered two shapes — the plan revision door itself writes the accrual detail, or a dedicated
+correction door writes a successor row. Lane 05 (#908) pins `clara.revise_accounting_plan`'s body
+as UNCHANGED in its own migration, so recutting it here would collide with that pin at
+integration. `clara.correct_accrual_adjustment` therefore NESTS `clara.revise_accounting_plan` —
+calling it, never recutting it — exactly as `clara.create_accrual_adjustment` already nests
+`clara.create_accounting_plan` (0222 §D).
+
+**What the file adds, and what it does not.** One function, its grant, and nothing else: no table,
+no column, no trigger, no index. `corrects_accrual_id`, `corrected_by_accrual_id`,
+`t_accrual_adjustments_append_only`'s one-admitted-update arm and the partial unique index
+`uq_accrual_adjustments_corrects` all already existed in 0222 — the ticket's own acceptance line
+("the columns and the unique index exist; no writer does today") is why. The door carries the LIVE
+revision's own schedule and authority window through to the nested `revise_accounting_plan` call
+unchanged; it corrects what was STATED (amount, either leg, term, method, instruction), never when
+or how often the plan runs. Already-posted occurrences and their reversals are consequently
+untouched by construction — `clara.accounting_plan_occurrences` is never written by this door, and
+a past occurrence keeps naming the revision it ran under, exactly as 0193's own supersede-and-keep
+shape already guarantees for every other revision.
+
+**The race this door closes itself.** Two concurrent corrections of the same accrual would both
+pass an unlocked read of `corrected_by_accrual_id` and then collide on
+`uq_accrual_adjustments_corrects` as a bare `23505` neither could classify. The door instead takes
+RUNG 1 — the same `accounting_plans` row lock `clara.revise_accounting_plan` itself takes — BEFORE
+re-reading `corrected_by_accrual_id`, so a second caller targeting the same accrual (always the
+same plan) blocks on that lock and, once it proceeds, is refused by name
+(`accrual_already_corrected`) rather than by an unclassifiable constraint error.
+
+**Migration triad.** `tests/accrual-correction-preintegration-gate.mjs` (stem
+`accrual_correction$`), `ACCRUAL_CORRECTION_0284_COHORT`/`ACCRUAL_CORRECTION_0284_HUMAN_FNS` in
+`tests/rig-meta.mjs` (spread into `ALLOWED[clara_authenticated]` and its own bimodal
+`cohortFailures()` call, the wave-2 `0270` pattern), and the gate's `--import` token in
+`package.json`'s test script, last in migration order. Battery:
+`tests/accrual-correction.test.mjs`, frontier-gated on the same stem, extending
+`tests/accrual-adjustments-fixtures.mjs` (0222's own) rather than building a second world.
+
+**Redo-safe by construction**: the one statement that changes the catalog is
+`create or replace function`; the grant/revoke pair is idempotent. The prestate asserts nothing
+about this file's own function being absent.
