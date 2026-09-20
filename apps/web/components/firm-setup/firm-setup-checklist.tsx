@@ -569,7 +569,13 @@ export function FirmSetupChecklist() {
                   // one makes it disappear from this list on the next read rather than staying
                   // visible with a "Recorded"/"Skipped" badge the way an accounting fact does.
                   if (isEducationTip(item)) {
-                    if (item.state !== "pending") return null;
+                    // Hidden once settled (see above), AND once the checklist is committed: every
+                    // other write control on this surface disappears on commit
+                    // (`!committed && ...` guards the answer/skip buttons below), and a tip left
+                    // pending into a committed checklist has no reopen door to answer through —
+                    // showing its title with no working buttons would be dead UI, so it is simply
+                    // never offered rather than nagging a firm that is already done.
+                    if (item.state !== "pending" || committed) return null;
                     return (
                       <li
                         key={item.item_key} className="flex flex-col gap-2"

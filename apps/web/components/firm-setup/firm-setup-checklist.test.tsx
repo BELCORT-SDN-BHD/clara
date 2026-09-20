@@ -448,9 +448,19 @@ test("fs.web.08 the not-started face is distinct from completion, and the seed a
     } finally { await h.unmount(); }
   });
 
+  const STILL_PENDING_TIP = "tip_invite_colleagues";
   const COMMITTED = { ...ENVELOPE, state: "committed", committed_at: "2026-09-16T02:00:00Z",
     counter: { required_answered: 3, required_total: 3 }, required_outstanding: [],
-    items: ENVELOPE.items.map((i) => ({ ...i, state: "answered", answer: "recorded" })) };
+    items: [
+      ...ENVELOPE.items.map((i) => ({ ...i, state: "answered", answer: "recorded" })),
+      // #935 — a tip nobody ever dismissed before the checklist was committed. There is no reopen
+      // door to answer it through, so it must not appear at all rather than showing dead buttons.
+      item({
+        item_key: STILL_PENDING_TIP, kind: "education", group_key: "tips", sort_order: 130,
+        question: "Invite your colleagues", note: "Settings -> Members sends an invitation.",
+        required: false, state: "pending", answer_shape: "text",
+      }),
+    ] };
   await withMockedEnv(mock({ setup: () => jsonResponse(COMMITTED) }), async () => {
     const h = await renderComponent(App());
     try {
@@ -459,6 +469,11 @@ test("fs.web.08 the not-started face is distinct from completion, and the seed a
       assert.equal(byTestId(h, "firm-setup-commit"), null, "a committed plan still offered Finish");
       assert.equal(byTestId(h, "firm-setup-answer-legal_name-action"), null,
         "a committed plan still offered an Answer control");
+      // #935 — a still-pending tip on a COMMITTED plan renders nothing: no title, no Got it, no
+      // Later. Every other write control on this surface disappears on commit; a tip is no
+      // exception, and there is no reopen door to act on it through once it is stuck here.
+      assert.equal(byTestId(h, `firm-setup-tip-${STILL_PENDING_TIP}`), null,
+        "a pending tip on a committed plan rendered its title and buttons");
     } finally { await h.unmount(); }
   });
 });
