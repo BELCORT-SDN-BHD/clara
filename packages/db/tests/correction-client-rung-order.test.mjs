@@ -24,6 +24,23 @@
 // nature (work-order rule 4's "where this repo's own documented standard asks for a structural
 // cell, that standard wins"): it is a claim about EVERY door in the estate, and no dynamic
 // schedule can make that claim.
+//
+// WHAT THIS FILE DELIBERATELY DOES NOT RE-TEST (AC4, "every existing refusal is unchanged; name
+// the battery"). 0238 reorders two lock acquisitions and changes nothing else, so the door's
+// refusals are proved unchanged by the batteries that already own them, re-run against the recut
+// body rather than duplicated here -- and by 0238's own tail, which counts fifteen `raise` sites
+// and requires all fifteen 0125 messages to still be present:
+//
+//   * `x42-s5c-awcc.test.mjs`       -- the door's own battery (the house legal date, the mirror)
+//   * `x37-wave-c-a-subledger.test.mjs` -- 0037's lock-order body pin + the allocation refusal
+//   * `x38-wave-c-b-match.test.mjs` / `x38-wave-c-b-bank.test.mjs` -- the bank-match refusals
+//   * `x27-filings-lock-order.test.mjs` -- 0027's documents-before-document_filings order
+//   * `s6-locks.test.mjs` / `s6-tasks.test.mjs` / `s6-schema.test.mjs` -- the correction
+//     schedules, the coding-task insertion, the grant surface
+//   * `f-a7-alpha.test.mjs` / `f-a7-beta-filing-verb.test.mjs` -- 0125's judgement arm
+//   * `x42-r10-o3.test.mjs` / `x42-r9-mirror.test.mjs` / `x42-adj-period-double.test.mjs` /
+//     `x42b0-r8-tails.test.mjs` / `f-a2-grants.test.mjs` /
+//     `subledger-hook-caller-roster.test.mjs` -- the censuses that name this door
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
