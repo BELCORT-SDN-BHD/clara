@@ -278,6 +278,51 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
     relations: ["stripe_events", "stripe_event_problems", "firm_registration_payments"],
     calls: [],
   }],
+  // #964 (0252_document_ingest_window_myt.sql), four anchored splices moving the document-ingest
+  // daily ceiling's window from a UTC calendar day to Asia/Kuala_Lumpur -- the SAME `execute
+  // v_head || 'AS $tag$' || v_new || '$tag$'` idiom the F-A3 PR-1a family above uses, each
+  // reading its own LIVE prosrc via `pg_get_functiondef(v_oid)` where `v_oid` is assigned a
+  // single literal-cast regprocedure (never `to_regprocedure(v_sig)` -- a function-call RHS is
+  // deliberately unattributable to this gate, so the migration binds `v_oid` directly to the
+  // signature literal instead). Every target therefore resolves, `kind:'unprovable'` (v_head/
+  // v_new/v_back are catalog-derived migration-time text, never a literal in the file's own
+  // words), and each entry's relations/calls are the EXACT `clara.*` tokens the LIVE prosrc was
+  // MEASURED to contain (`select prosrc from pg_proc where oid = '<sig>'::regprocedure`, regex
+  // `\bclara\s*\.\s*(?:"(\w+)"|(\w+))` -- the identical extraction `claraTargets()` uses --
+  // riders wave 2 lane 05 rig `clara_l05`, chain 0001->0252, PG 17.11, 2026-09-20). None is a
+  // wiki relation or wiki-touch call. `get_intake_batch`'s three bare function names
+  // (`_human_ctx`, `_intake_batch_pending_members`, `_work_door_ctx`) are cited only in that
+  // body's OWN prose comments (0229's design-rationale blocks), never called -- declared anyway
+  // because the measurement is a byte-level regex over prosrc text, which cannot distinguish a
+  // comment from code, and a waiver must never UNDER-declare.
+  ["_reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)", {
+    why: "#964 SS A -- the admission-time guard's window clause moves to Asia/Kuala_Lumpur; every "
+      + "other byte is the pinned 0007 body (reverse-substitution proof in the migration itself "
+      + "and in document-ingest-window-myt.test.mjs).",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: [],
+  }],
+  ["_resize_document_reservation(uuid,uuid,integer)", {
+    why: "#964 SS B -- the trusted-page-count guard, same window move, same proof discipline.",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: [],
+  }],
+  ["_settle_document_reservation(uuid,uuid,integer)", {
+    why: "#964 SS C -- the actual-page-count guard, same window move, same proof discipline.",
+    relations: ["document_ingest_reservations", "firm_document_limits", "firms"],
+    calls: [],
+  }],
+  ["get_intake_batch(uuid,integer)", {
+    why: "#964 SS D -- ONLY the capacity descriptor's comment and jsonb literal move (myt_day / "
+      + "00:00, replacing utc_day / 08:00); the five facets, waiting_basis and every other byte "
+      + "are the pinned 0229 body, proved by reverse substitution in the migration and by "
+      + "p964.window.capacity_descriptor_myt in intake-batch.test.mjs.",
+    relations: ["accounting_work", "agent_interruptions", "document_filings",
+      "document_intakes_visible", "document_processing_tasks_visible", "firm_memberships",
+      "intake_batch_members", "intake_batches", "operation_receipts"],
+    calls: ["_human_ctx", "_intake_batch_pending_members", "_work_door_ctx", "_work_run_attempts",
+      "actor_role_rank", "jwt_firm", "jwt_sub", "role_rank"],
+  }],
 ]);
 
 /** Normalise a waiver value to {why, relations:Set, calls:Set}; a legacy string is a bare

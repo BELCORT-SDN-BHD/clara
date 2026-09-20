@@ -276,16 +276,25 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // SQL to be in the declared set below, and a wrong declaration REDS this same gate (proven
   // by temporarily corrupting the entry and reverting, recorded on the PR). Do not copy this
   // entry's SHAPE as a precedent for an `unprovable` waiver — copy the REWRITE that made it
-  // possible instead; only `wake_freeform_read` above is unprovable BY NECESSITY. Thirteen
-  // pinned keys total: the eleven CoR-idiom cores, the one ACL-walled composed statement, and
-  // the one checked reconstruction. The NEXT entry must trip this pin and earn its own
-  // reviewed justification, exactly as these thirteen did.
+  // possible instead; only `wake_freeform_read` above is unprovable BY NECESSITY. #964
+  // (0252_document_ingest_window_myt.sql) adds FOUR more, back to the CoR-idiom shape: each an
+  // `unprovable` CoR patch by construction (`pg_get_functiondef(v_oid)` where `v_oid` binds a
+  // single literal-cast regprocedure, never `to_regprocedure(v_sig)` — the identical F-A3
+  // PR-1a attribution shape, restated), each independently rig-measured to carry no
+  // word-bounded "wiki" token anywhere in its body (riders wave 2 lane 05, chain 0001->0252,
+  // 2026-09-20). Seventeen pinned keys total: the eleven CoR-idiom cores, the four #964 adds,
+  // the one ACL-walled composed statement, and the one checked reconstruction. The NEXT entry
+  // must trip this pin and earn its own reviewed justification, exactly as these seventeen did.
   const expectedKeys = [
+    "_reserve_document_ingest(uuid,uuid,integer,timestamp with time zone)",
+    "_resize_document_reservation(uuid,uuid,integer)",
+    "_settle_document_reservation(uuid,uuid,integer)",
     "add_bank_account(uuid,text,text,text,text,uuid,text)",
     "apply_open_items(uuid,jsonb,text,text)",
     "apply_stripe_events(integer)",
     "book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)",
     "complete_bank_reconciliation(uuid,uuid[],text)",
+    "get_intake_batch(uuid,integer)",
     "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
     "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",
     "resolve_bank_line_exception(uuid,text,text,uuid,text)",

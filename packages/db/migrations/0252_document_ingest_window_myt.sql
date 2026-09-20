@@ -111,7 +111,12 @@ declare
   v_oid oid; v_src text; v_def text; v_head text; v_new text; v_back text; v_occ int;
   v_t1 text; v_r1 text;
 begin
-  v_oid := to_regprocedure(v_sig);
+  -- A LITERAL cast, never `to_regprocedure(v_sig)`: scripts/wiki-lint-checks.mjs's CoR-patch
+  -- target attribution (WB-R21) resolves `pg_get_functiondef`'s argument only through a direct
+  -- signature literal or a variable whose LATEST assignment is one — a function-call RHS is
+  -- deliberately unattributable, fail-closed. Keeping this identical to `v_sig` (asserted by §T's
+  -- own re-read after every splice) is what lets the reviewer see the two can never drift.
+  v_oid := 'clara._reserve_document_ingest(uuid,uuid,integer,timestamptz)'::regprocedure;
   select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
 
   v_t1 := $t1$      and created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc');$t1$;
@@ -163,7 +168,8 @@ declare
   v_oid oid; v_src text; v_def text; v_head text; v_new text; v_back text; v_occ int;
   v_t1 text; v_r1 text;
 begin
-  v_oid := to_regprocedure(v_sig);
+  -- A LITERAL cast, never `to_regprocedure(v_sig)` — see §A's identical comment.
+  v_oid := 'clara._resize_document_reservation(uuid,uuid,integer)'::regprocedure;
   select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
 
   v_t1 := $t1$      and created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc');$t1$;
@@ -215,7 +221,8 @@ declare
   v_oid oid; v_src text; v_def text; v_head text; v_new text; v_back text; v_occ int;
   v_t1 text; v_r1 text;
 begin
-  v_oid := to_regprocedure(v_sig);
+  -- A LITERAL cast, never `to_regprocedure(v_sig)` — see §A's identical comment.
+  v_oid := 'clara._settle_document_reservation(uuid,uuid,integer)'::regprocedure;
   select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
 
   v_t1 := $t1$      and created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc');$t1$;
@@ -269,7 +276,8 @@ declare
   v_oid oid; v_src text; v_def text; v_head text; v_new text; v_back text; v_occ int; v_probe text;
   v_t1 text; v_r1 text; v_t2 text; v_r2 text;
 begin
-  v_oid := to_regprocedure(v_sig);
+  -- A LITERAL cast, never `to_regprocedure(v_sig)` — see §A's identical comment.
+  v_oid := 'clara.get_intake_batch(uuid,integer)'::regprocedure;
   select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
 
   v_t1 := $t1$  -- never summed. `capacity` reports the SHIPPED window rather than the one the house rule wants:
