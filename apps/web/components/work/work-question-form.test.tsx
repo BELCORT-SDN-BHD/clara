@@ -988,3 +988,54 @@ test("885 a question whose source was corrected is not asked again: the sentence
   assert.doesNotMatch(sentence, /replacement|new Work is (already )?running/i,
     "…and promises no successor, because no arm admits one");
 });
+
+// #885 (third fix round, recheck finding L09-RC2-03) ------------------------------------------
+//
+// ONE SENTENCE PER ARM, AND EACH NAMES AN EXIT THAT WORKS. A source correction RETIRES the Work
+// parked on it, and that person restates the instruction on the corrected document. But a Work
+// holding a committed receipt is carved out of the retirement (#676) and is NOT retired -- and
+// `clara.restate_accounting_work` refuses it CLR13 `not_restatable`, because a Work that has
+// posted reads as completed. Telling that person to 'give the instruction again' points them at a
+// door that can only refuse. The record carries `work_posted` so the two arms can be told apart.
+test("885 the source-corrected sentence names the exit that actually works on each arm", async () => {
+  const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
+    ({ kind: "converge", reason, current, message: "refused" });
+  const CORRECTED = "2026-09-20T02:00:00.000Z";
+  const messageFor = (k: string): unknown =>
+    (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
+
+  // ARM A · the RETIRED Work: its question is cancelled and restating is the way back.
+  const retired = record({ status: "cancelled", work_status: "cancelled",
+    source_corrected_at: CORRECTED, work_posted: false } as never);
+  assert.equal(convergeKeyFor(converge("source_corrected"), retired), "convergeSourceCorrected");
+  const sentenceA = String(messageFor("convergeSourceCorrected"));
+  assert.match(sentenceA, /given again on the corrected document/i,
+    "the retired arm is told to state the instruction again, which is what #721's door admits");
+
+  // ARM B · the CARVE-OUT: the Work is untouched, still awaiting_input, and has already posted.
+  const posted = record({ source_corrected_at: CORRECTED, work_posted: true } as never);
+  assert.equal(convergeKeyFor(converge("source_corrected"), posted), "convergeSourceCorrectedPosted",
+    "a Work that has already posted gets its OWN sentence");
+  assert.equal(convergeKeyFor(null, posted), "convergeSourceCorrectedPosted",
+    "…including with no refusal to read, which is how the surface opens");
+  const sentenceB = String(messageFor("convergeSourceCorrectedPosted"));
+  assert.match(sentenceB, /cannot be restated|can no longer be restated/i,
+    "it says the door that would refuse will refuse");
+  assert.match(sentenceB, /Cancel Work/,
+    "…and names the exit the doors really allow (clara.cancel_agent_task is ACCEPTED here)");
+
+  // …AND BOTH ARE RENDERED, not merely mapped.
+  for (const [label, rec, needle] of [
+    ["retired", retired, /given again on the corrected document/i],
+    ["posted", posted, /Cancel Work/],
+  ] as const) {
+    const h = await renderComponent(App({ record: rec }));
+    try {
+      await h.settle();
+      assert.ok(byTestId(h, "work-question-converged"), label + ": the card opens on the sentence, not the form");
+      assert.match(h.text(), needle, label + ": …and it is THIS arm's sentence");
+    } finally {
+      await h.unmount();
+    }
+  }
+});

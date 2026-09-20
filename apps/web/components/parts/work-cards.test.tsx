@@ -808,3 +808,32 @@ test("839 (AC3) a transcript carrying BOTH work cards for one Work offers EXACTL
     backend.restore();
   }
 });
+
+// #885 (third fix round, recheck finding L09-RC2-03) — THE RAIL WITHHOLDS RESTATE ON A WORK THAT
+// HAS ALREADY POSTED. `clara.restate_accounting_work` refuses one CLR13 `not_restatable` (a
+// committed receipt reads as completed to that door), so the card that offers it would be offering
+// a 403 — the same rule the bookkeeper-floor cell above was fixed under. The shared question record
+// carries the fact (`work_posted`, migration 0268) and the pure gate reads it; this drives the REAL
+// card, at bookkeeper rank, off the Work's own detail route, so nothing else can explain the
+// absence.
+test("885 the rail withholds restate on a Work that has already posted, where the door would refuse", async () => {
+  const backend = parkedBackend(pendingQuestionWire({ work_posted: true }));
+  try {
+    const h = await renderComponent(ScopedApp(PARKED, 1));
+    try {
+      await assert.rejects(
+        settleUntil(h, () => byTestId(h.container, "work-restate") !== null,
+          "a restate control the door would refuse", 1_500),
+        /timed out/,
+        "no restate control is offered for a Work that has already posted",
+      );
+      assert.ok(backend.calls.some((c) => c.fn === "get_work_pending_question" && c.body.p_work === PARKED_WORK),
+        "positive control: the question door was read, so the panel had its record and withheld the offer");
+      assert.match(h.text(), /Clara accepted/, "…and the card itself is on screen");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
+  }
+});

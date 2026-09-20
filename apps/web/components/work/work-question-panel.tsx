@@ -55,7 +55,12 @@ export function offersRestateFor(
   record: WorkQuestionRecord | null | undefined,
   offerRestate: boolean,
 ): boolean {
-  return offerRestate && record?.work_status === "awaiting_input" && Boolean(record?.basis);
+  // #885 (third fix round) — …AND NOT A WORK THAT HAS ALREADY POSTED. `clara.restate_accounting_
+  // work` refuses one CLR13 `not_restatable` (a committed receipt reads as completed), so offering
+  // the control there is a 403 dressed as an affordance — the same rule L09-ADV-06 was fixed under.
+  // The working exit for that Work is Cancel Work, which its own card already offers.
+  return offerRestate && record?.work_status === "awaiting_input" && Boolean(record?.basis)
+    && record?.work_posted !== true;
 }
 
 export type WorkQuestionPanelProps = {

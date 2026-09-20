@@ -904,11 +904,17 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
   // #885 (second fix round) — A STILL-PENDING QUESTION CAN ALREADY BE UNANSWERABLE. The door
   // refuses one whose source was corrected after it was asked (CLR13 `source_corrected`), and
   // the record carries the same instant, so the sentence is reachable with NO refusal to read —
-  // which is the whole point: the person is told before they type, not after they submit. A
-  // question that was already ANSWERED keeps its own sentence; a later correction does not
-  // rewrite what happened.
+  // which is the whole point: the person is told before they type, not after they submit.
+  //
+  // THE TWO STATUSES MIRROR THE DOOR (third fix round). `clara.answer_work_question` says
+  // `source_corrected` for a question the retirement CANCELLED and refuses a PENDING one on the
+  // same ground, and says nothing of the sort for any other status — so a question that was
+  // already ANSWERED keeps its own sentence (a later correction does not rewrite what happened),
+  // and an EXPIRED one keeps the word 0180 gave it.
+  const corrected = Boolean(record.source_corrected_at)
+    && (record.status === "pending" || record.status === "cancelled");
   const reason = refusal?.kind === "converge" ? refusal.reason
-    : record.status === "pending" && record.source_corrected_at ? "source_corrected"
+    : corrected ? "source_corrected"
     : record.status;
   switch (reason) {
     case "already_answered":
@@ -934,7 +940,10 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
     // correction retired, and the Work it deliberately left alone (#676's committed-receipt
     // carve-out) whose question it nevertheless refuses.
     case "source_corrected":
-      return "convergeSourceCorrected";
+      // #885 (third fix round) — ONE WORD, TWO ARMS, TWO EXITS. A RETIRED Work is restated on the
+      // corrected document; a Work that has already POSTED is carved out of the retirement (#676)
+      // and `clara.restate_accounting_work` refuses it, so its sentence names Cancel Work instead.
+      return record.work_posted ? "convergeSourceCorrectedPosted" : "convergeSourceCorrected";
     case "basis_changed":
       return "convergeBasisChanged";
     case "state_changed":

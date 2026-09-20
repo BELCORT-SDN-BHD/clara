@@ -75,3 +75,19 @@ test("839 a null or absent record never crashes the gate", () => {
   assert.equal(offersRestateFor(null, true), false);
   assert.equal(offersRestateFor(undefined, true), false);
 });
+
+// #885 (third fix round, recheck finding L09-RC2-03) — A CONTROL THAT CAN ONLY BE REFUSED IS NOT
+// AN AFFORDANCE. `clara.restate_accounting_work` refuses a Work holding a committed receipt
+// (CLR13 `not_restatable`: it reads as completed), so offering Restate there is the same defect
+// L09-ADV-06 was fixed under one rank down. The record says so directly (`work_posted`).
+test("885 offersRestateFor withholds the control on a Work that has already posted", () => {
+  const parked = {
+    work_status: "awaiting_input",
+    basis: { posting_date: "2026-09-01", memo: "rent", currency: "MYR", lines: [] },
+  } as never;
+  assert.equal(offersRestateFor(parked, true), true, "the ordinary parked Work still offers it");
+  assert.equal(offersRestateFor({ ...(parked as object), work_posted: true } as never, true), false,
+    "…and a Work that has already posted does not: the door would refuse");
+  assert.equal(offersRestateFor({ ...(parked as object), work_posted: false } as never, true), true,
+    "…while an explicit false is the ordinary case");
+});

@@ -95,6 +95,14 @@ export type WorkQuestionRecord = {
    * to refuse. OPTIONAL: a database below the 0268 frontier carries no such key.
    */
   source_corrected_at?: string | null;
+  /**
+   * #885 (migration 0268) — does this Work already hold a committed receipt? It is #676's carve-out
+   * read off `clara._work_committed_receipt`, and the surface needs it to say something TRUE: such
+   * a Work reads as completed to `clara.restate_accounting_work`, which refuses it CLR13
+   * `not_restatable`. So the restate offer is withheld there and the source-corrected sentence
+   * names the exit the doors really allow. OPTIONAL: absent below the 0268 frontier.
+   */
+  work_posted?: boolean;
 };
 
 /** The value a human typed for one field, before it is sent. `null` means "left blank", which is

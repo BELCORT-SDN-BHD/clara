@@ -6134,6 +6134,7 @@
     "convergeCancelled": "This Work was stopped, so its question is closed.",
     "convergeSuperseded": "This Work was replaced by a newer one, so this question is closed. The replacement carries the same admitted instruction and will ask again if it needs to; a figure that has to change needs a new restatement.",
     "convergeSourceCorrected": "The source this question was asked about has been corrected since it was asked, so an answer now would stand on a reading that has changed. Nothing was started on the corrected figures — the instruction has to be given again on the corrected document.",
+    "convergeSourceCorrectedPosted": "The source this question was asked about has been corrected since it was asked, so this question can no longer be answered. This Work has already posted an entry, so it cannot be restated — use Cancel Work to stop it, and start a new one on the corrected document if it is still needed.",
     "convergeBasisChanged": "What this Work is recording has changed since the question was asked, so the answer no longer applies.",
     "convergeStateChanged": "This Work is no longer waiting on this question.",
     "inFlight": "Your previous send is still going through. Wait a moment and send again — it will not be recorded twice.",
