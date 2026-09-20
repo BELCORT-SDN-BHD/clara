@@ -908,6 +908,11 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
       return "convergeExpired";
     case "cancelled":
       return "convergeCancelled";
+    // #885 — narrower than `cancelled`, and it is the case a person most needs explained: the
+    // source this question was asked about was corrected, so the Work was retired and a
+    // replacement is already running on the corrected reading.
+    case "superseded":
+      return "convergeSuperseded";
     case "basis_changed":
       return "convergeBasisChanged";
     case "state_changed":

@@ -19,8 +19,11 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, setFieldValue } from "../../test/hookHarness";
 import { configureSessionTokenSource } from "../../lib/session-accessor";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
-import { WorkQuestionForm } from "./work-question-form";
-import { workAnswerDraftKey, writeWorkAnswerDraft, type WorkQuestionRecord } from "../../lib/work/questions";
+import { WorkQuestionForm, convergeKeyFor } from "./work-question-form";
+import {
+  workAnswerDraftKey, writeWorkAnswerDraft,
+  type AnswerRefusal, type WorkQuestionRecord,
+} from "../../lib/work/questions";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -914,4 +917,33 @@ test("two forms on one page do not share a control id — Needs-you expands more
     await h.unmount();
     s.restore();
   }
+});
+
+// #885 --------------------------------------------------------------------------------------
+// A question retired because its Work was REPLACED gets its own sentence. Before this, the
+// database's new `superseded` reason fell through `convergeKeyFor`'s default onto
+// "This Work is no longer waiting on this question." — true, and useless: it does not tell the
+// person that the source they were answering about was corrected, or that a replacement Work is
+// already running. Driven through the exported reducer the rendered card itself calls (line 381),
+// never through a copy of the switch.
+test("#885 a SUPERSEDED convergence gets its own sentence, and a plain cancellation keeps its own", () => {
+  const cancelled = record({ status: "cancelled", work_status: "cancelled" });
+  const converge = (reason: string, current: Record<string, unknown> | null = null): AnswerRefusal =>
+    ({ kind: "converge", reason, current, message: "refused" });
+
+  const key = convergeKeyFor(converge("superseded", { superseded_by: WORK }), cancelled);
+  assert.equal(key, "convergeSuperseded",
+    "the door's `superseded` reason maps to its OWN copy key");
+  assert.notEqual(key, convergeKeyFor(converge("state_changed"), cancelled),
+    "…and not to the generic state-changed fallback it used to land on");
+
+  const messageFor = (k: string): unknown =>
+    (messages as unknown as { WorkQuestion: Record<string, unknown> }).WorkQuestion[k];
+  assert.equal(typeof messageFor(key), "string",
+    "…and that key really resolves in en.json — an unresolved key renders as MISSING_MESSAGE");
+
+  assert.equal(convergeKeyFor(converge("cancelled"), cancelled), "convergeCancelled",
+    "a cancellation with no successor keeps the sentence it already had");
+  assert.equal(convergeKeyFor(null, cancelled), "convergeCancelled",
+    "…and so does a form mounted straight onto a settled cancelled record, with no refusal to read");
 });

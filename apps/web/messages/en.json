@@ -6130,6 +6130,7 @@
     "convergeStale": "This question was asked again while you were typing, so this answer is for an older version of it. Open the Work to see the current question.",
     "convergeExpired": "This question expired before it was answered. The Work can be retried, which asks it again.",
     "convergeCancelled": "This Work was stopped, so its question is closed.",
+    "convergeSuperseded": "The source this question was asked about has been corrected, so this Work was replaced. A new Work is already running on the corrected figures and will ask again if it needs to.",
     "convergeBasisChanged": "What this Work is recording has changed since the question was asked, so the answer no longer applies.",
     "convergeStateChanged": "This Work is no longer waiting on this question.",
     "inFlight": "Your previous send is still going through. Wait a moment and send again — it will not be recorded twice.",

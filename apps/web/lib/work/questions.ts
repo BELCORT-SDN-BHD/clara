@@ -141,6 +141,11 @@ export const CONVERGE_REASONS = [
   "stale_question",
   "expired",
   "cancelled",
+  // #885 — the narrower truth behind a `cancelled` question: the Work was REPLACED, not merely
+  // stopped. The database raises it when a source document the question was asked about is
+  // corrected (and for a #721 restatement, for the same reason), and `detail.current.superseded_by`
+  // names the Work that replaced this one.
+  "superseded",
   "basis_changed",
   "state_changed",
 ] as const;
