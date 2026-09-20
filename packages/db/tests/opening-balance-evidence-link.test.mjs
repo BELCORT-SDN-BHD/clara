@@ -25,7 +25,7 @@ import {
   // #854 — the two-session driver (see the section-4 header there for `isolation`/`commitOrCapture`)
   humanHoldThenContend,
   // #1014 — the binding-claim frontier this file's repaired race cells stand on
-  BINDING_CLAIM_STEM, gateBindingClaim,
+  BINDING_CLAIM_STEM, gateBindingClaim, ROLES,
 } from "./coding-lane-evidence-link-fixtures.mjs";
 import { approveEntry, createClient, freshResolution } from "./rig-fixtures.mjs";
 import {
@@ -207,79 +207,57 @@ test("obw.siblings_ok a multi-item seed on ONE tie document still approves every
 });
 
 // ===========================================================================================
-// 4 · #854 — THE TWO-SESSION RACE. Every cell above drives obw.evidence_first sequentially, in
-// ONE session: the loser's refusal is real, but nothing PROVES the winner's lock is what stopped
-// it (a schedule that never blocked proves nothing about a race — the same standard
-// coding-lane-evidence-link.test.mjs's `cle.race.*` cells hold themselves to). `humanHoldThenContend`
-// drives both arrival orders for real, each proving the contender genuinely BLOCKED on a LOCK.
+// 4 · THE TWO-SESSION RACE — #854 measured it, #1014 repaired it.
 //
-// THE LOCK-ORDER PARAGRAPH, restated once here (0213's own header, and 0037:2414 / 0197 §B/§C
-// before it): the opening approver reaches the evidence wall holding the entry's OWN row lock
-// first (`select ... for update` on the opening item, 0037:2414), then takes the document lock —
-// the SAME order the coding lane's `approve_entry` already takes (0197 §B/§C), so #854 adds no
-// new lock pair to the estate. `attach_entry_evidence` takes the document lock directly, with no
-// entry-row lock ahead of it. ACCEPTED OUTCOME: with that shared order, the two doors only ever
-// contend on ONE lock (`clara.documents`, `for update`, `clara._lock_document_binding`), never on
-// each other's row locks in reverse — a genuine DEADLOCK between them is not reachable, so no
-// side's abort is ever "a deadlock's documented outcome".
+// Every cell above drives obw.evidence_first sequentially, in ONE session: the loser's refusal is
+// real, but nothing PROVES the winner's lock is what stopped it (a schedule that never blocked
+// proves nothing about a race — the same standard coding-lane-evidence-link.test.mjs's `cle.race.*`
+// cells hold themselves to). `humanHoldThenContend` drives both arrival orders for real, each
+// proving the contender genuinely BLOCKED on a LOCK.
 //
-// WHAT #854 FOUND, MEASURED TWICE ON THIS RIG (below): `clara.documents` is locked FOR UPDATE by
-// both lanes PURELY for serialization — neither lane's body ever changes a column on that row.
-// BOTH sides commit: `attach_entry_evidence` (plain, holds first) commits a document it only
-// LOCKED (never wrote); the blocked `approve_opening_seed` (SERIALIZABLE, contends) is then
-// granted the SAME, byte-identical row, sees no reason to abort, and evaluates
-// `clara._document_posting_entry` against a snapshot taken BEFORE the attachment committed —
-// which does not see the evidence link at all. The reverse order does not have this hole, because
-// there the contender (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads
-// fresh per statement once unblocked — no isolation trick is needed or possible for it to see
-// what committed while it waited.
+// THE LOCK-ORDER PARAGRAPH, RESTATED ONCE HERE WITH #1014'S RULE (it supersedes the #854 wording
+// this block replaced; 0213's own header and 0037:2414 / 0197 §B/§C stand behind it):
 //
-// MECHANISM (this lane's OWN READING of the measurement above, not a cited fact — flagged per
-// L04-S07): a plausible account is that PostgreSQL's SERIALIZABLE "second updater" protection
-// (the one thing that would force a re-read after waiting out a FOR UPDATE) fires only when the
-// row waited on was ACTUALLY updated or deleted by the lock holder, never merely locked and
-// released — that would explain why a lock-only commit does not force the waiter to re-evaluate.
-// An at-least-equally-plausible alternative this lane did NOT rule out: SSI aborts a transaction
-// only when it sits at the PIVOT of a dangerous structure (an incoming AND an outgoing
-// rw-antidependency, PostgreSQL docs, "Serializable Isolation Level"); a single rw-conflict here
-// may simply not be the shape SSI polices at all, which has nothing to do with the second-updater
-// rule. Either way, the MEASUREMENT above (both sides commit, reproduced twice, deterministic)
-// stands on its own; a successor ticket repairing this should not assume either causal account
-// without checking the PostgreSQL source or asking a core committer.
+//   * The opening approver reaches the wall holding the OPENING ITEM'S OWN row lock first
+//     (`select ... for update`, 0037:2414), then takes the document — the SAME order the coding
+//     lane's `approve_entry` already takes (0197 §B/§C). `attach_entry_evidence` takes the
+//     document directly, with no entry-row lock ahead of it.
+//   * THE DOCUMENT IS NOW TWO ACQUISITIONS, NOT ONE, AND THEY ARE ORDERED:
+//     `clara._lock_document_binding` takes `clara.documents ... for update` FIRST and then upserts
+//     that document's row in `clara.document_binding_claims` (0235). Both lanes take both, in that
+//     order, through that one helper — so the two doors still contend on the document and nothing
+//     else, and a transaction binding two documents takes A.doc, A.claim, B.doc, B.claim: the
+//     relative order of the two documents is the one `clara.documents` already imposed.
+//   * ACCEPTED OUTCOME, UNCHANGED: with that shared order a genuine DEADLOCK between these two
+//     doors is not reachable, so no side's abort is ever "a deadlock's documented outcome". The
+//     estate's own ladder (`accounting_plans -> accounting_work -> agent_tasks ->
+//     agent_interruptions`, ARCHITECTURE §6) is untouched: no body on it takes the claim, and the
+//     claim takes nothing on it.
 //
-// obw.race.evidence_then_opening below is written to PROVE this defect, not to paper over it —
-// #854's own brief anticipates exactly this ("if both sides can commit, that is a new defect for
-// its own ticket") and puts repairing either wall, either approver or the document lock helper
-// explicitly OUT OF SCOPE for this ticket. Filed as a follow-up in this ticket's final report; the
-// cell stands as the regression sentinel until that follow-up lands.
+// WHAT #854 MEASURED, AND WHY THE OBVIOUS REPAIR WAS NOT AVAILABLE. `clara.documents` was locked
+// FOR UPDATE by both lanes PURELY for serialization — neither lane's body ever changed a column on
+// that row — and a lock that is only taken and released forces nothing on a waiter under a
+// snapshot isolation level. So `attach_entry_evidence` (plain, holds first) committed a document
+// it had only LOCKED, and the blocked `approve_opening_seed` (SERIALIZABLE since 0171) was granted
+// the SAME byte-identical row and evaluated `clara._tf_source_binding_wall`'s opening arm against
+// its pre-attachment snapshot, which never saw the link. BOTH SIDES COMMITTED. #854's report
+// guessed the repair would be "a fresh re-read of entry_evidence_links under the document lock":
+// it cannot be. A SERIALIZABLE transaction cannot READ what committed after its snapshot at all —
+// that is the isolation level, not a defect in the wall.
 //
-// CLOSING NOTES, code-review round 2 (findings recorded here rather than answered with new code —
-// neither changes an assertion):
+// WHAT 0235 DOES INSTEAD (and the three measurements it rests on, taken on this rig, PostgreSQL 17,
+// before the migration was written): a holder that only LOCKS a row lets a SERIALIZABLE waiter
+// proceed; a holder that UPDATES a row the waiter can see gives it 40001; a holder that INSERTS a
+// row the waiter's snapshot cannot see gives the same 40001 to a waiter upserting that key with ON
+// CONFLICT DO UPDATE. The claim is that upsert. It is arbitrated by an index rather than by
+// anyone's snapshot, so the blocked side meets a real write conflict where it used to find an
+// unchanged row — and the helper re-raises that failure as the walls' own CLR13
+// source_already_posted, so no raw 40001 reaches a person.
 //
-// L04B-SPEC-04 — AC2's literal wording is "reads standing postings off committed rows and asserts
-// exactly ONE". Neither race cell asserts a bare 1: `obw.race.opening_then_evidence` asserts
-// `s.drafts.all.length` (>= 3 by the seed's own mandatory multi-item setup, `obw.siblings_ok`) and
-// `obw.race.evidence_then_opening` asserts `s.drafts.all.length + 1`. This is a deliberate
-// reinterpretation, not an oversight: #821's whole carve-out is that MANY opening items legitimately
-// share one tie document, so "exactly one" can only mean "exactly the seed's own item count and
-// nothing else" — a single-item opening seed is not a shape this battery (or wb-fixtures.mjs's own
-// multi-item seed builder) can construct without weakening the multi-item coverage the ticket also
-// asks for. In the second arrival order, the count that actually stands (`+ 1`) IS the measured
-// defect this file's finding section names and L04B-SPEC-01 tracks — it is not a looser reading of
-// AC2, it is AC2's own assertion catching the regression it exists to catch.
-//
-// L04B-SPEC-07 — `approve_opening_correction`, named beside `approve_opening_seed` in the brief's
-// "Key interfaces" as one of "the contending doors", is never driven by either race cell; both call
-// `approveOpeningSeedOn` only. One-line check of whether the correction door reaches the SAME lock
-// path: `clara.approve_opening_correction` (0017:4162) loops over its draft correction entries and
-// calls `clara._approve_opening_entry(p_seed, e.id, ...)` for each one (0017:4241) — the EXACT SAME
-// helper `clara.approve_opening_seed` calls per item (0017:3962). `_approve_opening_entry`'s own
-// UPDATE into `journal_entries` (status -> approved) is what fires `t_source_binding_wall_upd`
-// (0213), which takes `clara._lock_document_binding` FIRST regardless of which approver's UPDATE
-// tripped it. So YES: the correction door shares the exact lock path the seed door does, and the
-// double-posting hole L04B-SPEC-01 measures on the seed door is architecturally reachable from the
-// correction door too — untested here, and named explicitly in GitHub issue #1014
-// (L04B-SPEC-01's required_fix), the residual this ticket's report asked the integrator to file.
+// The reverse arrival order never had the hole and is unchanged: its contender
+// (`attach_entry_evidence`) is plain READ COMMITTED, which always re-reads fresh per statement
+// once unblocked, so it needs no claim to notice what committed while it waited — the claim only
+// changes WHERE it blocks, never what it decides.
 
 /** Asserts the loser's refusal against `expectedShape`, one of the two shapes #854's brief
  *  names: `"CLR13"` (the wall's own `source_already_posted`, a statement-time refusal, same as
@@ -476,4 +454,102 @@ test("obw.race.typed_refusal the loser of the repaired race is refused in the WA
   assert.equal(out.b.detail.entry_id, null,
     "typed_refusal: in the race it names the document and answers null for the entry, rather than "
     + "inventing one it cannot see");
+});
+
+// ===========================================================================================
+// 5 · #1014 — THE CLAIM ITSELF, READ OFF THE CATALOG.
+//
+// The migration's own tail asserts all of this once, at apply time. This cell asserts it on
+// EVERY rig and on every restored or DR target the tail never ran against — the same reason
+// `cle.wall` exists beside 0197's tail. It is deliberately structural: the claim answers no
+// question, so there is no door to drive it through; what a later change could silently break is
+// its POSTURE (who may read a serialization token) and the ORDER inside the helper, and those are
+// catalog facts.
+// ===========================================================================================
+
+test("obw.claim the binding claim is a locked-down serialization token, and the helper takes the document BEFORE it claims", async (t) => {
+  if (await gateOpeningWall(t)) return;
+  if (await gateBindingClaim(t)) return;
+
+  const rel = await rootQuery(
+    `select r.rolname as owner, c.relrowsecurity as rls, c.relforcerowsecurity as forced
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+       join pg_roles r on r.oid = c.relowner
+      where n.nspname = 'clara' and c.relname = 'document_binding_claims'`);
+  assert.equal(rel.rows.length, 1, "claim: clara.document_binding_claims exists");
+  assert.equal(rel.rows[0].owner, ROLES.fnOwner, "claim: owned by clara_fn_owner, like every governed relation");
+  assert.equal(rel.rows[0].rls, true, "claim: RLS is ENABLED");
+  assert.equal(rel.rows[0].forced, true,
+    "claim: \u2026and FORCED \u2014 clara_fn_owner is not BYPASSRLS, so a token table without FORCE would "
+    + "be the one relation in the estate its own owner could read past");
+
+  const pol = await rootQuery(
+    `select p.polname, r.rolname
+       from pg_policy p left join pg_roles r on r.oid = any(p.polroles)
+      where p.polrelid = 'clara.document_binding_claims'::regclass order by 1`);
+  assert.deepEqual(pol.rows.map((x) => `${x.polname}:${x.rolname}`),
+    ["p_document_binding_claims_owner:clara_fn_owner"],
+    "claim: exactly ONE policy, the owner's \u2014 the definer that writes the token is the only thing "
+    + "that may see it");
+
+  for (const role of ["public", ROLES.authenticated, ROLES.runtime, ROLES.agentRo]) {
+    const g = await rootQuery(
+      `select coalesce(bool_or(has_table_privilege($1, 'clara.document_binding_claims', priv)), false) as any
+         from unnest(array['select','insert','update','delete']) as priv`, [role]);
+    assert.equal(g.rows[0].any, false,
+      `claim: ${role} holds NO grant on the token \u2014 it carries no domain meaning and answers no `
+      + "question, so a reader would only be a new oracle to keep honest");
+  }
+
+  const fn = await rootQuery(
+    `select r.rolname as owner, p.prosecdef, p.proconfig::text as cfg, p.prosrc,
+            has_function_privilege('public', p.oid, 'execute') as public_exec
+       from pg_proc p join pg_roles r on r.oid = p.proowner
+      where p.oid = 'clara._lock_document_binding(uuid)'::regprocedure`);
+  assert.equal(fn.rows.length, 1, "claim: the helper resolves");
+  assert.equal(fn.rows[0].owner, ROLES.fnOwner, "claim: still a clara_fn_owner body");
+  assert.equal(fn.rows[0].prosecdef, true, "claim: still SECURITY DEFINER");
+  assert.match(fn.rows[0].cfg, /search_path=clara, pg_temp/, "claim: still a pinned search_path");
+  assert.equal(fn.rows[0].public_exec, false, "claim: PUBLIC holds no EXECUTE \u2014 it is trigger-only");
+  for (const role of [ROLES.authenticated, ROLES.runtime, ROLES.agentRo]) {
+    const r = await rootQuery(
+      "select has_function_privilege($1, 'clara._lock_document_binding(uuid)'::regprocedure, 'execute') as x",
+      [role]);
+    assert.equal(r.rows[0].x, false, `claim: ${role} cannot EXECUTE the helper either`);
+  }
+
+  // THE ORDER IS THE MECHANISM, and it is positional: the document row must stay the first
+  // contention point, so the two race cells' `wait_event_type = 'Lock'` keeps meaning what it
+  // meant before 0235.
+  const src = fn.rows[0].prosrc;
+  assert.ok(src.includes("for update") && src.includes("clara.documents"),
+    "claim: the helper still takes clara.documents FOR UPDATE \u2014 0197's own tail assertion");
+  assert.ok(src.includes("document_binding_claims"), "claim: \u2026and then claims");
+  assert.ok(src.indexOf("for update") < src.indexOf("document_binding_claims"),
+    "claim: it LOCKS BEFORE IT CLAIMS \u2014 reversed, the contention point moves off clara.documents");
+  assert.ok(src.includes("on conflict") && !src.includes("on conflict do nothing"),
+    "claim: the claim is an UPSERT, never ON CONFLICT DO NOTHING \u2014 DO NOTHING takes no row lock "
+    + "against a VISIBLE conflicting row, which would leave the race open from a document's "
+    + "second binding onwards");
+  assert.ok(src.includes("serialization_failure") && src.includes("source_already_posted"),
+    "claim: the upsert's serialization failure is re-raised in the walls' own voice");
+
+  // …AND THE RECUT BODY REALLY RUNS. A structural read alone cannot tell a replaced function from
+  // one that is never reached, so this drives a plain sequential opening approval and reads the
+  // token the approval's own wall must have written for the tie document.
+  const s = await stagedSeed("claim");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.document_binding_claims where document_id=$1",
+    [s.doc.documentId])).rows[0].n, 0,
+  "claim: nothing has bound the fresh tie document yet");
+  const receipt = await approveOpeningSeed(HANA(), {
+    seed: s.seed, planRevision: await planRevision(s.plan), tieSha256: s.doc.sha256,
+    entryRevisions: s.revMap, opKey: opk("w1014-claim") });
+  assert.equal(receipt.status, "finalized", `claim: the ordinary approval still finalizes (${JSON.stringify(receipt)})`);
+  const claimed = await rootQuery(
+    "select claim_seq from clara.document_binding_claims where document_id=$1", [s.doc.documentId]);
+  assert.equal(claimed.rows.length, 1, "claim: the approval left exactly one claim row for the tie document");
+  assert.ok(Number(claimed.rows[0].claim_seq) >= s.drafts.all.length,
+    "claim: every opening item of the batch passed through the helper \u2014 the seq counts the "
+    + `upserts, one per item (seq ${claimed.rows[0].claim_seq}, items ${s.drafts.all.length})`);
 });

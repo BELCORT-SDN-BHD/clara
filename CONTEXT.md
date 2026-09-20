@@ -385,6 +385,10 @@ _Avoid_: A second question status; proof that the Work advanced.
 The append-only record that one client document is the source behind one posted journal entry: which Work and operation identity bound it, who bound it, when, and whether it was bound as the entry was recorded or attached afterwards. A document backs at most one live posted entry; a reversal releases the link so the corrected entry may cite the same document. Evidence is optional — an entry recorded without a document is a complete accounting fact.
 _Avoid_: A column rewritten on the posted entry; a claim that the document was independently verified; "unsourced" as a synonym for "wrong".
 
+**Document binding claim**:
+The serialization token behind “one document, one posted entry” when two people act on the same document at the same moment: whoever takes a document’s binding first keeps it, and the other is refused with the wall’s ordinary conflict. It records no accounting fact and answers no question — the evidence wall and the opening wall still decide what is a conflict.
+_Avoid_: Evidence link, tie document or “document lock” as synonyms — an evidence link is the durable record of which document backs which posted entry, a tie document is the one document an opening seed binds its items to, and a claim is neither of those and is never shown to a person.
+
 **Document filing**:
 One live placement of a document into one client's books, with the attribution act that authorised it. A document may be filed to more than one client of the firm at once, and a filing is *retired* rather than deleted — a retired filing stays readable, names its reason and, when a wrong-client correction retired it, the correction that did so.
 _Avoid_: The document itself; "unfiled" as a synonym for "not yet read"; deleting a filing.

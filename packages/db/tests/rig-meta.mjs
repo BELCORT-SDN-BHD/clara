@@ -2591,6 +2591,19 @@ const LEGAL_ENFORCEMENT_0234_HUMAN_FNS = [
 export const LEGAL_ENFORCEMENT_0234_COHORT = [...LEGAL_ENFORCEMENT_0234_HUMAN_FNS];
 // #1008 END
 
+// #1014 [0235, the document binding claim] — ONE relation and NO function name: 0235 recuts
+// clara._lock_document_binding in place (a `create or replace`, so no catalog entry enters or
+// leaves) and mints clara.document_binding_claims, the serialization token that makes a blocked
+// SERIALIZABLE opening approval lose instead of committing on its pre-block snapshot. There is
+// therefore no EXECUTE cohort to declare — the grant matrix is unchanged — only a TABLE cohort,
+// gated exactly as DOCUMENT_SOURCE_REVISION_0217_TABLES is: GOVERNED_TABLES' (a) branch demands
+// every entry EXIST, so listing it unconditionally would turn every pre-0235 database into a
+// MISSING-table failure that says nothing about RLS. The relation is written by that one definer
+// and read by NOBODY, so it holds no grant for any application role — the (b) derive branch
+// below still asserts its forced RLS either way, and 0235's own tail asserts the empty ACL.
+export const OPENING_BINDING_CLAIM_0235_TABLES = ["document_binding_claims"];
+// #1014 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3545,10 +3558,14 @@ export async function governedRlsFailures() {
     );
   }
   const sourceRevisionTablesLive = DOCUMENT_SOURCE_REVISION_0217_TABLES.filter((t) => present.has(t));
+  // #1014 [0235] — present once 0235 applies, absent before it; the same gating as 0217's.
+  const bindingClaimTablesLive = OPENING_BINDING_CLAIM_0235_TABLES.filter((t) => present.has(t));
   const roster = [
     ...GOVERNED_TABLES,
     ...(sourceRevisionTablesLive.length === DOCUMENT_SOURCE_REVISION_0217_TABLES.length
       ? DOCUMENT_SOURCE_REVISION_0217_TABLES : []),
+    ...(bindingClaimTablesLive.length === OPENING_BINDING_CLAIM_0235_TABLES.length
+      ? OPENING_BINDING_CLAIM_0235_TABLES : []),
     ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : []),
     ...(c2Live.length === CHECKOUT_GATE_C2_TABLES.length ? CHECKOUT_GATE_C2_TABLES : []),
     ...(c3Live.length === CHECKOUT_GATE_C3_TABLES.length ? CHECKOUT_GATE_C3_TABLES : []),

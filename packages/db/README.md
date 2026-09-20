@@ -1681,3 +1681,54 @@ set mode = 'enforce' where id;` as the superuser satisfies the relation's CHECK 
 it immediately, but it writes NO `clara._audit` row, NO `updated_by` and no receipt — the change
 becomes invisible to the estate's own record. Prefer creating the operator-firm precondition over
 using it.
+
+## 0235 — the document binding claim (#1014)
+
+Two lanes may bind one client document: the **document-coding / evidence** lane
+(`clara.attach_entry_evidence`, `clara.admit_journal_work`) and the **opening** lane
+(`clara.approve_opening_seed`, `clara.approve_opening_correction`). Since
+[0197](migrations/0197_coding_lane_evidence_link.sql) both reach that binding through ONE helper,
+`clara._lock_document_binding`, which takes `clara.documents … for update` before either wall asks
+its question. Since [0171](migrations/0171_opening_approval_isolation_pin.sql) the two opening
+approvers run SERIALIZABLE.
+
+Those two facts together were a double-posting hole, measured twice by #854 and repaired by
+[0235_opening_binding_claim.sql](migrations/0235_opening_binding_claim.sql). **A row lock that is
+only taken and released forces nothing on a waiter under a snapshot isolation level.** Neither lane
+ever wrote a column on the document row it locked, so an opening approval that blocked on a
+concurrent evidence attachment was granted the same byte-identical row when the attachment
+committed, found no reason to abort, and decided against its own pre-block snapshot — which could
+not see the new link. Both sides committed. (The reverse arrival order never had the hole: its
+contender is plain READ COMMITTED and re-reads fresh per statement once unblocked.)
+
+0235 keeps that `for update` unmoved and first, and appends one statement to the same helper: an
+upsert of the document's row in `clara.document_binding_claims`. The claim is a **serialization
+token** — one row per document, `document_id` / `claim_seq` / `claimed_at`, written by that helper
+alone, read by nothing, no grant for any application role, RLS forced with a single owner policy.
+Its conflict is arbitrated by an index rather than by either session's snapshot, so the blocked
+side now meets a real write conflict. `ON CONFLICT DO UPDATE` is load-bearing: `DO NOTHING` takes no
+row lock against a VISIBLE conflicting row and would leave the race open from a document's second
+binding onwards.
+
+The upsert's `serialization_failure` is caught in the helper and re-raised as the walls' own
+`CLR13` / `source_already_posted` naming the document, so no raw `40001 could not serialize access
+due to concurrent update` reaches a person. The handler wraps **the upsert alone**: a serialization
+failure on the `clara.documents` row would mean the document row itself changed (the legacy
+bytes/storage upgrade is its only writer) and keeps its own spelling. `detail.entry_id` is
+present-and-null on this one arm — the winner committed after the loser's snapshot and no read
+inside a SERIALIZABLE transaction can reach it.
+
+**Lock order.** The claim is taken after the document row and only ever for the same document, so a
+transaction binding documents A then B takes `A.doc, A.claim, B.doc, B.claim`: the relative order
+of two documents is the one `clara.documents` already imposed, and two transactions that inverted it
+would already have deadlocked on `clara.documents`. It joins neither the member-door order above
+nor the wave ladder `accounting_plans → accounting_work → agent_tasks → agent_interruptions`.
+
+Deployment notes: it recuts exactly one body (`clara._lock_document_binding`, a `create or
+replace`, so no catalog entry enters or leaves and the grant matrix is unchanged), mints one table,
+edits no applied migration, and re-pins `clara._tf_source_binding_wall`,
+`clara._tf_evidence_link_binding_wall`, `clara._document_posting_entry`,
+`clara._approve_opening_entry` and both opening doors by `sha256(prosrc)` in its prestate and again
+in its tail. It owes **no** writer-quiescence window: a transaction that began under the old body
+simply does not take the claim, which is the behaviour that shipped before it. Rollback is a
+successor migration restoring 0197's two-line body; the table may stay, since nothing reads it.
