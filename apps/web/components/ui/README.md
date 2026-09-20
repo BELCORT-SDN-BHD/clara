@@ -47,11 +47,62 @@ what would be overwritten (`pnpm ui:add <component> --dry-run` first, or `--diff
 change) and confirmed the protected file's owner-ruled fix is being deliberately superseded or
 re-applied afterward — never as a way to get past the abort without reading it.
 
+### The `cn` dependency stand-in (#969)
+
+Several registry items (the message/bubble/marker/avatar family, and others) import a `cn()`
+helper from a bare specifier `"cn"` — a registry-authoring placeholder, never a real published
+package this repo has used (`lib/utils.ts` exports its own). The pinned CLI's file-WRITE step
+correctly rewrites that import to this project's own `@/lib/utils` alias; its dependency-INSTALL
+step does not know that and installs a real `cn` npm package regardless, which then needs a hand
+revert of `package.json` and the lockfile (#642's own `ui:add --dry-run` finding).
+
+`pnpm ui:add` now handles this itself: it reports every dependency the item would add — on a
+`--dry-run` too, since a dry run writes nothing for the next step to act on — and, after a real
+install, automatically removes anything classified as a local stand-in (`cn`, and nothing else
+today) from `package.json` and the lockfile via `pnpm remove`, no manual revert needed. The same
+`CLARA_UI_ADD_OVERWRITE=1` knob above lets a genuine external `cn` package survive deliberately,
+instead of a second refusal vocabulary for this one name.
+
+**The ordering, and the window it leaves (L05-S07, 2026-09-20 fix round).** This is a drop AFTER
+the pinned CLI writes, never a pre-filter BEFORE it: `ui-add.mjs`'s `main()` runs `spawnAdd` (the
+real `shadcn add`) first and only then calls `stripLocalDependencies`. Between those two calls,
+`package.json` and `pnpm-lock.yaml` genuinely DO carry `cn` — an interrupt in that window (a killed
+process, a crashed machine) leaves exactly the hand-revert this guard exists to abolish, and every
+such install writes the lockfile twice (once for the CLI's own `pnpm add`, once for this guard's
+`pnpm remove`). This was not the preferred shape; it is what the pinned CLI's own surface allows.
+`node_modules/.bin/shadcn add --help` (pinned 4.19.0, checked at the same time as this note) offers
+no flag to skip or filter its dependency-install step — `-y`/`-o`/`-a`/`-p`/`--dry-run`/`--diff`/
+`--view` only — and pre-declaring a fake local `cn` package in `package.json` before the CLI runs
+would need this repo to ship a real (if empty) `cn` package for the installer to find satisfied,
+trading one workaround for a stranger one. A caller who cannot tolerate the window (a fully
+unattended pipeline, say) should run `--dry-run` first, confirm `cn` is the only local dependency
+named, and treat an INTERRUPT between the two spawns (the process killed, the machine crashed —
+never observed as this guard's own return path) as a signal to re-run `git status` and revert
+`package.json`/`pnpm-lock.yaml` by hand before retrying — the same hand-revert #642 already
+described, now a documented fallback rather than the every-time norm. A follow-up that wants the
+pre-filter shape instead would need to intercept the pinned CLI's own package-manager invocation,
+which is out of this ticket's scope.
+
+**An ORDINARY non-zero exit from the pinned CLI is not that window (fix round, L05B-S03).**
+MEASURED against the pinned 4.19.0 bundle (`apps/web/node_modules/shadcn/dist/chunk-CDOZT3OO.js`):
+the add flow's own `yh()` runs its dependency-install step FIRST and only then writes files
+(tailwind config, `cn` env vars, fonts, the components themselves) — so a `spawnAdd` that returns
+non-zero because the LATER, file-writing half failed has still already installed `cn`. `main()`
+now runs `stripLocalDependencies` on that path too (skipped only for a `--dry-run`, which writes
+nothing at all regardless of its own exit code, and for the override, which wants `cn` kept), and
+names the CLI's own exit code in what it logs either way. Only a genuine interrupt of the guard's
+own process between the two spawns — not a CLI failure the guard's own `main()` gets to run
+after — still needs the hand-revert above.
+
 ### Proof
 
 `scripts/check-ui-add-guard.selftest.mjs` (wired into `pnpm lint`) is this guard's own positive
 control: it drives the guard's decision logic against fixture payloads with no network, proving the
-abort, the override, and the no-false-positive case together. The live rehearsal against the real,
-pinned registry — `pnpm ui:add pagination` refusing because the payload still contains `button.tsx`,
-hash-identical before and after — is recorded in the delivering change's own report rather than run
-on every CI build, since a gate every PR runs must not depend on the network.
+abort, the override, the no-false-positive case, and the `cn` classification/report/strip flow
+together. The live rehearsal against the real, pinned registry — `pnpm ui:add pagination` refusing
+because the payload still contains `button.tsx`, hash-identical before and after; separately,
+`pnpm ui:add avatar` installing `cn` as a real dependency and this guard then removing it from both
+`package.json` and `pnpm-lock.yaml` with no trace left, `avatar.tsx` itself reverted afterward since
+adding a real component is outside this fix's own scope — is recorded in the delivering change's
+own report rather than run on every CI build, since a gate every PR runs must not depend on the
+network.

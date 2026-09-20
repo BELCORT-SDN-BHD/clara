@@ -2,6 +2,20 @@
 // The ceremony DSN bridge (F-T4 item F / fix-queue-design.md §6).
 //
 //   <secret source> | node scripts/ops/dsn-pipe.mjs -- <command> [args...]
+//   <secret source> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- wsl -u root -- <command>
+//
+// #917 — `pg_dump` 17 lives only in WSL on this rig, and the pinned CA's path (below) is written
+// in the WINDOWS spelling. A WSL child cannot open a Windows-spelled path, so `--child-os wsl`
+// (or simply invoking `wsl` as the child command — it is auto-detected too) respells the DSN's
+// `sslrootcert` and the two CA env vars (PGSSLROOTCERT, NODE_EXTRA_CA_CERTS) to the `/mnt/<drive>/…`
+// form for the CHILD only, sets `WSLENV` so those two plus the six PG identity vars actually cross
+// the Windows/WSL environment boundary (nothing crosses it that is not named in WSLENV — see
+// buildChildEnv's header), and deliberately never lists DATABASE_URL there: only the WSL-side
+// `bash`/`pg_dump`/`psql` need the PG* vars and the two CA vars, and the whole DSN is kept to this
+// process and its DIRECT child (the `wsl` invocation itself), never handed across the OS boundary
+// as one string. The CA fingerprint check (validateCa, below) always runs against the ORIGINAL
+// Windows-spelled DEFAULT_CA_PATH — respelling is a step applied only to EMITTED values, never to
+// the path the trust check itself reads.
 //
 // Reads a Postgres DSN on STDIN — never argv, never a file — forces `sslmode=verify-full`
 // AND `sslrootcert=<committed CA>` onto the DSN itself (not just the env; a DSN-level pin is
@@ -27,6 +41,74 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Absolute path to the committed pooler CA, resolved from THIS file's location — never cwd. */
 export const DEFAULT_CA_PATH = resolve(HERE, "..", "..", "ops", "tls", "pooler-ca.crt");
+
+/**
+ * #917 — respell a Windows-spelled absolute path (`C:\Users\…` or `C:/Users/…`) to the
+ * `/mnt/<drive>/…` form a WSL child can open. A path that does not start with a drive letter
+ * (already POSIX-shaped — the normal case on the Linux CI runners this selftest also runs on) is
+ * returned with backslashes normalised to forward slashes and is otherwise UNCHANGED: this
+ * function only ever adds the `/mnt/<drive>` prefix, it never invents one.
+ * @param {string} windowsPath
+ * @returns {string}
+ */
+export function toWslPath(windowsPath) {
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
+  if (!m) return windowsPath.replace(/\\/g, "/");
+  const drive = m[1].toLowerCase();
+  const rest = m[2].replace(/\\/g, "/");
+  return `/mnt/${drive}/${rest}`;
+}
+
+/** Recognised `--child-os` values. Anything else is refused (fail-closed), never silently
+ * ignored — "Out of scope: any child OS other than WSL" (#917). */
+const VALID_CHILD_OS = new Set(["wsl"]);
+
+/**
+ * #917 — an explicit `--child-os` always wins; absent, a `wsl` child command is auto-detected
+ * (the ticket's own alternative phrasing for the same trigger). Every other child command is
+ * untouched — this bridge's default (Windows- or Linux-native) behaviour is unchanged.
+ * @param {string|null} explicitChildOs
+ * @param {string} cmd the resolved child command (argv[0] after `--`)
+ * @returns {"wsl"|null}
+ */
+export function resolveChildOs(explicitChildOs, cmd) {
+  if (explicitChildOs) return explicitChildOs;
+  if (cmd === "wsl") return "wsl";
+  return null;
+}
+
+/**
+ * #917 — the `WSLENV` list this bridge emits for a `wsl` child: the six PG identity vars
+ * (needed by a bare `pg_dump`/`psql` on the WSL side, exactly like a native child) plus the two
+ * CA vars, which are ALREADY respelled to `/mnt/<drive>/…` by the time they reach this list (no
+ * `/p` flag — that would ask WSL to translate an already-WSL-native path a second time), plus
+ * `CLARA_BACKUP_DIR/p` — carried over from the hand wrapper this bridge replaces
+ * (RELEASE-RUNBOOK-0225-0233.md:213), WITH its `/p` flag: unlike the CA vars, dsn-pipe.mjs never
+ * reads or respells `CLARA_BACKUP_DIR` itself, so WSL's own WSLENV machinery must translate the
+ * Windows path an operator sets on the Windows side into the `/mnt/<drive>/…` form
+ * `packages/db/scripts/backup.mjs`'s own `CLARA_BACKUP_DIR` read (line 54) expects — dropping it
+ * from this list would silently fall back to `backup.mjs`'s default directory instead of the
+ * operator's chosen one (L05B-S02). `DATABASE_URL` is deliberately never listed: only the PG* +
+ * CA + backup-dir vars need to reach the WSL side, and crossing the whole DSN over the
+ * Windows/WSL environment boundary as one string is exactly the wider leak surface this bridge
+ * exists to avoid — MEASURED to actually work end-to-end against a real `wsl.exe` on this rig
+ * (this selftest's own WSL-boundary cell).
+ *
+ * IMPORTANT — read with L05B-S01: naming a var in `WSLENV` only gets it INTO the WSL child's
+ * environment; it says nothing about how that child's TLS stack USES it. A bare `pg_dump`/`psql`
+ * on the WSL side reads `PGSSLMODE`/`PGSSLROOTCERT` and treats the pinned CA as EXCLUSIVE, same
+ * as the Windows side. A Node `pg` client running ON THE WSL SIDE (e.g. `backup.mjs`'s own
+ * `--profile full` path, which this bridge's own AC1 command runs there) is DIFFERENT: with no
+ * `DATABASE_URL` in its environment, `packages/db/lib/pg.mjs`'s `connConfig()` returns `{}`, so
+ * node-postgres falls back to `readSSLConfigFromEnvironment()`, which maps `PGSSLMODE=verify-full`
+ * to a bare `ssl: true` — NODE_EXTRA_CA_CERTS then only AUGMENTS Node's global trust store; it
+ * does not make the pinned CA exclusive the way an explicit DSN `sslrootcert` does for the `pg`
+ * path on the Windows side. This is not a regression (the wrapper being replaced had the same
+ * shape) and is not a defect in `pg_dump`'s own trust (libpq is unaffected) — it is a real,
+ * narrower guarantee for a WSL-side Node client specifically, recorded here so the next reader
+ * does not assume the exclusivity DSN-pin/README paragraph above covers this leg too.
+ */
+export const WSL_ENV_LIST = "PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT:NODE_EXTRA_CA_CERTS:CLARA_BACKUP_DIR/p";
 
 // Captured from the live pooler 2026-08-23 and independently confirmed byte-identical against
 // Supabase's own publicly-hosted copy (https://supabase-downloads.s3-ap-southeast-1.amazonaws.com
@@ -227,17 +309,32 @@ export function readDsnFromStdin() {
 }
 
 /**
- * Split argv into the bridge's own flags (none today) and the child command after `--`.
- * `--` must be the VERY FIRST token — this bridge has no flags of its own, so any token before
- * `--` is a mistake, not something to silently discard (review finding C3: `indexOf("--")`
- * previously accepted, and dropped, arbitrary leading tokens).
+ * Split argv into the bridge's own flags and the child command after `--`.
+ * `--` must be the FIRST token, UNLESS it is preceded by exactly one recognised flag,
+ * `--child-os <os>` (#917) — any OTHER token before `--`, or an unrecognised `--child-os` value,
+ * is a mistake, not something to silently discard or guess at (review finding C3: `indexOf("--")`
+ * previously accepted, and dropped, arbitrary leading tokens; #917 keeps that same fail-closed
+ * shape for its one new flag).
+ * @returns {{ cmd: string, cmdArgs: string[], childOs: "wsl"|null }}
  */
 export function splitArgv(argv) {
-  if (argv[0] !== "--" || argv.length < 2) {
-    throw new Error("dsn-pipe: usage: <secret source> | node scripts/ops/dsn-pipe.mjs -- <command> [args...]  (`--` must be the FIRST argument)");
+  let i = 0;
+  let childOs = null;
+  if (argv[i] === "--child-os") {
+    childOs = argv[i + 1] ?? null;
+    if (!VALID_CHILD_OS.has(childOs)) {
+      throw new Error(`dsn-pipe: --child-os ${JSON.stringify(childOs)} is not supported (only "wsl" is) — refusing rather than guessing.`);
+    }
+    i += 2;
   }
-  const [cmd, ...cmdArgs] = argv.slice(1);
-  return { cmd, cmdArgs };
+  if (argv[i] !== "--" || argv.length < i + 2) {
+    throw new Error(
+      "dsn-pipe: usage: <secret source> | node scripts/ops/dsn-pipe.mjs [--child-os wsl] -- <command> [args...]  " +
+        "(`--` must be the first argument, or the first argument after `--child-os <os>`)",
+    );
+  }
+  const [cmd, ...cmdArgs] = argv.slice(i + 1);
+  return { cmd, cmdArgs, childOs };
 }
 
 function main() {
@@ -250,9 +347,15 @@ function main() {
 
   let cmd, cmdArgs, dsn, env;
   try {
-    ({ cmd, cmdArgs } = splitArgv(process.argv.slice(2)));
+    let childOs;
+    ({ cmd, cmdArgs, childOs } = splitArgv(process.argv.slice(2)));
+    const effectiveChildOs = resolveChildOs(childOs, cmd);
+    // #917 — respelling touches only the value EMITTED to the DSN/env; validateCa (above)
+    // already ran against the untouched, Windows-spelled DEFAULT_CA_PATH.
+    const caPath = effectiveChildOs === "wsl" ? toWslPath(DEFAULT_CA_PATH) : DEFAULT_CA_PATH;
     dsn = readDsnFromStdin();
-    env = buildChildEnv({ dsn });
+    env = buildChildEnv({ dsn, caPath });
+    if (effectiveChildOs === "wsl") env.WSLENV = WSL_ENV_LIST;
   } catch (err) {
     // Never interpolate `dsn` itself into a message — every throw site above already avoids it.
     console.error(err.message);

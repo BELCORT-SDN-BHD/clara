@@ -187,12 +187,30 @@ sha) and creates `(uuid,text,uuid)`.
 
 3f. **DB RESTORE POINT — the full dump, through the probe DSN into WSL.** `backup.mjs --profile
 full` (`pg_dump` 17.11 lives in WSL; Windows has none), ~50–100 s and ~215 MB observed in the last
-two ceremonies. **The CA-path workaround the 2026-09-17 ceremony recorded is still required and
-still unfixed:** `scripts/ops/dsn-pipe.mjs` pins `sslrootcert=<CA>` onto the DSN itself with the
-WINDOWS spelling of `ops/tls/pooler-ca.crt`, which a WSL child cannot open (`ENOENT`). There is no
-`--child-os wsl` spelling in `dsn-pipe.mjs` on `ede1df83` (checked) — the follow-up was filed and
-not implemented. So the dump runs under the same small WSL wrapper: it respells **only that one
-pin** to `/mnt/c/…` (same committed CA, `verify-full` kept, DSN env-only, never printed), with
+two ceremonies.
+
+**Update (#917, shipped after this ceremony ran):** `scripts/ops/dsn-pipe.mjs` now accepts
+`--child-os wsl` (or simply invoking `wsl` as the child command — it is auto-detected too), which
+respells the DSN's `sslrootcert` plus `PGSSLROOTCERT`/`NODE_EXTRA_CA_CERTS` to the `/mnt/<drive>/…`
+form and sets `WSLENV` for those two vars, the six PG identity vars and `CLARA_BACKUP_DIR/p` —
+never `DATABASE_URL`. (Fix round L05B-S01: a WSL-side Node `pg` client, unlike `pg_dump`/`psql`,
+still authenticates TLS additively via `NODE_EXTRA_CA_CERTS` on this path, not via an exclusive
+DSN pin — see `packages/db/README.md`'s "Backup and recovery" section.) The NEXT ceremony's
+invocation is:
+
+```sh
+<probe dsn pipe> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- \
+  wsl -u root -- bash -c 'node packages/db/scripts/backup.mjs --profile full'
+```
+
+with no hand-rolled wrapper script. The paragraph below records what THIS ceremony (2026-09-19,
+`ede1df83`) actually ran, before the flag existed — **the CA-path workaround the 2026-09-17
+ceremony recorded was still required and still unfixed at that time:** `scripts/ops/dsn-pipe.mjs`
+pinned `sslrootcert=<CA>` onto the DSN itself with the WINDOWS spelling of
+`ops/tls/pooler-ca.crt`, which a WSL child cannot open (`ENOENT`). There was no `--child-os wsl`
+spelling in `dsn-pipe.mjs` on `ede1df83` (checked) — the follow-up had been filed and not yet
+implemented. So the dump ran under a small WSL wrapper: it respelled **only that one pin** to
+`/mnt/c/…` (same committed CA, `verify-full` kept, DSN env-only, never printed), with
 
 ```
 export WSLENV='PGHOST:PGPORT:PGUSER:PGPASSWORD:PGDATABASE:PGSSLMODE:PGSSLROOTCERT/p:CLARA_BACKUP_DIR/p'

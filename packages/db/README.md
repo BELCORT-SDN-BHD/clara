@@ -61,6 +61,21 @@ checksum. Filenames must be `NNNN_name.sql`; the runner rejects late insertion b
 frontier. Files with no leading digit, including `UNNUMBERED_*.sql`, are silently skipped.
 `CLARA_MIGRATIONS_DIR` selects an alternate chain and must be set correctly for a split test rig.
 
+**Redo (#957).** Immutability is for *merged* history. A migration already applied to a rig but
+not yet merged sometimes needs one more fix-round edit, and the ordinary path above correctly
+refuses that on checksum drift. `redo`, passed to `migrate()` the same way `dir` is (or
+`CLARA_MIGRATION_REDO=<version>`), re-applies exactly one such version as a guarded, measured
+operation: it requires the same destructive guard `reset`/`restore`/`dr:selftest` already use
+(`CLARA_ALLOW_DESTRUCTIVE=1` and a disposable or explicitly-named target), refuses a version that
+is not currently applied or is not the *highest* applied version (so nothing built on top of it is
+silently invalidated), then deletes its ledger row and re-runs the edited file in the same
+transaction, under the same isolation/timeout/atomicity rules a normal apply uses. A failure
+anywhere in that transaction rolls the delete back with it, leaving the ledger exactly as it was.
+Write the redo target so re-running it against a database that already carries its OLD effects is
+safe — `create or replace function`/`procedure` and other naturally idempotent DDL, not a bare
+`create table`. This replaces the hand procedure (`SET ROLE clara_fn_owner`, re-run the body by
+hand, repair the ledger row by hand) six wave-2026-09-18 tickets independently reinvented.
+
 ### From-scratch reapply on a reused cluster (#867)
 
 Cluster roles (created by `create role`) are cluster-global, not per-database — `drop database`
@@ -1003,6 +1018,36 @@ owners/privileges. Do not start a restored diagnostic snapshot as an application
 `backup:full` preserves owners and privileges across `clara`, `workflow`,
 `workflow_drizzle` and `graphile_worker`. Its globals dump is supporting evidence;
 [deploy/roles-bootstrap.sql](deploy/roles-bootstrap.sql) recreates custom roles on a fresh target.
+
+A hosted ceremony's full backup goes through `scripts/ops/dsn-pipe.mjs`, which pins the ceremony
+CA onto the DSN and never lets the DSN itself reach argv or disk. PostgreSQL 17 client tools live
+only in WSL on the Windows release rig, and the committed CA's path is written in the Windows
+spelling, which a WSL child cannot open — pass `--child-os wsl` (or simply invoke `wsl` as the
+child command; it is auto-detected too) and dsn-pipe respells the DSN's `sslrootcert` plus
+`PGSSLROOTCERT`/`NODE_EXTRA_CA_CERTS` to the `/mnt/<drive>/…` form, and sets `WSLENV` so those two
+vars, the six PG identity vars and `CLARA_BACKUP_DIR` (translated by WSL's own `/p` flag, since
+dsn-pipe never touches it directly) actually cross the Windows/WSL boundary (`DATABASE_URL` is
+deliberately never listed there — the DSN itself stays local to this process and its direct
+`wsl` child; only the individual PG\*/backup-dir vars cross):
+
+```sh
+<dsn> | node scripts/ops/dsn-pipe.mjs --child-os wsl -- \
+  wsl -u root -- bash -c 'node packages/db/scripts/backup.mjs --profile full'
+```
+
+The CA fingerprint check always runs against the original Windows-spelled file; only the emitted
+values are respelled (#917).
+
+**TLS exclusivity on the WSL side is narrower than on the Windows side (#917, L05B-S01).** A bare
+`pg_dump`/`psql` on the WSL side reads `PGSSLMODE=verify-full` + `PGSSLROOTCERT` and still treats
+the pinned CA as EXCLUSIVE, same as any native invocation. But `backup.mjs --profile full` also
+opens a Node `pg` client, and on the WSL side that client sees no `DATABASE_URL` (it is
+deliberately not in `WSLENV`), so `packages/db/lib/pg.mjs`'s `connConfig()` returns `{}` and
+node-postgres falls back to reading TLS settings from the environment: `PGSSLMODE=verify-full`
+becomes a bare `ssl: true`, and `NODE_EXTRA_CA_CERTS` only AUGMENTS Node's global trust store
+rather than PINNING it the way an explicit DSN `sslrootcert` does on the Windows side. This is not
+a regression — the hand wrapper this flag replaces had the identical shape — but it means the
+DSN-level pin's exclusivity is unchanged for libpq tools only, not for a WSL-side Node client.
 
 `restore:full` runs role bootstrap before the transactional dump restore, then prints manual
 follow-ups. Complete those follow-ups against the current estate: private Storage bucket/policies

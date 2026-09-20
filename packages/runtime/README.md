@@ -705,6 +705,22 @@ frozen file. The same rule holds for every other module the closure report attri
 entry. The ruling is recorded here; no hardening is implemented by it.
 <!-- /#815 -->
 
+<!-- #849 -->
+The question an author actually asks is the INVERSE of the full report above — "which entries lock
+*this* module" — and until #849 that meant grepping the whole report by hand. Give
+`--print-closure` a module path and it filters straight to the answer:
+
+```sh
+node scripts/check-frozen-workflows.mjs --print-closure packages/runtime/lib/work-trace.mjs
+# freeze-lint closure report — module "packages/runtime/lib/work-trace.mjs" is locked by 6 of
+# 299 @frozen entry file(s):
+#   packages/runtime/workflows/claraWork.v3.impl.ts
+#   ...
+```
+
+An unreached module lists nothing (and says so) rather than silently printing the full report.
+<!-- /#849 -->
+
 <!-- #810 -->
 A RETIRED body does not vanish from the ledger: its manifest entry moves to the top-level `retired`
 record in `frozen-workflows.json` (path → the entry's last frozen `sha256` + the ruling that
@@ -712,6 +728,18 @@ authorised it), which is the only absence `MISSING` and `REMOVED-VS-BASE` accept
 path still present in the tree is its own finding, `RETIRED-PRESENT`. The first such retirement is
 `chatTurn_v1`'s three-file closure (#810, owner ruling 2026-09-15; beta only, runs parked on the
 body cancelled in the hosted cleanup first).
+
+**#849** gave that move a command instead of a hand edit of `frozen-workflows.json`:
+
+```sh
+node scripts/check-frozen-workflows.mjs --retire packages/runtime/workflows/chatTurn.v1.ts \
+  --ruling "#810 owner ruling 2026-09-15"
+```
+
+It refuses — writing nothing — unless the path currently has a manifest entry and its file is
+already gone from the tree (retiring a file still in the tree would silently un-freeze it), and it
+requires `--ruling`, since the ruling is the retired record's whole authority for leaving the
+ledger. Like `--update` and `--lock-deployed`, it is a deliberate local act and is refused under CI.
 <!-- /#810 -->
 
 ### The rollback preflight is a command, and it is a required step

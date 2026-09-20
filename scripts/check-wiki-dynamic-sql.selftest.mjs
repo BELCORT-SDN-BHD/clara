@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   scanSources, parseFunctions, parseCoRPatches, functionIdentity, signatureIdentity,
-  executeExpressions, staticSqlOf, WIKI_WHITELIST, DYNAMIC_SQL_ALLOWLIST,
+  executeExpressions, staticSqlOf, WIKI_WHITELIST, DYNAMIC_SQL_ALLOWLIST, maskComments,
 } from "./wiki-lint-checks.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -388,6 +388,76 @@ testCase("a CoR patch inside a function BODY is not double-counted as a patch", 
   const fns = parseFunctions(sql);
   if (fns.length !== 1) throw new Error(`expected 1 function, got ${fns.length}`);
   if (parseCoRPatches(sql, fns).length !== 0) throw new Error("a body comment was read as a patch");
+});
+
+// --- #959 — maskComments' unterminated-token contract -------------------------
+// Measured (#657 fix round 1): one unbalanced quote/dollar token earlier in a migration's
+// `do $tag$ … $tag$` block desynchronised `maskComments`, leaving every later comment
+// unmasked — which flipped an assertion-only tail's lint classification because a comment
+// mentioning `pg_get_functiondef(` was then read as real code. The chosen fix (stated in
+// skipQuoted's own doc comment): BOUNDED, not reported — an unterminated token is ordinary
+// text, scanning resumes at the very next character, so a later comment is still found.
+console.log("maskComments' unterminated-token contract (#959):");
+
+testCase("[#959 control] an apostrophe INSIDE a real `--` comment does not disturb masking of LATER comments (the comment's own blind blanking already handles this)", () => {
+  const input = "-- it's a note about the file\nselect 1; -- a later line comment\n/* a later block comment */\n";
+  const masked = maskComments(input);
+  if (masked.includes("a later line comment")) throw new Error(`later line comment survived unmasked:\n${JSON.stringify(masked)}`);
+  if (masked.includes("a later block comment")) throw new Error(`later block comment survived unmasked:\n${JSON.stringify(masked)}`);
+});
+
+testCase("[#959] an UNTERMINATED dollar-quote tag does not swallow the rest of the input — a later comment is still masked", () => {
+  const input = "select $oops$ 1;\n-- a real comment after an unterminated dollar-quote tag\n";
+  const masked = maskComments(input);
+  if (masked.includes("a real comment")) {
+    throw new Error(`the comment after the unterminated $oops$ tag survived unmasked — the swallow-to-EOF bug is back:\n${JSON.stringify(masked)}`);
+  }
+});
+
+testCase("[#959] an UNTERMINATED single quote (no closing ') does not swallow the rest of the input either", () => {
+  const input = "select 'oops\n-- a real comment after an unterminated string\n";
+  const masked = maskComments(input);
+  if (masked.includes("a real comment")) {
+    throw new Error(`the comment after the unterminated string survived unmasked:\n${JSON.stringify(masked)}`);
+  }
+});
+
+testCase("[#959 regression] the measured failure: an earlier unterminated quote in a `do` block no longer stops a LEGITIMATE later `pg_get_functiondef` census read from being recognised as exempt", () => {
+  // The exact grammar censusStatementBinding requires (this file's own CENSUS grammar comment,
+  // just above blockStatements): `select count(*) into v_n from ... where ... pg_get_functiondef(...) ...`,
+  // no `execute`/`using` in that statement. An UNRELATED, earlier, deliberately unterminated
+  // quote sits in its own prior statement — exactly #657's shape ("0038''s" one apostrophe off
+  // from being exactly this).
+  const sql = [
+    "do $tail$",
+    "declare v_n int;",
+    "begin",
+    "  select 'unterminated;", // the deliberately unbalanced quote — never closes anywhere below
+    "  select count(*) into v_n from pg_proc p where p.oid = 1::oid and pg_get_functiondef(p.oid) is not null;",
+    "  execute format($x$select 1$x$);", // an unrelated real execute, so the block is even considered
+    "end",
+    "$tail$;",
+  ].join("\n");
+  const patches = parseCoRPatches(sql, parseFunctions(sql));
+  if (patches.length !== 1) throw new Error(`expected exactly 1 patch entry, got ${patches.length}`);
+  const [patch] = patches;
+  if (patch.censusOnly[0] !== true) {
+    throw new Error(`expected the census read to be recognised as exempt (censusOnly[0]===true) — got ${JSON.stringify(patch.censusOnly)}; an earlier unterminated quote must not defeat recognition of a later, unrelated, legitimate census read`);
+  }
+  if (!patch.censusReads.some((r) => r.variable === "v_n")) {
+    throw new Error(`expected a recorded census read binding "v_n", got ${JSON.stringify(patch.censusReads)}`);
+  }
+});
+
+testCase("[#959 inverse] a genuine dynamic-SQL patch is STILL flagged when an earlier comment contains a token that could make it read as benign", () => {
+  const sql = "create function clara._probe_959(p_x uuid) returns void language plpgsql as $body$\n"
+    + "begin\n"
+    + "  -- note: pg_get_functiondef's read here is safe, nothing to see, this comment even has an apostrophe\n"
+    + "  execute 'select * from clara.wiki_pages';\n"
+    + "end\n$body$;\n";
+  const { findings } = scanSources([{ file: "inline-959", sql }], { assertWhitelistResolves: false });
+  if (findings.length !== 1) throw new Error(`expected exactly 1 finding (the real wiki hit must still be caught), got ${findings.length}:\n${findings.join("\n") || "(none)"}`);
+  if (!findings[0].includes("wiki_pages")) throw new Error(`finding does not name the real wiki hit:\n${findings[0]}`);
 });
 
 // --- the whole-tree invariant -------------------------------------------------
